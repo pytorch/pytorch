@@ -125,10 +125,12 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda(const Tensor& self, cons
 }
 
 
-std::tuple<Tensor, Tensor> batch_norm_gather_stats_with_counts_cuda(const Tensor& self, const Tensor& mean, const Tensor& invstd, const Tensor& running_mean,
-                                                        const Tensor& running_var, double momentum, double epsilon, const Tensor& counts) {
-  
-  return AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, running_mean.scalar_type(), "batch_norm_update_stats_cuda", [&] {
+std::tuple<Tensor, Tensor> batch_norm_gather_stats_with_counts_cuda(
+    const Tensor& self, const Tensor& mean, const Tensor& invstd, const Tensor& running_mean /* optional */,
+    const Tensor& running_var /* optional */, double momentum, double epsilon, const Tensor& counts) {
+
+  auto scalar_type = running_mean.defined() ? running_mean.scalar_type() : self.scalar_type();
+  return AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "batch_norm_update_stats_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     if (cuda::detail::canUse32BitIndexMath(self)) {
       return batch_norm_gather_stats_cuda_template<scalar_t, accscalar_t, int32_t>(mean, invstd, running_mean, running_var, momentum, epsilon, counts);
