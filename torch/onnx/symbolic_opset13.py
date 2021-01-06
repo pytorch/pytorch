@@ -108,9 +108,3 @@ def unbind(g, self, dim=0, _outputs=None):
 def glu(g, input, dim):
     first, second = g.op('Split', input, dim, outputs=2)
     return g.op('Mul', first, g.op('Sigmoid', second))
-
-def unsqueeze(g, self, dim):
-    return g.op("Unsqueeze", self, dim)
-
-def squeeze(g, self, dim):
-    return g.op("Squeeze", self, dim)

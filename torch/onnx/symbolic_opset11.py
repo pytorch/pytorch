@@ -658,7 +658,7 @@ def squeeze(g, self, dim=None):
         if_node_outputs = g.op("If", cond)
         if_node = if_node_outputs.node()
         if_block = torch.onnx.utils._add_block(if_node)
-        squeeze_ = if_block.op("Squeeze", self, axes_i=[dim])
+        squeeze_ = sym_help._squeeze_helper(if_block, self, [dim])
         torch.onnx.utils._add_output_to_block(if_block, squeeze_)
         else_block = torch.onnx.utils._add_block(if_node)
         identity_ = else_block.op("Identity", self)
@@ -673,13 +673,12 @@ def squeeze(g, self, dim=None):
                       "be exported without the squeeze node. If the model is intended to be used with dynamic " +
                       "input shapes, please export with dynamic_axes argument.")
         return self
-    return g.op("Squeeze", self, axes_i=[dim])
+    return sym_help._squeeze_helper(g, self, [dim])
 
 
 @parse_args('v', 'i')
 def unsqueeze(g, self, dim):
-    return g.op("Unsqueeze", self, axes_i=[dim])
-
+    return sym_help._unsqueeze_helper(g, self, [dim])
 
 def mm(g, self, other):
     return g.op("Gemm", self, other, beta_f=0.0, alpha_f=1.0)

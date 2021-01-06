@@ -321,17 +321,19 @@ def _interpolate_warning(interpolate_mode):
                   "to support Pytorch's behavior (like coordinate_transformation_mode and nearest_mode).\n"
                   "We recommend using opset 11 and above for models using this operator. ")
 
-def _unsqueeze_helper(g, input, dims):
+def _unsqueeze_helper(g, input, axes_i):
     if _export_onnx_opset_version >= 13:
-        return g.op("Unsqueeze", input, dims)
+        axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
+        return g.op("Unsqueeze", input, axes)
     else:
-        return g.op("Unsqueeze", input, axes_i=dims)
+        return g.op("Unsqueeze", input, axes_i=axes_i)
 
-def _squeeze_helper(g, input, dims):
+def _squeeze_helper(g, input, axes_i):
     if _export_onnx_opset_version >= 13:
-        return g.op("Squeeze", input, dims)
+        axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
+        return g.op("Squeeze", input, axes)
     else:
-        return g.op("Squeeze", input, axes_i=dims)
+        return g.op("Squeeze", input, axes_i=axes_i)
 
 def _interpolate_size_to_scales(g, input, output_size, dim):
     output_size = _maybe_get_const(output_size, 'is')

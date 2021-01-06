@@ -422,7 +422,7 @@ void fixDefaultRNNState(
   if (opset_version >= 13) {
     Node* unsqueeze_axes = graph->create(onnx::Constant, 1);
     unsqueeze_axes->insertBefore(unsqueezed_batch_size);
-    unsqueeze_axes->t_(attr::value, at::scalar_to_tensor(at::Scalar(0)));
+    unsqueeze_axes->t_(attr::value, at::unsqueeze(at::scalar_to_tensor(at::Scalar(0)), 0));
     unsqueezed_batch_size->addInput(unsqueeze_axes->output());
   } else {
     unsqueezed_batch_size->is_(attr::axes, {0});
@@ -453,7 +453,7 @@ void fixDefaultRNNState(
   if (opset_version >= 13) {
     Node* unsqueeze_axes = graph->create(onnx::Constant, 1);
     unsqueeze_axes->insertBefore(unsqueezed_num_directions);
-    unsqueeze_axes->t_(attr::value, at::scalar_to_tensor(at::Scalar(0)));
+    unsqueeze_axes->t_(attr::value, at::unsqueeze(at::scalar_to_tensor(at::Scalar(0)), 0));
     unsqueezed_num_directions->addInput(unsqueeze_axes->output());
   } else {
     unsqueezed_num_directions->is_(attr::axes, {0});
@@ -569,6 +569,87 @@ static void replaceInputWithList(Node* node, size_t i, ArrayRef<Value*> to) {
   }
 }
 
+static void eraseListConstruct(Block* block, int opset_version);
+
+static void eraseListConstruct(Node* n, int opset_version) {
+  for (auto b : n->blocks()) {
+    eraseListConstruct(b, opset_version);
+  }
+  std::vector<std::tuple<size_t, std::vector<Value*>>> replacements;
+
+  auto block = n->owningBlock();
+  size_t i = 0;
+  for (auto* input : n->inputs()) {
+    if (input->node()->kind() == prim::ListConstruct) {
+      printf("Found list construct node\n");
+      auto* lc_node = input->node();
+      TypePtr elem =
+          lc_node->output()->type()->cast<ListType>()->getElementType();
+      if (elem->cast<IntType>()) {
+        printf("int type\n");
+        // ListConstruct Int[] output case, we need to transform to ONNX
+        // Concat to ensure the output is a single tensor(dynamic) type in
+        // order to be consumed as inputs
+        std::vector<Value*> unsqueezed;
+        Graph* g = block->owningGraph();
+        for (auto* input : lc_node->inputs()) {
+          Node* unsqueezed_node = g->create(onnx::Unsqueeze, 1);
+          unsqueezed_node->insertBefore(lc_node);
+          unsqueezed_node->addInput(input);
+          if (opset_version >= 13) {
+            Node* unsqueeze_axes = g->create(onnx::Constant, 1);
+            unsqueeze_axes->insertBefore(unsqueezed_node);
+            unsqueeze_axes->t_(
+                attr::value, at::unsqueeze(at::scalar_to_tensor(at::Scalar(0)), 0));
+            unsqueezed_node->addInput(unsqueeze_axes->output());
+          } else {
+            unsqueezed_node->is_(attr::axes, {0});
+          }
+          unsqueezed.emplace_back(unsqueezed_node->output());
+        }
+        Node* concat_node = g->create(onnx::Concat, 1);
+        concat_node->i_(attr::axis, 0);
+        for (auto v : unsqueezed) {
+          concat_node->addInput(v);
+        }
+        concat_node->insertBefore(lc_node);
+
+        // make concat node output as new input, then ListConstruct should
+        // become dead
+        replacements.emplace_back(
+            i, std::vector<Value*>({concat_node->output()}));
+
+      } else {
+        printf("tensor type\n");
+        if (opset_version < OPSET_VERSION_11) {
+          // Tensor lists are used mostly for inputs to cat/stack. They are
+          // already handled in those symbolics, and should become dead
+          // afterwards.
+          replacements.emplace_back(
+              i,
+              std::vector<Value*>(
+                  lc_node->inputs().begin(), lc_node->inputs().end()));
+        } else {
+          c10::Symbol seq_node_kind = lc_node->inputs().size() > 0
+              ? onnx::SequenceConstruct
+              : onnx::SequenceEmpty;
+          Node* seq_node = block->owningGraph()->create(
+              seq_node_kind, {lc_node->inputs()}, 1);
+          seq_node->insertBefore(lc_node);
+          seq_node->output()->copyMetadata(lc_node->output());
+          lc_node->replaceAllUsesWith(seq_node);
+        }
+      }
+    }
+    i++;
+  }
+
+  for (auto ritr = replacements.rbegin(); ritr != replacements.rend();
+        ++ritr) {
+    replaceInputWithList(n, std::get<0>(*ritr), std::get<1>(*ritr));
+  }
+}
+
 static void eraseListConstruct(Block* block, int opset_version) {
   // TODO: Fix this pass/maybe get rid of this part.
   // Tensor lists might be used for meshgrid and such ops as well.
@@ -577,79 +658,9 @@ static void eraseListConstruct(Block* block, int opset_version) {
     Node* n = *it;
     ++it;
 
-    for (auto b : n->blocks()) {
-      eraseListConstruct(b, opset_version);
-    }
-    std::vector<std::tuple<size_t, std::vector<Value*>>> replacements;
-
-    size_t i = 0;
-    for (auto* input : n->inputs()) {
-      if (input->node()->kind() == prim::ListConstruct) {
-        auto* lc_node = input->node();
-        TypePtr elem =
-            lc_node->output()->type()->cast<ListType>()->getElementType();
-        if (elem->cast<IntType>()) {
-          // ListConstruct Int[] output case, we need to transform to ONNX
-          // Concat to ensure the output is a single tensor(dynamic) type in
-          // order to be consumed as inputs
-          std::vector<Value*> unsqueezed;
-          Graph* g = block->owningGraph();
-          for (auto* input : lc_node->inputs()) {
-            Node* unsqueezed_node = g->create(onnx::Unsqueeze, 1);
-            unsqueezed_node->insertBefore(lc_node);
-            unsqueezed_node->addInput(input);
-            if (opset_version >= 13) {
-              Node* unsqueeze_axes = g->create(onnx::Constant, 1);
-              unsqueeze_axes->insertBefore(unsqueezed_node);
-              unsqueeze_axes->t_(
-                  attr::value, at::scalar_to_tensor(at::Scalar(0)));
-              unsqueezed_node->addInput(unsqueeze_axes->output());
-            } else {
-              unsqueezed_node->is_(attr::axes, {0});
-            }
-            unsqueezed.emplace_back(unsqueezed_node->output());
-          }
-          Node* concat_node = g->create(onnx::Concat, 1);
-          concat_node->i_(attr::axis, 0);
-          for (auto v : unsqueezed) {
-            concat_node->addInput(v);
-          }
-          concat_node->insertBefore(lc_node);
-
-          // make concat node output as new input, then ListConstruct should
-          // become dead
-          replacements.emplace_back(
-              i, std::vector<Value*>({concat_node->output()}));
-
-        } else {
-          if (opset_version < OPSET_VERSION_11) {
-            // Tensor lists are used mostly for inputs to cat/stack. They are
-            // already handled in those symbolics, and should become dead
-            // afterwards.
-            replacements.emplace_back(
-                i,
-                std::vector<Value*>(
-                    lc_node->inputs().begin(), lc_node->inputs().end()));
-          } else {
-            c10::Symbol seq_node_kind = lc_node->inputs().size() > 0
-                ? onnx::SequenceConstruct
-                : onnx::SequenceEmpty;
-            Node* seq_node = block->owningGraph()->create(
-                seq_node_kind, {lc_node->inputs()}, 1);
-            seq_node->insertBefore(lc_node);
-            seq_node->output()->copyMetadata(lc_node->output());
-            lc_node->replaceAllUsesWith(seq_node);
-          }
-        }
-      }
-      i++;
-    }
-
-    for (auto ritr = replacements.rbegin(); ritr != replacements.rend();
-         ++ritr) {
-      replaceInputWithList(n, std::get<0>(*ritr), std::get<1>(*ritr));
-    }
+    eraseListConstruct(n, opset_version);
   }
+  eraseListConstruct(block->return_node(), opset_version);
 }
 
 // For ops such as meshgrid where output is a list of Tensors
