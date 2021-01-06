@@ -70,6 +70,7 @@ void SparseTensorImpl::set_storage_offset(int64_t storage_offset) {
 }
 
 int64_t SparseTensorImpl::dim() const {
+  TORCH_INTERNAL_ASSERT(sparse_dim_ + dense_dim_ == TensorImpl::dim());
   return sparse_dim_ + dense_dim_;
 }
 bool SparseTensorImpl::has_storage() const {
