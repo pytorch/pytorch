@@ -14,7 +14,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
+c10::intrusive_ptr<JitFuture> rpcTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
@@ -50,7 +50,7 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
       true /*forceGradRecording*/,
       rpcTimeoutSeconds);
 
-  // Get function return type to construct c10::ivalue::Future.
+  // Get function return type to construct JitFuture.
   auto returns = functionSchema.returns();
   // Script call only allows single IValue returned.
   TORCH_INTERNAL_ASSERT(
@@ -62,7 +62,7 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
 
   // Create a JIT future and pass it to futMessage's callback to set state
   // of the JIT future.
-  auto futPtr = c10::make_intrusive<c10::ivalue::Future>(returnType);
+  auto futPtr = c10::make_intrusive<JitFuture>(returnType);
   std::weak_ptr<JitFuture> wp = jitFuture;
   jitFuture->addCallback(at::wrapPropagateTLSState<void>([futPtr, wp]() {
     auto future = wp.lock();
