@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 import torch
 
 import torch.nn as nn
@@ -252,9 +253,11 @@ class Linear(torch.nn.Module):
             weight_post_process = mod.weight_fake_quant
             activation_post_process = mod.activation_post_process
         else:
-            assert type(mod) in cls._FLOAT_MODULE, \
-                ' nnq.' + cls.__name__ + '.from_float only works for ' + \
-                [float_mod.__name__ for float_mod in cls._FLOAT_MODULE]
+            if not isinstance(cls._FLOAT_MODULE, Iterable):
+                cls._FLOAT_MODULE = [cls._FLOAT_MODULE]
+            supported_modules = ', '.join([float_mod.__name__ for float_mod in cls._FLOAT_MODULE])
+            error_msg = 'nnq.{}.from_float only works for {}'.format(cls.__name__, supported_modules)
+            assert type(mod) in cls._FLOAT_MODULE, error_msg.format()
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             activation_post_process = mod.activation_post_process
             if type(mod) == nni.LinearReLU:
