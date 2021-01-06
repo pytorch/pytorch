@@ -6,11 +6,24 @@ from .pattern_utils import (
 from .utils import _parent_name
 from .quantization_types import QuantizerCls
 from ..fuser_method_mappings import get_fuser_method
+from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict
 
 # ---------------------
-# Fusion Patterns
+# Fusion Pattern Registrations
 # ---------------------
+
+# Base Pattern Handler
+class FuseHandler(ABC):
+    """ Base handler class for the fusion patterns
+    """
+    def __init__(self, quantizer: QuantizerCls, node: Node):
+        pass
+
+    @abstractmethod
+    def fuse(self, quantizer: QuantizerCls, load_arg: Callable,
+             fuse_custom_config_dict: Dict[str, Any] = None) -> Node:
+        pass
 
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv1d))
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv2d))
@@ -27,9 +40,9 @@ from typing import Any, Callable, Dict
 @register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm1d, torch.nn.Conv1d)))
 @register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
 @register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm3d, torch.nn.Conv3d)))
-class ConvBNReLUFusion():
+class ConvBNReLUFusion(FuseHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
-        super().__init__()
+        super().__init__(quantizer, node)
         self.relu_node = None
         self.bn_node = None
         if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
@@ -94,9 +107,9 @@ class ConvBNReLUFusion():
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.BatchNorm2d))
 @register_fusion_pattern((torch.nn.functional.relu, torch.nn.BatchNorm3d))
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.BatchNorm3d))
-class ModuleReLUFusion():
+class ModuleReLUFusion(FuseHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
-        super().__init__()
+        super().__init__(quantizer, node)
         self.relu_node = node
         assert isinstance(node.args[0], Node)
         node = node.args[0]
