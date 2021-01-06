@@ -244,6 +244,15 @@ struct C10_API VariableVersion {
   }
 };
 
+/**
+ * NOTE: Some TensorImpl methods are small and not overridden in the
+ * PyTorch codebase itself, but may theoretically need to be
+ * overridden by third-party TensorImpl subclasses. This macro allows
+ * users that need maximum performance and don't need these extension
+ * points to disable them with a build-time flag. (In particular,
+ * XLA's XLATensorImpl currently overrides these methods, so we can't
+ * enable this flag by default.)
+ */
 #ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 #define TENSORIMPL_MAYBE_VIRTUAL
 #else
