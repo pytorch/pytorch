@@ -319,6 +319,38 @@ class TestOptim(TestCase):
             ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=1., amsgrad=False)),
             ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=True)),
             ((optim.AdamW, optim._multi_tensor.AdamW), dict(weight_decay=0., amsgrad=False)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=1., amsgrad=True, 
+             rectify=True, weight_decouple=True)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=1., amsgrad=False, 
+             rectify=True, weight_decouple=True)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=0., amsgrad=True, 
+             rectify=True, weight_decouple=True)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=0., amsgrad=False, 
+             rectify=True, weight_decouple=True)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=1., amsgrad=True, 
+             rectify=False, weight_decouple=True)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=1., amsgrad=False, 
+             rectify=False, weight_decouple=True)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=0., amsgrad=True, 
+             rectify=False, weight_decouple=True)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=0., amsgrad=False, 
+             rectify=False, weight_decouple=True)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=1., amsgrad=True, 
+             rectify=True, weight_decouple=False)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=1., amsgrad=False, 
+             rectify=True, weight_decouple=False)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=0., amsgrad=True, 
+             rectify=True, weight_decouple=False)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=0., amsgrad=False, 
+             rectify=True, weight_decouple=False)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=1., amsgrad=True, 
+             rectify=False, weight_decouple=False)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=1., amsgrad=False, 
+             rectify=False, weight_decouple=False)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=0., amsgrad=True, 
+             rectify=False, weight_decouple=False)),
+            ((optim.AdaBelief, optim._multi_tensor.AdaBelief), dict(weight_decay=0., amsgrad=False, 
+             rectify=False, weight_decouple=False)),
             ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0, weight_decay=1, nesterov=True)),
             ((optim.SGD, optim._multi_tensor.SGD), dict(lr=0.2, momentum=1, dampening=0.5, weight_decay=1, nesterov=False)),
             ((optim.RMSprop, optim._multi_tensor.RMSprop), dict(weight_decay=1, momentum=1, centered=True)),
@@ -441,6 +473,51 @@ class TestOptim(TestCase):
             self._test_basic_cases(
                 lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=1, amsgrad=True)
             )
+            with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
+                optimizer(None, lr=1e-2, weight_decay=-1)
+    
+    def test_adabelief(self):
+        for optimizer in [optim.AdaBelief, optim_mt.AdaBelief]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, amsgrad=True)
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3),
+                [lambda opt: ExponentialLR(opt, gamma=0.9)]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, amsgrad=True),
+                [lambda opt: ExponentialLR(opt, gamma=0.9),
+                 lambda opt: ReduceLROnPlateau(opt)]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, lr=1e-2),
+                    lr=1e-3, amsgrad=True),
+                [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+                 lambda opt: ReduceLROnPlateau(opt)]
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
+                optimizer(None, lr=1e-2, betas=(1.0, 0.0))
+
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
 
