@@ -1697,18 +1697,18 @@ std::tuple<Tensor, Tensor> _triangular_solve_helper_cuda(const Tensor& self, con
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_qr(Tensor& Q, Tensor& R, int64_t n_columns, std::vector<int64_t>& infos) {
+static void apply_qr(Tensor& Q, Tensor& R, int64_t q_size_minus_2, int64_t r_size_minus_1, int64_t n_columns,
+                     bool compute_q, std::vector<int64_t>& infos) {
 #ifndef USE_MAGMA
 AT_ERROR("qr: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
-  auto q_data = Q.data_ptr<scalar_t>();
-  auto r_data = R.data_ptr<scalar_t>();
-  auto q_matrix_stride = matrixStride(Q);
-  auto r_matrix_stride = matrixStride(R);
 
-  magma_int_t m = magma_int_cast(Q.size(-2), "Q.size(-2)");
-  magma_int_t n = magma_int_cast(R.size(-1), "R.size(-1)");
+  magma_int_t m = magma_int_cast(q_size_minus_2, "Q.size(-2)");
+  magma_int_t n = magma_int_cast(r_size_minus_1, "R.size(-1)");
+
+  auto r_data = R.data_ptr<scalar_t>();
+  auto r_matrix_stride = matrixStride(R);
   magma_int_t k = m < n ? m : n;
   magma_int_t nb = magmaGeqrfOptimalBlocksize<scalar_t>(m, n);
   int64_t batch_size = batchCount(R);
@@ -1731,6 +1731,10 @@ AT_ERROR("qr: MAGMA library not found in "
       return;
     }
   }
+  if (!compute_q) {
+    // this is for mode='r'
+    return;
+  }
 
   // This phase computes Q (the raw version)
   // We require to perform ?geqrf_gpu again due to this bug in MAGMA:
@@ -1738,6 +1742,8 @@ AT_ERROR("qr: MAGMA library not found in "
   // - ?geqrf2_gpu gives correct R, but doesn't allow computation of Q via ?orgqr_gpu
   // Refer to the below link for more details:
   // http://icl.cs.utk.edu/magma/forum/viewtopic.php?f=2&t=1015&p=2800&hilit=geqrf_gpu#p2800
+  auto q_data = Q.data_ptr<scalar_t>();
+  auto q_matrix_stride = matrixStride(Q);
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* q_working_ptr = &q_data[i * q_matrix_stride];
     magmaGeqrf<scalar_t>(m, n, q_working_ptr, m, tau_data, work_data, &info, /*is_v2=*/false);
@@ -1754,36 +1760,43 @@ AT_ERROR("qr: MAGMA library not found in "
 #endif
 }
 
-std::tuple<Tensor,Tensor> _qr_helper_cuda(const Tensor& self, bool some) {
+std::tuple<Tensor,Tensor> _linalg_qr_helper_cuda(const Tensor& self, std::string mode) {
+  bool compute_q, reduced;
+  std::tie(compute_q, reduced) = _parse_qr_mode(mode);
   std::vector<int64_t> infos(batchCount(self), 0);
 
   // Setup input geometry and inputs for apply_qr
   std::vector<int64_t> q_sizes, q_strides;
   int64_t n_columns_q;
-  std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, some);
+  std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, reduced);
   Tensor q_working_copy, r_working_copy;
 
   // If there are no elements, then we simply return a pair of tensors of required dimensions
   if (self.numel() == 0) {
-    // Fix the number of columns of q_working_copy appropriately
-    q_sizes[self.dim() - 1] = n_columns_q;
-    q_working_copy = at::eye(q_sizes[self.dim() - 2], q_sizes[self.dim() - 1], self.options());
-    q_working_copy = q_working_copy.expand_as(q_working_copy);
-
-    // We repurpose the same q_sizes for r_working_copy
-    // Fix the number of rows and columns of q_working_copy appropriately
-    q_sizes[self.dim() - 1] = self.size(-1);
-    q_sizes[self.dim() - 2] = n_columns_q;
-    r_working_copy = at::empty(q_sizes, self.options());
+    int64_t n = self.size(-1);
+    r_working_copy = at::empty({n_columns_q, n}, self.options());
+    if (compute_q) {
+        int64_t n_rows_q = q_sizes[self.dim() - 2];
+        q_working_copy = at::eye(n_rows_q, n_columns_q, self.options());
+    } else {
+      q_working_copy = at::empty({0}, self.options());
+    }
     return std::make_tuple(q_working_copy, r_working_copy);
   }
 
-  q_working_copy = at::empty_strided(q_sizes, q_strides, self.options());
-  q_working_copy.narrow(-1, 0, self.size(-1)).copy_(self);
+  if (compute_q) {
+    q_working_copy = at::empty_strided(q_sizes, q_strides, self.options());
+    q_working_copy.narrow(-1, 0, self.size(-1)).copy_(self);
+  } else {
+    q_working_copy = at::empty({0}, self.options());
+  }
   r_working_copy = cloneBatchedColumnMajor(self);
 
+  int64_t m = q_sizes[self.dim() - 2];
+  int64_t n = r_working_copy.size(-1);
+
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "qr_cuda", [&]{
-    apply_qr<scalar_t>(q_working_copy, r_working_copy, n_columns_q, infos);
+    apply_qr<scalar_t>(q_working_copy, r_working_copy, m, n, n_columns_q, compute_q, infos);
   });
   if (self.dim() > 2) {
     batchCheckErrors(infos, "qr_cuda");
@@ -1791,10 +1804,12 @@ std::tuple<Tensor,Tensor> _qr_helper_cuda(const Tensor& self, bool some) {
     singleCheckErrors(infos[0], "qr_cuda");
   }
 
-  return std::make_tuple(q_working_copy.narrow(-1, 0, n_columns_q),
-                         r_working_copy.narrow(-2, 0, n_columns_q).triu());
+  if (compute_q) {
+    q_working_copy = q_working_copy.narrow(-1, 0, n_columns_q);
+  }
+  r_working_copy = r_working_copy.narrow(-2, 0, n_columns_q).triu();
+  return std::make_tuple(q_working_copy, r_working_copy);
 }
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ symeig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>

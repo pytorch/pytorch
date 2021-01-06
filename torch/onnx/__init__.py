@@ -40,7 +40,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
     once in order to get a trace of its execution to be exported;
     at the moment, it supports a limited set of dynamic models (e.g., RNNs.)
 
-    Arguments:
+    Args:
         model (torch.nn.Module): the model to be exported.
         args (tuple of arguments or torch.Tensor, a dictionary consisting of named arguments (optional)): 
             a dictionary to specify the input to the corresponding named parameter: 
@@ -173,7 +173,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             opset version of the onnx submodule. Since ONNX's latest opset may
             evolve before next stable release, by default we export to one stable
             opset version. Right now, supported stable opset version is 9.
-            The opset_version must be _onnx_master_opset or in _onnx_stable_opsets
+            The opset_version must be _onnx_main_opset or in _onnx_stable_opsets
             which are defined in torch/onnx/symbolic_helper.py
         do_constant_folding (bool, default False): If True, the constant-folding
             optimization is applied to the model during export. Constant-folding

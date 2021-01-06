@@ -494,7 +494,10 @@ void ONNXSetDynamicInputShape(
         continue;
       }
 
-      auto shape = input_tensor_type->symbolic_sizes().sizes().value();
+      auto shape_ref = input_tensor_type->symbolic_sizes().sizes();
+      TORCH_CHECK(
+          shape_ref.has_value(), "Input tensor shape should have value.");
+      auto shape = shape_ref.value();
 
       for (auto pair : axes_names) {
         auto axis = pair.first;
@@ -502,6 +505,10 @@ void ONNXSetDynamicInputShape(
         if (name_to_sym.find(name) == name_to_sym.end()) {
           name_to_sym[name] = ::c10::ShapeSymbol::newSymbol();
         }
+        TORCH_CHECK(
+            axis < shape.size(),
+            "Dynamic shape axis should be no more than the shape dimension for ",
+            name);
         shape[axis] = name_to_sym[name];
       }
 
