@@ -243,7 +243,7 @@ def check_fn_decorators_supported(fn_def, ctx):
             decorator_name = get_decorator_name(decorator)
             if decorator_name == "torch.no_grad":
                 ctx_range = ctx.make_range(decorator.lineno, decorator.col_offset, decorator.col_offset + len(decorator_name))
-                raise NotSupportedError(ctx_range, "Using torch.no_grad as a decorator is not supported")
+                raise NotSupportedError(ctx_range, "Using no_grad as a decorator is not supported")
 
 
 def get_jit_def(fn, def_name, self_name=None):

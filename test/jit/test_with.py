@@ -632,7 +632,7 @@ class TestWith(JitTestCase):
 
         with self.assertRaisesRegexWithHighlight(
             torch.jit.frontend.NotSupportedError,
-            r"Using torch.no_grad as a decorator is not supported",
+            r"Using no_grad as a decorator is not supported",
             "torch.no_grad"
         ):
             torch.jit.script(fn)
