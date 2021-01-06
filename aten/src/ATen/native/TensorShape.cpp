@@ -1084,7 +1084,7 @@ Tensor slice(
   auto sizes = self.sizes().vec();
   auto strides = self.strides().vec();
 
-  // handle optional parameters
+  // handle optinal parameters
   int64_t start_val = start.has_value() ? start.value() : 0;
   int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
 
