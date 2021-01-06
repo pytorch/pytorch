@@ -228,7 +228,7 @@ class PythonArgument:
     # Compute argument formal for python argument parsing.
     # Needs to be consistent with torch/csrc/utils/python_arg_parser.h.
     def argument_str(self, *, method: bool = False) -> str:
-        type_str = argument_type_str(self.type)
+        type_str = argument_type_str(self.type).replace('const ', '').replace(' &', '')
 
         name = self.name
         # s/self/input/ outside method bindings
@@ -566,7 +566,7 @@ class DispatchLambdaArgumentExprs:
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 def _cpp_signature(f: NativeFunction, *, method: bool = False) -> CppSignature:
-    return CppSignatureGroup.from_schema(f.func, method=method).signature
+    return CppSignatureGroup.from_native_function(f, method=method).signature
 
 def has_tensor_options(f: NativeFunction) -> bool:
     return f.func.arguments.tensor_options is not None
@@ -624,10 +624,9 @@ def argument_type_str(t: Type, *, simple_type: bool = False) -> str:
             return f'ScalarList[{size}]' if size is not None else 'ScalarList'
         elif str(t.elem) == 'Tensor?':
             if simple_type:
-                return 'TensorList'
+                return 'c10::List<c10::optional<Tensor>>'
             else:
-                # TODO: clone the old codegen behavior but does it make sense?
-                return 'TensorList?'
+                return 'const c10::List<c10::optional<Tensor>> &'
         elif str(t.elem) == 'Dimname':
             return f'DimnameList[{size}]' if size is not None else 'DimnameList'
         elem = argument_type_str(t.elem, simple_type=simple_type)
@@ -1051,12 +1050,14 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
                 return 'toDimnameListOptional'
 
     elif isinstance(t, ListType):
-        if str(t.elem) == 'Tensor' or str(t.elem) == 'Tensor?':
+        if str(t.elem) == 'Tensor':
             # accept and use definite size
             if t.size is not None:
                 return f'tensorlist_n<{t.size}>'
             else:
                 return 'tensorlist'
+        elif str(t.elem) == 'Tensor?':
+            return 'list_of_optional_tensors'
         elif str(t.elem) == 'Dimname':
             # accept definite size
             return 'dimnamelist'
