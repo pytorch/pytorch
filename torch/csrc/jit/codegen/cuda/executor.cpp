@@ -34,6 +34,9 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
   code += std::string("namespace ") + FusionExecutor::kernelNamespace() +
       " {\n" + executor_utils::kernelPreamble() + kernel + "}\n";
 
+  // How to define PhiloxCudaState for nvrtc, first option:
+  // code += "#include <ATen/CUDAGeneratorImpl.h># here?
+
   const char* debug_env = std::getenv("PYTORCH_CUDA_FUSER_DEBUG");
   if (debug_env && atoi(debug_env)) {
     std::cout << "\n==== codegen output for kernel: " << kernelName()

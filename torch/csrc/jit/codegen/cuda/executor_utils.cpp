@@ -39,6 +39,11 @@ std::string kernelPreamble() {
   ss << nvfuser_resources::block_reduction_cu;
   ss << nvfuser_resources::grid_reduction_cu;
   ss << nvfuser_resources::broadcast_cu;
+  // How to define PhiloxCudaState for nvtrc, another option:
+  // ss << nvfuser_resources::philox_cu
+  // with some corresponding file in torch/include/nvfuser_resources?
+  // If so, should that file contain a full definition of PhiloxCudaState somehow,
+  // or just "#include <ATen/CUDAGeneratorImpl.h>">?
 
   return ss.str();
 }

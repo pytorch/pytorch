@@ -1,3 +1,4 @@
+#include <ATen/CUDAGeneratorImpl.h>
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
@@ -86,7 +87,7 @@ class CudaKernelGenerator : private OptInConstDispatch {
 
     // Kernels generating random numbers take extra (seed, offset) arguments
     if (kernel_summary.is_stochastic) {
-      code_ << ", unsigned long long seed, unsigned long long offset";
+      code_ << ", at::PhiloxCudaState philox_args";
     }
 
     code_ << ") ";
@@ -99,7 +100,8 @@ class CudaKernelGenerator : private OptInConstDispatch {
     // Random number generator (optional)
     if (kernel_summary.is_stochastic) {
       indent() << "const int idx = blockIdx.x*blockDim.x + threadIdx.x;\n";
-      indent() << "Philox rnd(seed, idx, offset);\n";
+      indent() << "auto seeds = at::cuda::philox::unpack(philox_args)\n";
+      indent() << "Philox rnd(std::get<0>(seeds), idx, std::get<1>(seeds));\n";
     }
 
     // Do we have any dynamic shared memory buffers?

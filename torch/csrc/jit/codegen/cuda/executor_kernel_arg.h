@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/ir.h>
 
@@ -51,6 +52,14 @@ struct TensorArgCodegen<T, 0> {
 struct ArgAbstract {
   virtual ~ArgAbstract() {}
   virtual void* arg() = 0;
+};
+
+struct PhiloxCudaStateArg : public ArgAbstract {
+  at::PhiloxCudaState val_;
+  PhiloxCudaStateArg(at::PhiloxCudaState _val) : val_(_val){};
+  void* arg() {
+    return &val_;
+  }
 };
 
 struct ULongArg : public ArgAbstract {
@@ -155,6 +164,8 @@ class KernelArgumentHolder {
   void push(const IValue& val);
 
   void push(const uint64_t& val);
+
+  void push(const at::PhiloxCudaState& val);
 
   // Create buffer, flatten arguments into it, align by 8 Bytes, return pointers
   // in the buffer

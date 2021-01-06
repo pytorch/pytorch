@@ -137,6 +137,7 @@ uint64_t CUDAGeneratorImpl::seed() {
  */
 void CUDAGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
   at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::set_philox_offset_per_thread");
+  TORCH_CHECK(offset % 4 == 0, "offset must be a multiple of 4");
   philox_offset_per_thread_ = offset;
 }
 
@@ -189,10 +190,13 @@ uint64_t CUDAGeneratorImpl::capture_epilogue() {
  * See Note [Acquire lock when using random generators]
  */
 PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
+  // rounds increment up to the nearest multiple of 4
+  increment = ((increment + 3) / 4) * 4;
   if (at::cuda::currentStreamCaptureStatus() != at::cuda::CaptureStatus::None) {
     TORCH_CHECK(graph_expects_this_gen_,
                 "philox_cuda_state for an unexpected CUDA generator used during capture. "
                 CAPTURE_DEFAULT_GENS_MSG);
+    TORCH_INTERNAL_ASSERT(this->offset_intragraph_ % 4 == 0);
     uint32_t offset = this->offset_intragraph_;
     TORCH_INTERNAL_ASSERT(this->offset_intragraph_ <=
                           std::numeric_limits<uint32_t>::max() - increment);
@@ -204,6 +208,7 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
     TORCH_CHECK(!graph_expects_this_gen_,
                 "CUDA generator expects graph capture to be underway, "
                 "but the current stream is not capturing.");
+    TORCH_INTERNAL_ASSERT(this->philox_offset_per_thread_ % 4 == 0);
     uint64_t offset = this->philox_offset_per_thread_;
     this->philox_offset_per_thread_ += increment;
     return PhiloxCudaState(this->seed_, offset);
@@ -217,6 +222,7 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
 std::pair<uint64_t, uint64_t> CUDAGeneratorImpl::philox_engine_inputs(uint64_t increment) {
   at::cuda::assertNotCapturing("Refactor this op to use CUDAGeneratorImpl::philox_cuda_state. "
                                "Cannot call CUDAGeneratorImpl::philox_engine_inputs");
+  TORCH_INTERNAL_ASSERT(this->philox_offset_per_thread_ % 4 == 0);
   uint64_t offset = this->philox_offset_per_thread_;
   this->philox_offset_per_thread_ += increment;
   return std::make_pair(this->seed_, offset);
