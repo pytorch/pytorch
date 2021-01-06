@@ -422,7 +422,7 @@ Stmt* IRMutator::mutate(const Allocate* v) {
     return (Stmt*)v;
   }
 
-  return new Allocate(buffer_var_new, v->dtype(), dims_new);
+  return new Allocate(new Buf(buffer_var_new, dims_new, v->dtype()));
 }
 
 Stmt* IRMutator::mutate(const Free* v) {
@@ -515,7 +515,7 @@ Stmt* StmtClone::mutate(const AtomicAdd* v) {
 }
 
 Stmt* StmtClone::mutate(const Allocate* v) {
-  return new Allocate(v->buffer_var(), v->dtype(), v->dims());
+  return new Allocate(new Buf(v->buffer_var(), v->dims(), v->dtype()));
 }
 
 Stmt* StmtClone::mutate(const Free* v) {

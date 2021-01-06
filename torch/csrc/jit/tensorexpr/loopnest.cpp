@@ -945,7 +945,7 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
       flat_size = new Mul(flat_size, d);
     }
     flat_size = IRSimplifier::simplify(flat_size);
-    Stmt* alloc = new Allocate(buf->base_handle(), buf->dtype(), {flat_size});
+    Stmt* alloc = new Allocate(new Buf(buf->base_handle(), {flat_size}, buf->dtype()));
     Stmt* free = new Free(buf->base_handle());
     Block* alloc_block = findLowestContainingBlock(uses.at(buf));
     alloc_block->prepend_stmt(alloc);

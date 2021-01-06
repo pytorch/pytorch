@@ -11,6 +11,9 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+TORCH_API std::vector<const Expr*> ExprHandleVectorToExprVector(
+    const std::vector<ExprHandle>&);
+
 class Placeholder;
 
 // The common base between all statement node.
@@ -319,35 +322,24 @@ class TORCH_API Allocate : public StmtNode<Allocate> {
       const VarHandle& buffer_var,
       Dtype dtype,
       const std::vector<ExprHandle>& dims) {
-    std::vector<const Expr*> dims_nodes(dims.size());
-    for (size_t i = 0; i < dims.size(); i++) {
-      dims_nodes[i] = dims[i].node();
-    }
-    return new Allocate(buffer_var.node(), dtype, dims_nodes);
+    return new Allocate(new Buf(buffer_var.node(), ExprHandleVectorToExprVector(dims), dtype));
   }
 
   const Var* buffer_var() const {
-    return buffer_var_;
+    return buf_->base_handle();
   }
 
   Dtype dtype() const {
-    return dtype_;
+    return buf_->dtype();
   }
 
-  const std::vector<const Expr*>& dims() const {
-    return dims_;
+  const std::vector<const Expr*> dims() const {
+    return buf_->dims();
   }
 
-  Allocate(
-      const Var* buffer_var,
-      Dtype dtype,
-      const std::vector<const Expr*>& dims)
-      : buffer_var_(buffer_var), dtype_(dtype), dims_(dims) {}
-
+  Allocate(Buf* buf) : buf_(buf) {}
  private:
-  const Var* buffer_var_;
-  Dtype dtype_;
-  std::vector<const Expr*> dims_;
+  Buf* buf_;
   // TODO: add memory types.
 };
 

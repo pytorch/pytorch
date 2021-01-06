@@ -1988,7 +1988,7 @@ Stmt* TermExpander::mutate(const Allocate* v) {
     return (Stmt*)v;
   }
 
-  return new Allocate(buffer_var_new, v->dtype(), dims_new);
+  return new Allocate(new Buf(buffer_var_new, dims_new, v->dtype()));
 }
 
 Stmt* TermExpander::mutate(const Free* v) {
