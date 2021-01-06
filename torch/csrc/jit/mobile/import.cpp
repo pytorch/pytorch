@@ -427,12 +427,11 @@ mobile::Module BytecodeDeserializer::deserialize(
     debug_info_bvals = readArchive("mobile_debug", mcu).toTuple()->elements();
   }
 
-  // TODO: skip reading from "constants.pkl" if there is no tuple
-  // with tensor jit index in constants field in "bytecode.pkl", like
-  // ('tensor_jit_index', 4).
   std::vector<IValue> constant_values_from_jit;
   bool need_tensor_jit = has_tensor_jit_index(bvals);
 
+  // Read from constants.pkl only if there exists tensor jit index in
+  // bytecode.pkl
   if (need_tensor_jit && reader_->hasRecord("constants.pkl")) {
     constant_values_from_jit =
         readArchive("constants", mcu).toTuple()->elements();
