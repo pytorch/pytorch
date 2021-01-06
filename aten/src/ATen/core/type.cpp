@@ -1112,7 +1112,7 @@ std::string ClassType::getPreHookErrorMessage(const std::string& pre_hook_name) 
 }
 
 std::string ClassType::getHookErrorMessage(const std::string& hook_name) const {
-  FunctionSchema forwardSchema = getMethod("forward").getSchema();
+  const FunctionSchema& forwardSchema = getMethod("forward").getSchema();
   std::stringstream input_types;
   // create expected input type string
   const std::vector<Argument>& forward_args = forwardSchema.arguments();
