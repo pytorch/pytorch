@@ -8333,9 +8333,9 @@ flip(input, dims) -> Tensor
 Reverse the order of a n-D tensor along given axis in dims.
 
 .. note::
-    Unlike `np.flip`, `torch.flip` returns a new Tensor.
-    Due to this behavior, `torch.flip` has time complexity
-    of `O(N)` while `np.flip` is `O(1)`.
+    `torch.flip` makes a copy of :attr:`input`'s data. This is different from NumPy's `np.flip`,
+    which returns a view in constant time. Since copying a tensor's data is more work than viewing that data,
+    `torch.flip` is expected to be slower than `np.flip`.
 
 Args:
     {input}
@@ -8371,9 +8371,9 @@ Note:
     Equivalent to input[:,::-1]. Requires the array to be at least 2-D.
 
 .. note::
-    Unlike `np.fliplr`, `torch.fliplr` returns a new Tensor.
-    Due to this behavior, `torch.fliplr` has time complexity
-    of `O(N)` while `np.fliplr` is `O(1)`.
+    `torch.fliplr` makes a copy of :attr:`input`'s data. This is different from NumPy's `np.fliplr`,
+    which returns a view in constant time. Since copying a tensor's data is more work than viewing that data,
+    `torch.fliplr` is expected to be slower than `np.fliplr`.
 
 Args:
     input (Tensor): Must be at least 2-dimensional.
@@ -8402,9 +8402,9 @@ Note:
     Equivalent to input[::-1,...]. Requires the array to be at least 1-D.
 
 .. note::
-    Unlike `np.flipud`, `torch.flipud` returns a new Tensor.
-    Due to this behavior, `torch.flipud` has time complexity
-    of `O(N)` while `np.flipud` is `O(1)`.
+    `torch.flipud` makes a copy of :attr:`input`'s data. This is different from NumPy's `np.flipud`,
+    which returns a view in constant time. Since copying a tensor's data is more work than viewing that data,
+    `torch.flipud` is expected to be slower than `np.flipud`.
 
 Args:
     input (Tensor): Must be at least 1-dimensional.
