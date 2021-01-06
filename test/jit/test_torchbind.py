@@ -34,6 +34,13 @@ class TestTorchbind(JitTestCase):
             p = torch_root / 'build' / 'lib' / 'libtorchbind_test.so'
         torch.ops.load_library(str(p))
 
+    def test_torchbind_simple(self):
+        val = torch.classes._TorchScriptTesting._Foo(5, 3)
+        s = val.add(z=3, k=5)
+        print(s)
+        self.assertTrue(True)
+
+
     def test_torchbind(self):
         def test_equality(f, cmp_key):
             obj1 = f()

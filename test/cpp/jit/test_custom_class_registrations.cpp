@@ -18,8 +18,8 @@ struct Foo : torch::CustomClassHolder {
   int64_t info() {
     return this->x * this->y;
   }
-  int64_t add(int64_t z) {
-    return (x + y) * z;
+  int64_t add(int64_t z, int64_t k) {
+    return (x + y) * (z + k);
   }
   void increment(int64_t z) {
     this->x += z;
