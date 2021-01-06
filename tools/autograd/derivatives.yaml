@@ -896,8 +896,8 @@
   index: non_differentiable
   source: grad.take(index)
 
-- name: qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)
-  self: qr_backward(grads, self, some, Q, R)
+- name: linalg_qr(Tensor self, str mode='reduced') -> (Tensor Q, Tensor R)
+  self: linalg_qr_backward(grads, self, mode, Q, R)
 
 - name: rad2deg(Tensor self) -> Tensor
   self: rad2deg_backward(grad)
