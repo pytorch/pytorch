@@ -1150,7 +1150,7 @@ std::string ClassType::getHookErrorMessage(const std::string& hook_name) const {
 }
 
 void ClassType::checkPreHookSchema(torch::jit::Function& pre_hook) const {
-  const FunctionSchema pre_hook_schema = pre_hook.getSchema();
+  const FunctionSchema& pre_hook_schema = pre_hook.getSchema();
   std::string hook_id =
       "Pre-hook '" + pre_hook.name() + "' on module '" + name()->name() + "' ";
   std::string pre_hook_err_msg = getPreHookErrorMessage(pre_hook.name()) + "\n";
@@ -1184,7 +1184,7 @@ void ClassType::checkPreHookSchema(torch::jit::Function& pre_hook) const {
     TORCH_CHECK(
         input_tuple_types.size() == 1 && input_tuple_types[0]->kind() == NoneType::get()->kind(),
         hook_id,
-        "was expecting Tuple[None] as the input type. Recieved type: '",
+        "was expecting Tuple[None] as the input type. Received type: '",
         input_arg.type()->annotation_str(),
         "'.\n",
         pre_hook_err_msg
@@ -1194,7 +1194,7 @@ void ClassType::checkPreHookSchema(torch::jit::Function& pre_hook) const {
     TORCH_CHECK(
         input_tuple_types.size() == forward_args.size() - 1, hook_id,
         "has the wrong number of contained types for the",
-        " input argument's Tuple. Recieved type: '",
+        " input argument's Tuple. Received type: '",
         input_arg.type()->annotation_str(),
         "'.\n",
         pre_hook_err_msg
@@ -1205,7 +1205,7 @@ void ClassType::checkPreHookSchema(torch::jit::Function& pre_hook) const {
         TORCH_CHECK(
             false,
             hook_id,
-            "has the wrong inner types for the second tuple argument. Recieved type: '",
+            "has the wrong inner types for the second tuple argument. Received type: '",
             input_arg.type()->annotation_str(),
             "'.\n",
             pre_hook_err_msg
@@ -1285,7 +1285,7 @@ void ClassType::checkPreHookSchema(torch::jit::Function& pre_hook) const {
 }
 
 void ClassType::checkHookSchema(torch::jit::Function& hook) const {
-  const FunctionSchema hook_schema = hook.getSchema();
+  const FunctionSchema& hook_schema = hook.getSchema();
   std::string hook_id =
       "Hook '" + hook.name() + "' on module '" + name()->name() + "' ";
   std::string hook_err_msg = getHookErrorMessage(hook.name()) + "\n";
@@ -1322,7 +1322,7 @@ void ClassType::checkHookSchema(torch::jit::Function& hook) const {
         input_tuple_types.size() == 1 &&
           input_tuple_types[0]->kind() == NoneType::get()->kind(),
         hook_id,
-        "was expecting Tuple[None] as the input type. Recieved type: '",
+        "was expecting Tuple[None] as the input type. Received type: '",
         input_arg.type()->annotation_str(), 
         "'.\n",
         hook_err_msg
@@ -1333,7 +1333,7 @@ void ClassType::checkHookSchema(torch::jit::Function& hook) const {
         input_tuple_types.size() == forward_args.size() - 1,
         hook_id,
         "has the wrong number of contained types for the",
-        " input argument's Tuple. Recieved type: '",
+        " input argument's Tuple. Received type: '",
         input_arg.type()->annotation_str(),
         "'.\n",
         hook_err_msg
@@ -1346,7 +1346,7 @@ void ClassType::checkHookSchema(torch::jit::Function& hook) const {
             false, 
             hook_id,
             "has the wrong inner types for the second ",
-            "tuple argument. Recieved type: '",
+            "tuple argument. Received type: '",
             input_arg.type()->annotation_str(), 
             "'.\n", 
             hook_err_msg
@@ -1365,7 +1365,7 @@ void ClassType::checkHookSchema(torch::jit::Function& hook) const {
   TORCH_CHECK(
       prev_output.type()->annotation_str() == return_arg.type()->annotation_str(),
       hook_id,
-      "has the wrong type for the output argument. Recieved type: '",
+      "has the wrong type for the output argument. Received type: '",
       return_arg.type()->annotation_str(),
       "'. Expected type: '",
       prev_output.type()->annotation_str(),
