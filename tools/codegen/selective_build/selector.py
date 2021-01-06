@@ -3,6 +3,7 @@ import yaml
 
 from dataclasses import dataclass
 
+from tools.codegen.model import NativeFunction
 from tools.codegen.selective_build.operator import *
 
 # A SelectiveBuilder holds information extracted from the selective build
@@ -130,6 +131,10 @@ class SelectiveBuilder:
         name = strip_operator_overload_name(name)
         return name in self.operators and self.operators[name].include_all_overloads
 
+    def is_native_function_selected(self, func: NativeFunction) -> bool:
+        op_name = op_name_from_native_function(func)
+        return self.is_operator_selected(op_name)
+
     def is_operator_selected_for_training(self, name: str) -> bool:
         if not self.is_operator_selected(name):
             return False
@@ -156,6 +161,10 @@ class SelectiveBuilder:
             op.is_used_for_training or
             (base_op.include_all_overloads and base_op.is_used_for_training)
         )
+
+    def is_native_function_selected_for_training(self, func: NativeFunction) -> bool:
+        op_name = op_name_from_native_function(func)
+        return self.is_operator_selected_for_training(op_name)
 
     def is_root_operator(self, name: str) -> bool:
         if not self.is_operator_selected(name):
@@ -223,3 +232,9 @@ def combine_selective_builders(lhs: SelectiveBuilder, rhs: SelectiveBuilder) -> 
         kernel_metadata,
         include_all_kernel_dtypes,
     )
+
+
+def op_name_from_native_function(f: NativeFunction) -> str:
+    # This was originally read from the 'operator_name_with_overload' field in the
+    # declaration dict, which was the part before the first '(' in 'schema_string'.
+    return f'aten::{f.func.name}'
