@@ -442,10 +442,9 @@ class TestTesting(TestCase):
     @slowTest
     def test_cuda_assert_should_stop_test_suite(self, device):
         # This test is slow because it spawn another process to run another test suite.
-        import subprocess
-        import sys
 
-        problematic_test_script = """\
+        # Test running of cuda assert test suite should early terminate.
+        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
 #!/usr/bin/env python
 
 import torch
@@ -479,14 +478,12 @@ instantiate_device_type_tests(
 
 if __name__ == '__main__':
     run_tests()
-"""
-
-        # Test running of cuda assert test suite should early terminate.
-        p = subprocess.run([sys.executable, '-c', problematic_test_script], stderr=subprocess.PIPE, timeout=120)
+""")
         # should capture CUDA error
-        self.assertIn('CUDA error: device-side assert triggered', p.stderr.decode('ascii'))
+        self.assertIn('CUDA error: device-side assert triggered', stderr)
         # should run only 1 test because it throws unrecoverable error.
-        self.assertIn('Ran 1 test', p.stderr.decode('ascii'))
+        self.assertIn('Ran 1 test', stderr)
+
 
 instantiate_device_type_tests(TestTesting, globals())
 

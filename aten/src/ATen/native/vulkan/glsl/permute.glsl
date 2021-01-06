@@ -1,6 +1,5 @@
 #version 450 core
 layout(std430) buffer;
-layout(std430) uniform;
 layout(set = 0, binding = 0) writeonly buffer outputBuffer {
   float data[];
 }
