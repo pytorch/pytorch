@@ -298,27 +298,44 @@ class PoissonNLLLoss(_Loss):
 
 
 class GaussianNLLLoss(_Loss):
-    r"""Negative log likelihood loss with Gaussian distribution
+    r"""Gaussian negative log likelihood loss.
 
-    For targets modelled as having Gaussian distribution:
+    The targets are treated as samples from Gaussian distributions with
+    expectations and variances predicted by the neural network. For a
+    1-dimensional ``target`` tensor modelled as having Gaussian distribution
+    with expectation ``input`` and positive variance ``var``, the loss is:
+
     .. math::
-    target \sim \mathcal{N}(input, var)
+         \text{loss} = \frac{1}{2}\log(\text{var} + \text{eps})
+         + \frac{1}{2} \frac{\left(\text{input} - \text{target}\right)^2}{\text{var} + \text{eps}} + \text{const.}
 
-    The full loss can be described as:
+
+    where :attr:`eps` is added for stability. By default, the constant term of
+    the loss function is omitted unless :attr:`full` is ``True``. For a 
+    D-dimensional ``target`` tensor modelled as having a heteroscedastic
+    Gaussian distribution with  D-dimensional ``input`` and ``var`` the loss is:
+
     .. math::
-    \text{loss}[i] = \frac{1}{2}\sum_{j=1}^D \left(\log(\text{var}[i, j] + \epsilon) 
-     + \frac{\left(\text{input}[i,j] - \text{target}[i,j]\right)^2}{\text{var}[i,j]} \right)
-     + \frac{D}{2}\log(2\pi)
+        \text{loss} = \frac{1}{2}\sum_{i=1}^D \left(\log(\text{var}[i] + \text{eps}) 
+         + \frac{\left(\text{input}[i] - \text{target}[i]\right)^2}{\text{var}[i] + \text{eps}}\right)
 
-    where the input, target and variance tensors have shape (N, D). 
-    The homoscedastic case applies when the variance tensor has shape (N, 1) instead:
+    where the constant term is omitted. If ``var`` is 1-dimensional, the
+    homoscedastic case applies instead:
+
     .. math::
-    \text{loss}[i] = \frac{D}{2}\log(\text{var}[i] + \epsilon)
-     + \frac{1}{2}\sum_{j=1}^D \left(\frac{\left(\text{input}[i,j] - \text{target}[i,j]\right)^2}{\text{var}[i]}\right)
-     + \frac{D}{2}\log(2\pi)
+         \text{loss} = \frac{D}{2}\log(\text{var} + \text{eps})
+         + \frac{1}{2}\sum_{i=1}^D \left(\frac{\left(\text{input}[i] - \text{target}[i]\right)^2}{\text{var} + \text{eps}}\right)
 
-    By default, the constant final term is omitted, unless :attr:`full` is ``True``.
-
+    Args:
+        eps (float, optional): value added to ``var``, for stability. Default:
+            1e-6.
+        full (bool, optional): include the constant term in the loss
+            calculation. Default: ``False``.
+        reduction (string, optional): specifies the reduction to apply to the
+            output:``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction
+            will be applied, ``'mean'``: the output is the average of all batch
+            member losses, ``'sum'``: the output is the sum of all batch member
+            losses. Default: ``'mean'``.
 
     Examples::
 
@@ -333,7 +350,7 @@ class GaussianNLLLoss(_Loss):
         - Input: :math:`(N, *)` where :math:`*` means, any number of additional
           dimensions
         - Target: :math:`(N, *)`, same shape as the input
-        - Var: :math:`(N, 1)` or `(N, *)`, same shape as the input
+        - Var: :math:`(N, 1)` or :math:`(N, *)`, same shape as the input
         - Output: scalar by default. If :attr:`reduction` is ``'none'``, then :math:`(N, *)`,
           the same shape as the input
     """

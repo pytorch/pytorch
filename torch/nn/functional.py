@@ -2316,7 +2316,7 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Non
     return ret
 
 
-def gaussian_nll_loss(input, target, var, *, eps=1e-6, full=True, reduction='mean'):
+def gaussian_nll_loss(input, target, var, *, eps=1e-6, full=False, reduction='mean'):
     r"""Gaussian negative log likelihood loss.
 
     See :class:`~torch.nn.GaussianNLLLoss` for details.
