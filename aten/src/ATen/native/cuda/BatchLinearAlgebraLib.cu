@@ -56,7 +56,7 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
 
     auto dataPtr = allocator.allocate(sizeof(int) * n * batch_size);
     int* pivot = reinterpret_cast<int*>(dataPtr.get());
-    CUDA_PARALLEL_STREAM_LAUNCH(at::device_of(self), i, batch_size, [&] {
+    CUDA_PARALLEL_STREAM_LAUNCH(i, batch_size, [&] {
       _apply_single_inverse_helper<scalar_t>(
         &self_data[i * self_mat_stride], &self_inv_data[i * self_inv_mat_stride], pivot + i * n, p_infos + i * 2, n);
     });
@@ -137,7 +137,7 @@ inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& 
   int m = cuda_int_cast(self.size(-2), "m");
   int n = cuda_int_cast(self.size(-1), "n");   
 
-  CUDA_PARALLEL_STREAM_LAUNCH(at::device_of(self), i, batchsize, [&] {
+  CUDA_PARALLEL_STREAM_LAUNCH(i, batchsize, [&] {
     gesvdjInfo_t gesvdj_params;
     TORCH_CUSOLVER_CHECK(cusolverDnCreateGesvdjInfo(&gesvdj_params));
     // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetTolerance(gesvdj_params, 1.0e-7));
