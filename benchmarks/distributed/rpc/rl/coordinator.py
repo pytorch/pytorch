@@ -102,13 +102,15 @@ class CoordinatorBase:
         for p in [50, 75, 90, 95]:
             v = np.percentile(agent_latency_final, p)
             print("p" + str(p) + ":", round(v, 3))
-            benchmark_metrics['agent latency'][p] = round(v, 3)
+            p = f'p{p}'
+            benchmark_metrics['agent latency (seconds)'][p] = round(v, 3)
 
         print("\nAgent Throughput - ", len(agent_throughput_final))
         agent_throughput_final = sorted(agent_throughput_final)
         for p in [50, 75, 90, 95]:
             v = np.percentile(agent_throughput_final, p)
             print("p" + str(p) + ":", int(v))
+            p = f'p{p}'
             benchmark_metrics['agent throughput'][p] = int(v)
 
         print("\nObserver Latency - ", len(observer_latency_final))
@@ -116,13 +118,15 @@ class CoordinatorBase:
         for p in [50, 75, 90, 95]:
             v = np.percentile(observer_latency_final, p)
             print("p" + str(p) + ":", round(v, 3))
-            benchmark_metrics['observer latency'][p] = round(v, 3)
+            p = f'p{p}'
+            benchmark_metrics['observer latency (seconds)'][p] = round(v, 3)
 
         print("\nObserver Throughput - ", len(observer_throughput_final))
         observer_throughput_final = sorted(observer_throughput_final)
         for p in [50, 75, 90, 95]:
             v = np.percentile(observer_throughput_final, p)
             print("p" + str(p) + ":", int(v))
+            p = f'p{p}'
             benchmark_metrics['observer throughput'][p] = int(v)
 
         if queue:

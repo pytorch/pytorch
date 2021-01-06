@@ -103,10 +103,21 @@ def find_graph_variable(args):
             args[arg] = var_types[arg](args[arg])  # convert string to proper type
 
 def append_spaces(string, length):
+    r"""
+    Returns a modified string with spaces appended to the end.  If length of string argument
+    is greater than or equal to length, a single space is appended, otherwise x spaces are appended
+    where x is the difference between the length of string and the length argument
+    Args:
+        string (str): string to be modified
+        length (int): size of desired return string with spaces appended
+    Return: (str)
+    """
+    string = str(string)
     offset = length - len(string)
+    if offset <= 0:
+        offset = 1
     string += ' ' * offset
     return string
-
 
 def print_benchmark_results(report):
     r"""
@@ -120,28 +131,35 @@ def print_benchmark_results(report):
     for key, val in report.items():
         if key != "benchmark_results":
             print(f'{key} : {val}')
+
     x_axis_name = report.get('x_axis_name')
-    col_width = "7"
+    col_width = 7
     heading = ""
-    metric_headers = ['agent latency (second)', 'agent_throughput', 'observer latency (second)', 'observer_throughput']
+    if x_axis_name:
+        x_axis_output_label = f'{x_axis_name} |'
+        heading += append_spaces(x_axis_output_label, col_width)
+    metric_headers = ['agent latency (seconds)', 'agent throughput', 
+                      'observer latency (seconds)', 'observer throughput']
     percentile_subheaders = ['p50', 'p75', 'p90', 'p95']
     subheading = ""
-    for heading in metric_headers:
-        heading += append_spaces(heading, col_width * 4)
+    if x_axis_name:
+        subheading += append_spaces(' ' * (len(x_axis_output_label) - 1), col_width) 
+    for header in metric_headers:
+        heading += append_spaces(header, col_width * len(percentile_subheaders))
         for percentile in percentile_subheaders:
             subheading += append_spaces(percentile, col_width)
     print(heading)
     print(subheading)
-    import pdb
-    pdb.set_trace()
 
     for benchmark_run in report['benchmark_results']:
-        print('---------\nBenchmark')
+        run_results = ""
         if x_axis_name:
-            print(f'{x_axis_name} : {benchmark_run.get(x_axis_name)}')
-        for metric_name, percentile_results in benchmark_run.items():
-            if metric_name != x_axis_name:
-                print(f'{metric_name} -- {percentile_results}\n')
+            run_results += append_spaces(benchmark_run[x_axis_name], max(col_width, len(x_axis_output_label)))
+        for metric_name in metric_headers:
+            percentile_results = benchmark_run[metric_name]
+            for percentile in percentile_subheaders:
+                run_results += append_spaces(percentile_results[percentile], col_width)
+        print(run_results)
 
 def main():
     r"""
