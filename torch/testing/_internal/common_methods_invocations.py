@@ -867,7 +867,6 @@ op_db: List[OpInfo] = [
                    handles_large_floats=False,
                    handles_complex_extremals=False,
                    promotes_integers_to_float=True,
-                   test_inplace_grad=False,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    supports_dtype_kwarg=True,
                    skips=(
