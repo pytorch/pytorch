@@ -853,7 +853,7 @@ auto Engine::execute(const edge_list& roots,
   // A frech first time Engine::execute call should start on the CPU device, initialize
   // a new thread local ready queue on CPU or reuse the existing one (if there is one
   // allocated already, i.e. consecutive backward calls, re-entrant backward calls),
-  // then memorize the local_ready_queue in GraphTask
+  // then memoize the local_ready_queue in GraphTask
   init_local_ready_queue();
   bool not_reentrant_backward_call = worker_device == NO_DEVICE;
 

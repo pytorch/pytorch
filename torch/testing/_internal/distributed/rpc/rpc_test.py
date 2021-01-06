@@ -1335,7 +1335,11 @@ class RpcTest(RpcAgentTestFixture):
                 for event in events
                 if convert_remote_to_local(event.name) in EXPECTED_REMOTE_EVENTS
             ]
-            self.assertEqual(remote_events_list, EXPECTED_REMOTE_EVENTS)
+            self.assertEqual(
+                set(remote_events_list),
+                set(EXPECTED_REMOTE_EVENTS),
+                f"Mismatch between profiled events: {set(remote_events_list)} and expected events: {set(EXPECTED_REMOTE_EVENTS)}",
+            )
 
     @dist_init
     def test_profiler_remote_events_profiled(self):
@@ -1579,8 +1583,8 @@ class RpcTest(RpcAgentTestFixture):
                 scope_event = get_function_event(events, "foo")
                 # Since RPC call is within the scope, its CPU interval should be
                 # contained within foo's interval.
-                self.assertTrue(scope_event.time_range.start < rpc_event.time_range.start)
-                self.assertTrue(scope_event.time_range.end > rpc_event.time_range.end)
+                self.assertLessEqual(scope_event.time_range.start, rpc_event.time_range.start)
+                self.assertGreaterEqual(scope_event.time_range.end, rpc_event.time_range.end)
             # the sender, dest worker, function run, and type of RPC should all
             # be recorded.
             self_worker_name = worker_name(self.rank)
@@ -1776,7 +1780,13 @@ class RpcTest(RpcAgentTestFixture):
                 if time_range.start > last_end_time:
                     top_level_event_names.append(event_name)
                     last_end_time = time_range.end
-        self.assertEqual(sorted(top_level_event_names), sorted(expected_top_level_event_names))
+        top_level_event_names = sorted(top_level_event_names)
+        expected_top_level_event_names = sorted(expected_top_level_event_names)
+        self.assertEqual(
+            top_level_event_names,
+            expected_top_level_event_names,
+            f"Expected events {expected_top_level_event_names}, but got {top_level_event_names}",
+        )
 
     @dist_init
     def test_server_process_global_profiler(self):
@@ -1799,9 +1809,12 @@ class RpcTest(RpcAgentTestFixture):
         outer_profile_rref.rpc_sync().__exit__(None, None, None)
 
         inner_events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (inner_profile_rref,))
-        self._assert_top_level_events(inner_events, ['aten::sub'])
+        expected_inner_events = ['aten::sub']
+        expected_outer_events = expected_inner_events + ['aten::add']
+
+        self._assert_top_level_events(inner_events, expected_inner_events)
         outer_events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (outer_profile_rref,))
-        self._assert_top_level_events(outer_events, ['aten::add', 'aten::sub'])
+        self._assert_top_level_events(outer_events, expected_outer_events)
 
         inner_profile_rref.rpc_sync().key_averages()
         outer_profile_rref.rpc_sync().key_averages()
