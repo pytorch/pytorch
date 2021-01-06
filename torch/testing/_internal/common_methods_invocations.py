@@ -1266,7 +1266,7 @@ if TEST_SCIPY:
         # Reference:
         # https://en.cppreference.com/w/cpp/numeric/math/lgamma
         # https://en.cppreference.com/w/c/numeric/math/lgamma
-        
+
         # To handle the above discrepancy,
         # we never pass `-inf` to scipy.special.gammaln.
         if x.dtype.kind == 'f':
