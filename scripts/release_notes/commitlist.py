@@ -1,6 +1,6 @@
 import argparse
 from common import run, topics
-from collections import namedtuple, defaultdict
+from collections import defaultdict
 import os
 import csv
 import pprint

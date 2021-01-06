@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/runtime/static/ops.h>
 
 namespace torch {
 namespace jit {
@@ -25,15 +26,16 @@ Operation createStaticSubgraphRuntime(const Node* node) {
   return [runtime, num_inputs](Stack* stack) {
     RECORD_FUNCTION("Static Runtime", std::vector<c10::IValue>());
     auto inps = torch::jit::last(stack, num_inputs);
-    std::vector<at::Tensor> t_inputs;
-    t_inputs.reserve(num_inputs);
-    for (const auto& inp : inps) {
-      t_inputs.emplace_back(inp.toTensor());
-    }
+    // TODO maybe avoid call to vec
+    auto outputs = runtime->run(inps.vec(), {});
     torch::jit::drop(stack, num_inputs);
-    auto outputs = runtime->run(t_inputs);
-    for (auto& o : outputs) {
-      push_one(*stack, std::move(o));
+
+    if (runtime->num_outputs() > 1) {
+      for (auto& o : outputs.toTuple()->elements()) {
+        push_one(*stack, std::move(o));
+      }
+    } else {
+      push_one(*stack, std::move(outputs));
     }
     return 0;
   };
@@ -52,23 +54,44 @@ RegisterOperators StaticSubgraphOps({torch::jit::Operator(
 
 bool canHandle(Node* node) {
   for (Value* input : node->inputs()) {
-    // TODO checks
+    bool is_tensor = !!input->type()->cast<TensorType>();
+    auto list_type = input->type()->cast<ListType>();
+    bool is_list = list_type && list_type->getElementType()->cast<TupleType>();
+    auto tuple_type = input->type()->cast<TupleType>();
+    bool is_tuple = [&]() -> bool {
+      if (!tuple_type) {
+        return false;
+      }
+      for (auto& t : tuple_type->elements()) {
+        if (!t->cast<TensorType>()) {
+          return false;
+        }
+      }
+      return true;
+    }();
+    if (!(is_tensor || is_list || is_tuple)) {
+      if (input->node()->kind() != prim::Constant) {
+        return false;
+      }
+    }
   }
 
   auto kind = node->kind();
   if (kind.is_prim()) {
     REQ(kind == prim::TupleConstruct || kind == prim::ListConstruct ||
         kind == prim::StaticSubgraph);
+    if (kind == prim::TupleConstruct || kind == prim::ListConstruct) {
+      for (Value* input : node->inputs()) {
+        if (!input->type()->cast<TensorType>()) {
+          return false;
+        }
+      }
+    }
     return true;
   }
-  const Operator& op = node->getOperator();
-  auto analysis = op.aliasAnalysisKind();
-  if (AliasAnalysisKind::PURE_FUNCTION == analysis ||
-      (AliasAnalysisKind::FROM_SCHEMA == analysis &&
-       !node->schema().is_mutable())) {
-    return true;
-  }
-  return false;
+
+  // TODO add "canRunNatively" once memory management is audited
+  return canRunOutOfPlace(node);
 }
 
 bool canMerge(Node* consumer, Node* producer, AliasDb* aliasDb) {

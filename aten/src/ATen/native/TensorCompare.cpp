@@ -38,6 +38,8 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
   TORCH_CHECK(self.scalar_type() == other.scalar_type(), self.scalar_type(), " did not match ", other.scalar_type());
   TORCH_CHECK(!(self.is_complex() && equal_nan),
     "isclose with equal_nan=True is not supported for complex inputs.");
+  TORCH_CHECK(!(self.is_quantized() || other.is_quantized()),
+    "isclose is not supported for quantized inputs.");
 
   // Checks that rtol and atol are non-negative
   // Note: consistent with Python's isclose but divergent from NumPy's, which
@@ -104,7 +106,7 @@ Tensor isinf(const Tensor &self) {
           (at::isinf(at::imag(self)));
   }
 
-  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isinf", [&]() {
+  return AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "isinf", [&]() {
     return self.abs() == std::numeric_limits<scalar_t>::infinity();
   });
 }
@@ -168,7 +170,7 @@ Tensor isfinite(const Tensor& self) {
     return at::isfinite(self.abs());
   }
 
-  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isfinite", [&]() {
+  return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "isfinite", [&]() {
     return (self == self) * (self.abs() != std::numeric_limits<scalar_t>::infinity());
   });
 }
