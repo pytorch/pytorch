@@ -17,6 +17,7 @@ _grad_t = Union[Tuple[Tensor, ...], Tensor]
 # the type of the subclass, not the looser type of `Module`.
 T = TypeVar('T', bound='Module')
 
+
 class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpected_keys'])):
     def __repr__(self):
         if not self.missing_keys and not self.unexpected_keys:
@@ -24,6 +25,7 @@ class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpec
         return super(_IncompatibleKeys, self).__repr__()
 
     __str__ = __repr__
+
 
 def _addindent(s_, numSpaces):
     s = s_.split('\n')
@@ -109,6 +111,7 @@ def register_module_forward_hook(hook: Callable[..., None]) -> RemovableHandle:
     _global_forward_hooks[handle.id] = hook
     return handle
 
+
 def register_module_backward_hook(
     hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
 ) -> RemovableHandle:
@@ -133,6 +136,7 @@ def register_module_backward_hook(
     handle = hooks.RemovableHandle(_global_backward_hooks)
     _global_backward_hooks[handle.id] = hook
     return handle
+
 
 def register_module_full_backward_hook(
     hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
@@ -897,7 +901,7 @@ class Module:
 
         return result
 
-    __call__ : Callable[..., Any] = _call_impl
+    __call__: Callable[..., Any] = _call_impl
 
     def __setstate__(self, state):
         self.__dict__.update(state)
@@ -912,7 +916,10 @@ class Module:
             self._non_persistent_buffers_set = set()
         if '_is_full_backward_hook' not in self.__dict__:
             self._is_full_backward_hook = None
-    
+
+    def __getattr__(self):
+        pass
+
     def __getattribute__(self, name: str) -> Any:
         try:
             return super().__getattribute__(name)
@@ -928,9 +935,9 @@ class Module:
                 if name in _buffers:
                     return _buffers[name]
             if '_modules' in self.__dict__:
-                modules = self.__dict__['_modules']
-                if name in modules:
-                    return modules[name]
+                _modules = self.__dict__['_modules']
+                if name in _modules:
+                    return _modules[name]
 
             # Note: Purposely reuse the specific error thrown from the original attempt to
             # access the property. This ensures that the error message is correct for the
