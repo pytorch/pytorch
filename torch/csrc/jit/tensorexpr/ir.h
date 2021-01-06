@@ -637,7 +637,7 @@ enum IntrinsicsOp {
   kSigmoid,
   kExp,
   kExpm1,
-  kFabs,
+  kAbs,
   kLog,
   kLog2,
   kLog10,
@@ -655,6 +655,7 @@ enum IntrinsicsOp {
   kRemainder,
   kLgamma,
   kFrac,
+  kIsNan,
   kRand, // We need more discussions on this. Should we consider stateful?
 };
 
@@ -715,8 +716,8 @@ class Intrinsics : public CallNode<Intrinsics> {
         return "sigmoid";
       case kExp:
         return "exp";
-      case kFabs:
-        return "fabs";
+      case kAbs:
+        return "abs";
       case kLog:
         return "log";
       case kLog2:
@@ -755,6 +756,8 @@ class Intrinsics : public CallNode<Intrinsics> {
         return "erfc";
       case kFrac:
         return "frac";
+      case kIsNan:
+        return "isnan";
       default:
         throw std::runtime_error(
             "invalid op_type: " + c10::to_string(op_type()));

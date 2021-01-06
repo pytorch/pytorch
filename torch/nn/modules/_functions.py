@@ -196,3 +196,13 @@ class CrossMapLRN2d(Function):
                 accum_ratio.add_(paddded_ratio[c], alpha=-1)
 
         return grad_input, None, None, None, None
+
+class BackwardHookFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, *args):
+        ctx.mark_non_differentiable(*[arg for arg in args if not arg.requires_grad])
+        return args
+
+    @staticmethod
+    def backward(ctx, *args):
+        return args
