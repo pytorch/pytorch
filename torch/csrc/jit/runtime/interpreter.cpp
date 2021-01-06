@@ -1418,7 +1418,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // Check every input's shape against profiled (expected) shape.
             for (i = 0; i < num_inputs; i++) {
               auto& input = peek(stack, i, num_inputs);
-              auto t = input.toTensor();
+              auto& t = input.toTensor();
               const TypePtr& expected = frame.function->type_table_[inst.X + i];
               auto expected_type = expected->cast<TensorType>();
               if (t.defined() && !expected_type->matchTensor(t)) {
@@ -1439,7 +1439,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               // so it's safe to pass this guard check
               push(stack, true);
             } else {
-              auto t = stack.back().toTensor();
+              auto& t = stack.back().toTensor();
               const TypePtr& expected = frame.function->type_table_[inst.X];
               auto expected_type = expected->cast<TensorType>();
               if (t.defined() &&
