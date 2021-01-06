@@ -46,7 +46,7 @@ class ProfileCounter {
   float run_time_ = 0.0f;
 };
 
-class CAFFE2_API ProfileOperatorObserver final
+class TORCH_API ProfileOperatorObserver final
     : public ProfileCounter,
       public ObserverBase<OperatorBase> {
  public:
@@ -94,7 +94,7 @@ class CAFFE2_API ProfileOperatorObserver final
   void Stop() override;
 };
 
-class CAFFE2_API ProfileObserver final : public OperatorAttachingNetObserver<
+class TORCH_API ProfileObserver final : public OperatorAttachingNetObserver<
                                              ProfileOperatorObserver,
                                              ProfileObserver> {
  public:
