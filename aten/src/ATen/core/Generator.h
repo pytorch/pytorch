@@ -100,9 +100,9 @@ struct TORCH_API Generator {
 
   // Implementation not inlined to prevent cycle reference between
   // `ATen/core/Generator.h` and `ATen/core/Tensor.h`
-  void set_state(at::Tensor& new_state);
+  void set_state(const at::Tensor& new_state);
 
-  at::Tensor state() const;
+  at::Tensor get_state() const;
 
   std::mutex& mutex() {
     return impl_->mutex_;
@@ -147,7 +147,7 @@ namespace detail {
  * - The new state tensor must be a torch.ByteTensor
  * - Data of the new state tensor must be contiguous
  */
-static inline void check_rng_state(c10::TensorImpl& new_state) {
+static inline void check_rng_state(const c10::TensorImpl& new_state) {
   TORCH_CHECK_TYPE(
     new_state.layout() == kStrided && new_state.device().type() == kCPU && new_state.dtype() == kByte,
     "RNG state must be a torch.ByteTensor"

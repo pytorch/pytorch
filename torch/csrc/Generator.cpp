@@ -81,7 +81,7 @@ static PyObject * THPGenerator_getState(PyObject *_self, PyObject *noargs)
 
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen.mutex());
-  auto state_tensor = gen.state();
+  auto state_tensor = gen.get_state();
 
   return THPVariable_Wrap(std::move(state_tensor));
   END_HANDLE_TH_ERRORS

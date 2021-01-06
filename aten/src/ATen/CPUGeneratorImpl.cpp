@@ -121,7 +121,7 @@ uint64_t CPUGeneratorImpl::seed() {
  * 
  * FIXME: Remove support of the legacy state in the future?
  */
-void CPUGeneratorImpl::set_state(c10::TensorImpl& new_state) {
+void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   using detail::CPUGeneratorState;
   using detail::CPUGeneratorStateLegacy;
 
@@ -199,7 +199,7 @@ void CPUGeneratorImpl::set_state(c10::TensorImpl& new_state) {
  * Gets the current internal state of CPUGeneratorImpl. The internal
  * state is returned as a CPU byte tensor.
  */
-c10::intrusive_ptr<c10::TensorImpl> CPUGeneratorImpl::state() const {
+c10::intrusive_ptr<c10::TensorImpl> CPUGeneratorImpl::get_state() const {
   using detail::CPUGeneratorState;
 
   static const size_t size = sizeof(CPUGeneratorState);

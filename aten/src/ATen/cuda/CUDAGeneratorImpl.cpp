@@ -134,7 +134,7 @@ uint64_t CUDAGeneratorImpl::seed() {
  * Gets the current internal state of CUDAGeneratorImpl. The internal
  * state is returned as a CPU byte tensor.
  */
-c10::intrusive_ptr<c10::TensorImpl> CUDAGeneratorImpl::state() const {
+c10::intrusive_ptr<c10::TensorImpl> CUDAGeneratorImpl::get_state() const {
   // The RNG state comprises the seed, and an offset used for Philox.
   // The following line is just here for BC reason. sizeof curandStateMtgp32 is 4120.
   // It used to be static const size_t states_size = MAX_NUM_BLOCKS * sizeof(curandStateMtgp32);
@@ -164,7 +164,7 @@ c10::intrusive_ptr<c10::TensorImpl> CUDAGeneratorImpl::state() const {
  * comments of CUDAGeneratorImpl::state for information about the layout
  * and size of the internal state.
  */
-void CUDAGeneratorImpl::set_state(c10::TensorImpl& new_state) {
+void CUDAGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   static const size_t states_size = 200 * sizeof(4120); // this line is just here for BC reason
   static const size_t seed_size = sizeof(uint64_t);
   static const size_t offset_size = sizeof(int64_t);
