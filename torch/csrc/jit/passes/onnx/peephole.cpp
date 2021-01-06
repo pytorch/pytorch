@@ -696,7 +696,8 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         // (%10)
         origLogSoftmaxNode = prev->input(0)->node();
         auto transpose = origLogSoftmaxNode->input(0)->node();
-        origLogSoftmaxNode->replaceInput(0, transpose->inputs().at(0));
+        if (transpose->inputs().size() > 0)
+          origLogSoftmaxNode->replaceInput(0, transpose->inputs().at(0));
       } else if (
           prev->kind() == onnx::Reshape &&
           prev->input(0)->node()->kind() == onnx::Transpose &&
@@ -748,9 +749,6 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
           // onnx::Reshape(%35, %36) return (%37)
           auto nllloss_output = origNllLossNode->output(0)->uses()[0].user;
           TORCH_INTERNAL_ASSERT(nllloss_output->kind() == onnx::Reshape);
-          TORCH_INTERNAL_ASSERT(
-              nllloss_output->inputs()[1]->node()->kind() ==
-              prim::ListConstruct);
           // make output of reshape the output of nllloss
           nllloss_output->replaceAllUsesWith(origNllLossNode);
           origNllLossNode->output(0)->copyMetadata(nllloss_output->output(0));
