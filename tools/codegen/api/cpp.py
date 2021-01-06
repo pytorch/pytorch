@@ -106,7 +106,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
             return BaseCType("DimnameList", binds)
         elif str(t.elem) == 'Tensor?':
             if local.use_c10_dispatcher().dispatcher_uses_new_style():
-                return BaseCType("const c10::List<c10::optional<Tensor>> &", binds)
+                return ConstRefCType(BaseCType("c10::List<c10::optional<Tensor>>", binds))
             else:
                 return BaseCType("TensorList", binds)
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
