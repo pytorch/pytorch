@@ -406,7 +406,6 @@ void RequestCallbackNoPython::processForwardAutogradReq(
     } else {
       auto msg = getMessageWithAutograd(
           fromWorkerId,
-          //std::move(*wrappedRpcResponseFuture).moveValue(),
           std::move(*wrappedRpcResponseFuture->value().toCustomClass<Message>()),
           MessageType::FORWARD_AUTOGRAD_RESP);
       msg.setId(messageId);
@@ -539,7 +538,6 @@ void RequestCallbackNoPython::processRunWithProfilingReq(
                 profiledEvents, profilingConfig, event_lists);
             auto rpcWithProfilingResp = std::make_unique<RpcWithProfilingResp>(
                 MessageType::RUN_WITH_PROFILING_RESP,
-                //std::move(*wrappedRpcResponseFuture).value(),
                 std::move(*wrappedRpcResponseFuture->value().toCustomClass<Message>()),
                 profiledEvents,
                 profilingKeyId);

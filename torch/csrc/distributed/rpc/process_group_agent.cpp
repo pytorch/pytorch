@@ -590,12 +590,9 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
     futureCV_.notify_all();
     --clientActiveCalls_;
     if (message.type() == MessageType::EXCEPTION) {
-      //fm->setError(
-      //    std::string(message.payload().begin(), message.payload().end()));
       jitFuture->setError(std::make_exception_ptr(std::runtime_error(
           std::string(message.payload().begin(), message.payload().end()))));
     } else {
-      //jitFuture->markCompleted(std::move(message));
       jitFuture->markCompleted(
           IValue(c10::make_intrusive<Message>(std::move(message))));
     }
