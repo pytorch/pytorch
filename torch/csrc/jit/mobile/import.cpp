@@ -154,7 +154,7 @@ void parseMethods(
             .toInt();
 
     // If there exist a tuple in consts_list with this format
-    // ('tensor_jit_index', (4,)) fetch the tensor at index 4 from tensor table
+    // ('tensor_jit_index', 4) fetch the tensor at index 4 from tensor table
     // generated in jit, and push it to the new constant list
     // *updated_constant_vals*.
     std::vector<IValue> updated_constant_vals;
@@ -319,7 +319,7 @@ mobile::Module BytecodeDeserializer::deserialize(
 
   // TODO: skip reading from "constants.pkl" if there is no tuple
   // with tensor jit index in constants field in "bytecode.pkl", like
-  // ('tensor_jit_index', (4,)).
+  // ('tensor_jit_index', 4).
   std::vector<IValue> constant_values_from_jit;
   if (reader_->hasRecord("constants.pkl")) {
     constant_values_from_jit =

@@ -579,7 +579,7 @@ class ScriptModuleSerializer {
                       // if the constant value is tensor, and exist in tensor
                       // table from jit, replace the constant tensor with the
                       // tuple: ('tensor_jit_index', ({index_in_jit},)), for
-                      // example, ('tensor_jit_index', (4,)), where 4 is the the
+                      // example, ('tensor_jit_index', 4), where 4 is the the
                       // index in jit tensor table, and push the new tuple to
                       // deduplicated_constant_values. Otherwise, push the
                       // constant value to deduplicated_constant_values
