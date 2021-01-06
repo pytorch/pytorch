@@ -21,7 +21,7 @@ class Tensor;
  * properly when the blob is deallocated or re-allocated with a new type. A blob
  * could contain anything, although the most common case is to contain a Tensor.
  */
-class CAFFE2_API Blob final : public c10::intrusive_ptr_target {
+class TORCH_API Blob final : public c10::intrusive_ptr_target {
  public:
   /**
    * Initializes an empty Blob.

@@ -19,6 +19,25 @@ std::ostream& operator<<(std::ostream & out, TensorGeometryArg t) {
   return out;
 }
 
+void checkDim(
+    CheckedFrom c,
+    const Tensor& tensor,
+    const char* name,
+    int pos, // 1-indexed
+    int64_t dim) {
+  TORCH_CHECK(
+      tensor.dim() == dim,
+      "Expected ",
+      dim,
+      "-dimensional tensor, but got ",
+      tensor.dim(),
+      "-dimensional tensor for ",
+      TensorGeometryArg(TensorArg({tensor, name, pos})),
+      " (while checking arguments for ",
+      c,
+      ")");
+}
+
 void checkDim(CheckedFrom c, const TensorGeometryArg& t, int64_t dim) {
   TORCH_CHECK(t->dim() == dim,
     "Expected ", dim, "-dimensional tensor, but got ", t->dim(),

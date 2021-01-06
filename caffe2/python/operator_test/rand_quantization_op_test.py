@@ -6,7 +6,6 @@
 import numpy as np
 import struct
 import unittest
-import os
 
 from hypothesis import given, example
 import hypothesis.strategies as st

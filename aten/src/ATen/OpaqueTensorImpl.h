@@ -17,18 +17,20 @@ namespace at {
 // "shallow copy" in order to add support.
 
 template <typename OpaqueHandle>
-struct CAFFE2_API OpaqueTensorImpl : public TensorImpl {
+struct TORCH_API OpaqueTensorImpl : public TensorImpl {
   // public constructor for now...
   OpaqueTensorImpl(
       at::DispatchKeySet key_set,
       const caffe2::TypeMeta data_type,
       c10::Device device,
       OpaqueHandle opaque_handle,
-      c10::IntArrayRef sizes)
+      c10::IntArrayRef sizes,
+      bool is_non_overlapping_and_dense = true)
       : TensorImpl(key_set, data_type, device),
         opaque_handle_(std::move(opaque_handle)) {
     sizes_ = sizes.vec();
     refresh_numel();
+    is_non_overlapping_and_dense_ = is_non_overlapping_and_dense;
   }
 
   void release_resources() override {

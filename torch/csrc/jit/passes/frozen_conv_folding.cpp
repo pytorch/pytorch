@@ -63,19 +63,19 @@ void FoldFrozenConvBatchnorm(Block* b) {
       auto conv_w = constant_as<Tensor>(conv->namedInput("weight")).value();
 
       // implementation taken from torch/nn/utils/fusion.py
-      at::Tensor conv_b;
+      Tensor conv_b;
       if (conv->namedInput("bias")->type() == NoneType::get()) {
         conv_b = torch::zeros_like(bn_rm);
       } else {
         conv_b = constant_as<Tensor>(conv->namedInput("bias")).value();
       }
-      at::Tensor bn_w;
+      Tensor bn_w;
       if (bn->namedInput("weight")->type() == NoneType::get()) {
         bn_w = torch::ones_like(bn_rm);
       } else {
         bn_w = constant_as<Tensor>(bn->namedInput("weight")).value();
       }
-      at::Tensor bn_b;
+      Tensor bn_b;
       if (n->namedInput("bias")->type() == NoneType::get()) {
         bn_b = torch::zeros_like(bn_rm);
       } else {
@@ -90,7 +90,7 @@ void FoldFrozenConvBatchnorm(Block* b) {
       params.bn_eps = bn_eps;
       params.bn_w = bn_w;
       params.bn_b = bn_b;
-      std::tuple<at::Tensor, at::Tensor> out =
+      std::tuple<Tensor, Tensor> out =
           computeUpdatedConvWeightAndBias(params);
       WithInsertPoint guard(conv);
       auto fused_conv_w = b->owningGraph()->insertConstant(std::get<0>(out));
@@ -124,7 +124,7 @@ bool supportedAddOrSub(Node* n) {
 // constant tensor must satisfy the following:
 // - with resizing, broadcast to w/ weight/bias tensor shape
 // - broadcast to the conv output shape
-// It needs to be have a shape that can resize to weight/bias
+// It needs to have a shape that can resize to weight/bias
 // tensor shape because we need to run the op with the conv
 // weights/bias without changing their sizes.
 // It needs to broadcast to the conv output shape so that we do
@@ -134,10 +134,10 @@ bool supportedAddOrSub(Node* n) {
 // is they all contain a dim with value = channels-out. In the
 // conv output tensor, this is in the second dimension,
 // so the pointwise op tensor may have a second dimension of
-// value == chanels-out, but all the other dimensions have to be 1
+// value == channels-out, but all the other dimensions have to be 1
 bool opDoesNotBroadCastWithConv(
-    at::Tensor& op_tensor,
-    at::Tensor& weight_tensor) {
+    Tensor& op_tensor,
+    Tensor& weight_tensor) {
   if (op_tensor.ndimension() > weight_tensor.ndimension()) {
     return false;
   }
@@ -163,7 +163,7 @@ bool checkConvAndBroadcastingOpPreConditions(Node* conv, Node* op) {
   }
 
   auto conv_w = constant_as<Tensor>(conv->namedInput("weight")).value();
-  at::Tensor weight_tensor =
+  Tensor weight_tensor =
       constant_as<Tensor>(conv->namedInput("weight")).value();
 
   // avoid fusing op that causes type promotion
@@ -184,11 +184,11 @@ bool checkConvAndBroadcastingOpPreConditions(Node* conv, Node* op) {
   return true;
 }
 
-at::Tensor resizeConstantScalarOrTensorToShape(
+Tensor resizeConstantScalarOrTensorToShape(
     Value* v,
-    std::vector<int64_t> shape,
+    const std::vector<int64_t>& shape,
     TensorOptions options) {
-  at::Tensor ret_tensor;
+  Tensor ret_tensor;
   if (v->type()->cast<TensorType>()) {
     ret_tensor = constant_as<Tensor>(v).value();
   } else {
@@ -200,13 +200,9 @@ at::Tensor resizeConstantScalarOrTensorToShape(
     }
   }
 
-  // view does not work on tensors of size 0,
-  // and expand errors if the shape input has less # dims than the
-  // tensor input.
   if (ret_tensor.numel() == 1) {
-    if (ret_tensor.sizes().size() > 1) {
-      ret_tensor = ret_tensor.view({1});
-    }
+    //expand errors if the shape input has less # dims than the tensor input
+    ret_tensor = ret_tensor.reshape({1});
     ret_tensor = ret_tensor.expand(shape);
   } else {
     TORCH_INTERNAL_ASSERT(ret_tensor.numel() == prod_intlist(shape));
@@ -229,14 +225,14 @@ void FoldFrozenConvAddOrSub(Block* b) {
         continue;
       }
 
-      at::Tensor weight_tensor =
+      Tensor weight_tensor =
           constant_as<Tensor>(conv->namedInput("weight")).value();
 
-      at::Tensor add_or_sub_tensor = resizeConstantScalarOrTensorToShape(
+      Tensor add_or_sub_tensor = resizeConstantScalarOrTensorToShape(
           add_or_div->inputs().at(1),
           {weight_tensor.size(0)},
           weight_tensor.options());
-      at::Tensor bias;
+      Tensor bias;
       if (conv->namedInput("bias")->type() == NoneType::get()) {
         bias = at::zeros_like(add_or_sub_tensor);
       } else {
@@ -292,7 +288,7 @@ void FoldFrozenConvMulOrDiv(Block* b) {
         continue;
       }
 
-      at::Tensor weight_tensor =
+      Tensor weight_tensor =
           constant_as<Tensor>(conv->namedInput("weight")).value();
       int64_t out_channels = weight_tensor.size(0);
 
@@ -306,7 +302,7 @@ void FoldFrozenConvMulOrDiv(Block* b) {
 
       WithInsertPoint guard(conv);
 
-      at::Tensor mul_tensor = resizeConstantScalarOrTensorToShape(
+      Tensor mul_tensor = resizeConstantScalarOrTensorToShape(
           mul_or_div->inputs().at(1),
           weight_compatible_size,
           weight_tensor.options());
@@ -331,7 +327,7 @@ void FoldFrozenConvMulOrDiv(Block* b) {
 
       // now fold with bias tensor
       if (conv->namedInput("bias")->type() != NoneType::get()) {
-        at::Tensor bias = constant_as<Tensor>(conv->namedInput("bias")).value();
+        Tensor bias = constant_as<Tensor>(conv->namedInput("bias")).value();
         // bias is of shape {channels_out}
         auto mul_tensor = resizeConstantScalarOrTensorToShape(
             mul_or_div->inputs().at(1), {out_channels}, bias.options());
