@@ -1026,7 +1026,6 @@ Example:
     tensor([ 0,  1, -4], dtype=torch.int8)
 """.format(**common_args))
 
-# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.bmm,
            r"""
 bmm(input, mat2, *, deterministic=False, out=None) -> Tensor
@@ -2548,7 +2547,7 @@ Keyword args:
 
 .. note::  This function is similar to SciPy's `scipy.special.digamma`.
 
-.. note::  From PyTorch 1.8 onwards, the digamma function returns `-Inf` for `0`. 
+.. note::  From PyTorch 1.8 onwards, the digamma function returns `-Inf` for `0`.
            Previously it returned `NaN` for `0`.
 
 Example::
@@ -2934,7 +2933,6 @@ Example::
     tensor([ 0.,  1.])
 """.format(**common_args))
 
-# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.eye,
            r"""
 eye(n, m=None, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -2944,6 +2942,8 @@ Returns a 2-D tensor with ones on the diagonal and zeros elsewhere.
 Args:
     n (int): the number of rows
     m (int, optional): the number of columns with default being :attr:`n`
+
+Keyword arguments:
     {out}
     {dtype}
     {layout}
@@ -3033,21 +3033,25 @@ numbers. The remainder has the same sign as the dividend :attr:`input`.
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
 
-Note:
-    For the divisor as zero, returns ``NaN`` for floating-point common dtype;
-    raises ``RuntimeError`` for integral common dtype on CPU;
-    For integral common dtype On CUDA, due to it's an undefined behavior,
+.. note::
+
+    When the divisor is zero, returns ``NaN`` for common dtype as
+    floating-point on both CPU and GPU; raises ``RuntimeError`` for
+    common dtype as integral on CPU;
+
+    For common dtype as integral On GPU, due to it's an undefined behavior,
     returns a pattern of all 1s for all integral dividend except int64.
     For int64, returns all 1s for negative dividend, half 1s for positive
-    dividend. E.g.:
-        uint8: 0xff -> 255
-        int32: 0xffffffff -> -1
-        int64: 0xffffffffffffffff -> -1
-               0x00000000ffffffff -> 4294967295
+    dividend. Example::
+
+    uint8: 0xff -> 255
+    int32: 0xffffffff -> -1
+    int64: 0xffffffffffffffff -> -1 (negative)
+           0x00000000ffffffff -> 4294967295 (positive)
 
 Args:
     input (Tensor): the dividend
-    other (Tensor or float/integer): the divisor, which may be either a number or a tensor
+    other (Tensor or Scalar): the divisor
 
 Keyword args:
     {out}
@@ -3106,7 +3110,17 @@ add_docstr(torch.flatten,
            r"""
 flatten(input, start_dim=0, end_dim=-1) -> Tensor
 
-Flattens a contiguous range of dims in a tensor.
+Flattens :attr:`input` by reshaping it into a one-dimensional tensor. If :attr:`start_dim` or :attr:`end_dim`
+are passed, only dimensions starting with :attr:`start_dim` and ending with :attr:`end_dim` are flattened.
+The order of elements in :attr:`input` is unchanged.
+
+Unlike NumPy's flatten, which always copies input's data, this function may return the original object, a view,
+or copy. If no dimensions are flattened, then the original object :attr:`input` is returned. Otherwise, if input can
+be viewed as the flattened shape, then that view is returned. Finally, only if the input cannot be viewed as the
+flattened shape is input's data copied. See :meth:`torch.Tensor.view` for details on when a view will be returned.
+
+.. note::
+    Flattening a zero-dimensional tensor will return a one-dimensional view.
 
 Args:
     {input}
@@ -3138,12 +3152,10 @@ For a 3-D tensor the output is specified by::
     out[i][j][k] = input[i][index[i][j][k]][k]  # if dim == 1
     out[i][j][k] = input[i][j][index[i][j][k]]  # if dim == 2
 
-If :attr:`input` is an n-dimensional tensor with size
-:math:`(x_0, x_1..., x_{i-1}, x_i, x_{i+1}, ..., x_{n-1})`
-and ``dim = i``, then :attr:`index` must be an :math:`n`-dimensional tensor with
-size :math:`(x_0, x_1, ..., x_{i-1}, y, x_{i+1}, ..., x_{n-1})` where :math:`y \geq 1`
-and :attr:`out` will have the same size as :attr:`index`.  Note that ``input``
-and ``index`` do not broadcast against each other.
+:attr:`input` and :attr:`index` must have the same number of dimensions.
+It is also required that ``index.size(d) <= input.size(d)`` for all
+dimensions ``d != dim``.  :attr:`out` will have the same shape as :attr:`index`.
+Note that ``input`` and ``index`` do not broadcast against each other.
 
 Args:
     input (Tensor): the source tensor
@@ -4187,7 +4199,6 @@ Example::
     tensor([ 0.5724,  0.0000, -0.1208])
 """.format(**common_args))
 
-# TODO: update kwargs formatting (see https://github.com/pytorch/pytorch/issues/43667)
 add_docstr(torch.linspace, r"""
 linspace(start, end, steps, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
@@ -4214,6 +4225,8 @@ Args:
     start (float): the starting value for the set of points
     end (float): the ending value for the set of points
     steps (int): size of the constructed tensor
+
+Keyword arguments:
     {out}
     {dtype}
     {layout}
@@ -4550,7 +4563,6 @@ Example::
     tensor([ True,  True, False, False])
 """.format(**common_args))
 
-# TODO: update kwargs formatting (see https://github.com/pytorch/pytorch/issues/43667)
 add_docstr(torch.logspace, """
 logspace(start, end, steps, base=10.0, *, \
          out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -4581,7 +4593,9 @@ Args:
     start (float): the starting value for the set of points
     end (float): the ending value for the set of points
     steps (int): size of the constructed tensor
-    base (float): base of the logarithm function. Default: ``10.0``.
+    base (float, optional): base of the logarithm function. Default: ``10.0``.
+
+Keyword arguments:
     {out}
     {dtype}
     {layout}
@@ -5482,35 +5496,14 @@ Example::
 
 add_docstr(torch.argmin,
            r"""
-argmin(input) -> LongTensor
+argmin(input, dim=None, keepdim=False) -> LongTensor
 
-Returns the indices of the minimum value of all elements in the :attr:`input` tensor.
+Returns the indices of the minimum value(s) of the flattened tensor or along a dimension
 
 This is the second value returned by :meth:`torch.min`. See its
 documentation for the exact semantics of this method.
 
 .. note:: If there are multiple minimal values then the indices of the first minimal value are returned.
-
-Args:
-    {input}
-
-Example::
-
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[ 0.1139,  0.2254, -0.1381,  0.3687],
-            [ 1.0100, -1.1975, -0.0102, -0.4732],
-            [-0.9240,  0.1207, -0.7506, -1.0213],
-            [ 1.7809, -1.2960,  0.9384,  0.1438]])
-    >>> torch.argmin(a)
-    tensor(13)
-
-.. function:: argmin(input, dim, keepdim=False) -> LongTensor
-
-Returns the indices of the minimum values of a tensor across a dimension.
-
-This is the second value returned by :meth:`torch.min`. See its
-documentation for the exact semantics of this method.
 
 Args:
     {input}
@@ -5525,8 +5518,15 @@ Example::
             [ 1.0100, -1.1975, -0.0102, -0.4732],
             [-0.9240,  0.1207, -0.7506, -1.0213],
             [ 1.7809, -1.2960,  0.9384,  0.1438]])
+    >>> torch.argmin(a)
+    tensor(13)
     >>> torch.argmin(a, dim=1)
     tensor([ 2,  1,  3,  1])
+    >>> torch.argmin(a, dim=1, keepdim=True)
+    tensor([[2],
+            [1],
+            [3],
+            [1]])
 """.format(**single_dim_common))
 
 add_docstr(torch.mm,
@@ -6341,7 +6341,6 @@ Example::
 
 """.format(**common_args))
 
-# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.ones,
            r"""
 ones(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -6352,6 +6351,8 @@ by the variable argument :attr:`size`.
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
+
+Keyword arguments:
     {out}
     {dtype}
     {layout}
@@ -6369,7 +6370,6 @@ Example::
 
 """.format(**factory_common_args))
 
-# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.ones_like,
            r"""
 ones_like(input, *, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
@@ -6385,6 +6385,8 @@ Returns a tensor filled with the scalar value `1`, with the same size as
 
 Args:
     {input}
+
+Keyword arguments:
     {dtype}
     {layout}
     {device}
@@ -6689,18 +6691,30 @@ with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
 If :attr:`some` is ``True``, then this function returns the thin (reduced) QR factorization.
 Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
 
+.. warning:: ``torch.qr`` is deprecated. Please use ``torch.linalg.`` :meth:`~torch.linalg.qr`
+             instead, which provides a better compatibility with
+             ``numpy.linalg.qr``.
+
+             **Differences with** ``torch.linalg.`` :meth:`~torch.linalg.qr`:
+
+             * ``torch.linalg.qr`` takes a string parameter ``mode`` instead of ``some``:
+
+               - ``some=True`` is equivalent of ``mode='reduced'``: both are the
+                 default
+
+               - ``some=False`` is equivalent of ``mode='complete'``.
+
+
 .. warning::
           If you plan to backpropagate through QR, note that the current backward implementation
           is only well-defined when the first :math:`\min(input.size(-1), input.size(-2))`
           columns of :attr:`input` are linearly independent.
           This behavior will propably change once QR supports pivoting.
 
-.. note:: precision may be lost if the magnitudes of the elements of :attr:`input`
-          are large
-
-.. note:: While it should always give you a valid decomposition, it may not
-          give you the same one across platforms - it will depend on your
-          LAPACK implementation.
+.. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
+          and may produce different (valid) decompositions on different device types
+          and different platforms, depending on the precise version of the
+          underlying library.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
@@ -7189,14 +7203,14 @@ numbers. The remainder has the same sign as the divisor :attr:`other`.
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
 
-Note:
+.. note::
     Complex inputs are not supported. In some cases, it is not mathematically
     possible to satisfy the definition of a modulo operation with complex numbers.
     Check the note from :func:`torch.fmod` for zero divisor.
 
 Args:
     input (Tensor): the dividend
-    other (Tensor or float/integer): the divisor, which may be either a number or a tensor
+    other (Tensor or Scalar): the divisor
 
 Keyword args:
     {out}
@@ -8261,7 +8275,7 @@ If :attr:`upper` is ``False``, then lower triangular portion is used.
 Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` where `*` is zero or more
                     batch dimensions consisting of symmetric matrices.
-    eigenvectors(boolean, optional): controls whether eigenvectors have to be computed
+    eigenvectors(bool, optional): controls whether eigenvectors have to be computed
     upper(boolean, optional): controls whether to consider upper-triangular or lower-triangular region
 
 Keyword args:
@@ -9271,7 +9285,7 @@ Example::
 
 add_docstr(torch.full_like,
            """
-full_like(input, fill_value, \\*, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
+full_like(input, fill_value, \\*, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
 memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` filled with :attr:`fill_value`.
@@ -9490,9 +9504,10 @@ Please look at `Moore-Penrose inverse`_ for more details
     Batched version for complex inputs is only supported on the CPU.
 
 Arguments:
-    input (Tensor): The input tensor of size :math:`(*, m, n)` where :math:`*` is zero or more batch dimensions
-    rcond (float): A floating point value to determine the cutoff for small singular values.
-                   Default: 1e-15
+    input (Tensor): The input tensor of size :math:`(*, m, n)` where :math:`*` is
+        zero or more batch dimensions.
+    rcond (float, optional): A floating point value to determine the cutoff for
+        small singular values. Default: ``1e-15``.
 
 Returns:
     The pseudo-inverse of :attr:`input` of dimensions :math:`(*, n, m)`
@@ -9888,6 +9903,8 @@ As above, but the sample points are spaced uniformly at a distance of `dx`.
 
 Arguments:
     y (Tensor): The values of the function to integrate
+
+Keyword args:
     dx (float): The distance between points at which `y` is sampled.
     dim (int): The dimension along which to integrate.
         By default, use the last dimension.
