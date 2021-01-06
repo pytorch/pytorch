@@ -159,6 +159,8 @@ class TORCH_API StaticRuntime {
     return reg_;
   }
 
+  size_t num_outputs() const;
+
  private:
   // Static runtime states
   std::shared_ptr<InferenceModule> module_;

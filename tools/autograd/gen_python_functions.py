@@ -78,10 +78,10 @@ SKIP_PYTHON_BINDINGS = [
     'copy_sparse_to_sparse_', 'copy_',
     'numpy_T',  # this needs to be an attribute in Python, not a function
     'nonzero(_(out|numpy))?',
-    'set_quantizer_',  # return types not supported yet
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
-    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retain_grad', 'set_'
+    'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retain_grad', 'set_',
+    '_fw_primal'
 ]
 
 # These function signatures are not exposed to Python. Note that this signature
@@ -230,7 +230,7 @@ def load_deprecated_signatures(
             opname += '_out'
         if f.func.name.name.inplace and pyi:
             opname += '_'
-        args = CppSignatureGroup.from_schema(f.func, method=False).signature.arguments()
+        args = CppSignatureGroup.from_native_function(f, method=False).signature.arguments()
         # Simply ignore TensorOptionsArguments as it does not exist in deprecated.yaml.
         types = ', '.join(argument_type_str(a.argument.type)
                           for a in args if isinstance(a.argument, Argument))

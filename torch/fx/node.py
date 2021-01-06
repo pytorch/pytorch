@@ -59,8 +59,11 @@ class Node:
         self.target = target  # for method/module/function, the name of the method/module/function/attr
         # being invoked, e.g add, layer1, or torch.add
 
-        self._uses : Dict[Node, None] = {}
-        self._update_args_kwargs(map_arg(args, lambda x: x), map_arg(kwargs, lambda x: x))  # type: ignore
+        # All `Node`-valued inputs. Key is the Node, value is don't-care.
+        # The public API for this is `all_input_nodes`, this private attribute
+        # should not be accessed directly.
+        self._input_nodes : Dict[Node, None] = {}
+        self.__update_args_kwargs(map_arg(args, lambda x: x), map_arg(kwargs, lambda x: x))  # type: ignore
 
         # All of the nodes that use the value produced by this Node
         # Note one user may correspond to several uses, e.g. the node fo ``x + x``
@@ -156,7 +159,9 @@ class Node:
         depends on the node's opcode. See the ``fx.Graph`` docstring for more
         information.
         """
-        self._update_args_kwargs(map_arg(a, lambda x: x), self._kwargs)  # type: ignore
+        # DO NOT CALL `__update_args_kwargs` directly. The correct way to
+        # set `args` is via direct assignment, i.e. `node.args = new_args`
+        self.__update_args_kwargs(map_arg(a, lambda x: x), self._kwargs)  # type: ignore
 
     @property
     def kwargs(self) -> Dict[str, Argument]:
@@ -177,7 +182,9 @@ class Node:
         depends on the node's opcode. See the ``fx.Graph`` docstring for more
         information.
         """
-        self._update_args_kwargs(self._args, map_arg(k, lambda x: x))  # type: ignore
+        # DO NOT CALL `__update_args_kwargs` directly. The correct way to
+        # set `args` is via direct assignment, i.e. `node.kwargs = new_kwargs`
+        self.__update_args_kwargs(self._args, map_arg(k, lambda x: x))  # type: ignore
 
     @property
     def all_input_nodes(self) -> List['Node']:
@@ -191,26 +198,23 @@ class Node:
             List of ``Nodes`` that appear in the ``args`` and ``kwargs`` of this
             ``Node``, in that order.
         """
-        all_nodes : List['Node'] = []
-        map_arg(self.args, lambda n: all_nodes.append(n))
-        map_arg(self.kwargs, lambda n: all_nodes.append(n))
-        return all_nodes
+        return list(self._input_nodes.keys())
 
-    def _update_args_kwargs(self, new_args : Tuple[Argument, ...], new_kwargs : Dict[str, Argument]):
+    def __update_args_kwargs(self, new_args : Tuple['Argument', ...], new_kwargs : Dict[str, 'Argument']):
         """
         This API is internal. Do *not* call it directly.
         """
         self._args = new_args
         self._kwargs = new_kwargs
 
-        for old_use in self._uses.keys():
+        for old_use in self._input_nodes.keys():
             old_use.users.pop(self)
 
-        self._uses = {}
-        map_arg(self._args, lambda n: self._uses.setdefault(n))
-        map_arg(self._kwargs, lambda n: self._uses.setdefault(n))
+        self._input_nodes = {}
+        map_arg(self._args, lambda n: self._input_nodes.setdefault(n))
+        map_arg(self._kwargs, lambda n: self._input_nodes.setdefault(n))
 
-        for new_use in self._uses.keys():
+        for new_use in self._input_nodes.keys():
             new_use.users.setdefault(self)
 
     def __repr__(self) -> str:
@@ -240,18 +244,14 @@ class Node:
             new_kwargs = map_arg(use_node.kwargs, maybe_replace_node)
             assert isinstance(new_args, tuple)
             assert isinstance(new_kwargs, dict)
-            use_node._update_args_kwargs(new_args, new_kwargs)
+            use_node.__update_args_kwargs(new_args, new_kwargs)
 
         assert len(self.users) == 0
         return to_process
 
-
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
     """ Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys. """
-    if isinstance(a, tuple) and hasattr(a, '_fields'):
-        elements = tuple(map_arg(elem, fn) for elem in a)
-        return type(a)(*elements)  # type: ignore
-    elif isinstance(a, tuple):
+    if isinstance(a, tuple):
         return tuple(map_arg(elem, fn) for elem in a)
     elif isinstance(a, list):
         return immutable_list(map_arg(elem, fn) for elem in a)
