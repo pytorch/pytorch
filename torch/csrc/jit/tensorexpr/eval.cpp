@@ -834,8 +834,12 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         return std::erfc(v);
       case kSqrt:
         return std::sqrt(v);
-      case kRsqrt:
-        return 1.0f / std::sqrt(v);
+      case kRsqrt: {
+        auto rsqrt = [](TInput v) __ubsan_ignore_float_divide_by_zero__ {
+          return 1.0f / std::sqrt(v);
+        };
+        return rsqrt(v);
+      }
       case kCeil:
         return std::ceil(v);
       case kFloor:

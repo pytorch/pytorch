@@ -2988,7 +2988,7 @@ new_module_tests = [
                             .scale_factor(std::vector<double>({3., 3., 3.}))
                             .mode(torch::kTrilinear)
                             .align_corners(false)''',
-        input_size=(1, 2, 3, 4, 4),
+        input_size=(1, 2, 3, 4, 5),
         fullname='interpolate_trilinear_scale_3d',
         # See https://github.com/pytorch/pytorch/issues/5006
         precision=3e-4,
