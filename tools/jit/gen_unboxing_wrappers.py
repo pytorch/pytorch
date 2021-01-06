@@ -22,9 +22,10 @@ import argparse
 import re
 from itertools import groupby
 from functools import reduce
-from ..autograd.gen_autograd import load_aten_declarations
+import yaml
+
 from ..autograd.gen_autograd import RETURNS_VIEWS_OF_INPUT
-from ..autograd.utils import CodeTemplate, write, is_out_variant, op_name_with_overload
+from ..autograd.utils import CodeTemplate, YamlLoader, write, is_out_variant, op_name_with_overload
 from tools.codegen.selective_build.selector import SelectiveBuilder
 
 # JIT has a type system of
@@ -277,6 +278,66 @@ def is_backward_op(decl):
 # used to move 'out' arguments to the end of the list
 def argument_order(decl):
     return decl.get('jit_argument_order') or list(range(len(decl['arguments'])))
+
+
+def format_return_type(returns):
+    if len(returns) == 0:
+        return 'void'
+    elif len(returns) == 1:
+        return returns[0]['type']
+    else:
+        return_types = [r['type'] for r in returns]
+        return 'std::tuple<{}>'.format(','.join(return_types))
+
+
+def get_simple_type(arg):
+    simple_type = arg['type']
+    simple_type = simple_type.replace(' &', '').replace('const ', '')
+    simple_type = simple_type.replace('Generator *', 'Generator')
+
+    opt_match = re.match(r'c10::optional<(.+)>', simple_type)
+    if opt_match:
+        simple_type = '{}?'.format(opt_match.group(1))
+    return simple_type
+
+
+def load_aten_declarations(path):
+    with open(path, 'r') as f:
+        declarations = yaml.load(f, Loader=YamlLoader)
+
+    # enrich declarations with additional information
+    selected_declarations = []
+    for declaration in declarations:
+        if declaration.get('deprecated'):
+            continue
+
+        for arg in declaration['arguments']:
+            arg['simple_type'] = get_simple_type(arg)
+        for arg in declaration['schema_order_arguments']:
+            arg['simple_type'] = get_simple_type(arg)
+        for ret in declaration['returns']:
+            ret['simple_type'] = get_simple_type(ret)
+
+        declaration['formals'] = [arg['type'] + ' ' + arg['name']
+                                  for arg in declaration['arguments']]
+        declaration['schema_order_formals'] = [arg['type'] + ' ' + arg['name']
+                                               for arg in declaration['schema_order_arguments']]
+        declaration['args'] = [arg['name'] for arg in declaration['arguments']]
+        declaration['schema_order_args'] = [arg['name'] for arg in declaration['schema_order_arguments']]
+        declaration['api_name'] = declaration['name']
+        if declaration.get('overload_name'):
+            declaration['type_wrapper_name'] = "{}_{}".format(
+                declaration['name'], declaration['overload_name'])
+        else:
+            declaration['type_wrapper_name'] = declaration['name']
+        declaration['operator_name_with_overload'] = declaration['schema_string'].split('(')[0]
+        declaration['unqual_operator_name_with_overload'] = declaration['operator_name_with_overload'].split('::')[1]
+        declaration['return_type'] = format_return_type(declaration['returns'])
+
+        declaration['base_name'] = declaration['name']
+        selected_declarations.append(declaration)
+
+    return selected_declarations
 
 
 def gen_unboxing_wrappers(
