@@ -669,6 +669,30 @@ def sample_inputs_pinverse(op_info, device, dtype, requires_grad=False):
     return out
 
 
+def sample_inputs_flip(op_info, device, dtype, requires_grad):
+    tensors = (
+        make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad)
+    )
+
+    dims = ((0, 1, 2), (0,), (0, 2), (-1,))
+
+    # On CUDA, `dims=()` errors out with IndexError
+    # Reference: https://github.com/pytorch/pytorch/issues/49982
+    if device == 'cpu':
+        dims = dims + ((),)  # type: ignore
+
+    samples = [SampleInput(tensor, kwargs={'dims': dim}) for tensor, dim in product(tensors, dims)]
+
+    return samples
+
+def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad):
+    tensors = (
+        make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad)
+    )
+    return [SampleInput(tensor) for tensor in tensors]
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
