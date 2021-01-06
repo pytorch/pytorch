@@ -1366,6 +1366,7 @@ if TEST_SCIPY:
                        dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
                        skips=(
+                           # Reference: https://github.com/pytorch/pytorch/pull/50140#discussion_r552615345
                            SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                     dtypes=[torch.bfloat16]),
                            # Backward of `lgamma` uses `digamma` but `digamma`
@@ -1373,7 +1374,7 @@ if TEST_SCIPY:
                            # Error Raised:
                            #   RuntimeError: "digamma" not implemented for 'BFloat16'
                            SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                    device_type='cpu', dtypes=[torch.bfloat16]),
+                                    dtypes=[torch.bfloat16]),
                        ),
                        promotes_integers_to_float=True),
         OpInfo('xlogy',
