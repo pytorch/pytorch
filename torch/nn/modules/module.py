@@ -843,7 +843,6 @@ class Module:
         if recording_scopes:
             name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None
             if name:
-                cur_scope_name = tracing_state.current_scope()
                 tracing_state.push_scope(name)
             else:
                 recording_scopes = False
