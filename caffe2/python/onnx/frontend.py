@@ -17,15 +17,12 @@ import re
 
 from caffe2.python import core as caffe2_core
 from caffe2.python.compatibility import container_abcs
-from caffe2.proto import caffe2_legacy_pb2
-from enum import Enum
-from onnx import (defs, checker, helper, numpy_helper, mapping,
-                  ModelProto, GraphProto, NodeProto, AttributeProto, TensorProto, OperatorSetIdProto)
-from onnx.helper import make_tensor, make_tensor_value_info, make_attribute, make_model
+from onnx import (checker, helper, numpy_helper, mapping,
+                  GraphProto, NodeProto, TensorProto, OperatorSetIdProto)
+from onnx.helper import make_tensor_value_info, make_model
 import numpy as np
 
 from caffe2.python.onnx.helper import c2_native_run_net
-from caffe2.python.onnx.error import Unsupported
 
 import caffe2.python._import_c_extension as C
 
