@@ -14,7 +14,13 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/Host.h>
 #include <llvm/Support/TargetSelect.h>
+
+#if LLVM_VERSION_MAJOR >= 10
+#include <llvm/Support/CodeGen.h>
+#else
 #include <llvm/Target/TargetMachine.h>
+#endif
+
 #include <llvm/Transforms/IPO/AlwaysInliner.h>
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
 #include <llvm/Transforms/Scalar.h>
@@ -533,7 +539,11 @@ void LLVMCodeGenImpl::emitKernel(
         PM,
         asmStream,
         nullptr,
+#if LLVM_VERSION_MAJOR >= 10
+        llvm::CodeGenFileType::CGFT_AssemblyFile);
+#else
         llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
+#endif
     PM.run(*module_);
   }
   GRAPH_DEBUG(

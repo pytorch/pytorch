@@ -28,6 +28,7 @@ class Tensor;
 }
 namespace c10{
 struct TensorOptions;
+template<class T> class List;
 }
 namespace at {
 struct Generator;
@@ -206,10 +207,6 @@ class TORCH_API Tensor {
   Tensor& operator=(Scalar v) &&;
   Tensor& operator=(const Tensor&) &&;
   Tensor& operator=(Tensor&&) &&;
-
-  #ifdef _MSC_VER
-  #pragma warning( pop )
-  #endif
 
   bool is_same(const Tensor& other) const noexcept {
     return impl_ == other.impl_;
@@ -759,6 +756,12 @@ protected:
   void enforce_invariants();
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 };
+
+// For "multiple ... operators specified" warnings, closing brace of class
+// declaration must be included between pragma push & pop
+#ifdef _MSC_VER
+#pragma warning( pop )
+#endif
 
 int64_t get_device(Tensor self);
 
