@@ -79,13 +79,13 @@ struct static_add final : public at::native::structured_add_out {
 
 REGISTER_OPERATOR_FUNCTOR(aten::add, aten_add, [](Node* n) -> SROperator {
   return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-    auto in0_t = p_node->Input(0, reg).toTensor();
-    auto in1_t = p_node->Input(1, reg).toTensor();
+    auto& in0_t = p_node->Input(0, reg).toTensor();
+    auto& in1_t = p_node->Input(1, reg).toTensor();
     auto in2_s = p_node->Input(2, reg).toScalar();
     if (p_node->Output(0, reg).isNone()) {
       p_node->Output(0, reg) = create_empty_from(in0_t);
     }
-    auto out_t = p_node->Output(0, reg).toTensor();
+    auto& out_t = p_node->Output(0, reg).toTensor();
     static_add op{out_t};
     op.meta(in0_t, in1_t, in2_s);
     op.impl(in0_t, in1_t, in2_s, out_t);
@@ -94,12 +94,12 @@ REGISTER_OPERATOR_FUNCTOR(aten::add, aten_add, [](Node* n) -> SROperator {
 
 REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
   return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-    auto in0_t = p_node->Input(0, reg).toTensor();
-    auto in1_t = p_node->Input(1, reg).toTensor();
+    auto& in0_t = p_node->Input(0, reg).toTensor();
+    auto& in1_t = p_node->Input(1, reg).toTensor();
     if (p_node->Output(0, reg).isNone()) {
       p_node->Output(0, reg) = create_empty_from(in0_t);
     }
-    auto out_t = p_node->Output(0, reg).toTensor();
+    auto& out_t = p_node->Output(0, reg).toTensor();
     out_t.resize_({0});
     at::native::mul_out(out_t, in0_t, in1_t);
   };
@@ -107,15 +107,15 @@ REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
 
 REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
   return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-    auto in0_t = p_node->Input(0, reg).toTensor();
-    auto in1_t = p_node->Input(1, reg).toTensor();
-    auto in2_t = p_node->Input(2, reg).toTensor();
+    auto& in0_t = p_node->Input(0, reg).toTensor();
+    auto& in1_t = p_node->Input(1, reg).toTensor();
+    auto& in2_t = p_node->Input(2, reg).toTensor();
     auto in3_s = p_node->Input(3, reg).toScalar();
     auto in4_s = p_node->Input(4, reg).toScalar();
     if (p_node->Output(0, reg).isNone()) {
       p_node->Output(0, reg) = create_empty_from(in0_t);
     }
-    auto out_t = p_node->Output(0, reg).toTensor();
+    auto& out_t = p_node->Output(0, reg).toTensor();
     out_t.resize_({0});
     at::native::addmm_cpu_out(out_t, in0_t, in1_t, in2_t, in3_s, in4_s);
   };
@@ -123,13 +123,13 @@ REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
 
 REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
   return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-    auto in0_t = p_node->Input(0, reg).toTensor();
+    auto& in0_t = p_node->Input(0, reg).toTensor();
     auto in1_s = p_node->Input(1, reg).toScalar();
     auto in2_s = p_node->Input(2, reg).toScalar();
     if (p_node->Output(0, reg).isNone()) {
       p_node->Output(0, reg) = create_empty_from(in0_t);
     }
-    auto out_t = p_node->Output(0, reg).toTensor();
+    auto& out_t = p_node->Output(0, reg).toTensor();
     out_t.resize_({0});
     at::native::clamp_out(out_t, in0_t, in1_s, in2_s);
   };
@@ -137,12 +137,12 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
 
 REGISTER_OPERATOR_FUNCTOR(aten::bmm, aten_bmm, [](Node* n) -> SROperator {
   return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-    auto in0_t = p_node->Input(0, reg).toTensor();
-    auto in1_t = p_node->Input(1, reg).toTensor();
+    auto& in0_t = p_node->Input(0, reg).toTensor();
+    auto& in1_t = p_node->Input(1, reg).toTensor();
     if (p_node->Output(0, reg).isNone()) {
       p_node->Output(0, reg) = create_empty_from(in0_t);
     }
-    auto out_t = p_node->Output(0, reg).toTensor();
+    auto& out_t = p_node->Output(0, reg).toTensor();
     out_t.resize_({0});
     at::native::bmm_out_cpu(out_t, in0_t, in1_t);
   };
@@ -154,7 +154,7 @@ REGISTER_OPERATOR_FUNCTOR(
     [](Node* n) -> SROperator {
       return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
         auto input_size = p_node->input_regs().size();
-        auto in0_t = p_node->Input(0, reg).toTensor();
+        auto& in0_t = p_node->Input(0, reg).toTensor();
         double in1_d = input_size > 1 ? p_node->Input(1, reg).toDouble() : 0;
         double in2_d = input_size > 2 ? p_node->Input(2, reg).toDouble()
                                       : std::numeric_limits<double>::infinity();
@@ -164,7 +164,7 @@ REGISTER_OPERATOR_FUNCTOR(
         if (p_node->Output(0, reg).isNone()) {
           p_node->Output(0, reg) = create_empty_from(in0_t);
         }
-        auto out_t = p_node->Output(0, reg).toTensor();
+        auto& out_t = p_node->Output(0, reg).toTensor();
         out_t.resize_({0});
         at::native::nan_to_num_out(out_t, in0_t, in1_d, in2_d, in3_d);
       };
@@ -176,18 +176,18 @@ REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
     if (p_node->Output(0, reg).isNone()) {
       p_node->Output(0, reg) = create_empty_from(in0_tl[0]);
     }
-    auto out_t = p_node->Output(0, reg).toTensor();
+    auto& out_t = p_node->Output(0, reg).toTensor();
     out_t.resize_({0});
     at::native::_cat_out_cpu(out_t, in0_tl, in1_i);
   };
 });
 REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
   return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-    auto in0_t = p_node->Input(0, reg).toTensor();
+    auto& in0_t = p_node->Input(0, reg).toTensor();
     if (p_node->Output(0, reg).isNone()) {
       p_node->Output(0, reg) = create_empty_from(in0_t);
     }
-    auto out_t = p_node->Output(0, reg).toTensor();
+    auto& out_t = p_node->Output(0, reg).toTensor();
     out_t.resize_({0});
     at::native::tanh_out(out_t, in0_t);
   };
@@ -217,7 +217,7 @@ SROperator aten_stack(Node* n) {
     for (auto i = 0; i < inputs.size(); i++) {
       inputs[i] = inputs[i].unsqueeze(dim);
     }
-    auto out_t = p_node->Output(0, reg).toTensor();
+    auto& out_t = p_node->Output(0, reg).toTensor();
     out_t.resize_({0});
     at::native::_cat_out_cpu(out_t, inputs, dim);
   };
@@ -230,11 +230,11 @@ REGISTER_OPERATOR_FUNCTOR(
     aten_sigmoid,
     [](Node* n) -> SROperator {
       return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-        auto in0_t = p_node->Input(0, reg).toTensor();
+        auto& in0_t = p_node->Input(0, reg).toTensor();
         if (p_node->Output(0, reg).isNone()) {
           p_node->Output(0, reg) = create_empty_from(in0_t);
         }
-        auto out_t = p_node->Output(0, reg).toTensor();
+        auto& out_t = p_node->Output(0, reg).toTensor();
         out_t.resize_({0});
         at::native::sigmoid_out(out_t, in0_t);
       };
@@ -247,57 +247,57 @@ REGISTER_OPERATOR_FUNCTOR(
       if (in1) {
         auto in1_s = in1->toScalar();
         return [=](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-          auto in0_t = p_node->Input(0, reg).toTensor();
+          auto& in0_t = p_node->Input(0, reg).toTensor();
           if (p_node->Output(0, reg).isNone()) {
             p_node->Output(0, reg) = create_empty_from(in0_t);
           }
-          auto out_t = p_node->Output(0, reg).toTensor();
+          auto& out_t = p_node->Output(0, reg).toTensor();
           at::native::leaky_relu_out(out_t, in0_t, in1_s);
         };
       } else {
         return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-          auto in0_t = p_node->Input(0, reg).toTensor();
+          auto& in0_t = p_node->Input(0, reg).toTensor();
           auto in1_s = p_node->Input(1, reg).toScalar();
           if (p_node->Output(0, reg).isNone()) {
             p_node->Output(0, reg) = create_empty_from(in0_t);
           }
-          auto out_t = p_node->Output(0, reg).toTensor();
+          auto& out_t = p_node->Output(0, reg).toTensor();
           at::native::leaky_relu_out(out_t, in0_t, in1_s);
         };
       }
     });
 REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
   return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-    auto in0_t = p_node->Input(0, reg).toTensor();
+    auto& in0_t = p_node->Input(0, reg).toTensor();
     if (p_node->Output(0, reg).isNone()) {
       p_node->Output(0, reg) = create_empty_from(in0_t);
     }
-    auto out_t = p_node->Output(0, reg).toTensor();
+    auto& out_t = p_node->Output(0, reg).toTensor();
     out_t.resize_({0});
     at::native::threshold_out(out_t, in0_t, 0, 0);
   };
 });
 REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
   return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-    auto in0_t = p_node->Input(0, reg).toTensor();
+    auto& in0_t = p_node->Input(0, reg).toTensor();
     double in1_d = p_node->input_regs().size() > 1
         ? p_node->Input(1, reg).toDouble()
         : -1.0;
     if (p_node->Output(0, reg).isNone()) {
       p_node->Output(0, reg) = create_empty_from(in0_t);
     }
-    auto out_t = p_node->Output(0, reg).toTensor();
+    auto& out_t = p_node->Output(0, reg).toTensor();
     out_t.resize_({0});
     at::native::logit_out(out_t, in0_t, in1_d);
   };
 });
 REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
   return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-    auto in0_t = p_node->Input(0, reg).toTensor();
+    auto& in0_t = p_node->Input(0, reg).toTensor();
     if (p_node->Output(0, reg).isNone()) {
       p_node->Output(0, reg) = create_empty_from(in0_t);
     }
-    auto out_t = p_node->Output(0, reg).toTensor();
+    auto& out_t = p_node->Output(0, reg).toTensor();
     at::native::resize_as_(out_t, in0_t, c10::nullopt);
     at::native::copy_(out_t, in0_t, false);
   };
@@ -317,14 +317,14 @@ std::function<void(const ProcessedNode*, std::vector<IValue>&)>
 getNativeOperation(Node* n) {
   if (n->kind() == c10::Symbol::fromQualString("aten::transpose")) {
     return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-      auto in0_t = p_node->Input(0, reg).toTensor();
+      auto& in0_t = p_node->Input(0, reg).toTensor();
       auto in1_i = p_node->Input(1, reg).toInt();
       auto in2_i = p_node->Input(2, reg).toInt();
       p_node->Output(0, reg) = at::native::transpose(in0_t, in1_i, in2_i);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::flatten")) {
     return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-      auto in0_t = p_node->Input(0, reg).toTensor();
+      auto& in0_t = p_node->Input(0, reg).toTensor();
       auto in1_i = p_node->Input(1, reg).toInt();
       auto in2_i = p_node->Input(2, reg).toInt();
       p_node->Output(0, reg) = at::native::flatten(in0_t, in1_i, in2_i);
@@ -386,19 +386,19 @@ getNativeOperation(Node* n) {
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::permute")) {
     return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-      auto in0_t = p_node->Input(0, reg).toTensor();
+      auto& in0_t = p_node->Input(0, reg).toTensor();
       auto in1_iv = p_node->Input(1, reg).toIntVector();
       p_node->Output(0, reg) = at::native::permute(in0_t, in1_iv);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::reshape")) {
     return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-      auto in0_t = p_node->Input(0, reg).toTensor();
+      auto& in0_t = p_node->Input(0, reg).toTensor();
       auto in1_iv = p_node->Input(1, reg).toIntVector();
       p_node->Output(0, reg) = at::native::reshape(in0_t, in1_iv);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::slice")) {
     return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-      auto in0_t = p_node->Input(0, reg).toTensor();
+      auto& in0_t = p_node->Input(0, reg).toTensor();
       auto in1_i = p_node->Input(1, reg).toInt();
       auto in2_i = p_node->Input(2, reg).toInt();
       auto in3_i = p_node->Input(3, reg).toInt();
@@ -408,13 +408,13 @@ getNativeOperation(Node* n) {
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::narrow")) {
     return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
-      auto self = p_node->Input(0, reg).toTensor(); // self
+      auto& self = p_node->Input(0, reg).toTensor(); // self
       auto dim = p_node->Input(1, reg).toInt(); // dim
       int64_t start = 0;
       if (p_node->Input(2, reg).isScalar()) {
         start = p_node->Input(2, reg).toInt();
       } else {
-        auto t = p_node->Input(2, reg).toTensor();
+        auto& t = p_node->Input(2, reg).toTensor();
         start = t.item<int64_t>();
       }
       auto length = p_node->Input(3, reg).toInt(); // length
@@ -440,7 +440,7 @@ getNativeOperation(Node* n) {
   } else if (n->kind() == c10::Symbol::fromQualString("aten::to")) {
     return [](const ProcessedNode* p_node, std::vector<IValue>& reg) {
       DCHECK(p_node->input_regs().size() == 5);
-      auto in0_t = p_node->Input(0, reg).toTensor();
+      auto& in0_t = p_node->Input(0, reg).toTensor();
       auto in1_i = p_node->Input(1, reg).toScalarType();
       auto in2_i = p_node->Input(2, reg).toBool();
       auto in3_i = p_node->Input(3, reg).toBool();
