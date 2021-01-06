@@ -25,6 +25,10 @@ bool THPVariable_initModule(PyObject *module);
 THP_API PyObject * THPVariable_Wrap(torch::autograd::Variable var);
 
 static inline bool THPVariable_CheckExact(PyObject *obj) {
+  // Check that a python object is a `Tensor`, but not a `Tensor` subclass.
+  // (A subclass could have different semantics.) The one exception is
+  // Parameter, which is used for Python bookkeeping but is equivalent to
+  // Tensor as far as C++ is concerned.
   auto obj_py_type = Py_TYPE(obj);
   return (
     obj_py_type == (PyTypeObject*)THPVariableClass ||
