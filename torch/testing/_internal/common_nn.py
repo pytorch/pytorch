@@ -4950,7 +4950,7 @@ class ModuleTest(TestBase):
             raise unittest.SkipTest('Excluded from CUDA tests')
 
         cpu_input = self._get_input()
-        type_map = {'torch.DoubleTensor': torch.FloatTensor}  # type: ignore[attr-defined]
+        type_map = {torch.double: torch.float}
         cpu_input_tuple = cpu_input if isinstance(cpu_input, tuple) else (cpu_input,)
         gpu_input_tuple = to_gpu(cpu_input_tuple, type_map=type_map)
 

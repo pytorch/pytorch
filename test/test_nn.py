@@ -9870,7 +9870,7 @@ def add_test(test, decorator=None):
 
         def test_cdouble(self, test=test, kwargs=kwargs):
             test.test_cuda(self, dtype=torch.cdouble, **kwargs)
-        if getattr(test, 'check_complex', True):
+        if getattr(test, 'check_complex', False):
             add(cuda_test_name + '_cfloat', test_cfloat)
             add(cuda_test_name + '_cdouble', test_cdouble)
 
