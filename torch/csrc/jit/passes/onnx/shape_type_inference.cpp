@@ -200,7 +200,10 @@ bool IsSupportedNode(const Node* n) {
   return true;
 }
 
-Value* CloneValueFromListConstruct(Value* v, std::shared_ptr<Graph> n_graph, int opset_version) {
+Value* CloneValueFromListConstruct(
+    Value* v,
+    std::shared_ptr<Graph> n_graph,
+    int opset_version) {
   auto lc_node = v->node();
   TORCH_INTERNAL_ASSERT(lc_node->kind() == ::c10::prim::ListConstruct);
   // In jit/passes/onnx/peephole.cpp::eraseListConstruct,
@@ -264,34 +267,38 @@ Value* CloneValueFromListConstruct(Value* v, std::shared_ptr<Graph> n_graph, int
 }
 
 // Clone the node n for the new graph.
-Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph, int opset_version) {
-  auto clone_node = n_graph->createClone(n, [&n_graph, opset_version](Value* v) {
-    auto v_n = v->node();
-    switch (v_n->kind()) {
-      case ::c10::onnx::Constant: {
-        // Clone the input if it is constant.
-        auto constant_n = n_graph->insertNode(
-            n_graph->createClone(v_n, [](Value* v) { return v; }));
-        return constant_n->output();
-      }
-      case ::c10::prim::ListConstruct: {
-        return CloneValueFromListConstruct(v, n_graph, opset_version);
-      }
-      case ::c10::prim::PackPadded: {
-        auto input = n_graph->addInput();
-        input->copyMetadata(v_n->input(0));
-        return input;
-      }
-      default: {
-        // If the input is not constant, we cannot depend on its value
-        // in shape inference. Set it to graph input in the new graph,
-        // and copy over metadata, such as datatype and shape.
-        auto input = n_graph->addInput();
-        input->copyMetadata(v);
-        return input;
-      }
-    }
-  });
+Node* CloneNodeToGraph(
+    Node* n,
+    std::shared_ptr<Graph> n_graph,
+    int opset_version) {
+  auto clone_node =
+      n_graph->createClone(n, [&n_graph, opset_version](Value* v) {
+        auto v_n = v->node();
+        switch (v_n->kind()) {
+          case ::c10::onnx::Constant: {
+            // Clone the input if it is constant.
+            auto constant_n = n_graph->insertNode(
+                n_graph->createClone(v_n, [](Value* v) { return v; }));
+            return constant_n->output();
+          }
+          case ::c10::prim::ListConstruct: {
+            return CloneValueFromListConstruct(v, n_graph, opset_version);
+          }
+          case ::c10::prim::PackPadded: {
+            auto input = n_graph->addInput();
+            input->copyMetadata(v_n->input(0));
+            return input;
+          }
+          default: {
+            // If the input is not constant, we cannot depend on its value
+            // in shape inference. Set it to graph input in the new graph,
+            // and copy over metadata, such as datatype and shape.
+            auto input = n_graph->addInput();
+            input->copyMetadata(v);
+            return input;
+          }
+        }
+      });
   return clone_node;
 }
 
