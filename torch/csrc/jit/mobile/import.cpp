@@ -251,6 +251,116 @@ void parseMethods(
   }
 }
 
+// Find if any of the methods in the bytecode model bytecode_values include
+// a tuple with this format ('tensor_jit_index', 4) in "constants" field.
+bool has_tensor_jit_index(const std::vector<IValue>& bytecode_values) {
+  // The following variables are used to locate the "constants"
+  // fields in elements
+  bool is_constant_element = false;
+  c10::ivalue::ConstantString constants_str("constants");
+  auto constants_ir = IValue(constants_str);
+  c10::ivalue::ConstantString tensor_jit_index_str(mobile::kTensorJitIndex);
+  auto tensor_jit_index_ir = IValue(tensor_jit_index_str);
+  //  *bytecode_values* is bytcode model. The first element of the top tuple is
+  //  the bytecode version number. The following elements are methods. In each
+  //  method, it has all the necessary parts for the lite interpreter to
+  //  interpret, including the instructions, operators, constants, types and
+  //  register size.
+  //  *bvals* example:
+  //   (3,
+  //       ('__torch__.m.forward',
+  //           (('instructions',
+  //               (('STOREN', 1, 2),
+  //                    ('DROPR', 1, 0),
+  //                    ('MOVE', 2, 0),
+  //                    ('OP', 0, 0),
+  //                    ('RET', 0, 0))),
+  //                ('operators', (('aten::Int', 'Tensor'),)),
+  //                ('constants', ()),
+  //                ('types', ()),
+  //                ('register_size', 2)
+  //            )
+  //        )
+  //    )
+  for (const auto& element : bytecode_values) {
+    if (element.isTuple()) {
+      //  The second item of elements is a list of methods, like forward
+      //  method, example:
+      //  ('__torch__.m.forward',
+      //      (('instructions',
+      //          (('STOREN', 1, 2),
+      //              ('DROPR', 1, 0),
+      //              ('MOVE', 2, 0),
+      //              ('OP', 0, 0),
+      //              ('RET', 0, 0))),
+      //          ('operators', (('aten::Int', 'Tensor'),)),
+      //          ('constants', ()),
+      //          ('types', ()),
+      //          ('register_size', 2)
+      //      )
+      //  )
+      const auto& methods = element.toTuple()->elements();
+      for (const auto& method : methods) {
+        if (method.isTuple()) {
+          //  method example:
+          //  (('instructions',
+          //      (('STOREN', 1, 2),
+          //          ('DROPR', 1, 0),
+          //          ('MOVE', 2, 0),
+          //          ('OP', 0, 0),
+          //          ('RET', 0, 0))),
+          //      ('operators', (('aten::Int', 'Tensor'),)),
+          //      ('constants', ()),
+          //      ('types', ()),
+          //      ('register_size', 2)
+          //  )
+          const auto& method_elements = method.toTuple()->elements();
+          for (const auto& method_element : method_elements) {
+            //  method_element example:
+            //  ('instructions',
+            //      (('STOREN', 1, 2),
+            //          ('DROPR', 1, 0),
+            //          ('MOVE', 2, 0),
+            //          ('OP', 0, 0),
+            //          ('RET', 0, 0)),
+            //  )
+            is_constant_element = false;
+            // A list of if condition statement, trying to locate the
+            // 'constants' field.
+            if (method_element.isTuple()) {
+              const auto& key_values_vector =
+                  method_element.toTuple()->elements();
+              if (key_values_vector.size() == 2) {
+                const auto& key = key_values_vector[0];
+                const auto& values = key_values_vector[1];
+                // Find constant fields
+                if (key.isString() && key == constants_ir) {
+                  if (values.isTuple()) {
+                    const auto& constant_values = values.toTuple()->elements();
+                    for (const auto& constant_value : constant_values) {
+                      if (constant_value.isTuple()) {
+                        const auto& constant_value_tuple =
+                            constant_value.toTuple()->elements();
+                        if (constant_value_tuple.size() == 2 &&
+                            constant_value_tuple[0] == tensor_jit_index_ir &&
+                            constant_value_tuple[1].isInt()) {
+                          return true;
+                        }
+                      }
+                    }
+                  }
+                  is_constant_element = true;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
+
 // The deserializer class which loads the bytecode package from bc files.
 class BytecodeDeserializer final {
  public:
@@ -321,7 +431,9 @@ mobile::Module BytecodeDeserializer::deserialize(
   // with tensor jit index in constants field in "bytecode.pkl", like
   // ('tensor_jit_index', 4).
   std::vector<IValue> constant_values_from_jit;
-  if (reader_->hasRecord("constants.pkl")) {
+  bool need_tensor_jit = has_tensor_jit_index(bvals);
+
+  if (need_tensor_jit && reader_->hasRecord("constants.pkl")) {
     constant_values_from_jit =
         readArchive("constants", mcu).toTuple()->elements();
   }
