@@ -23,6 +23,24 @@ _magic_methods = ['__subclasscheck__', '__hex__', '__rmul__',
 class MockedObject:
     _name: str
 
+    def __new__(cls, *args, **kwargs):
+        # This condition is a hacky way of detecting whether __new__ was called
+        # from the unpickling process, as opposed to during regular object creation.
+        #
+        # When the unpickler is trying to create an object of type `foo.Bar`, it does
+        #    X = get attribute `Bar` from module `foo`
+        #    new_obj = X.__new__(X, ...)`
+        # If `foo` is a mocked module, then `Bar` will be a MockedObject
+        # *instance* and not a class.
+        if not isinstance(cls, type):
+            raise NotImplementedError(f"Object '{cls._name}' was mocked out during packaging "
+                                      f"but it is being used in '__new__'. If this error is "
+                                      "happening during 'load_pickle', please ensure that your "
+                                      "pickled object doesn't contain any mocked objects.")
+        # Otherwise, this is just a regular object creation
+        # (e.g. `x = MockedObject("foo")`), so pass it through normally.
+        return super().__new__(cls)
+
     def __init__(self, name):
         self.__dict__['_name'] = name
 
