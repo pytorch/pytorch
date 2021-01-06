@@ -1082,13 +1082,13 @@ class TestBinaryUfuncs(TestCase):
         ops = (torch.maximum, torch.minimum)
 
         for torch_op in ops:
-            with self.assertRaisesRegex(RuntimeError, 
+            with self.assertRaisesRegex(RuntimeError,
                                         "Expected all tensors to be on the same device"):
                 torch_op(a, b)
 
-            with self.assertRaisesRegex(RuntimeError, 
+            with self.assertRaisesRegex(RuntimeError,
                                         "Expected all tensors to be on the same device"):
-                torch_op(b, a) 
+                torch_op(b, a)
 
         # test cuda tensor and cpu scalar
         ops = ((torch.maximum, np.maximum), (torch.minimum, np.minimum))
@@ -2559,6 +2559,17 @@ class TestBinaryUfuncs(TestCase):
         reference_fn = partial(scipy.special.xlogy, 0)
         self.compare_with_numpy(torch_fn, reference_fn, t, exact_dtype=False)
         out_variant_helper(torch.xlogy, 0, t)
+
+    def test_xlogy_scalar_type_promotion(self, device):
+        # Test that python numbers don't participate in type promotion at the same
+        # priority level as 0-dim tensors
+        t = torch.randn((), dtype=torch.float32, device=device)
+
+        self.assertEqual(t.dtype, torch.xlogy(t, 5).dtype)
+        self.assertEqual(t.dtype, torch.xlogy(t, 5.).dtype)
+
+        self.assertEqual(t.dtype, torch.xlogy(5, t).dtype)
+        self.assertEqual(t.dtype, torch.xlogy(5., t).dtype)
 
     @skipIf(not TEST_SCIPY, "Scipy required for the test.")
     def test_xlogy_bfloat16(self, device):
