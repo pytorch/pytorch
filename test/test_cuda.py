@@ -23,7 +23,7 @@ from test_torch import AbstractTestCases
 
 from torch.testing._internal.common_methods_invocations import tri_tests_args, tri_large_tests_args, \
     _compare_trilu_indices, _compare_large_trilu_indices
-from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_rng_state, run_tests, \
+from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
@@ -764,12 +764,6 @@ class TestCuda(TestCase):
             self.assertEqual(x.cuda().get_device(), 0)
             torch.cuda.set_device(1)
         self.assertEqual(x.cuda().get_device(), 0)
-
-    def test_is_tensor(self):
-        for t in types:
-            tensor = get_gpu_type(t)()
-            self.assertTrue(torch.is_tensor(tensor))
-        self.assertTrue(torch.is_tensor(torch.cuda.HalfTensor()))
 
     def test_cuda_synchronize(self):
         torch.cuda.synchronize()

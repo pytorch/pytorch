@@ -346,13 +346,14 @@ class TestNN(NNTestCase):
         if extra_args is None:
             extra_args = tuple()
         input_tuple = input if isinstance(input, tuple) else (input,)
+        output_tuple = output if isinstance(output, tuple) else (output,)
         for i in input_tuple:
             if i.grad is not None:
                 i.grad.data.zero_()
         args = input_tuple + (target,) + extra_args
         if gradOutput is None:
             gradOutput = torch.ones(())
-        criterion(*args).backward(gradOutput.to(output))
+        criterion(*args).backward(gradOutput.to(output_tuple[0]))
         if isinstance(input, tuple):
             return tuple(i.grad.data for i in input)
         else:
@@ -9866,6 +9867,7 @@ def add_test(test, decorator=None):
 
         def test_cfloat(self, test=test, kwargs=kwargs):
             test.test_cuda(self, dtype=torch.cfloat, **kwargs)
+
         def test_cdouble(self, test=test, kwargs=kwargs):
             test.test_cuda(self, dtype=torch.cdouble, **kwargs)
         if getattr(test, 'check_complex', True):
