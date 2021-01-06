@@ -567,7 +567,7 @@ class FunctionSchema:
         else:
             return SchemaKind.functional
 
-    def signature(self) -> 'FunctionSchema':
+    def signature(self, *, strip_default: bool = False) -> 'FunctionSchema':
         """
         Certain schemas are 'related', in that they are simply
         inplace/out/functional versions of the same function.  This method
@@ -582,11 +582,13 @@ class FunctionSchema:
         - Out arguments are stripped
         - Mutability annotations are stripped  (this is sound
           because you cannot overload on mutability annotation)
+        - Return names are stripped since they are not overloadable and
+          some variants have return names but some not
         """
 
         def strip_ret_annotation(r: Return) -> Return:
             return Return(
-                name=r.name,
+                name=None,
                 type=r.type,
                 annotation=None,
             )
@@ -600,7 +602,7 @@ class FunctionSchema:
                 ),
                 overload_name="",  # stripped
             ),
-            arguments=self.arguments.signature(),
+            arguments=self.arguments.signature(strip_default=strip_default),
             returns=tuple(map(strip_ret_annotation, self.returns)),
         )
 
@@ -983,14 +985,14 @@ class Arguments:
         ret.extend(self.post_tensor_options_kwarg_only)
         return ret
 
-    def signature(self) -> 'Arguments':
+    def signature(self, *, strip_default: bool = False) -> 'Arguments':
         # dataclasses.replace could be used here, but it is less
         # type safe so for now I've opted to type everything out
         def strip_arg_annotation(a: Argument) -> Argument:
             return Argument(
                 name=a.name,
                 type=a.type,
-                default=a.default,  # hmmm
+                default=a.default if not strip_default else None,
                 annotation=None,
             )
 
