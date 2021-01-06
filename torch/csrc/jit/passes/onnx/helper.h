@@ -13,6 +13,7 @@ static const int OPSET_VERSION_9 = 9;
 static const int OPSET_VERSION_10 = 10;
 static const int OPSET_VERSION_11 = 11;
 static const int OPSET_VERSION_12 = 12;
+static const int OPSET_VERSION_13 = 13;
 
 using ValueToParamPairMap = std::map<Value*, std::pair<std::string, IValue>>;
 

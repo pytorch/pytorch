@@ -419,7 +419,7 @@ void fixDefaultRNNState(
   Node* unsqueezed_batch_size = graph->create(onnx::Unsqueeze, 1);
   unsqueezed_batch_size->insertBefore(n);
   unsqueezed_batch_size->addInput(batch_size->outputs()[0]);
-  if (opset_version >= 13) {
+  if (opset_version >= OPSET_VERSION_13) {
     Node* unsqueeze_axes = graph->create(onnx::Constant, 1);
     unsqueeze_axes->insertBefore(unsqueezed_batch_size);
     unsqueeze_axes->t_(
@@ -451,7 +451,7 @@ void fixDefaultRNNState(
   Node* unsqueezed_num_directions = graph->create(onnx::Unsqueeze, 1);
   unsqueezed_num_directions->insertBefore(n);
   unsqueezed_num_directions->addInput(num_directions->outputs()[0]);
-  if (opset_version >= 13) {
+  if (opset_version >= OPSET_VERSION_13) {
     Node* unsqueeze_axes = graph->create(onnx::Constant, 1);
     unsqueeze_axes->insertBefore(unsqueezed_num_directions);
     unsqueeze_axes->t_(
@@ -596,7 +596,7 @@ static void eraseListConstruct(Node* n, int opset_version) {
           Node* unsqueezed_node = g->create(onnx::Unsqueeze, 1);
           unsqueezed_node->insertBefore(lc_node);
           unsqueezed_node->addInput(input);
-          if (opset_version >= 13) {
+          if (opset_version >= OPSET_VERSION_13) {
             Node* unsqueeze_axes = g->create(onnx::Constant, 1);
             unsqueeze_axes->insertBefore(unsqueezed_node);
             unsqueeze_axes->t_(
