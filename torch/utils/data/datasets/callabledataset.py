@@ -2,7 +2,6 @@ from torch.utils.data import IterableDataset, _utils
 from typing import TypeVar, Callable, Iterator, Sized
 
 T_co = TypeVar('T_co', covariant=True)
-S_co = TypeVar('S_co', covariant=True)
 
 
 # Default function to return each item directly
@@ -20,17 +19,17 @@ class CallableIterableDataset(IterableDataset[T_co]):
         dataset: Source IterableDataset
         fn: Function called over each item
     """
-    dataset: IterableDataset[S_co]
-    fn: Callable[[S_co], T_co]
+    dataset: IterableDataset
+    fn: Callable
 
     def __init__(self,
-                 dataset: IterableDataset[S_co],
+                 dataset: IterableDataset,
                  *,
-                 fn: Callable[[S_co], T_co] = default_fn,
+                 fn: Callable = default_fn,
                  ) -> None:
         super(CallableIterableDataset, self).__init__()
         self.dataset = dataset
-        self.fn = fn
+        self.fn = fn  # type: ignore
 
     def __iter__(self) -> Iterator[T_co]:
         for data in self.dataset:
@@ -78,8 +77,8 @@ class CollateIterableDataset(CallableIterableDataset):
         [tensor(3.), tensor(4.), tensor(5.), tensor(6.)]
     """
     def __init__(self,
-                 dataset: IterableDataset[S_co],
+                 dataset: IterableDataset,
                  *,
-                 collate_fn: Callable[[S_co], T_co] = _utils.collate.default_collate,
+                 collate_fn: Callable = _utils.collate.default_collate,
                  ) -> None:
         super(CollateIterableDataset, self).__init__(dataset, fn=collate_fn)
