@@ -67,7 +67,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         qconfig = get_default_qconfig(qengine)
         qconfig_dict = {"": qconfig}
 
-        model_list = [ConvModel(), ConvBnModel(), ConvBNReLU()]
+        model_list = [ConvModel(), ConvBnModel(), ConvBnReLUModel()]
         for float_model in model_list:
             float_model.eval()
 

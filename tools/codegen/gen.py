@@ -203,8 +203,7 @@ class RegisterSchema:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
-        op_name = f"aten::{f.func.name}"
-        if not self.selector.is_operator_selected(op_name):
+        if not self.selector.is_native_function_selected(f):
             return None
         return f'm.def({cpp_string(str(f.func))});\n'
 
@@ -399,8 +398,7 @@ struct {class_name} final : public {parent_class} {{
                 e.expr for e in translate(functional_sig.arguments(), dispatcher.arguments(functional_func), method=False)
             )
 
-            op_name = f"aten::{f.func.name}"
-            if self.target is Target.REGISTRATION and not self.selector.is_operator_selected(op_name):
+            if self.target is Target.REGISTRATION and not self.selector.is_native_function_selected(f):
                 return None
 
             k = f.func.kind()
@@ -480,8 +478,7 @@ struct {class_name} final : public {parent_class} {{
         if f.manual_kernel_registration:
             return None
 
-        op_name = f"aten::{f.func.name}"
-        if self.target is Target.REGISTRATION and not self.selector.is_operator_selected(op_name):
+        if self.target is Target.REGISTRATION and not self.selector.is_native_function_selected(f):
             return None
 
         name = native.name(f.func)
