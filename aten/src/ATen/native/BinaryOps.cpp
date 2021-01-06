@@ -1109,11 +1109,11 @@ Tensor& xlogy_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor& xlogy_out(Tensor& result, Scalar self, const Tensor& other) {
-  return at::xlogy_out(result, c10::scalar_to_tensor(self, other.device()), other);
+  return at::xlogy_out(result, wrapped_scalar_tensor(self), other);
 }
 
 Tensor& xlogy_out(Tensor& result, const Tensor& self, Scalar other) {
-  return at::xlogy_out(result, self, c10::scalar_to_tensor(other, self.device()));
+  return at::xlogy_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor xlogy(const Tensor& x, const Tensor& y) {
@@ -1124,11 +1124,11 @@ Tensor xlogy(const Tensor& x, const Tensor& y) {
 }
 
 Tensor xlogy(Scalar x, const Tensor& y) {
-  return at::xlogy(c10::scalar_to_tensor(x, y.device()), y);
+  return at::xlogy(wrapped_scalar_tensor(x), y);
 }
 
 Tensor xlogy(const Tensor& x, Scalar y) {
-  return at::xlogy(x, c10::scalar_to_tensor(y, x.device()));
+  return at::xlogy(x, wrapped_scalar_tensor(y));
 }
 
 Tensor& xlogy_(Tensor& x, const Tensor& y) {
@@ -1136,7 +1136,7 @@ Tensor& xlogy_(Tensor& x, const Tensor& y) {
 }
 
 Tensor& xlogy_(Tensor& x, Scalar y) {
-  return at::xlogy_out(x, x, c10::scalar_to_tensor(y, x.device()));
+  return at::xlogy_out(x, x, wrapped_scalar_tensor(y));
 }
 
 } // namespace native

@@ -11,7 +11,7 @@ on the node's ``target`` attribute).
 3. Create a replacement node.
 4. Use the fx built-in ``replace_all_uses_with`` to replace the current
 node with the replacement.
-5. Call `recompile` on the GraphModule. This updates the generated
+5. Call ``recompile`` on the GraphModule. This updates the generated
 Python code to reflect the new Graph state.
 
 The following code demonstrates an example of replacing any instance of
@@ -27,17 +27,17 @@ class M(torch.nn.Module):
 # Symbolically trace an instance of the module
 traced = symbolic_trace(M())
 
-# If you have ``torch`` imported, you have two ways to denonte addition:
-# the ``+`` operator and the method ``torch.add``. ``+`` is a Python
-# built-in, so it's represented as a ``call_function`` Node with a target
-# of ``<built-in function add>``. ``torch.add`` is part of ``torch``, so
-# it becomes a ``call_method`` Node with a target of
-# ``<built-in method add of type object at MEMORY-LOCATION-OF-TORCH>``.
+# If you have `torch` imported, you have two ways to denonte addition:
+# the `+` operator and the method `torch.add`. `+` is a Python
+# built-in, so it's represented as a `call_function` Node with a target
+# of `<built-in function add>`. `torch.add` is part of `torch`, so
+# it becomes a `call_method` Node with a target of
+# `<built-in method add of type object at MEMORY-LOCATION-OF-TORCH>`.
 #
 # To determine whether a given node represents addition, we can match
-# on the ``target`` attribute. In this particular case, we have two
-# different representations of "addition", so we'll use a regex to match
-# on ``target``. (If you want to replace a ``torch``-specific operator,
+# on the `target` attribute. In this particular case, we have two
+# different representations of addition, so we'll use a regex to match
+# on `target`. (If you want to replace a `torch`-specific operator,
 # you can match on a simple string.)
 regexp = re.compile(r"(?<=[\s])add(?=[\>\s])")
 
@@ -54,4 +54,5 @@ for n in traced.graph.nodes:
         # Remove the old node from the graph
         traced.graph.erase_node(n)
 
+# Don't forget to recompile!
 traced.recompile()
