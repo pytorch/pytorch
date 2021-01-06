@@ -2,8 +2,6 @@ import dis
 import torch
 import inspect
 import operator
-import builtins
-from typing import Union
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
