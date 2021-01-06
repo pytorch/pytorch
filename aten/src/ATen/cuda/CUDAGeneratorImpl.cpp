@@ -145,7 +145,7 @@ c10::intrusive_ptr<c10::TensorImpl> CUDAGeneratorImpl::get_state() const {
   static const size_t offset_size = sizeof(int64_t);
   static const size_t total_size = states_size + seed_size + offset_size;
 
-  auto state_tensor = at::detail::empty_cpu({total_size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
+  auto state_tensor = at::detail::empty_cpu({(int64_t)total_size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
   auto rng_state = state_tensor.data_ptr<uint8_t>();
   // since curandStateMTGP is not used anymore, fill gen_states of THCGenerator with deterministic garbage value of -1
   // gen_states in THCGenerator struct was an array of curandStateMtgp32s.
