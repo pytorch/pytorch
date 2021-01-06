@@ -4,7 +4,6 @@ import unittest
 import string
 import textwrap
 import doctest
-from typing import Dict, Any
 
 import hypothesis
 from hypothesis.strategies import text, integers, composite, sampled_from, booleans
@@ -39,7 +38,7 @@ class TestExpectTest(expecttest.TestCase):
         r3 = {r}{quote}placeholder3{quote}
         """.format(r='r' if raw else '', quote=quote * 3)
         new_prog = expecttest.replace_string_literal(textwrap.dedent(prog), 2, t)[0]
-        ns : Dict[str, Any] = {}
+        ns = {}
         exec(new_prog, ns)
         msg = "program was:\n{}".format(new_prog)
         self.assertEqual(ns['r'], 'placeholder', msg=msg)  # noqa: F821
