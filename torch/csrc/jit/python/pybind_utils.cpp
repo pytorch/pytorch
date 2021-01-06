@@ -67,9 +67,14 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         }
       }
       std::vector<IValue> values;
-      values.reserve(tuple_size);
-      for (size_t i = 0; i < tuple_size; ++i) {
-        values.push_back(toIValue(tuple[i], elem_types[i]));
+      if (tuple_size == 0 && type->repr_str() == "Tuple[None]") {
+        values.reserve(1);
+        values.push_back(toIValue(py::none(), NoneType::get()));
+      } else {
+        values.reserve(tuple_size);
+        for (size_t i = 0; i < tuple_size; ++i) {
+          values.push_back(toIValue(tuple[i], elem_types[i]));
+        }
       }
       return tuple_type->name()
           ? c10::ivalue::Tuple::createNamed(std::move(values), tuple_type)
