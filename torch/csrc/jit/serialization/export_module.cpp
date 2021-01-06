@@ -588,11 +588,10 @@ class ScriptModuleSerializer {
                             constants_from_jit.find(
                                 constant_value.toTensor()) !=
                                 constants_from_jit.end()) {
-                          std::vector<IValue> index = {
-                              IValue(constants_from_jit.at(
-                                  constant_value.toTensor()))};
+                          auto index = IValue(constants_from_jit.at(
+                              constant_value.toTensor()));
                           auto index_with_key = Tup(std::vector<IValue>{
-                              IValue(mobile::kTensorJitIndex), Tup(index)});
+                              IValue(mobile::kTensorJitIndex), index});
                           deduplicated_constant_values.push_back(
                               index_with_key);
                         } else {

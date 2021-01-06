@@ -163,7 +163,7 @@ void parseMethods(
         const auto& tensor_jit = const_item.toTuple()->elements();
         if (tensor_jit.size() > 1) {
           const auto& tensor_jit_index_key = tensor_jit[0];
-          const auto& tensor_jit_index = tensor_jit[1].toTuple()->elements()[0];
+          const auto& tensor_jit_index = tensor_jit[1];
           if (tensor_jit_index_key.isString() &&
               tensor_jit_index_key.toString().get()->string() ==
                   mobile::kTensorJitIndex) {
