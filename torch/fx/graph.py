@@ -693,6 +693,12 @@ class Graph:
         import_strs = [f'import {name}' for name in sorted(modules_used)]
         import_block = '\n'.join(import_strs)
 
+        if len(body) == 0:
+            # If the Graph has no non-placeholder nodes, no lines for the body
+            # have been emitted. To continue to have valid Python code, emit a
+            # single pass statement
+            body.append('pass\n')
+
         code = ''.join(body)
         code = '\n'.join('    ' + line for line in code.split('\n'))
         fn_code = f"""\
