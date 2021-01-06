@@ -142,13 +142,6 @@ class OuterModuleTupleDoubleIO(torch.nn.Module):
 # Tests for JIT forward hooks and pre-hooks
 class TestHooks(JitTestCase):
     def test_module_hook_and_pre_hook_no_IO(self):
-
-        # TODO: this test causes the jit legacy fuser to seg fault
-        # at argument_spec.cpp:161 when the stack top is pointed
-        # to the Tuple's elements which do not exist :(
-        # run test with:
-        #   python test/test_jit_legacy.py TestHooks.test_module_hook_and_pre_hook_no_IO
-
         m = OuterModuleNoIO("outer_mod_name", "inner_mod_name")
 
         def pre_hook(self, input: Tuple[None]):
@@ -701,7 +694,7 @@ class TestHooks(JitTestCase):
         with self.assertRaisesRegex(
             RuntimeError,
             "has the wrong number of contained types for the "
-            r"input argument's Tuple. Recieved type: 'Tuple\[str, str\]'",
+            r"input argument's Tuple. Received type: 'Tuple\[str, str\]'",
         ):
             torch.jit.script(m)
 
@@ -727,7 +720,7 @@ class TestHooks(JitTestCase):
         with self.assertRaisesRegex(
             RuntimeError,
             "has the wrong inner types for the second tuple"
-            r" argument. Recieved type: 'Tuple\[None\]'",
+            r" argument. Received type: 'Tuple\[None\]'",
         ):
             torch.jit.script(m)
 
@@ -739,7 +732,7 @@ class TestHooks(JitTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "has the wrong type for the output argument. Recieved"
+            "has the wrong type for the output argument. Received"
             r" type: 'Tuple\[str\]'. Expected type: 'str'",
         ):
             torch.jit.script(m)
@@ -759,6 +752,6 @@ class TestHooks(JitTestCase):
         with self.assertRaisesRegex(
             RuntimeError,
             "has the wrong type for the output argument. "
-            r"Recieved type: 'str'. Expected type: 'Tuple\[str\]'",
+            r"Received type: 'str'. Expected type: 'Tuple\[str\]'",
         ):
             torch.jit.script(m)
