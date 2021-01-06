@@ -17,7 +17,7 @@ void confirmPendingUser(
     const JitFuture& jitFuture,
     const ForkId& expectedForkId) {
   if (!jitFuture.hasError()) {
-    auto msgPtr = jitFuture.value().toCustomClass<Message>();
+    auto msgPtr = jitFuture.constValue().toCustomClass<Message>();
     auto msgType = msgPtr->type();
     auto rpc = deserializeResponse(*msgPtr, msgType);
     auto rr = dynamic_cast<RemoteRet*>(rpc.get());
@@ -57,7 +57,7 @@ c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(
         ctx.delForkOfOwner(rref_ptr->rrefId(), rref_ptr->rrefId());
     return deletedRRef;
   } else {
-    auto msgPtr = jitFuture.value().toCustomClass<Message>();
+    auto msgPtr = jitFuture.constValue().toCustomClass<Message>();
     auto msgType = msgPtr->type();
     auto rpc = deserializeResponse(*msgPtr, msgType);
     auto rr = dynamic_cast<RemoteRet*>(rpc.get());
