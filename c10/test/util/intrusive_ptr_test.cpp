@@ -694,21 +694,21 @@ TEST(IntrusivePtrTest, Equality_Nullptr) {
   EXPECT_FALSE(var1 != var2);
 }
 
-TEST(IntrusivePtrTest, Nonequality) {
+TEST(IntrusivePtrTest, Inequality) {
   intrusive_ptr<SomeClass> var1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> var2 = make_intrusive<SomeClass>();
   EXPECT_TRUE(var1 != var2);
   EXPECT_FALSE(var1 == var2);
 }
 
-TEST(IntrusivePtrTest, Nonequality_NullptrLeft) {
+TEST(IntrusivePtrTest, Inequality_NullptrLeft) {
   intrusive_ptr<SomeClass> var1;
   intrusive_ptr<SomeClass> var2 = make_intrusive<SomeClass>();
   EXPECT_TRUE(var1 != var2);
   EXPECT_FALSE(var1 == var2);
 }
 
-TEST(IntrusivePtrTest, Nonequality_NullptrRight) {
+TEST(IntrusivePtrTest, Inequality_NullptrRight) {
   intrusive_ptr<SomeClass> var1 = make_intrusive<SomeClass>();
   intrusive_ptr<SomeClass> var2;
   EXPECT_TRUE(var1 != var2);
@@ -2487,28 +2487,28 @@ TEST(WeakIntrusivePtrTest, Equality_Invalid) {
   EXPECT_FALSE(var1 != var2);
 }
 
-TEST(WeakIntrusivePtrTest, Nonequality) {
+TEST(WeakIntrusivePtrTest, Inequality) {
   IntrusiveAndWeak<SomeClass> var1 = make_intrusive<SomeClass>();
   IntrusiveAndWeak<SomeClass> var2 = make_intrusive<SomeClass>();
   EXPECT_TRUE(var1.weak != var2.weak);
   EXPECT_FALSE(var1.weak == var2.weak);
 }
 
-TEST(WeakIntrusivePtrTest, Nonequality_InvalidLeft) {
+TEST(WeakIntrusivePtrTest, Inequality_InvalidLeft) {
   weak_intrusive_ptr<SomeClass> var1 = make_invalid_weak<SomeClass>();
   IntrusiveAndWeak<SomeClass> var2 = make_intrusive<SomeClass>();
   EXPECT_TRUE(var1 != var2.weak);
   EXPECT_FALSE(var1 == var2.weak);
 }
 
-TEST(WeakIntrusivePtrTest, Nonequality_InvalidRight) {
+TEST(WeakIntrusivePtrTest, Inequality_InvalidRight) {
   IntrusiveAndWeak<SomeClass> var1 = make_intrusive<SomeClass>();
   weak_intrusive_ptr<SomeClass> var2 = make_invalid_weak<SomeClass>();
   EXPECT_TRUE(var1.weak != var2);
   EXPECT_FALSE(var1.weak == var2);
 }
 
-TEST(WeakIntrusivePtrTest, Nonequality_WeakOnly) {
+TEST(WeakIntrusivePtrTest, Inequality_WeakOnly) {
   weak_intrusive_ptr<SomeClass> var1 = make_weak_only<SomeClass>();
   weak_intrusive_ptr<SomeClass> var2 = make_weak_only<SomeClass>();
   EXPECT_TRUE(var1 != var2);
