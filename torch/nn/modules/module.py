@@ -916,7 +916,7 @@ class Module:
         if '_is_full_backward_hook' not in self.__dict__:
             self._is_full_backward_hook = None
 
-    def __getattr__(self):
+    def __getattr__(self, name):
         pass
 
     def __getattribute__(self, name: str) -> Any:
