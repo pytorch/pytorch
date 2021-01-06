@@ -51,7 +51,7 @@ TORCH_API std::tuple<Tensor,Tensor> var_mean(const Tensor& self, int dim);
 TORCH_API Tensor std(const Tensor& self, int dim);
 TORCH_API std::tuple<Tensor,Tensor> std_mean(const Tensor& self, int dim);
 
-CAFFE2_API Tensor add(const Tensor& self, Scalar other, Scalar alpha=1);
+TORCH_API Tensor add(const Tensor& self, Scalar other, Scalar alpha=1);
 
 namespace {
   inline std::vector<int64_t> zero_sizes(const TensorOptions& options) {
