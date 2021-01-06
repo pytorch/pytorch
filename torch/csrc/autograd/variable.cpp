@@ -85,11 +85,13 @@ ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
     }
   } else if(view_fn_) {
     // if current_view doesn't have a view_func but it's parent has one
+    // Copy parent in case parent becomes empty later
+    auto prev_view_fn = view_fn_;
     auto size = tensor.sizes().vec();
     auto stride = tensor.strides().vec();
     auto storage_offset = tensor.storage_offset();
     view_func = [=](const at::Tensor& root_base) {
-      auto temp = view_fn_(root_base);
+      auto temp = prev_view_fn(root_base);
       return temp.as_strided(size, stride, storage_offset);
     };
   }
