@@ -1,3 +1,4 @@
+import builtins
 import functools
 import inspect
 from types import CodeType, FunctionType
@@ -339,10 +340,14 @@ class Tracer(TracerBase):
             global _wrap_fn
             _wrap_fn = self.call_wrapped_func
 
+            orig_len = builtins.len
+            builtins.len = wrap(builtins.len)
+
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                              type_expr=fn.__annotations__.get('return', None))
         finally:
             _wrap_fn = None
+            builtins.len = orig_len
             torch.nn.Module.__call__ = orig_call
             torch.nn.Module.__getattr__ = orig_getattr  # type: ignore
         return self.graph
