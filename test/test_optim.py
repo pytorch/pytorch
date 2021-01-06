@@ -475,7 +475,7 @@ class TestOptim(TestCase):
             )
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
-    
+
     def test_adabelief(self):
         for optimizer in [optim.AdaBelief, optim_mt.AdaBelief]:
             self._test_basic_cases(
