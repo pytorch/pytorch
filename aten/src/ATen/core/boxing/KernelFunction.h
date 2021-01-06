@@ -124,26 +124,6 @@ public:
   static KernelFunction makeFromUnboxedFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
 
   /**
-   * Create a KernelFunction from an unboxed functor and prevent creation of an
-   * unboxing-wrapper. This means that you cannot call this KernelFunction
-   * using KernelFunction::callBoxed()
-   *
-   * This is necessary because our unboxing wrappers don't work for all types
-   * yet, so if you want to use one of these types as function arguments,
-   * you need to use makeFromUnboxedOnlyFunctor.
-   *
-   * Example:
-   *
-   * > class MyFunctor final {
-   * >   public:
-   * >     Tensor operator()(Tensor a, Tensor b) {...}
-   * > };
-   * > KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunctor(std::make_unique<MyFunctor>());
-   */
-  template<class KernelFunctor>
-  static KernelFunction makeFromUnboxedOnlyFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
-
-  /**
    * Create a KernelFunction from an unboxed function.
    * This is usually better than KernelFunction::makeFromUnboxedRuntimeFunction
    * because knowing the function pointer as a template argument (i.e. at
@@ -159,23 +139,6 @@ public:
   static KernelFunction makeFromUnboxedFunction(FuncPtr);
 
   /**
-   * Create a KernelFunction from an unboxed function and prevent creation of an
-   * unboxing-wrapper. This means that you cannot call this KernelFunction
-   * using KernelFunction::callBoxed()
-   *
-   * This is necessary because our unboxing wrappers don't work for all types
-   * yet, so if you want to use one of these types as function arguments,
-   * you need to use makeFromUnboxedOnlyFunctor.
-   *
-   * Example:
-   *
-   * > Tensor unboxed_func(Tensor a, Tensor b) {...}
-   * > KernelFunction func = KernelFunction::makeFromUnboxedOnlyFunction<decltype(unboxed_func), &unboxed_func>();
-   */
-  template<class FuncPtr>
-  static KernelFunction makeFromUnboxedOnlyFunction(FuncPtr);
-
-  /**
    * Create a KernelFunction from an unboxed function.
    * KernelFunction::makeFromUnboxedFunction is usually a better choice than
    * this if you know the function pointer at compile time, see doc comment
@@ -188,9 +151,6 @@ public:
    */
   template<bool AllowLegacyTypes = false, class FuncType>
   static KernelFunction makeFromUnboxedRuntimeFunction(FuncType* func);
-
-  template<class FuncType>
-  static KernelFunction makeFromUnboxedOnlyRuntimeFunction(FuncType* func);
 
   static KernelFunction makeFallthrough();
   static KernelFunction makeAmbiguousAutogradOther();
@@ -225,8 +185,6 @@ private:
 
   template<BoxedKernelFunction* func>
   static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, Stack* stack);
-
-  void checkBoxedKernel(const OperatorHandle& opHandle) const;
 
   OperatorKernel* getFunctor_() const;
 
