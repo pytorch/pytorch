@@ -4,9 +4,11 @@
 from xml.dom import minidom
 from glob import glob
 import bz2
+from collections import defaultdict
 import json
 import os
 import statistics
+import subprocess
 import time
 
 import boto3
@@ -132,7 +134,29 @@ def send_report_to_scribe(reports):
     )
     r.raise_for_status()
 
-def send_report_to_s3(reports, *, total_seconds):
+def assemble_s3_object(reports, *, total_seconds):
+    return {
+        **build_info(),
+        'total_seconds': total_seconds,
+        'suites': {
+            name: {
+                'total_seconds': suite.total_time,
+                'cases': [
+                    {
+                        'name': case.name,
+                        'seconds': case.time,
+                        'errored': case.errored,
+                        'failed': case.failed,
+                        'skipped': case.skipped,
+                    }
+                    for case in suite.test_cases
+                ],
+            }
+            for name, suite in reports.items()
+        }
+    }
+
+def send_report_to_s3(obj):
     job = os.environ.get('CIRCLE_JOB')
     sha1 = os.environ.get('CIRCLE_SHA1')
     branch = os.environ.get('CIRCLE_BRANCH', '')
@@ -156,26 +180,59 @@ def send_report_to_s3(reports, *, total_seconds):
     # input files of a few megabytes in size like these JSON files, and
     # because for some reason zlib doesn't seem to play nice with the
     # gunzip command whereas Python's bz2 does work with bzip2
-    obj.put(Body=bz2.compress(json.dumps({
-        **build_info(),
-        'total_seconds': total_seconds,
-        'suites': {
-            name: {
-                'total_seconds': suite.total_time,
-                'cases': [
-                    {
-                        'name': case.name,
-                        'seconds': case.time,
-                        'errored': case.errored,
-                        'failed': case.failed,
-                        'skipped': case.skipped,
-                    }
-                    for case in suite.test_cases
-                ],
-            }
-            for name, suite in reports.items()
-        }
-    }).encode()))
+    obj.put(Body=bz2.compress(json.dumps(obj).encode()))
+
+def print_regressions(obj):
+    n = 10
+
+    sha1 = os.environ.get("CIRCLE_SHA1")
+    base = subprocess.check_output(
+        ["git", "merge-base", sha1, "origin/master"],
+        encoding="ascii",
+    ).strip()
+
+    commits = subprocess.check_output(
+        ["git", "rev-list", f"--max-count={n}", base],
+        encoding="ascii",
+    ).splitlines()
+
+    job = os.environ.get("CIRCLE_JOB")
+    s3 = boto3.resource("s3")
+    bucket = s3.Bucket(name="ossci-metrics")
+    index = {}
+    for commit in commits:
+        summaries = bucket.objects.filter(Prefix=f"test_time/{commit}/{job}/")
+        index[commit] = list(summaries)
+
+    objects = defaultdict(list)
+    for commit, summaries in index.items():
+        # should we do these in parallel?
+        for summary in summaries:
+            binary = summary.get()['Body'].read()
+            string = bz2.decompress(binary).decode('utf-8')
+            objects[commit].append(json.loads(string))
+
+    print()
+
+    print(f"Comparing test times for job {job} against base commit and its {n-1} most recent ancestors:")
+    for commit in commits:
+        runs = objects[commit]
+        num_runs = len(runs)
+        prefix = str(num_runs).rjust(3)
+        plural = " " if num_runs == 1 else "s"
+        times = [o['total_seconds'] for o in runs]
+        t = ""
+        if num_runs > 0:
+            t += f", total time {statistics.mean(times):8.2f}s"
+            if num_runs > 1:
+                t += f" ± {statistics.stdev(times):7.2f}s"
+        print(f"    {commit} {prefix} run{plural} found in S3{t}")
+
+    print()
+
+    times = [o['total_seconds'] for runs in objects.values() for o in runs]
+    print(f"Prior average total time: {statistics.mean(times):8.2f}s ± {statistics.stdev(times):.2f}s")
+    print(f"Current       total time: {obj['total_seconds']:8.2f}s")
 
 def positive_integer(value):
     parsed = int(value)
@@ -223,6 +280,11 @@ if __name__ == '__main__':
         help="upload test time to S3 bucket",
     )
     parser.add_argument(
+        "--compare-with-s3",
+        action="store_true",
+        help="download test times for base commits and compare",
+    )
+    parser.add_argument(
         "folder",
         help="test report folder",
     )
@@ -245,10 +307,15 @@ if __name__ == '__main__':
         longest_tests.extend(test_suite.test_cases)
     longest_tests = sorted(longest_tests, key=lambda x: x.time)[-args.longest_of_run:]
 
+    obj = assemble_s3_object(reports, total_seconds=total_time)
+
     if args.upload_to_s3:
-        send_report_to_s3(reports, total_seconds=total_time)
+        send_report_to_s3(obj)
 
     print(f"Total runtime is {datetime.timedelta(seconds=int(total_time))}")
     print(f"{len(longest_tests)} longest tests of entire run:")
     for test_case in reversed(longest_tests):
         print(f"    {test_case.class_name}.{test_case.name}  time: {test_case.time:.2f} seconds")
+
+    if args.compare_with_s3:
+        print_regressions(obj)
