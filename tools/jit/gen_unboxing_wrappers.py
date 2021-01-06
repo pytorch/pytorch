@@ -377,29 +377,7 @@ def gen_unboxing_wrappers(
                     device=device, pin_memory=pin_memory,
                     args_with_tensor_options=pack_arguments(args_with_tensor_options[1:]),
                     first=args_with_tensor_options[0], num_inputs=num_inputs)
-        elif decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
-            if len(decl['returns']) == 0:
-                return_type = "void"
-            elif len(decl['returns']) == 1:
-                return_type = decl['returns'][0]['type']
-            else:
-                return_type = "std::tuple<{}>".format(", ".join([r['type'] for r in decl['returns']]))
-            for a in decl['arguments']:
-                if 'type' not in a:
-                    raise Exception(decl)
-            argument_types_with_leading_comma = ", ".join([a['type'] for a in decl['arguments']])
-            if argument_types_with_leading_comma != "":
-                argument_types_with_leading_comma = ", " + argument_types_with_leading_comma
-            args_with_leading_comma = pack_arguments(args)
-            if args_with_leading_comma != "":
-                args_with_leading_comma = ", " + args_with_leading_comma
-            return CALL_UNBOXED_KERNEL.substitute(name=decl['name'],
-                                                  args_with_leading_comma=args_with_leading_comma,
-                                                  num_inputs=num_inputs,
-                                                  return_type=return_type,
-                                                  formals_types_with_leading_comma=argument_types_with_leading_comma)
         else:
-            assert decl['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']
             if is_namespace_function:
                 return CALL_NAMESPACE.substitute(name=decl['name'],
                                                  args=pack_arguments(args),
@@ -437,16 +415,6 @@ def gen_unboxing_wrappers(
         call = get_invocation(decl, arguments, num_inputs)
 
         returns = decl['returns']
-
-        if decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
-            constructor = CONSTRUCTOR.substitute(name=decl['name'],
-                                                 call=call,
-                                                 kw_assignments=kw_assignments,
-                                                 num_inputs=num_inputs,
-                                                 op_capture=op_capture,
-                                                 lvalues=lvalues)
-        else:
-            assert decl['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']
 
         return constructor
 
@@ -549,12 +517,6 @@ def gen_unboxing_wrappers(
     # ops are assigned arbitrarily but stably to a file based on hash
     for group in jit_decl_groups:
         x = sum(ord(c) for c in group[0]['name']) % num_shards
-        for decl in group:
-            if decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
-                shards[x].append(OPERATOR.substitute(signature=decl['schema_string'],
-                                                     op=emit_decl_variant(decl)))
-            else:
-                assert decl['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']
 
     for i, shard in enumerate(shards):
         env = {
