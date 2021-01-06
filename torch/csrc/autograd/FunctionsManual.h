@@ -129,7 +129,7 @@ Tensor slice_backward_wrapper(
     int64_t dim,
     c10::optional<int64_t> start,
     c10::optional<int64_t> end,
-    c10::optional<int64_t> step);
+    int64_t step);
 Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v);
 std::tuple<Tensor, Tensor> triangular_solve_backward(
