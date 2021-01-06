@@ -10,7 +10,7 @@ class SyncBatchNorm(Function):
         input = input.contiguous()
 
         count = torch.empty(1,
-                            dtype=running_mean.dtype,
+                            dtype=running_mean.dtype if running_mean is not None else torch.float32,
                             device=input.device).fill_(input.numel() // input.size(1))
 
         # calculate mean/invstd for input.
