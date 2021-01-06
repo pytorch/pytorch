@@ -112,17 +112,47 @@ class GraphAppendingTracer(TracerBase):
 class TraceError(ValueError):
     pass
 
-# Proxy objects are stand-in values for normal values in a PyTorch computation.
-# Instead of performing compute they record computation into Graph.
-# Each proxy wraps the Node instance that represents the expression that define the
-# value.
 
 class Proxy:
+    """
+    ``Proxy`` objects are ``Node`` wrappers used by the ``Tracer`` to
+    record operations seen during symbolic tracing.
+
+    The mechanism through which ``Proxy`` objects record computation is
+    ``__torch_function__``. If any custom Python type defines a method
+    named ``__torch_function__``, PyTorch will invoke that
+    ``__torch_function__`` implementation when an instance of that
+    custom type is passed to a function in the ``torch`` namespace. In
+    the ``Proxy`` implementation of ``__torch_function__``, we simply
+    create a new ``Proxy`` object with the passed-in operator. Creating
+    a new ``Proxy`` means that a new ``Node``—the ``Node`` wrapped by
+    the ``Proxy``—will be added to the ``Graph`` as well. When this new
+    ``Proxy`` object is used later in the code, it “transforms” its user
+    into another ``Proxy`` object and the process is repeated.
+
+    Consider the following example:
+
+    .. code-block:: python
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x)
+
+    First, the parameter ``x`` is transformed into a ``Proxy`` object
+    and the corresponding ``Node`` (a ``Node`` with op = “placeholder”
+    and target = “x”) is added to the ``Graph``. The next operation is
+    ``torch.relu``, which takes ``x`` as a parameter. Because ``x`` is a
+    ``Proxy``, ``__torch_function__`` is called on ``torch.relu``. This,
+    in turn, transforms ``torch.relu`` into a ``Proxy`` object and adds
+    a ``torch.relu`` ``Node`` to the ``Graph``.
+
+    If you're doing graph transforms, it's also possible to wrap your
+    own ``Proxy`` method around a raw ``Node`` so that you can use the
+    overloaded operators to add additional things to a ``Graph``.
+    """
     def __init__(self, node: Node, tracer: 'Optional[TracerBase]' = None):
         if tracer is None:
-            # this allows you to create a proxy object around a raw node
-            # so that if you are doing graph transforms you can use the overloaded operators
-            # to add additional things to a graph.
+            # This allows you to create a Proxy object around a raw Node
             tracer = GraphAppendingTracer(node.graph)
         self.tracer = tracer
         self.node = node
