@@ -502,6 +502,7 @@ public:
   template <typename Name, typename Func>
   Library& impl_UNBOXED(Name name, Func* raw_f) & {
     static_assert(c10::guts::false_t<Func>(), ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
+    return *this;
   }
 
   // These overloads cover cases when a SelectiveStr (see Note [Selective build])
@@ -525,6 +526,7 @@ public:
   template <typename Func>
   Library& impl_UNBOXED(detail::SelectiveStr<false> name, Func* raw_f) & {
     static_assert(c10::guts::false_t<Func>(), ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
+    return *this;
   }
 
   template <typename Func>
@@ -538,6 +540,7 @@ public:
   template <typename Func>
   Library& impl_UNBOXED(detail::SelectiveStr<true> name, Func* raw_f) & {
     static_assert(c10::guts::false_t<Func>(), ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
+    return *this;
   }
 
   /// Register a fallback implementation for all operators which will be used
