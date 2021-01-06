@@ -58,8 +58,8 @@ TensorIteratorConfig& TensorIteratorConfig::promote_inputs_to_common_dtype(const
   return *this;
 }
 
-TensorIteratorConfig& TensorIteratorConfig::set_common_dtype(ScalarType common_dtype) {
-  specified_common_dtype = c10::make_optional(common_dtype);
+TensorIteratorConfig& TensorIteratorConfig::set_common_dtype(c10::optional<ScalarType> common_dtype) {
+  specified_common_dtype = common_dtype;
   return *this;
 }
 
@@ -895,11 +895,12 @@ TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a) {
     .build();
 }
 
-TensorIterator TensorIterator::unary_float_op(Tensor& out, const Tensor& a) {
+TensorIterator TensorIterator::unary_float_op(Tensor& out, const Tensor& a, c10::optional<ScalarType> common_dtype) {
   return TensorIteratorConfig()
       .set_check_mem_overlap(true)
       .add_output(out)
       .add_input(a)
+      .set_common_dtype(common_dtype)
       .promote_inputs_to_common_dtype(true)
       .cast_common_dtype_to_outputs(true)
       .enforce_safe_casting_to_output(true)
