@@ -198,7 +198,7 @@ bool IsSupportedNode(const Node* n) {
   return true;
 }
 
-Value* CloneValueFromListConstruct(Value* v, std::shared_ptr<Graph> n_graph) {
+Value* CloneValueFromListConstruct(Value* v, std::shared_ptr<Graph> n_graph, int opset_version) {
   auto lc_node = v->node();
   TORCH_INTERNAL_ASSERT(lc_node->kind() == ::c10::prim::ListConstruct);
   // In jit/passes/onnx/peephole.cpp::eraseListConstruct,
@@ -223,7 +223,14 @@ Value* CloneValueFromListConstruct(Value* v, std::shared_ptr<Graph> n_graph) {
       auto new_input = n_graph->addInput();
       new_input->copyMetadata(input);
       unsqueezed_node->addInput(new_input);
-      unsqueezed_node->is_(attr::axes, {0});
+      if (opset_version >= 13) {
+        Node* unsqueeze_axes = n_graph->create(::c10::onnx::Constant, 1);
+        unsqueeze_axes->insertBefore(unsqueezed_node);
+        unsqueeze_axes->t_(attr::value, at::scalar_to_tensor(at::Scalar(0)));
+        unsqueezed_node->addInput(unsqueeze_axes->output());
+      } else {
+        unsqueezed_node->is_(attr::axes, {0});
+      }
       unsqueezed.emplace_back(unsqueezed_node->output());
     }
     Node* concat_node =
@@ -255,8 +262,8 @@ Value* CloneValueFromListConstruct(Value* v, std::shared_ptr<Graph> n_graph) {
 }
 
 // Clone the node n for the new graph.
-Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph) {
-  auto clone_node = n_graph->createClone(n, [&n_graph](Value* v) {
+Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph, int opset_version) {
+  auto clone_node = n_graph->createClone(n, [&n_graph, opset_version](Value* v) {
     auto v_n = v->node();
     switch (v_n->kind()) {
       case ::c10::onnx::Constant: {
@@ -266,7 +273,7 @@ Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph) {
         return constant_n->output();
       }
       case ::c10::prim::ListConstruct: {
-        return CloneValueFromListConstruct(v, n_graph);
+        return CloneValueFromListConstruct(v, n_graph, opset_version);
       }
       case ::c10::prim::PackPadded: {
         auto input = n_graph->addInput();
@@ -419,7 +426,7 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
   // Create a Graph containing only the single node n.
   // This graph is later converted to ONNX to run shape inference.
   auto n_graph = std::make_shared<Graph>();
-  auto clone_node = CloneNodeToGraph(n, n_graph);
+  auto clone_node = CloneNodeToGraph(n, n_graph, opset_version);
   n_graph->insertNode(clone_node);
 
   // Register all node outputs as graph outputs.
