@@ -53,7 +53,7 @@ class TORCH_API LoopNest {
 
   bool computeInline(Stmt* s);
   bool computeInline(const Buf* b);
-  void inlineIntermediateBufs(bool inline_output_buffers);
+  void inlineIntermediateBufs(bool allow_duplicated_work);
 
   static void splitWithTail(For* f, int factor);
   static void splitWithTail(
@@ -141,7 +141,7 @@ TORCH_API Stmt* FlattenIndexes(Stmt* s);
 // TODO: Revisit this once we decide on how dependencies analysis should look
 // like. Maybe we would choose to use a different API and BufUse would be
 // removed, or if we decide to keep it we need to properly document its API.
-struct BufUse {
+struct BufLoadOrStoreUse {
   Stmt* s;
   bool isStore;
 };
@@ -152,7 +152,8 @@ struct BufUse {
  * in the vectors reflects the order in which the uses appear in the given
  * statement.
  */
-std::unordered_map<const Buf*, std::vector<BufUse>> findUses(Stmt* s);
+std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>>
+findLoadOrStoreUses(Stmt* s);
 
 } // namespace tensorexpr
 } // namespace jit
