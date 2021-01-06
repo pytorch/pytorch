@@ -183,7 +183,7 @@ mobile::Module _load_data(
         deserializer.deserialize(std::move(device)).toObject(), mcu);
     std::unordered_map<std::string, std::string> copied_metadata =
         result.metadata();
-    if (result.metadata().find("model_name") == result.metadata().end()) {
+    if (copied_metadata.find("model_name") == copied_metadata.end()) {
       copied_metadata["model_name"] = result.name();
     }
     if (observer) {
