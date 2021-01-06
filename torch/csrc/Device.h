@@ -10,7 +10,7 @@ namespace torch { namespace python {
 /**
  * Utility for parsing Python device argument.
  */
-at::Device parseDevice(py::object device);
+at::Device parseDevice(py::handle device);
 
 void initDeviceBindings(PyObject* module);
 

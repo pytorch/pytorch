@@ -22,7 +22,7 @@ inline std::string deviceType(const Device& device) {
 
 } // namespace
 
-Device parseDevice(py::object device) {
+Device parseDevice(py::handle device) {
   if (py::isinstance<Device>(device)) {
     return device.cast<Device>();
   } else if (py::isinstance<py::str>(device)) {
