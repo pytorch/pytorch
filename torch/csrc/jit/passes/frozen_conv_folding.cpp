@@ -61,19 +61,19 @@ void FoldFrozenConvBatchnorm(Block* b) {
       auto conv_w = constant_as<Tensor>(conv->namedInput("weight")).value();
 
       // implementation taken from torch/nn/utils/fusion.py
-      at::Tensor conv_b;
+      Tensor conv_b;
       if (conv->namedInput("bias")->type() == NoneType::get()) {
         conv_b = torch::zeros_like(bn_rm);
       } else {
         conv_b = constant_as<Tensor>(conv->namedInput("bias")).value();
       }
-      at::Tensor bn_w;
+      Tensor bn_w;
       if (bn->namedInput("weight")->type() == NoneType::get()) {
         bn_w = torch::ones_like(bn_rm);
       } else {
         bn_w = constant_as<Tensor>(bn->namedInput("weight")).value();
       }
-      at::Tensor bn_b;
+      Tensor bn_b;
       if (n->namedInput("bias")->type() == NoneType::get()) {
         bn_b = torch::zeros_like(bn_rm);
       } else {
@@ -88,7 +88,7 @@ void FoldFrozenConvBatchnorm(Block* b) {
       params.bn_eps = bn_eps;
       params.bn_w = bn_w;
       params.bn_b = bn_b;
-      std::tuple<at::Tensor, at::Tensor> out =
+      std::tuple<Tensor, Tensor> out =
           computeUpdatedConvWeightAndBias(params);
       WithInsertPoint guard(conv);
       auto fused_conv_w = b->owningGraph()->insertConstant(std::get<0>(out));

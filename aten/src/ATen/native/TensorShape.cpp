@@ -8,6 +8,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <c10/util/SmallVector.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/SparseTensorUtils.h>
@@ -78,6 +79,10 @@ Tensor& set_cpu_(Tensor& result) {
   return result;
 }
 
+Tensor broadcast_to(const Tensor& self, IntArrayRef size) {
+  return self.expand(size);
+}
+
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
 }
@@ -110,8 +115,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
   // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
   // size (i.e. other empty sizes are not skipped).
-  // FIXME: warn if this is the case
-  bool allSkipped = true;
+
   bool allContiguous = true;
 
   // Inputs cannot alias the output tensor
@@ -136,6 +140,8 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   }(tensors);
 
   if (!pnotSkippedTensor) {
+    // FIXME: warn if this is the case -- see comment about skipped
+    // tensors at top of function.
     return result;
   }
   const Tensor& notSkippedTensor = *pnotSkippedTensor;
@@ -520,7 +526,7 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
 }
 
 std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t dim) {
-  TORCH_CHECK(self.dim() > 0, "expected at least a 1-dimensional tensor");
+  TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
   TORCH_CHECK(sections > 0, "number of sections must be larger than 0, got ", sections);
   std::vector<Tensor> splits(sections);
@@ -536,7 +542,7 @@ std::vector<Tensor> tensor_split(const Tensor& self, int64_t sections, int64_t d
 }
 
 std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_t dim) {
-  TORCH_CHECK(self.dim() > 0, "expected at least a 1-dimensional tensor");
+  TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
   int64_t dim_ = maybe_wrap_dim(dim, self.dim());
   int64_t num_indices = indices.size();
   std::vector<Tensor> splits(num_indices + 1);
@@ -548,6 +554,28 @@ std::vector<Tensor> tensor_split(const Tensor& self, IntArrayRef indices, int64_
   }
   splits[num_indices] = at::slice(self, dim_, start_idx, self.size(dim_));
   return splits;
+}
+
+std::vector<Tensor> tensor_split(const Tensor& self, const Tensor& tensor_indices_or_sections, int64_t dim) {
+  TORCH_CHECK(self.dim() > 0, "tensor_split expected at least a 1-dimensional tensor, but got a tensor with ", self.dim()," dims");
+  auto split_device = tensor_indices_or_sections.device();
+  TORCH_CHECK(split_device == kCPU,
+    "tensor_split expected tensor_indices_or_sections to be on cpu, but it's on ", split_device);
+  auto split_dtype = tensor_indices_or_sections.scalar_type();
+  TORCH_CHECK(split_dtype == at::kLong,
+    "tensor_split expected tensor_indices_or_sections to have dtype of long, but got ", split_dtype);
+  auto split_dim = tensor_indices_or_sections.dim();
+  TORCH_CHECK(split_dim == 1 || split_dim == 0,
+    "tensor_split expected tensor_indices_or_sections to be a zero-dimensional or one-dimensional tensor, but got a tensor with ", split_dim, " dims");
+
+  if (split_dim == 0) {
+    int64_t sections = tensor_indices_or_sections.item<int64_t>();
+    return self.tensor_split(sections, dim);
+  } else {
+    auto indices_data = tensor_indices_or_sections.data_ptr<int64_t>();
+    std::vector<int64_t> indices(indices_data, indices_data + tensor_indices_or_sections.numel());
+    return self.tensor_split(indices, dim);
+  }
 }
 
 std::vector<Tensor> unsafe_chunk(const Tensor& self, int64_t chunks, int64_t dim) {
@@ -1446,15 +1474,25 @@ inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
   return std::make_tuple(sizes, strides);
 }
 
-std::tuple<std::vector<int64_t>, std::vector<int64_t> >
+namespace {
+// Named type instead of a pair/tuple so that we can be sure to
+// construct the vectors in place and get NRVO.
+struct InferUnsqueezeGeometryResult {
+  c10::SmallVector<int64_t, 5> sizes;
+  c10::SmallVector<int64_t, 5> strides;
+  InferUnsqueezeGeometryResult(IntArrayRef tensor_sizes, IntArrayRef tensor_strides)
+      : sizes(tensor_sizes.begin(), tensor_sizes.end())
+      , strides(tensor_strides.begin(), tensor_strides.end()) {}
+};
+}
+InferUnsqueezeGeometryResult
 inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
-  auto sizes = tensor.sizes().vec();
-  auto strides = tensor.strides().vec();
-  int64_t new_stride = dim >= tensor.dim() ? 1 : sizes[dim] * strides[dim];
-  sizes.insert(sizes.begin() + dim, 1);
-  strides.insert(strides.begin() + dim, new_stride);
+  InferUnsqueezeGeometryResult result(tensor.sizes(), tensor.strides());
+  int64_t new_stride = dim >= tensor.dim() ? 1 : result.sizes[dim] * result.strides[dim];
+  result.sizes.insert(result.sizes.begin() + dim, 1);
+  result.strides.insert(result.strides.begin() + dim, new_stride);
 
-  return std::make_tuple(sizes, strides);
+  return result;
 }
 
 Tensor squeeze_qtensor(const Tensor& self) {
@@ -1603,7 +1641,7 @@ Tensor unsqueeze_qtensor(const Tensor& self, int64_t dim) {
                                                   axis,
                                                   quantizer->scalar_type());
   }
-  return make_qtensor(self, std::get<0>(g), std::get<1>(g), quantizer);
+  return make_qtensor(self, g.sizes, g.strides, quantizer);
 }
 
 Tensor unsqueeze(const Tensor& self, int64_t dim) {
@@ -1615,7 +1653,7 @@ Tensor unsqueeze(const Tensor& self, int64_t dim) {
     return unsqueeze_qtensor(self, dim);
   } else {
     auto g = inferUnsqueezeGeometry(self, dim);
-    return self.as_strided(std::get<0>(g), std::get<1>(g));
+    return self.as_strided(g.sizes, g.strides);
   }
 }
 
@@ -1623,7 +1661,7 @@ Tensor & unsqueeze_(Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
 
   auto g = inferUnsqueezeGeometry(self, dim);
-  return self.as_strided_(std::get<0>(g), std::get<1>(g));
+  return self.as_strided_(g.sizes, g.strides);
 }
 
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
