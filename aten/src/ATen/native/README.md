@@ -335,22 +335,31 @@ set of reviewers.
 ### `use_c10_dispatcher`
 
 ```
-use_c10_dispatcher: 'with_codegenerated_unboxing_wrapper'
-use_c10_dispatcher: 'hacky_wrapper_for_legacy_signatures'
 use_c10_dispatcher: 'full'
+use_c10_dispatcher: 'hacky_wrapper_for_legacy_signatures'
 ```
 
 This will indicate the level of integration with the c10 dispatcher.
-If setting this to 'full' works for your operator, please do.
-This will enabled the full templated boxing and unboxing for your operator.
-Some ops use features that aren't supported by those templates yet,
-and enabling `use_c10_dispatcher: full` for those will result in a compiler error.
-For those, use `use_c10_dispatcher: 'with_codegenerated_unboxing_wrapper'` instead,
-or just omit the argument because 'with_codegenerated_unboxing_wrapper' is the default.
-`use_c10_dispatcher: hacky_wrapper_for_legacy_signatures` is similar to `full`
-but adds a wrapper around the kernel before registering it with the dispatcher
-to support some legacy function signatures for kernels that we didn't migrate to
-the new signatures yet.
+For any new ops, please set this to 'full'. This is also the default,
+so you can just omit it.
+This requires the operator function signature to be aligned with the
+function schema in native_functions.yaml, i.e.
+- out arguments have to be in the end of the argument list instead of in the beginning
+- TensorOptions are taken as separate arguments
+```
+  const c10::optional<ScalarType>& dtype,
+  const c10::optional<Layout>& layout,
+  const c10::optional<Device>& device,
+  const c10::optional<bool>& pin_memory
+```
+  instead of one `TensorOptions` argument
+- optional tensors are taken as `const c10::optional<Tensor>&` instead of `Tensor`
+Some of our kernels are still written in a legacy way, not doing those things,
+and need an adapter to work with the dispatcher calling convention. For those, we use
+`use_c10_dispatcher: hacky_wrapper_for_legacy_signatures` to codegenerate a corresponding
+adapter around them in the operator registration call. Over time, we will migrate all
+those kernels to the new calling convention and hacky_wrapper will die.
+Please don't use it for new operators.
 
 ### `manual_kernel_registration`
 
