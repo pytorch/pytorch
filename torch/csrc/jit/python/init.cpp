@@ -472,7 +472,6 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def("_jit_pass_fixup_onnx_controlflow_node", FixupONNXControlflowNode)
-      .def("_jit_pass_fixup_onnx_loop_node_inputs", FixupONNXLoopNodeInputs)
       .def("_jit_pass_canonicalize_graph_fuser_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
@@ -949,7 +948,7 @@ void initJITBindings(PyObject* module) {
           "get_record",
           [](PyTorchStreamReader& self, const std::string& key) {
             at::DataPtr data;
-            size_t size;
+            size_t size = 0;
             std::tie(data, size) = self.getRecord(key);
             return py::bytes(reinterpret_cast<const char*>(data.get()), size);
           })
@@ -1204,7 +1203,7 @@ void initJITBindings(PyObject* module) {
       auto fork_node = graph->insertNode(graph->create(prim::TracedFork, 1));
       auto body_block = fork_node->addBlock();
 
-      Value* node_output;
+      Value* node_output = nullptr;
       py::object py_func_output;
       // Insert new trace ops into the fork op's sub-block
       WithInsertPoint guard(body_block);
