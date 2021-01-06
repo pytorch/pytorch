@@ -421,7 +421,8 @@ void fixDefaultRNNState(
   if (opset_version >= 13) {
     Node* unsqueeze_axes = graph->create(onnx::Constant, 1);
     unsqueeze_axes->insertBefore(unsqueezed_batch_size);
-    unsqueeze_axes->t_(attr::value, at::unsqueeze(at::scalar_to_tensor(at::Scalar(0)), 0));
+    unsqueeze_axes->t_(
+        attr::value, at::unsqueeze(at::scalar_to_tensor(at::Scalar(0)), 0));
     unsqueezed_batch_size->addInput(unsqueeze_axes->output());
   } else {
     unsqueezed_batch_size->is_(attr::axes, {0});
@@ -452,7 +453,8 @@ void fixDefaultRNNState(
   if (opset_version >= 13) {
     Node* unsqueeze_axes = graph->create(onnx::Constant, 1);
     unsqueeze_axes->insertBefore(unsqueezed_num_directions);
-    unsqueeze_axes->t_(attr::value, at::unsqueeze(at::scalar_to_tensor(at::Scalar(0)), 0));
+    unsqueeze_axes->t_(
+        attr::value, at::unsqueeze(at::scalar_to_tensor(at::Scalar(0)), 0));
     unsqueezed_num_directions->addInput(unsqueeze_axes->output());
   } else {
     unsqueezed_num_directions->is_(attr::axes, {0});
@@ -599,7 +601,8 @@ static void eraseListConstruct(Node* n, int opset_version) {
             Node* unsqueeze_axes = g->create(onnx::Constant, 1);
             unsqueeze_axes->insertBefore(unsqueezed_node);
             unsqueeze_axes->t_(
-                attr::value, at::unsqueeze(at::scalar_to_tensor(at::Scalar(0)), 0));
+                attr::value,
+                at::unsqueeze(at::scalar_to_tensor(at::Scalar(0)), 0));
             unsqueezed_node->addInput(unsqueeze_axes->output());
           } else {
             unsqueezed_node->is_(attr::axes, {0});
@@ -643,8 +646,7 @@ static void eraseListConstruct(Node* n, int opset_version) {
     i++;
   }
 
-  for (auto ritr = replacements.rbegin(); ritr != replacements.rend();
-        ++ritr) {
+  for (auto ritr = replacements.rbegin(); ritr != replacements.rend(); ++ritr) {
     replaceInputWithList(n, std::get<0>(*ritr), std::get<1>(*ritr));
   }
 }
