@@ -11,17 +11,19 @@ vTensor pack_image2d_h2w2(vTensor v_src, api::Context* context, api::Command::Bu
   TORCH_CHECK(v_src.has_image() , "Not implemented!");
   TORCH_CHECK(v_src.sizes().size() <= 2 , "pack_image2d_h2w2 not supported for tensors with dims > 2");
 
-  uint32_t orig_w;
+  uint32_t orig_w, orig_h;
   uint32_t packed_h, packed_w;
   if (v_src.sizes().size() == 2) {
     packed_h = div_up(v_src.sizes()[Layout::Parameter::height], INT64_C(2));
     packed_w = div_up(v_src.sizes()[Layout::Parameter::width], INT64_C(2));
     orig_w = v_src.sizes()[Layout::Parameter::width];
+    orig_h = v_src.sizes()[Layout::Parameter::height];
   }
   else {
     packed_h = 1;
     packed_w = div_up(v_src.sizes()[Layout::Parameter::height], INT64_C(2));
     orig_w = v_src.sizes()[Layout::Parameter::height];
+    orig_h = 1;
   }
   vTensor v_src_packed {
     context,
@@ -32,22 +34,17 @@ vTensor pack_image2d_h2w2(vTensor v_src, api::Context* context, api::Command::Bu
     },
     v_src.options()
   };
-  uint32_t plane = orig_w;
   const struct {
     uvec3 extents;
-    uint32_t block;
-    uvec4 offset;
-    uint32_t stride;
+    uint32_t fill;
+    uvec4 orig_size;
   } block {
     v_src_packed.extents(),
-    2u * plane,
+    0u,
     {
-      0,
-      1,
-      plane,
-      plane + 1,
-    },
-    2,
+      orig_w,
+      orig_h,
+    }
   };
 
   context->dispatch(
@@ -81,22 +78,19 @@ vTensor unpack_image2d_h2w2(vTensor v_src, c10::SmallVector<int64_t, 4u> output_
     v_src.options()
   };
 
-  uint32_t plane = output_sizes[output_sizes.size() - 1];
+  uint32_t orig_w = output_sizes[output_sizes.size() - 1];
+  uint32_t orig_h = output_sizes[output_sizes.size() - 2];
   const struct {
     uvec3 extents;
-    uint32_t block;
-    uvec4 offset;
-    uint32_t stride;
+    uint32_t fill;
+    uvec2 orig_sizes;
   } block {
     v_src.extents(),
-    2u * plane,
+    0u,
     {
-      0,
-      1,
-      plane,
-      plane + 1,
-    },
-    2,
+      orig_w,
+      orig_h,
+    }
   };
 
   context->dispatch(

@@ -11,8 +11,7 @@ layout(set = 0, binding = 1)          buffer  PRECISION restrict readonly  Buffe
 } uBuffer;
 layout(set = 0, binding = 2)          uniform PRECISION restrict           Block {
   ivec4 size;
-  ivec4 offset;
-  int stride;
+  ivec2 orig_size;
 } uBlock;
 
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
@@ -21,11 +20,12 @@ void main() {
   const ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
 
   if (all(lessThan(pos, uBlock.size.xy))) {
-    const int base_x = uBlock.stride*pos.x;
-    const int base = base_x + uBlock.size.w * pos.y;
-    const ivec4 index = base + uBlock.offset;
+    const int base_x = 2*pos.x;
+    const int base_y = 2*pos.y;
+    const int base = base_x + uBlock.orig_size.x * base_y;
+    const ivec4 index = base + ivec4(0, 1 ,uBlock.orig_size.x, uBlock.orig_size.x+1);
 
-    const vec4 mask = vec4(lessThan(vec4(base_x, base_x+1, base_x, base_x+1), vec4(uBlock.size.w/2)));
+    const vec4 mask = vec4(lessThan(vec4(base_x, base_x+1, base_x, base_x+1), vec4(uBlock.orig_size.x)));
     const vec4 outvec = vec4(
         uBuffer.data[index.x],
         uBuffer.data[index.y],
