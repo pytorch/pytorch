@@ -134,6 +134,8 @@ genrule(
         "aten/src/ATen/RegisterMeta.cpp",
         "aten/src/ATen/RegisterDefaultBackend.cpp",
         "aten/src/ATen/RegisterSchema.cpp",
+        "aten/src/ATen/CPUFunctions.h",
+        "aten/src/ATen/CUDAFunctions.h",
         "aten/src/ATen/Functions.h",
         "aten/src/ATen/Functions.cpp",
         "aten/src/ATen/NativeFunctions.h",
@@ -373,7 +375,6 @@ filegroup(
 filegroup(
     name = "thc_srcs_cu",
     srcs = [
-        "aten/src/THC/THCBlas.cu.cc",
         "aten/src/THC/THCReduceApplyUtils.cu.cc",
         "aten/src/THC/THCSleep.cu.cc",
         "aten/src/THC/THCSortUtils.cu.cc",

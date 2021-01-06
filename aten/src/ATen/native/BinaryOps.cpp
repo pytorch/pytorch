@@ -62,9 +62,10 @@ DEFINE_DISPATCH(igammac_stub);
 DEFINE_DISPATCH(nextafter_stub);
 DEFINE_DISPATCH(heaviside_stub);
 DEFINE_DISPATCH(copysign_stub);
+DEFINE_DISPATCH(xlogy_stub);
 
 TORCH_IMPL_FUNC(add_out) (
-  Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha
+  const Tensor& self, const Tensor& other, Scalar alpha, Tensor& result
 ) {
   add_stub(device_type(), *this, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
@@ -1093,6 +1094,43 @@ Tensor ldexp(const Tensor& self, const Tensor& other) {
 
 Tensor& ldexp_(Tensor& self, const Tensor& other) {
   return at::ldexp_out(self, self, other);
+}
+
+Tensor& xlogy_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_float_op(result, self, other);
+  xlogy_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor& xlogy_out(Tensor& result, Scalar self, const Tensor& other) {
+  return at::xlogy_out(result, wrapped_scalar_tensor(self), other);
+}
+
+Tensor& xlogy_out(Tensor& result, const Tensor& self, Scalar other) {
+  return at::xlogy_out(result, self, wrapped_scalar_tensor(other));
+}
+
+Tensor xlogy(const Tensor& x, const Tensor& y) {
+  Tensor result;
+  auto iter = TensorIterator::binary_float_op(result, x, y);
+  xlogy_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor xlogy(Scalar x, const Tensor& y) {
+  return at::xlogy(wrapped_scalar_tensor(x), y);
+}
+
+Tensor xlogy(const Tensor& x, Scalar y) {
+  return at::xlogy(x, wrapped_scalar_tensor(y));
+}
+
+Tensor& xlogy_(Tensor& x, const Tensor& y) {
+  return at::xlogy_out(x, x, y);
+}
+
+Tensor& xlogy_(Tensor& x, Scalar y) {
+  return at::xlogy_out(x, x, wrapped_scalar_tensor(y));
 }
 
 } // namespace native

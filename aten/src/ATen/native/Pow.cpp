@@ -31,11 +31,9 @@ Tensor& pow_out(Tensor& result, const Tensor& base, Scalar exp) {
            "result type ", common_dtype, "can't be cast to the desired output type ",
            result.scalar_type());
 
-  auto exponent = (exp.isComplex()) ? exp.toComplexDouble() : exp.toDouble();
-
-  if (exponent == 0.0) {
+  if (exp.equal(0.0)) {
     result.resize_as_(base).fill_(1);
-  } else if (exponent == 1.0) {
+  } else if (exp.equal(1.0)) {
     result.resize_as_(base).copy_(base);
   } else {
     auto iter = TensorIterator::unary_op(result, base.to(common_dtype));

@@ -19,6 +19,7 @@ import tools.codegen.api.cpp as cpp
 import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.native as native
 import tools.codegen.api.meta as meta
+from tools.codegen.api.translate import translate
 import tools.codegen.local as local
 from tools.codegen.selective_build.selector import SelectiveBuilder
 
@@ -222,13 +223,13 @@ class RegisterSchema:
 #     API without having to disambiguate which overload you want
 #     (as would be the case if you directly registered native::
 #     functions).
+#   - The tertiary function of this file is to generate *static*
+#     cpp API bindings which can be used to bypass dispatcher
+#     directly to kernels, but with user-friendly cpp-style API
 @dataclass(frozen=True)
 class RegisterDispatchKey:
     dispatch_key: str
 
-    # TODO: Give more precise type Union[Literal[Target.DEFINITION,
-    # Target.REGISTRATION]]; requires Literal from typing_extensions
-    # which we don't have a dep for yet.
     target: Target
 
     # Selector object to determine which operators to generate
@@ -237,9 +238,6 @@ class RegisterDispatchKey:
 
     # Whether or not we are actually code-genning for ROCm
     rocm: bool
-
-    def __post_init__(self) -> None:
-        assert self.target is not Target.DECLARATION
 
     @method_with_native_function
     def __call__(self, f: Union[StructuredNativeFunctions, NativeFunction]) -> List[str]:
@@ -386,25 +384,36 @@ struct {class_name} final : public {parent_class} {{
         # you edit this, you may need to also edit gen_unstructured.
         @with_native_function
         def gen_one(f: NativeFunction) -> Optional[str]:
-            assert self.target is not Target.DECLARATION
+            assert not f.manual_kernel_registration
 
             # TODO: put this into StructuredNativeFunctions itself
             functional_func = g.out.func.signature()
             functional_sig = DispatcherSignature.from_schema(functional_func)
 
-            # This is a little abusive; this assumes that the functionalization
-            # transformation ALWAYS refers to valid arguments in the original
-            # signature
-            functional_exprs = ', '.join(e.expr for e in functional_sig.exprs())
+            # TODO: is it meta or wot?  Sort this out
+            functional_exprs = ', '.join(
+                e.expr for e in translate(functional_sig.arguments(), dispatcher.arguments(functional_func), method=False)
+            )
 
             op_name = f"aten::{f.func.name}"
             if self.target is Target.REGISTRATION and not self.selector.is_operator_selected(op_name):
                 return None
 
             k = f.func.kind()
-            sig = NativeSignature.from_schema(f.func)
+            sig = NativeSignature(f.func, prefix="wrapper_")
 
-            if self.target is Target.DEFINITION:
+            # Unconditionally generate function version, never fallback binding.
+            # Some extra massaging would then be necessary in a hypothetical
+            # CPUTensor class
+            cpp_sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=False)
+            # For now, don't generate faithful signature for simplicity
+            cpp_sig = cpp_sig_group.signature
+
+            if self.target is Target.DECLARATION:
+                # namespace is handled by template
+                return f"TORCH_API {cpp_sig.decl()};\n"
+
+            elif self.target is Target.DEFINITION:
                 if self.dispatch_key == 'Meta':
                     class_name = f"structured_{meta.name(g)}_meta_{k.name}"
                     parent_class = f"at::meta::{meta.name(g)}"
@@ -430,11 +439,13 @@ struct {class_name} final : public {parent_class} {{
                 if self.dispatch_key == 'Meta':
                     impl_call = ""
                 else:
-                    impl_call = f"op.impl({out_expr}, {functional_exprs});"
+                    impl_call = f"op.impl({functional_exprs}, {out_expr});"
 
                 # For an overview of what this template code looks like, see
                 # https://github.com/pytorch/rfcs/pull/9
                 return f"""\
+namespace {{
+
 {self.gen_structured_class(
     f, k,
     class_name=class_name,
@@ -448,24 +459,21 @@ struct {class_name} final : public {parent_class} {{
     {impl_call}
     return {ret_expr};
 }}
+
+}} // anonymous namespace
+
+namespace {self.dispatch_key.lower()} {{
+{cpp_sig.defn()} {{
+    return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
+}}
+}} // namespace {self.dispatch_key.lower()}
 """
 
             elif self.target is Target.REGISTRATION:
                 dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
-                if local.use_c10_dispatcher() is UseC10Dispatcher.full:
-                    payload = f"TORCH_FN({sig.name()})"
-                elif local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
-                    payload = f"""
-c10::impl::hacky_wrapper_for_legacy_signatures<
-    {dispatcher_sig.type()},
-    {len(f.func.arguments.out)}
->(TORCH_FN({sig.name()}))
-"""
-                else:
-                    assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
-                    payload = f"torch::CppFunction::makeUnboxedOnly(&{sig.name()})"
-                return f'm.impl("{f.func.name}", {payload});'
+                assert local.use_c10_dispatcher() is UseC10Dispatcher.full
+                return f'm.impl("{f.func.name}", TORCH_FN({sig.name()}));'
             else:
                 assert_never(self.target)
                 # Silence mypy's "Missing return statement" error
@@ -475,10 +483,15 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
 
     @method_with_native_function
     def gen_unstructured(self, f: NativeFunction) -> Optional[str]:
-        # for mypy type refinement; would be fixed by TODO on target
-        assert self.target is not Target.DECLARATION
+        if f.func.is_out_fn():
+            assert local.use_c10_dispatcher().dispatcher_uses_new_style(), \
+                ("{} takes out arguments and has to be written in the new style. " +
+                 "Please add `use_c10_dispatcher: full` to your operator in native_functions.yaml " +
+                 "and write the C++ implementation to take out arguments in the end.").format(f.func.name)
 
         if self.dispatch_key not in f.dispatch:
+            return None
+        if f.manual_kernel_registration:
             return None
 
         op_name = f"aten::{f.func.name}"
@@ -488,9 +501,11 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
         name = native.name(f.func)
         returns_type = native.returns_type(f.func.returns)
         args = native.arguments(f.func)
-        args_str = ', '.join(map(str, args))
+        args_str = ', '.join(a.defn() for a in args)
 
-        if self.target is Target.DEFINITION:
+        if self.target is Target.DECLARATION:
+            return ''
+        elif self.target is Target.DEFINITION:
             impl_name = f"at::native::{f.dispatch[self.dispatch_key]}"
 
             args_exprs_str = ', '.join(a.name for a in args)
@@ -544,9 +559,13 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
 """
 
             return f"""\
+namespace {{
+
 {returns_type} {name}({args_str}) {{
 {cuda_guard}{return_kw}{impl_name}({args_exprs_str});
 }}
+
+}} // anonymous namespace
 """
 
         elif self.target is Target.REGISTRATION:
@@ -582,19 +601,17 @@ class ComputeFunction:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
-        if f.manual_kernel_registration:
-            return None
         if Variant.function not in f.variants:
             return None
 
         name = cpp.name(f.func)
 
-        sig_group = CppSignatureGroup.from_schema(f.func, method=False, fallback_binding=f.manual_cpp_binding)
+        sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)
 
         if self.target is Target.DECLARATION:
-            result = f"CAFFE2_API {sig_group.signature.decl()};\n"
+            result = f"TORCH_API {sig_group.signature.decl()};\n"
             if sig_group.faithful_signature is not None:
-                result += f"CAFFE2_API {sig_group.faithful_signature.decl()};\n"
+                result += f"TORCH_API {sig_group.faithful_signature.decl()};\n"
             return result
 
         assert self.target is Target.DEFINITION
@@ -607,7 +624,7 @@ class ComputeFunction:
             else:
                 sig = sig_group.signature
 
-            dispatcher_exprs = dispatcher.cpparguments_exprs(f.func, method=False, api_is_faithful=faithful)
+            dispatcher_exprs = translate(sig.arguments(), dispatcher_sig.arguments())
             dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
 
             return f"""
@@ -643,7 +660,7 @@ class ComputeTensorMethod:
 
         name = cpp.name(f.func)
 
-        sig_group = CppSignatureGroup.from_schema(f.func, method=True, fallback_binding=f.manual_cpp_binding)
+        sig_group = CppSignatureGroup.from_native_function(f, method=True, fallback_binding=f.manual_cpp_binding)
 
         if self.target is Target.DECLARATION:
             result = f"{sig_group.signature.decl()} const;\n"
@@ -662,7 +679,7 @@ class ComputeTensorMethod:
             else:
                 sig = sig_group.signature
 
-            dispatcher_exprs = dispatcher.cpparguments_exprs(f.func, method=True, api_is_faithful=faithful)
+            dispatcher_exprs = translate(sig.arguments(), dispatcher_sig.arguments(), method=True)
             dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
 
             return f"""
@@ -698,7 +715,7 @@ def compute_native_function_declaration(g: Union[StructuredNativeFunctions, Nati
         # only out has dispatch
         meta_name = meta.name(g)
         rs = []
-        seen = set()
+        seen: Set[Any] = set()
         out_args = native.arguments(g.out.func)
         for k, n in g.out.dispatch.items():
             if n in seen:
@@ -707,8 +724,8 @@ def compute_native_function_declaration(g: Union[StructuredNativeFunctions, Nati
                 continue
             seen.add(n)
             rs.append(f"""\
-struct CAFFE2_API structured_{n} : public at::meta::{meta_name} {{
-    void impl({', '.join(a.str_with_default() for a in out_args)});
+struct TORCH_API structured_{n} : public at::meta::{meta_name} {{
+    void impl({', '.join(a.decl() for a in out_args)});
 }};
 """)
 
@@ -722,18 +739,8 @@ struct CAFFE2_API structured_{n} : public at::meta::{meta_name} {{
                 if is_structured_dispatch_key(k):
                     continue
                 seen.add(n)
-                if f.func.is_out_fn() and local.use_c10_dispatcher() is UseC10Dispatcher.full:
-                    # out overloads don't get default arguments because
-                    # defaulted arguments would be before the out argument
-                    # in the argument list and that doesn't work.
-                    # TODO We should consider if we just want to remove
-                    # default arguments from all at::native functions
-                    # but that would be a larger change because we need
-                    # to change a lot of call sites
-                    args_str = ', '.join(str(a) for a in args)
-                else:
-                    args_str = ', '.join(a.str_with_default() for a in args)
-                rs.append(f"CAFFE2_API {returns_type} {n}({args_str});")
+                args_str = ', '.join(a.decl() for a in args)
+                rs.append(f"TORCH_API {returns_type} {n}({args_str});")
 
         return rs
 
@@ -753,7 +760,7 @@ struct CAFFE2_API structured_{n} : public at::meta::{meta_name} {{
             seen.add(n)
             returns_type = native.returns_type(f.func.returns)
             args = native.arguments(f.func)
-            rs.append(f"CAFFE2_API {returns_type} {n}({', '.join(a.str_with_default() for a in args)});")
+            rs.append(f"TORCH_API {returns_type} {n}({', '.join(a.decl() for a in args)});")
 
         return rs
 
@@ -761,13 +768,13 @@ def compute_meta_function_declaration(g: StructuredNativeFunctions) -> str:
     with native_function_manager(g.out):
         sig = g.signature()
         name = meta.name(g)
-        args = meta.arguments(sig)
-        args_str = ', '.join(map(str, args))
+        args = native.arguments(sig)
+        args_str = ', '.join(a.decl() for a in args)
         parent_class = g.out.structured_inherits
         if parent_class is None:
             parent_class = "at::impl::MetaBase"
         return f"""\
-struct CAFFE2_API {name} : public {parent_class} {{
+struct TORCH_API {name} : public {parent_class} {{
     void meta({args_str});
 }};
 """
@@ -785,7 +792,7 @@ class ComputeBackendSelect:
             return None
 
         name = native.name(f.func)
-        native_sig = NativeSignature.from_schema(f.func)
+        native_sig = NativeSignature(f.func)
 
         if not any(isinstance(a.argument, TensorOptionsArguments) for a in native_sig.arguments()):
             return None
@@ -894,7 +901,7 @@ def dynamic_type(t: Type) -> str:
     # also include Tensor[]
     if str(t) == 'Tensor':
         return 'Tensor'
-    return cpp.argumenttype_type(t, mutable=False)
+    return cpp.argumenttype_type(t, mutable=False, binds='__placeholder__').cpp_type()
 
 def compute_method_of_yaml(variants: Set[Variant]) -> List[str]:
     # This is written out explicitly to ensure that Tensor and
@@ -969,7 +976,7 @@ def compute_returns_yaml(f: NativeFunction) -> Tuple[List[Dict[str, str]], Dict[
     return returns, name_to_field_name
 
 # arguments in yaml roughly corresponds to the public C++ API
-def compute_cpp_argument_yaml(cpp_a: CppArgument, *, schema_order: bool, kwarg_only_set: Set[str],
+def compute_cpp_argument_yaml(cpp_a: Binding, *, schema_order: bool, kwarg_only_set: Set[str],
                               out_arg_set: Set[str], name_to_field_name: Dict[str, str]) -> object:
     if isinstance(cpp_a.argument, TensorOptionsArguments):
         arg: Dict[str, object] = {
@@ -997,7 +1004,7 @@ def compute_argument_yaml(a: Argument, *, schema_order: bool, kwarg_only_set: Se
         'dynamic_type': dynamic_type(a.type),
         'is_nullable': a.type.is_nullable(),
         'name': a.name,
-        'type': cpp.argument_type(a),
+        'type': cpp.argument_type(a, binds="__placeholder__").cpp_type(),
     }
     if a.default is not None:
         arg['default'] = pythonify_default(cpp.default_expr(a.default, a.type))
@@ -1025,7 +1032,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     kwarg_only_set = set(a.name for a in f.func.arguments.flat_kwarg_only)
     out_arg_set = set(a.name for a in f.func.arguments.out)
 
-    sig_group = CppSignatureGroup.from_schema(f.func, method=False, fallback_binding=False)
+    sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=False)
     cpp_args = sig_group.signature.arguments()
     arguments = [
         compute_cpp_argument_yaml(
@@ -1045,7 +1052,9 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
 
     cpp_schema_order_types = [
         # NB: method here doesn't matter
-        cpp.argument(a, method=False).type for a in schema_order_jit_arguments
+        r.type for a in schema_order_jit_arguments
+        for r in cpp.argument(
+            a, method=False, cpp_no_default_args=set(), faithful=False, has_tensor_options=False)
     ]
 
     cpp_returns = cpp.returns_type(f.func.returns)
@@ -1084,7 +1093,7 @@ def compute_registration_declarations(f: NativeFunction) -> str:
     name = dispatcher.name(f.func)
     returns_type = dispatcher.returns_type(f.func.returns)
     args = dispatcher.arguments(f.func)
-    args_str = ', '.join(map(str, args))
+    args_str = ', '.join(a.no_default().decl() for a in args)
     comment_data : Dict[str, str] = {
         'schema': f'aten::{f.func}',
         # TODO: What exactly is the semantics of the 'dispatch' field?
@@ -1309,15 +1318,19 @@ def main() -> None:
         # kernels
         "Meta",
     ]
+    # Only a limited set of dispatch keys get CPUFunctions.h headers generated
+    # for them; this is the set
+    functions_keys = {
+        "CPU",
+        "CUDA",
+    }
     if options.backend_whitelist:
         dispatch_keys = [k for k in dispatch_keys if is_generic_dispatch_key(k) or k in options.backend_whitelist]
 
     for dispatch_key in dispatch_keys:
-        cpp_template = 'RegisterDispatchKey.cpp'
-
         fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
 
-        fm.write_with_template(f'Register{dispatch_key}.cpp', cpp_template, lambda: {
+        fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
             'extra_cuda_headers': extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else '',
             'legacy_th_headers':
                 '#include <ATen/LegacyTHFunctionsCPU.h>' if dispatch_key == "CPU" else
@@ -1333,6 +1346,16 @@ def main() -> None:
                 grouped_native_functions
             )),
         })
+
+        if dispatch_key in functions_keys:
+            fm.write_with_template(f'{dispatch_key}Functions.h', 'DispatchKeyFunctions.h', lambda: {
+                'dispatch_namespace': dispatch_key.lower(),
+                'dispatch_declarations': list(concatMap(
+                    RegisterDispatchKey(dispatch_key, Target.DECLARATION, selector, rocm=options.rocm),
+                    grouped_native_functions
+                )),
+            })
+
         del fm
 
     # BackendSelect is generated specially
