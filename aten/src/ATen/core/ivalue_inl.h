@@ -377,7 +377,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
   // Get the result of the current future.
-  IValue value() const {
+  IValue value() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     if (eptr_) {
@@ -388,7 +388,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
 
   // This accessor should only be used if we know that the future is
   // completed() with no error.
-  const IValue& constValue() {
+  const IValue& constValue() const {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     AT_ASSERT(!eptr_);
