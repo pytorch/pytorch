@@ -480,6 +480,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
   if (!futureResponseMessage->hasError()) {
     Message&& responseMessage =
         std::move(*futureResponseMessage->value().toCustomClass<Message>());
+    responseMessage.setId(messageId);
     std::vector<c10::DeviceIndex> devices;
     try {
       devices = getDevicesForTensors(pipe->getRemoteName(), responseMessage);
@@ -570,8 +571,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
                   << " is running request #" << messageId << " from "
                   << pipe->getRemoteName() << " in thread pool";
 
-          auto futureResponseMessage =
-              std::make_shared<JitFuture>(at::AnyClassType::get());
+          std::shared_ptr<JitFuture> futureResponseMessage;
           try {
             futureResponseMessage = cb_->operator()(requestMessage);
           } catch (const std::exception& /* unused */) {
