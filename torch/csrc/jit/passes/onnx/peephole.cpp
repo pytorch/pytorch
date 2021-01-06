@@ -583,12 +583,10 @@ static void eraseListConstruct(Node* n, int opset_version) {
   size_t i = 0;
   for (auto* input : n->inputs()) {
     if (input->node()->kind() == prim::ListConstruct) {
-      printf("Found list construct node\n");
       auto* lc_node = input->node();
       TypePtr elem =
           lc_node->output()->type()->cast<ListType>()->getElementType();
       if (elem->cast<IntType>()) {
-        printf("int type\n");
         // ListConstruct Int[] output case, we need to transform to ONNX
         // Concat to ensure the output is a single tensor(dynamic) type in
         // order to be consumed as inputs
@@ -623,7 +621,6 @@ static void eraseListConstruct(Node* n, int opset_version) {
             i, std::vector<Value*>({concat_node->output()}));
 
       } else {
-        printf("tensor type\n");
         if (opset_version < OPSET_VERSION_11) {
           // Tensor lists are used mostly for inputs to cat/stack. They are
           // already handled in those symbolics, and should become dead
