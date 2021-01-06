@@ -95,7 +95,7 @@ std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
   // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
   // Since abslogdet_val cannot take nan, no special case handling is required.
   // in-place abs is not supported for complex tensors
-  auto abslogdet_val = diag_U.abs().log_().sum(-1);
+  auto abslogdet_val = isComplexType(t) ? diag_U.abs().log_().sum(-1) : diag_U.abs_().log_().sum(-1);
   return std::make_tuple(det_sign, abslogdet_val);
 }
 
