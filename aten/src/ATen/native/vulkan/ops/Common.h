@@ -36,7 +36,7 @@ struct Layout final {
 };
 
 struct Experimentation {
-  static constexpr bool kUseConv2dOldApi = true;
+  static constexpr bool kUseConv2dOldApi = false;
 };
 
 struct ConvPrepackLimits final {
