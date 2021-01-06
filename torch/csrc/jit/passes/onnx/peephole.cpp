@@ -419,7 +419,14 @@ void fixDefaultRNNState(
   Node* unsqueezed_batch_size = graph->create(onnx::Unsqueeze, 1);
   unsqueezed_batch_size->insertBefore(n);
   unsqueezed_batch_size->addInput(batch_size->outputs()[0]);
-  unsqueezed_batch_size->is_(attr::axes, {0});
+  if (opset_version >= 13) {
+    Node* unsqueeze_axes = graph->create(onnx::Constant, 1);
+    unsqueeze_axes->insertBefore(unsqueezed_batch_size);
+    unsqueeze_axes->t_(attr::value, at::scalar_to_tensor(at::Scalar(0)));
+    unsqueezed_batch_size->addInput(unsqueeze_axes->output());
+  } else {
+    unsqueezed_batch_size->is_(attr::axes, {0});
+  }
 
   Node* hidden_size = graph->create(onnx::Constant, 1);
   hidden_size->insertBefore(n);
@@ -443,7 +450,14 @@ void fixDefaultRNNState(
   Node* unsqueezed_num_directions = graph->create(onnx::Unsqueeze, 1);
   unsqueezed_num_directions->insertBefore(n);
   unsqueezed_num_directions->addInput(num_directions->outputs()[0]);
-  unsqueezed_num_directions->is_(attr::axes, {0});
+  if (opset_version >= 13) {
+    Node* unsqueeze_axes = graph->create(onnx::Constant, 1);
+    unsqueeze_axes->insertBefore(unsqueezed_num_directions);
+    unsqueeze_axes->t_(attr::value, at::scalar_to_tensor(at::Scalar(0)));
+    unsqueezed_num_directions->addInput(unsqueeze_axes->output());
+  } else {
+    unsqueezed_num_directions->is_(attr::axes, {0});
+  }
 
   Node* concated_dims = graph->create(onnx::Concat, 1);
   concated_dims->insertBefore(n);
@@ -584,7 +598,14 @@ static void eraseListConstruct(Block* block, int opset_version) {
             Node* unsqueezed_node = g->create(onnx::Unsqueeze, 1);
             unsqueezed_node->insertBefore(lc_node);
             unsqueezed_node->addInput(input);
-            unsqueezed_node->is_(attr::axes, {0});
+            if (opset_version >= 13) {
+              Node* unsqueeze_axes = g->create(onnx::Constant, 1);
+              unsqueeze_axes->insertBefore(unsqueezed_node);
+              unsqueeze_axes->t_(attr::value, at::scalar_to_tensor(at::Scalar(0)));
+              unsqueezed_node->addInput(unsqueeze_axes->output());
+            } else {
+              unsqueezed_node->is_(attr::axes, {0});
+            }
             unsqueezed.emplace_back(unsqueezed_node->output());
           }
           Node* concat_node = g->create(onnx::Concat, 1);
