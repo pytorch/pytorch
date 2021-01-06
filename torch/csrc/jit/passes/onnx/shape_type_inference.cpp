@@ -231,7 +231,8 @@ Value* CloneValueFromListConstruct(
       if (opset_version >= 13) {
         Node* unsqueeze_axes = n_graph->create(::c10::onnx::Constant, 1);
         unsqueeze_axes->insertBefore(unsqueezed_node);
-        unsqueeze_axes->t_(attr::value, at::unsqueeze(at::scalar_to_tensor(at::Scalar(0)), 0));
+        unsqueeze_axes->t_(
+            attr::value, at::unsqueeze(at::scalar_to_tensor(at::Scalar(0)), 0));
         unsqueezed_node->addInput(unsqueeze_axes->output());
       } else {
         unsqueezed_node->is_(attr::axes, {0});
@@ -517,7 +518,11 @@ void ONNXShapeTypeInference(
     } catch (std::runtime_error& ex) {
       // TODO: include this as warning once we have a more consolidated warning
       // system.
-      GRAPH_DEBUG("ONNX shape inference fails with: ", ex.what(), " on graph: ", n_graph->toString());
+      GRAPH_DEBUG(
+          "ONNX shape inference fails with: ",
+          ex.what(),
+          " on graph: ",
+          n_graph->toString());
       const char shape_err[] = "ShapeInferenceError";
       const char type_err[] = "TypeInferenceError";
       if ((strstr(ex.what(), shape_err) == NULL) &&
