@@ -209,7 +209,7 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
   std::stringstream encoded_inputs;
   for (const auto& input : inputs) {
     if (input.isTensor()) {
-      auto input_tensor = input.toTensor();
+      auto& input_tensor = input.toTensor();
 
       encoded_inputs << ";";
       auto sep = "";
