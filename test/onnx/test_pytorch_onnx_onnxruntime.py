@@ -681,7 +681,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         # Without empty optional arguments dictionary
         x = torch.randn(2, 3)
-        self.run_test(NoOptionalModel(), (x,), input_names=['input_x'])      
+        self.run_test(NoOptionalModel(), (x,), input_names=['input_x'])
         # With empty optional arguments dictionary
         y = torch.randn(2, 3)
         self.run_test(NoOptionalModel(), (y, {}))
