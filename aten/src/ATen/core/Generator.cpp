@@ -5,7 +5,7 @@
 namespace at {
 
 void Generator::set_state(const at::Tensor& new_state) {
-  TORCH_CHECK(new_state.defined(), "Tensor with undefined implementation is not allowed");
+  TORCH_CHECK(new_state.defined(), "Undefined tensor is not allowed");
   this->impl_->set_state(*new_state.unsafeGetTensorImpl());
 }
 

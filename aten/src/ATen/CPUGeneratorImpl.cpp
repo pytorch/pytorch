@@ -9,13 +9,13 @@ namespace at {
 namespace detail {
 
 /**
- * CPUGeneratorStateLegacy is a POD class needed for memcpys
+ * CPUGeneratorImplStateLegacy is a POD class needed for memcpys
  * in torch.get_rng_state() and torch.set_rng_state().
  * It is a legacy class and even though it is replaced with
  * at::CPUGeneratorImpl, we need this class and some of its fields
  * to support backward compatibility on loading checkpoints.
  */
-struct CPUGeneratorStateLegacy {
+struct CPUGeneratorImplStateLegacy {
   /* The initial seed. */
   uint64_t the_initial_seed;
   int left;  /* = 1; */
@@ -33,13 +33,13 @@ struct CPUGeneratorStateLegacy {
 };
 
 /**
- * CPUGeneratorState is a POD class containing
+ * CPUGeneratorImplState is a POD class containing
  * new data introduced in at::CPUGeneratorImpl and the legacy state. It is used
  * as a helper for torch.get_rng_state() and torch.set_rng_state()
  * functions.
  */ 
-struct CPUGeneratorState {
-  CPUGeneratorStateLegacy legacy_pod;
+struct CPUGeneratorImplState {
+  CPUGeneratorImplStateLegacy legacy_pod;
   float next_float_normal_sample;
   bool is_next_float_normal_sample_valid;
 };
@@ -116,21 +116,21 @@ uint64_t CPUGeneratorImpl::seed() {
 /**
  * Sets the internal state of CPUGeneratorImpl. The new internal state
  * must be a strided CPU byte tensor and of the same size as either
- * CPUGeneratorStateLegacy (for legacy CPU generator state) or
- * CPUGeneratorState (for new state).
+ * CPUGeneratorImplStateLegacy (for legacy CPU generator state) or
+ * CPUGeneratorImplState (for new state).
  * 
  * FIXME: Remove support of the legacy state in the future?
  */
 void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
-  using detail::CPUGeneratorState;
-  using detail::CPUGeneratorStateLegacy;
+  using detail::CPUGeneratorImplState;
+  using detail::CPUGeneratorImplStateLegacy;
 
-  static_assert(std::is_pod<CPUGeneratorStateLegacy>::value, "CPUGeneratorStateLegacy is not a PODType");
-  static_assert(std::is_pod<CPUGeneratorState>::value, "CPUGeneratorState is not a PODType");
+  static_assert(std::is_pod<CPUGeneratorImplStateLegacy>::value, "CPUGeneratorImplStateLegacy is not a PODType");
+  static_assert(std::is_pod<CPUGeneratorImplState>::value, "CPUGeneratorImplState is not a PODType");
 
-  static const size_t size_legacy = sizeof(CPUGeneratorStateLegacy);
-  static const size_t size_current = sizeof(CPUGeneratorState);
-  static_assert(size_legacy != size_current, "CPUGeneratorStateLegacy and CPUGeneratorState can't be of the same size");
+  static const size_t size_legacy = sizeof(CPUGeneratorImplStateLegacy);
+  static const size_t size_current = sizeof(CPUGeneratorImplState);
+  static_assert(size_legacy != size_current, "CPUGeneratorImplStateLegacy and CPUGeneratorImplState can't be of the same size");
 
   detail::check_rng_state(new_state);
 
@@ -139,15 +139,15 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   auto double_normal_sample = c10::optional<double>();
 
   // Construct the state of at::CPUGeneratorImpl based on input byte tensor size.
-  CPUGeneratorStateLegacy* legacy_pod;
+  CPUGeneratorImplStateLegacy* legacy_pod;
   auto new_state_size = new_state.numel();
   if (new_state_size == size_legacy) {
-    legacy_pod = (CPUGeneratorStateLegacy*)new_state.data();
-    // Note that in CPUGeneratorStateLegacy, we didn't have float version
+    legacy_pod = (CPUGeneratorImplStateLegacy*)new_state.data();
+    // Note that in CPUGeneratorImplStateLegacy, we didn't have float version
     // of normal sample and hence we leave the c10::optional<float> as is
 
     // Update next_double_normal_sample.
-    // Note that CPUGeneratorStateLegacy stores two uniform values (normal_x, normal_y)
+    // Note that CPUGeneratorImplStateLegacy stores two uniform values (normal_x, normal_y)
     // and a rho value (normal_rho). These three values were redundant and in the new
     // DistributionsHelper.h, we store the actual extra normal sample, rather than three
     // intermediate values.
@@ -158,7 +158,7 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
       double_normal_sample = c10::optional<double>(r * ::sin(theta));
     }
   } else if (new_state_size == size_current) {
-    auto rng_state = (CPUGeneratorState*)new_state.data();
+    auto rng_state = (CPUGeneratorImplState*)new_state.data();
     legacy_pod = &rng_state->legacy_pod;
     // update next_float_normal_sample
     if (rng_state->is_next_float_normal_sample_valid) {
@@ -173,13 +173,13 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
       double_normal_sample = c10::optional<double>(legacy_pod->normal_y);
     }
   } else {
-    AT_ERROR("Expected either a CPUGeneratorStateLegacy of size ", size_legacy,
-             " or a CPUGeneratorState of size ", size_current,
+    AT_ERROR("Expected either a CPUGeneratorImplStateLegacy of size ", size_legacy,
+             " or a CPUGeneratorImplState of size ", size_current,
              " but found the input RNG state size to be ", new_state_size);
   }
 
   // construct engine_
-  // Note that CPUGeneratorStateLegacy stored a state array of 64 bit uints, whereas in our
+  // Note that CPUGeneratorImplStateLegacy stored a state array of 64 bit uints, whereas in our
   // redefined mt19937, we have changed to a state array of 32 bit uints. Hence, we are
   // doing a std::copy.
   at::mt19937_data_pod rng_data;
@@ -200,16 +200,16 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
  * state is returned as a CPU byte tensor.
  */
 c10::intrusive_ptr<c10::TensorImpl> CPUGeneratorImpl::get_state() const {
-  using detail::CPUGeneratorState;
+  using detail::CPUGeneratorImplState;
 
-  static const size_t size = sizeof(CPUGeneratorState);
-  static_assert(std::is_pod<CPUGeneratorState>::value, "CPUGeneratorState is not a PODType");
+  static const size_t size = sizeof(CPUGeneratorImplState);
+  static_assert(std::is_pod<CPUGeneratorImplState>::value, "CPUGeneratorImplState is not a PODType");
 
   auto state_tensor = at::detail::empty_cpu({size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
   auto rng_state = state_tensor.data_ptr();
 
   // accumulate generator data to be copied into byte tensor
-  auto accum_state = std::make_unique<CPUGeneratorState>();
+  auto accum_state = std::make_unique<CPUGeneratorImplState>();
   auto rng_data = this->engine_.data();
   accum_state->legacy_pod.the_initial_seed = rng_data.seed_;
   accum_state->legacy_pod.left = rng_data.left_;
