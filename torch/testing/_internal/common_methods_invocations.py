@@ -1042,7 +1042,7 @@ op_db: List[OpInfo] = [
            skips=(
                # These tests do not work with output_func=itemgetter(1)
                # TODO: remove this once https://github.com/pytorch/pytorch/issues/49326 is resolved
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'))),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),)),
     OpInfo('linalg.solve',
            aten_name='linalg_solve',
            op=torch.linalg.solve,
