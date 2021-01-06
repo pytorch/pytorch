@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/library.h>
 
+#include <c10/util/Optional.h>
 #include <algorithm>
 #include <bitset>
 #include <cctype>
@@ -21,7 +22,6 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include <c10/util/Optional.h>
 
 namespace torch {
 namespace jit {

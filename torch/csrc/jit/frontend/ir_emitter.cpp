@@ -3462,7 +3462,7 @@ struct to_ir {
     }
 
     // handling cases like x[0:2]. x[0:2:] is already handled from python
-    if(!step) {
+    if (!step) {
       step = graph->insertConstant(1, loc);
     }
 
