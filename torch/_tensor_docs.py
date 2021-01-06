@@ -4255,7 +4255,7 @@ Example::
     False
 
 
-view(dtype) -> Tensor
+.. function:: view(dtype) -> Tensor
 
 Returns a new tensor with the same data as the :attr:`self` tensor but of a
 different :attr:`dtype`. :attr:`dtype` must have the same number of bytes per
