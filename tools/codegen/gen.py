@@ -203,8 +203,7 @@ class RegisterSchema:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
-        op_name = f"aten::{f.func.name}"
-        if not self.selector.is_operator_selected(op_name):
+        if not self.selector.is_native_function_selected(f):
             return None
         return f'm.def({cpp_string(str(f.func))});\n'
 
@@ -399,8 +398,7 @@ struct {class_name} final : public {parent_class} {{
                 e.expr for e in translate(functional_sig.arguments(), dispatcher.arguments(functional_func), method=False)
             )
 
-            op_name = f"aten::{f.func.name}"
-            if self.target is Target.REGISTRATION and not self.selector.is_operator_selected(op_name):
+            if self.target is Target.REGISTRATION and not self.selector.is_native_function_selected(f):
                 return None
 
             k = f.func.kind()
@@ -437,6 +435,8 @@ struct {class_name} final : public {parent_class} {{
                 # For an overview of what this template code looks like, see
                 # https://github.com/pytorch/rfcs/pull/9
                 return f"""\
+namespace {{
+
 {self.gen_structured_class(
     f, k,
     class_name=class_name,
@@ -450,6 +450,8 @@ struct {class_name} final : public {parent_class} {{
     {impl_call}
     return {ret_expr};
 }}
+
+}} // anonymous namespace
 """
 
             elif self.target is Target.REGISTRATION:
@@ -480,8 +482,7 @@ struct {class_name} final : public {parent_class} {{
         if f.manual_kernel_registration:
             return None
 
-        op_name = f"aten::{f.func.name}"
-        if self.target is Target.REGISTRATION and not self.selector.is_operator_selected(op_name):
+        if self.target is Target.REGISTRATION and not self.selector.is_native_function_selected(f):
             return None
 
         name = native.name(f.func)
@@ -543,9 +544,13 @@ struct {class_name} final : public {parent_class} {{
 """
 
             return f"""\
+namespace {{
+
 {returns_type} {name}({args_str}) {{
 {cuda_guard}{return_kw}{impl_name}({args_exprs_str});
 }}
+
+}} // anonymous namespace
 """
 
         elif self.target is Target.REGISTRATION:

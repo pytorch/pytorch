@@ -406,12 +406,13 @@ Command::Buffer Command::Pool::allocate() {
 }
 
 Command::Buffer& Command::Pool::stream() {
-  if (!stream_) {
-    stream_ = allocate();
-    stream_.begin();
+  if (!stream_.buffer) {
+    stream_.buffer = allocate();
+    stream_.buffer.begin();
+    stream_.counter = 0u;
   }
 
-  return stream_;
+  return stream_.buffer;
 }
 
 void Command::Pool::purge() {
@@ -421,7 +422,7 @@ void Command::Pool::purge() {
       "Potential reason: This command pool is moved from.");
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      !stream_,
+      !stream_.buffer,
       "Pending command buffer detected.  Make sure all command buffers are "
       "submitted to the queue for execution prior to reclaiming pool memory.");
 
@@ -452,14 +453,14 @@ void Command::Pool::submit(
         command_buffer,
         "Invalid Vulkan command buffer!");
 
-    // Are we submitting our one and only command stream or a regular command
+    // Are we submitting our one and only command stream, or a regular command
     // buffer whose scope is manually maintained by the user?
 
-    if (stream_.handle() == command_buffer) {
+    if (stream_.buffer.handle() == command_buffer) {
       // Are we ready to hand the command buffer off to the driver?
-      if (fence) {
-        stream_.end();
-        stream_.invalidate();
+      if (fence || (stream_.counter++ > Configuration::kSubmit)) {
+        stream_.buffer.end();
+        stream_.buffer.invalidate();
       }
       // Skip - Accumulate more calls prior to submission.
       else {

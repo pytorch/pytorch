@@ -16,12 +16,15 @@ vTensor pack_weights(
     return convert(weight_arg);
   }
 
+  api::Context* const context = api::context();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
+
   const Tensor weight = weight_arg.contiguous();
   const IntArrayRef w_sizes = weight.sizes();
   const float* const src_weight_ptr = weight.data_ptr<float>();
 
   vTensor v_weight{
-      api::context(),
+      context,
       &pool,
       w_sizes,
       weight.options(),
@@ -29,7 +32,7 @@ vTensor pack_weights(
 
   {
     using Future = vTensor::Future<void, vTensor::Access::Write>;
-    Future v_weight_future = v_weight.host<void, vTensor::Access::Write>();
+    Future v_weight_future = v_weight.host<void, vTensor::Access::Write>(command_buffer);
     Future::Payload v_weight_payload = v_weight_future.wait();
 
     memcpy(
@@ -49,8 +52,11 @@ vTensor pack_biases(
     return convert(*bias_arg);
   }
 
+  api::Context* const context = api::context();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
+
   vTensor v_bias{
-      api::context(),
+      context,
       &pool,
       {
           weight_arg.size(Layout::Parameter::width),
@@ -60,7 +66,7 @@ vTensor pack_biases(
 
   {
     using Future = vTensor::Future<void, vTensor::Access::Write>;
-    Future v_bias_future = v_bias.host<void, vTensor::Access::Write>();
+    Future v_bias_future = v_bias.host<void, vTensor::Access::Write>(command_buffer);
     Future::Payload v_bias_payload = v_bias_future.wait();
 
     if (bias_arg) {

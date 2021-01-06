@@ -481,22 +481,22 @@ TEST(VulkanAPITest, conv2d_pw) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, copy) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
+// TEST(VulkanAPITest, copy) {
+//   if (!at::is_vulkan_available()) {
+//     return;
+//   }
 
-  const auto cpu = at::rand({13, 17, 37, 19}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto vulkan = cpu.vulkan();
+//   const auto cpu = at::rand({13, 17, 37, 19}, at::device(at::kCPU).dtype(at::kFloat));
+//   const auto vulkan = cpu.vulkan();
 
-  const auto check = exactlyEqual(cpu, vulkan.cpu());
-  if (!check) {
-    std::cout << "Expected:\n" << cpu << std::endl;
-    std::cout << "Got:\n" << vulkan.cpu() << std::endl;
-  }
+//   const auto check = exactlyEqual(cpu, vulkan.cpu());
+//   if (!check) {
+//     std::cout << "Expected:\n" << cpu << std::endl;
+//     std::cout << "Got:\n" << vulkan.cpu() << std::endl;
+//   }
 
-  ASSERT_TRUE(check);
-}
+//   ASSERT_TRUE(check);
+// }
 
 TEST(VulkanAPITest, empty) {
   if (!at::is_vulkan_available()) {
@@ -626,27 +626,27 @@ TEST(VulkanAPITest, reshape) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, reshape_) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
+// TEST(VulkanAPITest, reshape_) {
+//   if (!at::is_vulkan_available()) {
+//     return;
+//   }
 
-  const auto cpu = at::rand({59, 41, 19, 67}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto vulkan = cpu.vulkan();
+//   const auto cpu = at::rand({59, 41, 19, 67}, at::device(at::kCPU).dtype(at::kFloat));
+//   const auto vulkan = cpu.vulkan();
 
-  const std::array<int64_t, 3> shape{59, 41 * 67, 19};
+//   const std::array<int64_t, 3> shape{59, 41 * 67, 19};
 
-  cpu.reshape(shape);
-  vulkan.reshape(shape);
+//   cpu.reshape(shape);
+//   vulkan.reshape(shape);
 
-  const auto check = almostEqual(cpu, vulkan.cpu());
-  if (!check) {
-    std::cout << "Expected:\n" << cpu << std::endl;
-    std::cout << "Got:\n" << vulkan.cpu() << std::endl;
-  }
+//   const auto check = almostEqual(cpu, vulkan.cpu());
+//   if (!check) {
+//     std::cout << "Expected:\n" << cpu << std::endl;
+//     std::cout << "Got:\n" << vulkan.cpu() << std::endl;
+//   }
 
-  ASSERT_TRUE(check);
-}
+//   ASSERT_TRUE(check);
+// }
 
 TEST(VulkanAPITest, upsample_nearest2d) {
   if (!at::is_vulkan_available()) {
@@ -910,24 +910,24 @@ class MobileNetV2 final : public OpsList {
   }
 };
 
-TEST(VulkanAPITest, mobilenetv2) {
-  if (!at::is_vulkan_available()) {
-    return;
-  }
+// TEST(VulkanAPITest, mobilenetv2) {
+//   if (!at::is_vulkan_available()) {
+//     return;
+//   }
 
-  MobileNetV2 mn2;
+//   MobileNetV2 mn2;
 
-  const auto input = at::rand({1, 3, 224, 224}, at::device(at::kCPU).dtype(at::kFloat));
-  const auto output = mn2.run(input, input.vulkan());
+//   const auto input = at::rand({1, 3, 224, 224}, at::device(at::kCPU).dtype(at::kFloat));
+//   const auto output = mn2.run(input, input.vulkan());
 
-  const auto check = almostEqual(output.first, output.second.cpu());
-  if (!check) {
-    std::cout << "Expected:\n" << output.first << std::endl;
-    std::cout << "Got:\n" << output.second.cpu() << std::endl;
-  }
+//   const auto check = almostEqual(output.first, output.second.cpu());
+//   if (!check) {
+//     std::cout << "Expected:\n" << output.first << std::endl;
+//     std::cout << "Got:\n" << output.second.cpu() << std::endl;
+//   }
 
-  ASSERT_TRUE(check);
-}
+//   ASSERT_TRUE(check);
+// }
 
 } // namespace
 

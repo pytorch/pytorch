@@ -102,6 +102,7 @@ struct Command final {
     struct Configuration final {
       static constexpr uint32_t kQuantum = 4u;
       static constexpr uint32_t kReserve = 16u;
+      static constexpr uint32_t kSubmit = 64u;
     };
 
     VkDevice device_;
@@ -112,7 +113,10 @@ struct Command final {
       size_t in_use;
     } buffer_;
 
-    Buffer stream_;
+    struct {
+      Buffer buffer;
+      uint32_t counter;
+    } stream_;
   } pool /* [thread_count] */;
 
   explicit Command(const GPU& gpu)
