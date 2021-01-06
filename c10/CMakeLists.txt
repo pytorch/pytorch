@@ -23,7 +23,7 @@ configure_file(
     ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h)
 
 # Note: if you want to add ANY dependency to the c10 library, make sure you
-# check with the core PyTorch developers as the dependendency will be
+# check with the core PyTorch developers as the dependency will be
 # transitively passed on to all libraries dependent on PyTorch.
 file(GLOB C10_SRCS
         *.cpp

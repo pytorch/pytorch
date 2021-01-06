@@ -720,6 +720,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.q_scale: lambda input: -1,
         torch.q_zero_point: lambda input: -1,
         torch.qr: lambda input, some=True, out=None: -1,
+        torch.linalg.qr: lambda input, mode='reduced', out=None: -1,
         torch.quantile: lambda input, q, dim=None, keepdim=False, out=None: -1,
         torch.nanquantile: lambda input, q, dim=None, keepdim=False, out=None: -1,
         torch.quantize_per_channel: lambda input, scales, zero_points, axis, dtype: -1,
