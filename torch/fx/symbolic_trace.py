@@ -14,28 +14,6 @@ HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 # wrap_fn and wrap_fn_impl are used to implement the behavior of
 # torch.fx.wrap. `_wrap_fn_impl` is installed during tracing.
 _wrap_fn = None
-def _wrap_fn_impl(orig_function, args, kwargs):
-    """
-    Given an ``orig_function`` to invoke, search the args and kwargs for
-    a Proxy object. If there is one, emit a ``call_function`` node to
-    preserve the call to this leaf function directly. Otherwise, just
-    return the results of this function call, as this function is not
-    being traced.
-    """
-    proxy = None
-
-    def find_proxy(x):
-        nonlocal proxy
-        if isinstance(x, Proxy):
-            proxy = x
-
-    map_aggregate(args, find_proxy)
-    map_aggregate(kwargs, find_proxy)
-
-    if proxy is not None:
-        return proxy.tracer.create_proxy('call_function', orig_function, args, kwargs)
-    else:
-        return orig_function(*args, **kwargs)
 
 def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     co = fn.__code__
@@ -264,6 +242,29 @@ class Tracer(TracerBase):
 
         return root_fn, args
 
+    def call_wrapped_func(self, orig_function, args, kwargs):
+        """
+        Given an ``orig_function`` to invoke, search the args and kwargs for
+        a Proxy object. If there is one, emit a ``call_function`` node to
+        preserve the call to this leaf function directly. Otherwise, just
+        return the results of this function call, as this function is not
+        being traced.
+        """
+        proxy = None
+
+        def find_proxy(x):
+            nonlocal proxy
+            if isinstance(x, Proxy):
+                proxy = x
+
+        map_aggregate(args, find_proxy)
+        map_aggregate(kwargs, find_proxy)
+
+        if proxy is not None:
+            return proxy.tracer.create_proxy('call_function', orig_function, args, kwargs)
+        else:
+            return orig_function(*args, **kwargs)
+
     def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
         """
         Trace ``root`` and return the corresponding FX ``Graph`` representation. ``root``
@@ -336,7 +337,7 @@ class Tracer(TracerBase):
             # Install _wrap_fn_impl so that we can properly record calls to
             # leaf functions, i.e. functions decorated with @fx.wrap
             global _wrap_fn
-            _wrap_fn = _wrap_fn_impl
+            _wrap_fn = self.call_wrapped_func
 
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                              type_expr=fn.__annotations__.get('return', None))
