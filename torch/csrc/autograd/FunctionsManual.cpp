@@ -14,6 +14,7 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/native/IndexingUtils.h>
 
 #include <ciso646>
 #include <algorithm>
@@ -160,10 +161,21 @@ std::tuple<Tensor, Tensor> _euclidean_dist_backward(const Tensor & grad, const T
             x2 * ratio.sum(-2, false).unsqueeze(-1) - ratio.transpose(-2, -1).matmul(x1)};
 }
 
-Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Scalar> & p_, const Tensor & norm) {
+Tensor norm_backward(const Tensor& grad, const Tensor& self, const optional<Scalar> & p_, const Tensor& norm) {
+  return norm_backward(grad, self, p_, norm, {}, true);
+}
+
+Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
+  size_t ndim = self.sizes().size();
   double p = p_.value_or(2.0).toDouble();
   Tensor self_scaled;
   Tensor scale_v;
+
+  if (!keepdim && self.dim() != 0) {
+    grad = unsqueeze_multiple(grad, dim, ndim);
+    norm = unsqueeze_multiple(norm, dim, ndim);
+  }
+
   if (p == 0.0) {
     return at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else if (p == 1.0) {
@@ -172,8 +184,13 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Sc
     self_scaled = self;
     scale_v = grad / norm;
   } else if (std::isinf(p)) {
-    self_scaled = self.sgn() * (self.abs() == norm).type_as(self);
-    scale_v = grad.clone(at::MemoryFormat::Preserve);
+    Tensor is_eq_max = (self.abs() == norm).logical_or_(self.isnan().logical_and_(norm.isnan())).type_as(self);
+    self_scaled = self.sign() * is_eq_max;
+    Tensor nb_max = is_eq_max.count_nonzero(dim);
+    if (self.dim() != 0) {
+      nb_max = unsqueeze_multiple(nb_max, dim, ndim);
+    }
+    scale_v = grad / nb_max;
   } else if (p < 2.0) {
     self_scaled = self.sgn() * self.abs().pow(p - 1);
     scale_v = grad / norm.pow(p - 1);
@@ -184,25 +201,6 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const optional<Sc
   // handle case at 0 where we return a subgradient containing 0
   scale_v.masked_fill_(norm == 0, 0);
   return self_scaled * scale_v;
-}
-
-Tensor norm_backward(Tensor grad, const Tensor & self, const optional<Scalar> & p_, Tensor norm, IntArrayRef dim, bool keepdim) {
-  IntArrayRef sizes = self.sizes();
-  if (!keepdim && self.dim() != 0) {
-    if (dim.size()==1) {
-      grad = grad.unsqueeze(dim[0]);
-      norm = norm.unsqueeze(dim[0]);
-    } else {
-      auto dims_to_unsqueeze = at::dim_list_to_bitset(dim, sizes.size());
-      for (size_t i = 0; i < sizes.size(); i++){
-        if (dims_to_unsqueeze[i]) {
-          grad = grad.unsqueeze(i);
-          norm = norm.unsqueeze(i);
-        }
-      }
-    }
-  }
-  return norm_backward(grad, self, p_, norm);
 }
 
 Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent) {
@@ -2214,15 +2212,17 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
       return nonsingular_case_backward(grad, self, det);
     }
   } else {
-    auto nonzero_det_indices = at::where(det);
+    auto nonzero_det_indices = at::native::toListOfOptionalTensors(at::where(det));
+    c10::optional<Tensor> first_nonzero_det_index = nonzero_det_indices[0];
 
-    if (nonzero_det_indices[0].size(0) == det.numel()) {  // all determinants are nonzero (non-singular)
+    if (first_nonzero_det_index->size(0) == det.numel()) {  // all determinants are nonzero (non-singular)
       return nonsingular_case_backward(grad, self, det);
     }
 
-    auto zero_det_indices = at::where(det == 0);
+    auto zero_det_indices = at::native::toListOfOptionalTensors(at::where(det == 0));
+    c10::optional<Tensor> first_zero_det_index = zero_det_indices[0];
 
-    if (zero_det_indices[0].size(0) == det.numel()) {  // all determinants are zero (singular)
+    if (first_zero_det_index->size(0) == det.numel()) {  // all determinants are zero (singular)
       return singular_case_backward(grad, self, det);
     }
 
@@ -2264,15 +2264,17 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
       return singular_case_backward(grad, self);
     }
   } else {
-    auto finite_logdet_indices = at::where(logdet != -INFINITY);
+    auto finite_logdet_indices = at::native::toListOfOptionalTensors(at::where(logdet != -INFINITY));
+    c10::optional<Tensor> first_finite_logdet_index = finite_logdet_indices[0];
 
-    if (finite_logdet_indices[0].size(0) == logdet.numel()) {  // all log determinants are finite (non-singular)
+    if (first_finite_logdet_index->size(0) == logdet.numel()) {  // all log determinants are finite (non-singular)
       return nonsingular_case_backward(grad, self);
     }
 
-    auto neginf_logdet_indices = at::where(logdet == -INFINITY);
+    auto neginf_logdet_indices = at::native::toListOfOptionalTensors(at::where(logdet == -INFINITY));
+    c10::optional<Tensor> first_neginf_logdet_index = neginf_logdet_indices[0];
 
-    if (neginf_logdet_indices[0].size(0) == logdet.numel()) {  // all log determinants are -inf (singular)
+    if (first_neginf_logdet_index->size(0) == logdet.numel()) {  // all log determinants are -inf (singular)
       return singular_case_backward(grad, self);
     }
 
@@ -2316,15 +2318,17 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
       return nonsingular_case_backward(grad_logabsdet, self);
     }
   } else {
-    auto nonzero_signdet_indices = at::where(signdet);
+    auto nonzero_signdet_indices = at::native::toListOfOptionalTensors(at::where(signdet));
+    c10::optional<Tensor> first_nonzero_signdet_index = nonzero_signdet_indices[0];
 
-    if (nonzero_signdet_indices[0].size(0) == logabsdet.numel()) {  // all log determinants are finite (non-singular)
+    if (first_nonzero_signdet_index->size(0) == logabsdet.numel()) {  // all log determinants are finite (non-singular)
       return nonsingular_case_backward(grad_logabsdet, self);
     }
 
-    auto zero_signdet_indices = at::where(signdet == 0);
+    auto zero_signdet_indices = at::native::toListOfOptionalTensors(at::where(signdet == 0));
+    c10::optional<Tensor> first_zero_signdet_index = zero_signdet_indices[0];
 
-    if (zero_signdet_indices[0].size(0) == logabsdet.numel()) {  // all log determinants are -inf (singular)
+    if (first_zero_signdet_index->size(0) == logabsdet.numel()) {  // all log determinants are -inf (singular)
       return singular_case_backward(grad_logabsdet, self);
     }
 
@@ -2876,8 +2880,8 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
   return gg_weight.view(size);
 }
 
-Tensor index_backward(Tensor zeros_like_self, TensorList indices, const Tensor& grad) {
-   return at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
+Tensor index_backward(Tensor zeros_like_self, const torch::List<c10::optional<Tensor>>& indices, const Tensor& grad) {
+  return at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
 }
 
 Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, const Tensor& raw_grad, bool zero_infinity) {
