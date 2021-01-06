@@ -128,7 +128,7 @@ std::pair<double, double> getTolerance(
   }
 }
 
-class TORCH_CUDA_API ReductionSizeMapper : private IterVisitor {
+class ReductionSizeMapper : private IterVisitor {
  public:
   //! Runs through the fusion and determines how many reductions were performed
   //! to compute each tensorview.

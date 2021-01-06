@@ -428,7 +428,7 @@ mobile::Module _load_for_mobile(
     mobile::Module result = deserializer.deserialize(device, extra_files);
     std::unordered_map<std::string, std::string> copied_metadata =
         result.metadata();
-    if (result.metadata().find("model_name") == result.metadata().end()) {
+    if (copied_metadata.find("model_name") == copied_metadata.end()) {
       copied_metadata["model_name"] = result.name();
     }
     if (observer) {
