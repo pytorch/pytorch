@@ -15,6 +15,7 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
 
+// NOLINTNEXTLINE
 C10_DEFINE_bool(
     torch_jit_disable_cat,
     false,
