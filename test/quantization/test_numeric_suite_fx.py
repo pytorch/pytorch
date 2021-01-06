@@ -12,7 +12,7 @@ from torch.quantization.fx.quantize import is_activation_post_process
 from torch.quantization.quantize_fx import convert_fx, fuse_fx, prepare_fx
 from torch.testing._internal.common_quantization import (
     ConvBnModel,
-    ConvBNReLU,
+    ConvBnReLUModel,
     ConvModel,
     QuantizationTestCase,
     SingleLayerLinearDynamicModel,
@@ -172,7 +172,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         qconfig = get_default_qconfig(qengine)
         qconfig_dict = {"": qconfig}
 
-        model_list = [ConvModel(), ConvBNReLU()]
+        model_list = [ConvModel(), ConvBnReLUModel()]
 
         for float_model in model_list:
             float_model.eval()
