@@ -265,7 +265,7 @@ bool IValue::ptrEqual(const IValue& lhs, const IValue& rhs) {
   TORCH_INTERNAL_ASSERT(lhs.is_intrusive_ptr);
   TORCH_INTERNAL_ASSERT(rhs.is_intrusive_ptr);
   return lhs.tag == rhs.tag &&
-      lhs.payload.as_intrusive_ptr == rhs.payload.as_intrusive_ptr;
+      lhs.payload.u.as_intrusive_ptr == rhs.payload.u.as_intrusive_ptr;
 }
 
 IValue IValue::equals(const IValue& rhs) const {
@@ -325,17 +325,17 @@ size_t IValue::hash(const IValue& v) {
     case Tag::None:
       return 0;
     case Tag::Bool:
-      return c10::get_hash(v.payload.as_bool);
+      return c10::get_hash(v.payload.u.as_bool);
     case Tag::Double:
-      return c10::get_hash(v.payload.as_double);
+      return c10::get_hash(v.payload.u.as_double);
     case Tag::Tensor:
       // Tensor __hash__ is equivalent to `id()`, so take the pointer value of
       // the tensor to emulate it
-      return c10::get_hash(v.payload.as_int);
+      return c10::get_hash(v.payload.as_tensor.unsafeGetTensorImpl());
     case Tag::Storage:
-      return c10::get_hash(v.payload.as_int);
+      return c10::get_hash(v.payload.u.as_int);
     case Tag::Int:
-      return c10::get_hash(v.payload.as_int);
+      return c10::get_hash(v.payload.u.as_int);
     case Tag::String:
       return c10::get_hash(v.toStringRef());
     case Tag::Tuple:
