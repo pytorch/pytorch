@@ -107,8 +107,20 @@ def _prepare_standalone_module_fx(
     standalone_module means it a submodule that is not inlined in parent module,
         and will be quantized separately as one unit.
 
-    Both input and output of the module are observed in the
-    standalone module.
+    How the standalone module is observed is specified by `input_quantized_idxs` and
+    `output_quantized_idxs` in the prepare_custom_config for the standalone module
+
+    Returns:
+        model(GraphModule): prepared standalone module
+        attributes:
+            _standalone_module_input_quantized_idxs(List[Int]): a list of
+                indexes for the graph input that is expected to be quantized,
+                same as input_quantized_idxs configuration provided
+                for the standalone module
+            _standalone_module_output_quantized_idxs(List[Int]): a list of
+                indexs for the graph output that is quantized
+                same as input_quantized_idxs configuration provided
+                for the standalone module
     """
     return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict, is_standalone_module=True)
 
@@ -378,8 +390,9 @@ def _convert_standalone_module_fx(
     r""" [Internal use only] Convert a model produced by :func:`~torch.quantization.prepare_standalone_module_fx`
     and convert it to a quantized model
 
-    Return:
-        A quantized standalone module which accepts float input
-        and produces float output.
+    Returns a quantized standalone module, whether input/output is quantized is
+    specified by prepare_custom_config_dict, with
+    input_quantized_idxs, output_quantized_idxs, please
+    see docs for prepare_fx for details
     """
     return _convert_fx(graph_module, debug, convert_custom_config_dict, is_standalone_module=True)
