@@ -514,8 +514,7 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
       std::move(data.first), std::move(data.second), work.type_, work.id_);
   if (message.isRequest()) {
     ++serverActiveCalls_;
-    auto futureResponse =
-        std::make_shared<JitFuture>(at::AnyClassType::get());
+    std::shared_ptr<JitFuture> futureResponse;
     try {
       futureResponse = cb_->operator()(message);
     } catch (const std::exception& e) {
@@ -595,12 +594,9 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
     futureCV_.notify_all();
     --clientActiveCalls_;
     if (message.type() == MessageType::EXCEPTION) {
-      //fm->setError(
-      //    std::string(message.payload().begin(), message.payload().end()));
       jitFuture->setError(std::make_exception_ptr(std::runtime_error(
           std::string(message.payload().begin(), message.payload().end()))));
     } else {
-      //jitFuture->markCompleted(std::move(message));
       jitFuture->markCompleted(
           IValue(c10::make_intrusive<Message>(std::move(message))));
     }
