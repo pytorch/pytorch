@@ -730,7 +730,7 @@ PyObject* initModule() {
   THPLayout_init(module);
   THPMemoryFormat_init(module);
   THPQScheme_init(module);
-  torch::initDeviceBindings(module);
+  torch::python::initDeviceBindings(module);
   THPStream_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));

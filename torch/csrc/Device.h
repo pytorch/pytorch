@@ -1,19 +1,20 @@
 #pragma once
 
-#include <ATen/ATen.h>
 #include <torch/csrc/python_headers.h>
+
+#include <ATen/ATen.h>
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch {
+namespace torch { namespace python {
 
 /**
- * Utility for parsing the device argument.
+ * Utility for parsing Python device argument.
  */
 at::Device parseDevice(py::object device);
 
 void initDeviceBindings(PyObject* module);
 
-} // namespace torch
+}} // namespace torch::python
 
 // Legacy functions are still kept to ease transition to pybind11 bindings
 // FIXME Remove use of these functions and get rid of them

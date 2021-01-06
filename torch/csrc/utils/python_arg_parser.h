@@ -489,7 +489,7 @@ inline at::Device PythonArgs::device(int i) {
     return at::Device(backendToDeviceType(dispatchKeyToBackend(torch::tensors::get_default_dispatch_key())));
   }
   // Original code does not mutate reference counts, so make a copy here
-  return torch::parseDevice(py::reinterpret_borrow<py::object>(args[i]));
+  return torch::python::parseDevice(py::reinterpret_borrow<py::object>(args[i]));
 }
 
 inline at::Device PythonArgs::deviceWithDefault(int i, const at::Device& default_device) {

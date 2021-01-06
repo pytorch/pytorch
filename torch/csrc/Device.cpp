@@ -3,7 +3,7 @@
 
 #include <sstream>
 
-namespace torch {
+namespace torch { namespace python {
 using namespace at;
 
 namespace {
@@ -103,4 +103,4 @@ void initDeviceBindings(PyObject* module) {
           });
 }
 
-} // namespace torch
+}} // namespace torch::python
