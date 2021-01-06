@@ -256,7 +256,6 @@ void parseMethods(
 bool has_tensor_jit_index(const std::vector<IValue>& bytecode_values) {
   // The following variables are used to locate the "constants"
   // fields in elements
-  bool is_constant_element = false;
   c10::ivalue::ConstantString constants_str("constants");
   auto constants_ir = IValue(constants_str);
   c10::ivalue::ConstantString tensor_jit_index_str(mobile::kTensorJitIndex);
@@ -324,7 +323,6 @@ bool has_tensor_jit_index(const std::vector<IValue>& bytecode_values) {
             //          ('OP', 0, 0),
             //          ('RET', 0, 0)),
             //  )
-            is_constant_element = false;
             // A list of if condition statement, trying to locate the
             // 'constants' field.
             if (method_element.isTuple()) {
@@ -349,7 +347,6 @@ bool has_tensor_jit_index(const std::vector<IValue>& bytecode_values) {
                       }
                     }
                   }
-                  is_constant_element = true;
                 }
               }
             }
