@@ -4355,14 +4355,8 @@ class TestONNXRuntime(unittest.TestCase):
         input = torch.randint(10, (7, 5))
         self.run_test(model, (input))
 
-<<<<<<< HEAD
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfUnsupportedOpsetVersion([12])  # Due to ONNX Loop shape inference issue
-=======
-    @disableScriptTest()  # scripting prim::Uninitialized, prim::dtype, prim::unchecked_cast
-    @skipIfUnsupportedMinOpsetVersion(10)
     @skipIfUnsupportedOpsetVersion([12, 13])  # Due to ONNX Loop shape inference issue
->>>>>>> e9cbf6573e1a16aa912bb88378b539cb9f3ebc4d
     def test_embedding_bag_1d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
             def forward(self, embedding_matrix, input, offset, weights):
