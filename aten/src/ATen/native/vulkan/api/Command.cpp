@@ -431,8 +431,7 @@ void Command::Pool::purge() {
 
 void Command::Pool::submit(
     const VkQueue queue,
-    const Buffer* const buffers,
-    const uint32_t count,
+    const c10::ArrayRef<const Buffer> buffers,
     const Resource::Fence fence) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && command_pool_,
@@ -444,22 +443,26 @@ void Command::Pool::submit(
       "Invalid Vulkan queue!");
 
   c10::SmallVector<VkCommandBuffer, Configuration::kReserve> command_buffers;
-  command_buffers.reserve(count);
+  command_buffers.reserve(buffers.size());
 
-  for (uint32_t buffer = 0u; buffer < count; ++buffer) {
-    VkCommandBuffer command_buffer = buffers[buffer].handle();
+  for (const Buffer& buffer : buffers) {
+    VkCommandBuffer command_buffer = buffer.handle();
 
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         command_buffer,
         "Invalid Vulkan command buffer!");
 
+    // Are we submitting our one and only command stream or a regular command
+    // buffer whose scope is manually maintained by the user?
+
     if (stream_.handle() == command_buffer) {
+      // Are we ready to hand the command buffer off to the driver?
       if (fence) {
         stream_.end();
         stream_.invalidate();
       }
+      // Skip - Accumulate more calls prior to submission.
       else {
-        // Skip
         command_buffer = VK_NULL_HANDLE;
       }
     }

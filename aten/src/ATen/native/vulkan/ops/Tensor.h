@@ -157,10 +157,10 @@ class vTensor final {
   */
 
   template<typename Type>
-  Future<Type, Access::Read> host() const &;
+  Future<Type, Access::Read> host(api::Command::Buffer&) const &;
 
   template<typename Type, Access::Flags kAccess>
-  Future<Type, kAccess> host() &;
+  Future<Type, kAccess> host(api::Command::Buffer&) &;
 
   /*
     Device access - these functions will be expensive if they trigger a buffer
@@ -206,14 +206,14 @@ class vTensor final {
     Host
   */
 
-  const vTensor* host() const;
-  vTensor* host(Access::Flags access);
+  const vTensor* host(api::Command::Buffer&) const;
+  vTensor* host(api::Command::Buffer&, Access::Flags);
 
   template<typename Type>
-  Future<Type, Access::Read> host() const && = delete;
+  Future<Type, Access::Read> host(api::Command::Buffer&) const && = delete;
 
   template<typename Type, Access::Flags kAccess>
-  Future<Type, kAccess> host() && = delete;
+  Future<Type, kAccess> host(api::Command::Buffer&) && = delete;
 
   /*
     Device
@@ -257,7 +257,7 @@ class vTensor final {
       Host
     */
 
-    Buffer& staging(Stage::Flags, Access::Flags) const;
+    Buffer& staging(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
     vTensor::Memory& wait() const;
 
     /*
@@ -478,13 +478,15 @@ vTensor::Future<Type, kAccess>::wait() const & {
 }
 
 template<typename Type>
-inline vTensor::Future<Type, vTensor::Access::Read> vTensor::host() const & {
-  return Future<Type, vTensor::Access::Read>(host());
+inline vTensor::Future<Type, vTensor::Access::Read>
+vTensor::host(api::Command::Buffer& command_buffer) const & {
+  return Future<Type, vTensor::Access::Read>(host(command_buffer));
 }
 
 template<typename Type, vTensor::Access::Flags kAccess>
-inline vTensor::Future<Type, kAccess> vTensor::host() & {
-  return Future<Type, kAccess>(host(kAccess));
+inline vTensor::Future<Type, kAccess>
+vTensor::host(api::Command::Buffer& command_buffer) & {
+  return Future<Type, kAccess>(host(command_buffer, kAccess));
 }
 
 inline bool vTensor::has_image() const {

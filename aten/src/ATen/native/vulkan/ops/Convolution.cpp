@@ -401,7 +401,7 @@ void conv2d_depthwise(
     const float output_min,
     const float output_max) {
   if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
-    const struct {
+    const struct Block final {
       ivec2 kernel;
       ivec2 stride;
       ivec2 padding;
@@ -484,7 +484,7 @@ void conv2d_pointwise(
     const float output_min,
     const float output_max) {
   if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
-    const struct {
+    const struct Block final {
       ivec2 kernel;
       ivec2 stride;
       ivec2 padding;
@@ -565,7 +565,7 @@ void conv2d(
     const float output_min,
     const float output_max) {
   if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
-    const struct {
+    const struct Block final {
       ivec4 kernel;
       ivec2 stride;
       ivec2 padding;
@@ -785,7 +785,7 @@ void conv2d_old(
     const int32_t OC_4 = v_output.extents().data[2];
     const int32_t OC = 4 * OC_4;
 
-    const struct {
+    const struct Block final {
       int32_t padding_x, padding_y;
       int32_t kernel_x, kernel_y;
       int32_t stride_x, stride_y;

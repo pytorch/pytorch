@@ -419,13 +419,16 @@ vTensor::vTensor(
     }) {
 }
 
-const vTensor* vTensor::host() const {
-  view_->staging(Stage::Host, Access::Read);
+const vTensor* vTensor::host(
+    api::Command::Buffer& command_buffer) const {
+  view_->staging(command_buffer, Stage::Host, Access::Read);
   return this;
 }
 
-vTensor* vTensor::host(const Access::Flags access) {
-  view_->staging(Stage::Host, access);
+vTensor* vTensor::host(
+    api::Command::Buffer& command_buffer,
+    const Access::Flags access) {
+  view_->staging(command_buffer, Stage::Host, access);
   return this;
 }
 
@@ -505,16 +508,9 @@ vTensor::View::View(
   ops::verify(options);
 }
 
-// We typically do not know whether we need a command buffer to service a request
-// until we have perfomed a bunch of checks in nested logic, and even then we
-// may end up with the always issued state transition optimized away under
-// certain conditions, which makes a policy of always allocating a command buffer
-// up front, only to end up using it at times, a wasteful approach.  This class
-// answers that need.
-
 class vTensor::View::CMD final {
  public:
-  explicit CMD(const View&, api::Command::Buffer* = nullptr);
+  CMD(const View&, api::Command::Buffer&);
   CMD(const CMD&) = delete;
   CMD& operator=(const CMD&) = delete;
   CMD(CMD&&) = delete;
@@ -554,22 +550,21 @@ class vTensor::View::CMD final {
 
  private:
   const View& view_;
-  api::Command::Buffer* command_buffer_;
+  api::Command::Buffer& command_buffer_;
+  bool used_;
 };
 
 vTensor::View::CMD::CMD(
     const View& view,
-    api::Command::Buffer* const command_buffer)
+    api::Command::Buffer& command_buffer)
   : view_(view),
-    command_buffer_(command_buffer) {
+    command_buffer_(command_buffer),
+    used_(false) {
 }
 
-api::Command::Buffer& vTensor::View::CMD::command_buffer() {
-  if (!command_buffer_) {
-    command_buffer_ = &view_.context_->command().pool.stream();
-  }
-
-  return *command_buffer_;
+inline api::Command::Buffer& vTensor::View::CMD::command_buffer() {
+  used_ = true;
+  return command_buffer_;
 }
 
 void vTensor::View::CMD::barrier(State::Transition transition) {
@@ -785,7 +780,7 @@ void vTensor::View::CMD::copy_buffer_to_image(
   const uvec3 extents = view_.extents();
   const uint32_t plane = extents.data[0u] * extents.data[1u];
 
-  const struct {
+  const struct Block final {
     uvec3 extents;
     uint32_t block;
     uvec4 offset;
@@ -842,7 +837,7 @@ void vTensor::View::CMD::copy_image_to_buffer(
   const uvec3 extents = view_.extents();
   const uint32_t plane = extents.data[0u] * extents.data[1u];
 
-  const struct {
+  const struct Block final {
     uvec3 extents;
     uint32_t block;
     uvec4 offset;
@@ -872,13 +867,12 @@ void vTensor::View::CMD::copy_image_to_buffer(
 }
 
 void vTensor::View::CMD::submit(api::Resource::Fence& fence) {
-  if (command_buffer_) {
-    fence = allocate_fence(view_.pool_);
+  if (used_) {
+    fence = allocate_fence(&view_.context_->resource().pool);
 
     view_.context_->command().pool.submit(
         view_.context_->gpu().queue,
-        command_buffer_,
-        1u,
+        command_buffer(),
         fence);
   }
 }
@@ -899,7 +893,7 @@ vTensor::Buffer& vTensor::View::buffer(
     api::Command::Buffer& command_buffer,
     const Stage::Flags stage,
     const Access::Flags access) const {
-  CMD cmd(*this, &command_buffer);
+  CMD cmd(*this, command_buffer);
   return buffer(cmd, stage, access);
 }
 
@@ -964,7 +958,7 @@ vTensor::Image& vTensor::View::image(
     api::Command::Buffer& command_buffer,
     const Stage::Flags stage,
     const Access::Flags access) const {
-  CMD cmd(*this, &command_buffer);
+  CMD cmd(*this, command_buffer);
   return image(cmd, stage, access);
 }
 
@@ -1019,9 +1013,10 @@ vTensor::Buffer& vTensor::View::staging() const {
 }
 
 vTensor::Buffer& vTensor::View::staging(
+    api::Command::Buffer& command_buffer,
     const Stage::Flags stage,
     const Access::Flags access) const {
-  CMD cmd(*this);
+  CMD cmd(*this, command_buffer);
   Buffer& staging = this->staging(cmd, stage, access);
   cmd.submit(fence());
 

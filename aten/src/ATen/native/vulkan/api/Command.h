@@ -7,6 +7,7 @@
 #include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
+#include <c10/util/ArrayRef.h>
 
 namespace at {
 namespace native {
@@ -91,8 +92,7 @@ struct Command final {
 
     void submit(
         VkQueue queue,
-        const Buffer* buffers,
-        uint32_t count,
+        c10::ArrayRef<const Buffer> buffers,
         Resource::Fence fence = {});
 
    private:
