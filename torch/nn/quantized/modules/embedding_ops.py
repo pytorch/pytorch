@@ -52,7 +52,6 @@ class EmbeddingPackedParams(torch.nn.Module):
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        version = local_metadata.get('version', None)
         self.dtype = state_dict[prefix + 'dtype']
         state_dict.pop(prefix + 'dtype')
 
