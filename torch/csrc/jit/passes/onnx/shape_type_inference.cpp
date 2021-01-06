@@ -200,7 +200,10 @@ bool IsSupportedNode(const Node* n) {
   return true;
 }
 
-Value* CloneValueFromListConstruct(Value* v, std::shared_ptr<Graph> n_graph, int opset_version) {
+Value* CloneValueFromListConstruct(
+    Value* v,
+    std::shared_ptr<Graph> n_graph,
+    int opset_version) {
   auto lc_node = v->node();
   TORCH_INTERNAL_ASSERT(lc_node->kind() == ::c10::prim::ListConstruct);
   // In jit/passes/onnx/peephole.cpp::eraseListConstruct,

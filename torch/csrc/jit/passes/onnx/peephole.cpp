@@ -601,7 +601,8 @@ static void eraseListConstruct(Block* block, int opset_version) {
             if (opset_version >= 13) {
               Node* unsqueeze_axes = g->create(onnx::Constant, 1);
               unsqueeze_axes->insertBefore(unsqueezed_node);
-              unsqueeze_axes->t_(attr::value, at::scalar_to_tensor(at::Scalar(0)));
+              unsqueeze_axes->t_(
+                  attr::value, at::scalar_to_tensor(at::Scalar(0)));
               unsqueezed_node->addInput(unsqueeze_axes->output());
             } else {
               unsqueezed_node->is_(attr::axes, {0});
