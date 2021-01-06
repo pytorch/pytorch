@@ -24,7 +24,7 @@ namespace rpc {
 
 namespace {
 
-IValue toIValue(const Message& message) {
+IValue toPyIValue(const Message& message) {
   MessageType msgType = message.type();
   auto response = deserializeResponse(message, msgType);
   switch (msgType) {
@@ -147,8 +147,8 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
           if (messageJitFuture->hasError()) {
             pyJitFuture->setError(messageJitFuture->exception_ptr());
           } else {
-            pyJitFuture->markCompleted(
-                toIValue(*messageJitFuture->value().toCustomClass<Message>()));
+            pyJitFuture->markCompleted(toPyIValue(
+                *messageJitFuture->value().toCustomClass<Message>()));
           }
         }));
 
