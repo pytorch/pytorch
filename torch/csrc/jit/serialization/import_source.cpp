@@ -380,7 +380,8 @@ struct SourceImporterImpl : public Resolver,
     std::unordered_set<std::string> buffer_names;
     std::unordered_set<std::string> pre_hook_names;
     std::unordered_set<std::string> hook_names;
-    // use to keep track of original ordering of hooks and prehooks
+    // used to keep track of original ordering of hooks and prehooks
+    // in case any are called more than once
     std::vector<std::string> pre_hooks_order;
     std::vector<std::string> hooks_order;
     // Process statements, splitting things into attribute and method
@@ -424,8 +425,9 @@ struct SourceImporterImpl : public Resolver,
                 const auto pre_hook_list =
                     ListLiteral(assign.rhs().get()).inputs();
                 for (const auto& pre_hook : pre_hook_list) {
-                  pre_hook_names.insert(StringLiteral(pre_hook).text());
-                  pre_hooks_order.emplace_back(StringLiteral(pre_hook).text());
+                  std::string pre_hook_name = StringLiteral(pre_hook).text(); 
+                  pre_hook_names.insert(pre_hook_name);
+                  pre_hooks_order.emplace_back(pre_hook_name);
                 }
               } else if (name == "__forward_hooks__") {
                 TORCH_INTERNAL_ASSERT(
@@ -433,8 +435,9 @@ struct SourceImporterImpl : public Resolver,
                     "Forward hooks only exist on modules at the moment");
                 const auto hook_list = ListLiteral(assign.rhs().get()).inputs();
                 for (const auto& hook : hook_list) {
-                  hook_names.insert(StringLiteral(hook).text());
-                  hooks_order.emplace_back(StringLiteral(hook).text());
+                  std::string hook_name = StringLiteral(hook).text(); 
+                  hook_names.insert(hook_name);
+                  hooks_order.emplace_back(hook_name);
                 }
               } else {
                 if (auto fixed_up = attributeAssignmentSpecialHandlingHack(

@@ -4163,9 +4163,9 @@ std::unique_ptr<Function> CompilationUnit::define(
       std::move(name), std::make_shared<Graph>(), creator);
   if (self) {
     // Register this as a method on `self`'s type
-    if (CompilationUnit::FunctionType::Hook == type) {
+    if (type == CompilationUnit::FunctionType::Hook) {
       self->getClassType()->addForwardHook(fn.get());
-    } else if (CompilationUnit::FunctionType::PreHook == type) {
+    } else if (type == CompilationUnit::FunctionType::PreHook) {
       self->getClassType()->addForwardPreHook(fn.get());
     } else {
       self->getClassType()->addMethod(fn.get());
@@ -4243,7 +4243,7 @@ std::vector<Function*> CompilationUnit::define(
   return functions;
 }
 
-std::vector<Function*> CompilationUnit::define_hooks(
+void CompilationUnit::define_hooks(
     const c10::optional<c10::QualifiedName>& prefix,
     const std::vector<Def>& hookDefs,
     const std::vector<ResolverPtr>& hookResolvers,
@@ -4331,8 +4331,6 @@ std::vector<Function*> CompilationUnit::define_hooks(
         self->getClassType()->getPreHookErrorMessage(functions.back()->name()));
     functions.back()->ensure_defined();
   }
-
-  return functions;
 }
 
 std::vector<Function*> CompilationUnit::define(
