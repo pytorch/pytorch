@@ -1337,7 +1337,7 @@ std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& 
 // This is a type dispatching helper function for 'apply_solve'
 Tensor& _linalg_solve_out_helper_cuda(Tensor& result, Tensor& input, Tensor& infos) {
   // 'result' and 'input' should be in column major order (it should be checked before calling this function)
-  // the content of 'result', 'input' and 'infos' is overriden by 'apply_solve'
+  // the content of 'result', 'input' and 'infos' is overwritten by 'apply_solve'
   // 'result' should contain data of 'other' tensor (right-hand-side of the linear system of equations)
   // 'input' should contain data of origianl 'input' tensor (left-hand-side of the linear system)
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_solve_out_cpu", [&]{
@@ -1646,7 +1646,7 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
 
 /*
 Computes the inverse of a symmetric (Hermitian) positive-definite matrix n-by-n matrix 'input' using the Cholesky factorization
-This is an in-place routine, content of 'input' is overriden.
+This is an in-place routine, content of 'input' is overwritten.
 'infos' is an int Tensors containing error codes for each matrix in the batched input.
 For more information see MAGMA's documentation for POTRI routine.
 */
@@ -1675,7 +1675,7 @@ static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
 Tensor& _cholesky_inverse_out_helper_cuda(Tensor &result, Tensor& infos, bool upper) {
   // This function calculates the inverse matrix in-place
   // result should be in column major order and contain matrices to invert
-  // the content of result is overriden by 'apply_cholesky_inverse'
+  // the content of result is overwritten by 'apply_cholesky_inverse'
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "cholesky_inverse_out_cuda", [&]{
     apply_cholesky_inverse<scalar_t>(result, infos, upper);
   });

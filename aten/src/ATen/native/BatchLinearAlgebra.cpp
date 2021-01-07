@@ -393,7 +393,7 @@ Computes the solution to a system of linear equations
 where A is an n-by-n matrix and X and B are n-by-nrhs matrices.
 Note that B is required to be a matrix, the usual, vector case, is obtained with nrhs = 1.
 Above description is for non-batched input, the batched input is also supported.
-This is an in-place routine, content of both A and b are overriden.
+This is an in-place routine, content of both A and b are overwritten.
 'infos' is an int Tensor containing error codes for each matrix in the batched input.
 For more information see LAPACK's documentation for GESV routine.
 */
@@ -462,7 +462,7 @@ std::tuple<Tensor&,Tensor&> solve_out(Tensor& solution, Tensor& lu, const Tensor
 // This is a type dispatching helper function for 'apply_solve'
 Tensor& _linalg_solve_out_helper_cpu(Tensor& result, Tensor& input, Tensor& infos) {
   // 'result' and 'input' should be in column major order (it should be checked before calling this function)
-  // the content of 'result', 'input' and 'infos' is overriden by 'apply_solve'
+  // the content of 'result', 'input' and 'infos' is overwritten by 'apply_solve'
   // 'result' should contain data of 'other' tensor (right-hand-side of the linear system of equations)
   // 'input' should contain data of original 'input' tensor (left-hand-side of the linear system of equations)
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_solve_out_cpu", [&]{
@@ -771,7 +771,7 @@ Tensor& linalg_cholesky_out(Tensor &result, const Tensor &self) {
 
 /*
 Computes the inverse of a symmetric (Hermitian) positive-definite matrix n-by-n matrix 'input' using the Cholesky factorization
-This is an in-place routine, content of 'input' is overriden.
+This is an in-place routine, content of 'input' is overwritten.
 'infos' is an int Tensors containing error codes for each matrix in the batched input.
 For more information see LAPACK's documentation for POTRI routine.
 */
@@ -801,7 +801,7 @@ static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
 Tensor& _cholesky_inverse_out_helper_cpu(Tensor &result, Tensor& infos, bool upper) {
   // This function calculates the inverse matrix in-place
   // result should be in column major order and contain matrices to invert
-  // the content of result is overriden by 'apply_cholesky_inverse'
+  // the content of result is overwritten by 'apply_cholesky_inverse'
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "cholesky_inverse_out_cpu", [&]{
     apply_cholesky_inverse<scalar_t>(result, infos, upper);
   });
@@ -1167,7 +1167,7 @@ std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, boo
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // This function computes eigenvalues 'w' and eigenvectors 'v' of the input that is stored initially in 'v'
-// The computation is done in-place: 'v' stores the input and will be overriden, 'w' should be an allocated empty array
+// The computation is done in-place: 'v' stores the input and will be overwritten, 'w' should be an allocated empty array
 // compute_v controls whether eigenvectors should be computed
 // uplo_str controls the portion of input matrix to consider in computations, allowed values are "u", "U", "l", "L"
 // infos is used to store information for possible checks for error
