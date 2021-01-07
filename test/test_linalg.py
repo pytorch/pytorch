@@ -5275,10 +5275,10 @@ else:
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_cholesky_inverse(self, device, dtype):
-        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
-        a = random_symmetric_pd_matrix(5, dtype=dtype, device=device)
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+        a = random_hermitian_pd_matrix(5, dtype=dtype, device=device)
 
         # compute inverse directly
         inv0 = torch.inverse(a)
