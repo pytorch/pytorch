@@ -1,8 +1,3 @@
-
-
-
-
-
 import numpy as np
 import os
 import shutil
@@ -711,8 +706,7 @@ class MyModule(torch.jit.ScriptModule):
         return self.mult.mm(x)
 
     @torch.jit.script_method
-    def multi_input(self, x, y, z=2):
-        # type: (Tensor, Tensor, int) -> Tensor
+    def multi_input(self, x: torch.Tensor, y: torch.Tensor, z: int = 2) -> torch.Tensor:
         return x + y + z
 
     @torch.jit.script_method
