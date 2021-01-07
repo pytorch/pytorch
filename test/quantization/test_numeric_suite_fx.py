@@ -222,7 +222,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
         def compare_and_validate_results(float_model, q_model, data):
             act_compare_dict = compare_model_outputs_fx(float_model, q_model, data)
-            expected_ob_dict_keys = {"x.stats", "conv.stats" }
+            expected_ob_dict_keys = {"x.stats", "conv.stats"}
 
             self.assertTrue(act_compare_dict.keys() == expected_ob_dict_keys)
             for k, v in act_compare_dict.items():

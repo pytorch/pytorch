@@ -55,12 +55,14 @@ def _get_logger_dict_helper_fx(model, target_dict):
                 input_node = node.args[0]
                 if (
                     input_node.op == "call_function"
-                    and input_node.target.__name__ == "quantize_per_tensor"
+                    and input_node.target == torch.quantize_per_tensor
                 ):
+                    # stats of activation before applying quantized op
                     target_dict[input_node.args[0].name + ".stats"] = modules[
                         node.target
                     ].stats
                 else:
+                    # stats for activation after applying quantized op
                     target_dict[node.args[0].name + ".stats"] = modules[
                         node.target
                     ].stats
