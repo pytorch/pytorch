@@ -88,6 +88,7 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
+#include <torch/csrc/jit/tensorexpr/reduction.h>
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
@@ -1254,9 +1255,10 @@ void initJITBindings(PyObject* module) {
   });
 
   // Tensor Expr Classes
-  py::class_<tensorexpr::KernelScope>(m, "KernelScope").def(py::init<>());
+  auto te = m.def_submodule("te");
+  py::class_<tensorexpr::KernelScope>(te, "KernelScope").def(py::init<>());
 
-  auto dtype_class = py::class_<tensorexpr::Dtype>(m, "Dtype");
+  auto dtype_class = py::class_<tensorexpr::Dtype>(te, "Dtype");
 
 #define DTYPE_SINGLETON_ACCESSOR(ctype, name) \
   dtype_class.def_property_readonly_static(   \
@@ -1264,7 +1266,7 @@ void initJITBindings(PyObject* module) {
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, DTYPE_SINGLETON_ACCESSOR)
 #undef DTYPE_SINGLETON_ACCESSOR
 
-  auto expr_handle_class = py::class_<tensorexpr::ExprHandle>(m, "ExprHandle")
+  auto expr_handle_class = py::class_<tensorexpr::ExprHandle>(te, "ExprHandle")
                                .def(py::self + py::self)
                                .def(py::self * py::self);
 
@@ -1274,10 +1276,10 @@ void initJITBindings(PyObject* module) {
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, EXPRHANDLE_CTOR)
 #undef EXPRHANDLE_CTOR
 
-  py::class_<tensorexpr::VarHandle, tensorexpr::ExprHandle>(m, "VarHandle");
-  py::class_<tensorexpr::BufHandle, tensorexpr::ExprHandle>(m, "BufHandle");
+  py::class_<tensorexpr::VarHandle, tensorexpr::ExprHandle>(te, "VarHandle");
+  py::class_<tensorexpr::BufHandle, tensorexpr::ExprHandle>(te, "BufHandle");
 
-  py::class_<tensorexpr::Placeholder>(m, "Placeholder")
+  py::class_<tensorexpr::Placeholder>(te, "Placeholder")
       .def(py::init<
            const std::string&,
            const tensorexpr::Dtype&,
@@ -1288,17 +1290,17 @@ void initJITBindings(PyObject* module) {
              const std::vector<tensorexpr::ExprHandle>& v) {
             return self.load(v);
           });
-  py::class_<tensorexpr::Tensor>(m, "Tensor")
+  py::class_<tensorexpr::Tensor>(te, "Tensor")
       .def(
           "load",
           [](tensorexpr::Tensor& self,
              const std::vector<tensorexpr::ExprHandle>& v) {
             return self.call(v);
           });
-  py::class_<tensorexpr::DimArg>(m, "DimArg")
+  py::class_<tensorexpr::DimArg>(te, "DimArg")
       .def(py::init<const tensorexpr::ExprHandle&>())
       .def(py::init<const tensorexpr::ExprHandle&, const std::string&>());
-  m.def(
+  te.def(
       "Compute",
       [](const std::string& func_name,
          const std::vector<tensorexpr::DimArg>& dim_args,
@@ -1343,16 +1345,41 @@ void initJITBindings(PyObject* module) {
         }
       },
       py::return_value_policy::reference);
+  py::class_<tensorexpr::Reducer>(te, "Reducer");
 
-  py::class_<tensorexpr::Stmt>(m, "Stmt").def(
-      "__str__", [](const tensorexpr::Stmt& self) {
+  te.def(
+      "SumReduce",
+      [](const std::string& func_name,
+         const std::vector<tensorexpr::DimArg>& dim_args,
+         tensorexpr::Tensor* buffer,
+         const std::vector<tensorexpr::DimArg>& reduce_args) {
+        return tensorexpr::Reduce(
+            func_name, dim_args, tensorexpr::Sum(), buffer, reduce_args);
+      },
+      py::return_value_policy::reference);
+
+  py::class_<tensorexpr::Stmt>(te, "Stmt")
+      .def("__str__", [](const tensorexpr::Stmt& self) {
         std::stringstream ss;
         ss << self;
         return ss.str();
       });
-  py::class_<tensorexpr::For, tensorexpr::Stmt>(m, "For");
+  py::class_<tensorexpr::For, tensorexpr::Stmt>(te, "For")
+      .def(
+          "index_var",
+          [](const tensorexpr::For& self) {
+            return tensorexpr::VarHandle(self.var());
+          },
+          py::return_value_policy::reference)
+      .def("body", &tensorexpr::For::body, py::return_value_policy::reference);
 
-  py::class_<tensorexpr::LoopNest>(m, "LoopNest")
+  py::class_<tensorexpr::Block, tensorexpr::Stmt>(te, "Block")
+      .def(
+          "stmts",
+          &tensorexpr::Block::stmts,
+          py::return_value_policy::reference);
+
+  py::class_<tensorexpr::LoopNest>(te, "LoopNest")
       .def(py::init<const std::vector<tensorexpr::Tensor*>&>())
       .def("vectorize_inner_loops", &tensorexpr::LoopNest::vectorizeInnerLoops)
       .def("prepare_for_codegen", &tensorexpr::LoopNest::prepareForCodegen)
@@ -1409,6 +1436,37 @@ void initJITBindings(PyObject* module) {
           },
           py::return_value_policy::reference)
       .def(
+          "rfactor",
+          [](tensorexpr::LoopNest& self,
+             const tensorexpr::Stmt& s,
+             const tensorexpr::VarHandle& v) {
+            auto st = dynamic_cast<const tensorexpr::Store*>(&s);
+            if (!st) {
+              return;
+            }
+            auto r = st->value();
+            self.rfactor(r, v.node());
+          },
+          py::return_value_policy::reference)
+      .def(
+          "rfactor",
+          [](tensorexpr::LoopNest& self,
+             const tensorexpr::Stmt& s,
+             const tensorexpr::VarHandle& v,
+             tensorexpr::Block& ins_point) {
+            auto st = dynamic_cast<const tensorexpr::Store*>(&s);
+            if (!st) {
+              return;
+            }
+            auto r = st->value();
+            self.rfactor(r, v.node(), &ins_point);
+          },
+          py::return_value_policy::reference)
+      .def(
+          "reorder",
+          &tensorexpr::LoopNest::reorderAxis,
+          py::return_value_policy::reference)
+      .def(
           "__str__",
           [](const tensorexpr::LoopNest& self) {
             std::stringstream ss;
@@ -1420,14 +1478,14 @@ void initJITBindings(PyObject* module) {
           &tensorexpr::LoopNest::root_stmt,
           py::return_value_policy::reference);
 
-  m.def(
-      "simplify_ir",
+  te.def(
+      "simplify",
       [](tensorexpr::Stmt* stmt) {
         return tensorexpr::IRSimplifier::simplify(stmt);
       },
       py::return_value_policy::reference);
 
-  py::class_<tensorexpr::CodeGen>(m, "CodeGen")
+  py::class_<tensorexpr::CodeGen>(te, "CodeGen")
       .def(
           "call",
           [](tensorexpr::CodeGen& self, const std::vector<at::Tensor>& values) {
@@ -1439,16 +1497,16 @@ void initJITBindings(PyObject* module) {
             self.call(value_ptrs);
           });
   py::class_<tensorexpr::SimpleIREvaluator, tensorexpr::CodeGen>(
-      m, "SimpleIREvaluator");
-  py::class_<tensorexpr::LLVMCodeGen, tensorexpr::CodeGen>(m, "LLVMCodeGen");
+      te, "SimpleIREvaluator");
+  py::class_<tensorexpr::LLVMCodeGen, tensorexpr::CodeGen>(te, "LLVMCodeGen");
 
-  py::class_<tensorexpr::CodeGen::BufferArg>(m, "BufferArg")
+  py::class_<tensorexpr::CodeGen::BufferArg>(te, "BufferArg")
       .def(py::init<const tensorexpr::Placeholder&>())
       .def(py::init<tensorexpr::Tensor*>())
       .def(py::init<const tensorexpr::VarHandle&>());
 
-  m.def(
-      "tensorexpr_codegen",
+  te.def(
+      "construct_codegen",
       [](const std::string& name,
          tensorexpr::Stmt* stmt,
          const std::vector<tensorexpr::CodeGen::BufferArg>& args) {
