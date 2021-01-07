@@ -486,6 +486,7 @@ if(MSVC)
   list(APPEND CUDA_NVCC_FLAGS "--no-host-device-move-forward")
 else()
   list(APPEND CUDA_NVCC_FLAGS "-std=c++14")
+  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "--std=c++14")
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-fPIC")
 endif()
 
