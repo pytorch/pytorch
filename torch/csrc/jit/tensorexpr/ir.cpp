@@ -175,6 +175,9 @@ const Expr* flatten_index(
 }
 
 Dtype Intrinsics::IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1) {
+  if (op_type == kIsNan) {
+    return dt1.cloneWithScalarType(ScalarType::Int);
+  }
   // TODO: check the op_type and make a real decision
   return dt1;
 }
@@ -187,11 +190,15 @@ Dtype Intrinsics::IntrinsicsDtype(IntrinsicsOp op_type, Dtype dt1, Dtype dt2) {
 Dtype Intrinsics::IntrinsicsDtype(
     IntrinsicsOp op_type,
     const std::vector<const Expr*>& params) {
-  // TODO: check the op_type an dmake a real decision
+  // TODO: check the op_type and make a real decision
+  // Doesnt this fail with kRand?
   if (params.size() == 0) {
     throw malformed_input("invalid params in Intrinsics");
+  } else if (params.size() == 1) {
+    return IntrinsicsDtype(op_type, params[0]->dtype());
+  } else if (params.size() == 2) {
+    return IntrinsicsDtype(op_type, params[0]->dtype(), params[1]->dtype());
   }
-
   return params[0]->dtype();
 }
 
@@ -209,7 +216,7 @@ int Intrinsics::OpArgCount(IntrinsicsOp op_type) {
     case kSigmoid:
     case kExp:
     case kExpm1:
-    case kFabs:
+    case kAbs:
     case kLog:
     case kLog2:
     case kLog10:
@@ -224,6 +231,7 @@ int Intrinsics::OpArgCount(IntrinsicsOp op_type) {
     case kTrunc:
     case kFrac:
     case kLgamma:
+    case kIsNan:
       return 1;
     case kRand:
       return 0;

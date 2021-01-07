@@ -18,6 +18,7 @@ import torch.nn.functional as F
 
 torch.set_default_dtype(torch.double)
 
+NO_NCCL = not hasattr(torch.distributed, "ProcessGroupNCCL")
 
 class TestDataParallel(TestCase):
 
@@ -596,6 +597,25 @@ class TestDataParallel(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_scatter_gpu(self):
         self._test_scatter(torch.randn((4, 4)).cuda())
+
+    @unittest.skipIf(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+    @unittest.skipIf(NO_NCCL, "NCCL needed")
+    def test_data_parallel_complex(self):
+        # We expect complex parameters to be broadcast by view_as_real, e.g. move from C to R^2
+        class Cplx(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.cplx = torch.nn.Parameter(torch.zeros(1, 10, dtype=torch.cfloat).cuda())
+
+            def forward(self, x):
+                return x + self.cplx
+
+        cplx = torch.nn.DataParallel(Cplx().cuda())
+        input = torch.rand(1, 10, dtype=torch.cfloat).cuda()
+        result = cplx(input)
+        # 2 is the extra real view dimension here
+        self.assertEqual(result.size(), torch.Size([1, 10, 2]))
+        self.assertEqual(result, torch.view_as_real(input))
 
     def _test_gather(self, output_device):
         inputs = (

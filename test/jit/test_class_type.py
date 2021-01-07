@@ -959,6 +959,26 @@ class TestClassType(JitTestCase):
             # Make sure class constant is accessible from module
             self.assertEqual(m.w, m_loaded.w)
 
+    def test_py_class_to_ivalue_missing_attribute(self):
+        global Foo  # see [local resolution in python]
+
+        class Foo(object):
+            i : int
+            f : float
+
+            def __init__(self, i : int, f : float):
+                self.i = i
+                self.f = f
+
+        @torch.jit.script
+        def test_fn(x : Foo) -> float:
+            return x.i + x.f
+
+        test_fn(Foo(3, 4.0))
+
+        with self.assertRaisesRegex(RuntimeError, 'missing attribute i'):
+            test_fn(torch.rand(3, 4))
+
     def test_unused_method(self):
         """
         Test unused methods on scripted classes.

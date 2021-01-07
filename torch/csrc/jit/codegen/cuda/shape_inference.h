@@ -1,6 +1,6 @@
 #pragma once
 
-#include <aten/src/ATen/Context.h>
+#include <ATen/Context.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {

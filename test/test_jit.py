@@ -35,6 +35,7 @@ from jit.test_profiler import TestProfiler  # noqa: F401
 from jit.test_slice import TestSlice  # noqa: F401
 from jit.test_warn import TestWarn  # noqa: F401
 from jit.test_isinstance import TestIsinstance  # noqa: F401
+from jit.test_cuda import TestCUDA  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
 
 # Torch
@@ -330,6 +331,40 @@ class TestJit(JitTestCase):
             @torch.jit.script
             def dot(points, query, dim):
                 return (points * query).sum(dim)
+
+    def test_dict_comprehension(self):
+        def fn():
+            return {i : chr(i + 65) for i in range(4)}
+        self.checkScript(fn, ())
+
+    def test_dict_comprehension_with_type_annotation(self):
+        def fn():
+            d: Dict[int, str] = {i : chr(i + 65) for i in range(4)}
+            return d
+        self.checkScript(fn, ())
+
+        with self.assertRaisesRegex(RuntimeError, ""):
+            with self.assertRaisesRegex(AssertionError, "Expected Dict "
+                                        "type annotation for dict "
+                                        "comprehension, found "
+                                        "Tuple[int, str]"):
+                @torch.jit.script
+                def fn():
+                    d: Tuple[int, str] = {i : chr(i + 65) for i in range(4)}
+                    return d
+
+    def test_dict_comprehension_scope(self):
+        def comprehension_can_access_outer_scope_variables():
+            lst = ["foo", "bar", "baz"]
+            return {l : len(l) for l in lst}
+
+        self.checkScript(comprehension_can_access_outer_scope_variables, ())
+
+        with self.assertRaisesRegex(RuntimeError, "undefined value i"):
+            @torch.jit.script
+            def outer_scope_cannot_access_comprehension_variables():
+                d = {i : chr(i + 65) for i in range(4)}
+                i = i + 1
 
     def test_constants_pkl(self):
         # This test asserts that the serialization archive includes a `constants.pkl`
@@ -1247,56 +1282,6 @@ graph(%Ra, %Rb):
           return (%z)""", m._c._get_method("forward").graph)
 
         FileCheck().check("my::matched_conv_bn").run(m._c._get_method("forward").graph)
-
-    def test_reconstruct_scopes(self):
-        class SubModule(torch.nn.Module):
-            def __init__(self):
-                super(SubModule, self).__init__()
-
-            def bar(self, x):
-                return x + x
-
-            def forward(self, x):
-                return x * self.bar(x)
-
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.sub = SubModule()
-
-            def forward(self, x):
-                return self.sub(x) + x
-
-        traced = torch.jit.trace(MyModule(), torch.zeros(1))
-        g = traced.graph
-        torch._C._jit_pass_inline(g)
-        torch._C._jit_pass_reconstruct_scopes(traced._c, g)
-        FileCheck().check("scope: top(MyModule).sub(SubModule).forward").run(g)
-
-    def test_reconstruct_scopes_duplicated_class_types(self):
-        class SubModule(torch.nn.Module):
-            def __init__(self):
-                super(SubModule, self).__init__()
-
-            def forward(self, x):
-                return x + 2
-
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.sub1 = SubModule()
-                self.sub2 = SubModule()
-
-            def forward(self, x):
-                return self.sub1(x) + self.sub2(x)
-
-        traced = torch.jit.trace(MyModule(), torch.zeros(1))
-        g = traced.graph
-        torch._C._jit_pass_inline(g)
-        torch._C._jit_pass_reconstruct_scopes(traced._c, g)
-        FileCheck().check_dag("scope: top(MyModule).sub1(SubModule).forward")  \
-                   .check_dag("scope: top(MyModule).sub2(SubModule).forward")  \
-                   .run(g)
 
     def test_expand_quantlint(self):
         pass
@@ -2409,8 +2394,7 @@ graph(%Ra, %Rb):
         warns = [str(w.message) for w in warns]
         self.assertEqual(len(warns), 0)
 
-    @unittest.skipIf(IS_WINDOWS or True, "TODO: need to fix this test case for "
-                                         "Windows, re-enable with https://github.com/pytorch/pytorch/pull/29339")
+    @unittest.skipIf(True, "TODO: re-enable with https://github.com/pytorch/pytorch/pull/29339")
     def test_torch_load_error(self):
         class J(torch.jit.ScriptModule):
             def __init__(self):
@@ -2421,20 +2405,20 @@ graph(%Ra, %Rb):
                 return input + 100
 
         j = J()
-        with tempfile.NamedTemporaryFile() as f:
-            j.save(f.name)
+        with TemporaryFileName() as fname:
+            j.save(fname)
             with self.assertRaisesRegex(RuntimeError, "is a zip"):
-                torch.load(f.name)
+                torch.load(fname)
 
-    @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
     def test_torch_load_zipfile_check(self):
         @torch.jit.script
         def fn(x):
             return x + 10
 
-        with tempfile.NamedTemporaryFile() as f:
-            fn.save(f.name)
-            self.assertTrue(torch.serialization._is_zipfile(f))
+        with TemporaryFileName() as fname:
+            fn.save(fname)
+            with io.open(fname, 'rb') as f:
+                self.assertTrue(torch.serialization._is_zipfile(f))
 
     def test_python_bindings(self):
         lstm_cell = torch.jit.script(LSTMCellS)
@@ -3538,17 +3522,22 @@ def foo(x):
                     'buffers_r': ['B'],
                     'children': ['another', 'foo'],
                     'modules': ['a', 'another', 'bar', 'foo'],
-                    'named_attributes': [('another', 'another'),
+                    'named_attributes': [('_is_full_backward_hook', None),
+                                         ('another', 'another'),
                                          ('foo', 'foo'),
                                          ('name', 'a'),
                                          ('p', 'P'),
                                          ('training', True)],
-                    'named_attributes_r': [('another', 'another'),
+                    'named_attributes_r': [('_is_full_backward_hook', None),
+                                           ('another', 'another'),
+                                           ('another._is_full_backward_hook', None),
                                            ('another.name', 'another'),
                                            ('another.training', True),
                                            ('foo', 'foo'),
+                                           ('foo._is_full_backward_hook', None),
                                            ('foo.b', 'B'),
                                            ('foo.bar', 'bar'),
+                                           ('foo.bar._is_full_backward_hook', None),
                                            ('foo.bar.an_int', 4),
                                            ('foo.bar.name', 'bar'),
                                            ('foo.bar.training', True),
@@ -6540,6 +6529,24 @@ a")
         self.checkScript(func, inputs_true, optimize=True)
         self.checkScript(func, inputs_false, optimize=True)
 
+    def test_ternary_module_type_hint(self):
+        class M1(torch.nn.Module):
+            def forward(self) -> Any:
+                return 'out' if self.training else {}
+
+        class M2(torch.nn.Module):
+            def forward(self) -> Any:
+                out: Any = 'out' if self.training else {}
+                return out
+
+        class M3(torch.nn.Module):
+            def forward(self) -> Optional[int]:
+                return None if self.training else 1
+
+        for module in [M1, M2, M3]:
+            self.checkModule(module().train(), ())
+            self.checkModule(module().eval(), ())
+
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()
@@ -6746,6 +6753,11 @@ a")
 
         self.checkScript(complicated_arithmetic_operation, ())
 
+    def test_in_operator_with_two_strings(self):
+        def fn() -> bool:
+            return "a" in "abcd"
+        self.checkScript(fn, ())
+
     def test_bitwise_ops(self):
 
         def int_test():
@@ -6900,6 +6912,61 @@ a")
                 else:
                     with self.assertRaisesRegex(RuntimeError, 'division by 0'):
                         foo(i, j)
+
+    # Testing bitwise shorthand aug assignment
+    def test_bool_augassign_bitwise_or(self):
+        def func(a: bool, b: bool) -> bool:
+            a |= b
+            return a
+
+        self.checkScript(func, (True, False), optimize=True)
+        self.checkScript(func, (True, True), optimize=True)
+        self.checkScript(func, (False, False), optimize=True)
+        self.checkScript(func, (False, True), optimize=True)
+
+    def test_bool_augassign_bitwise_and(self):
+        def func(a: bool, b: bool) -> bool:
+            a &= b
+            return a
+
+        self.checkScript(func, (True, False), optimize=True)
+        self.checkScript(func, (True, True), optimize=True)
+        self.checkScript(func, (False, False), optimize=True)
+        self.checkScript(func, (False, True), optimize=True)
+
+    def test_bool_augassign_bitwise_xor(self):
+        def func(a: bool, b: bool) -> bool:
+            a ^= b
+            return a
+
+        self.checkScript(func, (True, False), optimize=True)
+        self.checkScript(func, (True, True), optimize=True)
+        self.checkScript(func, (False, False), optimize=True)
+        self.checkScript(func, (False, True), optimize=True)
+
+    def test_number_augassign_bitwise_lshift(self):
+        def func() -> int:
+            z = 8
+            z <<= 2
+            return z
+
+        self.checkScript(func, (), optimize=True)
+
+    def test_number_augassign_bitwise_rshift(self):
+        def func() -> int:
+            z = 8
+            z >>= 2
+            return z
+
+        self.checkScript(func, (), optimize=True)
+
+    def test_number_augassign_bitwise_pow(self):
+        def func() -> float:
+            z = 8
+            z **= 2
+            return z
+
+        self.checkScript(func, (), optimize=True)
 
     def test_number_augassign(self):
         def func():
@@ -8830,7 +8897,7 @@ dedent """
     def test_torch_functional(self):
         def stft(input, n_fft):
             # type: (Tensor, int) -> Tensor
-            return torch.stft(input, n_fft)
+            return torch.stft(input, n_fft, return_complex=True)
 
         inps = (torch.randn(10), 7)
         self.assertEqual(stft(*inps), torch.jit.script(stft)(*inps))
@@ -8839,8 +8906,8 @@ dedent """
             # type: (Tensor, int) -> Tensor
             return torch.istft(input, n_fft)
 
-        inps2 = (torch.stft(*inps), inps[1])
-        self.assertEqual(torch.istft(*inps2), torch.jit.script(torch.istft)(*inps2))
+        inps2 = (stft(*inps), inps[1])
+        self.assertEqual(istft(*inps2), torch.jit.script(istft)(*inps2))
 
         def lu(x):
             # type: (Tensor) -> Tuple[Tensor, Tensor]
@@ -12128,10 +12195,10 @@ dedent """
         scripted_fn = torch.jit.script(tuple_slice)
         self.assertEqual(scripted_fn(torch.tensor(1)), (2, 3))
         tuple_graph = scripted_fn.graph
-        slices = tuple_graph.findAllNodes("prim::TupleSlice")
+        slices = tuple_graph.findAllNodes("prim::TupleConstruct")
         num_outputs = set(len(x.output().type().elements()) for x in slices)
-        # one tuple slice should have an output with 2 elements, other 4
-        self.assertTrue(num_outputs == {2, 4})
+        # there should be only one tupleSlice with length of 2
+        self.assertTrue(num_outputs == {2})
         self.run_pass('lower_all_tuples', tuple_graph)
         self.assertTrue('Tuple' not in str(tuple_graph))
 
@@ -12141,6 +12208,26 @@ dedent """
             return c[2:10]
 
         self.assertEqual(test_indexing_end_out_of_bounds(), ())
+
+    def test_stepped_tuple_slicing(self):
+
+        def check_slicing_tuple(slicing, tuple_type, tuple):
+            template = dedent("""
+            def func(x):
+                # type: ({}) -> Any
+                return x{}
+            """)
+            self._check_code(template.format(tuple_type, slicing), "func", [tuple])
+
+        check_slicing_tuple("[-3:3:2]", "Tuple[int, int, int]", (0, 1, 2))
+        check_slicing_tuple("[::55]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
+        check_slicing_tuple("[:4:4]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
+        check_slicing_tuple("[::-1]", "Tuple[int, int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5, 6))
+        check_slicing_tuple("[7:5:2]", "Tuple[int, int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5, 6))
+        check_slicing_tuple("[5:7:-2]", "Tuple[int, int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5, 6))
+        check_slicing_tuple("[::-2]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
+        check_slicing_tuple("[:4:-3]", "Tuple[int, int, int, int, int, int]", (0, 1, 2, 3, 4, 5))
+        check_slicing_tuple("[3::-2]", "Tuple[int, int, int, int, int]", (0, 1, 2, 3, 4))
 
     def test_lower_nested_tuples(self):
         @torch.jit.script
@@ -15216,6 +15303,25 @@ dedent """
             @torch.jit.script
             def foo():
                 new_item = {'score': [1.0], 'ys': [1, 2, 3]}
+
+    def test_dict_invalid_annotations(self):
+        # Check for invalid value type annotation
+        def wrong_value_type(dictionary: Dict[str, torch.jit.ScriptModule]):
+            return
+        with self.assertRaisesRegex(ValueError, "Unknown type annotation"):
+            torch.jit.script(wrong_value_type)
+
+        # Check for invalid key type annotation
+        def wrong_key_type(dictionary: Dict[torch.jit.ScriptModule, str]):
+            return
+        with self.assertRaisesRegex(ValueError, "Unknown type annotation"):
+            torch.jit.script(wrong_key_type)
+
+        # Check for invalid key and value type annotation
+        def wrong_key_value_type(dictionary: Dict[torch.jit.ScriptModule, torch.jit.ScriptModule]):
+            return
+        with self.assertRaisesRegex(ValueError, "Unknown type annotation"):
+            torch.jit.script(wrong_key_value_type)
 
     def test_get_set_state_with_tensors(self):
         class M(torch.nn.Module):

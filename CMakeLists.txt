@@ -173,6 +173,8 @@ option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(
     USE_NCCL "Use NCCL" ON
     "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
+cmake_dependent_option(USE_RCCL "Use RCCL" ON
+    USE_NCCL OFF)
 cmake_dependent_option(
     USE_STATIC_NCCL "Use static NCCL" OFF
     "USE_NCCL" OFF)
@@ -316,7 +318,7 @@ set(OP_DEPENDENCY "" CACHE STRING
 # symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk
 # https://software.intel.com/en-us/articles/symbol-lookup-error-when-linking-intel-mkl-with-gcc-on-ubuntu
 if(LINUX)
-  set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-as-needed")
+  set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-as-needed ${CMAKE_SHARED_LINKER_FLAGS}")
 endif()
 
 if(MSVC)
@@ -684,8 +686,8 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
 int main() {
   float a[] = {1.0, 1.0};
   float32x4x2_t v;
-  v.val[0] = vcombine_f32 (vcreate_f32 (__AARCH64_UINT64_C (0)), vcreate_f32 (__AARCH64_UINT64_C (0)));
-  v.val[1] = vcombine_f32 (vcreate_f32 (__AARCH64_UINT64_C (0)), vcreate_f32 (__AARCH64_UINT64_C (0)));
+  v.val[0] = vcombine_f32 (vcreate_f32 (0UL), vcreate_f32 (0UL));
+  v.val[1] = vcombine_f32 (vcreate_f32 (0UL), vcreate_f32 (0UL));
   vst1q_f32_x2(a, v);
   return 0;
 }" HAS_VST1)

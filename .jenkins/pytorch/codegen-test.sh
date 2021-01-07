@@ -37,7 +37,6 @@ python -m tools.setup_helpers.generate_code \
 mkdir -p "$OUT"/pyi/torch/_C
 mkdir -p "$OUT"/pyi/torch/nn
 python -m tools.pyi.gen_pyi \
-  --declarations-path "$OUT"/torch/share/ATen/Declarations.yaml \
   --native-functions-path aten/src/ATen/native/native_functions.yaml \
   --deprecated-functions-path tools/autograd/deprecated.yaml \
   --out "$OUT"/pyi
@@ -48,13 +47,6 @@ python -m tools.autograd.gen_autograd \
   aten/src/ATen/native/native_functions.yaml \
   "$OUT"/autograd \
   tools/autograd
-
-# unboxing_wrappers codegen (called by torch codegen but can run independently)
-mkdir -p "$OUT"/unboxing_wrappers
-python -m tools.jit.gen_unboxing_wrappers \
-  "$OUT"/torch/share/ATen/Declarations.yaml \
-  "$OUT"/unboxing_wrappers \
-  tools/jit/templates
 
 # annotated_fn_args codegen (called by torch codegen but can run independently)
 mkdir -p "$OUT"/annotated_fn_args
