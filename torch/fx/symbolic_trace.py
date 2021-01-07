@@ -4,10 +4,10 @@ from typing import Any, Dict, Optional, Tuple, List, Callable, Union
 import torch
 from torch._C import ScriptObject  # type: ignore
 
-from .node import Argument
+from .node import Argument, map_aggregate
 from .graph import Graph
 from .graph_module import GraphModule
-from .proxy import TracerBase
+from .proxy import TracerBase, Proxy
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -238,6 +238,60 @@ class Tracer(TracerBase):
 
         return root_fn, args
 
+    def call_wrapped_func(self, orig_fn, args, kwargs):
+        """
+        Given an ``orig_function`` to invoke, search the args and kwargs for
+        a Proxy object. If there is one, emit a ``call_function`` node to
+        preserve the call to this leaf function directly. Otherwise, just
+        return the results of this function call, as this function is not
+        being traced.
+        """
+        proxy = None
+
+        def find_proxy(x):
+            nonlocal proxy
+            if isinstance(x, Proxy):
+                proxy = x
+
+        map_aggregate(args, find_proxy)
+        map_aggregate(kwargs, find_proxy)
+
+        if proxy is not None:
+            return proxy.tracer.create_proxy('call_function', orig_fn, args, kwargs)
+        else:
+            return orig_fn(*args, **kwargs)
+
+    def _patch_wrapped_functions(self) -> Dict['frame', Dict['str', Any]]:
+        """
+        Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
+        the listed global functions in the `call_wrapped_func` wrapper. Returns
+        a map from frame to dict mapping name to the original global function.
+        """
+        orig_fns : Dict['frame', Dict['str', Any]] = {}
+
+        global _wrapped_fn_patch_table
+        for frame, names in _wrapped_fn_patch_table.items():
+            orig_fns.setdefault(frame, {})
+            orig_fns_this_frame = orig_fns[frame]
+            for name in names:
+                orig_fn = frame.f_globals[name]
+                orig_fns_this_frame[name] = orig_fn
+                def wrapped(*args, **kwargs):
+                    return self.call_wrapped_func(orig_fn, args, kwargs)
+                frame.f_globals[name] = wrapped
+
+        return orig_fns
+
+    def _unpatch_wrapped_functions(self, orig_fns : Dict['frame', Dict['str', Any]]):
+        """
+        Given the ``orig_fns`` dict that ``_patch_wrapped_functions``,
+        replace all of the global functions with the original global functions
+        that were there before symbolic tracing.
+        """
+        for frame, to_revert in orig_fns.items():
+            for name, fn in to_revert.items():
+                frame.f_globals[name] = fn
+
     def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
         """
         Trace ``root`` and return the corresponding FX ``Graph`` representation. ``root``
@@ -307,13 +361,52 @@ class Tracer(TracerBase):
             # Seems to be a mypy limitation: https://github.com/python/mypy/issues/2427
             torch.nn.Module.__getattr__ = module_getattr_wrapper  # type: ignore
             torch.nn.Module.__call__ = module_call_wrapper
+
+            orig_fns = self._patch_wrapped_functions()
+
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                              type_expr=fn.__annotations__.get('return', None))
         finally:
+            self._unpatch_wrapped_functions(orig_fns)
             torch.nn.Module.__call__ = orig_call
             torch.nn.Module.__getattr__ = orig_getattr  # type: ignore
         return self.graph
 
+# Type Dict['frame', Dict['str', Any]]
+# (can't annotate this global for some reason)
+#
+# This maps from frame object to ordered set of function names
+# to be patched at the beginning of symbolic tracing.
+_wrapped_fn_patch_table = {}
+
+def wrap(fn_name : str):
+    """
+    This function can be called at global scope in a module to cause
+    references to the global function secified by `fn_name` to use
+    them in FX.
+
+        # foo/bar/baz.py
+        def my_custom_function(x, y):
+            return x * x + y * y
+
+        torch.fx.wrap('my_custom_function')
+
+        def fn_to_be_traced(x, y):
+            # When symbolic tracing, the below call to my_custom_function will be inserted into
+            # the graph rather than tracing it.
+            return my_custom_function(x, y)
+
+    Args:
+
+        fn_name (str): The name of the global function to insert into the graph when it's called
+    """
+    f = inspect.currentframe().f_back
+    if f.f_code.co_name != '<module>':
+        raise NotImplementedError('wrap must be called at the top level of a module')
+
+    global _wrapped_fn_patch_table
+    _wrapped_fn_patch_table.setdefault(f, {})
+    _wrapped_fn_patch_table[f].setdefault(fn_name)
 
 def symbolic_trace(root : Union[torch.nn.Module, Callable]) -> GraphModule:
     """Symbolic tracing API
