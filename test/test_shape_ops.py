@@ -608,7 +608,7 @@ class TestShapeOps(TestCase):
 
 class TestShapeFuncs(TestCase):
     @dtypes(*(torch.uint8, torch.int64, torch.double, torch.complex128))
-    @ops(filter(lambda op: op.name in ['tile', 'repeat'], shape_funcs))
+    @ops([op for op in shape_funcs if op.name in ['tile', 'repeat']])
     def test_repeat_tile_vs_numpy(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         for sample in samples:
