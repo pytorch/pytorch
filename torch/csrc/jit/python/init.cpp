@@ -1514,7 +1514,11 @@ void initJITBindings(PyObject* module) {
          const std::vector<tensorexpr::CodeGen::BufferArg>& args) {
         tensorexpr::CodeGen* cg = nullptr;
         if (name == "llvm") {
+#ifdef TORCH_ENABLE_LLVM
           cg = new tensorexpr::LLVMCodeGen(stmt, args);
+#else
+          cg = new tensorexpr::SimpleIREvaluator(stmt, args);
+#endif
         } else {
           cg = new tensorexpr::SimpleIREvaluator(stmt, args);
         }
