@@ -5909,12 +5909,12 @@
 - func: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
   variants: method, function
   dispatch:
-    DefaultBackend: cholesky_inverse
+    CPU, CUDA: cholesky_inverse
 
 - func: cholesky_inverse.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    DefaultBackend: cholesky_inverse_out
+    CPU, CUDA: cholesky_inverse_out
 
 - func: qr.Q(Tensor self, bool some=True, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
