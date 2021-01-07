@@ -10,8 +10,7 @@
 #include <ATen/CUDAGeneratorImpl.h>
 #endif
 
-namespace torch {
-
+namespace torch { namespace python {
 using namespace at;
 
 namespace {
@@ -87,7 +86,7 @@ void initGeneratorBindings(PyObject* module) {
             HANDLE_TH_ERRORS
             // See Note [Acquire lock when using random generators]
             std::lock_guard<std::mutex> lock(gen.mutex());
-            return gen.state();
+            return gen.get_state();
             END_HANDLE_TH_ERRORS_PYBIND
           })
       .def("set_state",
@@ -123,4 +122,4 @@ void initGeneratorBindings(PyObject* module) {
           });
 }
 
-} // namespace torch
+}} // namespace torch::python

@@ -775,7 +775,7 @@ PyObject* initModule() {
      methods.data()
   };
   ASSERT_TRUE(module = PyModule_Create(&torchmodule));
-  torch::initGeneratorBindings(module);
+  torch::python::initGeneratorBindings(module);
   ASSERT_TRUE(THPException_init(module));
   THPSize_init(module);
   THPDtype_init(module);
