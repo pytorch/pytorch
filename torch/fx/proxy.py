@@ -167,12 +167,6 @@ class Proxy:
             return self.tracer.create_proxy('call_function', orig_method, args, kwargs,
                                             name=self.tracer.graph._target_to_str(orig_method.__name__))
 
-def len(item: Any) -> Union[Proxy, int]:
-    if not isinstance(item, Proxy):
-        return builtins.len(item)
-
-    return item.tracer.create_proxy('call_function', builtins.len, (item,), {})
-
 class Attribute(Proxy):
     def __init__(self, root: Proxy, attr: str):
         self.root = root
