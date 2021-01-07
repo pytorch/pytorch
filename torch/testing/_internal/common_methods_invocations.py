@@ -1369,6 +1369,9 @@ if TEST_SCIPY:
                            # Reference: https://github.com/pytorch/pytorch/pull/50140#discussion_r552615345
                            SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                     dtypes=[torch.bfloat16]),
+                           # Reference: https://github.com/pytorch/pytorch/pull/50140#issuecomment-756150214
+                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                    dtypes=[torch.float32, torch.float64], active_if=IS_WINDOWS),
                            # Backward of `lgamma` uses `digamma` but `digamma`
                            # is not implemented for `BFloat16`
                            # Error Raised:
