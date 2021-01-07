@@ -76,8 +76,8 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
 
   void addModule(std::string name, std::shared_ptr<ConcreteModuleType> meta);
 
-  void addForwardHook(std::string hook_id);
-  void addForwardPreHook(std::string pre_hook_id);
+  void addForwardHook(py::object hook);
+  void addForwardPreHook(py::object pre_hook);
 
   void addOverload(
       std::string methodName,
@@ -166,12 +166,12 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   std::unordered_map<std::string, c10::Symbol> builtinFunctions_;
   // The concrete types of any submodules
   std::vector<ModuleInfo> modules_;
-  // ID of hooks to be called before/after forward when the module
-  // is called directly. Used to insure modules have different types
+  // Hooks to be called before/after forward when the module
+  // is called directly. Used to ensure modules have different types
   // when they have different python hooks
   // Actual hooks are added to ClassType directly during compilation
-  std::vector<std::string> forwardHookIds_;
-  std::vector<std::string> forwardPreHookIds_;
+  std::vector<py::object> forwardHooks_;
+  std::vector<py::object> forwardPreHooks_;
 
   // If something is a ModuleDict/ModuleList, it means:
   //   1. The order of the submodules matters for comparing the type

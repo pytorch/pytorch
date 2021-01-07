@@ -348,18 +348,18 @@ def test_submodule_hook_and_pre_hook_multiple_IO_multiple_hooks():
 def test_submodule_forward_and_pre_hooks_single_IO():
     m = OuterModuleSingleIO("outer_mod_name", "inner_mod_name")
 
-    def pre_hook_single(self, input: Tuple[str]):
+    def pre_hook(self, input: Tuple[str]):
         assert self.name == "inner_mod_name"
         assert input[0] == "a_outermod"
         return "pre_hook_overrid_name"
 
-    def forward_hook_single(self, input: Tuple[str], output: str):
+    def forward_hook(self, input: Tuple[str], output: str):
         assert self.name == "inner_mod_name"
         assert input == ("pre_hook_overrid_name",)
         return output
 
-    m.submodule.register_forward_pre_hook(pre_hook_single)
-    m.submodule.register_forward_hook(forward_hook_single)
+    m.submodule.register_forward_pre_hook(pre_hook)
+    m.submodule.register_forward_hook(forward_hook)
 
     m_scripted = torch.jit.script(m)
 
@@ -507,6 +507,8 @@ def main():
 
     test_module_hook_and_pre_hook_no_IO()
     test_nested_tuple_IO()
+
+    print("OK: completed saving modules with hooks!")
 
 
 if __name__ == "__main__":
