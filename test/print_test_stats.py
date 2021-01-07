@@ -7,6 +7,7 @@ import bz2
 from collections import defaultdict
 import json
 import os
+from pathlib import Path
 import statistics
 import subprocess
 import time
@@ -182,19 +183,23 @@ def send_report_to_s3(obj):
     # gunzip command whereas Python's bz2 does work with bzip2
     obj.put(Body=bz2.compress(json.dumps(obj).encode()))
 
-def print_regressions(obj):
-    n = 10
-
+def print_regressions(obj, *, n):
     sha1 = os.environ.get("CIRCLE_SHA1")
     base = subprocess.check_output(
         ["git", "merge-base", sha1, "origin/master"],
         encoding="ascii",
     ).strip()
 
+    # if current commit is already on master, we need to exclude it from
+    # this history; otherwise we include the merge-base
     commits = subprocess.check_output(
-        ["git", "rev-list", f"--max-count={n}", base],
+        ["git", "rev-list", f"--max-count={n+1}", base],
         encoding="ascii",
     ).splitlines()
+    if base == sha1:
+        commits = commits[1:]
+    else:
+        commits = commits[:-1]
 
     job = os.environ.get("CIRCLE_JOB")
     s3 = boto3.resource("s3")
@@ -285,6 +290,18 @@ if __name__ == '__main__':
         help="download test times for base commits and compare",
     )
     parser.add_argument(
+        "--num-prev-commits",
+        type=positive_integer,
+        default=10,
+        metavar="N",
+        help="how many previous commits to compare test times with",
+    )
+    parser.add_argument(
+        "--use-json",
+        metavar="FILE.json",
+        help="compare S3 with JSON file, instead of the test report folder",
+    )
+    parser.add_argument(
         "folder",
         help="test report folder",
     )
@@ -318,4 +335,7 @@ if __name__ == '__main__':
         print(f"    {test_case.class_name}.{test_case.name}  time: {test_case.time:.2f} seconds")
 
     if args.compare_with_s3:
-        print_regressions(obj)
+        head_json = obj
+        if args.use_json:
+            head_json = json.loads(Path(args.use_json).read_text())
+        print_regressions(head_json, n=args.num_prev_commits)
