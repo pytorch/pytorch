@@ -212,6 +212,10 @@ void multi_margin_loss_backward_out_cpu_template(
   grad_input.resize_as_(input);
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
 
+  if (input.numel() == 0) {
+    return;
+  }
+
   auto input_contiguous = input.contiguous();
   auto target_contiguous = target.contiguous();
   auto weight_contiguous = weight.contiguous();
