@@ -21,22 +21,42 @@ vTensor pack_weights(
   const IntArrayRef w_sizes = weight.sizes();
   const float* const src_weight_ptr = weight.data_ptr<float>();
 
+  /* Source */
+  const int64_t src_kw_sz = w_sizes[Layout::Parameter::width];
+  const int64_t src_kh_sz = w_sizes[Layout::Parameter::height];
+
+  /* Destination */
+  const int64_t dst_kw_sz = div_up(src_kw_sz, INT64_C(2));
+  const int64_t dst_kh_sz = div_up(src_kh_sz, INT64_C(2));
+  const int64_t dst_plane_sz = dst_kw_sz * dst_kh_sz;
+
   vTensor v_weight{
       api::context(),
       &pool,
-      w_sizes,
+      {
+        4,
+        dst_kh_sz,
+        dst_kw_sz,
+      },
       weight.options(),
   };
 
-  {
-    using Future = vTensor::Future<void, vTensor::Access::Write>;
-    Future v_weight_future = v_weight.host<void, vTensor::Access::Write>();
-    Future::Payload v_weight_payload = v_weight_future.wait();
+  using Future = vTensor::Future<float, vTensor::Access::Write>;
+  Future v_weight_future = v_weight.host<float, vTensor::Access::Write>();
+  Future::Payload v_weight_payload = v_weight_future.wait();
 
-    memcpy(
-        v_weight_payload.get(),
-        src_weight_ptr,
-        std::min(weight.nbytes(), v_weight.nbytes()));
+  float* const dst_weight_ptr = v_weight_payload.get();
+  memset(dst_weight_ptr, 0, v_weight.nbytes());
+
+  for (int64_t src_h = 0; src_h < src_kh_sz; ++src_h) {
+    for (int64_t src_w = 0; src_w < src_kw_sz; ++src_w) {
+      int64_t dst_plane = 2*(src_h%2) + (src_w%2);
+      int64_t dst_index = (src_h/2)*dst_kw_sz + (src_w/2);
+      memcpy(
+          dst_weight_ptr + dst_plane * dst_plane_sz + dst_index,
+          src_weight_ptr + src_h * src_kw_sz + src_w,
+          sizeof(float));
+    }
   }
 
   return v_weight;
@@ -50,23 +70,54 @@ vTensor pack_biases(
     return convert(*bias_arg);
   }
 
-  using Future = vTensor::Future<void, vTensor::Access::Write>;
+  using Future = vTensor::Future<float, vTensor::Access::Write>;
   if (bias_arg) {
+    const Tensor bias = bias_arg->contiguous();
+    const IntArrayRef b_sizes = bias.sizes();
+    const float* const src_bias_ptr = bias.data_ptr<float>();
+
+    /* Source */
+    int64_t src_kw_sz, src_kh_sz;
+    if (bias.sizes().size() == 2) {
+      src_kw_sz = b_sizes[Layout::Parameter::width];
+      src_kh_sz = b_sizes[Layout::Parameter::height];
+    }
+    else {
+      src_kw_sz = b_sizes[Layout::Parameter::height];
+      src_kh_sz = 1;
+    }
+
+    /* Destination */
+    const int64_t dst_kw_sz = div_up(src_kw_sz, INT64_C(2));
+    const int64_t dst_kh_sz = div_up(src_kh_sz, INT64_C(2));
+    const int64_t dst_plane_sz = dst_kw_sz * dst_kh_sz;
+
     vTensor v_bias{
         api::context(),
         &pool,
-        bias_arg->sizes(),
-        weight_arg.options(),
+        {
+          4,
+          dst_kh_sz,
+          dst_kw_sz,
+        },
+        bias_arg->options(),
     };
 
-    {
-      Future v_bias_future = v_bias.host<void, vTensor::Access::Write>();
-      Future::Payload v_bias_payload = v_bias_future.wait();
+    Future v_bias_future = v_bias.host<float, vTensor::Access::Write>();
+    Future::Payload v_bias_payload = v_bias_future.wait();
 
-      memcpy(
-          v_bias_payload.get(),
-          bias_arg->contiguous().data_ptr<float>(),
-          std::min(bias_arg->nbytes(), v_bias.nbytes()));
+    float* const dst_bias_ptr = v_bias_payload.get();
+    memset(dst_bias_ptr, 0, v_bias.nbytes());
+
+    for (int64_t src_h = 0; src_h < src_kh_sz; ++src_h) {
+      for (int64_t src_w = 0; src_w < src_kw_sz; ++src_w) {
+        int64_t dst_plane = 2*(src_h%2) + (src_w%2);
+        int64_t dst_index = (src_h/2)*dst_kw_sz + (src_w/2);
+        memcpy(
+            dst_bias_ptr + dst_plane * dst_plane_sz + dst_index,
+            src_bias_ptr + src_h * src_kw_sz + src_w,
+            sizeof(float));
+      }
     }
 
     return v_bias;
@@ -78,17 +129,16 @@ vTensor pack_biases(
         {1},
         weight_arg.options(),
     };
-    {
-      Future v_bias_future = v_bias.host<void, vTensor::Access::Write>();
-      Future::Payload v_bias_payload = v_bias_future.wait();
-      memset(
-          v_bias_payload.get(),
-          // 2's complement integers and IEEE-754 floating point numbers both
-          // have identical bit representations for 0, so can use memset which
-          // only accepts uint8_t parameter.
-          0,
-          v_bias.nbytes());
-    }
+    Future v_bias_future = v_bias.host<float, vTensor::Access::Write>();
+    Future::Payload v_bias_payload = v_bias_future.wait();
+    memset(
+        v_bias_payload.get(),
+        // 2's complement integers and IEEE-754 floating point numbers both
+        // have identical bit representations for 0, so can use memset which
+        // only accepts uint8_t parameter.
+        0,
+        v_bias.nbytes());
+
     return v_bias;
   }
 }
@@ -222,7 +272,7 @@ Tensor LinearOpContext::run(
 
   c10::SmallVector<int64_t, 4u> output_sizes{
       v_input.sizes()[Layout::Parameter::height],
-      packed_.v_weight.sizes()[Layout::Parameter::width],
+      unpacked_.weight.sizes()[Layout::Parameter::width],
   };
 
   vTensor v_output_packed {
@@ -230,7 +280,7 @@ Tensor LinearOpContext::run(
       {
         4,
         div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2)),
-        div_up(packed_.v_weight.sizes()[Layout::Parameter::width], INT64_C(2)),
+        div_up(unpacked_.weight.sizes()[Layout::Parameter::width], INT64_C(2)),
       },
       input.options(),
   };
@@ -238,8 +288,6 @@ Tensor LinearOpContext::run(
   api::Command::Buffer input_pack_buffer = context->command().pool.allocate();
   input_pack_buffer.begin();
   vTensor v_input_packed = pack_image2d_h2w2(v_input, context, input_pack_buffer);
-  vTensor v_weight_packed = pack_image2d_h2w2(packed_.v_weight, context, input_pack_buffer);
-  vTensor v_bias_packed = pack_image2d_h2w2(packed_.v_bias, context, input_pack_buffer);
   input_pack_buffer.end();
   input_pack_buffer.submit(context->gpu().queue);
 
@@ -289,16 +337,14 @@ Tensor LinearOpContext::run(
                 vTensor::Access::Read),
             // Read-only access is implied on const tensors and triggers an async
             // synchronization if necessary.
-            v_weight_packed.image(
+            packed_.v_weight.image(
                 command_buffer,
-                vTensor::Stage::Compute,
-                vTensor::Access::Read),
+                vTensor::Stage::Compute),
             // Read-only access is implied on const tensors and triggers an async
             // synchronization if necessary.
-            v_bias_packed.image(
+            packed_.v_bias.image(
                 command_buffer,
-                vTensor::Stage::Compute,
-                vTensor::Access::Read),
+                vTensor::Stage::Compute),
             // Object lifetime is managed by the resource pool.
             // It is OK not to keep track of the handle.
             context->resource().pool.uniform(block).object);
@@ -337,10 +383,9 @@ Tensor LinearOpContext::run(
                 vTensor::Access::Read),
             // Read-only access is implied on const tensors and triggers an async
             // synchronization if necessary.
-            v_weight_packed.image(
+            packed_.v_weight.image(
                 command_buffer,
-                vTensor::Stage::Compute,
-                vTensor::Access::Read),
+                vTensor::Stage::Compute),
             // Object lifetime is managed by the resource pool.
             // It is OK not to keep track of the handle.
             context->resource().pool.uniform(block_no_bias).object);

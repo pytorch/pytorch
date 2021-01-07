@@ -156,10 +156,8 @@ TEST(VulkanAPITest, addmm) {
   const auto m2_cpu = at::rand({67, 163}, at::device(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::addmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 
-  const auto bias_vulkan = bias_cpu.vulkan();
   const auto m1_vulkan = m1_cpu.vulkan();
-  const auto m2_vulkan = m2_cpu.vulkan();
-  const auto out_vulkan = at::addmm(bias_vulkan, m1_vulkan, m2_vulkan, beta, alpha);
+  const auto out_vulkan = at::addmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha);
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
@@ -183,10 +181,8 @@ TEST(VulkanAPITest, addmm_expand) {
   const auto m2_cpu = at::rand({1280, 1000}, at::device(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::addmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
 
-  const auto bias_vulkan = bias_cpu.vulkan();
   const auto m1_vulkan = m1_cpu.vulkan();
-  const auto m2_vulkan = m2_cpu.vulkan();
-  const auto out_vulkan = at::addmm(bias_vulkan, m1_vulkan, m2_vulkan, beta, alpha);
+  const auto out_vulkan = at::addmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha);
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
@@ -548,8 +544,7 @@ TEST(VulkanAPITest, mm) {
   const auto out_cpu = m1_cpu.mm(m2_cpu);
 
   const auto m1_vulkan = m1_cpu.vulkan();
-  const auto m2_vulkan = m2_cpu.vulkan();
-  const auto out_vulkan = m1_vulkan.mm(m2_vulkan);
+  const auto out_vulkan = m1_vulkan.mm(m2_cpu);
 
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
   if (!check) {
@@ -697,16 +692,14 @@ class Addmm final : public BaseOp {
       const float alpha)
     : BaseOp(OpType::addmm),
       m2_(at::rand(c10::IntArrayRef({m1W, m2W}), at::device(at::kCPU).dtype(at::kFloat))),
-      v_m2(m2_.vulkan()),
       b_(at::rand(c10::IntArrayRef({m1H, m2W}), at::device(at::kCPU).dtype(at::kFloat))),
-      v_b_(b_.vulkan()),
       beta_(beta),
       alpha_(alpha) {
   }
 
   at::Tensor run(at::Tensor& t) const override {
     if (t.is_vulkan()) {
-      return at::addmm(v_b_, t, v_m2, beta_, alpha_);
+      return at::addmm(b_, t, m2_, beta_, alpha_);
     }
 
     return at::addmm(b_, t, m2_, beta_, alpha_);
@@ -718,9 +711,7 @@ class Addmm final : public BaseOp {
 
  private:
   at::Tensor m2_;
-  at::Tensor v_m2;
   at::Tensor b_;
-  at::Tensor v_b_;
   float beta_;
   float alpha_;
 };

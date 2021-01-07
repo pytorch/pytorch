@@ -25,16 +25,22 @@ void main() {
     const int base = base_x + uBlock.orig_size.x * base_y;
     const ivec4 index = base + ivec4(0, 1 ,uBlock.orig_size.x, uBlock.orig_size.x+1);
 
-    const vec4 mask_x = vec4(lessThan(vec4(base_x, base_x+1, base_x, base_x+1), vec4(uBlock.orig_size.x)));
-    const vec4 mask_y = vec4(lessThan(vec4(base_y, base_y, base_y+1, base_y+1), vec4(uBlock.orig_size.y)));
-    const vec4 outvec = vec4(
-        uBuffer.data[index.x],
-        uBuffer.data[index.y],
-        uBuffer.data[index.z],
-        uBuffer.data[index.w]);
+    vec4 outvec = vec4(0);
+    if (base_x < uBlock.orig_size.x && base_y < uBlock.orig_size.y) {
+      outvec.x = uBuffer.data[index.x];
+    }
+    if (base_x+1 < uBlock.orig_size.x && base_y < uBlock.orig_size.y) {
+      outvec.y = uBuffer.data[index.y];
+    }
+    if (base_x < uBlock.orig_size.x && base_y+1 < uBlock.orig_size.y) {
+      outvec.z = uBuffer.data[index.z];
+    }
+    if (base_x+1 < uBlock.orig_size.x && base_y+1 < uBlock.orig_size.y) {
+      outvec.w = uBuffer.data[index.w];
+    }
     imageStore(
         uImage,
         pos,
-        mask_x*mask_y*outvec);
+        outvec);
   }
 }
