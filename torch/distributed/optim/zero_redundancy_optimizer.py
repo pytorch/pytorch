@@ -226,7 +226,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         for device, per_device in self.per_device_params.items():
             # Allocate one buffer per rank and per device to group the small parameters
             self._buckets[device] = [
-                Bucket(buffer=torch.zeros(broadcast_buffer_size, dtype=per_device[0][0].dtype, device=device))
+                Bucket(buffer=torch.zeros(bucket_cap_kb, dtype=per_device[0][0].dtype, device=device))
                 for _ in range(len(per_device))
             ]
 
@@ -366,10 +366,6 @@ class ZeroRedundancyOptimizer(Optimizer):
             loss = self.optim.step(closure=closure, **kwargs)  # type: ignore
         else:
             loss = self.optim.step(**kwargs)
-
-        # Free the other grads
-        # ideally this would not be needed, handled in the reduce step by a zero-matching DDP engine
-        self._free_other_grads()
 
         # Sync all the updated shards in between the ranks
         self._broadcast_params()
@@ -526,10 +522,7 @@ class ZeroRedundancyOptimizer(Optimizer):
 
         with torch.no_grad():
             # All the params on this device (inc all ranks)
-            for (
-                device,
-                device_params,
-            ), bucket_list in zip(self.per_device_params.items(), self._buckets.values()):
+            for (device, device_params,), bucket_list in zip(self.per_device_params.items(), self._buckets.values()):
 
                 # Go through all the ranks and broadcast the new parameters, bucket the smallest ones
                 for (src_rank, params), bucket in zip(enumerate(device_params), bucket_list):
@@ -574,8 +567,7 @@ class ZeroRedundancyOptimizer(Optimizer):
             if rank == self.rank:
                 # Send the state to the reference replica
                 logging.debug(
-                    "Sending the sharded optimizer state to the reference replica from rank %s",
-                    rank,
+                    "Sending the sharded optimizer state to the reference replica from rank %s", rank,
                 )
                 _broadcast_object(
                     self.local_state_dict(), src_rank=self.global_rank, group=self.group, dist_device=self._device
@@ -613,15 +605,6 @@ class ZeroRedundancyOptimizer(Optimizer):
                 logging.debug("State from rank %s received", rank)
 
         return all_states
-
-    def _free_other_grads(self):
-        """Release gradients which are not being used in this rank"""
-
-        for rank, partition in enumerate(self.partition_parameters()):
-            if rank != self.rank:
-                for p in partition:
-                    for t in p["params"]:
-                        t.grad = None
 
     def _sync_param_groups(self, local_to_global: bool = False) -> None:
         """Sync learning rate and other optimizer attributes (needed to support schedulers).

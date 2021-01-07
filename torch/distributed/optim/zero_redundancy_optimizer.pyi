@@ -10,7 +10,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         params: _params_t,
         optim: Optimizer = ...,
         group: Optional[Any] = ...,
-        broadcast_buffer_size: int = ...,
+        bucket_cap_kb: int = ...,
         **default: Any
     ) -> None:
         ...
