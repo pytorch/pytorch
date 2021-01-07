@@ -425,7 +425,7 @@ struct SourceImporterImpl : public Resolver,
                 const auto pre_hook_list =
                     ListLiteral(assign.rhs().get()).inputs();
                 for (const auto& pre_hook : pre_hook_list) {
-                  std::string pre_hook_name = StringLiteral(pre_hook).text(); 
+                  std::string pre_hook_name = StringLiteral(pre_hook).text();
                   pre_hook_names.insert(pre_hook_name);
                   pre_hooks_order.emplace_back(pre_hook_name);
                 }
@@ -435,7 +435,7 @@ struct SourceImporterImpl : public Resolver,
                     "Forward hooks only exist on modules at the moment");
                 const auto hook_list = ListLiteral(assign.rhs().get()).inputs();
                 for (const auto& hook : hook_list) {
-                  std::string hook_name = StringLiteral(hook).text(); 
+                  std::string hook_name = StringLiteral(hook).text();
                   hook_names.insert(hook_name);
                   hooks_order.emplace_back(hook_name);
                 }
