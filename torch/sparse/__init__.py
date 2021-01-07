@@ -174,7 +174,7 @@ def softmax(input: Tensor, dim: int, dtype: Optional[DType] = None) -> Tensor:
     It is applied to all slices along `dim`, and will re-scale them so
     that the elements lie in the range `[0, 1]` and sum to 1.
 
-    Arguments:
+    Args:
         input (Tensor): input
         dim (int): A dimension along which softmax will be computed.
         dtype (:class:`torch.dtype`, optional): the desired data type
@@ -191,7 +191,7 @@ def log_softmax(input: Tensor, dim: int, dtype: Optional[DType] = None) -> Tenso
 
     See :class:`~torch.sparse.softmax` for more details.
 
-    Arguments:
+    Args:
         input (Tensor): input
         dim (int): A dimension along which softmax will be computed.
         dtype (:class:`torch.dtype`, optional): the desired data type

@@ -2716,6 +2716,135 @@ class TestLinalg(TestCase):
             self.assertEqual(torch.matrix_rank(aaT, True), np.linalg.matrix_rank(aaT.cpu().numpy(), True))
             self.assertEqual(torch.matrix_rank(aaT, 0.01, True), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01, True))
 
+    @precisionOverride({torch.float32: 5e-6, torch.complex64: 5e-6})
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_qr(self, device, dtype):
+        def run_test(tensor_dims, some):
+            A = torch.randn(*tensor_dims, dtype=dtype, device=device)
+            Q, R = torch.qr(A, some=some)
+
+            # Check0: Q[-2:] = (m, n_columns), R[-2:] = (n_columns, n)
+            m, n = tensor_dims[-2:]
+            n_columns = m if (not some) and m > n else min(m, n)
+            self.assertEqual(Q.size(-2), m)
+            self.assertEqual(R.size(-1), n)
+            self.assertEqual(Q.size(-1), n_columns)
+
+            A_ = A.cpu().numpy()
+            Q_ = Q.cpu().numpy()
+            R_ = R.cpu().numpy()
+
+            # Check1: A = QR
+            self.assertEqual(A_, np.matmul(Q_, R_))
+
+            # Check2: A = QR (with out)
+            Q_out, R_out = torch.full_like(Q, math.nan), torch.full_like(R, math.nan)
+            torch.qr(A, some=some, out=(Q_out, R_out))
+            Q_out_ = Q_out.cpu().numpy()
+            R_out_ = R_out.cpu().numpy()
+            self.assertEqual(A_, np.matmul(Q_out_, R_out_))
+
+            # Check3: Q == Q_out, R == R_out
+            self.assertEqual(Q_, Q_out_)
+            self.assertEqual(R_, R_out_)
+
+            # Check4: Q^{T}Q = I, triu(R) = R
+            eye = torch.eye(n_columns, device=device, dtype=dtype).expand(Q.shape[:-2] + (n_columns, n_columns)).cpu().numpy()
+            self.assertEqual(np.matmul(Q_.swapaxes(-1, -2).conj(), Q_), eye)
+            self.assertEqual(R.triu(), R)
+
+        tensor_dims_list = [(3, 5), (5, 5), (5, 3),  # Single matrix
+                            (7, 3, 5), (7, 5, 5), (7, 5, 3),  # 3-dim Tensors
+                            (7, 5, 3, 5), (7, 5, 5, 5), (7, 5, 5, 3)]  # 4-dim Tensors
+        for tensor_dims, some in itertools.product(tensor_dims_list, [True, False]):
+            run_test(tensor_dims, some)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_qr_vs_numpy(self, device, dtype):
+        """
+        test torch.linalg.qr vs numpy.linalg.qr
+        """
+        sizes_to_test = [
+            (7, 5),
+            (5, 7),
+            (5, 0),    # empty
+            (0, 5),    # empty
+        ]
+        for size in sizes_to_test:
+            t = torch.randn(size, device=device, dtype=dtype)
+            np_t = t.cpu().numpy()
+            for mode in ['reduced', 'complete']:
+                exp_q, exp_r = np.linalg.qr(np_t, mode=mode)
+                q, r = torch.linalg.qr(t, mode=mode)
+                self.assertEqual(q, exp_q)
+                self.assertEqual(r, exp_r)
+            #
+            # for mode='r' we need a special logic because numpy returns only r
+            exp_r = np.linalg.qr(np_t, mode='r')
+            q, r = torch.linalg.qr(t, mode='r')
+            # check that q is empty
+            assert q.shape == (0,)
+            assert q.dtype == t.dtype
+            assert q.device == t.device
+            # check r
+            self.assertEqual(r, exp_r)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_qr_batched(self, device, dtype):
+        """
+        test torch.linalg.qr vs numpy.linalg.qr. We need some special logic
+        because numpy does not support batched qr
+        """
+        def np_qr_batched(a, mode):
+            """poor's man batched version of np.linalg.qr"""
+            all_q = []
+            all_r = []
+            for matrix in a:
+                q, r = np.linalg.qr(matrix, mode=mode)
+                all_q.append(q)
+                all_r.append(r)
+            return np.array(all_q), np.array(all_r)
+
+        t = torch.randn((3, 7, 5), device=device, dtype=dtype)
+        np_t = t.cpu().numpy()
+        for mode in ['reduced', 'complete']:
+            exp_q, exp_r = np_qr_batched(np_t, mode=mode)
+            q, r = torch.linalg.qr(t, mode=mode)
+            self.assertEqual(q, exp_q)
+            self.assertEqual(r, exp_r)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_qr_out(self, device, dtype):
+        """
+        test torch.linalg.qr(out=...) vs torch.lingalg.qr
+        """
+        sizes_to_test = [
+            (7, 5),
+            (5, 7),
+            (5, 0),    # empty
+            (0, 5),    # empty
+        ]
+        for size in sizes_to_test:
+            t = torch.randn(size, device=device, dtype=dtype)
+            np_t = t.cpu().numpy()
+            for mode in ['reduced', 'complete', 'r']:
+                q, r = torch.linalg.qr(t, mode=mode)
+                out = (torch.empty((0), dtype=dtype, device=device),
+                       torch.empty((0), dtype=dtype, device=device))
+                q2, r2 = torch.linalg.qr(t, mode=mode, out=out)
+                assert q2 is out[0]
+                assert r2 is out[1]
+                self.assertEqual(q2, q)
+                self.assertEqual(r2, r)
+
     @dtypes(torch.double, torch.cdouble)
     def test_einsum(self, device, dtype):
         def check(equation, *operands):
@@ -5834,51 +5963,6 @@ else:
         self.assertEqual((torch.mm(a, tb) - b).norm(), expectedNorm, atol=1e-8, rtol=0)
         torch.lstsq(b, a, out=(tb, ta))
         self.assertEqual((torch.mm(a, tb) - b).norm(), expectedNorm, atol=1e-8, rtol=0)
-
-    @precisionOverride({torch.float32: 5e-6, torch.complex64: 5e-6})
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_qr(self, device, dtype):
-        def run_test(tensor_dims, some):
-            A = torch.randn(*tensor_dims, dtype=dtype, device=device)
-            Q, R = torch.qr(A, some=some)
-
-            # Check0: Q[-2:] = (m, n_columns), R[-2:] = (n_columns, n)
-            m, n = tensor_dims[-2:]
-            n_columns = m if (not some) and m > n else min(m, n)
-            self.assertEqual(Q.size(-2), m)
-            self.assertEqual(R.size(-1), n)
-            self.assertEqual(Q.size(-1), n_columns)
-
-            A_ = A.cpu().numpy()
-            Q_ = Q.cpu().numpy()
-            R_ = R.cpu().numpy()
-
-            # Check1: A = QR
-            self.assertEqual(A_, np.matmul(Q_, R_))
-
-            # Check2: A = QR (with out)
-            Q_out, R_out = torch.full_like(Q, math.nan), torch.full_like(R, math.nan)
-            torch.qr(A, some=some, out=(Q_out, R_out))
-            Q_out_ = Q_out.cpu().numpy()
-            R_out_ = R_out.cpu().numpy()
-            self.assertEqual(A_, np.matmul(Q_out_, R_out_))
-
-            # Check3: Q == Q_out, R == R_out
-            self.assertEqual(Q_, Q_out_)
-            self.assertEqual(R_, R_out_)
-
-            # Check4: Q^{T}Q = I, triu(R) = R
-            eye = torch.eye(n_columns, device=device, dtype=dtype).expand(Q.shape[:-2] + (n_columns, n_columns)).cpu().numpy()
-            self.assertEqual(np.matmul(Q_.swapaxes(-1, -2).conj(), Q_), eye)
-            self.assertEqual(R.triu(), R)
-
-        tensor_dims_list = [(3, 5), (5, 5), (5, 3),  # Single matrix
-                            (7, 3, 5), (7, 5, 5), (7, 5, 3),  # 3-dim Tensors
-                            (7, 5, 3, 5), (7, 5, 5, 5), (7, 5, 5, 3)]  # 4-dim Tensors
-        for tensor_dims, some in itertools.product(tensor_dims_list, [True, False]):
-            run_test(tensor_dims, some)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

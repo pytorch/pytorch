@@ -1430,7 +1430,7 @@ def softmin(input, dim=None, _stacklevel=3, dtype=None):
 
     See :class:`~torch.nn.Softmin` for more details.
 
-    Arguments:
+    Args:
         input (Tensor): input
         dim (int): A dimension along which softmin will be computed (so every slice
             along dim will sum to 1).
@@ -1464,7 +1464,7 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
 
     See :class:`~torch.nn.Softmax` for more details.
 
-    Arguments:
+    Args:
         input (Tensor): input
         dim (int): A dimension along which softmax will be computed.
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
@@ -1563,7 +1563,7 @@ def log_softmax(input, dim=None, _stacklevel=3, dtype=None):
 
     See :class:`~torch.nn.LogSoftmax` for more details.
 
-    Arguments:
+    Args:
         input (Tensor): input
         dim (int): A dimension along which log_softmax will be computed.
         dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
