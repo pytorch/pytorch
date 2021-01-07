@@ -193,16 +193,16 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
-    c10::ClassTypePtr class_type = concreteType_->getJitType()->cast<ClassType>();
-    bool have_pre_hooks = class_type 
-      && class_type->getForwardPreHooks().size() != 0;
-    bool have_hooks = class_type 
-      && class_type->getForwardHooks().size() != 0;
+    c10::ClassTypePtr class_type =
+        concreteType_->getJitType()->cast<ClassType>();
+    bool have_pre_hooks =
+        class_type && class_type->getForwardPreHooks().size() != 0;
+    bool have_hooks = class_type && class_type->getForwardHooks().size() != 0;
 
     std::vector<Value*> arg_values;
     std::vector<NamedValue> pre_hook_result;
     Value* forward_input;
-    std::shared_ptr<Graph> calling_graph = caller.graph(); 
+    std::shared_ptr<Graph> calling_graph = caller.graph();
 
     if (have_pre_hooks || have_hooks) {
       // convert forward args into tuple for forward hooks
@@ -214,9 +214,9 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       if (args.size() == 0) {
         arg_values.push_back(calling_graph->createNone()->output());
       }
-      forward_input = calling_graph
-                          ->insertNode(calling_graph->createTuple(arg_values))
-                          ->output();
+      forward_input =
+          calling_graph->insertNode(calling_graph->createTuple(arg_values))
+              ->output();
     }
 
     // call pre_hooks
@@ -232,8 +232,7 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
                     n_binders)
                 ->asValue(loc, caller);
         if (pre_hook_output->type() != NoneType::get()) {
-          if (pre_hook_output->type()->kind() !=
-              TypeKind::TupleType) {
+          if (pre_hook_output->type()->kind() != TypeKind::TupleType) {
             pre_hook_output =
                 calling_graph
                     ->insertNode(calling_graph->createTuple({pre_hook_output}))
