@@ -90,9 +90,9 @@ class CoordinatorBase:
         observer_throughput_final = [
             t for s in observer_throughput_final for t in s]
 
-        benchmark_metrics = {'agent latency': {}, 
+        benchmark_metrics = {'agent latency (seconds)': {}, 
                              'agent throughput': {}, 
-                             'observer latency': {}, 
+                             'observer latency (seconds)': {}, 
                              'observer throughput': {}}
 
 
