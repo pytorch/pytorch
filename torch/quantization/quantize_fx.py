@@ -1,12 +1,13 @@
 import torch
 from torch.fx import GraphModule  # type: ignore
 from torch.fx.symbolic_trace import Tracer  # type: ignore
+from torch.fx.node import Target, Node, Argument  # type: ignore
 from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401
 from .fx.utils import graph_pretty_str  # noqa: F401
 from .fx.utils import get_custom_module_class_keys  # noqa: F401
 from torch.nn.intrinsic import _FusedModule
-from typing import Dict, Any, List, Callable
+from typing import Dict, Any, List, Callable, Tuple, Optional
 
 def _check_is_graph_module(model: torch.nn.Module) -> None:
     if not isinstance(model, GraphModule):
@@ -41,20 +42,62 @@ def _fuse_fx(
     fuser = Fuser()
     return fuser.fuse(graph_module, fuse_custom_config_dict)
 
-class CustomTracer(Tracer):
+class Scope(object):
+    def __init__(self, module_path, module_type):
+        super().__init__()
+        self.module_path = module_path
+        self.module_type = module_type
+
+class ScopeContextManager(object):
+    def __init__(self, scope, current_module, current_module_path):
+        super().__init__()
+        self.prev_module_type = scope.module_type
+        self.prev_module_path = scope.module_path
+        self.scope = scope
+        self.scope.module_path = current_module_path
+        self.scope.module_type = type(current_module)
+
+    def __enter__(self):
+        return
+
+    def __exit__(self, *args):
+        self.scope.module_path = self.prev_module_path
+        self.scope.module_type = self.prev_module_type
+        return
+
+
+class QuantizationTracer(Tracer):
     def __init__(self, skipped_module_names: List[str],
                  skipped_module_classes: List[Callable]):
         super().__init__()
         self.skipped_module_names = skipped_module_names
         self.skipped_module_classes = skipped_module_classes
+        self.scope = Scope("", None)
+        self.node_name_to_scope = {}
 
-    def is_leaf_module(self, m, module_qualified_name):
-        return (m.__module__.startswith('torch.nn') and
+    def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
+        return (m.__module__.startswith("torch.nn") and
                 not isinstance(m, torch.nn.Sequential)) or \
             module_qualified_name in self.skipped_module_names or \
             type(m) in self.skipped_module_classes or \
             isinstance(m, _FusedModule)
 
+    def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any]) -> Any:
+        module_qualified_name = self.path_of_module(m)
+        if not self.is_leaf_module(m, module_qualified_name):
+            def scoped_forward(_args, _kwargs):
+                with ScopeContextManager(self.scope, m, module_qualified_name):
+                    return forward(*_args, **_kwargs)
+            return scoped_forward(args, kwargs)
+        return self.create_proxy("call_module", module_qualified_name, args, kwargs)
+
+    def create_node(self, kind : str, target : Target,
+                    args : Tuple[Argument, ...], kwargs : Dict[str, Argument], name : Optional[str] = None,
+                    type_expr : Optional[Any] = None) -> Node:
+        node = super().create_node(kind, target, args, kwargs, name, type_expr)
+        if kind == "call_method":
+            self.node_name_to_scope[node.name] = (self.scope.module_path, self.scope.module_type)
+        return node
 
 def _prepare_fx(model: torch.nn.Module, qconfig_dict: Any,
                 prepare_custom_config_dict: Dict[str, Any] = None,
@@ -89,18 +132,21 @@ forward graph of the parent module,
         float_custom_module_classes = get_custom_module_class_keys(
             prepare_custom_config_dict, "float_to_observed_custom_module_class")
         skipped_module_classes += float_custom_module_classes
-    tracer = CustomTracer(skipped_module_names, skipped_module_classes)
+    tracer = QuantizationTracer(skipped_module_names, skipped_module_classes)
     graph_module = GraphModule(model, tracer.trace(model))
     graph_module = _fuse_fx(graph_module, prepare_custom_config_dict)
     quantizer = Quantizer()
     return quantizer.prepare(
         graph_module,
         qconfig_dict,
+        tracer.node_name_to_scope,
         prepare_custom_config_dict=prepare_custom_config_dict,
         is_standalone_module=is_standalone_module)
 
 def _prepare_standalone_module_fx(
-        model: torch.nn.Module, qconfig_dict: Any,
+        model: torch.nn.Module,
+        qconfig_dict: Any,
+        node_name_to_scope: Dict[str, Tuple[str, Any]],
         prepare_custom_config_dict: Dict[str, Any] = None) -> GraphModule:
     r""" [Internal use only] Prepare a standalone module, so that it can be used when quantizing the
     parent module.
@@ -110,7 +156,7 @@ def _prepare_standalone_module_fx(
     Both input and output of the module are observed in the
     standalone module.
     """
-    return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict, is_standalone_module=True)
+    return _prepare_fx(model, qconfig_dict, node_name_to_scope, prepare_custom_config_dict, is_standalone_module=True)
 
 def fuse_fx(model: torch.nn.Module,
             fuse_custom_config_dict: Dict[str, Any] = None) -> GraphModule:

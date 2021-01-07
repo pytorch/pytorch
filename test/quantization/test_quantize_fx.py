@@ -561,7 +561,6 @@ class TestQuantizeFx(QuantizationTestCase):
             "": None,
             "object_type": [
                 (nn.Conv2d, default_qconfig),
-                ("chunk", None)
             ]
         }
         # make sure it runs
@@ -845,6 +844,49 @@ class TestQuantizeFx(QuantizationTestCase):
         }
         m = prepare_fx(m, qconfig_dict)
         m = convert_fx(m)
+
+    def test_qconfig_for_call_method(self):
+        class Sub(torch.nn.Module):
+            def forward(self, x):
+                return x.transpose(2, 3)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub = Sub()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)  # default_qconfig
+                x = self.sub(x)  # None
+                x = self.conv2(x)  # default_qconfig
+                return x.transpose(2, 3)  # default_qconfig
+
+
+        m = M().eval()
+        # since we don't quantize sub, we should have dequantize after the self.conv1
+        # and quantize before self.conv2
+        # however, the dequantize after conv2 should happen after x.transpose since
+        # it is configured with default_qconfig
+        qconfig_dict = {"": default_qconfig, "module_name": [("sub", None)]}
+        m = prepare_fx(m, qconfig_dict)
+        m(torch.randn(2, 1, 3, 3))
+        m = convert_fx(m)
+        node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Conv2d),
+            ns.call_method("dequantize"),
+            ns.call_method("transpose"),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Conv2d),
+            ns.call_method("transpose"),
+            ns.call_method("dequantize")
+        ]
+        self.checkGraphModuleNodes(m, expected_node_list=node_list)
+
+        # make sure it runs
+        m(torch.randn(2, 1, 3, 3))
 
     @skipIfNoFBGEMM
     def test_qat_and_script(self):
