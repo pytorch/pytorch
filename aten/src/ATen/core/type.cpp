@@ -1192,7 +1192,8 @@ void ClassType::checkPreHookSchema(torch::jit::Function& pre_hook) const {
   } else {
     // check input tuple for correct size and correct contained types
     TORCH_CHECK(
-        input_tuple_types.size() == forward_args.size() - 1, hook_id,
+        input_tuple_types.size() == forward_args.size() - 1,
+        hook_id,
         "has the wrong number of contained types for the",
         " input argument's Tuple. Received type: '",
         input_arg.type()->annotation_str(),
@@ -1201,7 +1202,7 @@ void ClassType::checkPreHookSchema(torch::jit::Function& pre_hook) const {
     );
 
     for (int i = 1; i < forward_args.size(); ++i) {
-      if (forward_args[i].type()->annotation_str() != input_tuple_types[i - 1]->annotation_str()) {
+      if (*forward_args[i].type() != *input_tuple_types[i - 1]) {
         TORCH_CHECK(
             false,
             hook_id,
@@ -1225,8 +1226,7 @@ void ClassType::checkPreHookSchema(torch::jit::Function& pre_hook) const {
   if (return_arg.type()->kind() == NoneType::get()->kind()) {
     return;
   }
-  if (forward_args.size() == 2 && 
-        forward_args[1].type()->annotation_str() == return_arg.type()->annotation_str()) {
+  if (forward_args.size() == 2 && *forward_args[1].type() == *return_arg.type()) {
     // TORCH_CHECK below is for the edge case where forward's input is a tuple and the 
     // pre-hook returns a matching tuple. Eager doesn't support this- the working eager return
     // for a tuple type is the forward's input tuple wrapped inside of another tuple. 
@@ -1273,8 +1273,7 @@ void ClassType::checkPreHookSchema(torch::jit::Function& pre_hook) const {
   );
   // check that contained types match forward types
   for (int i = 1; i < forward_args.size(); ++i) {
-    if (forward_args[i].type()->annotation_str() !=
-        return_tuple_types[i - 1]->annotation_str()) {
+    if (*forward_args[i].type() != *return_tuple_types[i - 1]) {
       TORCH_CHECK(
           false, 
           wrong_type_returned_err_msg,
@@ -1340,8 +1339,7 @@ void ClassType::checkHookSchema(torch::jit::Function& hook) const {
     );
 
     for (int i = 1; i < forward_args.size(); ++i) {
-      if (forward_args[i].type()->annotation_str() !=
-          input_tuple_types[i - 1]->annotation_str()) {
+      if (*forward_args[i].type() != *input_tuple_types[i - 1]) {
         TORCH_CHECK(
             false, 
             hook_id,
@@ -1363,7 +1361,7 @@ void ClassType::checkHookSchema(torch::jit::Function& hook) const {
 
   // output tuple needs to match prev_output's return exactly
   TORCH_CHECK(
-      prev_output.type()->annotation_str() == return_arg.type()->annotation_str(),
+      *prev_output.type() == *return_arg.type(),
       hook_id,
       "has the wrong type for the output argument. Received type: '",
       return_arg.type()->annotation_str(),
