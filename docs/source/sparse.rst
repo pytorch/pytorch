@@ -363,6 +363,56 @@ assumption that the fill value is negative infinity.
 
 .. See https://github.com/Quansight-Labs/rfcs/tree/pearu/rfc-fill-value/RFC-0004-sparse-fill-value for a new API
 
+.. _sparse-gcs-docs:
+
+Sparse GCS Tensor
++++++++++++++++++
+
+The GCS (Generalized Compressed Storage) tensor format is a special
+sparse tensor format for expressing N-D tensors with compressed
+indices similar to the CSR format for 2D sparse matrices. The main
+advantage over the COO format is faster tensor operations as a 
+result of improved data locality. We use dimensionality reduction 
+to map the N-dimensional indicies to 2-dimensional indices and apply 
+the standard CSR format for storing the elements in the dimensionality 
+reduced 2-dimensional array.
+
+We use the basic ideas formulated in the paper "Efficient storage 
+scheme for n-dimensional sparse array: GCRS/GCCS" by Md Abu Hanif Shaikh
+and K.M. Azharul Hasan, published in 2015. In the paper, the
+authors reduce odd and even numbered dimensions of an N-D tensor
+map to the row and column dimensions of the GCS tensor, respectively.
+We remove this limitation and allow reduction along any dimension
+specified by the user in order to improve data locality and thereby
+performance.
+
+The GCS format is expressed using four tensors:
+
+  - ``crow_indices``
+  - ``col_indices``
+  - ``values``
+  - ``reduction``
+
+The following references are useful for a deeper understanding of
+the GCS format:
+
+  - https://github.com/pearu/gcs/blob/main/GentleIntroductionToGCS.md
+  - https://ieeexplore.ieee.org/document/7237032/
+  - https://github.com/Quansight-Labs/rfcs/tree/pearu/rfc0005/RFC0003-sparse-roadmap
+
+Construction
+------------
+
+As a result of pytorch being linked with 32-bit MKL, we must use 32 bit
+integer indices in the ``crow_indices`` and ``col_indices`` functions.
+Therefore, a reduction scheme where the resulting dimensions exceed ``INT_MAX``
+for 32 bit integers is not supported (as of now).
+
+Operations on sparse GCS tensors
+--------------------------------
+
+
+
 Supported Linear Algebra operations
 +++++++++++++++++++++++++++++++++++
 

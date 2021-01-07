@@ -225,10 +225,10 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
   return out;
 }
 
-SparseTensor add_out_sparse_gcs_cpu(SparseTensor& out, const SparseTensor& self,
-                                     const SparseTensor& src, Scalar alpha) {
+Tensor& add_out_sparse_gcs_cpu(const Tensor& self, const SparseTensor& other, 
+                                    Scalar alpha, SparseTensor& out) {
   if (!self.is_sparse()) {
-    return add_out_dense_sparse_gcs_cpu(out, self, src, alpha);
+    return add_out_dense_sparse_gcs_cpu(out, self, other, alpha);
   }
   else {
     TORCH_CHECK(false, "NotImplementedError: Addition of sparse GCS tensors is not yet implemented.")

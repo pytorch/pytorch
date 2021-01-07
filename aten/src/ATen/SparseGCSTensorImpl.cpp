@@ -40,7 +40,9 @@ SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set,
 
 void SparseGCSTensorImpl::resize_and_clear_(int64_t nnz_size, int64_t ptr_size, int64_t redux_size, IntArrayRef size) {
   // TODO: perform error checking.
-  TORCH_CHECK(size.size() + 1 == redux_size, "size of the reduction array has to be len(sparse.shape)+1, but got: ", redux_size);
+  TORCH_CHECK(size.size() + 1 == redux_size, 
+              "size of the reduction array has to be len(sparse.shape)+1, but got: ", 
+              redux_size);
 
   // call pointers().options() here since the struct contructor calls the tensor constructor
   // with args for device specific init.
@@ -71,17 +73,25 @@ void SparseGCSTensorImpl::resize_as_(const Tensor& src) {
   
 void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, const Tensor& indices,
                                                       const Tensor& values, const Tensor& reduction) {
-  TORCH_CHECK(!indices.is_sparse(), "expected indices to be a dense tensor, but got indices of layout ", indices.layout());
-  TORCH_CHECK(!pointers.is_sparse(), "expected pointers to be a dense tensor, but got pointers of layout ", pointers.layout());
-  TORCH_CHECK(!values.is_sparse(), "expected values to be a dense tensor, but got values of layout ", values.layout());
-  TORCH_CHECK(!reduction.is_sparse(), "expected reduction to be a dense tensor, but got reduction of layout ", reduction.layout());
+  TORCH_CHECK(!indices.is_sparse(), 
+              "expected indices to be a dense tensor, but got indices of layout ", 
+              indices.layout());
+  TORCH_CHECK(!pointers.is_sparse(), 
+              "expected pointers to be a dense tensor, but got pointers of layout ", 
+              pointers.layout());
+  TORCH_CHECK(!values.is_sparse(), 
+              "expected values to be a dense tensor, but got values of layout ", 
+              values.layout());
+  TORCH_CHECK(!reduction.is_sparse(), 
+              "expected reduction to be a dense tensor, but got reduction of layout ", 
+              reduction.layout());
 
   TORCH_CHECK(values.device().type() == device().type(), "device type of values (", values.device().type(),
               ") must match device type of device().type()", device().type(), ")");
-  TORCH_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", indices.get_device(),
-              ") must match device of values (", values.get_device(), ")");
-  TORCH_CHECK(!pointers.is_cuda() || pointers.get_device() == values.get_device(), "device of pointers (", pointers.get_device(),
-              ") must match device of values (", values.get_device(), ")");
+  TORCH_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", 
+              indices.get_device(), ") must match device of values (", values.get_device(), ")");
+  TORCH_CHECK(!pointers.is_cuda() || pointers.get_device() == values.get_device(), "device of pointers (", 
+              pointers.get_device(), ") must match device of values (", values.get_device(), ")");
 
   TORCH_CHECK(indices.size(0) == values.size(0), "indices and values must have same nnz, but got nnz from indices: ",
               indices.size(0), ", nnz from values: ", values.size(0));
@@ -94,8 +104,10 @@ void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, cons
   TORCH_CHECK(indices.scalar_type() == kInt, "indices must be an int32 type, but got: ", indices.dtype());
   TORCH_CHECK(pointers.scalar_type() == kInt, "pointers must be int32 type, but got: ", pointers.dtype());
   TORCH_CHECK(reduction.scalar_type() == kInt, "reduction must be int32 type, but got: ", reduction.dtype());
-  TORCH_CHECK(values.scalar_type() == typeMetaToScalarType(dtype()), "dtype of values (", values.scalar_type(), ") must match dtype of sparse tensor (", typeMetaToScalarType(dtype()), ")");
-  
+  TORCH_CHECK(values.scalar_type() == typeMetaToScalarType(dtype()), 
+              "dtype of values (", values.scalar_type(), ") must match dtype of sparse tensor (", 
+              typeMetaToScalarType(dtype()), ")");
+
   pointers_ = pointers;
   indices_ = indices;
   values_ = values;
@@ -108,8 +120,20 @@ void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, cons
   auto reduction_accessor = reduction_.accessor<int32_t, 1>();
 
   rsplit_dim_ = reduction_accessor[reduction_.size(0)-1];
-  TORCH_CHECK(rsplit_dim_ <= sizes_.size(), "Dimensions can only be split between 0 and ", sizes_.size(), ", but got split dimension as: ", rsplit_dim_);
-    
+  TORCH_CHECK(rsplit_dim_ <= sizes_.size(), "Dimensions can only be split between 0 and ", 
+              sizes_.size(), ", but got split dimension as: ", rsplit_dim_);
+  
+  int64_t dim0 = 1, dim1 = 1;
+  for (int i = 0; i < rsplit_dim_; ++i) {
+    dim0 *= sizes_[i];
+  }
+  TORCH_CHECK(dim0 <= INT_MAX, "row dimension of reduced tensor must be <= ", INT_MAX);
+
+  for (int i = rsplit_dim_; i < sizes_.size(); ++i) {
+    dim1 *= sizes_[i];
+  }
+  TORCH_CHECK(dim1 <= INT_MAX, "column dimension of reduced tensor must be <= ", INT_MAX);
+
   dims0_.resize(rsplit_dim_);
   strides0_.resize(1);
   
