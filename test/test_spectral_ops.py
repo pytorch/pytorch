@@ -6,12 +6,11 @@ from itertools import product
 import itertools
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_WITH_SLOW, TEST_NUMPY, TEST_LIBROSA)
+    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyOnCPUAndCUDA,
      skipCPUIfNoMkl, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA, OpDTypes)
 from torch.testing._internal.common_methods_invocations import spectral_funcs
-from torch.autograd.gradcheck import gradgradcheck
 
 from distutils.version import LooseVersion
 from typing import Optional, List
