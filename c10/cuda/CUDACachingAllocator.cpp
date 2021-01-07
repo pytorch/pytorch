@@ -21,6 +21,7 @@
 namespace c10 {
 
 C10_DEFINE_REGISTRY(FreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
+C10_DEFINE_REGISTRY(ExpensiveFreeCudaMemoryCallbacksRegistry, FreeMemoryCallback);
 
 namespace cuda {
 namespace CUDACachingAllocator {
@@ -240,7 +241,9 @@ class DeviceCachingAllocator {
       // Attempt allocate
       || alloc_block(params, false)
       // Free all non-split cached blocks and retry alloc.
-      || (free_cached_blocks() && alloc_block(params, true));
+      || (free_cached_blocks() && alloc_block(params, true))
+      // Run expensive free memory callbacks and try again
+      || (trigger_expensive_free_memory_callbacks(params) && get_free_block(params));
 
     TORCH_INTERNAL_ASSERT((!block_found && params.err != cudaSuccess) || params.block);
     if (!block_found) {
@@ -642,6 +645,15 @@ class DeviceCachingAllocator {
     for (const auto& name : FreeCudaMemoryCallbacksRegistry()->Keys()) {
       freed_memory |=
         FreeCudaMemoryCallbacksRegistry()->Create(name)->Execute();
+    }
+    return freed_memory;
+  }
+
+  bool trigger_expensive_free_memory_callbacks(AllocParams& p) {
+    bool freed_memory = false;
+    for (const auto& name : ExpensiveFreeCudaMemoryCallbacksRegistry()->Keys()) {
+      freed_memory |=
+        ExpensiveFreeCudaMemoryCallbacksRegistry()->Create(name)->Execute();
     }
     return freed_memory;
   }
