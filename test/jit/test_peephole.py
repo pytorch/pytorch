@@ -39,7 +39,7 @@ class TestPeephole(JitTestCase):
         a = torch.ones(4, 4)
         j = self.checkScript(test_write, (a,))
 
-    def test_peephole_no_output_aliasing(self):
+    def test_peephole_no_ops(self):
         def test_peephole(x):
             y = x + 0
             return x, y
@@ -48,6 +48,30 @@ class TestPeephole(JitTestCase):
         j = self.checkScript(test_peephole, (a,))
         r1, r2 = j(a)
         self.assertNotEqual(r1.data_ptr(), r2.data_ptr())
+
+        @torch.jit.script
+        def test_peephole(y):
+            y = y + 0
+            y = y - 0
+            y = y * 1
+            y = y / 1
+            return torch.relu(y)
+
+        self.run_pass('peephole', test_peephole.graph)
+        FileCheck().check_not("aten::add").check_not("aten::sub").check_not("aten::mul").check_not("aten::div").run(test_peephole.graph)
+
+        def foo(x):
+            a = x + 2
+            b = a + 0
+            b.add_(3)
+            return a + b
+
+        self.checkScript(foo, (torch.tensor([4]),))
+
+        foo_s = torch.jit.script(foo)
+        self.run_pass('peephole', foo_s.graph)
+        FileCheck().check_count("aten::add", 4, exactly=True).run(foo_s.graph)
+
 
     def test_peephole(self):
         a = torch.tensor([0.4])
