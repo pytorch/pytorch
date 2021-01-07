@@ -2,7 +2,7 @@
 
 This tool is used to measure pytorch distributed rpc throughput and latency for reinforcement learning.
 
-The main process for which these measurements are calculated involves an `agent` and `observers`.  Each observer has its own state.  Through many iterations, each observer passes its state to the agent and requests an action to alter its state. If `batch=False` then the agent will process and respond to a single observer request at a time, otherwise all observer requests incoming to the agent will be queued until that queue is the size of `batch_size`, at which point all requests will be processed and replied to.  There is also a `coordinator` that manages the `agent` and `observer`
+The benchmark spawns one *agent* process and a configurable number of *observer* processes. As this benchmark focuses on RPC throughput and latency, the agent uses a dummy policy and observers all use randomly generated states and rewards. In each iteration, observers pass their state to the agent through `torch.distributed.rpc` and wait for the agent to respond with an action. If `batch=False`, then the agent will process and respond to a single observer request at a time. Otherwise, the agent will accumulate requests from multiple observers and run them through the policy in one shot. There is also a separate *coordinator* process that manages the *agent* and *observers*. 
 
 In addition to printing measurements, this benchmark produces a JSON file.  Users may choose a single argument to provide multiple comma separated entries for (ie: `world_size="10,50,100"`) in which case the JSON file produced can be passed to the plotting repo to visually see how results differ.  In this case, each entry for the variable argument will be placed on the x axis.
 
