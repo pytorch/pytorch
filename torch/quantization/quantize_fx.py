@@ -43,12 +43,38 @@ def _fuse_fx(
     return fuser.fuse(graph_module, fuse_custom_config_dict)
 
 class Scope(object):
+    """ Scope object that records the module path and the module type
+    of a module. Scope is used to track the information of the module
+    that contains a Node in a Graph of GraphModule. For example:
+    class Sub(torch.nn.Module):
+        def forward(self, x):
+            # This will be a call_method Node in GraphModule,
+            # scope for this would be (module_path="sub", module_type=Sub)
+            return x.transpose(1, 2)
+
+    class M(torch.nn.Module):
+        def __init__(self):
+            self.sub = Sub()
+
+        def forward(self, x):
+            # This will be a call_method Node as well,
+            # scope for this would be (module_path="", None)
+            x = x.transpose(1, 2)
+            x = self.sub(x)
+            return x
+
+    """
     def __init__(self, module_path: str, module_type: Any):
         super().__init__()
         self.module_path = module_path
         self.module_type = module_type
 
 class ScopeContextManager(object):
+    """ A context manager to track the Scope of Node during symbolic
+    tracing.
+    When entering a forward function of a Module, we'll update the scope information of
+    the current module, and when we exit, we'll restore the previous scope information.
+    """
     def __init__(
             self,
             scope: Scope,
@@ -76,6 +102,11 @@ class QuantizationTracer(Tracer):
         super().__init__()
         self.skipped_module_names = skipped_module_names
         self.skipped_module_classes = skipped_module_classes
+        # NB: initialized the module_type of top level module to None
+        # we are assuming people won't configure the model with the type of top level
+        # module here, since people can use "" for global config
+        # We can change this if there is a use case that configures
+        # qconfig using top level module type
         self.scope = Scope("", None)
         self.node_name_to_scope = {}
 
@@ -90,6 +121,8 @@ class QuantizationTracer(Tracer):
         module_qualified_name = self.path_of_module(m)
         if not self.is_leaf_module(m, module_qualified_name):
             def scoped_forward(_args, _kwargs):
+                # Creating scope with information of current module
+                # scope will be restored automatically upon exit
                 with ScopeContextManager(self.scope, m, module_qualified_name):
                     return forward(*_args, **_kwargs)
             return scoped_forward(args, kwargs)
