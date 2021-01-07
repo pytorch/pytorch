@@ -225,7 +225,8 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
   return out;
 }
 
-SparseTensor& add_out_sparse_gcs_cpu(SparseTensor& out, const SparseTensor& self, const SparseTensor& src, Scalar alpha) {
+SparseTensor add_out_sparse_gcs_cpu(SparseTensor& out, const SparseTensor& self,
+                                     const SparseTensor& src, Scalar alpha) {
   if (!self.is_sparse()) {
     return add_out_dense_sparse_gcs_cpu(out, self, src, alpha);
   }

@@ -26,15 +26,18 @@ namespace at {
 // Since the GCS format allows the user to collapse contiguous
 // dimensions of their choice into 2-D tensors, use of optimized
 // routines meant for CSR formats from MKL or MAGMA can be
-// used for performing operations on the collapsed dimensions.
+// used for performing operations on the tensor. Since we provide
+// the user with the flexibility of choosing the dimensions to
+// reduce, the user can reduce along the most utilized diemensions
+// in their computation for maximum data locality.
 // For further information on usage and best practices see
 // the documentation of the torch.sparse_gcs_tensor() method
 // and the benchmarks in the benchmarks/sparse folder for
 // comparisons against COO.
 
 // We use four Tensors for representing the GCS format:
-// row_indices_, col_indices_, values_ and reduction_.
-// The row_indices_, col_indices_ and values_ tensors
+// crow_indices_, col_indices_, values_ and reduction_.
+// The crow_indices_, col_indices_ and values_ tensors
 // are very similar to the tensors of the CSR format used
 // for storing compressed row indices, col indices and
 // non-zero values respectively. The reduction_ tensor

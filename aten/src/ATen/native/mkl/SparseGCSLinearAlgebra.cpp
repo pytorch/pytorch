@@ -78,8 +78,8 @@ namespace at { namespace native {
     }
 
     template <typename scalar_t>
-    static inline void sparse_mm_mkl_template(Tensor& res, const IntTensor& indices,
-                                              const IntTensor& pointers, const Tensor& values,
+    static inline void sparse_mm_mkl_template(Tensor& res, const Tensor& indices,
+                                              const Tensor& pointers, const Tensor& values,
                                               const Tensor& dense, const Tensor& t, Scalar alpha,
                                               Scalar beta, IntArrayRef size, IntArrayRef dense_size) {
       sparse_mm_mkl_impl(res.data_ptr<scalar_t>(),
