@@ -743,7 +743,6 @@ class DistributedDataParallel(Module):
             res = to_map(inputs)
         finally:
             to_map = None
-
         return res
 
     def to_kwargs(self, inputs, kwargs, device_id):
