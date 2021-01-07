@@ -152,6 +152,20 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
     return nullptr;
   }
   template <typename T>
+  T* castRaw() {
+    if (T::Kind == kind()) {
+      return static_cast<T*>(this);
+    }
+    return nullptr;
+  }
+  template <typename T>
+  const T* castRaw() const {
+    if (T::Kind == kind()) {
+      return static_cast<T*>(this);
+    }
+    return nullptr;
+  }
+  template <typename T>
   std::shared_ptr<T> expect() {
     auto r = cast<T>();
     AT_ASSERT(r);
@@ -162,6 +176,18 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
     auto r = cast<const T>();
     AT_ASSERT(r);
     return r;
+  }
+  template <typename T>
+  T& expectRef() {
+    auto* r = castRaw<T>();
+    AT_ASSERT(r);
+    return *r;
+  }
+  template <typename T>
+  const T& expectRef() const {
+    auto* r = castRaw<const T>();
+    AT_ASSERT(r);
+    return *r;
   }
   virtual ~Type() = default;
   virtual bool hasFreeVariables() const {
