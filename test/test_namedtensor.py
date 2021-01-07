@@ -1371,7 +1371,7 @@ class TestNamedTensor(TestCase):
 
         def test_not_matching():
             # insertion should throw RuntimeError if dimensions and names do not match
-            with self.assertRaisesRegex(RuntimeError, "aten::view is not yet supported on named tensors"):
+            with self.assertRaisesRegex(RuntimeError, "aten::view is not yet supported with named tensors"):
                 tensor, insert = create_tensor('N:2,C:2,H:3', 'H:3,C:2')
                 tensor[0] = insert
 
