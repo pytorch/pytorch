@@ -102,7 +102,7 @@ struct Command final {
     struct Configuration final {
       static constexpr uint32_t kQuantum = 4u;
       static constexpr uint32_t kReserve = 16u;
-      static constexpr uint32_t kSubmit = UINT32_MAX;
+      static constexpr uint32_t kSubmit = 10u;
     };
 
     VkDevice device_;

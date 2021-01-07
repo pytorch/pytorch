@@ -46,10 +46,10 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
         // appropriate barriers are inserted automatically if WAR or WAW hazards
         // are detected.  Examples of such scenario for instance are if any of
         // these async operations are on going in the background on 'self':
-        //  - On discrete systems:
+        // - On discrete systems:
         //      * buffer-to-staging transfers
         //      * staging-to-buffer transfers
-        // -  On UMA buffer is an alias for staging and accessible both on host
+        // - On UMA buffer is an alias for staging and accessible both on host
         //    and device.  Consequently:
         //      * buffer-to-image NHWC -> NC4HW packing
         //      * image-to-buffer NC4HW -> NHWC unpacking

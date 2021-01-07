@@ -454,10 +454,14 @@ void Command::Pool::submit(
         "Invalid Vulkan command buffer!");
 
     // Are we submitting our one and only command stream, or a regular command
-    // buffer whose scope is manually maintained by the user?
+    // buffer whose scope is manually maintained by the user?  Automatically
+    // maintain state and submission rate if the former.
 
     if (stream_.buffer.handle() == command_buffer) {
-      // Are we ready to hand the command buffer off to the driver?
+      // Hand the stream off to the driver if:
+      // - The user has implictly signaled interest in the results via a fence.
+      // - We are over the submission cutoff.  We don't want to starve the GPU.
+
       if (fence || (stream_.counter++ > Configuration::kSubmit)) {
         stream_.buffer.end();
         stream_.buffer.invalidate();
