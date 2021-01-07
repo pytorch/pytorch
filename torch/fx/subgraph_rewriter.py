@@ -69,9 +69,10 @@ class SubgraphMatcher:
 
 def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable) -> None:
     """
-    Matches a set of operators and their data dependencies (``pattern``)
-    in the Graph of a GraphModule (``gm``), then replaces the matched
-    subgraph with another set (``replacement``).
+    Matches all possible non-overlapping sets of operators and their
+    data dependencies (``pattern``) in the Graph of a GraphModule
+    (``gm``), then replaces each of these matched subgraphs with another
+    subgraph (``replacement``).
 
     Args:
         ``gm``: The GraphModule that wraps the Graph to operate on
@@ -123,9 +124,8 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
     found match in the set of overlapping matches will be replaced.
 
     One important thing to note is that the parameters of the
-    ``pattern`` and ``replacement`` Callables should be: 1) a subset
-    of the parameters of the original ``forward`` function, 2) used
-    in the Callable itself. Rule #2 is why, in the above code block, the
+    ``pattern`` and ``replacement`` Callables must be used in the
+    Callable itself. This rule is why, in the above code block, the
     ``forward`` function has parameters ``x, w1, w2``, but the
     ``pattern`` function only has parameters ``w1, w2``. ``pattern``
     doesn't use ``x``, so it shouldn't specify ``x`` as a parameter.
@@ -188,13 +188,13 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
 
     # The set of all nodes in `original_graph` that we've seen thus far
     # as part of a pattern match
-    nodes_to_delete: Set[Node] = set()
+    replaced_nodes: Set[Node] = set()
 
     # Return TRUE if one of the nodes in the current match has already
     # been used as part of another match
     def overlaps_with_prev_match(match : Match) -> bool:
         for n in match.nodes_map.values():
-            if n in nodes_to_delete and n.op != "placeholder":
+            if n in replaced_nodes and n.op != "placeholder":
                 return True
         return False
 
@@ -220,14 +220,14 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
         # in `pattern`
         subgraph_output: Node = match.anchor
 
-        def mark_nodes_for_deletion(n : Node) -> None:
+        def mark_node_as_replaced(n : Node) -> None:
             if n not in match.nodes_map.values():
                 return
             for n_ in n.all_input_nodes:
-                mark_nodes_for_deletion(n_)
-            nodes_to_delete.add(n)
+                mark_node_as_replaced(n_)
+            replaced_nodes.add(n)
 
-        mark_nodes_for_deletion(subgraph_output)
+        mark_node_as_replaced(subgraph_output)
 
         # Intialize `val_map` with mappings from placeholder nodes in
         # `replacement` to their corresponding node in `original_graph`
@@ -250,7 +250,7 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
         # `pattern` output node so we don't have two outputs in the
         # resultant graph
         if subgraph_output.op != "output":
-            subgraph_output = subgraph_output.args[0]
+            subgraph_output = subgraph_output.args[0]    # type: ignore
         subgraph_output.replace_all_uses_with(copied_output)
 
         # Erase the `pattern` nodes
