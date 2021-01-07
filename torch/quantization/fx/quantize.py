@@ -352,6 +352,7 @@ class Quantizer:
         for node in input_graph.nodes:
             if node.op == "get_attr":
                 module_name, _ = _parent_name(node.target)
+                assert self.modules is not None
                 self.qconfig_map[node.name] = get_qconfig(
                     qconfig_dict, type(self.modules[module_name]), module_name, global_qconfig)
             elif node.op == "call_function":
@@ -368,12 +369,12 @@ class Quantizer:
                     qconfig_dict, module_type, module_path, global_qconfig)
                 self.qconfig_map[node.name] = qconfig
             elif node.op == 'call_module':
+                assert self.modules is not None
                 module_qconfig = get_qconfig(
                     qconfig_dict, type(self.modules[node.target]), node.target, global_qconfig)
                 # regex is not supported eager mode propagate_qconfig_, we'll
                 # need to set the qconfig explicitly here in case regex
                 # is used
-                assert self.modules is not None
                 self.modules[node.target].qconfig = module_qconfig
                 self.qconfig_map[node.name] = module_qconfig
 
@@ -577,7 +578,7 @@ class Quantizer:
             self,
             model: GraphModule,
             qconfig_dict: Any,
-            node_name_to_scope: Dict[str, str],
+            node_name_to_scope: Dict[str, Tuple[str, Any]],
             prepare_custom_config_dict: Dict[str, Any] = None,
             is_standalone_module: bool = False) -> GraphModule:
         return self._prepare(

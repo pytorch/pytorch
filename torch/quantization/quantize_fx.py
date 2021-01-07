@@ -183,7 +183,6 @@ forward graph of the parent module,
 def _prepare_standalone_module_fx(
         model: torch.nn.Module,
         qconfig_dict: Any,
-        node_name_to_scope: Dict[str, Tuple[str, Any]],
         prepare_custom_config_dict: Dict[str, Any] = None) -> GraphModule:
     r""" [Internal use only] Prepare a standalone module, so that it can be used when quantizing the
     parent module.
@@ -205,7 +204,7 @@ def _prepare_standalone_module_fx(
                 same as input_quantized_idxs configuration provided
                 for the standalone module
     """
-    return _prepare_fx(model, qconfig_dict, node_name_to_scope, prepare_custom_config_dict, is_standalone_module=True)
+    return _prepare_fx(model, qconfig_dict, prepare_custom_config_dict, is_standalone_module=True)
 
 def fuse_fx(model: torch.nn.Module,
             fuse_custom_config_dict: Dict[str, Any] = None) -> GraphModule:
