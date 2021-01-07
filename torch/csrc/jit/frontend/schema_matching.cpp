@@ -71,7 +71,7 @@ Value* tryConvertToType(
     if (convertibleToList(value->type(), unwrapOptional(concrete_type))) {
       auto unpacked = createTupleUnpack(value);
       auto elem_type =
-          unwrapOptional(concrete_type)->expect<ListType>()->getElementType();
+          unwrapOptional(concrete_type)->expectRef<ListType>().getElementType();
       value = graph.insertNode(graph.createList(elem_type, unpacked))->output();
     }
 
@@ -322,8 +322,9 @@ static c10::optional<MatchedSchema> tryMatchSchema(
         // The actual cannot already be a list
         if (actual_type->kind() != TypeKind::ListType &&
             !convertibleToList(actual_type, unwrapOptional(arg.type()))) {
-          auto formal_type =
-              unwrapOptional(arg.type())->expect<ListType>()->getElementType();
+          auto formal_type = unwrapOptional(arg.type())
+                                 ->expectRef<ListType>()
+                                 .getElementType();
 
           Value* list = tryCreateList(
               formal_type,
