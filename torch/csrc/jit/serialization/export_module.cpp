@@ -132,8 +132,9 @@ std::string getModuleTypeName(const Module& module, const std::string& prefix) {
 std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
     const Module& module,
     const Function& func,
-    std::unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>
-        constants_from_jit = {},
+    const std::
+        unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
+            constants_from_jit = {},
     bool save_mobile_debug_info = false) {
   auto graph = func.graph()->copy();
 
@@ -239,7 +240,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   std::vector<IValue> deduplicated_constants;
   for (const auto& constant : constants) {
     if (constant.isTensor()) {
-      const auto constant_tensor = constant.toTensor();
+      const auto& constant_tensor = constant.toTensor();
       if (constants_from_jit.find(constant_tensor) ==
           constants_from_jit.end()) {
         deduplicated_constants.emplace_back(constant);
