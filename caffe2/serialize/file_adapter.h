@@ -10,7 +10,7 @@
 namespace caffe2 {
 namespace serialize {
 
-class CAFFE2_API FileAdapter final : public ReadAdapterInterface {
+class TORCH_API FileAdapter final : public ReadAdapterInterface {
  public:
   C10_DISABLE_COPY_AND_ASSIGN(FileAdapter);
   explicit FileAdapter(const std::string& file_name);

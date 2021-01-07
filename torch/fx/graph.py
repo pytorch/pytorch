@@ -247,6 +247,8 @@ class Graph:
         assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
+        assert isinstance(args, tuple), "args must be a tuple"
+        assert isinstance(kwargs, dict), "kwargs must be a dict"
         unique_name = self._create_unique_name(name if name is not None else self._target_to_str(target))
         n = Node(self, unique_name, op, target, args, kwargs, type_expr)
         self._insert(n)
@@ -415,7 +417,7 @@ class Graph:
                     type_expr: Optional[Any] = None) -> Node:
         """
         Insert a ``call_method`` ``Node`` into the ``Graph``. A ``call_method`` node
-        represents a call to a given method on the 0th element of `args.
+        represents a call to a given method on the 0th element of ``args``.
 
         Args:
 
@@ -575,7 +577,9 @@ class Graph:
         free_vars: List[str] = []
         modules_used : Set[str] = set()
         body: List[str] = []
-        maybe_return_annotation : str = ''
+
+        # Wrap string in list to pass by reference
+        maybe_return_annotation : List[str] = ['']
 
         def register_modules_used(qualified_name : str):
             if '.' in qualified_name:
@@ -617,6 +621,8 @@ class Graph:
             not used in the remainder of the code are freed and the memory usage
             of the code is optimal.
             """
+            if user.op == 'placeholder':
+                return
             if user.op == 'output':
                 body.append('\n')
                 return
@@ -635,7 +641,7 @@ class Graph:
                 free_vars.append(f'{node.target}{maybe_type_annotation}{maybe_default_arg}')
                 raw_name = node.target.replace('*', '')
                 if raw_name != node.name:
-                    body.append(f'{node.name} = {raw_name}')
+                    body.append(f'{node.name} = {raw_name}\n')
                 return
             elif node.op == 'call_method':
                 assert isinstance(node.target, str)
@@ -671,7 +677,7 @@ class Graph:
                 return
             elif node.op == 'output':
                 if node.type is not None:
-                    maybe_return_annotation = f" -> {type_repr(node.type)}"
+                    maybe_return_annotation[0] = f" -> {type_repr(node.type)}"
                 body.append(f'return {repr(node.args[0])}')
                 return
             raise NotImplementedError(f'node: {node.op} {node.target}')
@@ -687,13 +693,18 @@ class Graph:
         import_strs = [f'import {name}' for name in sorted(modules_used)]
         import_block = '\n'.join(import_strs)
 
+        if len(body) == 0:
+            # If the Graph has no non-placeholder nodes, no lines for the body
+            # have been emitted. To continue to have valid Python code, emit a
+            # single pass statement
+            body.append('pass\n')
+
         code = ''.join(body)
-        code = '\n'.join('    ' + line for line in code.split('\n')) + '\n'
+        code = '\n'.join('    ' + line for line in code.split('\n'))
         fn_code = f"""\
 {import_block}
-def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
-{code}
-"""
+def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
+{code}"""
 
         return fn_code
 
@@ -756,9 +767,9 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
         """
         Runs various checks on this Graph to make sure it is well-formed. In
         particular:
-            - Checks Nodes have correct ownership (owned by this graph)
-            - Checks Nodes appear in topological order
-            - If ``root`` is provided, checks that targets exist in ``root``
+        - Checks Nodes have correct ownership (owned by this graph)
+        - Checks Nodes appear in topological order
+        - If ``root`` is provided, checks that targets exist in ``root``
 
         Args:
 
