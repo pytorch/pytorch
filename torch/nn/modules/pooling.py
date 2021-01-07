@@ -83,7 +83,7 @@ class MaxPool1d(_MaxPoolNd):
     padding: _size_1_t
     dilation: _size_1_t
 
-    def forward(self, input: Tensor) -> Tuple[Tensor, Tensor]:
+    def forward(self, input: Tensor) -> Tensor:
         return F.max_pool1d(input, self.kernel_size, self.stride,
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
@@ -157,7 +157,7 @@ class MaxPool2d(_MaxPoolNd):
     padding: _size_2_t
     dilation: _size_2_t
 
-    def forward(self, input: Tensor) -> Tuple[Tensor, Tensor]:
+    def forward(self, input: Tensor) -> Tensor:
         return F.max_pool2d(input, self.kernel_size, self.stride,
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
@@ -235,7 +235,7 @@ class MaxPool3d(_MaxPoolNd):
     padding: _size_3_t
     dilation: _size_3_t
 
-    def forward(self, input: Tensor) -> Tuple[Tensor, Tensor]:
+    def forward(self, input: Tensor) -> Tensor:
         return F.max_pool3d(input, self.kernel_size, self.stride,
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)

@@ -926,7 +926,7 @@ class TestJit(JitTestCase):
         m_dropout.eval()
         self.assertEqual(dropout(input) + 1, m_dropout(input))
 
-    def test_MaxUnpoolNd(self):
+    def test_nn_MaxUnpoolNd(self):
 
         class Mod(nn.Module):
             def __init__(self, pool_mod, unpool_mod):
@@ -938,15 +938,16 @@ class TestJit(JitTestCase):
                 output, indices = self.pool(input)
                 return self.unpool(output, indices)
 
-        m1 = Mod(nn.MaxPool1d(2, stride=2, return_indices=True),
-                 nn.MaxUnpool1d(2, stride=2))
-        inp = torch.tensor([[[1., 2, 3, 4, 5, 6, 7, 8]]])
-        self.checkModule(m1, (inp,))
+        # See issue #45904
+        # m1 = Mod(nn.MaxPool1d(2, stride=2, return_indices=True),
+        #          nn.MaxUnpool1d(2, stride=2))
+        # inp = torch.tensor([[[1., 2, 3, 4, 5, 6, 7, 8]]])
+        # self.checkModule(m1, (inp,))
 
-        m2 = Mod(nn.MaxPool2d(2, stride=2, return_indices=True),
-                 nn.MaxUnpool2d(2, stride=2))
-        inp2d = torch.arange(1, 17, dtype=torch.float).reshape(1, 1, 4, 4)
-        self.checkModule(m2, (inp2d,))
+        # m2 = Mod(nn.MaxPool2d(2, stride=2, return_indices=True),
+        #          nn.MaxUnpool2d(2, stride=2))
+        # inp2d = torch.arange(1, 17, dtype=torch.float).reshape(1, 1, 4, 4)
+        # self.checkModule(m2, (inp2d,))
 
         # crashes pytorch
         # m3 = Mod(nn.MaxPool3d(3, stride=2, return_indices=True), 
@@ -954,7 +955,7 @@ class TestJit(JitTestCase):
         # inp3d = torch.randn(20, 16, 51, 33, 15)
         # self.checkModule(m3, (inp3d,))
 
-    def test_FractionalMaxPoolNd(self):
+    def test_nn_FractionalMaxPoolNd(self):
         class Mod(nn.Module):
             def __init__(self, m):
                 super().__init__()
