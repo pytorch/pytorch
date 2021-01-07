@@ -90,6 +90,43 @@ static c10::optional<c10::ScalarType> PromoteScalarTypes(
   return st;
 }
 
+// Type promotion between scalars and tensors
+// per logic here
+// https://pytorch.org/docs/master/tensor_attributes.html#tensor-attributes
+static c10::optional<c10::ScalarType> PromoteScalarTypesWithCategory(
+    const std::vector<c10::ScalarType>& typesFromTensors,
+    const std::vector<c10::ScalarType>& typesFromScalars) {
+  auto typeFromTensor = PromoteScalarTypes(typesFromTensors);
+  auto typeFromScalar = PromoteScalarTypes(typesFromScalars);
+
+  auto getTypeCategory = [](c10::ScalarType t) {
+    if (c10::kBool == t) {
+      return 1;
+    }
+    if (c10::isIntegralType(t)) {
+      return 2;
+    }
+    if (c10::isFloatingType(t)) {
+      return 3;
+    }
+    return 0;
+  };
+
+  if (c10::nullopt == typeFromScalar) {
+    return typeFromTensor;
+  } else if (c10::nullopt == typeFromTensor) {
+    return typeFromScalar;
+  }
+
+  auto typeCategoryFromTensor = getTypeCategory(typeFromTensor.value());
+  auto typeCategoryFromScalar = getTypeCategory(typeFromScalar.value());
+
+  if (typeCategoryFromScalar > typeCategoryFromTensor) {
+    return typeFromScalar;
+  }
+  return typeFromTensor;
+}
+
 static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
   std::vector<c10::ScalarType> typesFromTensors;
   std::vector<c10::ScalarType> typesFromScalars;
@@ -108,8 +145,39 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
           // which is by default considered as a tensor.
           typesFromScalars.emplace_back(c10::kLong);
         } else if (nkind == onnx::Constant) {
-          typesFromScalars.emplace_back(
-              input->node()->t(attr::value).scalar_type());
+          auto tensor = input->node()->t(attr::value);
+          auto rank = tensor.dim();
+          auto scalar_type = tensor.scalar_type();
+          // Mimic PyTorch scalar type promotion logic
+          // from https://github.com/pytorch/pytorch/issues/9515
+          // Quoting:
+          //    A Tensor is a considered a "wrapped number" if it is
+          //    auto-wrapped from a C++ or Python number type. Integer types are
+          //    wrapped as 0-dim int64 tensors and floating-point types are
+          //    wrapped as 0-dim double tensors.
+          if (rank == 0) {
+            auto default_scalar_type =
+                at::typeMetaToScalarType(at::get_default_dtype());
+            switch (scalar_type) {
+              case at::kDouble:
+                // floating-point numbers wrapped as double tensors are
+                // considered to have default type, instead of double.
+                typesFromScalars.emplace_back(default_scalar_type);
+                break;
+              case at::kLong:
+              case at::kBool:
+                // bool and integer numbers remain the same type.
+                typesFromScalars.emplace_back(scalar_type);
+                break;
+              default:
+                // other types are not from wrapped numbers,
+                // track them as types from tensors.
+                typesFromTensors.emplace_back(scalar_type);
+                break;
+            }
+          } else {
+            typesFromTensors.emplace_back(scalar_type);
+          }
         } else if (
             auto scalar_type =
                 input->type()->cast<TensorType>()->scalarType()) {
@@ -130,31 +198,22 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
         typesFromTensors.end());
     st = PromoteScalarTypes(typesFromScalars);
   } else {
-    if (typesFromScalars.size() == n->inputs().size()) {
-      // If all inputs are scalars, infer scalar_type by calling
-      // c10::promoteTypes.
-      st = PromoteScalarTypes(typesFromScalars);
-    } else if (output_st) {
+    if (output_st) {
       // If output scalar type is available, use that.
       st = output_st;
-    } else if (!typesFromTensors.empty()) {
-      // When inputs consist of tensors and scalars. In PyTorch, scalars are
-      // implicitly casted to have the same scalar type as input tensors.
-      st = typesFromTensors[0];
-      if (std::any_of(
-              typesFromTensors.begin(),
-              typesFromTensors.end(),
-              [&st](const c10::ScalarType& type) { return type != st; })) {
-        std::cerr
-            << "Warning: ONNX Scalar Type Analysis - Scalar types mismatch for tensor inputs of operator "
-            << n->kind().toDisplayString()
-            << ". Please report a bug to PyTorch. "
-            << "The scalar type " << c10::toString(*st)
-            << " of the first tensor is chosen." << std::endl;
-      }
+    } else if (n->kind() == onnx::Mod && !typesFromTensors.empty()) {
+      // Most of the operators like Mul are switched to allow implicit type
+      // promotion. But fmod and remainder still only support implicit casting
+      // between scalars. i.e. for torch.remainder(a, b), if a is LongTensor and
+      // b is float, b will be cast to Long.
+      st = PromoteScalarTypes(typesFromTensors);
     } else {
-      // When inputs consist of only scalars.
-      st = PromoteScalarTypes(typesFromScalars);
+      // PyTorch now does implicit type promotion regardless whether the inputs
+      // are tensors or scalars. (Previously only scalars support implicit
+      // casting).
+      // Per logic here
+      // https://pytorch.org/docs/master/tensor_attributes.html#tensor-attributes
+      st = PromoteScalarTypesWithCategory(typesFromTensors, typesFromScalars);
     }
   }
 

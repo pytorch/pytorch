@@ -43,13 +43,16 @@ class LinearOpContext : public torch::jit::CustomClassHolder {
   c10::optional<Tensor> orig_bias_;
   c10::optional<Scalar> output_min_;
   c10::optional<Scalar> output_max_;
+  bool orig_weight_and_bias_freed_;
 
  public:
   SerializationTypeLinearPrePack unpack() {
+    TORCH_CHECK(!orig_weight_and_bias_freed_, "Original weight and bias have been freed");
     return std::make_tuple(orig_weight_, orig_bias_, output_min_, output_max_);
   }
 
   virtual Tensor run(const Tensor& input) = 0;
+  virtual void free_orig_weight_and_bias() = 0;
 };
 
 class XNNPackLinearOpContext final : public LinearOpContext {
@@ -68,9 +71,11 @@ class XNNPackLinearOpContext final : public LinearOpContext {
     orig_bias_ = std::move(bias);
     output_min_ = min;
     output_max_ = max;
+    orig_weight_and_bias_freed_ = false;
   }
 
-  Tensor run(const Tensor& input);
+  Tensor run(const Tensor& input) override;
+  void free_orig_weight_and_bias() override;
 
   static c10::intrusive_ptr<LinearOpContext> create_context(
       Tensor&& weight,
@@ -89,9 +94,11 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
   int64_t groups_;
   c10::optional<Scalar> output_min_;
   c10::optional<Scalar> output_max_;
+  bool orig_weight_and_bias_freed_;
 
  public:
   SerializationTypeConv2dPrePack unpack() {
+    TORCH_CHECK(!orig_weight_and_bias_freed_, "Original weight and bias have been freed");
     return std::make_tuple(
         orig_weight_,
         orig_bias_,
@@ -104,6 +111,7 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
   }
 
   virtual Tensor run(const Tensor& input) = 0;
+  virtual void free_orig_weight_and_bias() = 0;
 };
 
 class TransposeConv2dOpContext : public torch::jit::CustomClassHolder {
@@ -117,9 +125,11 @@ class TransposeConv2dOpContext : public torch::jit::CustomClassHolder {
   int64_t groups_;
   c10::optional<Scalar> output_min_;
   c10::optional<Scalar> output_max_;
+  bool orig_weight_and_bias_freed_;
 
  public:
   SerializationTypeTransposeConv2dPrePack unpack() {
+    TORCH_CHECK(!orig_weight_and_bias_freed_, "Original weight and bias have been freed");
     return std::make_tuple(
         orig_weight_,
         orig_bias_,
@@ -133,6 +143,7 @@ class TransposeConv2dOpContext : public torch::jit::CustomClassHolder {
   }
 
   virtual Tensor run(const Tensor& input) = 0;
+  virtual void free_orig_weight_and_bias() = 0;
 };
 
 class XNNPackConv2dOpContext final : public Conv2dOpContext {
@@ -159,9 +170,11 @@ class XNNPackConv2dOpContext final : public Conv2dOpContext {
     groups_ = groups;
     output_min_ = min;
     output_max_ = max;
+    orig_weight_and_bias_freed_ = false;
   }
 
   Tensor run(const Tensor& input) override;
+  void free_orig_weight_and_bias() override;
 
   static c10::intrusive_ptr<Conv2dOpContext> create_context(
       Tensor&& weight,
@@ -200,9 +213,11 @@ class XNNPackTransposeConv2dOpContext final : public TransposeConv2dOpContext {
     groups_ = groups;
     output_min_ = min;
     output_max_ = max;
+    orig_weight_and_bias_freed_ = false;
   }
 
   Tensor run(const Tensor& input) override;
+  void free_orig_weight_and_bias() override;
 
   static c10::intrusive_ptr<TransposeConv2dOpContext> create_context(
       Tensor&& weight,

@@ -35,13 +35,14 @@ clip_ranges_short_configs = op_bench.config_list(
 
 class ClipRangesBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, LENGTH, M, N, MAX_LENGTH, device, dtype):
-        self.input = torch.rand(LENGTH, M, N, device=device).type(dtype)
-        self.max_length = MAX_LENGTH
+        self.inputs = {
+            "input": torch.rand(LENGTH, M, N, device=device).type(dtype),
+            "max_length": MAX_LENGTH
+        }
         self.set_module_name("clip_ranges")
 
-    def forward(self):
-        output = torch.ops.fb.clip_ranges(self.input, self.max_length)
-        return output
+    def forward(self, input, max_length: int):
+        return torch.ops.fb.clip_ranges(input, max_length)
 
 
 op_bench.generate_pt_test(

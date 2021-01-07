@@ -413,7 +413,7 @@ void max_pool2d_with_indices_out_cuda_template(
                   in_stride_h, in_stride_w,
                   kernel_stride_C, kernel_size_C,
                   output_data, indices_data);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
           break;
         }
         case MemoryFormat::Contiguous: {
@@ -425,7 +425,7 @@ void max_pool2d_with_indices_out_cuda_template(
                   nbatch, nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
                   kH, kW, dH, dW, padH, padW, dilationH, dilationW,
                   output_data, indices_data);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
           break;
         }
         default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
@@ -583,7 +583,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
                   in_stride_h, in_stride_w,
                   kernel_stride_C, kernel_size_C,
                   gradInput_data);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
           break;
         }
         case MemoryFormat::Contiguous: {
@@ -607,7 +607,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
                   nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
                   kH, kW, dH, dW, padH, padW, dilationH, dilationW,
                   gradInput_data);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
           break;
         }
         default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");

@@ -1,23 +1,35 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/interned_strings.h>
+#include <c10/core/CPUAllocator.h>
 #include <caffe2/core/scope_guard.h>
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
+#include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 namespace torch {
 namespace jit {
-namespace {
-void OptimizeGraph(std::shared_ptr<torch::jit::Graph>& graph) {
+
+void PrepareGraphForStaticRuntime(std::shared_ptr<torch::jit::Graph> graph) {
   Inline(*graph);
   ConstantPropagation(graph);
   Canonicalize(graph);
   ConstantPropagation(graph);
   RemoveTensorMutation(graph);
+  ConstantPropagation(graph);
+  EliminateDeadCode(graph);
+}
+
+namespace {
+void OptimizeGraph(std::shared_ptr<torch::jit::Graph>& graph) {
+  PrepareGraphForStaticRuntime(graph);
+  FuseInferenceOpsForSparseNN(graph);
   ConstantPropagation(graph);
 }
 
@@ -69,18 +81,199 @@ std::unique_ptr<c10::FunctionSchema> RemoveSelfFromSchema(
   return std::make_unique<c10::FunctionSchema>(s.cloneWithArguments(args));
 }
 
-void AssignRegisters(
+// Returns two useful constructs:
+//  first: map each value to all values that are alive
+//    at the same time.
+//  second: set of all inputs/outputs/constants (always alive)
+std::pair<std::unordered_map<Value*, std::set<Value*>>, std::set<Value*>>
+LivenessMap(const std::shared_ptr<torch::jit::Graph>& graph) {
+  std::unordered_map<Value*, std::set<Value*>> liveness_map;
+  std::set<Value*> always_alive;
+
+  std::vector<Value*> frontier;
+  // map live values to their deps, invariant: set.size() > 0
+  std::unordered_map<Value*, std::set<Node*>> live_values;
+  for (const auto& input : graph->inputs()) {
+    frontier.emplace_back(input);
+    always_alive.insert(input);
+  }
+  for (const auto& output : graph->outputs()) {
+    always_alive.insert(output);
+  }
+
+  auto add_live_value = [&](Value* v) {
+    liveness_map[v] = {};
+
+    for (const auto& live_v : live_values) {
+      liveness_map.at(v).insert(live_v.first);
+      liveness_map.at(live_v.first).insert(v);
+    }
+
+    // only add values to the live set if they
+    // have deps, otherwise they die immediately
+    if (v->uses().size()) {
+      live_values[v] = {};
+    }
+
+    for (const auto& u : v->uses()) {
+      const auto& node = u.user;
+      // track deps of this value
+      live_values.at(v).insert(node);
+    }
+  };
+
+  auto traverse_node = [&](Node* node, std::vector<Value*>& dead) {
+    for (const auto& input : node->inputs()) {
+      // ignore constant values
+      if (input->node()->kind() == prim::Constant) {
+        always_alive.insert(input);
+        continue;
+      }
+      if (live_values.count(input)) {
+        live_values.at(input).erase(node);
+        if (!live_values.at(input).size()) {
+          dead.emplace_back(input);
+        }
+      }
+    }
+  };
+
+  for (const auto& node : graph->nodes()) {
+    for (const auto& v : node->outputs()) {
+      add_live_value(v);
+    }
+
+    std::vector<Value*> dead;
+    traverse_node(node, dead);
+    for (const auto& dead_value : dead) {
+      live_values.erase(dead_value);
+    }
+  }
+
+  for (const auto& v : live_values) {
+    TORCH_CHECK(always_alive.count(v.first));
+  }
+
+  for (const auto& node : graph->nodes()) {
+    for (const auto& input : node->inputs()) {
+      for (const auto& output : node->outputs()) {
+        if (liveness_map.count(input) && liveness_map.count(output)) {
+          liveness_map.at(input).insert(output);
+          liveness_map.at(output).insert(input);
+        }
+      }
+    }
+  }
+
+  return std::make_pair(liveness_map, always_alive);
+}
+
+std::unordered_set<Value*> GetOptimizableValues(
+    const std::shared_ptr<torch::jit::Graph>& graph) {
+  std::unordered_set<Value*> can_reuse;
+  // values used by unsupported ops (as either inputs or outputs)
+  // these need to be removed from "can_reuse" after analyzing all nodes
+  std::unordered_set<Value*> cannot_reuse;
+  for (const auto& n : graph->nodes()) {
+    for (const auto& v : n->inputs()) {
+      if (canRunOutOfPlace(n) && canReuseInputs(n)) {
+        can_reuse.insert(v);
+      } else {
+        cannot_reuse.insert(v);
+      }
+    }
+    for (const auto& v : n->outputs()) {
+      if (canRunOutOfPlace(n) && canReuseOutputs(n)) {
+        can_reuse.insert(v);
+      } else {
+        cannot_reuse.insert(v);
+      }
+    }
+  }
+  for (auto v : cannot_reuse) {
+    can_reuse.erase(v);
+  }
+  return can_reuse;
+}
+
+size_t AssignRegisters(
     const std::shared_ptr<torch::jit::Graph>& graph,
     std::unordered_map<Value*, size_t>& value_to_reg,
     std::vector<Value*>& values,
     std::vector<size_t>& input_regs,
-    std::vector<size_t>& output_regs) {
+    std::vector<size_t>& output_regs,
+    bool optimize_memory) {
+  auto lm = LivenessMap(graph);
+  auto optimizable_values = GetOptimizableValues(graph);
+
+  size_t num_regs = 0;
+  size_t reused_regs = 0;
+  std::unordered_map<size_t, std::set<Value*>> reg_to_val;
+  auto getReg = [&](Value* v) -> size_t {
+    if (!optimize_memory) {
+      return num_regs++;
+    }
+    TORCH_CHECK(!value_to_reg.count(v));
+    auto iter = lm.first.find(v);
+    if (iter == lm.first.end()) {
+      return num_regs++;
+    }
+    if (!optimizable_values.count(v)) {
+      return num_regs++;
+    }
+    if (lm.second.count(v)) {
+      return num_regs++;
+    }
+    const auto& live_values = iter->second;
+    // iterate through all the allocated registers
+    // and check for potential re-use, greedily
+    for (const auto& v2r : value_to_reg) {
+      auto candidate_v = v2r.first;
+
+      if (!optimizable_values.count(candidate_v)) {
+        continue;
+      }
+      if (lm.second.count(candidate_v)) {
+        continue;
+      }
+
+      // Only re-use float* tensors
+      auto t = candidate_v->type()->cast<TensorType>();
+      if (!t) {
+        continue;
+      }
+      // TODO audit this assumption (passes tests, but is scary)
+      if (t->scalarType() && *(t->scalarType()) != at::kFloat) {
+        continue;
+      }
+      // TODO
+      // if (*(t->scalarType()) != at::kFloat) {
+      //  continue;
+      //}
+      if (!live_values.count(candidate_v)) {
+        bool already_used = false;
+        for (auto use : reg_to_val.at(v2r.second)) {
+          if (live_values.count(use)) {
+            already_used = true;
+          }
+        }
+        if (already_used) {
+          continue;
+        }
+        reused_regs++;
+        return v2r.second;
+      }
+    }
+    return num_regs++;
+  };
+
   // assign register to Value*
   for (Value* input : graph->inputs()) {
     TORCH_CHECK(value_to_reg.count(input) == 0);
-    size_t index = value_to_reg.size();
-    value_to_reg[input] = index;
-    input_regs.push_back(index);
+    auto reg = getReg(input);
+    value_to_reg[input] = reg;
+    reg_to_val[reg].insert(input);
+    input_regs.push_back(reg);
   }
   for (Node* node : graph->nodes()) {
     for (Value* input : node->inputs()) {
@@ -89,8 +282,9 @@ void AssignRegisters(
     for (Value* output : node->outputs()) {
       TORCH_CHECK(
           value_to_reg.count(output) == 0, "the graph needs to be in SSA form");
-      size_t index = value_to_reg.size();
-      value_to_reg[output] = index;
+      auto reg = getReg(output);
+      value_to_reg[output] = reg;
+      reg_to_val[reg].insert(output);
     }
   }
   TORCH_CHECK(graph->outputs().size() > 0);
@@ -103,11 +297,12 @@ void AssignRegisters(
   for (const auto& p : value_to_reg) {
     values[p.second] = p.first;
   }
+  return reused_regs;
 }
 
-// Internal blobs (IValues) are discarded after run if
+// Internal values are discarded after run if
 // opts_.cleanup_activations is true.
-void DeduceInternalBlobs(
+void DeduceInternalValues(
     const std::shared_ptr<torch::jit::Graph>& graph,
     const std::unordered_map<Value*, size_t>& value_to_reg,
     std::vector<size_t>& internals) {
@@ -129,12 +324,20 @@ void InferenceModule::init() {
   OptimizeGraph(graph);
   CheckGraphEligibility(graph);
   RemoveSelfFromGraphInput(graph);
-  AssignRegisters(graph, value_to_reg, values, input_regs, output_regs);
-  DeduceInternalBlobs(graph, value_to_reg, internals);
+  reused_regs = AssignRegisters(
+      graph,
+      value_to_reg,
+      values,
+      input_regs,
+      output_regs,
+      opts.optimize_memory);
+  DeduceInternalValues(graph, value_to_reg, internals);
 }
 
-InferenceModule::InferenceModule(const torch::jit::Module& m)
-    : module(m.copy()), graph(nullptr), schema(nullptr) {
+InferenceModule::InferenceModule(
+    const torch::jit::Module& m,
+    InferenceModuleOptions opts_)
+    : module(m.copy()), graph(nullptr), schema(nullptr), opts(opts_) {
   module.eval();
   module = freeze_module(module);
 
@@ -147,8 +350,10 @@ InferenceModule::InferenceModule(const torch::jit::Module& m)
   init();
 }
 
-InferenceModule::InferenceModule(std::shared_ptr<torch::jit::Graph> g)
-    : module(), graph(g), schema(nullptr) {
+InferenceModule::InferenceModule(
+    std::shared_ptr<torch::jit::Graph> g,
+    InferenceModuleOptions opts_)
+    : module(), graph(std::move(g)), schema(nullptr), opts(opts_) {
   init();
 }
 
@@ -171,6 +376,9 @@ StaticRuntime::StaticRuntime(
   const auto& value_to_reg = module_->value_to_reg;
 
   // fill workspace_ with constants and create ProcessedNodes
+  // NB: before optimizing the order of execution, ensure that the
+  // memory optimization pass (LivenessMap + AssignRegisters) is
+  // aware of the new order!
   for (Node* node : graph->nodes()) {
     if (node->kind() == prim::Constant) {
       TORCH_CHECK(node->output()->type()->kind() != FunctionType::Kind);
@@ -190,6 +398,10 @@ StaticRuntime::StaticRuntime(
           opts.enable_out_variant);
     }
   }
+}
+
+size_t StaticRuntime::num_outputs() const {
+  return module_->output_regs.size();
 }
 
 std::vector<at::Tensor> StaticRuntime::run(
@@ -218,23 +430,36 @@ std::vector<at::Tensor> StaticRuntime::run(
 c10::IValue StaticRuntime::run(
     const std::vector<c10::IValue>& args,
     const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  // We assume inference workloads, so we do not need
+  // autograd. Enabling this is a significant win on dispatcher
+  // overhead because it saves a round of dispatch for at least some
+  // functions, such as resize_ and resize_as_.
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+
   if (planner_) {
     planner_->allocate();
   }
 
-  std::vector<IValue> stack(args);
   if (!kwargs.empty()) {
     // This is not ideal
     TORCH_CHECK(
         module_->schema != nullptr,
         "Schema is not available. Consider creating the Static Runtime "
         "with StaticRuntime(const torch::jit::Module& m) instead.");
-    module_->schema->checkAndNormalizeInputs(stack, kwargs);
-  }
-  for (size_t i = 0; i < stack.size(); i++) {
-    Input(i) = stack[i];
+    std::vector<c10::IValue> s = args;
+    module_->schema->checkAndNormalizeInputs(s, kwargs);
+    for (size_t i = 0; i < s.size(); i++) {
+      Input(i) = s[i];
+    }
+  } else {
+    for (size_t i = 0; i < args.size(); i++) {
+      Input(i) = args[i];
+    }
   }
 
+  // NB: before optimizing the order of execution, ensure that the
+  // memory optimization pass (LivenessMap + AssignRegisters) is
+  // aware of the new order!
   for (const auto& n : nodes_) {
     n.run(reg_);
   }
@@ -248,7 +473,14 @@ c10::IValue StaticRuntime::run(
   }
 
   // no need to keep references of outputs in static runtime anymore
-  DCHECK(module_->output_regs.size() == 1);
+  if (num_outputs() > 1) {
+    std::vector<c10::IValue> outputs;
+    outputs.reserve(num_outputs());
+    for (const auto& reg : module_->output_regs) {
+      outputs.emplace_back(reg_[reg]);
+    }
+    return c10::ivalue::Tuple::create(outputs);
+  }
   return std::move(reg_[module_->output_regs[0]]);
 }
 
@@ -290,6 +522,15 @@ void StaticRuntime::benchmark(
   }
   std::cout << std::setw(15) << results.total_time << " ms. in Total"
             << std::endl;
+
+  if (planner_) {
+    std::cout << "Total memory managed: " << planner_->total_managed()
+              << " bytes" << std::endl;
+  }
+  if (module_->opts.optimize_memory) {
+    std::cout << "Total number of reused registers: " << module_->reused_regs
+              << std::endl;
+  }
 }
 
 float StaticRuntime::benchmark_model(
@@ -316,6 +557,10 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     const int warmup_runs,
     const int main_runs) {
   TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
+
+  // See comment on above use of AutoNonVariableTypeMode for
+  // explanation.
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
 
   IndividualMetrics results;
   results.total_time = 0.0;
@@ -383,12 +628,14 @@ void StaticRuntime::deallocate_registers(const std::vector<size_t>& internals) {
   // they will be re-created in the next iteration regardless
   for (auto i : internals) {
     if (reg_[i].isTensor()) {
-      if (reg_[i].toTensor().storage().nbytes() > 0) {
-        reg_[i] = IValue();
+      // If the tensor has no storage, we can keep it around. We
+      // implement by moving out of the register (leaving behind an
+      // empty IValue for free!) and possibly moving back.
+      at::Tensor asTensor = std::move(reg_[i]).toTensor();
+      if (asTensor.storage().nbytes() == 0) {
+        reg_[i] = std::move(asTensor);
       }
     } else {
-      // TensorLists and Tuples
-      // TODO: cache the List and Tuple objects but release what's inside
       reg_[i] = IValue();
     }
   }
@@ -444,7 +691,7 @@ size_t MemoryPlanner::compute_aligned_tensor_size(size_t nbytes) {
 }
 
 at::DataPtr MemoryPlanner::allocate_buffer(size_t size) {
-  at::Allocator* allocator = c10::GetCPUAllocator();
+  at::Allocator* allocator = c10::GetCPUCachingAllocator();
   return allocator->allocate(size);
 }
 
@@ -532,20 +779,23 @@ ProcessedNode::ProcessedNode(
     std::ostringstream ss;
     node->print(ss, 0, nullptr, false);
     VLOG(1) << "Switch to out variant for node: " << ss.str();
-  }
-  if (canRunNatively(node)) {
+  } else if (canRunNatively(node)) {
     native_fn_ = getNativeOperation(node);
     std::ostringstream ss;
     node->print(ss, 0, nullptr, false);
     VLOG(1) << "Switch to native impl for node: " << ss.str();
+  } else {
+    std::ostringstream ss;
+    node->print(ss, 0, nullptr, false);
+    VLOG(1) << "Fallback interpreter for node: " << ss.str();
   }
 }
 
 void ProcessedNode::run(std::vector<IValue>& reg) const {
   if (fn_) {
-    fn_->operator()(this, reg);
+    fn_(this, reg);
   } else if (native_fn_) {
-    native_fn_->operator()(this, reg);
+    native_fn_(this, reg);
   } else {
     std::vector<IValue> stack;
     const size_t size = node_->inputs().size();
@@ -553,32 +803,10 @@ void ProcessedNode::run(std::vector<IValue>& reg) const {
     for (size_t i = 0; i < size; i++) {
       stack.emplace_back(Input(i, reg));
     }
-    if (op_) {
-      op_->operator()(&stack);
-    } else {
-      if (node_->kind() == prim::ListConstruct) {
-        listConstruct(
-            stack,
-            node_->output()->type()->expect<ListType>(),
-            node_->inputs().size());
-      } else if (node_->kind() == prim::TupleConstruct) {
-        bool named =
-            node_->output()->type()->expect<TupleType>()->name().has_value();
-        if (named) {
-          namedTupleConstruct(
-              stack,
-              node_->output()->type()->expect<TupleType>(),
-              node_->inputs().size());
-        } else {
-          tupleConstruct(stack, node_->inputs().size());
-        }
-      } else if (node_->kind() == prim::ListUnpack) {
-        size_t num_outputs = node_->outputs().size();
-        listUnpack(stack, num_outputs);
-      } else {
-        TORCH_CHECK(0, "Unhandled operation!", node_->kind().toQualString());
-      }
-    }
+
+    DCHECK(op_);
+    op_->operator()(&stack);
+
     DCHECK_EQ(stack.size(), node_->outputs().size());
     for (auto i = 0; i < node_->outputs().size(); i++) {
       Output(i, reg) = std::move(stack[i]);

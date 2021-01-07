@@ -22,7 +22,7 @@ namespace ivalue {
 
 // This is in ivalue.cpp because we need to access Type::annotation_str, which
 // is declared in jit_type.h
-void checkCustomClassType(TypePtr expected_type, TypePtr actual_type) {
+void checkCustomClassType(const Type* expected_type, const Type* actual_type) {
   // NB: doing pointer comparison here
   // If in the future there ever arises a need to call operator== on custom class
   // Type's, this needs to be changed!
@@ -33,7 +33,7 @@ void checkCustomClassType(TypePtr expected_type, TypePtr actual_type) {
               expected_type->repr_str());
 }
 
-CAFFE2_API c10::intrusive_ptr<ConstantString> ConstantString::create(
+TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
     std::string str_) {
   return c10::make_intrusive<ConstantString>(std::move(str_));
 }
@@ -76,6 +76,8 @@ TypePtr IValue::type() const {
       return NoneType::get();
     case Tag::Tensor:
       return TensorType::create(toTensor());
+    case Tag::Storage:
+      return StorageType::get();
     case Tag::Double:
       return FloatType::get();
     case Tag::ComplexDouble:
@@ -125,7 +127,7 @@ TypePtr IValue::type() const {
 
 void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
   if (visitor(*this)) {
-    // Short cut.
+    // Shortcut
     return;
   }
   switch (this->tag) {
@@ -155,6 +157,15 @@ void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
       for (const auto& attr: attributes) {
         auto attribute = obj_value->getAttr(attr.getName());
         attribute.visit(visitor);
+      }
+      break;
+    }
+    case Tag::PyObject: {
+      c10::intrusive_ptr<at::ivalue::PyObjectHolder> py_obj = toPyObjectHolder();
+      auto match = py_obj->tryToInferType();
+      if (match.success()) {
+        auto contained_value = py_obj->toIValue(match.type());
+        contained_value.visit(visitor);
       }
       break;
     }
@@ -201,9 +212,18 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       }
       break;
     }
+    case Tag::PyObject: {
+      subValues.insert(*this);
+      c10::intrusive_ptr<at::ivalue::PyObjectHolder> py_obj = toPyObjectHolder();
+      auto match = py_obj->tryToInferType();
+      TORCH_INTERNAL_ASSERT(match.success(),
+            "Cannot infer type of ", py_obj->toStr(), "\n:", match.reason());
+      auto contained_value = py_obj->toIValue(match.type());
+      contained_value.getSubValues(subValues);
+      break;
+    }
     case Tag::Future:
     case Tag::Device:
-    case Tag::PyObject:
     case Tag::Uninitialized:
     case Tag::Capsule:
       TORCH_INTERNAL_ASSERT(
@@ -262,6 +282,8 @@ IValue IValue::equals(const IValue& rhs) const {
         return false;
       }
       return lhs.toTensor().eq(rhs.toTensor());
+    case Tag::Storage:
+      return rhs.isStorage() && lhs.toStorage().unsafeGetStorageImpl() == rhs.toStorage().unsafeGetStorageImpl();
     case Tag::Double:
       return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
     case Tag::Int:
@@ -275,7 +297,7 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::Tuple:
       return rhs.isTuple() && *lhs.toTuple() == *rhs.toTuple();
     case Tag::Stream:
-      return rhs.isStream() && lhs.toStream() == lhs.toStream();
+      return rhs.isStream() && lhs.toStream() == rhs.toStream();
     case Tag::Device:
       return rhs.isDevice() && lhs.toDevice() == rhs.toDevice();
     case Tag::GenericList:
@@ -312,6 +334,8 @@ size_t IValue::hash(const IValue& v) {
     case Tag::Tensor:
       // Tensor __hash__ is equivalent to `id()`, so take the pointer value of
       // the tensor to emulate it
+      return c10::get_hash(v.payload.as_int);
+    case Tag::Storage:
       return c10::get_hash(v.payload.as_int);
     case Tag::Int:
       return c10::get_hash(v.payload.as_int);
@@ -472,12 +496,16 @@ std::ostream& IValue::repr(
       if ((c == FP_NORMAL || c == FP_ZERO ) && std::abs(d) < 1e10) {
         int64_t i = int64_t(d);
         if (double(i) == d) {
+          // -0.0 (signed zero) needs to be parsed as -0.
+          if (i == 0 && std::signbit(d)) {
+            return out << "-" << i << ".";
+          }
           return out << i << ".";
         }
       }
       auto orig_prec = out.precision();
       return out << std::setprecision(std::numeric_limits<double>::max_digits10)
-                 << v.toDouble() << std::setprecision(orig_prec);
+                 << d << std::setprecision(orig_prec);
     }
     case IValue::Tag::Int:
       return out << v.toInt();
@@ -507,6 +535,9 @@ std::ostream& IValue::repr(
       auto enum_holder = v.toEnumHolder();
       return out << enum_holder->qualifiedClassName() << "." <<
           enum_holder->name();
+    }
+    case IValue::Tag::Object: {
+      TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind(), ". Perhaps you've frozen a module with custom classes?");
     }
     default:
       TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind());
@@ -644,6 +675,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << v.toNone();
     case IValue::Tag::Tensor:
       return out << v.toTensor();
+    case IValue::Tag::Storage:
+      return out << v.toStorage().unsafeGetStorageImpl();
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);
@@ -659,8 +692,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
         << v.toDouble()
         << std::setprecision(orig_prec);
     } case IValue::Tag::ComplexDouble: {
-      c10::complex<double> d = (*v).val.toComplexDouble();
-      IValue real(d.real()), imag(d.imag());
+      c10::complex<double> d = (*(v.toComplexDouble())).val;
+      IValue real(d.real()), imag(std::abs(d.imag()));
       auto sign = "";
       if (d.imag() >= 0) {
         sign = "+";
@@ -886,7 +919,7 @@ getClassConverter() {
   return classConverter;
 }
 
-CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
+TORCH_API intrusive_ptr<ivalue::Future> collectAll(
     List<intrusive_ptr<ivalue::Future>> srcs) {
   struct Ctx {
     explicit Ctx(List<intrusive_ptr<ivalue::Future>> srcs)
@@ -918,7 +951,7 @@ CAFFE2_API intrusive_ptr<ivalue::Future> collectAll(
   return ctx->dstFuture;
 }
 
-CAFFE2_API intrusive_ptr<ivalue::Future> collectAny(
+TORCH_API intrusive_ptr<ivalue::Future> collectAny(
     List<intrusive_ptr<ivalue::Future>> srcs) {
   if (srcs.empty()) {
     auto res = make_intrusive<ivalue::Future>(NoneType::get());

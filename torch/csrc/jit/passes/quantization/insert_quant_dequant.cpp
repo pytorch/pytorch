@@ -360,10 +360,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
         embedding_bag_inputs[9]); // per_sample_weights
   }
 
-  if (op_name == "embedding_bag_4bit") {
-    // 4-bit op has an extra input compressed_indices_mapping
-    qembedding_bag_inputs.push_back(none);
-  }
+  qembedding_bag_inputs.push_back(none); // compressed_indices_mapping
   qembedding_bag_inputs.push_back(embedding_bag_inputs[inputs_size - 1]);
 
   Node* qembedding_bag =
@@ -990,7 +987,7 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
       v->debugName(),
       " exists.");
   QParamVector qparams;
-  c10::QScheme qscheme;
+  c10::QScheme qscheme = c10::kPerTensorAffine;
 
   auto observer_module = module.attr(observer_name.value()).toModule();
   auto scalar_type = observer_module.attr("dtype");

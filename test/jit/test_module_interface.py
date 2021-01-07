@@ -1,7 +1,7 @@
 # flake8: noqa
 # TODO: enable linting check for this file
 
-from typing import List
+from typing import List, Any
 import torch
 import torch.nn as nn
 import os
@@ -201,6 +201,44 @@ class TestModuleInterface(JitTestCase):
         # wrong module that is not compatible with module interface
         with self.assertRaisesRegex(RuntimeError, "is not compatible with interface"):
             as_module_interface(scripted_wrong_mod)
+
+        # Check that interface implementations can be contravariant in argument types and covariant in return type.
+        global TensorToAny
+        @torch.jit.interface
+        class TensorToAny(nn.Module):
+            def forward(self, input: torch.Tensor) -> Any:
+                pass
+
+        @torch.jit.script
+        def as_tensor_to_any(x: TensorToAny) -> TensorToAny:
+            return x
+
+        global AnyToAny
+        @torch.jit.interface
+        class AnyToAny(nn.Module):
+            def forward(self, input: Any) -> Any:
+                pass
+
+        @torch.jit.script
+        def as_any_to_any(x: AnyToAny) -> AnyToAny:
+            return x
+
+        class TensorToAnyImplA(nn.Module):
+            def forward(self, input: Any) -> Any:
+                return input
+
+        class TensorToAnyImplB(nn.Module):
+            def forward(self, input: Any) -> torch.Tensor:
+                return torch.tensor([1])
+
+        class AnyToAnyImpl(nn.Module):
+            def forward(self, input: Any) -> torch.Tensor:
+                return torch.tensor([1])
+
+        as_tensor_to_any(torch.jit.script(TensorToAnyImplA()))
+        as_tensor_to_any(torch.jit.script(TensorToAnyImplB()))
+        as_any_to_any(torch.jit.script(AnyToAnyImpl()))
+
 
     def test_module_interface_inheritance(self):
         with self.assertRaisesRegex(RuntimeError, "does not support inheritance yet. Please directly"):

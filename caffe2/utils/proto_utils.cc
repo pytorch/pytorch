@@ -53,7 +53,6 @@ C10_EXPORT bool IsCPUDeviceType(int device_type) {
       PROTO_CPU,
       PROTO_MKLDNN,
       PROTO_IDEEP,
-      PROTO_ONLY_FOR_TEST,
   };
   return cpu_types.count(device_type);
 }

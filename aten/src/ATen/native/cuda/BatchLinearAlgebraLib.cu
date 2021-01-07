@@ -50,13 +50,14 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
     int* p_infos = infos.data_ptr<int>();
     auto main_stream = at::cuda::getCurrentCUDAStream();
 
+    at::cuda::CUDAEvent main_event;
+    main_event.record(main_stream);
+
     for (int64_t i = 0; i < batch_size; i++) {
       auto stream = at::cuda::getStreamFromPool();
       at::cuda::CUDAStreamGuard guard(stream);
 
-      at::cuda::CUDAEvent can_start;
-      can_start.record(main_stream);
-      can_start.block(main_stream);
+      main_event.block(stream);
 
       auto dataPtr = allocator.allocate(sizeof(int) * n);
       int* pivot = reinterpret_cast<int*>(dataPtr.get());
@@ -81,11 +82,16 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
     auto dataPtr = allocator.allocate(sizeof(int)*batch_size*n);
     int* ipiv_array = reinterpret_cast<int*>(dataPtr.get());
 
+    Tensor _info1 = at::zeros({batch_size}, self.options().dtype(at::kInt));
+    Tensor _info2 = at::zeros({batch_size}, self.options().dtype(at::kInt));
+
     at::cuda::blas::getrfBatched<scalar_t>(n, reinterpret_cast<scalar_t**>(self_array.data_ptr()), n,
-      ipiv_array, infos.data_ptr<int>(), batch_size);
+      ipiv_array, _info1.data_ptr<int>(), batch_size);
 
     at::cuda::blas::getriBatched<scalar_t>(n, reinterpret_cast<scalar_t**>(self_array.data_ptr()), n,
-      ipiv_array, infos.data_ptr<int>(), batch_size, reinterpret_cast<scalar_t**>(self_inv_array.data_ptr()));
+      ipiv_array, _info2.data_ptr<int>(), batch_size, reinterpret_cast<scalar_t**>(self_inv_array.data_ptr()));
+
+    infos = at::stack({_info1, _info2}, 1);
   }
 }
 
@@ -106,13 +112,14 @@ Tensor _inverse_helper_cuda_lib(const Tensor& self) {
 
   if (self.dim() > 2 && batch_size > 1) {
     Tensor infos = at::zeros({batchCount(self) * 2}, self.options().dtype(kInt));
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
-      apply_batched_inverse_lib<scalar_t>(self_working_copy, self_inv_working_copy, infos);
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cuda", [&]{
+      apply_batched_inverse_lib<scalar_t>(
+        self_working_copy, self_inv_working_copy, infos);
     });
     batchCheckErrors(infos, "inverse_cuda", false, 2);
   } else {
     Tensor info = at::zeros({2}, self.options().dtype(at::kInt));
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "inverse_cuda", [&]{
       apply_single_inverse_lib<scalar_t>(self_working_copy, self_inv_working_copy, info);
     });
     batchCheckErrors(info, "inverse_cuda", false, 2);

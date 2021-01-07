@@ -1035,10 +1035,78 @@ class TestFreezing(JitTestCase):
 
         model = torch.jit.script(Net())
         model.train()
-
-        with self.assertRaisesRegex(RuntimeError, 'Freezing module in training mode is not yet supported'):
-            mTrain_freezed = torch._C._freeze_module(model._c)
-
+        mTrain_freezed = torch._C._freeze_module(model._c)
+        # verify mTrain_freezed looks exactly as:
+        # module {
+        #   attributes {
+        #     conv1 = ...
+        #     conv2 = ...
+        #     dropout1 = ...
+        #     dropout2 = ...
+        #     fc1 = ...
+        #     fc2 = ...
+        #   }
+        #   ...
+        #   submodules {
+        #     module conv1 {
+        #       attributes {
+        #          weight = ...
+        #          bias = ...
+        #       }
+        #       ...
+        #     }
+        #     module conv2 {
+        #       attributes {
+        #          weight = ...
+        #          bias = ...
+        #       }
+        #       ...
+        #     }
+        #     module dropout1 {
+        #       attributes {
+        #          training = ...
+        #       }
+        #       ...
+        #     }
+        #     module dropout2 {
+        #       attributes {
+        #          training = ...
+        #       }
+        #       ...
+        #     }
+        #     module fc1 {
+        #       attributes {
+        #          weight = ...
+        #          bias = ...
+        #       }
+        #       ...
+        #     }
+        #     module fc2 {
+        #       attributes {
+        #          weight = ...
+        #          bias = ...
+        #       }
+        #       ...
+        #     }
+        self.assertFalse(mTrain_freezed.hasattr('training'))
+        self.assertTrue(mTrain_freezed.hasattr('conv1'))
+        self.assertFalse(mTrain_freezed.conv1.hasattr('training'))
+        self.assertTrue(mTrain_freezed.conv1.hasattr('weight'))
+        self.assertTrue(mTrain_freezed.conv1.hasattr('bias'))
+        self.assertTrue(mTrain_freezed.hasattr('conv2'))
+        self.assertFalse(mTrain_freezed.conv2.hasattr('training'))
+        self.assertTrue(mTrain_freezed.conv2.hasattr('weight'))
+        self.assertTrue(mTrain_freezed.conv2.hasattr('bias'))
+        self.assertTrue(mTrain_freezed.hasattr('dropout1'))
+        self.assertTrue(mTrain_freezed.dropout1.hasattr('training'))
+        self.assertTrue(mTrain_freezed.hasattr('dropout2'))
+        self.assertTrue(mTrain_freezed.dropout2.hasattr('training'))
+        self.assertTrue(mTrain_freezed.hasattr('fc1'))
+        self.assertTrue(mTrain_freezed.fc1.hasattr('weight'))
+        self.assertTrue(mTrain_freezed.fc1.hasattr('bias'))
+        self.assertTrue(mTrain_freezed.hasattr('fc2'))
+        self.assertTrue(mTrain_freezed.fc2.hasattr('weight'))
+        self.assertTrue(mTrain_freezed.fc2.hasattr('bias'))
         model.eval()
         mEval_freezed = torch._C._freeze_module(model._c)
         self.assertFalse(mEval_freezed.hasattr('conv1'))
@@ -1056,6 +1124,14 @@ class TestFreezing(JitTestCase):
         m = torch.jit.load(buffer)
         FileCheck().check_not('GetAttr[name=') \
                    .run(m._c._get_method('forward').graph)
+        m2 = torch._C._freeze_module(model._c, preserveParameters=True)
+        self.assertTrue(m2.hasattr('conv1'))
+        self.assertTrue(m2.hasattr('conv2'))
+        self.assertFalse(m2.hasattr('dropout1'))
+        self.assertFalse(m2.hasattr('training'))
+        self.assertTrue(m2.hasattr('fc1'))
+        self.assertFalse(m2.hasattr('dropout2'))
+        self.assertTrue(m2.hasattr('fc2'))
 
     def test_freeze_module_detach_gradient(self):
         mod = nn.Conv2d(8, 3, 4, 2, 1)
@@ -1255,3 +1331,33 @@ class TestFreezing(JitTestCase):
         m.eval()
         with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleDictIndex is not supported"):
             mf = torch._C._freeze_module(m._c)
+
+
+    def test_freeze_non_module_class_getattr(self):
+        class BoxCoder(object):
+            def __init__(self, bbox_xform_clip):
+                # type: (float) -> None
+                self.bbox_xform_clip = bbox_xform_clip
+
+            def decode(self, input):
+                return input * self.bbox_xform_clip
+
+        class MyModule(torch.nn.Module):
+            __annotations__ = {
+                'box_coder': BoxCoder,
+            }
+
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.box_coder = BoxCoder(50.)
+
+            def forward(self, input):
+                return self.box_coder.decode(input)
+
+        model = MyModule()
+        model.eval()
+        script_model = torch.jit.freeze(torch.jit.script(model))
+        inp = torch.randn([4, 4])
+        output_eager = model(inp)
+        self.assertEqual(model(inp), script_model(inp))
+        FileCheck().check_not("GetAttr").run(script_model.graph)

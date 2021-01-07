@@ -228,7 +228,7 @@ void ConcreteModuleTypeBuilder::addConstant(
         "\n:",
         match.reason());
   }
-  constants_.emplace(std::move(name), toIValue(value, match.type()));
+  constants_.emplace(std::move(name), toIValue(std::move(value), match.type()));
 }
 
 void ConcreteModuleTypeBuilder::addConstant(std::string name, IValue value) {
@@ -237,7 +237,7 @@ void ConcreteModuleTypeBuilder::addConstant(std::string name, IValue value) {
 
 void ConcreteModuleTypeBuilder::addAttribute(
     std::string name,
-    TypePtr type,
+    const TypePtr& type,
     bool isParameter,
     bool isBuffer) {
   TORCH_INTERNAL_ASSERT(type);
@@ -262,7 +262,7 @@ void ConcreteModuleTypeBuilder::addFunctionAttribute(
 
 void ConcreteModuleTypeBuilder::addBuiltinFunction(
     std::string name,
-    std::string symbol_name) {
+    const std::string& symbol_name) {
   builtinFunctions_.emplace(
       std::move(name), c10::Symbol::fromQualString(symbol_name));
 }

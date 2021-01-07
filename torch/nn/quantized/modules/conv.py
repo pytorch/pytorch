@@ -182,11 +182,9 @@ class _ConvNd(nn.Module):
                 cls._FLOAT_MODULE.__name__
             assert hasattr(mod, "qconfig"), \
                 "Input float module must have qconfig defined."
+            activation_post_process = mod.activation_post_process
             if type(mod) == cls._NNI_CONV_RELU_MODULE:
-                activation_post_process = mod[1].activation_post_process
                 mod = mod[0]
-            else:
-                activation_post_process = mod.activation_post_process
             weight_post_process = mod.qconfig.weight()
         return cls.get_qconv(mod, activation_post_process, weight_post_process)
 
@@ -449,13 +447,9 @@ class Conv3d(_ConvNd):
             cls._FLOAT_MODULE.__name__
         assert hasattr(mod, 'qconfig'), \
             'Input float module must have qconfig defined.'
-        # Workaround for sequential, ConvReLU3d should probably inherit from
-        # Conv3d instead
+        activation_post_process = mod.activation_post_process
         if type(mod) == nni.ConvReLU3d:
-            activation_post_process = mod[1].activation_post_process
             mod = mod[0]
-        else:
-            activation_post_process = mod.activation_post_process
         return cls.get_qconv(mod, activation_post_process)
 
 # === Transposed Convolutions ===

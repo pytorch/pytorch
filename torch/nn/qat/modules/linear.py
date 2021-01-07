@@ -21,7 +21,7 @@ class Linear(nn.Linear):
 
     def __init__(self, in_features, out_features, bias=True,
                  qconfig=None):
-        super(Linear, self).__init__(in_features, out_features, bias)
+        super().__init__(in_features, out_features, bias)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
         self.weight_fake_quant = qconfig.weight()

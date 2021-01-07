@@ -9,6 +9,8 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rref_backward_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rref_backward_resp.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
@@ -34,7 +36,7 @@ void processRemoteProfiledEvents(
       "Profiler was expected to be enabled. This can happen in callback "
       " continutations that run in different threads, and the TLS of the "
       " profiler was not propagated.");
-  std::vector<torch::autograd::profiler::Event> events =
+  std::vector<torch::autograd::profiler::LegacyEvent> events =
       rpcWithProfilingResp.getProfiledEvents();
   const auto& profilingId = rpcWithProfilingResp.getProfilingId();
   auto& remoteProfilerManager = RemoteProfilerManager::getInstance();
@@ -44,7 +46,7 @@ void processRemoteProfiledEvents(
   std::for_each(
       events.begin(),
       events.end(),
-      [&keyPrefixStr](torch::autograd::profiler::Event& event) {
+      [&keyPrefixStr](torch::autograd::profiler::LegacyEvent& event) {
         std::string name = keyPrefixStr + std::string(event.name());
         event.setName(at::StringView(name));
       });
@@ -134,6 +136,9 @@ std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
     case MessageType::RUN_WITH_PROFILING_REQ: {
       return autograd::RpcWithProfilingReq::fromMessage(request);
     }
+    case MessageType::RREF_BACKWARD_REQ: {
+      return autograd::RRefBackwardReq::fromMessage(request);
+    }
     default: {
       TORCH_INTERNAL_ASSERT(
           false, "Request type ", request.type(), " not supported.");
@@ -197,6 +202,9 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
       wrappedMsgType = rpcWithProfilingResp.wrappedMessageType();
       auto wrappedRPC = std::move(rpcWithProfilingResp).moveWrappedRpc();
       return wrappedRPC;
+    }
+    case MessageType::RREF_BACKWARD_RESP: {
+      return autograd::RRefBackwardResp::fromMessage(response);
     }
     default: {
       TORCH_INTERNAL_ASSERT(
@@ -503,9 +511,9 @@ std::vector<at::IValue> readWrappedPayload(
 }
 
 void populateRemoteProfiledEvents(
-    std::vector<torch::autograd::profiler::Event>& profiledEvents,
+    std::vector<torch::autograd::profiler::LegacyEvent>& profiledEvents,
     const torch::autograd::profiler::ProfilerConfig& profilingConfig,
-    const std::vector<std::vector<torch::autograd::profiler::Event>>&
+    const std::vector<std::vector<torch::autograd::profiler::LegacyEvent>>&
         eventLists) {
   // Gather all events into a vector
   for (auto& l : eventLists) {
@@ -517,11 +525,11 @@ void populateRemoteProfiledEvents(
   bool cudaProfilingEnabled =
       profilingConfig.state == torch::autograd::profiler::ProfilerState::CUDA;
   bool foundCpuStart = false;
-  const torch::autograd::profiler::Event* profilerStart = nullptr;
+  const torch::autograd::profiler::LegacyEvent* profilerStart = nullptr;
   // Each device has its own cudaProfilerStart, so we must take
   // care to use the correct one depending on the device the
   // operation ran on.
-  std::unordered_map<int, const torch::autograd::profiler::Event*>
+  std::unordered_map<int, const torch::autograd::profiler::LegacyEvent*>
       cudaProfilerStarts;
   for (auto& e : profiledEvents) {
     if (!foundCpuStart && 0 == strcmp(e.name(), "__start_profile")) {

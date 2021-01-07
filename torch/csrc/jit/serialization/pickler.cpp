@@ -49,6 +49,8 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     pushTuple(ivalue);
   } else if (ivalue.isDouble()) {
     pushDouble(ivalue.toDouble());
+  } else if (ivalue.isComplexDouble()) {
+    pushComplexDouble(ivalue);
   } else if (ivalue.isInt()) {
     pushInt(ivalue.toInt());
   } else if (ivalue.isBool()) {
@@ -77,13 +79,15 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
         pushDouble(item);
       }
     });
-  } else if (ivalue.isComplexDoubleList()) {
-    pushSpecializedList(ivalue, "build_complexdoublelist", [=](const IValue& ivalue) {
-      for (double item : ivalue.toComplexDoubleVector()) {
-        pushDouble(item);
-      }
-    });
-  } else if (ivalue.isBoolList()) {
+  }
+  // else if (ivalue.isComplexDoubleList()) {
+  //   pushSpecializedList(ivalue, "build_complexdoublelist", [=](const IValue& ivalue) {
+  //     for (double item : ivalue.toComplexDoubleVector()) {
+  //       pushDouble(item);
+  //     }
+  //   });
+  // }
+  else if (ivalue.isBoolList()) {
     pushSpecializedList(ivalue, "build_boollist", [=](const IValue& ivalue) {
       for (bool item : ivalue.toBoolList()) {
         pushBool(item);
@@ -96,11 +100,11 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isObject()) {
     auto obj = ivalue.toObject();
     auto type = obj->type();
-    if (memorized_class_types_ != nullptr) {
-      // Memorize every class type the Pickler encountered
+    if (memoized_class_types_ != nullptr) {
+      // memoize every class type the Pickler encountered
       // This is used to make sure we capture all the run-time types
       // and serialize them properly for class/interface polymorphism
-      memorized_class_types_->emplace_back(type);
+      memoized_class_types_->emplace_back(type);
     }
     auto type_name = type->name().value();
     if (type_renamer_) {
@@ -127,8 +131,8 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isCapsule()) {
     std::stringstream err;
     err << "Cannot serialize custom bound C++ class";
-    if (memorized_class_types_ && memorized_class_types_->size()) {
-      if (auto qualname = memorized_class_types_->back()->name()) {
+    if (memoized_class_types_ && memoized_class_types_->size()) {
+      if (auto qualname = memoized_class_types_->back()->name()) {
         err << " " << qualname->qualifiedName();
       }
     }
@@ -469,6 +473,14 @@ void Pickler::pushDouble(double value) {
   push<PickleOpCode>(PickleOpCode::BINFLOAT);
   // Python pickle format is big endian, swap.
   push<double>(swapDouble(value));
+}
+void Pickler::pushComplexDouble(const IValue& value) {
+  c10::complex<double> d = (*(value.toComplexDouble())).val;
+  pushGlobal("builtins", "complex");
+  pushIValue(d.real());
+  pushIValue(d.imag());
+  push<PickleOpCode>(PickleOpCode::TUPLE2);
+  push<PickleOpCode>(PickleOpCode::REDUCE);
 }
 
 void Pickler::pushLong(const std::string& data) {
