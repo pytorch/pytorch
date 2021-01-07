@@ -9283,18 +9283,19 @@ class TestNN(NNTestCase):
     def test_unflatten(self):
         tensor_input = torch.randn(2, 50)
 
-        # Unflatten Tensor
+        # Unflatten Tensor (unflattened_size as a tuple of ints and list of ints)
 
-        unflatten = nn.Unflatten(dim=1, unflattened_size=(2, 5, 5))
-        tensor_output = unflatten(tensor_input)
-        self.assertEqual(tensor_output.size(), torch.Size([2, 2, 5, 5]))
+        for us in ((2, 5, 5), [2, 5, 5]):
+            unflatten = nn.Unflatten(dim=1, unflattened_size=us)
+            tensor_output = unflatten(tensor_input)
+            self.assertEqual(tensor_output.size(), torch.Size([2, 2, 5, 5]))
 
         # Unflatten NamedTensor
 
         unflatten = nn.Unflatten(dim='features', unflattened_size=(('C', 2), ('H', 5), ('W', 5)))
         named_tensor_input = tensor_input.refine_names('N', 'features')
         named_tensor_output = unflatten(named_tensor_input)
-        self.assertEqual(tensor_output.size(), torch.Size([2, 2, 5, 5]))
+        self.assertEqual(named_tensor_output.size(), torch.Size([2, 2, 5, 5]))
 
     def test_unflatten_invalid_arg(self):
         # Wrong type for unflattened_size (tuple of floats)
@@ -9304,6 +9305,13 @@ class TestNN(NNTestCase):
                 r"unflattened_size must be tuple of ints, but found element of type float at pos 2"):
             nn.Unflatten(dim=1, unflattened_size=(2, 5, 5.0))
 
+        # Wrong type for unflattened_size (list of lists and list of tuples)
+        for us in ([['C', 2], ['W', 5], ['H', 5]], [('C', 2), ('W', 5), ('H', 5)]):
+            with self.assertRaisesRegex(
+                    TypeError,
+                    r"unflattened_size must be a tuple of tuples, but found type list"):
+                nn.Unflatten(dim='features', unflattened_size=us)
+
         # Wrong type for unflattened_size (tuple of lists)
 
         with self.assertRaisesRegex(
@@ -9311,19 +9319,12 @@ class TestNN(NNTestCase):
                 r"unflattened_size must be tuple of tuples, but found element of type list at pos 0"):
             nn.Unflatten(dim='features', unflattened_size=(['C', 2], ['W', 5], ['H', 5]))
 
-        # Wrong type for unflattened_size (list of ints)
+        # Wrong type for unflattened_size (tuple of dicts)
 
         with self.assertRaisesRegex(
                 TypeError,
-                r"unflattened_size must be a tuple of ints, but found type list"):
-            nn.Unflatten(dim=1, unflattened_size=[2, 5, 5])
-
-        # Wrong type for unflattened_size (list of lists)
-
-        with self.assertRaisesRegex(
-                TypeError,
-                r"unflattened_size must be a tuple of tuples, but found type list"):
-            nn.Unflatten(dim='features', unflattened_size=[['C', 2], ['W', 5], ['H', 5]])
+                r"unflattened_size must be tuple of tuples, but found element of type dict at pos 0"):
+            nn.Unflatten(dim='features', unflattened_size=({'C': 2}, {'W': 5}, {'H': 5}))
 
     def test_layer_norm_grads_with_create_graph_flag(self):
         atol = 1e-5
