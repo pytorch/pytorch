@@ -6,6 +6,7 @@
 #include <THC/THCTensorTypeUtils.cuh>
 #include <THC/THCTensorCopy.hpp>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAException.h>
 
 //
 // This file contains pointwise operation functions and kernels that
@@ -242,14 +243,11 @@ bool THC_pointwiseApply1(THCState* state,
   // (or vice versa), the contiguous tensor can be collapsed to one
   // dimension, and the loop to translate the linear index to the array
   // index can be similarly collapsed. That is what this unrolling is for.
-#define HANDLE_CASE(TYPE, A)                                            \
-  kernelPointwiseApply1<Op,                                             \
-                        ScalarTypeA,                                    \
-                        TYPE, A>                                        \
-    <<<grid, block, 0, c10::cuda::getCurrentCUDAStream(curDevice)>>>(   \
-      OffsetInfo<ScalarTypeA, TYPE, A>  \
-          (aInfo),                                                      \
-      (TYPE) totalElements, op);
+#define HANDLE_CASE(TYPE, A)                                              \
+  kernelPointwiseApply1<Op, ScalarTypeA, TYPE, A>                         \
+    <<<grid, block, 0, c10::cuda::getCurrentCUDAStream(curDevice)>>>(     \
+      OffsetInfo<ScalarTypeA, TYPE, A>(aInfo), (TYPE) totalElements, op); \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define HANDLE_A_CASE(TYPE, A) {            \
   switch (A) {                              \
@@ -298,6 +296,7 @@ bool THC_pointwiseApply1(THCState* state,
                             uint64_t, 1>
         <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
           aOffset, (uint64_t) totalElements, op);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
 
 #if CUDA_VERSION < 9000
@@ -310,6 +309,7 @@ bool THC_pointwiseApply1(THCState* state,
                             uint64_t, -1>
         <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
           aOffset, (uint64_t) totalElements, op);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   }
 #undef HANDLE_CASE
@@ -392,16 +392,13 @@ bool THC_pointwiseApply2(THCState* state,
   // dimension, and the loop to translate the linear index to the array
   // index can be similarly collapsed. That is what this unrolling is for.
 #define HANDLE_CASE(TYPE, A, B)                                         \
-  kernelPointwiseApply2<Op,                                             \
-                        ScalarTypeA,                                    \
-                        ScalarTypeB,                                    \
-                        TYPE, A, B>                                     \
+  kernelPointwiseApply2<Op, ScalarTypeA, ScalarTypeB, TYPE, A, B>       \
     <<<grid, block, 0, c10::cuda::getCurrentCUDAStream(curDevice)>>>(   \
-      OffsetInfo<ScalarTypeA, TYPE, A>  \
-          (aInfo),                                                      \
-      OffsetInfo<ScalarTypeB, TYPE, B>                                  \
-          (bInfo),                                                      \
-      (TYPE) totalElements, op);
+      OffsetInfo<ScalarTypeA, TYPE, A>(aInfo),                          \
+      OffsetInfo<ScalarTypeB, TYPE, B>(bInfo),                          \
+      (TYPE) totalElements, op);                                        \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
 
 #define HANDLE_B_CASE(TYPE, A, B) {         \
   switch (B) {                              \
@@ -474,6 +471,7 @@ bool THC_pointwiseApply2(THCState* state,
                             uint64_t, 1, 1>
         <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
           aOffset, bOffset, (uint64_t) totalElements, op);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
 #if CUDA_VERSION < 9000
       grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
@@ -488,6 +486,7 @@ bool THC_pointwiseApply2(THCState* state,
                             uint64_t, -1, -1>
         <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
           aOffset, bOffset, (uint64_t) totalElements, op);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   }
 #undef HANDLE_CASE
@@ -598,7 +597,8 @@ bool THC_pointwiseApply3(THCState* state,
           (bInfo),                                                      \
       OffsetInfo<ScalarTypeC, TYPE, C>                                  \
           (cInfo),                                                      \
-      (TYPE) totalElements, op);
+      (TYPE) totalElements, op);                                        \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define HANDLE_C_CASE(TYPE, A, B, C) {      \
   switch (C) {                              \
@@ -697,6 +697,7 @@ bool THC_pointwiseApply3(THCState* state,
                             uint64_t, 1, 1, 1>
         <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
           aOffset, bOffset, cOffset, (uint64_t) totalElements, op);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
 #if CUDA_VERSION < 9000
       grid.x = min(at::cuda::getCurrentDeviceProperties()->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
@@ -715,6 +716,7 @@ bool THC_pointwiseApply3(THCState* state,
                             uint64_t, -1, -1, -1>
         <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
           aOffset, bOffset, cOffset, (uint64_t) totalElements, op);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   }
 #undef HANDLE_CASE

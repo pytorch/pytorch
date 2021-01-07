@@ -817,15 +817,16 @@ static void launch_reduce_kernel(const ReduceConfig& config, const R& reduction)
   switch(config.output_vec_size) {
   case 4:
     reduce_kernel<max_threads / 4, 4, R><<<grid, block, shared_memory, stream>>>(reduction);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     break;
   case 2:
     reduce_kernel<max_threads / 2, 2, R><<<grid, block, shared_memory, stream>>>(reduction);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     break;
   default:
     reduce_kernel<max_threads / 1, 1, R><<<grid, block, shared_memory, stream>>>(reduction);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
-
-  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 class AccumulationBuffer {
@@ -872,7 +873,7 @@ int get_output_vec_size(TensorIterator &iter) {
       vec_size /= 2;
     }
   };
-  
+
   uint64_t base_address = reinterpret_cast<uint64_t>(iter.data_ptr(iter.noutputs())) / sizeof(scalar_t);
   update_vec_size(base_address);
 

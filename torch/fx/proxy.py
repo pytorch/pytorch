@@ -2,6 +2,8 @@ import dis
 import torch
 import inspect
 import operator
+import builtins
+from typing import Union
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
@@ -50,7 +52,13 @@ class TracerBase:
         Can be override to support more trace-specific types.
         """
         # aggregates
-        if isinstance(a, (tuple, list)):
+        if isinstance(a, tuple) and hasattr(a, '_fields'):
+            # NamedTuple constructors don't seem to like getting a generator
+            # expression as an argument to their constructor, so build this
+            # intermediate tuple and unpack it into the NamedTuple constructor
+            args = tuple(self.create_arg(elem) for elem in a)
+            return type(a)(*args)  # type: ignore
+        elif isinstance(a, (tuple, list)):
             return type(a)(self.create_arg(elem) for elem in a)
         elif isinstance(a, dict):
             r = {}
@@ -147,6 +155,9 @@ class Proxy:
     def keys(self):
         return self.tracer.keys(self)
 
+    def __len__(self):
+        raise RuntimeError("'len' is not supported. Replace it with 'torch.fx.len'.")
+
     def __torch_function__(self, orig_method, types, args=None, kwargs=None):
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
@@ -155,6 +166,12 @@ class Proxy:
         else:
             return self.tracer.create_proxy('call_function', orig_method, args, kwargs,
                                             name=self.tracer.graph._target_to_str(orig_method.__name__))
+
+def len(item: Any) -> Union[Proxy, int]:
+    if not isinstance(item, Proxy):
+        return builtins.len(item)
+
+    return item.tracer.create_proxy('call_function', builtins.len, (item,), {})
 
 class Attribute(Proxy):
     def __init__(self, root: Proxy, attr: str):

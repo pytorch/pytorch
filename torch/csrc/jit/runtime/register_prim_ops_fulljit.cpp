@@ -29,7 +29,15 @@ RegisterOperators reg(
     {Operator(
          prim::profile,
          [](const Node* node) -> Operation {
-           auto callback = node->cast<ProfileOp>()->getCallback();
+           return [](Stack* stack) {
+             AT_ERROR(
+                 "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::profile_ivalue,
+         [](const Node* node) -> Operation {
            return [](Stack* stack) {
              AT_ERROR(
                  "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
