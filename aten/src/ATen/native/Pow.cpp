@@ -83,7 +83,8 @@ Tensor& float_power_out(Tensor& result, const Tensor& base, const Tensor& exp) {
   auto dtype = (at::isComplexType(base.scalar_type()) || at::isComplexType(exp.scalar_type())) ?
                 at::kComplexDouble : at::kDouble;
   TORCH_CHECK(result.scalar_type() == dtype,
-              "output dtype ", result.scalar_type(), " is not the desired dtype ", dtype);
+              "the output given to float_power has dtype ", result.scalar_type(),
+              " but the operation's result requires dtype ", dtype);
 
   return at::pow_out(result, base.to(dtype), exp.to(dtype));
 }
@@ -91,7 +92,8 @@ Tensor& float_power_out(Tensor& result, const Tensor& base, const Tensor& exp) {
 Tensor& float_power_out(Tensor& result, const Tensor& base, Scalar exp) {
   auto dtype = (at::isComplexType(base.scalar_type()) || exp.isComplex()) ? at::kComplexDouble : at::kDouble;
   TORCH_CHECK(result.scalar_type() == dtype,
-              "output dtype ", result.scalar_type(), " is not the desired dtype ", dtype);
+              "the output given to float_power has dtype ", result.scalar_type(),
+              " but the operation's result requires dtype ", dtype);
 
   // Note: need the casts inside the ternary because conversion functions return e.g. c10::complex,
   // which causes a complex scalar to always be returned.
@@ -102,7 +104,8 @@ Tensor& float_power_out(Tensor& result, const Tensor& base, Scalar exp) {
 Tensor& float_power_out(Tensor& result, Scalar base, const Tensor& exp) {
   auto dtype = (at::isComplexType(exp.scalar_type()) || base.isComplex()) ? at::kComplexDouble : at::kDouble;
   TORCH_CHECK(result.scalar_type() == dtype,
-              "output dtype ", result.scalar_type(), " is not the desired dtype ", dtype);
+              "the output given to float_power has dtype ", result.scalar_type(),
+              " but the operation's result requires dtype ", dtype);
 
   base = (dtype == at::kComplexDouble) ? Scalar(base.toComplexDouble()) : Scalar(base.toDouble());
   return at::pow_out(result, base, exp.to(dtype));
