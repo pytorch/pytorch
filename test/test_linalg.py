@@ -5310,8 +5310,6 @@ else:
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_cholesky_inverse_errors_and_warnings(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-
         # cholesky_inverse requires the input to be at least 2 dimensional tensor
         a = torch.randn(2, device=device, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, "must have at least 2 dimensions"):
