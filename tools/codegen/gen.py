@@ -435,6 +435,8 @@ struct {class_name} final : public {parent_class} {{
                 # For an overview of what this template code looks like, see
                 # https://github.com/pytorch/rfcs/pull/9
                 return f"""\
+namespace {{
+
 {self.gen_structured_class(
     f, k,
     class_name=class_name,
@@ -448,6 +450,8 @@ struct {class_name} final : public {parent_class} {{
     {impl_call}
     return {ret_expr};
 }}
+
+}} // anonymous namespace
 """
 
             elif self.target is Target.REGISTRATION:
@@ -466,12 +470,6 @@ struct {class_name} final : public {parent_class} {{
     def gen_unstructured(self, f: NativeFunction) -> Optional[str]:
         # for mypy type refinement; would be fixed by TODO on target
         assert self.target is not Target.DECLARATION
-
-        if f.func.is_out_fn():
-            assert local.use_c10_dispatcher().dispatcher_uses_new_style(), \
-                ("{} takes out arguments and has to be written in the new style. " +
-                 "Please add `use_c10_dispatcher: full` to your operator in native_functions.yaml " +
-                 "and write the C++ implementation to take out arguments in the end.").format(f.func.name)
 
         if self.dispatch_key not in f.dispatch:
             return None
@@ -515,8 +513,7 @@ struct {class_name} final : public {parent_class} {{
     const DeviceGuard device_guard(device_or_default(device));
 """
                 else:
-                    assert local.use_c10_dispatcher() in [UseC10Dispatcher.with_codegenerated_unboxing_wrapper,
-                                                          UseC10Dispatcher.hacky_wrapper_for_legacy_signatures]
+                    assert local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures
                     cuda_guard_from_tensor_options = """\
     const DeviceGuard device_guard(options.device());
 """
@@ -540,9 +537,13 @@ struct {class_name} final : public {parent_class} {{
 """
 
             return f"""\
+namespace {{
+
 {returns_type} {name}({args_str}) {{
 {cuda_guard}{return_kw}{impl_name}({args_exprs_str});
 }}
+
+}} // anonymous namespace
 """
 
         elif self.target is Target.REGISTRATION:
@@ -554,16 +555,14 @@ struct {class_name} final : public {parent_class} {{
                 # Figure out which signature the function is
                 if local.use_c10_dispatcher() is UseC10Dispatcher.full:
                     payload = f"TORCH_FN({name})"
-                elif local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
+                else:
+                    assert local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures
                     payload = f"""
 c10::impl::hacky_wrapper_for_legacy_signatures<
     {dispatcher_sig.type()},
     {len(f.func.arguments.out)}
 >(TORCH_FN({name}))
 """
-                else:
-                    assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
-                    payload = f"torch::CppFunction::makeUnboxedOnly(&{name})"
 
                 return f'm.impl("{f.func.name}",\n{payload});\n'
         else:
@@ -782,14 +781,9 @@ class ComputeBackendSelect:
         dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
         sig: Union[NativeSignature, DispatcherSignature]
-        if local.use_c10_dispatcher().dispatcher_uses_new_style():
-            sig = dispatcher_sig
-            dispatcher_exprs = dispatcher_sig.exprs()
-            dispatch_key = "c10::computeDispatchKey(dtype, layout, device)"
-        else:
-            sig = native_sig
-            dispatcher_exprs = native_sig.dispatcher_exprs()
-            dispatch_key = "options.computeDispatchKey()"
+        sig = dispatcher_sig
+        dispatcher_exprs = dispatcher_sig.exprs()
+        dispatch_key = "c10::computeDispatchKey(dtype, layout, device)"
 
         if self.target is Target.DEFINITION:
             # I don't think there's actually a good reason to generate
@@ -815,11 +809,7 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
 }}
 """
         elif self.target is Target.REGISTRATION:
-            if local.use_c10_dispatcher().dispatcher_uses_new_style():
-                return f"""m.impl("aten::{f.func.name}", TORCH_FN({name}));"""
-            else:
-                assert local.use_c10_dispatcher() is UseC10Dispatcher.with_codegenerated_unboxing_wrapper
-                return f"""m.impl_UNBOXED("aten::{f.func.name}", {name});"""
+            return f"""m.impl("aten::{f.func.name}", TORCH_FN({name}));"""
         elif self.target is Target.DECLARATION:
             raise AssertionError()
         else:
@@ -1044,7 +1034,6 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         ('name', cpp.name(f.func)),
         ('operator_name', str(f.func.name.name)),
         ('overload_name', str(f.func.name.overload_name)),
-        ('use_c10_dispatcher', f.use_c10_dispatcher.name),
         ('manual_kernel_registration', f.manual_kernel_registration),
         ('category_override', f.category_override if f.category_override is not None else ''),
         ('matches_jit_signature', True),

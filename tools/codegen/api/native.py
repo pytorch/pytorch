@@ -64,8 +64,7 @@ def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments], *, is_out
         # Erase SelfArgument from the distinction
         return argument(a.argument, is_out=is_out)
     elif isinstance(a, TensorOptionsArguments):
-        if local.use_c10_dispatcher() in [UseC10Dispatcher.hacky_wrapper_for_legacy_signatures,
-                                          UseC10Dispatcher.with_codegenerated_unboxing_wrapper]:
+        if local.use_c10_dispatcher() == UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
             # TODO: expunge this logic entirely
             default = None
             if should_default:
