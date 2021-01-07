@@ -46,7 +46,7 @@ void initGeneratorBindings(PyObject* module) {
   options.disable_user_defined_docstrings();
   options.disable_function_signatures();
 
-  py::class_<Generator>(module, "Generator", py::is_final())
+  py::class_<Generator>(module, "Generator")
       // FIXME These constructors are temporary and will be replaced by a subsequent
       // PR that binds at::Device with pybind11
       .def(py::init([]() { return createGenerator(Device(kCPU)); }))
@@ -113,7 +113,7 @@ void initGeneratorBindings(PyObject* module) {
             return gen.seed();
             END_HANDLE_TH_ERRORS_PYBIND
           })
-      .def("initial_seed", [](Generator& gen) { return gen.current_seed(); })
+      .def("initial_seed", [](const Generator& gen) { return gen.current_seed(); })
       // FIXME Refactor this after binding Device with pybind11
       .def_property_readonly(
           "device",
