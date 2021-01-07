@@ -142,7 +142,7 @@ inline int64_t stride(const Tensor& tensor, int64_t dim) {
   return tensor.stride(dim);
 }
 
-inline int64_t is_complex(const Tensor& tensor) {
+inline bool is_complex(const Tensor& tensor) {
   return tensor.is_complex();
 }
 
