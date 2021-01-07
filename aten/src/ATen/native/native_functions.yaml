@@ -5998,7 +5998,6 @@
     CPU, CUDA: lgamma_out
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: lgamma_
