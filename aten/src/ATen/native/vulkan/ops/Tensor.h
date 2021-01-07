@@ -336,7 +336,7 @@ class vTensor final {
     Image& image(CMD&, Stage::Flags, Access::Flags) const;
     Buffer& staging() const;
     Buffer& staging(CMD&, Stage::Flags, Access::Flags) const;
-    Fence& fence() const;
+    Fence& fence(Access::Flags) const;
 
     // Validation
     void verify() const;

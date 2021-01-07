@@ -1004,7 +1004,7 @@ vTensor::Buffer& vTensor::View::staging(
     const Access::Flags access) const {
   CMD cmd(*this, command_buffer);
   Buffer& staging = this->staging(cmd, stage, access);
-  cmd.submit(fence());
+  cmd.submit(fence(access));
 
   return staging;
 }
@@ -1042,8 +1042,12 @@ vTensor::Buffer& vTensor::View::staging(
   return staging();
 }
 
-vTensor::Fence& vTensor::View::fence() const {
-  return (fence_ = allocate_fence(&context_->resource().pool));
+vTensor::Fence& vTensor::View::fence(const Access::Flags access) const {
+  if (access & Access::Read) {
+    fence_ = allocate_fence(&context_->resource().pool);
+  }
+
+  return fence_;
 }
 
 vTensor::Memory& vTensor::View::wait() const {
