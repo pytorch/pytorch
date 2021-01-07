@@ -1498,7 +1498,9 @@ void initJITBindings(PyObject* module) {
           });
   py::class_<tensorexpr::SimpleIREvaluator, tensorexpr::CodeGen>(
       te, "SimpleIREvaluator");
+#ifdef TORCH_ENABLE_LLVM
   py::class_<tensorexpr::LLVMCodeGen, tensorexpr::CodeGen>(te, "LLVMCodeGen");
+#endif
 
   py::class_<tensorexpr::CodeGen::BufferArg>(te, "BufferArg")
       .def(py::init<const tensorexpr::Placeholder&>())
