@@ -296,8 +296,6 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad):
                         kwargs=dict(dim=1)),)
 
 def sample_inputs_slogdet(op_info, device, dtype, requires_grad):
-    from torch.testing._internal.common_utils import random_hermitian_matrix, random_hermitian_pd_matrix
-
     # original test cases from 'method_tests' have too many test_inputs
     # we don't actually need all of them to check the autograd and jit correctness
     # sample inputs with shapes 0x0, 0xSxS, 2x0x0 are added
