@@ -94,9 +94,11 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
   strides_.push_back(1);
 }
 
+#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 IntArrayRef TensorImpl::sizes() const {
   return sizes_;
 }
+#endif
 
 IntArrayRef TensorImpl::strides() const {
   return strides_;
