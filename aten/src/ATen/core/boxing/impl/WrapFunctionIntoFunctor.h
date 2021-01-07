@@ -9,7 +9,8 @@ namespace impl {
     template<class FuncPtr, class ReturnType, class... Parameters>
     class WrapFunctionIntoFunctor_<FuncPtr, ReturnType, guts::typelist::typelist<Parameters...>> final : public c10::OperatorKernel {
     public:
-      decltype(auto) operator()(Parameters... args) {
+      // Note: benchmarks showed that this function wasn't getting inlined during calls to at::empty
+      C10_ALWAYS_INLINE decltype(auto) operator()(Parameters... args) {
         return (*FuncPtr::func_ptr())(std::forward<Parameters>(args)...);
       }
     };

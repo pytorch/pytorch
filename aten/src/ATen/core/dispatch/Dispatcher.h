@@ -130,7 +130,7 @@ public:
   // The dispatch key with highest priority is used.
   // See Note [Plumbing Keys Through The Dispatcher]
   template<class Return, class... Args>
-  Return callWithDispatchKey(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet dispatchKeySet, Args... args) const;
+  Return callWithDispatchKeySet(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet dispatchKeySet, Args... args) const;
 
   // Like call, but intended for use in a redispatch: you are currently
   // in some currentDispatchKey, you have finished processing the key and
@@ -363,8 +363,9 @@ public:
     return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
   }
 
-  Return callWithDispatchKey(DispatchKeySet dispatchKeySet, Args... args) const {
-    return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKeySet, std::forward<Args>(args)...);
+  // Note: benchmarks showed that this function wasn't getting inlined during calls to at::empty
+  C10_ALWAYS_INLINE Return callWithDispatchKeySet(DispatchKeySet dispatchKeySet, Args... args) const {
+    return c10::Dispatcher::singleton().callWithDispatchKeySet<Return, Args...>(*this, dispatchKeySet, std::forward<Args>(args)...);
   }
 
 private:
@@ -424,7 +425,8 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(Args...)>& op, DispatchKeySet dispatchKeySet, Args... args) const {
+// Note: benchmarks showed that this function wasn't getting inlined during calls to at::empty
+C10_ALWAYS_INLINE Return Dispatcher::callWithDispatchKeySet(const TypedOperatorHandle<Return(Args...)>& op, DispatchKeySet dispatchKeySet, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   // No alias dispatch key is allowed at runtime.
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKeySet.highestPriorityTypeId()));
@@ -478,7 +480,7 @@ inline Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, A
       DispatchKeySet::FULL,
       args...
     );
-  return callWithDispatchKey<Return, Args...>(op, dispatchKeySet, args...);
+  return callWithDispatchKeySet<Return, Args...>(op, dispatchKeySet, args...);
 }
 
 template<class Return, class... Args>
