@@ -838,10 +838,10 @@ Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& i
   // TODO: implement efficient non-allocating copy of the upper part of the matrix to the lower part and lower -> upper
   if (upper) {
     result.triu_();
-    result += at::triu(result, 1).transpose(-2, -1);
+    result += at::triu(result, 1).conj().transpose(-2, -1);
   } else {
     result.tril_();
-    result += at::tril(result, -1).transpose(-2, -1);
+    result += at::tril(result, -1).conj().transpose(-2, -1);
   }
   return result;
 }
