@@ -135,9 +135,7 @@ bool supportedAddOrSub(Node* n) {
 // conv output tensor, this is in the second dimension,
 // so the pointwise op tensor may have a second dimension of
 // value == channels-out, but all the other dimensions have to be 1
-bool opDoesNotBroadCastWithConv(
-    Tensor& op_tensor,
-    Tensor& weight_tensor) {
+bool opDoesNotBroadCastWithConv(Tensor& op_tensor, Tensor& weight_tensor) {
   if (op_tensor.ndimension() > weight_tensor.ndimension()) {
     return false;
   }
@@ -201,7 +199,7 @@ Tensor resizeConstantScalarOrTensorToShape(
   }
 
   if (ret_tensor.numel() == 1) {
-    //expand errors if the shape input has less # dims than the tensor input
+    // expand errors if the shape input has less # dims than the tensor input
     ret_tensor = ret_tensor.reshape({1});
     ret_tensor = ret_tensor.expand(shape);
   } else {
