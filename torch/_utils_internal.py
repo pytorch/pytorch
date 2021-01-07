@@ -1,6 +1,7 @@
 
 import os
 import inspect
+import sys
 import tempfile
 
 # this arbitrary-looking assortment of functionality is provided here
@@ -8,11 +9,12 @@ import tempfile
 # use is the FB build environment, where this source file is replaced
 # by an equivalent.
 
-if os.path.basename(os.path.dirname(__file__)) == 'shared':
-    torch_parent = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-else:
-    torch_parent = os.path.dirname(os.path.dirname(__file__))
-
+# __file__ is meaningless in the context of frozen torch used in torch deploy.
+if not sys.executable == 'torch_deploy':
+    if os.path.basename(os.path.dirname(__file__)) == 'shared':
+        torch_parent = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    else:
+        torch_parent = os.path.dirname(os.path.dirname(__file__))
 
 def get_file_path(*path_components):
     return os.path.join(torch_parent, *path_components)
@@ -60,7 +62,7 @@ def get_source_lines_and_file(obj, error_msg=None):
 
 TEST_MASTER_ADDR = '127.0.0.1'
 TEST_MASTER_PORT = 29500
-# USE_GLOBAL_DEPS controls whether __init__.py tries to load 
+# USE_GLOBAL_DEPS controls whether __init__.py tries to load
 # libtorch_global_deps, see Note [Global dependencies]
 USE_GLOBAL_DEPS = True
 # USE_RTLD_GLOBAL_WITH_LIBTORCH controls whether __init__.py tries to load

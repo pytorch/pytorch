@@ -1,4 +1,10 @@
-#ifdef USE_CUDA
+// CudaIPCTypes.cpp was moved from libtorch_python to libtorch_cuda,
+// but its header is still used outside libtorch_cuda, so define USE_CUDA
+// in this file (since it is not defined in general for libtorch_cuda sources)
+#ifndef USE_CUDA
+#define USE_CUDA
+#endif
+
 #include <torch/csrc/CudaIPCTypes.h>
 #include <TH/THAllocator.h>
 #include <map>
@@ -243,5 +249,3 @@ namespace {
 REGISTER_FREE_MEMORY_CALLBACK("cuda_ipc_collect", CudaIPCCollectCallback);
 }
 } // namespace c10
-
-#endif
