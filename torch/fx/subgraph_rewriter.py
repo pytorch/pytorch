@@ -96,7 +96,7 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
                 return x + torch.max(m1) + torch.max(m2)
 
         def pattern(w1, w2):
-            return torch.cat([w1, w2])
+            return torch.cat([w1, w2]).sum()
 
         def replacement(w1, w2):
             return torch.stack([w1, w2])
@@ -124,11 +124,29 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
     found match in the set of overlapping matches will be replaced.
 
     One important thing to note is that the parameters of the
-    ``pattern`` and ``replacement`` Callables must be used in the
-    Callable itself. This rule is why, in the above code block, the
+    ``pattern`` Callable must be used in the Callable itself,
+    and the parameters of the ``replacement`` Callable must match
+    the pattern. The first rule is why, in the above code block, the
     ``forward`` function has parameters ``x, w1, w2``, but the
     ``pattern`` function only has parameters ``w1, w2``. ``pattern``
     doesn't use ``x``, so it shouldn't specify ``x`` as a parameter.
+    As an example of the second rule, consider replacing
+
+    .. code-block:: python
+
+        def pattern(x, y):
+            return torch.neg(x) + torch.relu(y)
+
+    with
+
+    .. code-block:: python
+
+        def replacement(x, y):
+            return torch.relu(x)
+
+    In this case, ``replacement`` needs the same number of parameters
+    as ``pattern`` (both ``x`` and ``y``), even though the parameter
+    ``y`` isn't used in ``replacement``.
 
     After calling ``subgraph_rewriter.replace_pattern``, the generated
     Python code looks like this:
