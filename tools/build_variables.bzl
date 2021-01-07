@@ -7,9 +7,6 @@ GENERATED_CPP = [
     "autograd/generated/VariableType_2.cpp",
     "autograd/generated/VariableType_3.cpp",
     "autograd/generated/VariableType_4.cpp",
-    "jit/generated/generated_unboxing_wrappers_0.cpp",
-    "jit/generated/generated_unboxing_wrappers_1.cpp",
-    "jit/generated/generated_unboxing_wrappers_2.cpp",
     "autograd/generated/TraceType_0.cpp",
     "autograd/generated/TraceType_1.cpp",
     "autograd/generated/TraceType_2.cpp",
@@ -39,9 +36,6 @@ libtorch_nvfuser_generated_headers = ["{}.h".format(name[36:-3]) for name in lib
 def libtorch_generated_sources(gencode_pattern):
     return [gencode_pattern.format(name) for name in [
         "autograd/generated/Functions.cpp",
-        "jit/generated/generated_unboxing_wrappers_0.cpp",
-        "jit/generated/generated_unboxing_wrappers_1.cpp",
-        "jit/generated/generated_unboxing_wrappers_2.cpp",
         "autograd/generated/VariableType_0.cpp",
         "autograd/generated/VariableType_1.cpp",
         "autograd/generated/VariableType_2.cpp",
@@ -90,6 +84,8 @@ core_sources_common = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/autograd/profiler_utils.cpp",
+    "torch/csrc/autograd/autograd_meta.cpp",
+    "torch/csrc/autograd/forward_grad.cpp",
     "torch/csrc/jit/frontend/edit_distance.cpp",
     "torch/csrc/jit/frontend/string_to_type.cpp",
     "torch/csrc/jit/mobile/type_parser.cpp",
@@ -349,6 +345,7 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/serialization/export_module.cpp",
     "torch/csrc/jit/serialization/import_legacy.cpp",
     "torch/csrc/utils/byte_order.cpp",
+    "torch/csrc/utils/out_types.cpp",
 ]
 
 def libtorch_sources(gencode_pattern = ":generate-code[{}]"):
@@ -406,6 +403,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/transform_rfactor.cpp",
     "torch/csrc/jit/codegen/cuda/type.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
+    "torch/csrc/jit/runtime/register_cuda_ops.cpp",
 ]
 
 libtorch_cuda_sources = libtorch_cuda_core_sources + [
@@ -501,7 +499,6 @@ libtorch_python_core_sources = [
     "torch/csrc/MemoryFormat.cpp",
     "torch/csrc/QScheme.cpp",
     "torch/csrc/Module.cpp",
-    "torch/csrc/PtrWrapper.cpp",
     "torch/csrc/python_dimname.cpp",
     "torch/csrc/Size.cpp",
     "torch/csrc/Storage.cpp",
