@@ -25,7 +25,7 @@ void main() {
     const int base = base_x + uBlock.orig_size.x * base_y;
     const ivec4 index = base + ivec4(0, 1 ,uBlock.orig_size.x, uBlock.orig_size.x+1);
 
-    vec4 outvec = vec4(0);
+    vec4 outvec = vec4(0,0,0,0);
     if (base_x < uBlock.orig_size.x && base_y < uBlock.orig_size.y) {
       outvec.x = uBuffer.data[index.x];
     }
