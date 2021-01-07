@@ -4680,11 +4680,11 @@ class TestNN(NNTestCase):
         var = torch.tensor([[0.5, 1., 1.5], [1., 1.5, 2.]])
         component_wise_loss = 0.5 * (torch.sum(torch.log(var) + (input - target)**2 / var, dim=1))
         self.assertEqual(component_wise_loss,
-                         F.gaussian_nll_loss(input, target, var, eps=0, reduction='none'))
+                         F.gaussian_nll_loss(input, target, var, reduction='none'))
         self.assertEqual(torch.sum(component_wise_loss),
-                         F.gaussian_nll_loss(input, target, var, eps=0, reduction='sum'))
+                         F.gaussian_nll_loss(input, target, var, reduction='sum'))
         self.assertEqual(torch.mean(component_wise_loss),
-                         F.gaussian_nll_loss(input, target, var, eps=0, reduction='mean'))
+                         F.gaussian_nll_loss(input, target, var, reduction='mean'))
         with self.assertRaisesRegex(ValueError, 'is not valid'):
             F.gaussian_nll_loss(input, target, var, reduction='total')
 

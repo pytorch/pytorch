@@ -301,30 +301,20 @@ class GaussianNLLLoss(_Loss):
     r"""Gaussian negative log likelihood loss.
 
     The targets are treated as samples from Gaussian distributions with
-    expectations and variances predicted by the neural network. For a
-    1-dimensional ``target`` tensor modelled as having Gaussian distribution
-    with expectation ``input`` and positive variance ``var``, the loss is:
-
-    .. math::
-         \text{loss} = \frac{1}{2}\log(\text{var} + \text{eps})
-         + \frac{1}{2} \frac{\left(\text{input} - \text{target}\right)^2}{\text{var} + \text{eps}} + \text{const.}
-
-
-    where :attr:`eps` is added for stability. By default, the constant term of
-    the loss function is omitted unless :attr:`full` is ``True``. For a 
-    D-dimensional ``target`` tensor modelled as having a heteroscedastic
-    Gaussian distribution with  D-dimensional ``input`` and ``var`` the loss is:
+    expectations and variances predicted by the neural network. For a 
+    D-dimensional ``target`` tensor modelled as having heteroscedastic Gaussian
+    distributions with  D-dimensional expectation ``input`` and variance ``var``
+    the loss is:
 
     .. math::
         \text{loss} = \frac{1}{2}\sum_{i=1}^D \left(\log(\text{var}[i] + \text{eps}) 
-         + \frac{\left(\text{input}[i] - \text{target}[i]\right)^2}{\text{var}[i] + \text{eps}}\right)
+         + \frac{\left(\text{input}[i] - \text{target}[i]\right)^2}{\text{var}[i] + \text{eps}}\right) + \text{const.}
 
-    where the constant term is omitted. If ``var`` is 1-dimensional, the
-    homoscedastic case applies instead:
+    where :attr:`eps` is added for stability. By default, the constant term of
+    the loss function is omitted unless :attr:`full` is ``True``. If ``var`` is
+    a scalar (implying ``target`` tensor has homoscedastic Gaussian 
+    distributions) it is broadcasted to be the same size as the input.
 
-    .. math::
-         \text{loss} = \frac{D}{2}\log(\text{var} + \text{eps})
-         + \frac{1}{2}\sum_{i=1}^D \left(\frac{\left(\text{input}[i] - \text{target}[i]\right)^2}{\text{var} + \text{eps}}\right)
 
     Args:
         eps (float, optional): value added to ``var``, for stability. Default:
@@ -342,7 +332,15 @@ class GaussianNLLLoss(_Loss):
         >>> loss = nn.GaussianNLLLoss()
         >>> input = torch.randn(5, 2, requires_grad=True)
         >>> target = torch.randn(5, 2)
-        >>> var = torch.ones(5, 2, requires_grad=True)
+        >>> var = torch.ones(5, 2, requires_grad=True) #heteroscedastic
+        >>> output = loss(input, target, var)
+        >>> output.backward()
+
+
+        >>> loss = nn.GaussianNLLLoss()
+        >>> input = torch.randn(5, 2, requires_grad=True)
+        >>> target = torch.randn(5, 2)
+        >>> var = torch.ones(5, 1, requires_grad=True) #homoscedastic
         >>> output = loss(input, target, var)
         >>> output.backward()
 

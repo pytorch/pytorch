@@ -2325,7 +2325,7 @@ def gaussian_nll_loss(input, target, var, *, eps=1e-6, full=False, reduction='me
         input: expectation of the Gaussian distribution.
         target: sample from the Gaussian distribution.
         var: tensor of positive variance(s), one for each of the expectations
-        in the input (heteroscedastic), or a single one (homoscedastic).
+            in the input (heteroscedastic), or a single one (homoscedastic).
         eps: value added to var, for stability. Default: 1e-6.
         full: ``True``/``False`` (bool), include the constant term in the loss
             calculation. Default: ``False``.
@@ -2353,8 +2353,10 @@ def gaussian_nll_loss(input, target, var, *, eps=1e-6, full=False, reduction='me
     if torch.any(var < 0):
         raise ValueError("var has negative entry/entries")
 
-    # Add eps for stability
-    var = var + eps
+    # Clamp for stability
+    var = var.clone()
+    with torch.no_grad():
+        var.clamp_(min=eps)
 
     # Calculate loss (without constant)
     loss = 0.5 * (torch.log(var) + (input - target)**2 / var).view(input.size(0), -1).sum(dim=1)
