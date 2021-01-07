@@ -10,13 +10,12 @@ To run this, you will need to have Caffe2 installed as well.
 
 
 
-
+import collections
 import itertools
 import logging
 import re
 
 from caffe2.python import core as caffe2_core
-from caffe2.python.compatibility import container_abcs
 from onnx import (checker, helper, numpy_helper, mapping,
                   GraphProto, NodeProto, TensorProto, OperatorSetIdProto)
 from onnx.helper import make_tensor_value_info, make_model
@@ -153,7 +152,7 @@ class Caffe2Frontend(object):
         const_tensors = []
         if isinstance(nodes, tuple):
             nodes, const_tensors = nodes
-        if not isinstance(nodes, container_abcs.Iterable):
+        if not isinstance(nodes, collections.abc.Iterable):
             nodes = [nodes]
         return nodes, const_tensors
 
