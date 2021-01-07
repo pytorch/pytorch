@@ -652,9 +652,9 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
       case Layout::SparseGCS:
         switch(device_.type()) {
           case DeviceType::CPU:
-            return DispatchKey::SparseGCS_CPU;
+            return DispatchKey::CompressedSparseCPU;
           case DeviceType::CUDA:
-            return DispatchKey::SparseGCS_CUDA;
+            return DispatchKey::CompressedSparseCUDA;
           default:
             AT_ERROR("Unsupported device type for sparse GCS layout: ", device_.type());
         }
@@ -694,9 +694,9 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::CUDA;
   } else if (tid == DispatchKey::SparseHIP) {
     return DeviceType::HIP;
-  } else if (tid == DispatchKey::SparseGCS_CPU) {
+  } else if (tid == DispatchKey::CompressedSparseCPU) {
     return DeviceType::CPU;
-  } else if (tid == DispatchKey::SparseGCS_CUDA) {
+  } else if (tid == DispatchKey::CompressedSparseCUDA) {
     return DeviceType::CUDA;
   } else if (tid == DispatchKey::MkldnnCPU) {
     return DeviceType::CPU;

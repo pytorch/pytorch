@@ -437,8 +437,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::SparseCPU) ||
            key_set_.has(DispatchKey::SparseCUDA) ||
            key_set_.has(DispatchKey::SparseHIP) ||
-           key_set_.has(DispatchKey::SparseGCS_CPU) ||
-           key_set_.has(DispatchKey::SparseGCS_CUDA);
+           key_set_.has(DispatchKey::CompressedSparseCPU) ||
+           key_set_.has(DispatchKey::CompressedSparseCUDA);
   }
 
   bool is_quantized() const {

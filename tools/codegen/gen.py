@@ -1273,11 +1273,11 @@ def main() -> None:
     dispatch_keys = [
         "CPU",
         "SparseCPU",
-        "SparseGCS_CPU",
+        "CompressedSparseCPU",
         "MkldnnCPU",
         "CUDA",
         "SparseCUDA",
-        "SparseGCS_CUDA",
+        "CompressedSparseCUDA",
         "QuantizedCPU",
         "QuantizedCUDA",
         "Math",

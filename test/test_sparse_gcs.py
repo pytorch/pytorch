@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
 load_tests = load_tests
 
 class TestSparseGCS(TestCase):
-    def gen_sparse_gcs(self, shape, nnz, fill_value=float('NaN')):
+    def gen_sparse_gcs(self, shape, nnz, fill_value=0):
         total_values = functools.reduce(operator.mul, shape, 1)
         dense = np.random.randn(total_values)
         fills = random.sample(list(range(total_values)), total_values-nnz)
@@ -55,6 +55,21 @@ class TestSparseGCS(TestCase):
         self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int32), sp.indices())
         self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=torch.int64), sp.values())
 
+    def test_sparse_gcs_dim_reduction(self):
+        size = (5, 5, 5, 5, 5)
+        dense = torch.randn(size)
+        sparse_simple = dense.to_sparse_gcs(reduction=[0, 1, 2, 3, 4, 2])
+        self.assertEqual(sparse_simple.reduction(), torch.tensor([0, 1, 2, 3, 4, 2]))
+
+        sparse_eccentric = dense.to_sparse_gcs(reduction=[1, 0, 2, 4, 3, 1])
+        self.assertEqual(sparse_eccentric.reduction(), torch.tensor([1, 0, 2, 4, 3]))
+
+        with self.assertRaisesRegex(RuntimeError, "reduction array must be"):
+            dense.to_sparse_gcs(reduction=[0, 1, 2, 3, 4, 5])
+
+        with self.assertRaisesRegex(RuntimeError, "reduction array must be"):
+            dense.to_sparse_gcs(reduction=[0, 1, 2, 3, 2])
+
     def test_dense_convert(self):
         size = (5, 5, 5, 5, 5)
         dense = torch.randn(size)
@@ -71,7 +86,7 @@ class TestSparseGCS(TestCase):
         sparse = dense.to_sparse_gcs(None, -999)
         self.assertEqual(sparse.to_dense(), dense)
 
-    def test_gcs_matvec(self):
+    def test_gcs_matvec_simple2d(self):
         side = 100
         gcs = self.gen_sparse_gcs((side, side), 1000)
         vec = torch.randn(side, dtype=torch.double)
@@ -80,6 +95,11 @@ class TestSparseGCS(TestCase):
         expected = gcs.to_dense().matmul(vec)
 
         self.assertEqual(res, expected)
+
+    def test_gcs_matvec_nd_tensor(self):
+        size = (5, 5, 5, 5, 5)
+        dense = torch.randn(size)
+        sparse = dense.to_sparse_gcs(None, -999)
         
     def test_gcs_matmul(self):
         side1 = 100
@@ -93,6 +113,14 @@ class TestSparseGCS(TestCase):
             expected = gcs.to_dense().matmul(mat)
 
             self.assertEqual(res, expected)
+
+    def test_coo_gcs_conversion(self):
+        size = (5, 5, 5, 5, 5)
+        dense = torch.randn(size)
+        coo_sparse = dense.to_sparse()
+        gcs_sparse = coo_sparse.to_sparse_gcs()
+
+        self.assertEqual(gcs_sparse.to_dense(), dense)
 
 if __name__ == '__main__':
     run_tests()

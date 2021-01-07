@@ -22,9 +22,9 @@ SparseTensor new_gcs_tensor(const TensorOptions& options) {
   AT_ASSERT(options.layout() == kSparseGCS);
   DispatchKey dispatch_key;
   if (options.device().is_cuda()) {
-    dispatch_key = DispatchKey::SparseGCS_CUDA;
+    dispatch_key = DispatchKey::CompressedSparseCUDA;
   } else {
-    dispatch_key = DispatchKey::SparseGCS_CPU;
+    dispatch_key = DispatchKey::CompressedSparseCPU;
   }
   
   return detail::make_tensor<SparseGCSTensorImpl>(
