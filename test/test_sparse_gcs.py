@@ -100,6 +100,28 @@ class TestSparseGCS(TestCase):
         size = (5, 5, 5, 5, 5)
         dense = torch.randn(size)
         sparse = dense.to_sparse_gcs(None, -999)
+        vec = torch.randn(5, dtype=torch.double)
+
+        res = sparse.matmul(vec)
+        expected = sparse.to_dense().matmul(vec)
+
+        self.assertEqual(res, expected)
+
+        sparse_reduce = dense.to_sparse_gcs(reduction=[0, 2, 4, 1, 3, 1])
+        vec = torch.randn(125, dtype=torch.double)
+
+        res = sparse.matmul(vec)
+        # reshape the dense tensor to make it look like the reduced sparse COO
+        # tensor and then verify the result.
+
+    def test_gcs_matvec_error(self):
+        size = (5, 5, 5, 5, 5)
+        dense = torch.randn(size)
+        sparse = dense.to_sparse_gcs(None, -999)
+        vec = torch.randn(10, dtype=torch.double)
+
+        with self.assertRaisesRegex(RuntimeError, "dimension mismatch"):
+            sparse.matmul(vec)
         
     def test_gcs_matmul(self):
         side1 = 100

@@ -998,6 +998,7 @@ class Tensor(torch._C._TensorBase):
         # <row>: <list of (colindex, value)>
         col_value = defaultdict(list)
         num = 0
+        # TODO: Possible optimization with https://github.com/pytorch/pytorch/pull/44190/files/9c6f074c56147a804cf2cf5e10bd8d2bac58d367#r528199371
         for index in itertools.product(*map(range, shape)):
             v = self
             for i in index:
