@@ -309,12 +309,12 @@ struct PythonPrintImpl {
     // because it doesn't hash any information about the tensors.
     // We will probably need to optimize this at some point using hashing.
     if (val.isTensor()) {
-      auto t = val.toTensor();
+      auto& t = val.toTensor();
       for (size_t i = 0; i < constant_table_.size(); ++i) {
         if (!constant_table_[i].isTensor()) {
           continue;
         }
-        auto t2 = constant_table_[i].toTensor();
+        auto& t2 = constant_table_[i].toTensor();
         if (t.options().type_equal(t2.options()) && t.equal(t2)) {
           return i;
         }
@@ -1339,15 +1339,13 @@ struct PythonPrintImpl {
           body_ << "\"" << param << "\", ";
         }
         body_ << "]\n";
-#ifndef FBCODE_CAFFE2
-        // Note: Forward compat gated. TODO: @voznesenskym to remove when ready.
+
         indent();
         body_ << "__buffers__ = [";
         for (const auto& buffer : buffers) {
           body_ << "\"" << buffer << "\", ";
         }
         body_ << "]\n";
-#endif
       }
 
       for (size_t i = 0; i < numAttrs; i++) {
