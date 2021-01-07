@@ -1485,12 +1485,13 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
   auto A_data = A.data_ptr<scalar_t>();
   auto b_data = b.data_ptr<scalar_t>();
   magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
+  magma_int_t lda = std::max<magma_int_t>(1, n);
   magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
 
   int info_tmp = 0;
   if (b.dim() == 2) {
-    magmaCholeskySolve<scalar_t>(uplo, n, nrhs, A_data, n,
-                                 b_data, n, &info_tmp);
+    magmaCholeskySolve<scalar_t>(uplo, n, nrhs, A_data, lda,
+                                 b_data, lda, &info_tmp);
     info = info_tmp;
   } else {
     auto A_mat_stride = matrixStride(A);
@@ -1521,7 +1522,7 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
       scalar_t** b_array_cur = &b_array[mini_idx];
 
       magmaCholeskySolveBatched<scalar_t>(
-          uplo, n, nrhs, A_array_cur, n, b_array_cur, n,
+          uplo, n, nrhs, A_array_cur, lda, b_array_cur, lda,
           info_tmp, batch_limit, magma_queue);
 
       if (info_tmp != 0) {
@@ -1533,7 +1534,7 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
     // which concisely is equal to batch_size % batch_limit
     if (batch_size % batch_limit != 0 && info_tmp == 0) {
       magmaCholeskySolveBatched<scalar_t>(
-          uplo, n, nrhs, &A_array[mini_idx], n, &b_array[mini_idx], n,
+          uplo, n, nrhs, &A_array[mini_idx], lda, &b_array[mini_idx], lda,
           info_tmp, batch_size % batch_limit, magma_queue);
     }
 
