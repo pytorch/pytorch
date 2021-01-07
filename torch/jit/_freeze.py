@@ -103,7 +103,7 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize: bool = Tr
     out = RecursiveScriptModule(torch._C._freeze_module(mod._c, preserved_attrs))
     RecursiveScriptModule._finalize_scriptmodule(out)
     if optimize:
-        optimize_frozen_graph(out.graph)
+        optimize_frozen_module(out)
 
     return out
 
@@ -120,7 +120,7 @@ def optimize_frozen_module(mod):
         mod (:class:`ScriptModule`): a frozen module to be optimized
 
     Returns:
-        Optimized Frozen :class:`ScriptModule`.
+        None
 
     Note:
         In rare occassions, this can result in slower execution.
