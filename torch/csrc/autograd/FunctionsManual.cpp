@@ -1974,10 +1974,11 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   // https://giggleliu.github.io/2019/04/02/einsumbp.html
   // https://arxiv.org/abs/1909.02659
   if (self.is_complex() && gu.defined()) {
-    // computes L = Identity.mul(uh @ gu)
+    auto t_1i = at::zeros({1}, self.options());
+    at::imag(t_1i).fill_(1);
     Tensor L = at::matmul(uh, gu).diagonal(0, -2, -1);
-    L = L - L.conj();
-    Tensor imag_term = 0.5 * at::matmul(u * (L * sigma_inv).unsqueeze(-2), vh);
+    auto L_times_sigma_inv = at::imag(L).mul(sigma_inv);
+    Tensor imag_term = at::matmul(u * (L_times_sigma_inv.mul(t_1i)).unsqueeze(-2), vh);
     return u_term + sigma_term + v_term + imag_term;
   }
 
