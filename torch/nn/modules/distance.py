@@ -11,6 +11,8 @@ class PairwiseDistance(Module):
     .. math ::
         \Vert x \Vert _p = \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}.
 
+    See also :func:`torch.pdist` and :func:`torch.cdist` for pairwise distance matrices.
+
     Args:
         p (real): the norm degree. Default: 2
         eps (float, optional): Small value to avoid division by zero.
@@ -61,6 +63,7 @@ class CosineSimilarity(Module):
         >>> input2 = torch.randn(100, 128)
         >>> cos = nn.CosineSimilarity(dim=1, eps=1e-6)
         >>> output = cos(input1, input2)
+        >>> output_matrix = cos(input1[:,:,None], output2.T[None,:,:])
     """
     __constants__ = ['dim', 'eps']
     dim: int

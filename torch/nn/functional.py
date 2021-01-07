@@ -3638,6 +3638,9 @@ cosine_similarity = _add_docstr(torch.cosine_similarity, r"""
 cosine_similarity(x1, x2, dim=1, eps=1e-8) -> Tensor
 
 Returns cosine similarity between x1 and x2, computed along dim.
+This function can also compute the similarity matrix for every pair of
+`x1[i]` and `x2[j]`, which is equivalent to `x1.mm(x2.T)` when both `x1`
+and `x2` are normalized to have unit L-2 norm.
 
 .. math ::
     \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
@@ -3657,8 +3660,10 @@ Example::
 
     >>> input1 = torch.randn(100, 128)
     >>> input2 = torch.randn(100, 128)
-    >>> output = F.cosine_similarity(input1, input2)
-    >>> print(output)
+    >>> sim_vector = F.cosine_similarity(input1, input2)
+    >>> print(sim_vector)
+    >>> sim_matrix = F.cosine_similarity(input1[:,:,None], input1.T[None,:,:])
+    >>> print(sim_matrix)
 """)
 
 
