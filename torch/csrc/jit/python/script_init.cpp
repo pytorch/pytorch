@@ -1710,10 +1710,8 @@ void initJitScriptBindings(PyObject* module) {
           [](std::shared_ptr<ConcreteModuleType> concreteType,
              const std::vector<Def>& hookDefs,
              const std::vector<ResolutionCallback>& hookRcbs,
-             const std::vector<FunctionDefaults>& hookDefaults,
              const std::vector<Def>& preHookDefs,
-             const std::vector<ResolutionCallback>& preHookRcbs,
-             const std::vector<FunctionDefaults>& preHookDefaults) {
+             const std::vector<ResolutionCallback>& preHookRcbs) {
             TORCH_INTERNAL_ASSERT(hookDefs.size() == hookRcbs.size());
             TORCH_INTERNAL_ASSERT(preHookDefs.size() == preHookRcbs.size());
 

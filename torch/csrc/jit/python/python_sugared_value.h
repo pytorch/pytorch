@@ -193,42 +193,35 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
-    bool is_class_type =
-        concreteType_->getJitType()->cast<ClassType>() != nullptr;
-    bool have_pre_hooks = is_class_type &&
-        concreteType_->getJitType()
-                ->expect<ClassType>()
-                ->getForwardPreHooks()
-                .size() != 0;
-    bool have_hooks = is_class_type &&
-        concreteType_->getJitType()
-                ->expect<ClassType>()
-                ->getForwardHooks()
-                .size() != 0;
+    c10::ClassTypePtr class_type = concreteType_->getJitType()->cast<ClassType>();
+    bool have_pre_hooks = class_type 
+      && class_type->getForwardPreHooks().size() != 0;
+    bool have_hooks = class_type 
+      && class_type->getForwardHooks().size() != 0;
+
     std::vector<Value*> arg_values;
     std::vector<NamedValue> pre_hook_result;
     Value* forward_input;
+    std::shared_ptr<Graph> calling_graph = caller.graph(); 
 
     if (have_pre_hooks || have_hooks) {
       // convert forward args into tuple for forward hooks
       // (the input of eager hooks are always tuples)
       for (const auto& sv : args) {
-        arg_values.push_back(sv.value(*caller.graph()));
+        arg_values.push_back(sv.value(*calling_graph));
       }
       // create fake none if forward has no input
       if (args.size() == 0) {
-        arg_values.push_back(caller.graph()->createNone()->output());
+        arg_values.push_back(calling_graph->createNone()->output());
       }
-      forward_input = caller.graph()
-                          ->insertNode(caller.graph()->createTuple(arg_values))
+      forward_input = calling_graph
+                          ->insertNode(calling_graph->createTuple(arg_values))
                           ->output();
     }
 
     // call pre_hooks
     if (have_pre_hooks) {
-      for (const auto& hook : concreteType_->getJitType()
-                                  ->expect<ClassType>()
-                                  ->getForwardPreHooks()) {
+      for (const auto& hook : class_type->getForwardPreHooks()) {
         Value* pre_hook_output =
             FunctionValue(hook)
                 .call(
@@ -238,12 +231,12 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
                     kwargs,
                     n_binders)
                 ->asValue(loc, caller);
-        if (pre_hook_output->node()->output(0)->type() != NoneType::get()) {
-          if (pre_hook_output->node()->output(0)->type()->kind() !=
+        if (pre_hook_output->type() != NoneType::get()) {
+          if (pre_hook_output->type()->kind() !=
               TypeKind::TupleType) {
             pre_hook_output =
-                caller.graph()
-                    ->insertNode(caller.graph()->createTuple({pre_hook_output}))
+                calling_graph
+                    ->insertNode(calling_graph->createTuple({pre_hook_output}))
                     ->output();
           }
           forward_input = pre_hook_output;
@@ -251,8 +244,8 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
       }
       // de-tuple pre_hook output for forward
       at::ArrayRef<Value*> output_nodes =
-          caller.graph()
-              ->insertNode(caller.graph()->createTupleUnpack(forward_input))
+          calling_graph
+              ->insertNode(calling_graph->createTupleUnpack(forward_input))
               ->outputs();
       for (auto& output_node : output_nodes) {
         pre_hook_result.emplace_back(NamedValue(output_node));
@@ -270,9 +263,7 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
 
     // call hooks
     if (have_hooks) {
-      for (const auto& hook : concreteType_->getJitType()
-                                  ->expect<ClassType>()
-                                  ->getForwardHooks()) {
+      for (const auto& hook : class_type->getForwardHooks()) {
         Value* forward_hook_output = FunctionValue(hook)
                                          .call(
                                              loc,
@@ -283,7 +274,7 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
                                              kwargs,
                                              n_binders)
                                          ->asValue(loc, caller);
-        if (forward_hook_output->node()->output(0)->type() != NoneType::get()) {
+        if (forward_hook_output->type() != NoneType::get()) {
           forward_output = forward_hook_output;
         }
       }
