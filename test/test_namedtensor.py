@@ -1353,30 +1353,30 @@ class TestNamedTensor(TestCase):
 
     def test_insert(self):
 
-            def create_tensor(dim, dim_insert):
-                tensor = create(dim, factory=torch.zeros)
-                insert = create(dim_insert, factory=torch.ones)
-                return tensor, insert
+        def create_tensor(dim, dim_insert):
+            tensor = create(dim, factory=torch.zeros)
+            insert = create(dim_insert, factory=torch.ones)
+            return tensor, insert
 
-            def test_matching():
-                # insertion should work if dimensions and names match
-                tensor, insert = create_tensor('N:2,C:2,H:3', 'C:2,H:3')
+        def test_matching():
+            # insertion should work if dimensions and names match
+            tensor, insert = create_tensor('N:2,C:2,H:3', 'C:2,H:3')
+            tensor[0] = insert
+
+            tensor_unnamed, insert_unnamed = create_tensor('2,2,3', '2,3')
+            tensor_unnamed[0] = insert_unnamed
+
+            # comparison is not yet supported too, so names have to be dropped
+            self.assertEqual(tensor.rename(None), tensor_unnamed)
+
+        def test_not_matching():
+            # insertion should throw RuntimeError if dimensions and names do not match
+            with self.assertRaisesRegex(RuntimeError, "aten::view is not yet supported on named tensors"):
+                tensor, insert = create_tensor('N:2,C:2,H:3', 'H:3,C:2')
                 tensor[0] = insert
 
-                tensor_unnamed, insert_unnamed = create_tensor('2,2,3', '2,3')
-                tensor_unnamed[0] = insert_unnamed
-
-                # comparison is not yet supported too, so names have to be dropped
-                self.assertEqual(tensor.rename(None), tensor_unnamed)
-
-            def test_not_matching():
-                # insertion should throw RuntimeError if dimensions and names do not match
-                with self.assertRaisesRegex(RuntimeError, "aten::view is not yet supported on named tensors"):
-                    tensor, insert = create_tensor('N:2,C:2,H:3', 'H:3,C:2')
-                    tensor[0] = insert
-
-            test_matching()
-            test_not_matching()
+        test_matching()
+        test_not_matching()
 
     def test_using_unseen_interned_string_bumps_refcount_permanently(self):
         # Please don't use this as a name in a different test.
