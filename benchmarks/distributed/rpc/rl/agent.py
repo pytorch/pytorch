@@ -40,6 +40,8 @@ class AgentBase:
     def __init__(self, batch=True):
         r"""
         Inits agent class
+        Args:
+            batch (bool): whether to process and respond to observer requests as a batch or 1 at a time
         """
         self.id = rpc.get_worker_info().id
         self.running_reward = 0
