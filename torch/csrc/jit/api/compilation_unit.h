@@ -100,7 +100,7 @@ struct TORCH_API CompilationUnit {
       // see [name mangling]
       bool shouldMangle = false);
 
-  std::vector<Function*> define_hooks(
+  void define_hooks(
       const c10::optional<c10::QualifiedName>& prefix,
       const std::vector<Def>& hookDefs,
       const std::vector<ResolverPtr>& hookResolvers,
@@ -234,13 +234,13 @@ struct TORCH_API CompilationUnit {
         // Classes can have multiple pointers to the same hook,
         // need to make sure to not delete it twice
         std::unordered_set<Function*> hooks_to_delete;
-        for (auto hook : cls->getForwardHooks()) {
+        for (const auto& hook : cls->getForwardHooks()) {
           hooks_to_delete.insert(hook);
         }
-        for (auto pre_hook : cls->getForwardPreHooks()) {
+        for (const auto& pre_hook : cls->getForwardPreHooks()) {
           hooks_to_delete.insert(pre_hook);
         }
-        for (auto hook : hooks_to_delete) {
+        for (const auto& hook : hooks_to_delete) {
           // Tombstone the hook in the compilation unit.
           auto it = dict_.find(hook->qualname());
           if (it != dict_.end()) {

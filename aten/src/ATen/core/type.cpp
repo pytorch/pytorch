@@ -1045,11 +1045,11 @@ void ClassType::addMethod(torch::jit::Function* method) {
   methods_.push_back(method);
 }
 
-const std::vector<torch::jit::Function*>& ClassType::getForwardHooks() {
+const std::vector<torch::jit::Function*>& ClassType::getForwardHooks() const {
     return forward_hooks_;
 }
 
-const std::vector<torch::jit::Function*>& ClassType::getForwardPreHooks() {
+const std::vector<torch::jit::Function*>& ClassType::getForwardPreHooks() const {
     return forward_pre_hooks_;
 }
 
@@ -1063,7 +1063,7 @@ void ClassType::addForwardHook(torch::jit::Function* hook_ptr) {
 
 torch::jit::Function* ClassType::findForwardPreHook(const std::string& name) const {
   for (const auto& pre_hook : forward_pre_hooks_) {
-        if (name == pre_hook->name()) {
+    if (name == pre_hook->name()) {
       return pre_hook;
     }
   }
@@ -1072,7 +1072,7 @@ torch::jit::Function* ClassType::findForwardPreHook(const std::string& name) con
 
 torch::jit::Function* ClassType::findForwardHook(const std::string& name) const {
   for (const auto& hook : forward_hooks_) {
-        if (name == hook->name()) {
+    if (name == hook->name()) {
       return hook;
     }
   }

@@ -51,23 +51,24 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       size_t tuple_size = tuple.size();
       auto tuple_type = type->cast<TupleType>();
       const auto& elem_types = tuple_type->elements();
-      if (elem_types.size() != tuple_size) {
-        if (!(tuple_size == 0 && type->repr_str() == "Tuple[None]")) {
-          // Above check added for static forward hooks. Need a way to
-          // match a type to eager's empty 'tuple' input for python calls
-          // to scripted pre_hook/hook when forward has no inputs.
-          // Tuple[] and 'tuple' aren't valid types and providing no type
-          // results in the inferred type of 'Tensor' for the hooks' input.
-          // Using type 'None' also fails to match the python input of '()'
-          throw py::cast_error(c10::str(
-              "Object ",
-              py::str(obj),
-              " had a different number of elements than type ",
-              type->repr_str()));
-        }
+      // empty_none_tuple used for static forward hooks. Need a way to
+      // match a type to eager's empty 'tuple' input for python calls
+      // to scripted pre_hook/hook when forward has no inputs.
+      // Tuple[] and 'tuple' aren't valid types and providing no type
+      // results in the inferred type of 'Tensor' for the hooks' input.
+      // Using type 'None' also fails to match the python input of '()'
+      bool empty_none_tuple = tuple_size == 0 
+          && elem_types.size() == 1 
+          && *tuple_type == *TupleType::create({NoneType::get()}); 
+      if (elem_types.size() != tuple_size && !empty_none_tuple) {
+        throw py::cast_error(c10::str(
+            "Object ",
+            py::str(obj),
+            " had a different number of elements than type ",
+            type->repr_str()));
       }
       std::vector<IValue> values;
-      if (tuple_size == 0 && type->repr_str() == "Tuple[None]") {
+      if (empty_none_tuple) {
         values.reserve(1);
         values.push_back(toIValue(py::none(), NoneType::get()));
       } else {
