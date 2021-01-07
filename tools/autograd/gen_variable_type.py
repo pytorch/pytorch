@@ -648,27 +648,6 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
 
     def emit_dispatch_call(f: NativeFunction, input_base: str, unpacked_args: Sequence[str]) -> str:
         """ Dispatch call via function in a namespace or method on Tensor."""
-  # .redispatch<${ret_and_arg_types}>(${redispatch_args})""")
-
-        # args = combined['schema_order_arguments'] if \
-            # combined['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures'] else combined['arguments']
-        # arg_types = [a['type'] for a in args]
-        # ret_and_arg_types = ', '.join([combined['return_type']] + arg_types)
-
-        # # TODO: something less hacky than AutogradOther?
-        # dispatch_key_set = 'ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther)'
-        # redispatch_args = ['op', dispatch_key_set] + combined['unpacked_args']
-
-# TODO: in view case, DON"T mask out the higher keys
-
-        # args = combined['schema_order_arguments'] if  \
-            # combined['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures'] else combined['arguments']
-        # arg_types = [a['type'] for a in args]
-        # ret_and_arg_types = ', '.join([combined['return_type']] + arg_types)
-        # # TODO: something less hacky than AutogradOther?
-        # # note that we do NOT modify ks here. This is a full redispatch that should call back into the autograd kernel.
-        # dispatch_key_set = 'ks'
-        # redispatch_args = ['op', dispatch_key_set] + updated_unpacked_args
         dispatcher_sig = DispatcherSignature.from_schema(f.func)
         dispatcher_exprs = dispatcher_sig.exprs()
         dispatch_key_set = 'ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther)'
@@ -678,11 +657,6 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         return CALL_DISPATCH.substitute(
             ret_and_arg_types=ret_and_arg_types,
             redispatch_args=redispatch_args)
-            # api_name=cpp.name(
-                # f.func,
-                # faithful_name_for_out_overloads=True,
-            # ),
-            # unpacked_args=unpacked_args)
 
     def emit_view_lambda(unpacked_bindings: List[Binding]) -> str:
         """ Generate an additional lambda function to recover views in backward when as_strided is not supported.
