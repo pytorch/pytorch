@@ -77,7 +77,8 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
     else if (at::kVulkan == src.device().type()) {
       const vTensor& v_src = convert(src);
 
-      {
+      // Vulkan -> CPU
+      if (self.device().is_cpu()) {
         // Similar notes as above applies, with the additional consideration of
         // potential syncs on read accesses.  Namely,
         // - on discrete systems, if the (staging, buffer, image) trio, or
@@ -90,27 +91,24 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
         using Future = vTensor::Future<const void, vTensor::Access::Read>;
         const Future v_src_future = v_src.host<const void>(command_buffer);
 
-        // Vulkan -> CPU
-        if (self.device().is_cpu()) {
-          // Ideally we would have been able to put as much distance between
-          // requesting the data - a call to host() - and accessing the data
-          // - a call to wait() - but a local view of the computation graph
-          // in eager mode makes that optimization non-trivial.
+        // Ideally we would have been able to put as much distance between
+        // requesting the data - a call to host() - and accessing the data
+        // - a call to wait() - but a local view of the computation graph
+        // in eager mode makes that optimization non-trivial.
 
-          // This wait() is a no-op if data is not out of sync.  More often than
-          // not though, waits here are expected as the GPU catches up with
-          // compute submitted from CPU.
+        // This wait() is a no-op if data is not out of sync.  More often than
+        // not though, waits here are expected as the GPU catches up with
+        // compute submitted from CPU.
 
-          const Future::Payload v_src_payload = v_src_future.wait();
+        const Future::Payload v_src_payload = v_src_future.wait();
 
-          memcpy(
-              self.data_ptr<float>(),
-              v_src_payload.get(),
-              std::min(src.nbytes(), self.nbytes()));
-        }
-        else {
-          TORCH_CHECK(false, "Unsupported!");
-        }
+        memcpy(
+            self.data_ptr<float>(),
+            v_src_payload.get(),
+            std::min(src.nbytes(), self.nbytes()));
+      }
+      else {
+        TORCH_CHECK(false, "Unsupported!");
       }
 
       //
@@ -149,7 +147,7 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
       //    lockstep.  Obviously this is just bad.  Mentioned for the sake of
       //    completeness.
 
-      api::context()->flush();
+      context->flush();
     }
     else {
       TORCH_INTERNAL_ASSERT(

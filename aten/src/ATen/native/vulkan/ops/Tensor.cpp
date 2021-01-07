@@ -543,28 +543,18 @@ class vTensor::View::CMD final {
       const Image::Object& image,
       Buffer::Object& buffer);
 
-  void submit(Fence& fence);
-
- private:
-  api::Command::Buffer& command_buffer();
+  void submit(Fence fence);
 
  private:
   const View& view_;
   api::Command::Buffer& command_buffer_;
-  bool used_;
 };
 
 vTensor::View::CMD::CMD(
     const View& view,
     api::Command::Buffer& command_buffer)
   : view_(view),
-    command_buffer_(command_buffer),
-    used_(false) {
-}
-
-inline api::Command::Buffer& vTensor::View::CMD::command_buffer() {
-  used_ = true;
-  return command_buffer_;
+    command_buffer_(command_buffer) {
 }
 
 void vTensor::View::CMD::barrier(State::Transition transition) {
@@ -694,7 +684,7 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
       barrier.stage.src = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
     }
 
-    command_buffer().barrier(barrier);
+    command_buffer_.barrier(barrier);
   }
 }
 
@@ -722,7 +712,7 @@ void vTensor::View::CMD::copy_buffer_to_staging(
           {},
         }));
 
-  command_buffer().copy(buffer, staging);
+  command_buffer_.copy(buffer, staging);
 }
 
 void vTensor::View::CMD::copy_staging_to_buffer(
@@ -749,7 +739,7 @@ void vTensor::View::CMD::copy_staging_to_buffer(
           {},
         }));
 
-  command_buffer().copy(staging, buffer);
+  command_buffer_.copy(staging, buffer);
 }
 
 void vTensor::View::CMD::copy_buffer_to_image(
@@ -796,7 +786,7 @@ void vTensor::View::CMD::copy_buffer_to_image(
   };
 
   view_.context_->dispatch(
-      command_buffer(),
+      command_buffer_,
       {
         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -853,7 +843,7 @@ void vTensor::View::CMD::copy_image_to_buffer(
   };
 
   view_.context_->dispatch(
-      command_buffer(),
+      command_buffer_,
       {
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -866,15 +856,11 @@ void vTensor::View::CMD::copy_image_to_buffer(
       view_.context_->resource().pool.uniform(block).object);
 }
 
-void vTensor::View::CMD::submit(api::Resource::Fence& fence) {
-  if (used_) {
-    fence = allocate_fence(&view_.context_->resource().pool);
-
-    view_.context_->command().pool.submit(
-        view_.context_->gpu().queue,
-        command_buffer(),
-        fence);
-  }
+void vTensor::View::CMD::submit(const api::Resource::Fence fence) {
+  view_.context_->command().pool.submit(
+      view_.context_->gpu().queue,
+      command_buffer_,
+      fence);
 }
 
 vTensor::Buffer& vTensor::View::buffer() const {
@@ -1057,7 +1043,7 @@ vTensor::Buffer& vTensor::View::staging(
 }
 
 vTensor::Fence& vTensor::View::fence() const {
-  return fence_;
+  return (fence_ = allocate_fence(&context_->resource().pool));
 }
 
 vTensor::Memory& vTensor::View::wait() const {
