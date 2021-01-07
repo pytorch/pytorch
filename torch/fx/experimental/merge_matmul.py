@@ -1,9 +1,14 @@
 import torch
 
+from torch.fx.graph import Graph
+from torch.fx.graph_module import GraphModule
+from torch.fx.node import Node
+from torch.fx.symbolic_trace import symbolic_trace
+
 import itertools
 import operator
 
-from typing import List
+from typing import Dict, List
 
 
 def get_first_dim(t: torch.Tensor) -> int:
@@ -22,7 +27,7 @@ def get_first_dim(t: torch.Tensor) -> int:
     return t.shape[0]
 
 
-def legalize_graph(gm: torch.fx.GraphModule):
+def legalize_graph(gm: GraphModule):
     """
     Replace the graph of the given GraphModule with one that contains the same nodes as the
     original, but in topologically sorted order.
@@ -40,8 +45,8 @@ def legalize_graph(gm: torch.fx.GraphModule):
     dependencies = {node: node.all_input_nodes.copy() for node in gm.graph.nodes}
 
     # Construct a new graph that will contain all nodes in topologically sorted order.
-    new_graph = torch.fx.Graph()
-    value_remap = {}
+    new_graph = Graph()
+    value_remap: Dict[Node, Node] = {}
 
     # Copy over all nodes with no dependencies.
     for node, deps in dependencies.items():
@@ -75,7 +80,7 @@ def legalize_graph(gm: torch.fx.GraphModule):
     gm.graph = new_graph
 
 
-def may_depend_on(a: torch.fx.Node, b: torch.fx.Node, search_depth: int = 6):
+def may_depend_on(a: Node, b: Node, search_depth: int = 6):
     """
     Determine if one node depends on another in a torch.fx.Graph.
 
@@ -112,7 +117,7 @@ def may_depend_on(a: torch.fx.Node, b: torch.fx.Node, search_depth: int = 6):
     return False
 
 
-def are_nodes_independent(nodes: List[torch.fx.Node]):
+def are_nodes_independent(nodes: List[Node]):
     """
     Check if all of the given nodes are pairwise-data independent.
 
@@ -141,10 +146,10 @@ def merge_matmul(in_mod: torch.nn.Module):
        K       ----      ---------        ---------
                 K            R                R
     """
-    gm = torch.fx.symbolic_trace(in_mod)
+    gm = symbolic_trace(in_mod)
 
-    rhs_users = {}
-    lhs_users = {}
+    rhs_users: Dict[Node, List[Node]] = {}
+    lhs_users: Dict[Node, List[Node]] = {}
 
     # Populate rhs_users and lhs_users - maps from LHS/RHS matrix multiply operands to
     # the matmul of which they are the LHS/RHS.
