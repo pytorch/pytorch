@@ -1869,7 +1869,13 @@ struct TORCH_API ClassType : public NamedType {
 
   std::string str() const override {
      return annotation_str();
-   }
+  }
+
+  std::string repr_str() const override {
+    std::stringstream ss;
+    ss << str() << "(" << compilation_unit().get() << ")";
+    return ss.str();
+  }
 
   const std::vector<torch::jit::Function*>& methods() const;
 
