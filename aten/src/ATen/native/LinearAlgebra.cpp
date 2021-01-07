@@ -83,10 +83,8 @@ Tensor logdet(const Tensor& self) {
 std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
   squareCheckInputs(self);
   ScalarType t = self.scalar_type();
-  TORCH_CHECK((t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble)
-              && self.dim() >= 2,
-              "linalg_slogdet(", self.scalar_type(), "{", self.sizes(), "}): expected a tensor with 2 or more dimensions "
-              "of float, double, cfloat or cdouble types");
+  TORCH_CHECK(t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble,
+              "linalg_slogdet: expected a tensor of float, double, cfloat or cdouble types but got ", t);
 
   Tensor det_P, diag_U;
   std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
