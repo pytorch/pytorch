@@ -180,14 +180,14 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
           }
         } else if (
             auto scalar_type =
-                input->type()->cast<TensorType>()->scalarType()) {
+                input->type()->castRaw<TensorType>()->scalarType()) {
           typesFromTensors.emplace_back(*scalar_type);
         }
       });
 
   c10::optional<c10::ScalarType> st = c10::nullopt;
   const c10::optional<c10::ScalarType> output_st =
-      n->output()->type()->cast<TensorType>()->scalarType();
+      n->output()->type()->castRaw<TensorType>()->scalarType();
 
   if (IsComparisonOp(n->kind())) {
     // For comparison ops, always promote scalar type to highest among inputs,

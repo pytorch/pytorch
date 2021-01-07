@@ -973,7 +973,7 @@ struct TORCH_API TupleType : public NamedType {
     }
 
     const auto& l_elements = elements();
-    const auto& r_elements = rhs.cast<TupleType>()->elements();
+    const auto& r_elements = rhs.castRaw<TupleType>()->elements();
     if (l_elements.size() != r_elements.size())
       return false;
     for (size_t i = 0; i < l_elements.size(); ++i) {

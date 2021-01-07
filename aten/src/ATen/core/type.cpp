@@ -74,16 +74,16 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       out << "[Undefined]";
     }
   } else if(t.kind() == TypeKind::ListType) {
-    auto prim = t.cast<ListType>()->getElementType();
+    auto prim = t.castRaw<ListType>()->getElementType();
     out << *prim << "[]";
   } else if (t.kind() == TypeKind::OptionalType) {
-    auto prim = t.cast<OptionalType>()->getElementType();
+    auto prim = t.castRaw<OptionalType>()->getElementType();
     out << *prim << "?";
   } else if(t.kind() == TypeKind::FutureType) {
-    auto elem = t.cast<FutureType>()->getElementType();
+    auto elem = t.castRaw<FutureType>()->getElementType();
     out << "Future[" << *elem << "]";
   } else if(t.kind() == TypeKind::RRefType) {
-    auto elem = t.cast<RRefType>()->getElementType();
+    auto elem = t.castRaw<RRefType>()->getElementType();
     out << "RRef[" << *elem << "]";
   } else if(auto tup = t.cast<TupleType>()) {
     if (tup->schema()) {
@@ -281,8 +281,8 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
 
   if (t1->cast<FutureType>() && t2->cast<FutureType>()) {
     if (auto elem = unifyTypes(
-            t1->cast<FutureType>()->getElementType(),
-            t2->cast<FutureType>()->getElementType())) {
+            t1->castRaw<FutureType>()->getElementType(),
+            t2->castRaw<FutureType>()->getElementType())) {
       return FutureType::create(*elem);
     }
   }

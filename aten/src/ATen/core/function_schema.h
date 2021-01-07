@@ -375,7 +375,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
   // so we always use Type(alias)? format
   auto type = arg.type();
   bool is_opt = type->kind() == OptionalType::Kind;
-  auto unopt_type = is_opt ? type->cast<OptionalType>()->getElementType() : type;
+  auto unopt_type = is_opt ? type->castRaw<OptionalType>()->getElementType() : type;
 
   if (unopt_type->kind() == ListType::Kind && arg.N()) {
     // sized lists get size N from arg, not type

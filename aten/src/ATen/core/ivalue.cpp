@@ -458,7 +458,7 @@ std::ostream& printMaybeAnnotatedDict(
     std::ostream& out,
     const IValue& the_dict,
     IValueFormatter formatter) {
-  auto value_type = the_dict.type()->cast<DictType>()->getValueType();
+  auto value_type = the_dict.type()->castRaw<DictType>()->getValueType();
   if (the_dict.toGenericDict().size() == 0 ||
       !elementTypeCanBeInferredFromMembers(value_type)) {
     out << "annotate(" << the_dict.type()->annotation_str() << ",";

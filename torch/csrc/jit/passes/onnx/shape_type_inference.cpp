@@ -214,7 +214,7 @@ Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph) {
       // special case, and change from list type to tensor type. The scalar type
       // is preserved. If the elemtype is Int, insert a onnx::Concat node into
       // the graph.
-      TypePtr elem = v->type()->cast<ListType>()->getElementType();
+      TypePtr elem = v->type()->castRaw<ListType>()->getElementType();
       c10::optional<at::ScalarType> scalar_type = c10::nullopt;
       if (elem->cast<IntType>()) {
         scalar_type = at::kLong;

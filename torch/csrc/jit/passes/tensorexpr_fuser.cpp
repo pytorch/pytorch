@@ -710,7 +710,7 @@ class TensorExprFuser {
       if (!v->isCompleteTensor()) {
         return false;
       }
-      if (*v->type()->cast<TensorType>()->dim() == 0) {
+      if (*v->type()->castRaw<TensorType>()->dim() == 0) {
         return false;
       }
     }
