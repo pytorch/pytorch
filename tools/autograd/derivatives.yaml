@@ -1571,10 +1571,10 @@
   grad_output: avg_pool3d(grad, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
   self: zeros_like(self)
 
-- name: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result, Tensor output) -> Tensor
+- name: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result, Tensor self) -> Tensor
   # is_result is always false here since double backward call is an out-of-place call, self is input itself
-  grad_output: elu_backward(grad, alpha, scale, input_scale, false, output)
-  output: grad * grad_output * input_scale * (output < 0).type_as(grad)
+  grad_output: elu_backward(grad, alpha, scale, input_scale, false, self)
+  self: grad * grad_output * input_scale * (self < 0).type_as(grad)
 
 - name: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] output_size, Tensor indices) -> Tensor
   grad_output: max_pool_double_backward(grad, indices, 2)
