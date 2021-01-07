@@ -72,7 +72,7 @@ pool2d_shape_check(
   TORCH_CHECK(input.numel() > 0 && (ndim == 3 || ndim == 4),
               "non-empty 3D or 4D input tensor expected but got ndim: ", ndim);
   TORCH_CHECK(kW/2 >= padW && kH/2 >= padH,
-              "pad should be smaller than half of kernel size, but got ",
+              "pad should be smaller than or equal to half of kernel size, but got ",
               "padW = ", padW, ", padH = ", padH, ", kW = ", kW, ", kH = ", kH);
 
   TORCH_CHECK(outputWidth >= 1 && outputHeight >= 1,
@@ -172,7 +172,7 @@ pool3d_shape_check(
   }
 
   TORCH_CHECK(kT/2 >= pT && kW/2 >= pW && kH/2 >= pH,
-              "pad should be smaller than half of kernel size, but got "
+              "pad should be smaller than or equal to half of kernel size, but got "
               "kT: ", kT, " kW: ", kW, " kH: ", kH, " padT: ", pT, " padW: ", pW, " padH: ", pH);
 
   TORCH_CHECK(otime >= 1 && owidth >= 1 && oheight >= 1,

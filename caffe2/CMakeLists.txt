@@ -340,9 +340,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(GENERATED_CXX_TORCH
     "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_0.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_1.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_2.cpp"
     )
 
   if(NOT INTERN_DISABLE_AUTOGRAD)
@@ -434,8 +431,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/load_derivatives.py"
     "${TOOLS_PATH}/autograd/nested_dict.py"
     "${TOOLS_PATH}/autograd/utils.py"
-    "${TOOLS_PATH}/jit/gen_unboxing_wrappers.py"
-    "${TOOLS_PATH}/jit/templates/generated_unboxing_wrappers.cpp"
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
 
@@ -479,6 +474,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   # This one needs to be unconditionally added as Functions.cpp is also unconditionally added
   list(APPEND TORCH_SRCS
     ${TORCH_SRC_DIR}/csrc/autograd/FunctionsManual.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/out_types.cpp
   )
 
   if(NOT INTERN_DISABLE_AUTOGRAD)
