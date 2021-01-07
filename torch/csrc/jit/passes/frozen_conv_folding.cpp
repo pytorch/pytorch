@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
-#include <torch/torch.h>
 
 namespace torch {
 namespace jit {
@@ -63,19 +62,19 @@ void FoldFrozenConvBatchnorm(Block* b) {
       // implementation taken from torch/nn/utils/fusion.py
       Tensor conv_b;
       if (conv->namedInput("bias")->type() == NoneType::get()) {
-        conv_b = torch::zeros_like(bn_rm);
+        conv_b = at::zeros_like(bn_rm);
       } else {
         conv_b = constant_as<Tensor>(conv->namedInput("bias")).value();
       }
       Tensor bn_w;
       if (bn->namedInput("weight")->type() == NoneType::get()) {
-        bn_w = torch::ones_like(bn_rm);
+        bn_w = at::ones_like(bn_rm);
       } else {
         bn_w = constant_as<Tensor>(bn->namedInput("weight")).value();
       }
       Tensor bn_b;
       if (n->namedInput("bias")->type() == NoneType::get()) {
-        bn_b = torch::zeros_like(bn_rm);
+        bn_b = at::zeros_like(bn_rm);
       } else {
         bn_b = constant_as<Tensor>(bn->namedInput("bias")).value();
       }
@@ -88,8 +87,7 @@ void FoldFrozenConvBatchnorm(Block* b) {
       params.bn_eps = bn_eps;
       params.bn_w = bn_w;
       params.bn_b = bn_b;
-      std::tuple<Tensor, Tensor> out =
-          computeUpdatedConvWeightAndBias(params);
+      std::tuple<Tensor, Tensor> out = computeUpdatedConvWeightAndBias(params);
       WithInsertPoint guard(conv);
       auto fused_conv_w = b->owningGraph()->insertConstant(std::get<0>(out));
       auto fused_conv_b = b->owningGraph()->insertConstant(std::get<1>(out));
