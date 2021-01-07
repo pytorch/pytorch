@@ -57,9 +57,8 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       // Tuple[] and 'tuple' aren't valid types and providing no type
       // results in the inferred type of 'Tensor' for the hooks' input.
       // Using type 'None' also fails to match the python input of '()'
-      bool empty_none_tuple = tuple_size == 0 
-          && elem_types.size() == 1 
-          && *tuple_type == *TupleType::create({NoneType::get()}); 
+      bool empty_none_tuple = tuple_size == 0 && elem_types.size() == 1 &&
+          *tuple_type == *TupleType::create({NoneType::get()});
       if (elem_types.size() != tuple_size && !empty_none_tuple) {
         throw py::cast_error(c10::str(
             "Object ",
