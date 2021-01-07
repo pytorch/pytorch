@@ -1944,7 +1944,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 
   if (gu.defined()) {
     auto guh = gu.conj().transpose(-2, -1);
-    u_term = at::matmul(u, (F.mul(at::matmul(uh, gu) - at::matmul(guh, u)) * sigma.unsqueeze(-2)));
+    u_term = at::matmul(u, F.mul(at::matmul(uh, gu) - at::matmul(guh, u)) * sigma.unsqueeze(-2));
     if (m > k) {
       // projection operator onto subspace orthogonal to span(U) defined as I - UU^H
       auto proj_on_ortho_u = -at::matmul(u, uh);
