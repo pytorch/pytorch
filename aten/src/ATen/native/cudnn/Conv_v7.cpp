@@ -276,11 +276,6 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
           perf_results.get(),
           ws.data,
           ws.size), args);
-
-      // Free the cached blocks in our caching allocator. They are
-      // needed here because the above benchmarking uses a huge amount of memory,
-      // e.g. a few GBs.
-      c10::cuda::CUDACachingAllocator::emptyCache();
     }
     return getValidAlgorithms<perf_t>(perf_results.get(), args, perf_count);
   }
@@ -346,11 +341,6 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
           perf_results.get(),
           ws.data,
           ws.size), args);
-
-      // Free the cached blocks in our caching allocator. They are
-      // needed here because the above benchmarking uses a huge amount of memory,
-      // e.g. a few GBs.
-      c10::cuda::CUDACachingAllocator::emptyCache();
     }
     return getValidAlgorithms<perf_t>(perf_results.get(), args, perf_count);
   }
@@ -418,11 +408,6 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
           perf_results.get(),
           ws.data,
           ws.size), args);
-
-      // Free the cached blocks in our caching allocator. They are
-      // needed here because the above benchmarking uses a huge amount of memory,
-      // e.g. a few GBs.
-      c10::cuda::CUDACachingAllocator::emptyCache();
     }
     return getValidAlgorithms<perf_t>(perf_results.get(), args, perf_count);
   }
