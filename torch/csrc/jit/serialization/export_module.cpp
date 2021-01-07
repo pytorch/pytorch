@@ -56,7 +56,6 @@ struct tensor_value_equal {
   }
 };
 
-
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
   return func;
@@ -133,7 +132,9 @@ std::string getModuleTypeName(const Module& module, const std::string& prefix) {
 std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
     const Module& module,
     const Function& func,
-    bool save_mobile_debug_info) {
+    std::unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>
+        constants_from_jit = {},
+    bool save_mobile_debug_info = false) {
   auto graph = func.graph()->copy();
 
   Inline(*graph);
@@ -235,8 +236,27 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   // Make a copy of the constants and append the method names
   // that we emitted for the converted INTERFACE_CALL nodes above.
   auto constants = code.constant_table();
+  std::vector<IValue> deduplicated_constants;
+  for (const auto& constant : constants) {
+    if (constant.isTensor()) {
+      const auto constant_tensor = constant.toTensor();
+      if (constants_from_jit.find(constant_tensor) ==
+          constants_from_jit.end()) {
+        deduplicated_constants.emplace_back(constant);
+      } else {
+        auto index = IValue(constants_from_jit.at(constant_tensor));
+        auto key_with_index =
+            Tup(std::vector<IValue>{IValue(mobile::kTensorJitIndex), index});
+
+        deduplicated_constants.emplace_back(key_with_index);
+      }
+    } else {
+      deduplicated_constants.emplace_back(constant);
+    }
+  }
+
   for (auto& method_name : method_names) {
-    constants.emplace_back(std::move(method_name));
+    deduplicated_constants.emplace_back(std::move(method_name));
   }
 
   // types
@@ -252,7 +272,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
 
   auto table = Table({{"instructions", Tup(instructions)},
                       {"operators", Tup(operators)},
-                      {"constants", Tup(constants)},
+                      {"constants", Tup(deduplicated_constants)},
                       {"types", Tup(types)},
                       {"register_size", register_size}});
   auto bytecode_vals = Tup({func.qualname().qualifiedName(), table});
@@ -285,7 +305,7 @@ void setstateTuple(
     Function& setstate = type->getMethod("__setstate__");
     if (setstate.isGraphFunction()) {
       auto func_tuple =
-          getFunctionTuple(module, setstate, save_mobile_debug_info);
+          getFunctionTuple(module, setstate, {}, save_mobile_debug_info);
       elements.push_back(func_tuple.first);
       if (save_mobile_debug_info) {
         debug_info_elements->push_back(func_tuple.second.value());
@@ -308,12 +328,14 @@ void moduleMethodsTuple(
     const Module& module,
     std::vector<c10::IValue>& elements,
     c10::optional<std::vector<c10::IValue>>& debug_info_elements,
+    std::unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>
+        constants_from_jit,
     bool save_mobile_debug_info) {
   auto methods = module.get_methods();
   // top level methods
   for (const auto& method : methods) {
-    auto func_tuple =
-        getFunctionTuple(module, method.function(), save_mobile_debug_info);
+    auto func_tuple = getFunctionTuple(
+        module, method.function(), constants_from_jit, save_mobile_debug_info);
     elements.push_back(func_tuple.first);
     if (save_mobile_debug_info) {
       debug_info_elements->push_back(func_tuple.second.value());
@@ -504,155 +526,6 @@ class ScriptModuleSerializer {
     }
   }
 
-  //  Remove the tensor Ivalue in elements "constants" field if they exist in
-  //  constants_from_jit
-  std::vector<IValue> deduplicate_constants(
-      std::vector<IValue>& elements,
-      const std::
-          unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
-              constants_from_jit) {
-    std::vector<IValue> deduplicated_elements;
-
-    //    The following three variables are used to locate the "constants"
-    //    fields in elements
-    bool is_constant_element = false;
-    c10::ivalue::ConstantString constants_str("constants");
-    auto constants_ir = IValue(constants_str);
-
-    //  *elements* is bytcode model. The first element of the top tuple is the
-    //  bytecode version number. The following elements are methods. In each
-    //  method, it has all the necessary parts for the lite interpreter to
-    //  interpret, including the instructions, operators, constants, types and
-    //  register size.
-    //  *elements* example:
-    //   (3,
-    //       ('__torch__.m.forward',
-    //           (('instructions',
-    //               (('STOREN', 1, 2),
-    //                    ('DROPR', 1, 0),
-    //                    ('MOVE', 2, 0),
-    //                    ('OP', 0, 0),
-    //                    ('RET', 0, 0))),
-    //                ('operators', (('aten::Int', 'Tensor'),)),
-    //                ('constants', ()),
-    //                ('types', ()),
-    //                ('register_size', 2)
-    //            )
-    //        )
-    //    )
-    for (const auto& element : elements) {
-      if (element.isTuple()) {
-        //  The second item of elements is a list of methods, like forward
-        //  method, example:
-        //  ('__torch__.m.forward',
-        //      (('instructions',
-        //          (('STOREN', 1, 2),
-        //              ('DROPR', 1, 0),
-        //              ('MOVE', 2, 0),
-        //              ('OP', 0, 0),
-        //              ('RET', 0, 0))),
-        //          ('operators', (('aten::Int', 'Tensor'),)),
-        //          ('constants', ()),
-        //          ('types', ()),
-        //          ('register_size', 2)
-        //      )
-        //  )
-        const auto& methods = element.toTuple()->elements();
-        std::vector<IValue> deduplicate_methods;
-        for (const auto& method : methods) {
-          if (method.isTuple()) {
-            //  method example:
-            //  (('instructions',
-            //      (('STOREN', 1, 2),
-            //          ('DROPR', 1, 0),
-            //          ('MOVE', 2, 0),
-            //          ('OP', 0, 0),
-            //          ('RET', 0, 0))),
-            //      ('operators', (('aten::Int', 'Tensor'),)),
-            //      ('constants', ()),
-            //      ('types', ()),
-            //      ('register_size', 2)
-            //  )
-            const auto& method_elements = method.toTuple()->elements();
-            std::vector<IValue> deduplicate_method_elements;
-            for (const auto& method_element : method_elements) {
-              //  method_element example:
-              //  ('instructions',
-              //      (('STOREN', 1, 2),
-              //          ('DROPR', 1, 0),
-              //          ('MOVE', 2, 0),
-              //          ('OP', 0, 0),
-              //          ('RET', 0, 0)),
-              //  )
-              is_constant_element = false;
-              // A list of if condition statement, trying to locate the
-              // 'constants' field.
-              if (method_element.isTuple()) {
-                const auto& key_values_vector =
-                    method_element.toTuple()->elements();
-                if (key_values_vector.size() == 2) {
-                  const auto& key = key_values_vector[0];
-                  const auto& values = key_values_vector[1];
-                  // Find constant fields
-                  if (key.isString() && key == constants_ir) {
-                    if (values.isTuple()) {
-                      const auto& constant_values =
-                          values.toTuple()->elements();
-                      std::vector<IValue> deduplicated_constant_values;
-                      // Loop all constant value in the 'constants' field,
-                      // if the constant value is tensor, and exist in tensor
-                      // table from jit, replace the constant tensor with the
-                      // tuple: ('tensor_jit_index', ({index_in_jit},)), for
-                      // example, ('tensor_jit_index', 4), where 4 is the the
-                      // index in jit tensor table, and push the new tuple to
-                      // deduplicated_constant_values. Otherwise, push the
-                      // constant value to deduplicated_constant_values
-                      for (const auto& constant_value : constant_values) {
-                        if (constant_value.isTensor() &&
-                            constants_from_jit.find(
-                                constant_value.toTensor()) !=
-                                constants_from_jit.end()) {
-                          auto index = IValue(
-                              constants_from_jit.at(constant_value.toTensor()));
-                          auto index_with_key = Tup(std::vector<IValue>{
-                              IValue(mobile::kTensorJitIndex), index});
-                          deduplicated_constant_values.push_back(
-                              index_with_key);
-                        } else {
-                          deduplicated_constant_values.push_back(
-                              constant_value);
-                        }
-                      }
-                      std::vector<IValue> deduplicated_constant_key_values = {
-                          constants_ir,
-                          Tup(std::move(deduplicated_constant_values))};
-                      deduplicate_method_elements.push_back(
-                          Tup(std::move(deduplicated_constant_key_values)));
-                    } else {
-                      deduplicate_method_elements.push_back(method_element);
-                    }
-                    is_constant_element = true;
-                  }
-                }
-              }
-              if (!is_constant_element) {
-                deduplicate_method_elements.push_back(method_element);
-              }
-            }
-            deduplicate_methods.push_back(
-                Tup(std::move(deduplicate_method_elements)));
-          } else {
-            deduplicate_methods.push_back(method);
-          }
-        }
-        deduplicated_elements.push_back(Tup(std::move(deduplicate_methods)));
-      } else {
-        deduplicated_elements.push_back(element);
-      }
-    }
-    return deduplicated_elements;
-  }
-
   void writeByteCode(
       const Module& module,
       bool save_mobile_debug_info,
@@ -669,11 +542,13 @@ class ScriptModuleSerializer {
           static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
     }
     moduleMethodsTuple(
-        module, elements, debug_info_elements, save_mobile_debug_info);
+        module,
+        elements,
+        debug_info_elements,
+        constants_from_jit,
+        save_mobile_debug_info);
 
-    auto deduplicated_elements =
-        deduplicate_constants(elements, constants_from_jit);
-    auto telements = Tup(std::move(deduplicated_elements));
+    auto telements = Tup(std::move(elements));
 
     writeArchive("bytecode", telements);
     if (save_mobile_debug_info) {
@@ -764,7 +639,7 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
   c10::optional<std::vector<c10::IValue>> debug_info_elements;
   moduleMethodsTuple(
-      m, elements, debug_info_elements, false /* save_mobile_debug_info */);
+      m, elements, debug_info_elements, {}, false /* save_mobile_debug_info */);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =
