@@ -715,7 +715,8 @@ class DistributedDataParallel(Module):
         """
         def to_map(obj):
             if isinstance(obj, torch.Tensor):
-                # Perform CPU -> GPU copies in a background stream
+                # Perform CPU -> GPU copies in a background stream. This code is
+                # motivated from similar logic in torch/nn/parallel/_functions.py
                 stream = _get_stream(target_gpu)
                 with torch.cuda.stream(stream):
                     output = obj.to(target_gpu)
