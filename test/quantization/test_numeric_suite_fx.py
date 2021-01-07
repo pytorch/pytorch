@@ -13,7 +13,7 @@ from torch.quantization.fx.quantize import is_activation_post_process
 from torch.quantization.quantize_fx import convert_fx, fuse_fx, prepare_fx
 from torch.testing._internal.common_quantization import (
     ConvBnModel,
-    ConvBNReLU,
+    ConvBnReLUModel,
     ConvModel,
     QuantizationTestCase,
     SingleLayerLinearDynamicModel,
@@ -63,7 +63,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         qconfig = get_default_qconfig(qengine)
         qconfig_dict = {"": qconfig}
 
-        model_list = [ConvModel(), ConvBnModel(), ConvBNReLU()]
+        model_list = [ConvModel(), ConvBnModel(), ConvBnReLUModel()]
         for float_model in model_list:
             float_model.eval()
 
@@ -155,7 +155,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         qconfig = get_default_qconfig(qengine)
         qconfig_dict = {"": qconfig}
 
-        model_list = [ConvModel(), ConvBNReLU()]
+        model_list = [ConvModel(), ConvBnReLUModel()]
 
         for float_model in model_list:
             float_model.eval()
@@ -222,10 +222,9 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
         def compare_and_validate_results(float_model, q_model, data):
             act_compare_dict = compare_model_outputs_fx(float_model, q_model, data)
+            expected_ob_dict_keys = {"x.stats", "conv.stats" }
 
-            expected_ob_dict_keys = {"stats"}
             self.assertTrue(act_compare_dict.keys() == expected_ob_dict_keys)
-            self.assertEqual(len(act_compare_dict), 1)
             for k, v in act_compare_dict.items():
                 self.assertTrue(len(v["float"]) == 1)
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
@@ -236,7 +235,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         qconfig = get_default_qconfig(qengine)
         qconfig_dict = {"": qconfig}
 
-        model_list = [ConvModel(), ConvBNReLU()]
+        model_list = [ConvModel(), ConvBnReLUModel()]
 
         for float_model in model_list:
             float_model.eval()
@@ -259,9 +258,9 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
         def compare_and_validate_results(float_model, q_model, data):
             act_compare_dict = compare_model_outputs_fx(float_model, q_model, data)
-            expected_ob_dict_keys = {"stats"}
+            expected_ob_dict_keys = {"x.stats", "fc1.stats"}
+
             self.assertTrue(act_compare_dict.keys() == expected_ob_dict_keys)
-            self.assertEqual(len(act_compare_dict), 1)
             for k, v in act_compare_dict.items():
                 self.assertTrue(len(v["float"]) == 1)
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))

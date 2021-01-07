@@ -932,7 +932,7 @@ adaptive_max_pool3d = _adaptive_pool('adaptive_max_pool3d', "MaxPool", _triple, 
 
 
 # Generate paddings in ONNX order based on pad in pytorch.
-# Arguments:
+# Args:
 #     dim: the dimension of the tensor.
 #     pad: the paddings in pytorch.
 #          The order is dim_n_begin, dim_n_end, dim_n-1_begin, dim_n-1_end, ...
@@ -1916,6 +1916,9 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
                        'ScaledTanh', 'HardSigmoid', 'Elu', 'Softsign', 'Softplus']
     variantToOnnxActivationMap = dict(zip([act_fun.lower() for act_fun in onnxActivations], onnxActivations))
     weights_per_layer = 4 if has_biases else 2
+    # this means that projections are used inside LSTM, so need to tell user that it's not supported
+    if variant == 'LSTM' and len(all_weights) != num_layers * weights_per_layer * (1 + bidirectional):
+        return _unimplemented("LSTM", "LSTMs with projections")
     assert len(all_weights) == num_layers * weights_per_layer * (1 + bidirectional)
     layer_weights = [all_weights[i:i + weights_per_layer] for i in range(0, len(all_weights), weights_per_layer)]
     if batch_first:
@@ -2312,6 +2315,9 @@ def log2(g, self):
 def prim_shape(g, self):
     return g.op('Shape', self)
 
+def prim_max(g, self, other):
+    return g.op('Max', self, other)
+
 def prim_data(g, self):
     return self
 
@@ -2362,14 +2368,16 @@ def gather(g, self, dim, index, sparse_grad=False):
 def _var_mean(g, input, dim, unbiased, keepdim):
     if dim is None:
         mean = g.op("ReduceMean", input, keepdims_i=0)
+        t_mean = mean
         num_elements = numel(g, input)
     else:
         mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=keepdim)
+        t_mean = g.op("ReduceMean", input, axes_i=dim, keepdims_i=1)
         redudced_dims = g.op("Shape", input)
         # dim could contain one or multiple dimensions
         redudced_dims = g.op("Gather", redudced_dims, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
         num_elements = g.op("ReduceProd", redudced_dims, keepdims_i=0)
-    sub_v = g.op("Sub", input, mean)
+    sub_v = g.op("Sub", input, t_mean)
     sqr_sub = g.op("Mul", sub_v, sub_v)
     keepdim_mean = 0 if dim is None else keepdim
     var = g.op("ReduceMean", sqr_sub, axes_i=dim, keepdims_i=keepdim_mean)
