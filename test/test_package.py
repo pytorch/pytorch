@@ -375,6 +375,7 @@ def load():
         check('torch.**', ['torch.**.foo'], ['torch', 'torch.bar', 'torch.barfoo'], ['torch.foo', 'torch.some.foo'])
         check('**.torch', [], ['torch', 'bar.torch'], ['visiontorch'])
 
+    @skipIf(version_info < (3, 7), 'mock uses __getattr__ a 3.7 feature')
     def test_pickle_mocked(self):
         import package_a.subpackage
         obj = package_a.subpackage.PackageASubpackageObject()
