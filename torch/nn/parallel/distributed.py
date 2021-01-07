@@ -20,6 +20,7 @@ from .replicate import replicate
 from .scatter_gather import scatter_kwargs, gather, is_namedtuple
 from .parallel_apply import parallel_apply
 from torch._utils import _get_device_index, _get_all_device_indices
+from ._functions import _get_stream
 
 
 def _find_tensors(obj):
@@ -714,7 +715,19 @@ class DistributedDataParallel(Module):
         """
         def to_map(obj):
             if isinstance(obj, torch.Tensor):
-                return (obj.to(target_gpu), )
+                # Perform CPU -> GPU copies in a background stream
+                stream = _get_stream(target_gpu)
+                with torch.cuda.stream(stream):
+                    output = obj.to(target_gpu)
+                # synchronize with the copy stream
+                with torch.cuda.device(target_gpu):
+                    main_stream = torch.cuda.current_stream()
+                    # Sync the current stream with the copy stream
+                    main_stream.wait_stream(stream)
+                    # Ensure tensor memory is not reused until work on
+                    # main stream is complete
+                    output.record_stream(main_stream)
+                return (output, )
             if is_namedtuple(obj):
                 return [type(obj)(*args) for args in zip(*map(to_map, obj))]
             if isinstance(obj, tuple) and len(obj) > 0:
@@ -730,6 +743,7 @@ class DistributedDataParallel(Module):
             res = to_map(inputs)
         finally:
             to_map = None
+
         return res
 
     def to_kwargs(self, inputs, kwargs, device_id):
