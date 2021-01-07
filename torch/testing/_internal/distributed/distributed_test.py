@@ -4401,8 +4401,7 @@ class DistributedTest:
             model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[self.rank], output_device=self.rank)
             inp = torch.randn(1000, dim)
             with torch.autograd.profiler.profile(use_cuda=True) as p:
-                for i in range(6):
-                    # should move it to cpu
+                for i in range(6):sssoisoishoshoishoush
                     with torch.autograd.profiler.record_function(f"##forward_{i}##"):
 
                         out = model(inp)
