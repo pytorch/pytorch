@@ -91,10 +91,11 @@ Alias of :func:`torch.det`.
 slogdet = _add_docstr(_linalg.linalg_slogdet, r"""
 linalg.slogdet(input) -> (Tensor, Tensor)
 
-Calculates the sign and natural logarithm of the absolute values of the determinants of the determinant(s)
-of a square matrix or batches of square matrices :attr:`input`.
+Calculates the sign and natural logarithm of the absolute value of a square matrix's determinant,
+or of the absolute values of the determinants of a batch of square matrices :attr`input`.
+The determinant can be computed with ``sign * exp(logabsdet)``.
 
-Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` datatypes.
+Supports input of float, double, cfloat and cdouble datatypes.
 
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
 
@@ -107,8 +108,8 @@ Arguments:
                     where `*` is one or more batch dimensions.
 
 Returns:
-    A namedtuple (sign, logabsdet) containing the sign of the determinant, and the natural logarithm
-    of the absolute value of determinant.
+    A namedtuple (sign, logabsdet) containing the sign of the determinant and the natural logarithm
+    of the absolute value of determinant, respectively.
 
 Example::
 
