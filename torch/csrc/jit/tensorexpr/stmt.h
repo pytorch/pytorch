@@ -11,9 +11,6 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-TORCH_API std::vector<const Expr*> ExprHandleVectorToExprVector(
-    const std::vector<ExprHandle>&);
-
 class Placeholder;
 
 // The common base between all statement node.
@@ -321,9 +318,7 @@ class TORCH_API Allocate : public StmtNode<Allocate> {
   static Allocate* make(
       const VarHandle& buffer_var,
       Dtype dtype,
-      const std::vector<ExprHandle>& dims) {
-    return new Allocate(new Buf(buffer_var.node(), ExprHandleVectorToExprVector(dims), dtype));
-  }
+      const std::vector<ExprHandle>& dims);
 
   const Var* buffer_var() const {
     return buf_->base_handle();
@@ -337,9 +332,13 @@ class TORCH_API Allocate : public StmtNode<Allocate> {
     return buf_->dims();
   }
 
-  Allocate(Buf* buf) : buf_(buf) {}
+  const Buf* buf() const {
+    return buf_;
+  }
+
+  Allocate(const Buf* buf) : buf_(buf) {}
  private:
-  Buf* buf_;
+  const Buf* buf_;
   // TODO: add memory types.
 };
 
