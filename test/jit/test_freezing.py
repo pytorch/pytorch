@@ -1485,14 +1485,17 @@ class TestFrozenOptimizations(JitTestCase):
 
         for use_bias, pytorch_op in product(conv_bias, ops):
             # broadcasting add
-            test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False, add_tensor=torch.rand(32, 1, 32), expect_success=False)
+            test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False,
+                             add_tensor=torch.rand(32, 1, 32), expect_success=False)
 
             # broadcasting add
             test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False, add_tensor=torch.rand(1, 1), expect_success=True)
 
             # # add with different dtype
-            test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False, add_tensor=torch.rand(1).to(torch.int), expect_success=False)
-            test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False, add_tensor=torch.rand(1).to(torch.half), expect_success=False)
+            test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False,
+                             add_tensor=torch.rand(1).to(torch.int), expect_success=False)
+            test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False,
+                             add_tensor=torch.rand(1).to(torch.half), expect_success=False)
 
     def test_optimize_freeze_module(self):
         in_channels, out_channels = 3, 32
