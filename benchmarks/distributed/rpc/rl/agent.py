@@ -17,6 +17,10 @@ class Policy(nn.Module):
     def __init__(self, in_features, nlayers, out_features):
         r"""
         Inits policy class
+        Args:
+            in_features (int): number of input features the model takes         
+            nlayers (int): number of layers in the model
+            out_features (int): number of features the model outputs
         """
         super(Policy, self).__init__()
 

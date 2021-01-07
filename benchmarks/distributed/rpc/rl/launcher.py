@@ -123,7 +123,7 @@ def print_benchmark_results(report):
     r"""
     Prints benchmark results
     Args:
-        args (report): JSON formatted dictionary containing relevant data on the run of this application
+        report (dict): JSON formatted dictionary containing relevant data on the run of this application
     """
     print("--------------------------------------------------------------")
     print("PyTorch distributed rpc benchmark reinforcement learning suite")
