@@ -54,7 +54,7 @@ elif BACKEND == "mpi":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
     dist.init_process_group(init_method=INIT_METHOD, backend="mpi")
 
-    class TestMPI(DistributedTest._DistTestBase):
+    class TestMPIWithFork(TestCase, DistributedTest._DistTestBase):
         pass
 
 elif BACKEND == "test":

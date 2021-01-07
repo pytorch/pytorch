@@ -11,6 +11,10 @@
 namespace torch {
 namespace jit {
 
+struct TORCH_API InferenceModuleOptions {
+  bool optimize_memory{true}; // TODO remove when logic moves to runtime
+};
+
 struct TORCH_API StaticRuntimeOptions {
   bool cleanup_activations{true};
   bool enable_out_variant{true};
@@ -59,8 +63,10 @@ struct TORCH_API StaticRuntimeOptions {
 // Group readonly data structures into InferenceModule
 struct TORCH_API InferenceModule {
  public:
-  explicit InferenceModule(const torch::jit::Module& m);
-  explicit InferenceModule(std::shared_ptr<torch::jit::Graph> g);
+  explicit InferenceModule(const torch::jit::Module& m, InferenceModuleOptions);
+  explicit InferenceModule(
+      std::shared_ptr<torch::jit::Graph> g,
+      InferenceModuleOptions);
   torch::jit::Module module;
   std::shared_ptr<torch::jit::Graph> graph;
   std::unique_ptr<c10::FunctionSchema> schema;
@@ -70,19 +76,26 @@ struct TORCH_API InferenceModule {
   std::vector<size_t> input_regs; // inputs to the graph
   std::vector<size_t> output_regs; // outputs of the graph
   std::vector<size_t> internals;
+  size_t reused_regs = 0;
+  InferenceModuleOptions opts;
 
  private:
   void init();
 };
 
+TORCH_API void PrepareGraphForStaticRuntime(
+    std::shared_ptr<torch::jit::Graph> g);
+
 inline TORCH_API std::shared_ptr<InferenceModule> PrepareForStaticRuntime(
-    const torch::jit::Module& m) {
-  return std::make_shared<InferenceModule>(m);
+    const torch::jit::Module& m,
+    InferenceModuleOptions opts = InferenceModuleOptions()) {
+  return std::make_shared<InferenceModule>(m, opts);
 }
 
 inline TORCH_API std::shared_ptr<InferenceModule> PrepareForStaticRuntime(
-    std::shared_ptr<torch::jit::Graph> g) {
-  return std::make_shared<InferenceModule>(g);
+    std::shared_ptr<torch::jit::Graph> g,
+    InferenceModuleOptions opts = InferenceModuleOptions()) {
+  return std::make_shared<InferenceModule>(g, opts);
 }
 
 class MemoryPlanner;
@@ -146,6 +159,8 @@ class TORCH_API StaticRuntime {
     return reg_;
   }
 
+  size_t num_outputs() const;
+
  private:
   // Static runtime states
   std::shared_ptr<InferenceModule> module_;
@@ -208,6 +223,9 @@ class MemoryPlanner {
 
   void allocate();
   void deallocate();
+  size_t total_managed() const {
+    return internal_blob_max_sizes_sum_;
+  }
 
  private:
   const std::vector<IValue>& reg_;
@@ -249,7 +267,7 @@ class ProcessedNode {
   }
 
   bool has_out_variant() const {
-    return fn_.has_value();
+    return static_cast<bool>(fn_);
   }
 
   const std::vector<size_t>& input_regs() const {
@@ -260,13 +278,16 @@ class ProcessedNode {
     return output_regs_;
   }
 
+  const TypePtr& get_output_type(size_t i) const {
+    DCHECK_LT(i, output_regs().size());
+    return node_->outputs()[i]->type();
+  }
+
  private:
   Node* node_;
   c10::optional<Operation> op_;
-  c10::optional<std::function<void(const ProcessedNode*, std::vector<IValue>&)>>
-      fn_;
-  c10::optional<std::function<void(const ProcessedNode*, std::vector<IValue>&)>>
-      native_fn_;
+  std::function<void(const ProcessedNode*, std::vector<IValue>&)> fn_;
+  std::function<void(const ProcessedNode*, std::vector<IValue>&)> native_fn_;
 
   std::vector<size_t> input_regs_;
   std::vector<size_t> output_regs_;

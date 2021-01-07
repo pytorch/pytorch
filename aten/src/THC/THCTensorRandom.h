@@ -11,7 +11,7 @@
 
 #include <ATen/CUDAGeneratorImpl.h>
 
-THC_API void THCRandom_getRNGState(at::Generator gen_, THByteTensor *rng_state);
-THC_API void THCRandom_setRNGState(at::Generator gen_, THByteTensor *rng_state);
+TORCH_CUDA_API void THCRandom_getRNGState(at::Generator gen_, THByteTensor *rng_state);
+TORCH_CUDA_API void THCRandom_setRNGState(at::Generator gen_, THByteTensor *rng_state);
 
 #endif

@@ -17,7 +17,7 @@ class AveragedModel(Module):
     on the device :attr:`device` and allows to compute running averages of the 
     parameters of the :attr:`model`.
 
-    Arguments:
+    Args:
         model (torch.nn.Module): model to use with SWA
         device (torch.device, optional): if provided, the averaged model will be
             stored on the :attr:`device` 
@@ -117,7 +117,7 @@ def update_bn(loader, model, device=None):
 
     It performs one pass over data in `loader` to estimate the activation
     statistics for BatchNorm layers in the model.
-    Arguments:
+    Args:
         loader (torch.utils.data.DataLoader): dataset loader to compute the
             activation statistics on. Each data batch should be either a
             tensor, or a list/tuple whose first element is a tensor
@@ -172,7 +172,7 @@ class SWALR(_LRScheduler):
     This learning rate scheduler is meant to be used with Stochastic Weight 
     Averaging (SWA) method (see `torch.optim.swa_utils.AveragedModel`).
 
-    Arguments:
+    Args:
         optimizer (torch.optim.Optimizer): wrapped optimizer
         swa_lrs (float or list): the learning rate value for all param groups
             together or separately for each group.
@@ -219,8 +219,8 @@ class SWALR(_LRScheduler):
             self.anneal_func = self._cosine_anneal
         elif anneal_strategy == 'linear':
             self.anneal_func = self._linear_anneal
-        if not isinstance(anneal_epochs, int) or anneal_epochs < 1:
-            raise ValueError("anneal_epochs must be a positive integer, got {}".format(
+        if not isinstance(anneal_epochs, int) or anneal_epochs < 0:
+            raise ValueError("anneal_epochs must be equal or greater than 0, got {}".format(
                              anneal_epochs)) 
         self.anneal_epochs = anneal_epochs
 
@@ -257,11 +257,13 @@ class SWALR(_LRScheduler):
             warnings.warn("To get the last learning rate computed by the scheduler, "
                           "please use `get_last_lr()`.", UserWarning)
         step = self._step_count - 1
-        prev_t = max(0, min(1, (step - 1) / self.anneal_epochs))
+        if self.anneal_epochs == 0:
+            step = max(1, step)
+        prev_t = max(0, min(1, (step - 1) / max(1, self.anneal_epochs)))
         prev_alpha = self.anneal_func(prev_t)
         prev_lrs = [self._get_initial_lr(group['lr'], group['swa_lr'], prev_alpha)
                     for group in self.optimizer.param_groups]
-        t = max(0, min(1, step / self.anneal_epochs))
+        t = max(0, min(1, step / max(1, self.anneal_epochs)))
         alpha = self.anneal_func(t)
         return [group['swa_lr'] * alpha + lr * (1 - alpha) 
                 for group, lr in zip(self.optimizer.param_groups, prev_lrs)]

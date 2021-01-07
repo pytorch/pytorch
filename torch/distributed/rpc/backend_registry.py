@@ -28,15 +28,17 @@ _backend_type_doc = """
 """
 
 # Create an enum type, `BackendType`, with empty members.
-BackendType = enum.Enum(value="BackendType", names={})
-BackendType.__repr__ = _backend_type_repr
+# Can't handle Function Enum API (mypy bug #9079)
+BackendType = enum.Enum(value="BackendType", names=dict())  # type: ignore[misc]
+# Unable to assign a function a method (mypy bug #2427)
+BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
 BackendType.__doc__ = _backend_type_doc
 
 def backend_registered(backend_name):
     """
     Checks if backend_name is registered as an RPC backend.
 
-    Arguments:
+    Args:
         backend_name (str): string to identify the RPC backend.
     Returns:
         True if the backend has been registered with ``register_backend``, else
@@ -50,7 +52,7 @@ def register_backend(
 ):
     """Registers a new RPC backend.
 
-    Arguments:
+    Args:
         backend_name (str): backend string to identify the handler.
         construct_rpc_backend_options_handler (function):
             Handler that is invoked when
@@ -73,8 +75,10 @@ def register_backend(
         },
         **existing_enum_dict
     )
-    BackendType = enum.Enum(value="BackendType", names=extended_enum_dict)
-    BackendType.__repr__ = _backend_type_repr
+    # Can't handle Function Enum API (mypy bug #9079)
+    BackendType = enum.Enum(value="BackendType", names=extended_enum_dict)  # type: ignore[misc]
+    # Unable to assign a function a method (mypy bug #2427)
+    BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
     BackendType.__doc__ = _backend_type_doc
     return BackendType[backend_name]
 

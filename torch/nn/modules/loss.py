@@ -210,6 +210,7 @@ class NLLLoss(_WeightedLoss):
         self.ignore_index = ignore_index
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        assert self.weight is None or isinstance(self.weight, Tensor)
         return F.nll_loss(input, target, weight=self.weight, ignore_index=self.ignore_index, reduction=self.reduction)
 
 
@@ -527,6 +528,7 @@ class BCELoss(_WeightedLoss):
         super(BCELoss, self).__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        assert self.weight is None or isinstance(self.weight, Tensor)
         return F.binary_cross_entropy(input, target, weight=self.weight, reduction=self.reduction)
 
 
@@ -626,6 +628,8 @@ class BCEWithLogitsLoss(_Loss):
         self.register_buffer('pos_weight', pos_weight)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        assert self.weight is None or isinstance(self.weight, Tensor)
+        assert self.pos_weight is None or isinstance(self.pos_weight, Tensor)
         return F.binary_cross_entropy_with_logits(input, target,
                                                   self.weight,
                                                   pos_weight=self.pos_weight,
@@ -958,6 +962,7 @@ class CrossEntropyLoss(_WeightedLoss):
         self.ignore_index = ignore_index
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        assert self.weight is None or isinstance(self.weight, Tensor)
         return F.cross_entropy(input, target, weight=self.weight,
                                ignore_index=self.ignore_index, reduction=self.reduction)
 
@@ -1006,6 +1011,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
         super(MultiLabelSoftMarginLoss, self).__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        assert self.weight is None or isinstance(self.weight, Tensor)
         return F.multilabel_soft_margin_loss(input, target, weight=self.weight, reduction=self.reduction)
 
 
@@ -1173,6 +1179,7 @@ class MultiMarginLoss(_WeightedLoss):
         self.margin = margin
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        assert self.weight is None or isinstance(self.weight, Tensor)
         return F.multi_margin_loss(input, target, p=self.p, margin=self.margin,
                                    weight=self.weight, reduction=self.reduction)
 
@@ -1363,7 +1370,8 @@ class TripletMarginWithDistanceLoss(_Loss):
     def __init__(self, *, distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
                  margin: float = 1.0, swap: bool = False, reduction: str = 'mean'):
         super(TripletMarginWithDistanceLoss, self).__init__(size_average=None, reduce=None, reduction=reduction)
-        self.distance_function = distance_function if distance_function is not None else PairwiseDistance()
+        self.distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = \
+            distance_function if distance_function is not None else PairwiseDistance()
         self.margin = margin
         self.swap = swap
 

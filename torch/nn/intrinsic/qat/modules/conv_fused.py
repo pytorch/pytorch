@@ -1,7 +1,7 @@
 import math
 import torch
 import torch.nn as nn
-import torch.nn.intrinsic
+import torch.nn.intrinsic as nni
 import torch.nn.qat as nnqat
 import torch.nn.functional as F
 from torch.nn import init
@@ -15,7 +15,7 @@ _BN_CLASS_MAP = {
 }
 
 
-class _ConvBnNd(nn.modules.conv._ConvNd):
+class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
 
     _version = 2
 
@@ -93,8 +93,13 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         bias_shape = [1] * len(self.weight.shape)
         bias_shape[1] = -1
         scaled_weight = self.weight_fake_quant(self.weight * scale_factor.reshape(weight_shape))
-        # this does not include the conv bias
-        conv = self._conv_forward(input, scaled_weight)
+        # using zero bias here since the bias for original conv
+        # will be added later
+        if self.bias is not None:
+            zero_bias = torch.zeros_like(self.bias)
+        else:
+            zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device)
+        conv = self._conv_forward(input, scaled_weight, zero_bias)
         conv_orig = conv / scale_factor.reshape(bias_shape)
         if self.bias is not None:
             conv_orig = conv_orig + self.bias.reshape(bias_shape)
@@ -219,7 +224,7 @@ class ConvBn1d(_ConvBnNd, nn.Conv1d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvBn1d
+    _FLOAT_MODULE = nni.ConvBn1d
 
     def __init__(self,
                  # Conv1d args
@@ -259,7 +264,7 @@ class ConvBnReLU1d(ConvBn1d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvBnReLU1d
+    _FLOAT_MODULE = nni.ConvBnReLU1d
 
     def __init__(self,
                  # Conv1d args
@@ -305,7 +310,7 @@ class ConvBn2d(_ConvBnNd, nn.Conv2d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvBn2d
+    _FLOAT_MODULE = nni.ConvBn2d
 
     def __init__(self,
                  # ConvNd args
@@ -345,7 +350,7 @@ class ConvBnReLU2d(ConvBn2d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvBnReLU2d
+    _FLOAT_MODULE = nni.ConvBnReLU2d
 
     def __init__(self,
                  # Conv2d args
@@ -374,7 +379,7 @@ class ConvBnReLU2d(ConvBn2d):
     def from_float(cls, mod):
         return super(ConvBnReLU2d, cls).from_float(mod)
 
-class ConvReLU2d(nnqat.Conv2d):
+class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
     r"""A ConvReLU2d module is a fused module of Conv2d and ReLU, attached with
     FakeQuantize modules for weight for
     quantization aware training.
@@ -386,7 +391,7 @@ class ConvReLU2d(nnqat.Conv2d):
         weight_fake_quant: fake quant module for weight
 
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.ConvReLU2d
+    _FLOAT_MODULE = nni.ConvReLU2d
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1,
@@ -402,7 +407,7 @@ class ConvReLU2d(nnqat.Conv2d):
 
     def forward(self, input):
         return F.relu(
-            self._conv_forward(input, self.weight_fake_quant(self.weight)))
+            self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias))
 
     @classmethod
     def from_float(cls, mod):

@@ -13,10 +13,10 @@ if [ -z "${IN_CI}" ]; then
 fi
 
 if which sccache > /dev/null; then
-  printf "#!/bin/sh\nexec sccache $(which clang++) \$*" > "${WORKSPACE_DIR}/clang++"
+  printf "#!/bin/sh\nexec sccache %s \$*" "$(which clang++)" > "${WORKSPACE_DIR}/clang++"
   chmod a+x "${WORKSPACE_DIR}/clang++"
 
-  printf "#!/bin/sh\nexec sccache $(which clang) \$*" > "${WORKSPACE_DIR}/clang"
+  printf "#!/bin/sh\nexec sccache %s \$*" "$(which clang)" > "${WORKSPACE_DIR}/clang"
   chmod a+x "${WORKSPACE_DIR}/clang"
 
   export PATH="${WORKSPACE_DIR}:$PATH"

@@ -180,7 +180,7 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
         } else {
           auto type = profiled_types.at(pno);
           GRAPH_DEBUG("Existing type for %", pno->debugName(), " ", *type);
-          pttp = type->merge(pttp);
+          pttp = type->merge(*pttp);
           GRAPH_DEBUG("Result for %", pno->debugName(), " ", *pttp);
           profiled_types[pno] = pttp;
         }
@@ -359,7 +359,7 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
           " records for run ",
           frame_id);
 
-      if (raw_pr->profiled_types_per_frame_.size() == 0) {
+      if (raw_pr->profiled_types_per_frame_.empty()) {
         return;
       }
 
@@ -370,18 +370,17 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
       // and use it for building the symbol sets
       auto profiled_types_iter = raw_pr->profiled_types_per_frame_.begin();
       auto merged_profiled_types = profiled_types_iter->second;
-      profiled_types_iter++;
+      ++profiled_types_iter;
 
       // merge profiling information from next runs into the first one
       for (; profiled_types_iter != raw_pr->profiled_types_per_frame_.end();
-           profiled_types_iter++) {
+           ++profiled_types_iter) {
         SetPartitioningHelper partition_helper;
         for (const auto& val_type_pair : profiled_types_iter->second) {
-          if (merged_profiled_types.count(val_type_pair.first) == 0) {
-            merged_profiled_types[val_type_pair.first] = val_type_pair.second;
-          } else {
-            auto type = merged_profiled_types[val_type_pair.first];
-            auto merged_type = type->merge(val_type_pair.second);
+          auto insertion_result = merged_profiled_types.insert(val_type_pair);
+          if (!insertion_result.second) { // Already existed
+            const TensorType* type = insertion_result.first->second.get();
+            auto merged_type = type->merge(*val_type_pair.second);
             if (merged_type->sizes().size().has_value()) {
               auto new_shape = raw_pr->mergeSymbolicShapes(
                   val_type_pair.second->symbolic_sizes(),
@@ -394,13 +393,12 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
                   profiled_types_iter->first,
                   " into ",
                   *type);
-              merged_type = type->withSymbolicShapes(new_shape);
+              merged_type = type->withSymbolicShapes(std::move(new_shape));
               GRAPH_DEBUG("Result : ", *merged_type);
-              merged_profiled_types[val_type_pair.first] = merged_type;
+              insertion_result.first->second = std::move(merged_type);
             } else {
               // reset symbolic shapes when ranks are different
-              type = type->merge(val_type_pair.second);
-              merged_profiled_types[val_type_pair.first] = type;
+              insertion_result.first->second = std::move(merged_type);
             }
           }
         }

@@ -63,15 +63,17 @@ def skip_if_small_worldsize(func):
 
 def skip_if_not_multigpu(func):
     """Multi-GPU tests requires at least 2 GPUS. Skip if this is not met."""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if torch.cuda.is_available() and torch.cuda.device_count() >= 2:
-            return func(*args, **kwargs)
-        message = "Need at least {} CUDA devices".format(2)
-        TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
-        sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if torch.cuda.is_available() and torch.cuda.device_count() >= 2:
+                return func(*args, **kwargs)
+            message = "Need at least {} CUDA devices".format(2)
+            TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
+            sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
+        return wrapper
 
-    return wrapper
+    return decorator
 
 def require_n_gpus_for_nccl_backend(n, backend):
     def decorator(func):

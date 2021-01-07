@@ -70,17 +70,20 @@ at::Tensor& metal_copy_impl_(at::Tensor& dst, const at::Tensor& src) {
 
 Tensor empty(
     IntArrayRef size,
-    const TensorOptions& options,
+    optional<ScalarType> dtype,
+    optional<Layout> layout,
+    optional<Device> device,
+    optional<bool> pin_memory,
     c10::optional<MemoryFormat> memory_format) {
   TORCH_CHECK(
-      !options.has_pinned_memory(),
+      !pin_memory.has_value(),
       "'pin_memory' argument is incompatible with Metal tensor");
   TORCH_CHECK(
-      !options.has_memory_format() && !memory_format,
+      !memory_format.has_value(),
       "'memory_format' argument is incompatible with Metal tensor");
   MetalTensor mt{size.vec()};
   return MetalTensor::toTensor(
-      std::move(mt), at::device(at::kMetal).dtype(options.dtype()));
+      std::move(mt), at::device(at::kMetal).dtype(dtype));
 };
 
 at::Tensor empty_strided(
@@ -249,7 +252,7 @@ TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl("add.Tensor", TORCH_FN(add_Tensor));
   m.impl("add_.Tensor", TORCH_FN(add__Tensor));
   m.impl("addmm", TORCH_FN(addmm));
-  m.impl_UNBOXED("empty.memory_format", empty);
+  m.impl("empty.memory_format", empty);
   m.impl("empty_strided", TORCH_FN(empty_strided));
   m.impl("log_softmax.int", TORCH_FN(log_softmax_int));
   m.impl("max_pool2d", TORCH_FN(max_pool2d));

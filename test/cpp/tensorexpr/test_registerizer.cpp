@@ -1,3 +1,4 @@
+#include <gtest/gtest.h>
 #include "test/cpp/tensorexpr/test_base.h"
 
 #include "test/cpp/tensorexpr/test_utils.h"
@@ -11,7 +12,7 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 // Can replace a simple scalar access with a local variable.
-void testRegisterizerSimple() {
+TEST(Registerizer, RegisterizerSimple) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -56,7 +57,7 @@ void testRegisterizerSimple() {
 }
 
 // Won't do replacement of a loop access.
-void testRegisterizerLoop() {
+TEST(Registerizer, RegisterizerLoop) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   VarHandle x("x", kInt);
@@ -103,7 +104,7 @@ void testRegisterizerLoop() {
 
 // Won't replace even if the load is a fixed scalar, since the store could
 // invalidate it.
-void testRegisterizerLoopFixedLoad() {
+TEST(Registerizer, RegisterizerLoopFixedLoad) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -150,7 +151,7 @@ void testRegisterizerLoopFixedLoad() {
 
 // We can registerize accesses that occur entirely within inner scopes, even if
 // they depend on the loop var.
-void testRegisterizerLoopInternal() {
+TEST(Registerizer, RegisterizerLoopInternal) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -197,7 +198,7 @@ void testRegisterizerLoopInternal() {
 
 // An access can be overlapped by another read in the same Expr. In this case
 // B[z] and B[y] overlap and prevent registerization of both accesses.
-void testRegisterizerLoopInternalLoadOverlap() {
+TEST(Registerizer, RegisterizerLoopInternalLoadOverlap) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
@@ -232,7 +233,7 @@ void testRegisterizerLoopInternalLoadOverlap() {
   ASSERT_EQ(before.str(), after.str());
 }
 
-void testRegisterizerLoopInternalRepeated() {
+TEST(Registerizer, RegisterizerLoopInternalRepeated) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -304,7 +305,7 @@ void testRegisterizerLoopInternalRepeated() {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-void testRegisterizerLoopInternalRepeatedOverlapLoopVar() {
+TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapLoopVar) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -349,7 +350,7 @@ void testRegisterizerLoopInternalRepeatedOverlapLoopVar() {
   ASSERT_EQ(before.str(), after.str());
 }
 
-void testRegisterizerLoopInternalRepeatedOverlapOther() {
+TEST(Registerizer, RegisterizerLoopInternalRepeatedOverlapOther) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -396,7 +397,7 @@ void testRegisterizerLoopInternalRepeatedOverlapOther() {
 }
 
 // Will registerize multiple accesses of different items of the same buffer.
-void testRegisterizerMultiVar() {
+TEST(Registerizer, RegisterizerMultiVar) {
   KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
   VarHandle x("x", kInt);
@@ -452,7 +453,7 @@ void testRegisterizerMultiVar() {
 }
 
 // Will registerize the valid accesses while skipping invalid replacements.
-void testRegisterizerVariableLoad() {
+TEST(Registerizer, RegisterizerVariableLoad) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   BufHandle b("B", {10}, kInt);
@@ -511,7 +512,7 @@ void testRegisterizerVariableLoad() {
 }
 
 // Can registerize variable accesses so long as the variable does not change.
-void testRegisterizerSymbolicIndices() {
+TEST(Registerizer, RegisterizerSymbolicIndices) {
   KernelScope kernel_scope;
   VarHandle i("i", kInt);
   VarHandle N("N", kInt);
@@ -558,7 +559,7 @@ void testRegisterizerSymbolicIndices() {
 }
 
 // Can registerize accesses dependent on multiple loop vars.
-void testRegisterizerMultiLoop() {
+TEST(Registerizer, RegisterizerMultiLoop) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -616,7 +617,7 @@ void testRegisterizerMultiLoop() {
 }
 
 // Can registerize correctly if scalars already exist in the program.
-void testRegisterizerRepeated() {
+TEST(Registerizer, RegisterizerRepeated) {
   KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
   VarHandle x("x", kInt);
@@ -673,7 +674,7 @@ void testRegisterizerRepeated() {
 }
 
 // Can registerize the load of A.
-void testRegisterizerNoLoads() {
+TEST(Registerizer, RegisterizerNoLoads) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -714,7 +715,7 @@ void testRegisterizerNoLoads() {
 }
 
 // Can registerize the load of A but not the store of B.
-void testRegisterizerNoRepeatedStores() {
+TEST(Registerizer, RegisterizerNoRepeatedStores) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   BufHandle b("B", {10}, kInt);
@@ -763,7 +764,7 @@ void testRegisterizerNoRepeatedStores() {
 }
 
 // Won't registerize if there are multiple accesses which may overlap.
-void testRegisterizerMultiVarOverlap() {
+TEST(Registerizer, RegisterizerMultiVarOverlap) {
   KernelScope kernel_scope;
   BufHandle a("A", {2}, kInt);
   VarHandle x("x", kInt);
@@ -792,7 +793,7 @@ void testRegisterizerMultiVarOverlap() {
   ASSERT_EQ(before.str(), after.str());
 }
 
-void testRegisterizerAllocs() {
+TEST(Registerizer, RegisterizerAllocs) {
   KernelScope kernel_scope;
 
   BufHandle a("A", {2}, kInt);
@@ -861,7 +862,7 @@ void testRegisterizerAllocs() {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-void testRegisterizerNoInitializer() {
+TEST(Registerizer, RegisterizerNoInitializer) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -902,7 +903,7 @@ void testRegisterizerNoInitializer() {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-void testRegisterizerNoInitializerLoopVar() {
+TEST(Registerizer, RegisterizerNoInitializerLoopVar) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -931,7 +932,7 @@ void testRegisterizerNoInitializerLoopVar() {
   ASSERT_EQ(before.str(), after.str());
 }
 
-void testRegisterizerLoadThenStore() {
+TEST(Registerizer, RegisterizerLoadThenStore) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   BufHandle b("B", {1}, kInt);
@@ -981,7 +982,7 @@ void testRegisterizerLoadThenStore() {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-void testRegisterizerParallelized() {
+TEST(Registerizer, RegisterizerParallelized) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -1011,7 +1012,7 @@ void testRegisterizerParallelized() {
 
 // Should be able to registerize this since the scalar would exist before the
 // branch.
-void testRegisterizerConditionAfter() {
+TEST(Registerizer, RegisterizerConditionAfter) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -1061,7 +1062,7 @@ void testRegisterizerConditionAfter() {
 
 // Should be able to registerize this since the scalar exists in the same form
 // after the branch and there is no overlap.
-void testRegisterizerConditionBefore() {
+TEST(Registerizer, RegisterizerConditionBefore) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -1113,7 +1114,7 @@ void testRegisterizerConditionBefore() {
 }
 
 // Should be able to registerize this as the combination of the two above rules.
-void testRegisterizerConditionInside() {
+TEST(Registerizer, RegisterizerConditionInside) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -1173,7 +1174,7 @@ void testRegisterizerConditionInside() {
 // An example where an access is cut by an overlapping access inside a
 // condition, and both sides are large enough to be registerized but cannot be
 // because there is no safe place to put the initializer or finalizer.
-void testRegisterizerConditionInsideOverlap1() {
+TEST(Registerizer, RegisterizerConditionInsideOverlap1) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -1232,7 +1233,7 @@ void testRegisterizerConditionInsideOverlap1() {
 // from the loop. Registerization occurs but does not include any accesses in
 // the condition, and the first group must be finalized before the Cond, the
 // second initialized after it.
-void testRegisterizerConditionInsideOverlap2() {
+TEST(Registerizer, RegisterizerConditionInsideOverlap2) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -1317,7 +1318,7 @@ void testRegisterizerConditionInsideOverlap2() {
 // program, because we don't know if the branch would be taken and if it isn't
 // the accesses in it don't need to be valid (think size checks on the index).
 // In this case the accesses cannot be registerized.
-void testRegisterizerConditionHidden() {
+TEST(Registerizer, RegisterizerConditionHidden) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -1359,7 +1360,7 @@ void testRegisterizerConditionHidden() {
 // that that access is valid in the higher scope (or at least if its not it's
 // the user's fault). It "unhides" the conditional accesses, allowing
 // registerization to occur.
-void testRegisterizerConditionUnhidden() {
+TEST(Registerizer, RegisterizerConditionUnhidden) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -1420,7 +1421,7 @@ void testRegisterizerConditionUnhidden() {
 }
 
 // Can registerize a load that occurs in the condition of a Cond.
-void testRegisterizerCondCondition() {
+TEST(Registerizer, RegisterizerCondCondition) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -1471,7 +1472,7 @@ void testRegisterizerCondCondition() {
 
 // Appearing in the condition of a Cond makes it visible to the enclosing scope,
 // and so we can registerize internal usages.
-void testRegisterizerCondConditionUnhidden() {
+TEST(Registerizer, RegisterizerCondConditionUnhidden) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -1521,7 +1522,7 @@ void testRegisterizerCondConditionUnhidden() {
 }
 
 // Conditional hiding also works for IfThenElse exprs.
-void testRegisterizerIfThenElseHidden() {
+TEST(Registerizer, RegisterizerIfThenElseHidden) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -1565,7 +1566,7 @@ void testRegisterizerIfThenElseHidden() {
 }
 
 // Conditional unhiding also works for IfThenElse exprs.
-void testRegisterizerIfThenElseUnhidden() {
+TEST(Registerizer, RegisterizerIfThenElseUnhidden) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -1622,7 +1623,7 @@ void testRegisterizerIfThenElseUnhidden() {
 }
 
 // Nested IfThenElse exprs can't promote to higher level scopes.
-void testRegisterizerIfThenElseNested() {
+TEST(Registerizer, RegisterizerIfThenElseNested) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -1667,7 +1668,7 @@ void testRegisterizerIfThenElseNested() {
 // branch, since it is not a Stmt and cannot hold variable definitions. We need
 // to check that we don't promote the initializer/finalizer to the enclosing
 // Block.
-void testRegisterizerIfThenElseInternal() {
+TEST(Registerizer, RegisterizerIfThenElseInternal) {
   KernelScope kernel_scope;
   // Making these floats so they don't get simplified to a single access.
   BufHandle a("A", {5}, kFloat);
@@ -1748,7 +1749,7 @@ void testRegisterizerIfThenElseInternal() {
 }
 
 // Can registerize a load that occurs in the condition of an IfThenElse;
-void testRegisterizerIfThenElseCondition() {
+TEST(Registerizer, RegisterizerIfThenElseCondition) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -1795,7 +1796,7 @@ void testRegisterizerIfThenElseCondition() {
 
 // Appearing in the condition of a Cond makes it visible to the enclosing scope,
 // and so we can registerize internal usages.
-void testRegisterizerIfThenElseConditionUnhidden() {
+TEST(Registerizer, RegisterizerIfThenElseConditionUnhidden) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -1836,7 +1837,7 @@ void testRegisterizerIfThenElseConditionUnhidden() {
 
 // Cannot promote accesses internal to IfThenElse branches even if the enclosing
 // scope if conditional.
-void testRegisterizerConditionBranchOnly() {
+TEST(Registerizer, RegisterizerConditionBranchOnly) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   VarHandle x("x", kInt);
@@ -1888,7 +1889,7 @@ void testRegisterizerConditionBranchOnly() {
 
 // We can registerize an IfThenElse that appears in the condition branch of a
 // Cond. This is a weird but valid thing to do.
-void testRegisterizerCondIfThenElse() {
+TEST(Registerizer, RegisterizerCondIfThenElse) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -1938,7 +1939,7 @@ void testRegisterizerCondIfThenElse() {
 
 // Can registerize a conditional access in the RHS of a store unhidden by it's
 // LHS, and hoist it out of a loop.
-void testRegisterizerIfThenElseLoop() {
+TEST(Registerizer, RegisterizerIfThenElseLoop) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -1989,7 +1990,7 @@ void testRegisterizerIfThenElseLoop() {
 }
 
 // Cannot registerize if the RHS overlaps the access creating visibility.
-void testRegisterizerIfThenElseLoopCut() {
+TEST(Registerizer, RegisterizerIfThenElseLoopCut) {
   KernelScope kernel_scope;
   BufHandle a("A", {5}, kInt);
   BufHandle b("B", {5}, kInt);
@@ -2029,7 +2030,7 @@ void testRegisterizerIfThenElseLoopCut() {
 
 // Simple case where an access is cut by an overlapping access later in the
 // program, we can registerize up until the overlap.
-void testRegisterizerPartialAfter() {
+TEST(Registerizer, RegisterizerPartialAfter) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -2086,7 +2087,7 @@ void testRegisterizerPartialAfter() {
 
 // We can registerize an access which overlaps a previous access, the
 // initializer must be inserted after the previous access.
-void testRegisterizerPartialBefore() {
+TEST(Registerizer, RegisterizerPartialBefore) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -2143,7 +2144,7 @@ void testRegisterizerPartialBefore() {
 
 // The combination of the previous two tests, an access is cut by an overlapping
 // access in both directions.
-void testRegisterizerPartialInside() {
+TEST(Registerizer, RegisterizerPartialInside) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x1("x1", kInt);
@@ -2220,7 +2221,7 @@ void testRegisterizerPartialInside() {
 // An element could be registerized program wide but is cut by a conditional
 // access, we should break this into two scalars and write back to the buffer
 // before the condition.
-void testRegisterizerPartialCondition() {
+TEST(Registerizer, RegisterizerPartialCondition) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -2296,7 +2297,7 @@ void testRegisterizerPartialCondition() {
 
 // Tests case where an access is cut by an internal conditional access which
 // itself is registerized.
-void testRegisterizerPartialConditionInternalCut() {
+TEST(Registerizer, RegisterizerPartialConditionInternalCut) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -2359,7 +2360,7 @@ void testRegisterizerPartialConditionInternalCut() {
 
 // First statment in condition closes outer access, but can be registerized with
 // later statements.
-void testRegisterizerPartialConditionInternalStart() {
+TEST(Registerizer, RegisterizerPartialConditionInternalStart) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -2423,7 +2424,7 @@ void testRegisterizerPartialConditionInternalStart() {
 }
 
 // An access cuts two open overlaps and creates four scalar variables.
-void testRegisterizerPartialOverlapsTwo() {
+TEST(Registerizer, RegisterizerPartialOverlapsTwo) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -2493,7 +2494,7 @@ void testRegisterizerPartialOverlapsTwo() {
 
 // Nested blocks will automatically be flattened and do not provent
 // registerization of enclosed accesses.
-void testRegisterizerNestedBlocks() {
+TEST(Registerizer, RegisterizerNestedBlocks) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -2546,7 +2547,7 @@ void testRegisterizerNestedBlocks() {
 
 // The access can be registerized internally to a condition, but must ensure
 // that both initializer and finalizer are within the same condition.
-void testRegisterizerNestedConditions() {
+TEST(Registerizer, RegisterizerNestedConditions) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -2602,7 +2603,7 @@ void testRegisterizerNestedConditions() {
 
 // If an access exists outside the scope of the condition then we can lift
 // nested conditional usages into the same scalar.
-void testRegisterizerNestedConditionsUnhidden() {
+TEST(Registerizer, RegisterizerNestedConditionsUnhidden) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -2658,7 +2659,7 @@ void testRegisterizerNestedConditionsUnhidden() {
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
 }
 
-void testRegisterizerNestedConditionsHiddenFirst() {
+TEST(Registerizer, RegisterizerNestedConditionsHiddenFirst) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -2700,7 +2701,7 @@ void testRegisterizerNestedConditionsHiddenFirst() {
   stmt = registerize(stmt);
 }
 
-void testRegisterizerNestedConditionsHiddenSecond() {
+TEST(Registerizer, RegisterizerNestedConditionsHiddenSecond) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -2744,7 +2745,7 @@ void testRegisterizerNestedConditionsHiddenSecond() {
 
 // If an access is cut by another access internal to a condition block, it still
 // cuts the access.
-void testRegisterizerNestedConditionsCut() {
+TEST(Registerizer, RegisterizerNestedConditionsCut) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -2783,7 +2784,7 @@ void testRegisterizerNestedConditionsCut() {
   ASSERT_EQ(before.str(), after.str());
 }
 
-void testRegisterizerNestedConditionLoopHidden() {
+TEST(Registerizer, RegisterizerNestedConditionLoopHidden) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
@@ -2830,7 +2831,7 @@ void testRegisterizerNestedConditionLoopHidden() {
 
 // Three loops and four element regions, three of which should be registerized
 // at different levels of the IR.
-void testRegisterizerNestedConditionThreeDeep() {
+TEST(Registerizer, RegisterizerNestedConditionThreeDeep) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
@@ -2930,7 +2931,7 @@ void testRegisterizerNestedConditionThreeDeep() {
 
 // Can replace a simple scalar access with a local variable even when that
 // variable is an outer loop var.
-void testRegisterizerNestedLoopSimple() {
+TEST(Registerizer, RegisterizerNestedLoopSimple) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -2985,7 +2986,7 @@ void testRegisterizerNestedLoopSimple() {
 // Test the positive case of the hiddenAccess split, where an internal
 // conditional access can be hoisted up through a loop to match an existing
 // access in a higher scope and the two can be registerized.
-void testRegisterizerHiddenAccessYes() {
+TEST(Registerizer, RegisterizerHiddenAccessYes) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
@@ -3070,7 +3071,7 @@ void testRegisterizerHiddenAccessYes() {
 // Test the negative case of the hiddenAccess split, where the hoisted access is
 // never unhidden at a higher scope and registerization occurs at the lower
 // scope.
-void testRegisterizerHiddenAccessNo() {
+TEST(Registerizer, RegisterizerHiddenAccessNo) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
@@ -3150,7 +3151,7 @@ void testRegisterizerHiddenAccessNo() {
 // In this case the conditional access must be hoisted by two loops, there are
 // two accesses here one is unhidden and the other isnt. A[0] can be
 // registerized but B[0] cannot.
-void testRegisterizerHiddenAccessMultiLoop() {
+TEST(Registerizer, RegisterizerHiddenAccessMultiLoop) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);
@@ -3235,7 +3236,7 @@ void testRegisterizerHiddenAccessMultiLoop() {
 
 // Accesses are registerized inside two conditions, but the immeidate parent is
 // not a condition.
-void testRegisterizerTwoConditionalLoops() {
+TEST(Registerizer, RegisterizerTwoConditionalLoops) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -3313,7 +3314,7 @@ void testRegisterizerTwoConditionalLoops() {
 }
 
 // Accesses are registerized inside two conditions, cut in the middle.
-void testRegisterizerTwoConditionalLoopsCut() {
+TEST(Registerizer, RegisterizerTwoConditionalLoopsCut) {
   KernelScope kernel_scope;
   BufHandle a("A", {1}, kInt);
   VarHandle x("x", kInt);
@@ -3401,7 +3402,7 @@ void testRegisterizerTwoConditionalLoopsCut() {
 
 // references a Let var in a local scope which cannot be hoisted out of the
 // loop.
-void testRegisterizerLoopLetVar() {
+TEST(Registerizer, RegisterizerLoopLetVar) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   VarHandle x("x", kInt);
@@ -3435,7 +3436,7 @@ void testRegisterizerLoopLetVar() {
 
 // references a Let var in an outer scope that does not prevent hoisting the
 // initializer.
-void testRegisterizerLoopLetVarOuter() {
+TEST(Registerizer, RegisterizerLoopLetVarOuter) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   VarHandle x("x", kInt);
@@ -3483,7 +3484,7 @@ void testRegisterizerLoopLetVarOuter() {
 
 // Okay so the registerizer generally goes after index flattening, but just in
 // case. Test multi index registerization.
-void testRegisterizerMultiDim() {
+TEST(Registerizer, RegisterizerMultiDim) {
   KernelScope kernel_scope;
   BufHandle a("A", {3, 4, 5}, kInt);
   VarHandle x("x", kInt);
@@ -3529,7 +3530,7 @@ void testRegisterizerMultiDim() {
 
 // Wont registerize if only some dims match, but will still registerize distinct
 // elements.
-void testRegisterizerMultiDimPartial() {
+TEST(Registerizer, RegisterizerMultiDimPartial) {
   KernelScope kernel_scope;
   BufHandle a("A", {3, 4, 5}, kInt);
   VarHandle x("x", kInt);
@@ -3577,7 +3578,7 @@ void testRegisterizerMultiDimPartial() {
 }
 
 // If they could overlap across all dimensions we cannot registerize.
-void testRegisterizerMultiDimOverlap() {
+TEST(Registerizer, RegisterizerMultiDimOverlap) {
   KernelScope kernel_scope;
   BufHandle a("A", {3, 4, 5}, kInt);
   VarHandle x("x", kInt);
@@ -3611,7 +3612,7 @@ void testRegisterizerMultiDimOverlap() {
 }
 
 // But, if one dimension is known to be distinct they do not overlap.
-void testRegisterizerMultiDimPartialOverlap() {
+TEST(Registerizer, RegisterizerMultiDimPartialOverlap) {
   KernelScope kernel_scope;
   BufHandle a("A", {3, 4, 5}, kInt);
   VarHandle x("x", kInt);
@@ -3657,7 +3658,7 @@ void testRegisterizerMultiDimPartialOverlap() {
 }
 
 // A 3D reduction with different input dimensionality.
-void testRegisterizerMultiDim3DReduction1() {
+TEST(Registerizer, RegisterizerMultiDim3DReduction1) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10, 10}, kInt);
@@ -3731,7 +3732,7 @@ void testRegisterizerMultiDim3DReduction1() {
 
 // A 3D reduction with the same smaller dimensionality using different loop
 // vars.
-void testRegisterizerMultiDim3DReduction2() {
+TEST(Registerizer, RegisterizerMultiDim3DReduction2) {
   KernelScope kernel_scope;
   BufHandle a("A", {10}, kInt);
   BufHandle b("B", {10}, kInt);

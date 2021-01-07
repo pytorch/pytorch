@@ -6,7 +6,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, skipCPUIfNoLapack, skipCUDAIfNoMagma, onlyCPU)
-import collections
+from collections.abc import Sequence
 
 # Information for generating an alias test
 # NOTE: ending the alias_name with an underscore will interpret the test
@@ -151,8 +151,18 @@ alias_infos = (
     AliasInfo('true_divide_', torch.Tensor.true_divide_, 'div_', torch.Tensor.div_,
               lambda d: torch.randn(20, device=d), get_args=lambda d: (torch.rand(20, device=d) + .1,),
               decorators=(onlyCPU,)),
+    AliasInfo('swapdims', torch.swapdims, 'transpose', torch.transpose,
+              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1)),
+    AliasInfo('swapdims_', torch.Tensor.swapdims_, 'transpose_', torch.Tensor.transpose_,
+              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1)),
+    AliasInfo('swapaxes', torch.swapaxes, 'transpose', torch.transpose,
+              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1)),
+    AliasInfo('swapaxes_', torch.Tensor.swapaxes_, 'transpose_', torch.Tensor.transpose_,
+              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1)),
     AliasInfo('row_stack', torch.row_stack, 'vstack', torch.vstack,
               lambda d: ((torch.randn(20, device=d), torch.randn(20, device=d)))),
+    AliasInfo('moveaxis', torch.moveaxis, 'movedim', torch.movedim,
+              lambda d: torch.randn(20, 3, 2, 1, device=d), get_args=lambda d: (3, 1)),
 )
 
 # Placeholder test class for validating that aliases are correctly
@@ -163,7 +173,7 @@ class TestOpNormalization(JitTestCase):
 
 # Clone input tensor and sequence of Tensors
 def clone_inp(inp):
-    if isinstance(inp, collections.Sequence):
+    if isinstance(inp, Sequence):
         return list(map(torch.clone, inp))
     else:
         return inp.clone()
@@ -191,7 +201,7 @@ def create_alias_tests(cls):
                 arg_string = ', '.join((str(arg) for arg in info.get_args(device)))
                 script = fn_template.format(alias_name=info.alias_name, args=arg_string)
             else:
-                is_input_tensor_list = isinstance(info.get_input(device), collections.Sequence)
+                is_input_tensor_list = isinstance(info.get_input(device), Sequence)
                 # For sequence of Tensors, annotate the type to be List[Tensor]
                 if is_input_tensor_list:
                     fn_template = '''

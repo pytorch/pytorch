@@ -96,6 +96,21 @@ struct Pipeline final {
     }
   } layout;
 
+  //
+  // Stage
+  //
+
+  struct Stage final {
+    typedef uint8_t Flags;
+
+    enum Type : Flags {
+      None = 0u << 0u,
+      Compute = 1u << 0u,
+      Host = 1u << 1u,
+      Transfer = 1u << 2u,
+    };
+  };
+
   /*
     Descriptor
   */
@@ -202,9 +217,9 @@ inline size_t Pipeline::Factory::Hasher::operator()(
   return c10::get_hash(
       descriptor.pipeline_layout,
       descriptor.shader_module,
-      descriptor.local_work_group.width,
-      descriptor.local_work_group.height,
-      descriptor.local_work_group.depth);
+      descriptor.local_work_group.data[0u],
+      descriptor.local_work_group.data[1u],
+      descriptor.local_work_group.data[2u]);
 }
 
 inline Pipeline::Object::operator bool() const {

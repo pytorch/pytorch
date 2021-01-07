@@ -119,8 +119,31 @@ b = resources.load_binary('main', 'main_binary')
     def test_extern(self):
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as he:
-            he.extern_modules(['package_a.subpackage', 'module_a'])
+            he.extern(['package_a.subpackage', 'module_a'])
+            he.require_module('package_a.subpackage')
+            he.require_module('module_a')
             he.save_module('package_a')
+        hi = PackageImporter(filename)
+        import package_a.subpackage
+        import module_a
+
+        module_a_im = hi.import_module('module_a')
+        hi.import_module('package_a.subpackage')
+        package_a_im = hi.import_module('package_a')
+
+        self.assertIs(module_a, module_a_im)
+        self.assertIsNot(package_a, package_a_im)
+        self.assertIs(package_a.subpackage, package_a_im.subpackage)
+
+    def test_extern_glob(self):
+        filename = self.temp()
+        with PackageExporter(filename, verbose=False) as he:
+            he.extern(['package_a.*', 'module_*'])
+            he.save_module('package_a')
+            he.save_source_string('test_module', """\
+import package_a.subpackage
+import module_a
+""")
         hi = PackageImporter(filename)
         import package_a.subpackage
         import module_a
@@ -137,8 +160,31 @@ b = resources.load_binary('main', 'main_binary')
     def test_mock(self):
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as he:
-            he.mock_modules(['package_a.subpackage', 'module_a'])
+            he.mock(['package_a.subpackage', 'module_a'])
             he.save_module('package_a')
+            he.require_module('package_a.subpackage')
+            he.require_module('module_a')
+        hi = PackageImporter(filename)
+        import package_a.subpackage
+        _ = package_a.subpackage
+        import module_a
+        _ = module_a
+
+        m = hi.import_module('package_a.subpackage')
+        r = m.result
+        with self.assertRaisesRegex(NotImplementedError, 'was mocked out'):
+            r()
+
+    @skipIf(version_info < (3, 7), 'mock uses __getattr__ a 3.7 feature')
+    def test_mock_glob(self):
+        filename = self.temp()
+        with PackageExporter(filename, verbose=False) as he:
+            he.mock(['package_a.*', 'module*'])
+            he.save_module('package_a')
+            he.save_source_string('test_module', """\
+import package_a.subpackage
+import module_a
+""")
         hi = PackageImporter(filename)
         import package_a.subpackage
         _ = package_a.subpackage
@@ -157,7 +203,7 @@ b = resources.load_binary('main', 'main_binary')
         class Custom(PackageExporter):
             def require_module(self, name, dependencies):
                 if name == 'module_a':
-                    self.mock_module('module_a')
+                    self.save_mock_module('module_a')
                 elif name == 'package_a':
                     self.save_source_string('package_a', 'import module_a\nresult = 5\n')
                 else:
@@ -310,6 +356,24 @@ def load():
             results.append(r)
 
         self.assertTrue(torch.allclose(*results))
+
+    def test_module_glob(self):
+        from torch.package.exporter import _GlobGroup
+
+        def check(include, exclude, should_match, should_not_match):
+            x = _GlobGroup(include, exclude)
+            for e in should_match:
+                self.assertTrue(x.matches(e))
+            for e in should_not_match:
+                self.assertFalse(x.matches(e))
+
+        check('torch.*', [], ['torch.foo', 'torch.bar'], ['tor.foo', 'torch.foo.bar', 'torch'])
+        check('torch.**', [], ['torch.foo', 'torch.bar', 'torch.foo.bar', 'torch'], ['what.torch', 'torchvision'])
+        check('torch.*.foo', [], ['torch.w.foo'], ['torch.hi.bar.baz'])
+        check('torch.**.foo', [], ['torch.w.foo', 'torch.hi.bar.foo'], ['torch.f.foo.z'])
+        check('torch*', [], ['torch', 'torchvision'], ['torch.f'])
+        check('torch.**', ['torch.**.foo'], ['torch', 'torch.bar', 'torch.barfoo'], ['torch.foo', 'torch.some.foo'])
+        check('**.torch', [], ['torch', 'bar.torch'], ['visiontorch'])
 
 if __name__ == '__main__':
     main()

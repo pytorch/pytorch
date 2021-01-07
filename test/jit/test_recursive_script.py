@@ -1,4 +1,3 @@
-import unittest
 import os
 import sys
 import typing
@@ -159,7 +158,6 @@ class TestRecursiveScript(JitTestCase):
             # Make sure that no entries are left over from the previous failure
             FileCheck().check_count("is being compiled", 2).run(str(e))
 
-    @unittest.skipIf(sys.version_info[:2] < (3, 7), "Class annotations are a thing in > 3.5, need to fix for < 3.7")
     def test_constants_with_final(self):
         class M1(torch.nn.Module):
             x : torch.jit.Final[int]
