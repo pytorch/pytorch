@@ -308,11 +308,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() {
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   for (size_t i = 0; i < devices_.size(); ++i) {
     // Checking the work's corresponding CUDA events' status
-    auto ret = cudaEventQuery((*cudaEvents_)[i]);
-    if (ret != cudaSuccess && ret != cudaErrorNotReady) {
-      AT_CUDA_CHECK(ret);
-    }
-    if (ret == cudaErrorNotReady) {
+    if (!(*cudaEvents_)[i].query()) {
       return false;
     }
   }
@@ -1413,7 +1409,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
     const BarrierOptions& opts) {
   std::vector<at::Device> devices;
-  if (usedDeviceIdxs_.empty()) {
+
+  // Use user defined GPU device ids if provided
+  if (!opts.device_ids.empty()) {
+    for (auto device : opts.device_ids) {
+      devices.push_back(at::Device(at::DeviceType::CUDA, device));
+    }
+  } else if (usedDeviceIdxs_.empty()) {
     // This means there is not yet a NCCL collective being called
     // Here we have to use the best guesses and will use a single GPU to call
     // allreduce to achieve barrier.

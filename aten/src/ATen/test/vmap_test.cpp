@@ -296,7 +296,7 @@ TEST(VmapTest, TestVmapPhysicalViewNewLogicalFromPhysical) {
     VmapPhysicalView physical_view(ones({2, 3, 4}), /*levels = {2}*/4);
     Tensor physical = ones({2, 6, 7});
 
-    auto result = physical_view.newLogicalFromPhysical(physical);
+    auto result = physical_view.getPhysicalToLogicalMap().apply(physical);
     auto* batched = maybeGetBatchedImpl(result);
     ASSERT_TRUE(batched != nullptr);
     ASSERT_TRUE(batched->value().is_same(physical));
@@ -307,7 +307,7 @@ TEST(VmapTest, TestVmapPhysicalViewNewLogicalFromPhysical) {
     VmapPhysicalView physical_view(ones({2, 3, 4, 5, 6}), /*levels = {1, 3, 4}*/2 | 8 | 16);
     Tensor physical = ones({2, 3, 4, 7});
 
-    auto result = physical_view.newLogicalFromPhysical(physical);
+    auto result = physical_view.getPhysicalToLogicalMap().apply(physical);
     auto* batched = maybeGetBatchedImpl(result);
     ASSERT_TRUE(batched != nullptr);
     ASSERT_TRUE(batched->value().is_same(physical));
@@ -318,7 +318,7 @@ TEST(VmapTest, TestVmapPhysicalViewNewLogicalFromPhysical) {
     VmapPhysicalView physical_view(ones({2}), /*levels = {2}*/4);
     Tensor physical = ones({2});
 
-    auto result = physical_view.newLogicalFromPhysical(physical);
+    auto result = physical_view.getPhysicalToLogicalMap().apply(physical);
     auto* batched = maybeGetBatchedImpl(result);
     ASSERT_TRUE(batched != nullptr);
     ASSERT_TRUE(batched->value().is_same(physical));
