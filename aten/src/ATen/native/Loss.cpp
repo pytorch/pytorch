@@ -397,15 +397,11 @@ Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
 
 Tensor& l1_loss_out(Tensor& result, const Tensor& input, const Tensor& target, int64_t reduction) {
   auto diff = at::sub_out(result, input, target);
-  if (reduction != Reduction::None) {
-    auto loss = at::abs_out(result, diff);
-    if (reduction == Reduction::Mean) {
-      at::mean_out(result, loss, 0);
-    } else {
-      at::sum_out(result, loss, 0);
-    }
-  } else {
-    at::abs_out(result, diff);
+  auto loss = at::abs_out(result, diff);
+  if (reduction == Reduction::Mean) {
+    at::mean_out(result, loss, 0);
+  } else if (reduction == Reduction::Sum) {
+    at::sum_out(result, loss, 0);
   }
   return result;
 }
