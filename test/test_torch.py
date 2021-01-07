@@ -19,15 +19,15 @@ from itertools import product, combinations, permutations
 from torch import multiprocessing as mp
 from torch.testing._internal.common_utils import (
     TestCase, TEST_WITH_ROCM, run_tests,
-    IS_WINDOWS, NO_MULTIPROCESSING_SPAWN,
+    IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
     skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, BytesIOContext,
-    skipIfRocm, skipIfNoSciPy,
+    skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    skipCUDAIfNoMagma, skipCUDAIfRocm, skipCUDAIfNotRocm,
+    skipCUDAIfNoMagma, skipCUDAIfRocm,
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA,
@@ -936,10 +936,6 @@ class AbstractTestCases:
 
                         # index_add calls atomicAdd on cuda.
                         zeros = torch.zeros(size, dtype=dtype, device=device)
-
-                        # index_add is not supported for complex dtypes on cuda yet
-                        if device.startswith('cuda') and dtype.is_complex:
-                            continue
 
                         added = zeros.index_add(0, torch.arange(0, size[0], dtype=idx_dtype, device=device), tensor)
                         self.assertEqual(added, tensor)
@@ -1852,15 +1848,14 @@ class AbstractTestCases:
             self.assertEqual(complexdouble_storage.type(), 'torch.ComplexDoubleStorage')
             self.assertIs(complexdouble_storage.dtype, torch.complex128)
 
-        @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
         def test_from_file(self):
-            size = 10000
-            with tempfile.NamedTemporaryFile() as f:
-                s1 = torch.FloatStorage.from_file(f.name, True, size)
+            def assert_with_filename(filename):
+                size = 10000
+                s1 = torch.FloatStorage.from_file(filename, True, size)
                 t1 = torch.FloatTensor(s1).copy_(torch.randn(size))
 
                 # check mapping
-                s2 = torch.FloatStorage.from_file(f.name, True, size)
+                s2 = torch.FloatStorage.from_file(filename, True, size)
                 t2 = torch.FloatTensor(s2)
                 self.assertEqual(t1, t2, atol=0, rtol=0)
 
@@ -1874,15 +1869,24 @@ class AbstractTestCases:
                 t2.fill_(rnum)
                 self.assertEqual(t1, t2, atol=0, rtol=0)
 
-        @unittest.skipIf(IS_WINDOWS, "TODO: need to fix this test case for Windows")
+                # release the tensors
+                del s1, t1, s2, t2
+
+            with TemporaryFileName() as fname:
+                assert_with_filename(fname)
+
+            if IS_FILESYSTEM_UTF8_ENCODING:
+                with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
+                    assert_with_filename(fname)
+
         def test_torch_from_file(self):
-            size = 10000
-            with tempfile.NamedTemporaryFile() as f:
-                s1 = torch.from_file(f.name, True, size, dtype=torch.float)
+            def assert_with_filename(filename):
+                size = 10000
+                s1 = torch.from_file(filename, True, size, dtype=torch.float)
                 t1 = torch.FloatTensor(s1).copy_(torch.randn(size))
 
                 # check mapping
-                s2 = torch.from_file(f.name, True, size, dtype=torch.float)
+                s2 = torch.from_file(filename, True, size, dtype=torch.float)
                 t2 = torch.FloatTensor(s2)
                 self.assertEqual(t1, t2, atol=0, rtol=0)
 
@@ -1895,6 +1899,16 @@ class AbstractTestCases:
                 rnum = random.uniform(-1, 1)
                 t2.fill_(rnum)
                 self.assertEqual(t1, t2, atol=0, rtol=0)
+
+                # release the tensors
+                del s1, t1, s2, t2
+
+            with TemporaryFileName() as fname:
+                assert_with_filename(fname)
+
+            if IS_FILESYSTEM_UTF8_ENCODING:
+                with TemporaryDirectoryName(suffix='中文') as dname, TemporaryFileName(dir=dname) as fname:
+                    assert_with_filename(fname)
 
         def test_print(self):
             default_type = torch.Tensor().type()
@@ -5675,7 +5689,8 @@ class TestTorchDeviceType(TestCase):
             x = torch.tensor([], device=device)
             self.assertEqual(x.dtype, x.storage().dtype)
 
-    @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half)
+    @dtypes(torch.float, torch.double)
     def test_multinomial(self, device, dtype):
         def make_prob_dist(shape, is_contiguous):
             if is_contiguous:
@@ -6238,7 +6253,6 @@ class TestDevicePrecision(TestCase):
     exact_dtype = True
 
     @onlyCUDA
-    @skipCUDAIfNotRocm
     def test_index_add_bfloat16(self, device):
         inp_tensor = torch.randn(5, 3, device='cpu').bfloat16()
         t = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.bfloat16, device='cpu')
@@ -6638,7 +6652,6 @@ tensor_op_tests = [
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('atan2', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-2, 1e-5, 1e-5, _types, _types_no_half),
-    ('angle', '', _small_3d, lambda t, d: [], 0, 0, 0, _types_no_half, [torch.bfloat16], False),
     ('fmod', 'value', _small_3d, lambda t, d: [3], 1e-3),
     ('fmod', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-3),
     ('chunk', '', _medium_2d, lambda t, d: [4], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
@@ -6854,7 +6867,6 @@ tensor_op_tests = [
     ('rot90', 'k1_d12', _small_3d, lambda t, d: [1, [1, 2]], 1e-5, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
     ('rot90', 'k1_neg_d', _small_3d, lambda t, d: [1, [1, -1]], 1e-5, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
     ('rot90', 'default', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
-    ('rsqrt', '', lambda t, d: _small_3d(t, d) + 1, lambda t, d: [], 1e-2, 1e-5, 1e-4, _float_types_no_half),
     ('sinh', '', lambda t, d: _small_3d(t, d).clamp(-1, 1), lambda t, d: [], 1e-3, 1e-5, 1e-5, _float_types),
     ('tan', '', lambda t, d: _small_3d(t, d).clamp(-1, 1), lambda t, d: [], 1e-3, 1e-5, 1e-5, _float_types),
     ('tan', 'complex', lambda t, d: _small_3d(t, d), lambda t, d: [], 1e-3, 1e-5, 1e-5, _complex_types),
@@ -6897,7 +6909,6 @@ tensor_op_tests = [
     ('atanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('erf', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('erfc', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('erfinv', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('exp', '', _small_3d, lambda t, d: [], 1e-2, 5e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('exp', 'small', lambda t, d: _small_3d(t, d).clamp(-1, 1),
         lambda t, d: [], 1e-2, 5e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
@@ -6910,7 +6921,6 @@ tensor_op_tests = [
     ('trunc', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('ceil', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('lgamma', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, _float_types_no_half, [torch.bfloat16]),
-    ('digamma', 'op', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e0, _float_types_no_half),
 ]
 
 # Creates and decorates a generic test and adds it to the class.

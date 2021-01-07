@@ -769,6 +769,13 @@ bitwise_xor_() -> Tensor
 In-place version of :meth:`~Tensor.bitwise_xor`
 """)
 
+add_docstr_all('broadcast_to',
+               r"""
+broadcast_to(shape) -> Tensor
+
+See :func:`torch.broadcast_to`.
+""")
+
 add_docstr_all('logical_and',
                r"""
 logical_and() -> Tensor
@@ -3120,14 +3127,25 @@ For a 3-D tensor, :attr:`self` is updated as::
 
 This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
 
-:attr:`self`, :attr:`index` and :attr:`src` (if it is a Tensor) should have same
-number of dimensions. It is also required that ``index.size(d) <= src.size(d)``
-for all dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all
-dimensions ``d != dim``.
+:attr:`self`, :attr:`index` and :attr:`src` (if it is a Tensor) should all have
+the same number of dimensions. It is also required that
+``index.size(d) <= src.size(d)`` for all dimensions ``d``, and that
+``index.size(d) <= self.size(d)`` for all dimensions ``d != dim``.
+Note that ``index`` and ``src`` do not broadcast.
 
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
-between ``0`` and ``self.size(dim) - 1`` inclusive, and all values in a row
-along the specified dimension :attr:`dim` must be unique.
+between ``0`` and ``self.size(dim) - 1`` inclusive.
+
+.. warning::
+
+    When indices are not unique, the behavior is non-deterministic (one of the
+    values from ``src`` will be picked arbitrarily) and the gradient will be
+    incorrect (it will be propagated to all locations in the source that
+    correspond to the same index)!
+
+.. note::
+
+    The backward pass is implemented only for ``src.shape == index.shape``.
 
 Additionally accepts an optional :attr:`reduce` argument that allows
 specification of an optional reduction operation, which is applied to all
@@ -3149,36 +3167,39 @@ Reducing with the addition operation is the same as using
 
 Args:
     dim (int): the axis along which to index
-    index (LongTensor): the indices of elements to scatter,
-      can be either empty or the same size of src.
-      When empty, the operation returns identity
-    src (Tensor): the source element(s) to scatter,
-      incase `value` is not specified
-    value (float): the source element(s) to scatter,
-      incase `src` is not specified
-    reduce (string): reduction operation to apply,
-      can be either 'add' or 'multiply'.
+    index (LongTensor): the indices of elements to scatter, can be either empty
+        or of the same dimensionality as ``src``. When empty, the operation
+        returns ``self`` unchanged.
+    src (Tensor or float): the source element(s) to scatter.
+    reduce (str, optional): reduction operation to apply, can be either
+        ``'add'`` or ``'multiply'``.
 
 Example::
 
-    >>> x = torch.rand(2, 5)
-    >>> x
-    tensor([[ 0.3992,  0.2908,  0.9044,  0.4850,  0.6004],
-            [ 0.5735,  0.9006,  0.6797,  0.4152,  0.1732]])
-    >>> torch.zeros(3, 5).scatter_(0, torch.tensor([[0, 1, 2, 0, 0], [2, 0, 0, 1, 2]]), x)
-    tensor([[ 0.3992,  0.9006,  0.6797,  0.4850,  0.6004],
-            [ 0.0000,  0.2908,  0.0000,  0.4152,  0.0000],
-            [ 0.5735,  0.0000,  0.9044,  0.0000,  0.1732]])
+    >>> src = torch.arange(1, 11).reshape((2, 5))
+    >>> src
+    tensor([[ 1,  2,  3,  4,  5],
+            [ 6,  7,  8,  9, 10]])
+    >>> index = torch.tensor([[0, 1, 2, 0]])
+    >>> torch.zeros(3, 5, dtype=src.dtype).scatter_(0, index, src)
+    tensor([[1, 0, 0, 4, 0],
+            [0, 2, 0, 0, 0],
+            [0, 0, 3, 0, 0]])
+    >>> index = torch.tensor([[0, 1, 2], [0, 1, 4]])
+    >>> torch.zeros(3, 5, dtype=src.dtype).scatter_(1, index, src)
+    tensor([[1, 2, 3, 0, 0],
+            [6, 7, 0, 0, 8],
+            [0, 0, 0, 0, 0]])
 
-    >>> z = torch.zeros(2, 4).scatter_(1, torch.tensor([[2], [3]]), 1.23)
-    >>> z
-    tensor([[ 0.0000,  0.0000,  1.2300,  0.0000],
-            [ 0.0000,  0.0000,  0.0000,  1.2300]])
+    >>> torch.full((2, 4), 2.).scatter_(1, torch.tensor([[2], [3]]),
+    ...            1.23, reduce='multiply')
+    tensor([[2.0000, 2.0000, 2.4600, 2.0000],
+            [2.0000, 2.0000, 2.0000, 2.4600]])
+    >>> torch.full((2, 4), 2.).scatter_(1, torch.tensor([[2], [3]]),
+    ...            1.23, reduce='add')
+    tensor([[2.0000, 2.0000, 3.2300, 2.0000],
+            [2.0000, 2.0000, 2.0000, 3.2300]])
 
-    >>> z = torch.ones(2, 4).scatter_(1, torch.tensor([[2], [3]]), 1.23, reduce='multiply')
-    >>> z
-    tensor([[1.0000, 1.0000, 1.2300, 1.0000],
-            [1.0000, 1.0000, 1.0000, 1.2300]])
 """)
 
 add_docstr_all('scatter_add_',
@@ -3201,28 +3222,35 @@ For a 3-D tensor, :attr:`self` is updated as::
 :attr:`self`, :attr:`index` and :attr:`src` should have same number of
 dimensions. It is also required that ``index.size(d) <= src.size(d)`` for all
 dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
-``d != dim``.
+``d != dim``. Note that ``index`` and ``src`` do not broadcast.
 
 Note:
     {forward_reproducibility_note}
 
+.. note::
+
+    The backward pass is implemented only for ``src.shape == index.shape``.
+
 Args:
     dim (int): the axis along which to index
-    index (LongTensor): the indices of elements to scatter and add,
-      can be either empty or the same size of src.
-      When empty, the operation returns identity.
+    index (LongTensor): the indices of elements to scatter and add, can be
+        either empty or of the same dimensionality as ``src``. When empty, the
+        operation returns ``self`` unchanged.
     src (Tensor): the source elements to scatter and add
 
 Example::
 
-    >>> x = torch.rand(2, 5)
-    >>> x
-    tensor([[0.7404, 0.0427, 0.6480, 0.3806, 0.8328],
-            [0.7953, 0.2009, 0.9154, 0.6782, 0.9620]])
-    >>> torch.ones(3, 5).scatter_add_(0, torch.tensor([[0, 1, 2, 0, 0], [2, 0, 0, 1, 2]]), x)
-    tensor([[1.7404, 1.2009, 1.9154, 1.3806, 1.8328],
-            [1.0000, 1.0427, 1.0000, 1.6782, 1.0000],
-            [1.7953, 1.0000, 1.6480, 1.0000, 1.9620]])
+    >>> src = torch.ones((2, 5))
+    >>> index = torch.tensor([[0, 1, 2, 0, 0]])
+    >>> torch.zeros(3, 5, dtype=src.dtype).scatter_add_(0, index, src)
+    tensor([[1., 0., 0., 1., 1.],
+            [0., 1., 0., 0., 0.],
+            [0., 0., 1., 0., 0.]])
+    >>> index = torch.tensor([[0, 1, 2, 0, 0], [0, 1, 2, 2, 2]])
+    >>> torch.zeros(3, 5, dtype=src.dtype).scatter_add_(0, index, src)
+    tensor([[2., 0., 0., 1., 1.],
+            [0., 2., 0., 0., 0.],
+            [0., 0., 2., 1., 1.]])
 
 """.format(**reproducibility_notes))
 
@@ -3338,6 +3366,20 @@ add_docstr_all('sin_',
 sin_() -> Tensor
 
 In-place version of :meth:`~Tensor.sin`
+""")
+
+add_docstr_all('sinc',
+               r"""
+sinc() -> Tensor
+
+See :func:`torch.sinc`
+""")
+
+add_docstr_all('sinc_',
+               r"""
+sinc_() -> Tensor
+
+In-place version of :meth:`~Tensor.sinc`
 """)
 
 add_docstr_all('sinh',
@@ -4449,6 +4491,20 @@ add_docstr_all('masked_scatter',
 masked_scatter(mask, tensor) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.masked_scatter_`
+""")
+
+add_docstr_all('xlogy',
+               r"""
+xlogy(other) -> Tensor
+
+See :func:`torch.xlogy`
+""")
+
+add_docstr_all('xlogy_',
+               r"""
+xlogy_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.xlogy`
 """)
 
 add_docstr_all('masked_fill',

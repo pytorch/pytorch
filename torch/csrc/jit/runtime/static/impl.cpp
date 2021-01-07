@@ -213,6 +213,7 @@ size_t AssignRegisters(
     if (!optimize_memory) {
       return num_regs++;
     }
+    TORCH_CHECK(!value_to_reg.count(v));
     auto iter = lm.first.find(v);
     if (iter == lm.first.end()) {
       return num_regs++;
@@ -399,6 +400,10 @@ StaticRuntime::StaticRuntime(
   }
 }
 
+size_t StaticRuntime::num_outputs() const {
+  return module_->output_regs.size();
+}
+
 std::vector<at::Tensor> StaticRuntime::run(
     const std::vector<at::Tensor>& inps) {
   std::vector<c10::IValue> stack;
@@ -435,17 +440,21 @@ c10::IValue StaticRuntime::run(
     planner_->allocate();
   }
 
-  std::vector<IValue> stack(args);
   if (!kwargs.empty()) {
     // This is not ideal
     TORCH_CHECK(
         module_->schema != nullptr,
         "Schema is not available. Consider creating the Static Runtime "
         "with StaticRuntime(const torch::jit::Module& m) instead.");
-    module_->schema->checkAndNormalizeInputs(stack, kwargs);
-  }
-  for (size_t i = 0; i < stack.size(); i++) {
-    Input(i) = stack[i];
+    std::vector<c10::IValue> s = args;
+    module_->schema->checkAndNormalizeInputs(s, kwargs);
+    for (size_t i = 0; i < s.size(); i++) {
+      Input(i) = s[i];
+    }
+  } else {
+    for (size_t i = 0; i < args.size(); i++) {
+      Input(i) = args[i];
+    }
   }
 
   // NB: before optimizing the order of execution, ensure that the
@@ -464,7 +473,14 @@ c10::IValue StaticRuntime::run(
   }
 
   // no need to keep references of outputs in static runtime anymore
-  DCHECK(module_->output_regs.size() == 1);
+  if (num_outputs() > 1) {
+    std::vector<c10::IValue> outputs;
+    outputs.reserve(num_outputs());
+    for (const auto& reg : module_->output_regs) {
+      outputs.emplace_back(reg_[reg]);
+    }
+    return c10::ivalue::Tuple::create(outputs);
+  }
   return std::move(reg_[module_->output_regs[0]]);
 }
 

@@ -5,7 +5,7 @@ from torch.nn.parameter import Parameter
 from .observer import _with_args
 
 
-class _LearnableFakeQuantize(nn.Module):
+class _LearnableFakeQuantize(torch.quantization.FakeQuantizeBase):
     r""" This is an extension of the FakeQuantize module in fake_quantize.py, which
     supports more generalized lower-bit quantization and support learning of the scale
     and zero point parameters through backpropagation. For literature references,
@@ -98,6 +98,10 @@ class _LearnableFakeQuantize(nn.Module):
         return self
 
     @torch.jit.export
+    def enable_observer(self, enabled=True):
+        self.toggle_observer_update(enabled)
+
+    @torch.jit.export
     def toggle_qparam_learning(self, enabled=True):
         self.learning_enabled[0] = int(enabled)
         self.scale.requires_grad = enabled
@@ -151,5 +155,3 @@ class _LearnableFakeQuantize(nn.Module):
                     self.quant_min, self.quant_max, grad_factor)
 
         return X
-
-    with_args = classmethod(_with_args)

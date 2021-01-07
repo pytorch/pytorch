@@ -352,6 +352,14 @@ void initTreeViewBindings(PyObject* module) {
                        const Expr& iter) {
         return ListComp::create(range, elt, target, iter);
       }));
+  py::class_<DictComp, Expr>(m, "DictComp")
+      .def(py::init([](const SourceRange& range,
+                       const Expr& key,
+                       const Expr& value,
+                       const Expr& target,
+                       const Expr& iter) {
+        return DictComp::create(range, key, value, target, iter);
+      }));
   py::class_<ListLiteral, Expr>(m, "ListLiteral")
       .def(py::init([](const SourceRange& range, std::vector<Expr> args) {
         return ListLiteral::create(range, wrap_list(range, std::move(args)));

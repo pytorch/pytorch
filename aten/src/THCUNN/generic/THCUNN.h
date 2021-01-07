@@ -5,7 +5,7 @@
 #include <ATen/core/Reduction.h>
 #include <ATen/Generator.h>
 
-THC_API void THNN_(ClassNLLCriterion_updateOutput)(
+TORCH_CUDA_API void THNN_(ClassNLLCriterion_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCIndexTensor *target,
@@ -15,7 +15,7 @@ THC_API void THNN_(ClassNLLCriterion_updateOutput)(
                   THCTensor *total_weight,
                   int64_t ignore_index);
 
-THC_API void THNN_(ClassNLLCriterion_updateGradInput)(
+TORCH_CUDA_API void THNN_(ClassNLLCriterion_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCIndexTensor *target,
@@ -26,33 +26,33 @@ THC_API void THNN_(ClassNLLCriterion_updateGradInput)(
                   THCTensor *total_weight,
                   int64_t ignore_index);
 
-THC_API void THNN_(GatedLinear_updateOutput)(
+TORCH_CUDA_API void THNN_(GatedLinear_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
                   int dim);
 
-THC_API void THNN_(GatedLinear_updateGradInput)(
+TORCH_CUDA_API void THNN_(GatedLinear_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
                   int dim);
 
-THC_API void THNN_(LogSigmoid_updateOutput)(
+TORCH_CUDA_API void THNN_(LogSigmoid_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
                   THCTensor *buffer);
 
-THC_API void THNN_(LogSigmoid_updateGradInput)(
+TORCH_CUDA_API void THNN_(LogSigmoid_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
                   THCTensor *buffer);
 
-THC_API void THNN_(MultiLabelMarginCriterion_updateOutput)(
+TORCH_CUDA_API void THNN_(MultiLabelMarginCriterion_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCIndexTensor *target,
@@ -60,7 +60,7 @@ THC_API void THNN_(MultiLabelMarginCriterion_updateOutput)(
                   THCTensor *is_target,
                   int64_t reduction);
 
-THC_API void THNN_(MultiLabelMarginCriterion_updateGradInput)(
+TORCH_CUDA_API void THNN_(MultiLabelMarginCriterion_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCIndexTensor *target,
@@ -69,7 +69,7 @@ THC_API void THNN_(MultiLabelMarginCriterion_updateGradInput)(
                   THCTensor *is_target,
                   int64_t reduction);
 
-THC_API void THNN_(MultiMarginCriterion_updateOutput)(
+TORCH_CUDA_API void THNN_(MultiMarginCriterion_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCIndexTensor *target,
@@ -79,7 +79,7 @@ THC_API void THNN_(MultiMarginCriterion_updateOutput)(
                   THCTensor *weights,           // [OPTIONAL]
                   accreal margin);
 
-THC_API void THNN_(MultiMarginCriterion_updateGradInput)(
+TORCH_CUDA_API void THNN_(MultiMarginCriterion_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCIndexTensor *target,
@@ -90,7 +90,7 @@ THC_API void THNN_(MultiMarginCriterion_updateGradInput)(
                   THCTensor *weights,           // [OPTIONAL]
                   accreal margin);
 
-THC_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
+TORCH_CUDA_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCIndexTensor *target,
@@ -100,7 +100,7 @@ THC_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
                   THCTensor *total_weight,
                   int64_t ignore_index);
 
-THC_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
+TORCH_CUDA_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCIndexTensor *target,
@@ -111,7 +111,7 @@ THC_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
                   THCTensor *total_weight,
                   int64_t ignore_index);
 
-THC_API void THNN_(SpatialConvolutionMM_updateOutput)(
+TORCH_CUDA_API void THNN_(SpatialConvolutionMM_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
@@ -123,7 +123,7 @@ THC_API void THNN_(SpatialConvolutionMM_updateOutput)(
                   int dW, int dH,
                   int padW, int padH);
 
-THC_API void THNN_(SpatialConvolutionMM_updateGradInput)(
+TORCH_CUDA_API void THNN_(SpatialConvolutionMM_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *gradOutput,
@@ -135,7 +135,7 @@ THC_API void THNN_(SpatialConvolutionMM_updateGradInput)(
                   int dW, int dH,
                   int padW, int padH);
 
-THC_API void THNN_(SpatialConvolutionMM_accGradParameters)(
+TORCH_CUDA_API void THNN_(SpatialConvolutionMM_accGradParameters)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *gradOutput,
@@ -148,7 +148,7 @@ THC_API void THNN_(SpatialConvolutionMM_accGradParameters)(
                   int padW, int padH,
                   accreal scale);
 
-THC_API void THNN_(SpatialDepthwiseConvolution_updateOutput)(
+TORCH_CUDA_API void THNN_(SpatialDepthwiseConvolution_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
@@ -159,7 +159,7 @@ THC_API void THNN_(SpatialDepthwiseConvolution_updateOutput)(
                   int padW, int padH,
                   int dilationW, int dilationH);
 
-THC_API void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
+TORCH_CUDA_API void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *gradOutput,
@@ -170,7 +170,7 @@ THC_API void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
                   int padW, int padH,
                   int dilationW, int dilationH);
 
-THC_API void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
+TORCH_CUDA_API void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *gradOutput,
@@ -180,7 +180,7 @@ THC_API void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
                   int padW, int padH,
                   int dilationW, int dilationH);
 
-THC_API void THNN_(RReLU_updateOutput)(
+TORCH_CUDA_API void THNN_(RReLU_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
@@ -191,7 +191,7 @@ THC_API void THNN_(RReLU_updateOutput)(
                   bool inplace,
                   c10::optional<at::Generator> generator);
 
-THC_API void THNN_(RReLU_updateGradInput)(
+TORCH_CUDA_API void THNN_(RReLU_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *gradOutput,

@@ -193,9 +193,6 @@ libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/Functions.h",
         "torch/csrc/autograd/generated/Functions.cpp",
         "torch/csrc/autograd/generated/variable_factories.h",
-        "torch/csrc/jit/generated/generated_unboxing_wrappers_0.cpp",
-        "torch/csrc/jit/generated/generated_unboxing_wrappers_1.cpp",
-        "torch/csrc/jit/generated/generated_unboxing_wrappers_2.cpp",
 ]
 
 libtorch_python_generated_sources = [
@@ -339,7 +336,8 @@ filegroup(
         "aten/src/ATen/cuda/CUDABlas.cpp",
         "aten/src/ATen/cuda/CUDASolver.cpp",
         "aten/src/ATen/cuda/CUDAContext.cpp",
-        "aten/src/ATen/cuda/CUDAGenerator.cpp",
+        "aten/src/ATen/cuda/CUDAGeneratorImpl.cpp",
+        "aten/src/ATen/cuda/CUDAGraph.cpp",
         "aten/src/ATen/cuda/CuSparseHandlePool.cpp",
         "aten/src/ATen/cuda/CublasHandlePool.cpp",
         "aten/src/ATen/cuda/CusolverDnHandlePool.cpp",
@@ -372,7 +370,6 @@ filegroup(
 filegroup(
     name = "thc_srcs_cu",
     srcs = [
-        "aten/src/THC/THCBlas.cu.cc",
         "aten/src/THC/THCReduceApplyUtils.cu.cc",
         "aten/src/THC/THCSleep.cu.cc",
         "aten/src/THC/THCSortUtils.cu.cc",
