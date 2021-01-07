@@ -134,6 +134,7 @@ bool SigmoidFocalLossOp<float, CUDAContext>::RunOnDevice() {
       N, D, H, W, X.data<float>(), T.data<int>(),
       wp.data<float>(), gamma_, alpha_, num_classes_,
       losses_.mutable_data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   math::Sum<float, CUDAContext>(
       losses_.size(), losses_.data<float>(), avg_loss_data, &context_);
@@ -165,6 +166,7 @@ bool SigmoidFocalLossGradientOp<float, CUDAContext>::RunOnDevice() {
       N, D, H, W, X.data<float>(), T.data<int>(), dX->mutable_data<float>(),
       wp.data<float>(), gamma_, alpha_, num_classes_,
       d_avg_loss.data<float>());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   math::Scale<float, float, CUDAContext>(
       dX->size(),
       scale_,

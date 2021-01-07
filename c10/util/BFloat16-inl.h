@@ -59,7 +59,7 @@ inline C10_HOST_DEVICE BFloat16 operator*(const BFloat16& a, const BFloat16& b) 
   return static_cast<float>(a) * static_cast<float>(b);
 }
 
-inline C10_HOST_DEVICE BFloat16 operator/(const BFloat16& a, const BFloat16& b) {
+inline C10_HOST_DEVICE BFloat16 operator/(const BFloat16& a, const BFloat16& b) __ubsan_ignore_float_divide_by_zero__ {
   return static_cast<float>(a) / static_cast<float>(b);
 }
 
