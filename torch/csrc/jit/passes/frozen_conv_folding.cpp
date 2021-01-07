@@ -183,7 +183,7 @@ bool checkConvAndBroadcastingOpPreConditions(Node* conv, Node* op) {
 Tensor resizeConstantScalarOrTensorToShape(
     Value* v,
     const std::vector<int64_t>& shape,
-    TensorOptions options) {
+    at::TensorOptions options) {
   Tensor ret_tensor;
   if (v->type()->cast<TensorType>()) {
     ret_tensor = constant_as<Tensor>(v).value();
@@ -201,7 +201,7 @@ Tensor resizeConstantScalarOrTensorToShape(
     ret_tensor = ret_tensor.reshape({1});
     ret_tensor = ret_tensor.expand(shape);
   } else {
-    TORCH_INTERNAL_ASSERT(ret_tensor.numel() == prod_intlist(shape));
+    TORCH_INTERNAL_ASSERT(ret_tensor.numel() == at::prod_intlist(shape));
     ret_tensor = ret_tensor.view(shape);
   }
   return ret_tensor;
