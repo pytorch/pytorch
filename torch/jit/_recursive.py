@@ -275,12 +275,10 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             concrete_type_builder.add_failed_attribute(name, hint)
 
     # add hooks to concrete type
-    # TODO: would using a random number here be better? I had collisions happen
-    # even with the name and python id combination here ...  
     for hook in nn_module._forward_hooks.values():
-        concrete_type_builder.add_forward_hook(hook.__name__ + str(id(hook)))
+        concrete_type_builder.add_forward_hook(hook)
     for pre_hook in nn_module._forward_pre_hooks.values():
-        concrete_type_builder.add_forward_pre_hook(pre_hook.__name__ + str(id(pre_hook)))
+        concrete_type_builder.add_forward_pre_hook(pre_hook)
 
     return concrete_type_builder
 
@@ -332,13 +330,11 @@ def create_methods_and_properties_from_stubs(concrete_type, method_stubs, proper
 def create_hooks_from_stubs(concrete_type, hook_stubs, pre_hook_stubs):
     hook_defs = [h.def_ for h in hook_stubs]
     hook_rcbs = [h.resolution_callback for h in hook_stubs]
-    hook_defaults = [get_default_args(h.original_method) for h in hook_stubs]
 
     pre_hook_defs = [h.def_ for h in pre_hook_stubs]
     pre_hook_rcbs = [h.resolution_callback for h in pre_hook_stubs]
-    pre_hook_defaults = [get_default_args(h.original_method) for h in pre_hook_stubs]
 
-    concrete_type._create_hooks(hook_defs, hook_rcbs, hook_defaults, pre_hook_defs, pre_hook_rcbs, pre_hook_defaults)
+    concrete_type._create_hooks(hook_defs, hook_rcbs, pre_hook_defs, pre_hook_rcbs)
 
 def get_module_concrete_type(nn_module, share_types=True):
     """
@@ -448,7 +444,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     if concrete_type not in concrete_type_store.methods_compiled:
         create_methods_and_properties_from_stubs(concrete_type, method_stubs, property_stubs)
         # Create hooks after methods to ensure no name collisions between hooks and methods.
-        # If done before hooks can overshadow methods that aren't exported
+        # If done before, hooks can overshadow methods that aren't exported
         create_hooks_from_stubs(concrete_type, hook_stubs, pre_hook_stubs)
         torch._C._run_emit_module_hook(cpp_module)
         concrete_type_store.methods_compiled.add(concrete_type)

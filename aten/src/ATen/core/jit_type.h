@@ -2116,8 +2116,8 @@ struct TORCH_API ClassType : public NamedType {
   void addForwardHook(torch::jit::Function* hook_ptr);
   torch::jit::Function* findForwardPreHook(const std::string& name) const;
   torch::jit::Function* findForwardHook(const std::string& name) const;
-  const std::vector<torch::jit::Function*>& getForwardHooks();
-  const std::vector<torch::jit::Function*>& getForwardPreHooks();
+  const std::vector<torch::jit::Function*>& getForwardHooks() const;
+  const std::vector<torch::jit::Function*>& getForwardPreHooks() const;
   
   std::string getPreHookErrorMessage(const std::string& name) const;
   std::string getHookErrorMessage(const std::string& name) const;
@@ -2192,7 +2192,7 @@ struct TORCH_API ClassType : public NamedType {
   // List of methods associated with this class.
   std::vector<torch::jit::Function*> methods_;
 
-  // List of hooks to be run before/after forward
+  // List of hooks to be run before/after forward.
   std::vector<torch::jit::Function*> forward_hooks_;
   std::vector<torch::jit::Function*> forward_pre_hooks_;
   
