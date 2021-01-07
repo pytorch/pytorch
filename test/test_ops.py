@@ -1,4 +1,4 @@
-from functools import partial, wraps
+from functools import wraps
 
 import torch
 
@@ -83,10 +83,9 @@ class TestGradients(TestCase):
                     return out_fn(variant(*args, **kwargs))
             else:
                 variant_out_fn = variant
-            partial_fn = partial(variant_out_fn, **sample.kwargs)
 
             def fn(*inputs):
-                output = partial_fn(*inputs)
+                output = variant_out_fn(*inputs, **sample.kwargs)
                 return op.output_func(output)
 
             if check == 'gradcheck':
