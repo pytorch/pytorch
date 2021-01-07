@@ -9486,7 +9486,6 @@
   structured_delegate: upsample_nearest1d_backward.grad_input
 
 - func: upsample_nearest2d.out(Tensor self, int[2] output_size, float? scales_h=None, float? scales_w=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: full
   python_module: nn
   structured: True
   dispatch:
@@ -9494,14 +9493,12 @@
     CUDA: upsample_nearest2d_out_cuda
 
 - func: upsample_nearest2d(Tensor self, int[2] output_size, float? scales_h=None, float? scales_w=None) -> Tensor
-  use_c10_dispatcher: full
   python_module: nn
   structured_delegate: upsample_nearest2d.out
   dispatch:
     QuantizedCPU: upsample_nearest2d_quantized_cpu
 
 - func: upsample_nearest2d_backward.grad_input(Tensor grad_output, int[2] output_size, int[4] input_size, float? scales_h=None, float? scales_w=None, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: full
   python_module: nn
   structured: True
   dispatch:
@@ -9509,7 +9506,6 @@
     CUDA: upsample_nearest2d_backward_out_cuda
 
 - func: upsample_nearest2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, float? scales_h=None, float? scales_w=None) -> Tensor
-  use_c10_dispatcher: full
   python_module: nn
   structured_delegate: upsample_nearest2d_backward.grad_input
 

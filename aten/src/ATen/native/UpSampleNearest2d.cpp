@@ -58,8 +58,8 @@ TORCH_META_FUNC(upsample_nearest2d) (
 
 TORCH_META_FUNC(upsample_nearest2d_backward) (
   const Tensor& grad_output,
-  IntArrayRef input_size,
   IntArrayRef output_size,
+  IntArrayRef input_size,
   c10::optional<double> scales_h,
   c10::optional<double> scales_w
 ) {
@@ -83,49 +83,6 @@ TORCH_META_FUNC(upsample_nearest2d_backward) (
 } // namespace meta
 
 namespace native {
-namespace {
-
-static void upsample_nearest2d_backward_out_cpu_template(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    IntArrayRef output_size,
-    IntArrayRef input_size,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
-  TORCH_CHECK(
-      output_size.size() == 2,
-      "It is expected output_size equals to 2, but got size ",
-      output_size.size());
-
-  TORCH_CHECK(
-      input_size.size() == 4,
-      "It is expected input_size equals to 4, but got size ",
-      input_size.size());
-
-  int64_t output_height = output_size[0];
-  int64_t output_width = output_size[1];
-
-  int64_t nbatch = input_size[0];
-  int64_t channels = input_size[1];
-  int64_t input_height = input_size[2];
-  int64_t input_width = input_size[3];
-
-  upsample_2d_shape_check(
-      Tensor(),
-      grad_output,
-      nbatch,
-      channels,
-      input_height,
-      input_width,
-      output_height,
-      output_width);
-
-  grad_input.resize_({nbatch, channels, input_height, input_width});
-  grad_input.zero_();
-
-  upsample_nearest2d_backward_kernel(kCPU, grad_input, grad_output, scales_h, scales_w);
-}
-} // namespace
 
 TORCH_IMPL_FUNC(upsample_nearest2d_out_cpu) (
     const Tensor& input,
@@ -144,6 +101,7 @@ TORCH_IMPL_FUNC(upsample_nearest2d_backward_out_cpu) (
     c10::optional<double> scales_h,
     c10::optional<double> scales_w,
     Tensor& grad_input) {
+  grad_input.zero_();
   upsample_nearest2d_backward_kernel(kCPU, grad_input, grad_output, scales_h, scales_w);
 }
 
@@ -168,10 +126,7 @@ Tensor upsample_nearest2d_backward_cpu(
   auto osize = compute_output_size(input_size, output_size, scale_factors);
   auto scale_h = get_scale_value(scale_factors, 0);
   auto scale_w = get_scale_value(scale_factors, 1);
-  auto grad_input = at::zeros(input_size, grad_output.options());
-  upsample_nearest2d_backward_out_cpu_template(
-      grad_input, grad_output, osize, input_size, scale_h, scale_w);
-  return grad_input;
+  return at::upsample_nearest2d_backward(grad_output, osize, input_size, scale_h, scale_w);
 }
 
 DEFINE_DISPATCH(upsample_nearest2d_kernel);
