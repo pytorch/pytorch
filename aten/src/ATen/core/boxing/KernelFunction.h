@@ -52,15 +52,24 @@ public:
   // Benchmarks have shown that it is expensive for the dispatcher to read from thread-local storage (TLS)
   // upon every dispatch call into order to compute which kernel to dispatch to.
   //
-  // To mitigate this, we allow kernels to optionally take in the DispatchKeySet that the dispatcher computed,
-  // manually calculate the next kernel that should be dispatched to, and pass that information back to the dispatcher,
-  // thus bypassing the dispatcher overhead of reading from TLS to recompute keys.
-  // Kernels that opt into this convention must register themselves with Library::impl_withKeys() rather than Library::impl().
-  // See the kernels in VariableTypeEverything.cpp and TraceTypeEverything.cpp for examples.
+  // To mitigate this, we've updated the calling convention inside the dispatcher to expect every kernel that it stores
+  // to have a first argument of type DispatchKeySet.
   //
-  // This changes the calling convention for the dispatcher. The dispatcher now expects all kernels that it stores
-  // to have a first argument of type DispatchKeySet. The mechanism for optionally passing that DispatchKeySet
-  // into the kernel lives in make_boxed_from_unboxed_functor.h.
+  // What are the invariants of the DispatchKeySet when it gets passed to a kernel?
+  // - All keys to the left of the current dispatch key have been masked out.
+  //   (e.g. a Tracing kernel that takes in the DispatchKeySet will expect the highest bit to be DispatchKey::Tracer)
+  // - All other keys that dispatcher normally would have computed through TLS + global state + op arguments
+  //   are still in the set.
+  //
+  // Kernels can then opt into using this keyset to save the dispatcher from doing repeated work during redispatches:
+  // recalculating the highest-priority dispatch key, which involves reading from TLS. Instead, the kernels that opt in will
+  // calculate an updated DispatchKeySet directly from the old one, and pass the updated set directly into the dispatcher
+  // upon redispatching.
+  //
+  // This is an opt-in mechanism: Kernels can automatically opt in by setting the first argument in their signature
+  // to be of type DispatchKeySet. See the kernels in VariableTypeEverything.cpp and TraceTypeEverything.cpp for examples.
+  //
+  // The mechanism for optionally passing that DispatchKeySet into the kernel lives in make_boxed_from_unboxed_functor.h.
   // See Note [Plumbing Keys Through The Dispatcher 2] for details.
   using InternalBoxedKernelFunction = void(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
   // This is the public API for how boxed kernels are defined
@@ -130,7 +139,7 @@ public:
    * See Note [Plumbing Keys Through The Dispatcher] for details.
    */
   template<BoxedKernelFunction_withKeys* func>
-  static KernelFunction makeFromBoxedFunction_withKeys();
+  static KernelFunction makeFromBoxedFunction();
 
   /**
    * Create a KernelFunction from an unboxed functor.
@@ -145,9 +154,6 @@ public:
    */
   template<bool AllowLegacyTypes = false, class KernelFunctor>
   static KernelFunction makeFromUnboxedFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
-
-  template<bool AllowLegacyTypes = false, class KernelFunctor>
-  static KernelFunction makeFromUnboxedFunctor_withKeys(std::unique_ptr<OperatorKernel> kernelFunctor);
 
   /**
    * Create a KernelFunction from an unboxed functor and prevent creation of an
@@ -169,9 +175,6 @@ public:
   template<class KernelFunctor>
   static KernelFunction makeFromUnboxedOnlyFunctor(std::unique_ptr<OperatorKernel> kernelFunctor);
 
-  template<class KernelFunctor>
-  static KernelFunction makeFromUnboxedOnlyFunctor_withKeys(std::unique_ptr<OperatorKernel> kernelFunctor);
-
   /**
    * Create a KernelFunction from an unboxed function.
    * This is usually better than KernelFunction::makeFromUnboxedRuntimeFunction
@@ -186,9 +189,6 @@ public:
    */
   template<class FuncPtr, bool AllowLegacyTypes = false>
   static KernelFunction makeFromUnboxedFunction(FuncPtr);
-
-  template<class FuncPtr, bool AllowLegacyTypes = false>
-  static KernelFunction makeFromUnboxedFunction_withKeys(FuncPtr);
 
   /**
    * Create a KernelFunction from an unboxed function and prevent creation of an
@@ -207,9 +207,6 @@ public:
   template<class FuncPtr>
   static KernelFunction makeFromUnboxedOnlyFunction(FuncPtr);
 
-  template<class FuncPtr>
-  static KernelFunction makeFromUnboxedOnlyFunction_withKeys(FuncPtr);
-
   /**
    * Create a KernelFunction from an unboxed function.
    * KernelFunction::makeFromUnboxedFunction is usually a better choice than
@@ -224,14 +221,8 @@ public:
   template<bool AllowLegacyTypes = false, class FuncType>
   static KernelFunction makeFromUnboxedRuntimeFunction(FuncType* func);
 
-  template<bool AllowLegacyTypes = false, class FuncType>
-  static KernelFunction makeFromUnboxedRuntimeFunction_withKeys(FuncType* func);
-
   template<class FuncType>
   static KernelFunction makeFromUnboxedOnlyRuntimeFunction(FuncType* func);
-
-  template<class FuncType>
-  static KernelFunction makeFromUnboxedOnlyRuntimeFunction_withKeys(FuncType* func);
 
   static KernelFunction makeFallthrough();
   static KernelFunction makeAmbiguousAutogradOther();
@@ -249,11 +240,6 @@ public:
   static std::enable_if_t<guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> makeFromUnboxedLambda(Lambda&& lambda);
   template<bool AllowLegacyTypes = false, class Lambda>
   static std::enable_if_t<!guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> makeFromUnboxedLambda(Lambda&& lambda);
-
-  template<bool AllowLegacyTypes = false, class Lambda>
-  static std::enable_if_t<guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> makeFromUnboxedLambda_withKeys(Lambda&& lambda);
-  template<bool AllowLegacyTypes = false, class Lambda>
-  static std::enable_if_t<!guts::is_stateless_lambda<std::decay_t<Lambda>>::value, KernelFunction> makeFromUnboxedLambda_withKeys(Lambda&& lambda);
 
   std::string dumpState() const;
   // For testing internal invariants only
@@ -273,7 +259,7 @@ private:
   static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
 
   template<BoxedKernelFunction_withKeys* func>
-  static void make_boxed_function_withKeys(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
+  static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
 
   void checkBoxedKernel(const OperatorHandle& opHandle) const;
 

@@ -25,7 +25,7 @@ MANUAL_BACKEND = set([
 # For these ops we want to skip the codegen-ed registration to both Autograd and Tracer keys.
 # You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
 MANUAL_AUTOGRAD_AND_TRACER = set([
-    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_',
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_', '_fw_primal',
 ])
 
 # Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:
@@ -112,9 +112,8 @@ def format_trace_inputs(f: NativeFunction) -> str:
             ]
         else:
             name = arg.name
-            # XXX: For arg that have type of Tensor?[], tracer will pass allow_undefined to addInputs
             if str(arg.type) == 'Tensor?[]':
-                return [f'jit::tracer::addInputs(node, "{name}", {name}, true);']
+                return [f'jit::tracer::addInputs(node, "{name}", {name});']
             else:
                 return [ADD_TRACE_INPUT.substitute(name=name, input=name)]
 
@@ -122,7 +121,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
     if f.use_c10_dispatcher.dispatcher_uses_new_style():
         args = list(f.func.schema_order_arguments())
     else:
-        sig_group = CppSignatureGroup.from_schema(f.func, method=False)
+        sig_group = CppSignatureGroup.from_native_function(f, method=False)
         args = [cpp_args.argument for cpp_args in sig_group.signature.arguments()
                 if not isinstance(cpp_args.argument, SelfArgument)]
 
@@ -383,7 +382,7 @@ def method_definition(f: NativeFunction) -> Optional[str]:
                 for a in f.func.schema_order_arguments()]
         )
     else:
-        sig_group = CppSignatureGroup.from_schema(f.func, method=False)
+        sig_group = CppSignatureGroup.from_native_function(f, method=False)
         formals = ', '.join(['c10::DispatchKeySet ks'] + [f'{a.type} {a.name}' for a in sig_group.signature.arguments()])
 
     return METHOD_DEFINITION.substitute(
@@ -394,13 +393,13 @@ def method_definition(f: NativeFunction) -> Optional[str]:
     )
 
 WRAPPER_REGISTRATION = CodeTemplate("""\
-m.impl_withKeys("${name}",
+m.impl("${name}",
        TORCH_FN(${class_type}::${type_wrapper_name})
 );
 """)
 
 UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
-m.impl_UNBOXED_withKeys("${name}", &${class_type}::${type_wrapper_name});
+m.impl_UNBOXED("${name}", &${class_type}::${type_wrapper_name});
 """)
 
 @with_native_function

@@ -18,21 +18,24 @@ public:
     CppSignature& operator=(CppSignature&&) noexcept = default;
 
     template<class FuncType>
-    static CppSignature make() {
+    static CppSignature make(
+          std::enable_if_t<!c10::guts::infer_function_traits_t<std::decay_t<FuncType>>::first_arg_is_dispatchKeySet::value, std::nullptr_t> = nullptr) {
         // Normalize functors, lambdas, function pointers, etc. into the plain function type
         using decayed_function_type = typename guts::infer_function_traits_t<std::decay_t<FuncType>>::func_type;
 
         return CppSignature(std::type_index(typeid(decayed_function_type)));
     }
 
+    // Specialization for when the first argument is of type DispatchKeySet
+    // Hide the DispatchKeySet argument from the schema.
+    // We do this to guarantee that all CppSignature's for an operator will match, even if they're registered
+    // with different calling conventions.
+    // See Note [Plumbing Keys Through The Dispatcher]
     template<class FuncType>
-    static CppSignature make_withKeys() {
+    static CppSignature make(
+          std::enable_if_t<c10::guts::infer_function_traits_t<std::decay_t<FuncType>>::first_arg_is_dispatchKeySet::value, std::nullptr_t> = nullptr) {
         // Normalize functors, lambdas, function pointers, etc. into the plain function type
-        // Additionally, hide the first argument of the schema, which is expected to be of type DispatchKeySet.
-        // We do this to guarantee that all CppSignature's for an operator will match, even if they're registered
-        // with different calling conventions.
-        // See Note [Plumbing Keys Through The Dispatcher]
-        using decayed_function_type = typename guts::infer_function_traits_withKeys_t<std::decay_t<FuncType>>::func_type;
+        using decayed_function_type = typename guts::infer_function_traits_t<std::decay_t<FuncType>>::func_type_skip_first_arg;
 
         return CppSignature(std::type_index(typeid(decayed_function_type)));
     }

@@ -184,7 +184,7 @@ auto result_ = (${first}).${name}(${args_with_tensor_options});
 """)
 
 CONSTRUCTOR = CodeTemplate("""\
-[](OperatorKernel* unboxedKernel, const OperatorHandle&, c10::DispatchKeySet ks, Stack* stack) {
+[](OperatorKernel* unboxedKernel, const OperatorHandle&, Stack* stack) {
     using namespace at;
     ${lvalues}
     ${call}
@@ -195,8 +195,7 @@ CONSTRUCTOR = CodeTemplate("""\
 
 OPERATOR = CodeTemplate("""\
   .op("${signature}",
-    ${op1},
-    ${op2})
+    ${op})
 """)
 
 
@@ -292,7 +291,7 @@ def gen_unboxing_wrappers(
 
     ops = []
 
-    def get_invocation(decl, args, num_inputs, *, passThroughDispatchKeys):
+    def get_invocation(decl, args, num_inputs):
 
         # because the arg list can get lengthy we put them on a separate line
         def pack_arguments(args):
@@ -327,15 +326,10 @@ def gen_unboxing_wrappers(
             for a in decl['arguments']:
                 if 'type' not in a:
                     raise Exception(decl)
-            argument_types = [a['type'] for a in decl['arguments']]
-            args_copy = args
-            if passThroughDispatchKeys:
-                argument_types = ['c10::DispatchKeySet'] + argument_types
-                args_copy = ['ks'] + args
-            argument_types_with_leading_comma = ", ".join(argument_types)
+            argument_types_with_leading_comma = ", ".join([a['type'] for a in decl['arguments']])
             if argument_types_with_leading_comma != "":
                 argument_types_with_leading_comma = ", " + argument_types_with_leading_comma
-            args_with_leading_comma = pack_arguments(args_copy)
+            args_with_leading_comma = pack_arguments(args)
             if args_with_leading_comma != "":
                 args_with_leading_comma = ", " + args_with_leading_comma
             return CALL_UNBOXED_KERNEL.substitute(name=decl['name'],
@@ -358,7 +352,7 @@ def gen_unboxing_wrappers(
         jit_type = jit_type_of(arg)
         return jit_type.startswith('Tensor') and '!' in jit_type
 
-    def emit_decl_variant(decl, *, passThroughDispatchKeys):
+    def emit_decl_variant(decl):
         if ('emit_dummy_placeholder' in decl):
             return "DUMMY_OPERATION"
         kw_assignments = []
@@ -379,7 +373,7 @@ def gen_unboxing_wrappers(
                 value = arg['name']
             arguments.append(value)
 
-        call = get_invocation(decl, arguments, num_inputs, passThroughDispatchKeys=passThroughDispatchKeys)
+        call = get_invocation(decl, arguments, num_inputs)
 
         returns = decl['returns']
 
@@ -497,8 +491,7 @@ def gen_unboxing_wrappers(
         for decl in group:
             if decl['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper':
                 shards[x].append(OPERATOR.substitute(signature=decl['schema_string'],
-                                                     op1=emit_decl_variant(decl, passThroughDispatchKeys=False),
-                                                     op2=emit_decl_variant(decl, passThroughDispatchKeys=True)))
+                                                     op=emit_decl_variant(decl)))
             else:
                 assert decl['use_c10_dispatcher'] in ['full', 'hacky_wrapper_for_legacy_signatures']
 

@@ -81,11 +81,11 @@ forward graph of the parent module,
     # symbolically trace the model
     if not is_standalone_module:
         # standalone module and custom module config are applied in top level module
-        standalone_module_names = prepare_custom_config_dict.get('standalone_module_name', [])
-        skipped_module_names += standalone_module_names
+        standalone_module_name_configs = prepare_custom_config_dict.get("standalone_module_name", [])
+        skipped_module_names += [config[0] for config in standalone_module_name_configs]
 
-        standalone_module_classes = prepare_custom_config_dict.get('standalone_module_class', [])
-        skipped_module_classes += standalone_module_classes
+        standalone_module_class_configs = prepare_custom_config_dict.get("standalone_module_class", [])
+        skipped_module_classes += [config[0] for config in standalone_module_class_configs]
         float_custom_module_classes = get_custom_module_class_keys(
             prepare_custom_config_dict, "float_to_observed_custom_module_class")
         skipped_module_classes += float_custom_module_classes
@@ -178,11 +178,19 @@ def prepare_fx(
         # optional: specify the path for standalone modules
         # These modules are symbolically traced and quantized as one unit
         "standalone_module_name": [
-           "submodule.standalone"
+           # module_name, qconfig_dict, prepare_custom_config_dict
+           ("submodule.standalone",
+            None,  # qconfig_dict for the prepare function called in the submodule,
+                   # None means use qconfig from parent qconfig_dict
+            {"input_quantized_idxs": [], "output_quantized_idxs": []})  # prepare_custom_config_dict
         ],
 
         "standalone_module_class": [
-            StandaloneModule
+            # module_class, qconfig_dict, prepare_custom_config_dict
+            (StandaloneModule,
+             None,  # qconfig_dict for the prepare function called in the submodule,
+                    # None means use qconfig from parent qconfig_dict
+            {"input_quantized_idxs": [0], "output_quantized_idxs": [0]})  # prepare_custom_config_dict
         ],
 
         # user will manually define the corresponding observed

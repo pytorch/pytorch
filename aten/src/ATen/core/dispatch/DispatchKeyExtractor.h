@@ -25,7 +25,7 @@ const DispatchKeySet always_included{DispatchKey::BackendSelect};
 //
 // Unlike Tensor::key_set(), the value of this on a tensor can change depending
 // on TLS.
-static inline DispatchKeySet dispatchTypeId(
+static inline DispatchKeySet computeDispatchKeySet(
     DispatchKeySet ks,
     // The key mask lets us eliminate (by zero entries) keys which should not
     // be considered for dispatch.  There are two cases when we use this:
@@ -168,7 +168,7 @@ private:
       DispatchKeySet eligibleKeys,
       DispatchKeySet ks
   ) const {
-    return impl::dispatchTypeId(ks,
+    return impl::computeDispatchKeySet(ks,
       // Keys that are fallthrough should be skipped
         nonFallthroughKeys_
       // Regardless of fallthrough behavior, only accept keys which are eligible

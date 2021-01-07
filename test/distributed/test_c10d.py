@@ -291,7 +291,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
         return store
 
     def test_address_already_in_use(self):
-        if sys.platform == 'win32':
+        if sys.platform == "win32":
             err_msg_reg = "Only one usage of each socket address*"
         else:
             err_msg_reg = "^Address already in use$"
@@ -338,6 +338,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
     @slowTest
     def test_numkeys_delkeys(self):
         self._test_numkeys_delkeys(self._create_store())
+
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
@@ -3803,15 +3804,21 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         # Get GPU model with the hook registered.
-        state = powerSGD.PowerSGDState(
-            process_group=process_group, matrix_approximation_rank=1
-        )
-        gpu_model = self._gpu_model_with_ddp_comm_hook(
-            process_group, powerSGD.powerSGD_hook, gradient_as_bucket_view, state
-        )
+        # Test the hook with different algorithmic configs.
+        for use_error_feedback, warm_start in product([True, False], [True, False]):
+            state = powerSGD.PowerSGDState(
+                process_group=process_group,
+                matrix_approximation_rank=1,
+                use_error_feedback=use_error_feedback,
+                warm_start=warm_start,
+            )
+            for hook in [powerSGD.powerSGD_hook, powerSGD.batched_powerSGD_hook]:
+                gpu_model = self._gpu_model_with_ddp_comm_hook(
+                    process_group, hook, gradient_as_bucket_view, state
+                )
 
-        # check whether the grads are equal to what DDP without hook would return.
-        self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
+                # check whether the grads are equal to what DDP without hook would return.
+                self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
 
     def _test_builtin_ddp_comm_hooks_nccl(self, gradient_as_bucket_view=False):
         """
@@ -4633,6 +4640,43 @@ class CommTest(MultiProcessTestCase):
 
             with self.assertRaisesRegex(RuntimeError, "Timed out initializing process group"):
                 c10d.new_group([0], timeout=timedelta(seconds=1))
+
+    @requires_nccl()
+    @skip_if_not_multigpu
+    def test_nccl_barrier_device_ids(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store)
+
+        c10d.barrier(device_ids=[self.rank])
+
+    @requires_nccl()
+    @skip_if_not_multigpu
+    def test_nccl_barrier_device_ids_function_argument(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store)
+
+        with self.assertRaisesRegex(RuntimeError, "Invalid function argument"):
+            c10d.barrier(device_ids=self.rank)
+
+    @requires_gloo()
+    def test_gloo_barrier_device_ids(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="gloo",
+            rank=self.rank,
+            world_size=self.world_size,
+            store=store)
+
+        with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
+            c10d.barrier(device_ids=[self.rank])
 
 if __name__ == "__main__":
     assert (

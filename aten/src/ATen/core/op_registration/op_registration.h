@@ -18,18 +18,21 @@ namespace c10 {
 
 namespace detail {
 template<class KernelFunctor>
-std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor() {
+std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor(
+          std::enable_if_t<!c10::guts::infer_function_traits_t<KernelFunctor>::first_arg_is_dispatchKeySet::value, std::nullptr_t> = nullptr) {
   using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type;
   return std::make_unique<FunctionSchema>(inferFunctionSchemaFlattenedReturns<func_type>("", ""));
 }
 
+// Specialization for when the first argument is of type DispatchKeySet
+// We do this because every argument in a function schema is expected to be convertable
+// to an ivalue, but DispatchKeySet is not a type we want the jit to be aware of.
+// See Note [Plumbing Keys Through The Dispatcher]
 template<class KernelFunctor>
-std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor_withKeys() {
+std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor(
+          std::enable_if_t<c10::guts::infer_function_traits_t<KernelFunctor>::first_arg_is_dispatchKeySet::value, std::nullptr_t> = nullptr) {
   // Hide the first argument of the schema, which is expected to be of type DispatchKeySet.
-  // We do this because every argument in a function schema is expected to be convertable
-  // to an ivalue, but DispatchKeySet is not a type we want the jit to be aware of.
-  // See Note [Plumbing Keys Through The Dispatcher]
-  using func_type = typename c10::guts::infer_function_traits_withKeys_t<KernelFunctor>::func_type;
+  using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type_skip_first_arg;
   return std::make_unique<FunctionSchema>(inferFunctionSchemaFlattenedReturns<func_type>("", ""));
 }
 }
