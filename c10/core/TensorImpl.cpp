@@ -44,6 +44,17 @@ const at::Tensor& TensorImpl::grad() const {
   return autograd_meta_->grad();
 }
 
+const at::Tensor& TensorImpl::fw_grad(uint64_t level, const at::Tensor& self) const {
+  // See TensorImpl::grad() above for explanation about the line below
+  if (!autograd_meta_) return impl::GetAutogradMetaFactory()->undefined_tensor();
+  return autograd_meta_->fw_grad(level, self);
+}
+
+void TensorImpl::set_fw_grad(const at::Tensor& new_grad, const at::Tensor& self, uint64_t level, bool is_inplace_op) {
+  if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
+  autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
+}
+
 TensorImpl::TensorImpl(
     Storage&& storage,
     DispatchKeySet key_set,
@@ -293,7 +304,8 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
     const c10::VariableVersion& version_counter,
     bool allow_tensor_metadata_change) const {
   auto impl = c10::make_intrusive<TensorImpl>(
-      Storage(storage()), key_set_, data_type_);
+      // No need to populate Storage; copy_tensor_metadata will do it for us.
+      key_set_, data_type_, device_opt_);
   copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
@@ -308,7 +320,8 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
     c10::VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
   auto impl = c10::make_intrusive<TensorImpl>(
-      Storage(storage()), key_set_, data_type_);
+      // No need to populate Storage; copy_tensor_metadata will do it for us.
+      key_set_, data_type_, device_opt_);
   copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),

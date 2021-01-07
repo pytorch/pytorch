@@ -62,6 +62,32 @@ class TestTorchbind(JitTestCase):
             return ss1.pop() + ss2.pop()
         test_equality(f, lambda x: x)
 
+        # test nn module with prepare_scriptable function
+        class NonJitableClass(object):
+            def __init__(self, int1, int2):
+                self.int1 = int1
+                self.int2 = int2
+
+            def return_vals(self):
+                return self.int1, self.int2
+
+        class CustomWrapper(torch.nn.Module):
+            def __init__(self, foo):
+                super(CustomWrapper, self).__init__()
+                self.foo = foo 
+
+            def forward(self) -> None:
+                self.foo.increment(1)
+                return
+
+            def __prepare_scriptable__(self):
+                int1, int2 = self.foo.return_vals()
+                foo = torch.classes._TorchScriptTesting._Foo(int1, int2)
+                return CustomWrapper(foo) 
+
+        foo = CustomWrapper(NonJitableClass(1, 2))
+        jit_foo = torch.jit.script(foo)
+
     def test_torchbind_take_as_arg(self):
         global StackString  # see [local resolution in python]
         StackString = torch.classes._TorchScriptTesting._StackString
@@ -239,6 +265,10 @@ class TestTorchbind(JitTestCase):
 
         traced = torch.jit.trace(TryTracing(), ())
         self.assertEqual(torch.zeros(4, 4), traced())
+
+    def test_torchbind_pass_wrong_type(self):
+        with self.assertRaisesRegex(RuntimeError, 'missing attribute capsule'):
+            torch.ops._TorchScriptTesting.take_an_instance(torch.rand(3, 4))
 
     def test_torchbind_tracing_nested(self):
         class TryTracingNest(torch.nn.Module):

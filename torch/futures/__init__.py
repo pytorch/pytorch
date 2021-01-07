@@ -51,7 +51,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         this ``Future``. The callback function can use the ``Future.wait()`` API
         to get the value.
 
-        Arguments:
+        Args:
             callback(``Callable``): a ``Callable`` that takes this ``Future`` as
                                     the only argument.
 
@@ -97,7 +97,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         use the same callback registration API under the hood, and thus the order of
         their callbacks will be maintained even if their calls are interleaved.
 
-        Arguments:
+        Args:
             callback(``None``): a ``Callable`` that takes in no arguments
 
         Example::
@@ -121,7 +121,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         completed and trigger all attached callbacks. Note that a ``Future``
         cannot be marked completed twice.
 
-        Arguments:
+        Args:
             result (object): the result object of this ``Future``.
 
         Example::
@@ -152,7 +152,7 @@ def collect_all(futures: List[Future]) -> Future[List[Future]]:
     combined :class:`~torch.futures.Future` that is completed when all of the
     sub-futures are completed.
 
-    Arguments:
+    Args:
         futures (list): a list of :class:`~torch.futures.Future` objects.
 
     Returns:
@@ -185,7 +185,7 @@ def wait_all(futures: List[Future]) -> List:
     Waits for all provided futures to be complete, and returns
     the list of completed values.
 
-    Arguments:
+    Args:
         futures (list): a list of :class:`~torch.futures.Future` object.
 
     Returns:

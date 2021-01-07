@@ -320,6 +320,7 @@ struct CanEmitInline {
         // by the later BailOut in createBailoutBlock and its jf_index
         // will become invalid.
         v->node()->kind() != prim::TensorExprGroup &&
+        v->node()->kind() != prim::StaticSubgraph &&
         v->node()->kind() != prim::CudaFusionGroup &&
         v->node()->kind() != prim::FusionGroup &&
         v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
@@ -791,6 +792,9 @@ struct CodeImpl {
     } else if (node->cast<ProfileOptionalOp>()) {
       profile_function_table_.push_back(
           node->cast<ProfileOptionalOp>()->getCallback());
+    } else if (node->cast<ProfileIValueOp>()) {
+      profile_function_table_.push_back(
+          node->cast<ProfileIValueOp>()->getCallback());
     } else {
       TORCH_INTERNAL_ASSERT(false);
     }
@@ -887,6 +891,10 @@ struct CodeImpl {
   }
 
   void emitWarn(Node* node) {
+    if (FLAGS_torch_jit_disable_warning_prints) {
+      return;
+    }
+
     emitLoadInputs(node->inputs());
     int32_t idx = -1;
     if (node->hasAttribute(attr::warn_id)) {
@@ -945,6 +953,7 @@ struct CodeImpl {
       case prim::BailOut:
         emitBailOut(node);
         break;
+      case prim::profile_ivalue:
       case prim::profile_optional:
       case prim::profile:
         emitProfile(node);
@@ -1409,13 +1418,10 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // Check every input's shape against profiled (expected) shape.
             for (i = 0; i < num_inputs; i++) {
               auto& input = peek(stack, i, num_inputs);
-              auto t = input.toTensor();
+              auto& t = input.toTensor();
               const TypePtr& expected = frame.function->type_table_[inst.X + i];
               auto expected_type = expected->cast<TensorType>();
-              if (t.defined() &&
-                  (!frames.back().symbols2dims.bindSymbolicShapes(
-                       t.sizes(), expected_type->symbolic_sizes()) ||
-                   !expected_type->matchTensor(t))) {
+              if (t.defined() && !expected_type->matchTensor(t)) {
                 push(stack, false);
                 break;
               }
@@ -1433,7 +1439,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               // so it's safe to pass this guard check
               push(stack, true);
             } else {
-              auto t = stack.back().toTensor();
+              auto& t = stack.back().toTensor();
               const TypePtr& expected = frame.function->type_table_[inst.X];
               auto expected_type = expected->cast<TensorType>();
               if (t.defined() &&
@@ -1489,7 +1495,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++frame.pc;
           } break;
           case LIST_CONSTRUCT: {
-            auto type = frame.function->type_table_[inst.X]->expect<ListType>();
+            const auto& type =
+                frame.function->type_table_[inst.X]->expectRef<ListType>();
             listConstruct(stack, type, inst.N);
             ++frame.pc;
           } break;
@@ -1607,10 +1614,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   }
 
   static void checkAndStartRecordFunction(Frame& frame, Stack& stack) {
+    bool pre_sampled = false;
     if (!frame.record_function && at::hasCallbacks() &&
-        at::isRecordFunctionEnabled()) {
+        at::shouldRunRecordFunction(&pre_sampled)) {
       auto rec_fn = std::make_unique<at::RecordFunction>(
-          at::RecordScope::TORCHSCRIPT_FUNCTION);
+          at::RecordScope::TORCHSCRIPT_FUNCTION, pre_sampled);
       if (rec_fn->isActive()) {
         if (rec_fn->needsInputs()) {
           rec_fn->before(

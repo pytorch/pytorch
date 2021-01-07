@@ -284,6 +284,11 @@ def try_ann_to_type(ann, loc):
     if is_dict(ann):
         key = try_ann_to_type(ann.__args__[0], loc)
         value = try_ann_to_type(ann.__args__[1], loc)
+        # Raise error if key or value is None
+        if key is None:
+            raise ValueError(f"Unknown type annotation: '{ann.__args__[0]}' at {loc.highlight()}")
+        if value is None:
+            raise ValueError(f"Unknown type annotation: '{ann.__args__[1]}' at {loc.highlight()}")
         return DictType(key, value)
     if is_optional(ann):
         if issubclass(ann.__args__[1], type(None)):

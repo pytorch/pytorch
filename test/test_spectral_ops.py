@@ -188,13 +188,13 @@ class TestFFT(TestCase):
     def test_fft_invalid_dtypes(self, device):
         t = torch.randn(64, device=device, dtype=torch.complex128)
 
-        with self.assertRaisesRegex(RuntimeError, "Expected a real input tensor"):
+        with self.assertRaisesRegex(RuntimeError, "rfft expects a real input tensor"):
             torch.fft.rfft(t)
 
-        with self.assertRaisesRegex(RuntimeError, "Expected a real input tensor"):
+        with self.assertRaisesRegex(RuntimeError, "rfftn expects a real-valued input tensor"):
             torch.fft.rfftn(t)
 
-        with self.assertRaisesRegex(RuntimeError, "Expected a real input tensor"):
+        with self.assertRaisesRegex(RuntimeError, "ihfft expects a real input tensor"):
             torch.fft.ihfft(t)
 
     @skipCUDAIfRocm
@@ -244,17 +244,6 @@ class TestFFT(TestCase):
         x = torch.randn(64, device=device).to(dtype)
         with self.assertRaisesRegex(RuntimeError, "Unsupported dtype "):
             op(x)
-
-
-    def _fft_grad_check_helper(self, torch_fn, input, args):
-        inputs = (input.detach().requires_grad_(),)
-
-        def test_fn(x):
-            return torch_fn(x, *args)
-
-        self.assertTrue(torch.autograd.gradcheck(test_fn, inputs))
-        if TEST_WITH_SLOW:
-            self.assertTrue(gradgradcheck(test_fn, inputs))
 
     # nd-fft tests
 
@@ -334,10 +323,10 @@ class TestFFT(TestCase):
     def test_fftn_invalid(self, device, dtype, op):
         a = torch.rand(10, 10, 10, device=device, dtype=dtype)
 
-        with self.assertRaisesRegex(RuntimeError, "FFT dims must be unique"):
+        with self.assertRaisesRegex(RuntimeError, "dims must be unique"):
             op(a, dim=(0, 1, 0))
 
-        with self.assertRaisesRegex(RuntimeError, "FFT dims must be unique"):
+        with self.assertRaisesRegex(RuntimeError, "dims must be unique"):
             op(a, dim=(2, -1))
 
         with self.assertRaisesRegex(RuntimeError, "dim and shape .* same length"):
@@ -445,10 +434,10 @@ class TestFFT(TestCase):
                      torch.fft.rfft2, torch.fft.irfft2)
 
         for func in fft_funcs:
-            with self.assertRaisesRegex(RuntimeError, "FFT dims must be unique"):
+            with self.assertRaisesRegex(RuntimeError, "dims must be unique"):
                 func(a, dim=(0, 0))
 
-            with self.assertRaisesRegex(RuntimeError, "FFT dims must be unique"):
+            with self.assertRaisesRegex(RuntimeError, "dims must be unique"):
                 func(a, dim=(2, -1))
 
             with self.assertRaisesRegex(RuntimeError, "dim and shape .* same length"):
@@ -458,7 +447,7 @@ class TestFFT(TestCase):
                 func(a, dim=(2, 3))
 
         c = torch.complex(a, a)
-        with self.assertRaisesRegex(RuntimeError, "Expected a real input"):
+        with self.assertRaisesRegex(RuntimeError, "rfftn expects a real-valued input"):
             torch.fft.rfft2(c)
 
     # Helper functions
@@ -489,6 +478,19 @@ class TestFFT(TestCase):
                 expected = numpy_fn(*args)
                 actual = torch_fn(*args, device=device, dtype=dtype)
                 self.assertEqual(actual, expected, exact_dtype=False)
+
+    @skipCPUIfNoMkl
+    @skipCUDAIfRocm
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float, torch.double)
+    def test_fftfreq_out(self, device, dtype):
+        for func in (torch.fft.fftfreq, torch.fft.rfftfreq):
+            expect = func(n=100, d=.5, device=device, dtype=dtype)
+            actual = torch.empty((), device=device, dtype=dtype)
+            with self.assertWarnsRegex(UserWarning, "out tensor will be resized"):
+                func(n=100, d=.5, out=actual)
+            self.assertEqual(actual, expect)
+
 
     @skipCPUIfNoMkl
     @skipCUDAIfRocm
@@ -710,7 +712,9 @@ class TestFFT(TestCase):
             else:
                 window = None
             if expected_error is None:
-                result = x.stft(n_fft, hop_length, win_length, window, center=center)
+                with self.maybeWarnsRegex(UserWarning, "stft with return_complex=False"):
+                    result = x.stft(n_fft, hop_length, win_length, window,
+                                    center=center, return_complex=False)
                 # NB: librosa defaults to np.complex64 output, no matter what
                 # the input dtype
                 ref_result = librosa_stft(x, n_fft, hop_length, win_length, window, center)
@@ -922,14 +926,21 @@ class TestFFT(TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'complex'):
                     x.stft(10, window=window, pad_mode='constant', onesided=True)
             else:
-                y = x.stft(10, window=window, pad_mode='constant', onesided=True)
-                self.assertEqual(y.dtype, torch.double)
-                self.assertEqual(y.size(), (6, 51, 2))
+                y = x.stft(10, window=window, pad_mode='constant', onesided=True,
+                           return_complex=True)
+                self.assertEqual(y.dtype, torch.cdouble)
+                self.assertEqual(y.size(), (6, 51))
 
-        y = torch.rand(100, device=device, dtype=torch.double)
-        window = torch.randn(10, device=device, dtype=torch.cdouble)
+        x = torch.rand(100, device=device, dtype=torch.cdouble)
         with self.assertRaisesRegex(RuntimeError, 'complex'):
             x.stft(10, pad_mode='constant', onesided=True)
+
+    # stft is currently warning that it requires return-complex while an upgrader is written
+    def test_stft_requires_complex(self, device):
+        x = torch.rand(100)
+        y = x.stft(10, pad_mode='constant')
+        # with self.assertRaisesRegex(RuntimeError, 'stft requires the return_complex parameter'):
+        #     y = x.stft(10, pad_mode='constant')
 
     @skipCUDAIfRocm
     @skipCPUIfNoMkl
@@ -958,7 +969,7 @@ class TestFFT(TestCase):
     def test_istft_round_trip_simple_cases(self, device, dtype):
         """stft -> istft should recover the original signale"""
         def _test(input, n_fft, length):
-            stft = torch.stft(input, n_fft=n_fft)
+            stft = torch.stft(input, n_fft=n_fft, return_complex=True)
             inverse = torch.istft(stft, n_fft=n_fft, length=length)
             self.assertEqual(input, inverse, exact_dtype=True)
 
@@ -980,7 +991,7 @@ class TestFFT(TestCase):
             for sizes in data_sizes:
                 for i in range(num_trials):
                     original = torch.randn(*sizes, dtype=dtype, device=device)
-                    stft = torch.stft(original, **stft_kwargs)
+                    stft = torch.stft(original, return_complex=True, **stft_kwargs)
                     inversed = torch.istft(stft, length=original.size(1), **istft_kwargs)
 
                     # trim the original for case when constructed signal is shorter than original
