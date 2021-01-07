@@ -573,7 +573,7 @@ static void eraseListConstruct(Block* block, int opset_version) {
         auto* lc_node = input->node();
         TypePtr elem =
             lc_node->output()->type()->castRaw<ListType>()->getElementType();
-        if (elem->cast<IntType>()) {
+        if (elem->castRaw<IntType>()) {
           // ListConstruct Int[] output case, we need to transform to ONNX
           // Concat to ensure the output is a single tensor(dynamic) type in
           // order to be consumed as inputs

@@ -572,7 +572,7 @@ class IrParser {
                    static_cast<c10::TypePtr>(NoneType::get()))) {
       // TODO: should we consider adding support for NoneType;
       return true;
-    } else if (val->type()->cast<ListType>()) {
+    } else if (val->type()->castRaw<ListType>()) {
       // TODO: we don't support list type in codegen yet;
       // This is a WAR to allow axes of reduction to be passed as constant list;
       // We simply ignore conversion if the scalar value is a constant;

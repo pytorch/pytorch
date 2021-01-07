@@ -34,7 +34,7 @@ void inlineForkedClosure(Node* fork_closure) {
                         ->setSourceRange(fork_closure->sourceRange());
 
   if (fork_graph->inputs().size() != 1 ||
-      !fork_graph->inputs().at(0)->type()->cast<TupleType>()) {
+      !fork_graph->inputs().at(0)->type()->castRaw<TupleType>()) {
     throw ErrorReport(fork_node->sourceRange())
         << "Cannot fork lambda with parameters";
   }

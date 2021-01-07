@@ -457,7 +457,7 @@ struct MethodValue : public SugaredValue {
     argsWithSelf.insert(argsWithSelf.end(), args.begin(), args.end());
     std::vector<const FunctionSchema*> schemas;
     for (const std::string& method_name : method_names_) {
-      if (auto class_type = self_->type()->cast<ClassType>()) {
+      if (auto* class_type = self_->type()->castRaw<ClassType>()) {
         Function& method = class_type->getMethod(method_name);
         try {
           method.ensure_defined();
@@ -467,7 +467,7 @@ struct MethodValue : public SugaredValue {
               << "Recursive calls are not supported";
         }
         schemas.push_back(&method.getSchema());
-      } else if (auto interface_type = self_->type()->cast<InterfaceType>()) {
+      } else if (auto* interface_type = self_->type()->castRaw<InterfaceType>()) {
         schemas.push_back(interface_type->getMethod(method_name));
       } else {
         TORCH_INTERNAL_ASSERT(

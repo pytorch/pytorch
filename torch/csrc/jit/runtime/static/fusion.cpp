@@ -63,7 +63,7 @@ bool canHandle(Node* node) {
         return false;
       }
       for (auto& t : tuple_type->elements()) {
-        if (!t->cast<TensorType>()) {
+        if (!t->castRaw<TensorType>()) {
           return false;
         }
       }
@@ -82,7 +82,7 @@ bool canHandle(Node* node) {
         kind == prim::StaticSubgraph);
     if (kind == prim::TupleConstruct || kind == prim::ListConstruct) {
       for (Value* input : node->inputs()) {
-        if (!input->type()->cast<TensorType>()) {
+        if (!input->type()->castRaw<TensorType>()) {
           return false;
         }
       }

@@ -48,7 +48,7 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::fromJitType(
   builder.setPoisoned();
 
   // `type` should either be a module interface or a class type
-  if (auto interface = type->cast<InterfaceType>()) {
+  if (auto* interface = type->castRaw<InterfaceType>()) {
     TORCH_INTERNAL_ASSERT(interface->is_module());
   } else {
     const auto classType = type->expect<ClassType>();

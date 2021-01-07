@@ -883,7 +883,7 @@ bool AliasDb::functionalNonEscapingListUse(const Use& use) const {
   Value* container = n->inputs().at(offset);
 
   // only consider aten op uses of lists
-  if (!container->type()->cast<ListType>()) {
+  if (!container->type()->castRaw<ListType>()) {
     return false;
   }
 

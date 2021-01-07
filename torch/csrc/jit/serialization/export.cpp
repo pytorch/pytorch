@@ -323,7 +323,7 @@ void EncoderBase::EncodeValueInfo(
   std::string name = n->debugName();
   v->set_name(name);
   auto tensorTypeToONNXType = [&dynamic_axes, &name, this](
-                                  const TensorTypePtr& t,
+                                  const TensorType* t,
                                   onnx::TypeProto_Tensor* tensor_type) {
     if (t->dim()) {
       onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
@@ -351,20 +351,20 @@ void EncoderBase::EncodeValueInfo(
     }
   };
 
-  if (TensorTypePtr node_type = n->type()->cast<TensorType>()) {
+  if (auto* node_type = n->type()->castRaw<TensorType>()) {
     if (node_type->dim() || node_type->scalarType()) {
       // Encode type if either shape or dtype exists.
       onnx::TypeProto* onnx_type = v->mutable_type();
       onnx::TypeProto_Tensor* tensor_type = onnx_type->mutable_tensor_type();
       tensorTypeToONNXType(node_type, tensor_type);
     }
-  } else if (BoolTypePtr node_type = n->type()->cast<BoolType>()) {
+  } else if (n->type()->castRaw<BoolType>()) {
     onnx::TypeProto* onnx_type = v->mutable_type();
     onnx::TypeProto_Tensor* tensor_type = onnx_type->mutable_tensor_type();
     tensor_type->set_elem_type(ATenTypeToOnnxType(at::kBool));
-  } else if (ListTypePtr list_type = n->type()->cast<ListType>()) {
+  } else if (auto* list_type = n->type()->castRaw<ListType>()) {
     auto elem_type = list_type->getElementType();
-    if (TensorTypePtr inner_node_type = elem_type->cast<TensorType>()) {
+    if (auto* inner_node_type = elem_type->castRaw<TensorType>()) {
       onnx::TypeProto* onnx_type = v->mutable_type();
       onnx::TypeProto_Sequence* sequence_type =
           onnx_type->mutable_sequence_type();

@@ -17,7 +17,7 @@ bool getRequiresGrad(Value* value) {
 }
 
 void setRequiresGrad(Value* value, bool req_value) {
-  if (auto type = value->type()->cast<TensorType>()) {
+  if (auto* type = value->type()->castRaw<TensorType>()) {
     value->setType(type->withRequiresGrad(req_value));
   }
 }
@@ -73,7 +73,7 @@ void PropagateRequiresGradSimpleNode(Node* node) {
         return setRequiresGrad(node->output(), *const_arg);
       }
     }
-    if (auto type = node->output()->type()->cast<TensorType>()) {
+    if (auto* type = node->output()->type()->castRaw<TensorType>()) {
       if (type->scalarType()) {
         setRequiresGrad(
             node->output(),
@@ -88,7 +88,7 @@ void PropagateRequiresGradSimpleNode(Node* node) {
   bool should_require =
       std::any_of(inputs.begin(), inputs.end(), getRequiresGrad);
   for (Value* output : outputs) {
-    if (auto type = output->type()->cast<TensorType>()) {
+    if (auto* type = output->type()->castRaw<TensorType>()) {
       if (type->scalarType()) {
         setRequiresGrad(
             output,

@@ -238,7 +238,7 @@ void checkMutableFunctionDefault(
     const SourceRange& range,
     const Argument& arg,
     const py::object& def_arg) {
-  if (checkMutableFunctionDefault(def_arg) || arg.type()->cast<ClassType>()) {
+  if (checkMutableFunctionDefault(def_arg) || arg.type()->castRaw<ClassType>()) {
     throw ErrorReport(range)
         << "Mutable default parameters are not supported because Python binds them to the function"
         << " and they persist across function calls.\n As a workaround, make the default None and instantiate"
@@ -449,7 +449,7 @@ static void setInputTensorTypes(Graph& g, const Stack& stack, bool complete) {
     // Leave packed param types alone. This is needed for downstream passes
     // (like alias analysis) to work properly. This will be unpacked later
     // in unpackQuantizedWeights.
-    if (auto named_type = v->type()->cast<c10::NamedType>()) {
+    if (auto* named_type = v->type()->castRaw<c10::NamedType>()) {
       if (auto qualname = named_type->name()) {
         if (getCustomClass(qualname->qualifiedName())) {
           s_iter++;
@@ -529,7 +529,7 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
              ->isSubtypeOf(unshapedType(item.b.type()))) {
       // Since named types are saved and loaded in the test suite, we cannot
       // expect them to be equal. We should still check their slots however.
-      if (!item.a.type()->cast<c10::NamedType>()) {
+      if (!item.a.type()->castRaw<c10::NamedType>()) {
         return false;
       }
     }

@@ -38,7 +38,7 @@ bool isValidArgumentForRunning(Value* v) {
   // allow constants
   if (toIValue(v))
     return true;
-  if (TensorTypePtr tt = v->type()->cast<TensorType>()) {
+  if (auto* tt = v->type()->castRaw<TensorType>()) {
     if (!tt->scalarType()) {
       return false;
     }
@@ -159,7 +159,7 @@ class ShapePropagator {
     if (auto iv = toIValue(v)) {
       return *iv;
     }
-    if (TensorTypePtr type = type_->cast<TensorType>()) {
+    if (auto* type = type_->castRaw<TensorType>()) {
       if (type->isComplete()) {
         auto attype = type->device()->is_cpu() ? at::CPU(*type->scalarType())
                                                : at::CUDA(*type->scalarType());
@@ -475,7 +475,7 @@ class ShapePropagator {
     static const auto propagate = [](Node* node,
                                      at::ArrayRef<Value*> tensors) -> bool {
       for (Value* v : tensors) {
-        if (auto type = v->type()->cast<TensorType>()) {
+        if (auto* type = v->type()->castRaw<TensorType>()) {
           node->output()->setType(type->dimensionedOnly());
           return true;
         }
@@ -737,7 +737,7 @@ class ShapePropagator {
   }
 
   static c10::optional<size_t> determineListSize(Value* list) {
-    AT_ASSERT(list->type()->cast<ListType>());
+    AT_ASSERT(list->type()->castRaw<ListType>());
     if (auto shape = constant_as<c10::List<int64_t>>(list)) {
       return shape->size();
     }
@@ -1188,7 +1188,7 @@ class ShapePropagator {
             "aten::prelu(Tensor self, Tensor weight) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
-          if (auto type = node->input(0)->type()->cast<TensorType>()) {
+          if (auto* type = node->input(0)->type()->castRaw<TensorType>()) {
             return {type->dimensionedOnly()};
           }
           return {};
@@ -1218,7 +1218,7 @@ class ShapePropagator {
             "aten::any(Tensor self) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
-          if (auto type = node->input(0)->type()->cast<TensorType>()) {
+          if (auto* type = node->input(0)->type()->castRaw<TensorType>()) {
             return {type->withDim(0)};
           }
           return {};
@@ -1236,7 +1236,7 @@ class ShapePropagator {
         {"aten::mean(Tensor self, *, int? dtype) -> Tensor"},
         [](Node* node) -> type_vec_t {
           at::optional<IValue> maybe_dtype_option = node->get(attr::dtype);
-          if (auto type = node->input(0)->type()->cast<TensorType>()) {
+          if (auto* type = node->input(0)->type()->castRaw<TensorType>()) {
             auto ret = type->withDim(0);
             if (maybe_dtype_option && !maybe_dtype_option->isNone()) {
               return {ret->withScalarType(maybe_dtype_option->toScalarType())};
@@ -1327,7 +1327,7 @@ class ShapePropagator {
             "aten::argmin(Tensor self, int? dim, bool keepdim) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
-          if (auto type = node->input(0)->type()->cast<TensorType>()) {
+          if (auto* type = node->input(0)->type()->castRaw<TensorType>()) {
             if (node->input(1)->type()->kind() == c10::TypeKind::NoneType) {
               return {type->withDim(0)};
             } else {
@@ -1503,8 +1503,8 @@ class ShapePropagator {
             "aten::zeros_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
-          if (auto type =
-                  node->namedInput(attr::self)->type()->cast<TensorType>()) {
+          if (auto* type =
+                  node->namedInput(attr::self)->type()->castRaw<TensorType>()) {
             if (type->dim()) {
               return factory_like_with_ndim(node, *type->dim());
             }
@@ -1576,8 +1576,8 @@ class ShapePropagator {
             "aten::_cast_Short(Tensor self, bool non_blocking) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
-          if (auto type =
-                  node->namedInput(attr::self)->type()->cast<TensorType>()) {
+          if (auto* type =
+                  node->namedInput(attr::self)->type()->castRaw<TensorType>()) {
             return {type->withScalarType(get_cast_scalar_type(node))};
           }
           return {};
@@ -1762,7 +1762,7 @@ class ShapePropagator {
           node->matches(
               "aten::as_tensor(Tensor data, *, ScalarType? dtype, Device? device) -> Tensor")) {
         TypePtr input_type = node->inputs().at(0)->type();
-        if (auto type = input_type->cast<TensorType>()) {
+        if (auto* type = input_type->castRaw<TensorType>()) {
           if (type->scalarType() && type->device()) {
             at::ScalarType default_type = *type->scalarType();
             c10::Device default_device = *type->device();

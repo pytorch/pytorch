@@ -134,7 +134,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   }
 
   // accessing fields of named tuples
-  if (auto tuple_type = value_->type()->cast<TupleType>()) {
+  if (auto* tuple_type = value_->type()->castRaw<TupleType>()) {
     if (tuple_type->schema()) {
       auto attrs = tuple_type->schema()->arguments();
       for (size_t i = 0; i < attrs.size(); i++) {
@@ -149,7 +149,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
         }
       }
     }
-  } else if (auto classType = value_->type()->cast<ClassType>()) {
+  } else if (auto* classType = value_->type()->castRaw<ClassType>()) {
     // This is a class, emit the proper attribute lookup
     if (auto method = classType->findMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
@@ -165,12 +165,12 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
       return MethodValue(value_, prop->getter->name())
           .call(loc, m, {}, {}, /*n_binders=*/1);
     }
-  } else if (auto iface = value_->type()->cast<InterfaceType>()) {
+  } else if (auto* iface = value_->type()->castRaw<InterfaceType>()) {
     // accessing methods of interfaces
     if (auto schema = iface->getMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
     }
-  } else if (auto enum_type = value_->type()->cast<EnumType>()) {
+  } else if (value_->type()->castRaw<EnumType>()) {
     // Handle access to Enum's `name` and `value` attribute.
     auto& g = *m.graph();
 
@@ -353,7 +353,7 @@ std::shared_ptr<SugaredValue> SimpleValue::call(
     return FunctionValue(ret).call(loc, m, ctx_inputs, kwargs, n_binders);
   }
 
-  if (auto class_type = getValue()->type()->cast<ClassType>()) {
+  if (getValue()->type()->castRaw<ClassType>()) {
     return attr(loc, m, "__call__")->call(loc, m, args, kwargs, n_binders);
   }
 
@@ -384,16 +384,16 @@ SugaredValuePtr SimpleValue::getitem(
   Graph& g = *m.graph();
 
   // if it's a List/String/Dict, emit a regular __getitem__ op
-  if (val_type->cast<ListType>() || val_type->cast<StringType>()) {
+  if (val_type->castRaw<ListType>() || val_type->castRaw<StringType>()) {
     return std::make_shared<SimpleValue>(
         g.insert(aten::__getitem__, {val, idx}, {}, loc));
-  } else if (auto dict_type = val_type->cast<DictType>()) {
+  } else if (val_type->castRaw<DictType>()) {
     return std::make_shared<SimpleValue>(
         g.insert(aten::__getitem__, {val, idx}, {}, loc));
   } else if (val_type->isSubtypeOf(TensorType::get())) {
     return std::make_shared<SimpleValue>(
         g.insert(aten::select, {val, 0, idx}, {}, loc));
-  } else if (auto class_type = val_type->cast<ClassType>()) {
+  } else if (auto* class_type = val_type->castRaw<ClassType>()) {
     // Check if this is an indexing operation enabled by a type hint.
     // The ModuleDict has already been checked during IR generation to make
     // sure its contents implement the module interface referred to by
@@ -416,16 +416,16 @@ SugaredValuePtr SimpleValue::iter(const SourceRange& loc, Function& m) {
   auto value = getValue();
   auto type = value->type();
   // built-in iterable types
-  if (type->cast<ListType>() || type->cast<StringType>() ||
-      type->cast<TensorType>()) {
+  if (type->castRaw<ListType>() || type->castRaw<StringType>() ||
+      type->castRaw<TensorType>()) {
     return std::make_shared<SimpleValue>(value);
   }
   // dicts iterate over keys
-  if (type->cast<DictType>()) {
+  if (type->castRaw<DictType>()) {
     return std::make_shared<SimpleValue>(
         m.graph()->insert(aten::keys, {value}, {}, loc));
   }
-  if (auto tup = type->cast<TupleType>()) {
+  if (type->castRaw<TupleType>()) {
     auto tup_values = createTupleUnpack(value);
     std::vector<SugaredValuePtr> tup_sugared;
     for (Value* v : tup_values) {
@@ -445,7 +445,7 @@ RangeValue::RangeValue(
     c10::optional<int64_t> static_len) {
   for (size_t i = 0; i < inputs.size(); ++i) {
     auto typ = inputs[i]->type();
-    if (!typ->cast<IntType>()) {
+    if (!typ->castRaw<IntType>()) {
       throw ErrorReport(loc)
           << "all inputs of range must be ints, found " << typ->repr_str()
           << " in argument " << c10::guts::to_string(i);
@@ -588,7 +588,7 @@ std::shared_ptr<SugaredValue> MagicMethod::call(
     size_t n_binders) {
   if (args.size() > 0) {
     Value* self = args[0].value(*m.graph());
-    if (auto class_ptr = self->type()->cast<ClassType>()) {
+    if (self->type()->castRaw<ClassType>()) {
       return SimpleValue(self)
           .attr(loc, m, desugared_name_)
           ->call(loc, m, args.slice(1), kwargs, n_binders);

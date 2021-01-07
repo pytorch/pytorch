@@ -993,7 +993,7 @@ void guardFusionGroup(Node* fusion) {
   for (Value* input : fusion->inputs()) {
     // We only check inputs of the fusion group and expect NNC to infer
     // intermediates and outputs shapes
-    if (!input->type()->cast<TensorType>()) {
+    if (!input->type()->castRaw<TensorType>()) {
       continue;
     }
 

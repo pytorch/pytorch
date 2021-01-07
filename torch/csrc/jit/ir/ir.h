@@ -177,7 +177,7 @@ struct Value {
     return type()->requires_grad();
   }
   bool isCompleteTensor() const {
-    if (auto pt = type()->cast<TensorType>()) {
+    if (auto* pt = type()->castRaw<TensorType>()) {
       return pt->isComplete();
     }
     return false;

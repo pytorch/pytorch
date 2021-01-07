@@ -149,11 +149,11 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
 }
 
 void restoreContainerTypeTags(IValue& ivalue, const TypePtr& type) {
-  if (auto dict_type = type->cast<DictType>()) {
+  if (auto* dict_type = type->castRaw<DictType>()) {
     auto dict = ivalue.toGenericDict();
     dict.unsafeSetKeyType(dict_type->getKeyType());
     dict.unsafeSetValueType(dict_type->getValueType());
-  } else if (auto list_type = type->cast<ListType>()) {
+  } else if (auto* list_type = type->castRaw<ListType>()) {
     ivalue.toList().unsafeSetElementType(list_type->getElementType());
   } else {
     AT_ERROR("Unknown type for tag restoration: " + type->annotation_str());

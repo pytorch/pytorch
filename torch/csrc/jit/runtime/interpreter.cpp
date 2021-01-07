@@ -941,7 +941,7 @@ struct CodeImpl {
             node->inputs().slice(1));
         break;
       case prim::CallMethod:
-        if (auto class_type = node->inputs().at(0)->type()->cast<ClassType>()) {
+        if (auto* class_type = node->inputs().at(0)->type()->castRaw<ClassType>()) {
           emitCall(&class_type->getMethod(node->s(attr::name)), node->inputs());
         } else {
           emitInterfaceCall(node->s(attr::name), node->inputs());

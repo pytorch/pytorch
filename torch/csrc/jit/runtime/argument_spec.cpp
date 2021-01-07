@@ -41,14 +41,14 @@ void ArgumentSpecCreator::scan(
     // as optional (previously they didn't at all, so it's not a regression).
     num_optionals_++;
     instructions_.emplace_back(SPECIALIZE_OPTIONAL);
-  } else if (auto tup = typ->cast<TupleType>()) {
+  } else if (auto* tup = typ->castRaw<TupleType>()) {
     size_t pos = instructions_.size();
     instructions_.emplace_back(ENTER_TUPLE);
     for (const auto& elem : tup->containedTypes()) {
       scan(elem, depth + 1, written_slots);
     }
     finishAggregate(pos);
-  } else if (auto cls = typ->cast<ClassType>()) {
+  } else if (auto* cls = typ->castRaw<ClassType>()) {
     size_t pos = instructions_.size();
     instructions_.emplace_back(ENTER_OBJECT);
     for (size_t i = 0; i < cls->numAttributes(); ++i) {
@@ -77,7 +77,7 @@ static void scanWrittenSlots(
     ArgumentSpecCreator::WrittenSlots& written_slots) {
   for (Node* n : block->nodes()) {
     if (n->kind() == prim::SetAttr) {
-      if (auto cls = n->inputs().at(0)->type()->cast<ClassType>()) {
+      if (auto* cls = n->inputs().at(0)->type()->castRaw<ClassType>()) {
         written_slots.insert(cls->name()->qualifiedName() + n->s(attr::name));
       }
     }
@@ -265,7 +265,7 @@ void ArgumentSpecCreator::specializeTypes(
   auto inputs = graph.inputs();
   for (size_t i = 0; i < inputs.size(); ++i) {
     auto t = result_stack.back()[i];
-    if (auto ot = t->cast<OptionalType>()) {
+    if (t->castRaw<OptionalType>()) {
       // if an optional input hasn't been specialized above, it is None
       // so we disconnect the input here and replace its uses with
       // a constant

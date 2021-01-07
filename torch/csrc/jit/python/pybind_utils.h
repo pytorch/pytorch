@@ -457,11 +457,11 @@ inline bool isTraceableType(const TypePtr& type) {
     return true;
   }
 
-  if (auto list_type = type->cast<ListType>()) {
+  if (auto* list_type = type->castRaw<ListType>()) {
     return isTraceableType(list_type->getElementType());
   }
 
-  if (auto tuple_type = type->cast<TupleType>()) {
+  if (auto* tuple_type = type->castRaw<TupleType>()) {
     return std::all_of(
         tuple_type->elements().begin(),
         tuple_type->elements().end(),
@@ -470,7 +470,7 @@ inline bool isTraceableType(const TypePtr& type) {
         });
   }
 
-  if (auto dict_type = type->cast<DictType>()) {
+  if (auto* dict_type = type->castRaw<DictType>()) {
     return isTraceableType(dict_type->getValueType());
   }
 

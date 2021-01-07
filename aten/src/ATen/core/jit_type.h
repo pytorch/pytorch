@@ -134,7 +134,7 @@ struct TORCH_API OptionalType
     if (Type::isSubtypeOfExt(rhs, why_not)) {
       return true;
     }
-    if (auto rhs_ = rhs->cast<OptionalType>()) {
+    if (auto* rhs_ = rhs->castRaw<OptionalType>()) {
       return getElementType()->isSubtypeOfExt(rhs_->getElementType(), why_not);
     }
     return false;
@@ -781,7 +781,7 @@ struct TORCH_API DictType : public Type {
   }
 
   bool operator==(const Type& rhs) const override {
-    if (auto dict_rhs = rhs.cast<DictType>()) {
+    if (auto* dict_rhs = rhs.castRaw<DictType>()) {
       return *getKeyType() == *(dict_rhs->getKeyType()) &&
           *getValueType() == *(dict_rhs->getValueType());
     }
@@ -832,7 +832,7 @@ struct TORCH_API FutureType
     if (Type::isSubtypeOfExt(rhs, why_not)) {
       return true;
     }
-    if (auto rhs_ = rhs->cast<FutureType>()) {
+    if (auto* rhs_ = rhs->castRaw<FutureType>()) {
       return getElementType()->isSubtypeOfExt(rhs_->getElementType(), why_not);
     }
     return false;
@@ -1026,7 +1026,7 @@ struct TORCH_API EnumType : public NamedType {
   }
 
   bool operator==(const Type& rhs) const override {
-    if (auto enum_rhs = rhs.cast<EnumType>()) {
+    if (auto* enum_rhs = rhs.castRaw<EnumType>()) {
       return name().value() == enum_rhs->name().value() &&
           *getValueType() == *(enum_rhs->getValueType()) &&
           this->compilation_unit() == enum_rhs->compilation_unit();
@@ -1260,7 +1260,7 @@ struct TORCH_API FunctionType : public NamedType {
         new FunctionType(function)); // NOLINT(modernize-make-shared)
   }
   bool operator==(const Type& rhs) const override {
-    if (auto func_type = rhs.cast<FunctionType>()) {
+    if (auto* func_type = rhs.castRaw<FunctionType>()) {
       return func_type->function_ == function_;
     }
 
@@ -1857,7 +1857,7 @@ struct TORCH_API ClassType : public NamedType {
       std::string doc_string = "");
 
   bool operator==(const Type& rhs) const override {
-    if (auto user_rhs = rhs.cast<ClassType>()) {
+    if (auto* user_rhs = rhs.castRaw<ClassType>()) {
       const auto& lhs_name = name().value();
       const auto& rhs_name = user_rhs->name().value();
 
@@ -2203,7 +2203,7 @@ struct TORCH_API InterfaceType : public NamedType {
       QualifiedName qualifiedName, bool is_module=false);
 
   bool operator==(const Type& rhs) const override {
-    if (auto user_rhs = rhs.cast<InterfaceType>()) {
+    if (auto* user_rhs = rhs.castRaw<InterfaceType>()) {
       return isSubTypeImpl(*this, *user_rhs, nullptr) &&
           isSubTypeImpl(*user_rhs, *this, nullptr);
     }

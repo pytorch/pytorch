@@ -83,7 +83,7 @@ class NaiveTypePropagator {
       case aten::gelu:
       case aten::tanh: {
         TORCH_CHECK(
-            hasTypeAndDim(node->input(0)->type()->cast<TensorType>()),
+            hasTypeAndDim(node->input(0)->type()->castRaw<TensorType>()),
             "Type, device, and dimensionality propagation has failed, or was not provided enough information.");
         node->output()->setType(node->input(0)->type()->cast<TensorType>());
         break;
@@ -91,7 +91,7 @@ class NaiveTypePropagator {
       // TODO: rand_like should support cast.
       case aten::rand_like: {
         TORCH_CHECK(
-            hasTypeAndDim(node->input(0)->type()->cast<TensorType>()),
+            hasTypeAndDim(node->input(0)->type()->castRaw<TensorType>()),
             "Type, device, and dimensionality propagation has failed, or was not provided enough information.");
         node->output()->setType(node->input(0)->type()->cast<TensorType>());
         break;

@@ -61,7 +61,7 @@ struct PeepholeOptimizeListIdiomsImpl {
 
       // only optimizing list ops
       if (node->inputs().size() == 0 ||
-          !node->inputs().at(0)->type()->cast<ListType>()) {
+          !node->inputs().at(0)->type()->castRaw<ListType>()) {
         continue;
       }
 

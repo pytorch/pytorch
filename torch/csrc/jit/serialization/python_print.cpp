@@ -1297,7 +1297,7 @@ struct PythonPrintImpl {
         type_printer_(std::move(type_printer)),
         enforce_importable_(enforce_importable) {}
 
-  void printClass(const ClassTypePtr& classType) {
+  void printClass(const ClassType& classType) {
     // If any of the methods are not Graph funtions, this indicates that
     // this class is a custom-bound C++ class. Skip serialization
     // of this class, we will depend on the ClassType being defined
@@ -1396,11 +1396,11 @@ struct PythonPrintImpl {
   }
 
   void printNamedType(const c10::NamedTypePtr& type) {
-    if (auto functionType = type->cast<FunctionType>()) {
+    if (auto* functionType = type->castRaw<FunctionType>()) {
       printFunction(*functionType->function());
-    } else if (auto classType = type->cast<ClassType>()) {
-      printClass(classType);
-    } else if (auto tupleType = type->cast<TupleType>()) {
+    } else if (auto* classType = type->castRaw<ClassType>()) {
+      printClass(*classType);
+    } else if (auto* tupleType = type->castRaw<TupleType>()) {
       TORCH_INTERNAL_ASSERT(tupleType->schema());
       body_ << "class " << tupleType->name()->name();
       body_ << "(NamedTuple):\n";
@@ -1413,7 +1413,7 @@ struct PythonPrintImpl {
                 << attr.type()->annotation_str(type_printer_) << "\n";
         }
       }
-    } else if (auto interfaceType = type->cast<InterfaceType>()) {
+    } else if (auto* interfaceType = type->castRaw<InterfaceType>()) {
       body_ << "class " << interfaceType->name()->name();
       if (interfaceType->is_module()) {
         body_ << "(ModuleInterface):\n";
@@ -1443,7 +1443,7 @@ struct PythonPrintImpl {
           body_ << "  pass\n";
         }
       }
-    } else if (auto enumType = type->cast<EnumType>()) {
+    } else if (auto* enumType = type->castRaw<EnumType>()) {
       body_ << "class " << enumType->qualifiedClassName().name() << "(Enum):\n";
 
       std::string value_wrapper = "";

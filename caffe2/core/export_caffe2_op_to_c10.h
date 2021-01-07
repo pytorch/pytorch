@@ -84,7 +84,7 @@ inline void _call_caffe2_op_from_c10(
   bool return_tensor_list = false;
   if (schema.returns().size() == 1) {
     auto type = schema.returns()[0].type();
-    if (c10::ListTypePtr list_type = type->cast<c10::ListType>()) {
+    if (auto* list_type = type->castRaw<c10::ListType>()) {
       if (list_type->getElementType()->kind() == c10::TypeKind::TensorType) {
         return_tensor_list = true;
       }

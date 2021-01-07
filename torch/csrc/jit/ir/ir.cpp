@@ -352,7 +352,7 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   c10::optional<at::Device> device = c10::nullopt;
   auto checkValue = [&](const Value* v) {
-    if (TensorTypePtr type = v->type()->cast<TensorType>()) {
+    if (auto* type = v->type()->castRaw<TensorType>()) {
       if (type->device() && !has_device) {
         has_device = true;
         device = *type->device();
@@ -954,7 +954,7 @@ bool Node::mustBeNone() const {
       (outputs().size() == 1 && output()->type() == NoneType::get()) ||
       // It's a constant optional with no value in the attributes.
       (kind_ == prim::Constant && !this->hasAttributes() &&
-       output()->type()->cast<OptionalType>());
+       output()->type()->castRaw<OptionalType>());
 }
 
 void Node::dump() const {
@@ -1635,7 +1635,7 @@ Node* Graph::createTupleSlice(
 
 Node* Graph::createEnumName(Value* e) {
   e->type()->expect<EnumType>();
-  assert(e->type()->cast<EnumType>());
+  assert(e->type()->castRaw<EnumType>());
   auto n = create(prim::EnumName, {e});
   n->output()->setType(StringType::get());
   return n;
@@ -1753,7 +1753,7 @@ Value* Graph::insertToList(Value* v, TypePtr type) {
   TypePtr ptr = type;
 
   // Unwrap the type to determine the number of dimensions.
-  while (auto list_type = ptr->cast<ListType>()) {
+  while (auto* list_type = ptr->castRaw<ListType>()) {
     ptr = list_type->getElementType();
     ++dim;
   }

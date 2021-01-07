@@ -55,7 +55,7 @@ void functionCallSubstitution(Block* block) {
       } break;
       case prim::CallMethod: {
         const std::string& name = cur->s(attr::name);
-        if (auto class_type = cur->input(0)->type()->cast<ClassType>()) {
+        if (auto* class_type = cur->input(0)->type()->castRaw<ClassType>()) {
           Function& function = class_type->getMethod(name);
           if (!function.isGraphFunction()) {
             continue;

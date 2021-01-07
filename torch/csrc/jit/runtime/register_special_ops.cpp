@@ -197,7 +197,7 @@ void createTensorFromList(Stack* stack) {
     pop(stack, data, dtype, device);
   }
   auto elem_type = data.type();
-  while (auto list_type = elem_type->cast<ListType>()) {
+  while (auto* list_type = elem_type->castRaw<ListType>()) {
     elem_type = list_type->getElementType();
   }
   auto sizes = compute_sizes(data);

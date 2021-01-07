@@ -321,7 +321,7 @@ void checkInterface(
     Function& m,
     const std::shared_ptr<ModuleValue>& self,
     const std::string& field) {
-  if (self->asValue(loc, m)->type()->cast<InterfaceType>()) {
+  if (self->asValue(loc, m)->type()->castRaw<InterfaceType>()) {
     throw ErrorReport(loc)
         << "Could not compile " << field
         << "() because module is an interface type. Please file issue.";
@@ -497,7 +497,7 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
     const std::string& field) {
   // 1. Look inside Module object for the field.
   const auto& selfType_ = concreteType_->getJitType();
-  if (selfType_->cast<InterfaceType>()) {
+  if (selfType_->castRaw<InterfaceType>()) {
     return std::make_shared<SimpleValue>(self_)->attr(loc, m, field);
   }
 

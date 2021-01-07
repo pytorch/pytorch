@@ -963,7 +963,7 @@ struct to_ir {
 
         // If val is a class instance, this is a method call to a type-specific
         // implementation of del defined in a __delitem__ method.
-        if (auto cls = val->type()->cast<ClassType>()) {
+        if (auto* cls = val->type()->castRaw<ClassType>()) {
           if (!cls->findMethod("__delitem__")) {
             throw ErrorReport(target.range())
                 << "Class does not define __delitem__";
@@ -1133,7 +1133,7 @@ struct to_ir {
     // and (2) only enable this OPTIONAL_NONE when loading newer
     // graphs because it is incompatible with older graphs.
     // Refinement none(name, RefinementKind::OPTIONAL_NONE);
-    if (auto optional_type = lhs_value->type()->cast<OptionalType>()) {
+    if (auto* optional_type = lhs_value->type()->castRaw<OptionalType>()) {
       Refinement present(name, optional_type->getElementType());
       if (tok == TK_IS) {
         return RefinementSet({}, {present});
@@ -1271,7 +1271,7 @@ struct to_ir {
                             ->setType(ListType::ofTensors());
     bool type_set = false;
     if (type_hint) {
-      if (!type_hint->cast<ListType>()) {
+      if (!type_hint->castRaw<ListType>()) {
         throw ErrorReport(loc)
             << "Expected list type annotation for list comprehension"
                ", found "
@@ -1314,7 +1314,7 @@ struct to_ir {
     dict_value->setType(DictType::create(StringType::get(), TensorType::get()));
     bool type_set = false;
     if (type_hint) {
-      if (!type_hint->cast<DictType>()) {
+      if (!type_hint->castRaw<DictType>()) {
         throw ErrorReport(loc)
             << "Expected Dict type annotation for dict comprehension"
                ", found "
@@ -1674,7 +1674,7 @@ struct to_ir {
         if (actual_type->kind() == AnyType::Kind) {
           return true;
         }
-        if (auto op = actual_type->cast<OptionalType>()) {
+        if (auto* op = actual_type->castRaw<OptionalType>()) {
           return op->getElementType()->kind() == kind;
         }
         return false;
@@ -2194,9 +2194,9 @@ struct to_ir {
     }
 
     TypePtr elemType = nullptr;
-    if (const ListTypePtr listType = type->cast<ListType>()) {
+    if (auto* listType = type->castRaw<ListType>()) {
       elemType = listType->getElementType();
-    } else if (const DictTypePtr dictType = type->cast<DictType>()) {
+    } else if (auto* dictType = type->castRaw<DictType>()) {
       elemType = dictType->getKeyType();
     }
 
@@ -2964,7 +2964,7 @@ struct to_ir {
       case prim::list: {
         if (apply.inputs().size() == 0) {
           TypePtr type = type_hint ? type_hint : ListType::ofTensors();
-          if (!type->cast<ListType>()) {
+          if (!type->castRaw<ListType>()) {
             throw ErrorReport(apply.range())
                 << "Expected list type annotation for list(), found "
                 << type_hint->repr_str();
@@ -2982,8 +2982,8 @@ struct to_ir {
         // aten::list builtin op is registered for List and Str input
         // dispatch to the builtin op to avoid perf slowdown on existing uses
         if (auto simple = asSimple(iter_input)) {
-          if (simple->type()->cast<ListType>() ||
-              simple->type()->cast<StringType>()) {
+          if (simple->type()->castRaw<ListType>() ||
+              simple->type()->castRaw<StringType>()) {
             return std::make_shared<SimpleValue>(emitBuiltinCall(
                 apply.range(), *method.graph(), aten::list, {simple}, {}));
           }
@@ -3517,7 +3517,7 @@ struct to_ir {
     }
     // TODO for now let's deal with TupleType first. Ideally all list, tensor,
     // string, and tuple slicing should be same (tugsbayasgalan)
-    if (sliceable->type()->cast<TupleType>()) {
+    if (sliceable->type()->castRaw<TupleType>()) {
       std::vector<at::optional<NamedValue>> tuple_args;
       // since we are only dealing with tuple slicing for now, we try to keep
       // tuple args seperate for now
@@ -4010,7 +4010,7 @@ struct to_ir {
       // a normal value.
       // Desugars gather syntactic sugar foo[i]
       Value* idx = subscript_sv->asValue(val_range, method);
-      if (sliceable->type()->cast<TupleType>()) {
+      if (sliceable->type()->castRaw<TupleType>()) {
         return std::make_shared<SimpleValue>(
             emitTupleIndex(range, sv->asValue(val_range, method), idx));
       } else if (sliceable->type()->isSubtypeOf(TensorType::get())) {

@@ -216,7 +216,7 @@ Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph) {
       // the graph.
       TypePtr elem = v->type()->castRaw<ListType>()->getElementType();
       c10::optional<at::ScalarType> scalar_type = c10::nullopt;
-      if (elem->cast<IntType>()) {
+      if (elem->castRaw<IntType>()) {
         scalar_type = at::kLong;
 
         auto lc_node = v->node();
@@ -240,11 +240,11 @@ Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph) {
           concat_node->addInput(v);
         }
         return concat_node->output();
-      } else if (elem->cast<FloatType>()) {
+      } else if (elem->castRaw<FloatType>()) {
         scalar_type = at::kFloat;
-      } else if (elem->cast<BoolType>()) {
+      } else if (elem->castRaw<BoolType>()) {
         scalar_type = at::kBool;
-      } else if (auto t_type = elem->cast<TensorType>()) {
+      } else if (auto* t_type = elem->castRaw<TensorType>()) {
         scalar_type = t_type->scalarType();
       }
 
@@ -279,15 +279,15 @@ bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
   // Verify if every input has type(either Tensor or Sequence) and scalar type.
   // This is a requirement for ONNX graph inputs.
   for (auto in : graph->inputs()) {
-    if (auto t_type = in->type()->cast<TensorType>()) {
+    if (auto* t_type = in->type()->castRaw<TensorType>()) {
       if (!t_type->scalarType().has_value()) {
         GRAPH_UPDATE(
             "Input ", in->debugName(), " is tensor type, but miss datatype.");
         return false;
       }
-    } else if (auto s_type = in->type()->cast<ListType>()) {
+    } else if (auto* s_type = in->type()->castRaw<ListType>()) {
       auto e_type = s_type->getElementType();
-      if (auto t_type = e_type->cast<TensorType>()) {
+      if (auto* t_type = e_type->castRaw<TensorType>()) {
         if (t_type->scalarType().has_value()) {
           continue;
         }

@@ -337,7 +337,7 @@ static IValue addInput(
     value->setDebugName(name);
     state->setValue(input_tensor, value);
     return input_tensor;
-  } else if (auto tuple_type = type->cast<TupleType>()) {
+  } else if (auto* tuple_type = type->castRaw<TupleType>()) {
     auto unpack_node =
         state->graph->insertNode(state->graph->createTupleUnpack(value));
     auto elem_values = unpack_node->outputs();
@@ -351,7 +351,7 @@ static IValue addInput(
       elems[i] = addInput(state, elems.at(i), elem_types[i], elem_values[i]);
     }
     return tuple;
-  } else if (auto dict_type = type->cast<DictType>()) {
+  } else if (auto* dict_type = type->castRaw<DictType>()) {
     auto dict = input.toGenericDict();
 
     // Unpack the list values statically
@@ -368,7 +368,7 @@ static IValue addInput(
     }
 
     return dict;
-  } else if (auto list_type = type->cast<ListType>()) {
+  } else if (auto* list_type = type->castRaw<ListType>()) {
     size_t num_elems = input.isList() ? input.toListRef().size()
                                       : input.toTensorVector().size();
     auto list_unpack = state->graph->insertNode(

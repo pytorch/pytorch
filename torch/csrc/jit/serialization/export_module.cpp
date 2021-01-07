@@ -156,8 +156,8 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
       for (const auto& input : node->inputs()) {
         const auto& input_type = input->type();
         if (input_type->kind() == TypeKind::TupleType) {
-          if (const auto& name_typed_input =
-                  input_type->cast<at::NamedType>()) {
+          if (auto* name_typed_input =
+                  input_type->castRaw<at::NamedType>()) {
             TORCH_CHECK(
                 !name_typed_input->name(),
                 "A named tuple type is not supported in mobile module. ",

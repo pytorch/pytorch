@@ -126,7 +126,7 @@ IValue tensorToListRecursive(
     at::IntArrayRef strides,
     size_t element_size) {
   // If ty is a ListType, get the element type.
-  if (auto list_type = ty->cast<ListType>()) {
+  if (auto* list_type = ty->castRaw<ListType>()) {
     ty = list_type->getElementType();
   } else {
     // If the output type is a scalar, read and push one scalar of

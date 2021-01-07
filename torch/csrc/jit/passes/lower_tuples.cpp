@@ -81,7 +81,7 @@ static void LowerAllTuples(Block* block);
 
 static void RemoveTupleConstants(Node* n) {
   if (!(n->kind() == prim::Constant &&
-        n->output()->type()->cast<TupleType>())) {
+        n->output()->type()->castRaw<TupleType>())) {
     return;
   }
 
@@ -128,7 +128,7 @@ static void VisitNode(Node* n, Node* insert_point) {
   // flatten the input list  op(a, tup, b) --> op(a, t0, t1, b)
   for (size_t i = 0; i < n->inputs().size();) {
     auto input = n->inputs()[i];
-    if (TupleTypePtr tt = input->type()->cast<TupleType>()) {
+    if (auto* tt = input->type()->castRaw<TupleType>()) {
       TORCH_CHECK(
           supported_ops.count(n->kind()) > 0,
           "tuple appears in op that does not forward tuples, ",
@@ -163,7 +163,7 @@ static void VisitNode(Node* n, Node* insert_point) {
     // and:
     //    tup = (t0, t1)
     // is placed at the current insertion point
-    if (TupleTypePtr tt = output->type()->cast<TupleType>()) {
+    if (auto* tt = output->type()->castRaw<TupleType>()) {
       TORCH_CHECK(
           supported_ops.count(n->kind()) > 0,
           "tuple appears in op that does not forward tuples, ",

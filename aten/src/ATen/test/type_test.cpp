@@ -10,7 +10,7 @@ namespace c10 {
 TEST(TypeCustomPrinter, Basic) {
   TypePrinter printer =
       [](const ConstTypePtr& t) -> c10::optional<std::string> {
-    if (auto tensorType = t->cast<TensorType>()) {
+    if (t->castRaw<TensorType>()) {
       return "CustomTensor";
     }
     return c10::nullopt;
@@ -30,7 +30,7 @@ TEST(TypeCustomPrinter, Basic) {
 TEST(TypeCustomPrinter, ContainedTypes) {
   TypePrinter printer =
       [](const ConstTypePtr& t) -> c10::optional<std::string> {
-    if (auto tensorType = t->cast<TensorType>()) {
+    if (t->castRaw<TensorType>()) {
       return "CustomTensor";
     }
     return c10::nullopt;
@@ -54,7 +54,7 @@ TEST(TypeCustomPrinter, ContainedTypes) {
 TEST(TypeCustomPrinter, NamedTuples) {
   TypePrinter printer =
       [](const ConstTypePtr& t) -> c10::optional<std::string> {
-    if (auto tupleType = t->cast<TupleType>()) {
+    if (auto* tupleType = t->castRaw<TupleType>()) {
       // Rewrite only namedtuples
       if (tupleType->name()) {
         return "Rewritten";

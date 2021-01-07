@@ -87,7 +87,7 @@ bool maybeBroadcastOnShape(
       n->outputs().size() == 1,
       "not expecting multiple outputs from a node, graph partitioning logic needs to be updated");
   // assumes that if output is not a tensor type, it's not broadcasting
-  if (auto out_type = n->output(0)->type()->cast<TensorType>()) {
+  if (auto* out_type = n->output(0)->type()->castRaw<TensorType>()) {
     if (out_type->dim()) {
       if (out_type->dim().value() < shape.size()) {
         // no broadcast for reduction operation;

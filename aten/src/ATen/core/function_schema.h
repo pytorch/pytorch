@@ -56,7 +56,7 @@ struct Argument {
   bool is_inferred_type() const {
     bool is_inferred_type = false;
     TORCH_INTERNAL_ASSERT(type_);
-    if (auto pt = type_->cast<TensorType>()) {
+    if (auto* pt = type_->castRaw<TensorType>()) {
       if (pt->isInferredType()) {
         is_inferred_type = true;
       }

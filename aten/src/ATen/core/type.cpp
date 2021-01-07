@@ -17,7 +17,7 @@ TypeVerbosity type_verbosity() {
 }
 
 std::ostream& operator<<(std::ostream & out, const Type & t) {
-  if (auto value = t.cast<TensorType>()) {
+  if (auto* value = t.castRaw<TensorType>()) {
     if  (value->scalarType().has_value()) {
       out << toString(*value->scalarType());
       if (!value->sizes().size().has_value()) {
@@ -85,7 +85,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   } else if(t.kind() == TypeKind::RRefType) {
     auto elem = t.castRaw<RRefType>()->getElementType();
     out << "RRef[" << *elem << "]";
-  } else if(auto tup = t.cast<TupleType>()) {
+  } else if(auto* tup = t.castRaw<TupleType>()) {
     if (tup->schema()) {
       out << "NamedTuple";
     }
@@ -252,19 +252,19 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
   // Attempt to unify Complete Tensor Types for immutable type containers
 
   // unify(Optional[t1], t2) => Optional[unify(t1, t2)]
-  if (auto opt_t1 = t1->cast<OptionalType>()) {
+  if (auto* opt_t1 = t1->castRaw<OptionalType>()) {
     if (auto elem = unifyTypes(opt_t1->getElementType(), t2)) {
       return OptionalType::create(*elem);
     }
-  } else if (auto opt_t2 = t2->cast<OptionalType>()) {
+  } else if (auto* opt_t2 = t2->castRaw<OptionalType>()) {
     if (auto elem = unifyTypes(opt_t2->getElementType(), t1)) {
       return OptionalType::create(*elem);
     }
   }
 
-  if (t1->cast<TupleType>() && t2->cast<TupleType>()) {
-    auto tuple1 = t1->cast<TupleType>();
-    auto tuple2 = t2->cast<TupleType>();
+  if (t1->castRaw<TupleType>() && t2->castRaw<TupleType>()) {
+    auto* tuple1 = t1->castRaw<TupleType>();
+    auto* tuple2 = t2->castRaw<TupleType>();
     if (tuple1->elements().size() != tuple2->elements().size()) {
       return c10::nullopt;
     }
@@ -279,7 +279,7 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
     return static_cast<TypePtr>(TupleType::create(elements));
   }
 
-  if (t1->cast<FutureType>() && t2->cast<FutureType>()) {
+  if (t1->castRaw<FutureType>() && t2->castRaw<FutureType>()) {
     if (auto elem = unifyTypes(
             t1->castRaw<FutureType>()->getElementType(),
             t2->castRaw<FutureType>()->getElementType())) {
@@ -344,7 +344,7 @@ MatchTypeReturn matchTypeVariables(
     return MatchTypeReturn::Success();
   }
 
-  if (auto vt = formal->cast<VarType>()) {
+  if (auto* vt = formal->castRaw<VarType>()) {
     auto it = type_env.find(vt->name());
     if (it == type_env.end()) {
       type_env[vt->name()] = actual;
@@ -360,8 +360,8 @@ MatchTypeReturn matchTypeVariables(
        << it->second->repr_str() << " is matched to type "
        << actual->repr_str();
     return ss.str();
-  } else if (auto lt_formal = formal->cast<ListType>()) {
-    if (auto lt_actual = actual->cast<ListType>()) {
+  } else if (auto* lt_formal = formal->castRaw<ListType>()) {
+    if (auto* lt_actual = actual->castRaw<ListType>()) {
       const auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
@@ -369,7 +369,7 @@ MatchTypeReturn matchTypeVariables(
         return innerMatch;
       }
       return MatchTypeReturn::Success();
-    } else if (auto tup_type = actual->cast<TupleType>()) {
+    } else if (auto* tup_type = actual->castRaw<TupleType>()) {
       std::stringstream ss;
       auto maybe_tuple_unified = unifyTypeList(tup_type->elements(), ss);
       if (maybe_tuple_unified) {
@@ -382,8 +382,8 @@ MatchTypeReturn matchTypeVariables(
     ss << "Cannot match " << lt_formal->repr_str() << " to "
        << actual->repr_str();
     return ss.str();
-  } else if (auto tp_formal = formal->cast<TupleType>()) {
-    if (auto tp_actual = actual->cast<TupleType>()) {
+  } else if (auto* tp_formal = formal->castRaw<TupleType>()) {
+    if (auto* tp_actual = actual->castRaw<TupleType>()) {
       if (tp_formal->elements().size() != tp_actual->elements().size()) {
         return MatchTypeReturn("Cannot match tuples of mismatched size");
       }
@@ -400,8 +400,8 @@ MatchTypeReturn matchTypeVariables(
       ss << "Cannot match a tuple to " << actual->repr_str();
       return MatchTypeReturn(ss.str());
     }
-  } else if (auto lt_formal = formal->cast<FutureType>()) {
-    if (auto lt_actual = actual->cast<FutureType>()) {
+  } else if (auto* lt_formal = formal->castRaw<FutureType>()) {
+    if (auto* lt_actual = actual->castRaw<FutureType>()) {
       const auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
@@ -413,8 +413,8 @@ MatchTypeReturn matchTypeVariables(
       ss << "Cannot match a future to " << actual->repr_str();
       return ss.str();
     }
-  } else if (auto lt_formal = formal->cast<RRefType>()) {
-    if (auto lt_actual = actual->cast<RRefType>()) {
+  } else if (auto* lt_formal = formal->castRaw<RRefType>()) {
+    if (auto* lt_actual = actual->castRaw<RRefType>()) {
       const auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
@@ -426,8 +426,8 @@ MatchTypeReturn matchTypeVariables(
       ss << "Cannot match a rref to " << actual->repr_str();
       return ss.str();
     }
-  } else if (auto opt_formal = formal->cast<OptionalType>()) {
-    if (auto opt_actual = actual->cast<OptionalType>()) {
+  } else if (auto* opt_formal = formal->castRaw<OptionalType>()) {
+    if (auto* opt_actual = actual->castRaw<OptionalType>()) {
       const auto optionedMatch = matchTypeVariables(
           opt_formal->getElementType(), opt_actual->getElementType(), type_env);
       if (!optionedMatch.success()) {
@@ -445,8 +445,8 @@ MatchTypeReturn matchTypeVariables(
     // matches Optional[T] later error checking on tryEvalTypeVariables will
     // report the problem if we never match variables in type T
     return MatchTypeReturn::Success();
-  } else if (auto dict_formal = formal->cast<DictType>()) {
-    if (auto dict_actual = actual->cast<DictType>()) {
+  } else if (auto* dict_formal = formal->castRaw<DictType>()) {
+    if (auto* dict_actual = actual->castRaw<DictType>()) {
       auto key_match = matchTypeVariables(
           dict_formal->getKeyType(), dict_actual->getKeyType(), type_env);
       if (!key_match.success()) {
@@ -474,7 +474,7 @@ TORCH_API TypePtr tryEvalTypeVariables(TypePtr type, std::unordered_map<std::str
     return type;
   }
 
-  if (auto vt = type->cast<VarType>()) {
+  if (auto* vt = type->castRaw<VarType>()) {
     auto it = type_env.find(vt->name());
     if (it == type_env.end()) {
       return nullptr;
@@ -525,7 +525,7 @@ bool Type::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   if (rhs->kind() == TypeKind::AnyType || *this == *rhs) {
     return true;
   }
-  if(auto rhs_ = rhs->cast<OptionalType>()) {
+  if(auto* rhs_ = rhs->castRaw<OptionalType>()) {
     return this->isSubtypeOfExt(rhs_->getElementType(), why_not);
   }
   return false;
@@ -1020,9 +1020,9 @@ const SymbolicShape& TensorType::symbolic_sizes() const {
 }
 
 bool TensorType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
-  if (auto rhs_p = rhs->cast<TensorType>()) {
+  if (auto* rhs_p = rhs->castRaw<TensorType>()) {
     // if we have the same pointer, avoid computing the merge
-    if (this == rhs_p.get()) {
+    if (this == rhs_p) {
       return true;
     }
     return *merge(*rhs_p) == *rhs_p;
@@ -1101,11 +1101,11 @@ ClassTypePtr ClassType::refine(at::ArrayRef<TypePtr> refined_slots) const {
 }
 
 bool ClassType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
-  if (rhs->cast<AnyClassType>()) {
+  if (rhs->castRaw<AnyClassType>()) {
     return true;
   }
   // to improve performance, this check can be cached
-  if (auto iface = rhs->cast<InterfaceType>()) {
+  if (auto* iface = rhs->castRaw<InterfaceType>()) {
     // ClassType is not a subtype of InterfaceType if the InterfaceType is a
     // Module Interface Type but the Class Type is not a Module Class Type
     if (!is_module() && iface->is_module()) {
@@ -1186,7 +1186,7 @@ bool InterfaceType::isSubTypeImpl(
 
 bool InterfaceType::isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const {
   // to improve performance this check can be cached
-  if (auto iface = rhs->cast<InterfaceType>()) {
+  if (auto* iface = rhs->castRaw<InterfaceType>()) {
     return isSubTypeImpl(*this, *iface, why_not);
   }
   return Type::isSubtypeOfExt(rhs, why_not);

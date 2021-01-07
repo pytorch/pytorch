@@ -186,7 +186,7 @@ class AttributePropagator {
     if (preservedAttrs_.count(attr)) {
       return false;
     }
-    if (!attr.type()->cast<ClassType>()) {
+    if (!attr.type()->castRaw<ClassType>()) {
       for (auto& ivalue : preservedAttrs_) {
         if (!ivalue.isObject() && ivalue.overlaps(attr)) {
           return false;
@@ -232,7 +232,7 @@ class AttributePropagator {
           TORCH_CHECK(
               freezeInterfaces_ ||
                   !(n->kind() == prim::GetAttr &&
-                    n->output()->type()->cast<InterfaceType>()),
+                    n->output()->type()->castRaw<InterfaceType>()),
               "attempted to freeze a module that uses interface attributes");
           auto name = n->s(attr::name);
           auto attrModule = module_;
@@ -370,7 +370,7 @@ class AttributePropagator {
           blocks.push(sub_block);
         }
         if (n->kind() == prim::GetAttr) {
-          if (!n->output()->type()->cast<InterfaceType>()) {
+          if (!n->output()->type()->castRaw<InterfaceType>()) {
             continue;
           }
           auto name = n->s(attr::name);
@@ -503,7 +503,7 @@ class AttributePropagator {
     // as the base module (similar to 'self' in forward) to resolve GetAttrs.
     //  Otherwise freezing is applied using module_
     if (node->kind() == prim::GetAttr &&
-        node->output()->type()->cast<ClassType>()) {
+        node->output()->type()->castRaw<ClassType>()) {
       auto name = node->s(attr::name);
       auto input = node->inputs()[0];
       if (!findConstantAttr(input, name, attrModule, graph)) {

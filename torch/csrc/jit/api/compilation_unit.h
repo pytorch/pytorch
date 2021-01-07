@@ -211,7 +211,7 @@ struct TORCH_API CompilationUnit {
   void _clear_python_cu() {
     // Delete all the associated class methods
     for (const auto& type : classes_) {
-      if (auto cls = type->cast<ClassType>()) {
+      if (auto* cls = type->castRaw<ClassType>()) {
         for (auto method : cls->methods()) {
           // Tombstone the method in the compilation unit.
           // Don't erase because the dict_

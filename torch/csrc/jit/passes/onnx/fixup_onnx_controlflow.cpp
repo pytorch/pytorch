@@ -38,7 +38,7 @@ Node* InsertCastForCond(Value* cond_val, Graph* graph, Node* consumer_node) {
 
 bool IsCondCastRequired(Value* cond_val) {
   const auto& type = cond_val->type();
-  if (auto tt = type->cast<TensorType>()) {
+  if (auto* tt = type->castRaw<TensorType>()) {
     if (auto scalar_type = tt->scalarType()) {
       return *scalar_type != c10::kBool;
     }

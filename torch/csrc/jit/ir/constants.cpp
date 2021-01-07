@@ -135,7 +135,7 @@ c10::optional<Value*> tryInsertConstant(
 }
 
 c10::optional<IValue> toIValue(const Value* v) {
-  if (v->node()->kind() != prim::Constant || v->type()->cast<FunctionType>()) {
+  if (v->node()->kind() != prim::Constant || v->type()->castRaw<FunctionType>()) {
     return c10::nullopt;
   }
   const Node* node = v->node();
@@ -181,7 +181,7 @@ c10::optional<IValue> toIValue(const Value* v) {
     return s;
   } else if (node->mustBeNone()) {
     return IValue();
-  } else if (type->cast<EnumType>()) {
+  } else if (type->castRaw<EnumType>()) {
     const auto& enum_val = node->ival(attr::value);
     return enum_val;
   } else if (type->cast<ClassType>() && !type->is_module()) {

@@ -90,7 +90,7 @@ std::pair<std::shared_ptr<Graph>, std::vector<Slot>> lower_graph(
     }
     size_t slot_idx = e.mod->type()->getAttributeSlot(e.n->s(attr::name));
     auto iv = e.mod->getSlot(slot_idx);
-    if (ClassTypePtr c = e.n->output()->type()->cast<ClassType>()) {
+    if (auto* c = e.n->output()->type()->castRaw<ClassType>()) {
       if (c->is_module()) {
         for (Use use : e.n->output()->uses()) {
           to_scan.emplace_back(ToScan{iv.toObject(), use.user, use.offset});
