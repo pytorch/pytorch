@@ -148,7 +148,7 @@ bool InterpreterState::run(Stack& stack) {
       case RET:
         return false;
       case LIST_CONSTRUCT: {
-        auto type = code_->types_[inst.X]->expect<at::ListType>();
+        const auto& type = code_->types_[inst.X]->expectRef<at::ListType>();
         listConstruct(stack, type, inst.N);
         ++pc;
       } break;

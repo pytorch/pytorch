@@ -311,7 +311,8 @@ namespace impl {
 
   template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
   std::decay_t<typename guts::infer_function_traits_t<Functor>::return_type>
-  call_functor_with_args_from_stack_(Functor* functor, Stack* stack, std::index_sequence<ivalue_arg_indices...>) {
+  call_functor_with_args_from_stack_(Functor* functor, Stack* stack, std::index_sequence<ivalue_arg_indices...>,
+          std::enable_if_t<!c10::guts::infer_function_traits_t<Functor>::first_arg_is_dispatchKeySet::value, std::nullptr_t> = nullptr) {
     (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
 
     /*
@@ -330,7 +331,8 @@ namespace impl {
 
   template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
   std::decay_t<typename guts::infer_function_traits_t<Functor>::return_type>
-  call_functor_with_args_from_stack_withKeys_(Functor* functor, DispatchKeySet dispatchKeySet, Stack* stack, std::index_sequence<ivalue_arg_indices...>) {
+  call_functor_with_args_from_stack_(Functor* functor, DispatchKeySet dispatchKeySet, Stack* stack, std::index_sequence<ivalue_arg_indices...>,
+          std::enable_if_t<c10::guts::infer_function_traits_t<Functor>::first_arg_is_dispatchKeySet::value, std::nullptr_t> = nullptr) {
     (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
 
     /*
@@ -369,7 +371,7 @@ namespace impl {
     // This functor is used by all kernels that take in a DispatchKeySet as their first argument.
     // We don't want to put the keyset on the stack, so [num arguments on the stack] = [num parameters] - 1
     constexpr size_t num_ivalue_args = guts::infer_function_traits_t<Functor>::number_of_parameters - 1;
-    return call_functor_with_args_from_stack_withKeys_<Functor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack, std::make_index_sequence<num_ivalue_args>());
+    return call_functor_with_args_from_stack_<Functor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack, std::make_index_sequence<num_ivalue_args>());
   }
 
   // push_outputs
@@ -445,9 +447,7 @@ namespace impl {
   // This specialization is for kernels with a first argument that is NOT of type DispatchKeySet
   // This includes kernels with 0 arguments.
   template<class KernelFunctor, class ReturnType, class... ParameterTypes>
-  struct wrap_kernel_functor_unboxed_<
-          KernelFunctor,
-          ReturnType(ParameterTypes...)> final {
+  struct wrap_kernel_functor_unboxed_<KernelFunctor, ReturnType(ParameterTypes...)> final {
     static_assert(std::is_same<ReturnType, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value,
       "Return type mismatch");
     static_assert(std::is_same<guts::typelist::typelist<ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value,
@@ -469,9 +469,7 @@ namespace impl {
 
   // This specialization is for kernels with a first argument of type DispatchKeySet
   template<class KernelFunctor, class ReturnType, class... ParameterTypes>
-  struct wrap_kernel_functor_unboxed_<
-          KernelFunctor,
-          ReturnType(DispatchKeySet, ParameterTypes...)> final {
+  struct wrap_kernel_functor_unboxed_<KernelFunctor, ReturnType(DispatchKeySet, ParameterTypes...)> final {
     static_assert(std::is_same<ReturnType, typename guts::infer_function_traits_t<KernelFunctor>::return_type>::value,
       "Return type mismatch");
     static_assert(std::is_same<guts::typelist::typelist<DispatchKeySet, ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value,

@@ -134,13 +134,13 @@ public:
         }
       }
     });
-    return dispatchKeySetToDispatchKey_(DispatchKeySet::FULL, ks);
+    return computeDispatchKeySetExcludingFallthroughKeys(DispatchKeySet::FULL, ks);
   }
 
   template<class... Args>
   DispatchKeySet getDispatchKeyUnboxed(DispatchKeySet eligibleKeys, const Args&... args) const {
     auto ks = detail::multi_dispatch_key_set(args...);
-    return dispatchKeySetToDispatchKey_(eligibleKeys, ks);
+    return computeDispatchKeySetExcludingFallthroughKeys(eligibleKeys, ks);
   }
 
   void setOperatorHasFallthroughForKey(DispatchKey k, bool has_fallthrough);
@@ -163,7 +163,7 @@ private:
   }
 
   // NB: If there is no valid dispatch key, this will return Undefined
-  DispatchKeySet dispatchKeySetToDispatchKey_(
+  DispatchKeySet computeDispatchKeySetExcludingFallthroughKeys(
       // This is often known statically to be all ones; IN OPTIMIZER WE TRUST
       DispatchKeySet eligibleKeys,
       DispatchKeySet ks
