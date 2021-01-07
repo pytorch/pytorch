@@ -103,6 +103,9 @@ void TracingState::delValue(const IValue& var) {
 Value* getValueTrace(const IValue& var) {
   return getTracingState()->getValue(var);
 }
+Value* getOptTensorValueTrace(const c10::optional<at::Tensor>& var) {
+  return getValueTrace(IValue(var));
+}
 Value* TracingState::getValue(const IValue& var) {
   // allow tracing of tuples passed to List[Tensor] or Tuple[Tensor...]
   // arguments
@@ -134,7 +137,7 @@ Value* TracingState::getValue(const IValue& var) {
     return graph->insertNode(dict_node)->output();
   }
   if (var.isTensor()) {
-    auto ten = var.toTensor();
+    auto& ten = var.toTensor();
     if (!ten.defined()) {
       Node* n = graph->createNone();
       return graph->insertNode(n)->output();
@@ -234,7 +237,7 @@ bool TracingState::hasValue(const IValue& var) const {
 Value* TracingState::getOutput(const IValue& iv, size_t i) {
   bool tracing_mode_strict = getTracingState()->strict;
   if (iv.isTensor()) {
-    at::Tensor var = iv.toTensor();
+    const at::Tensor& var = iv.toTensor();
     if (!var.defined()) {
       Node* n = graph->createNone();
       return graph->insertNode(n)->output();
@@ -503,7 +506,7 @@ void setValueTrace(const IValue& v, Value* value) {
 }
 void TracingState::setValue(const IValue& v, Value* value) {
   if (v.isTensor()) {
-    auto var = v.toTensor();
+    auto& var = v.toTensor();
     AT_ASSERT(var.defined());
     env_stack.back()[v] = value;
   } else if (v.isTensorList()) {
@@ -684,6 +687,16 @@ void addInputs(
     list_node = g->insertNode(
         g->createList(TensorType::get(), fmap(value, getValueTrace)));
   }
+  n->addInput(list_node->output());
+}
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const List<c10::optional<at::Tensor>>& value) {
+  Graph* g = n->owningGraph();
+  Node* list_node = nullptr;
+  list_node = g->insertNode(g->createList(
+      OptionalType::ofTensor(), fmap(value, getOptTensorValueTrace)));
   n->addInput(list_node->output());
 }
 
