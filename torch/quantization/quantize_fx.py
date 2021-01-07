@@ -43,13 +43,17 @@ def _fuse_fx(
     return fuser.fuse(graph_module, fuse_custom_config_dict)
 
 class Scope(object):
-    def __init__(self, module_path, module_type):
+    def __init__(self, module_path: str, module_type: Any):
         super().__init__()
         self.module_path = module_path
         self.module_type = module_type
 
 class ScopeContextManager(object):
-    def __init__(self, scope, current_module, current_module_path):
+    def __init__(
+            self,
+            scope: Scope,
+            current_module: torch.nn.Module,
+            current_module_path: str):
         super().__init__()
         self.prev_module_type = scope.module_type
         self.prev_module_path = scope.module_path

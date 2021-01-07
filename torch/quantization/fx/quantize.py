@@ -61,8 +61,6 @@ from .utils import (
 
 from .qconfig_utils import *
 
-import warnings
-
 from typing import Optional, Dict, Any, List, Tuple, Set, Callable
 
 # Define helper types
