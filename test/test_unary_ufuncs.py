@@ -642,14 +642,6 @@ class TestUnaryUfuncs(TestCase):
             size = [5, 5]
             tensor = torch.rand(size, dtype=dtype, device=device)
 
-            # index_add calls atomicAdd on cuda.
-            zeros = torch.zeros(size, dtype=dtype, device=device)
-
-            # index_add is not supported for complex dtypes on cuda yet
-            if device.startswith('cuda') and dtype.is_complex:
-                self.assertRaises(RuntimeError,
-                                  lambda: zeros.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor))
-
             with self.assertRaisesRegex(RuntimeError,
                                         (r'Unlike NumPy, torch.sign is not intended to support complex numbers\. '
                                          r'Please use torch.sgn instead\.')):
