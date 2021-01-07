@@ -4394,6 +4394,7 @@ class DistributedTest:
         @require_backends_available({"gloo", "nccl"})
         @skip_if_lt_x_gpu(2)
         def test_ddp_cpu_copy(self):
+            # Test only for profiling purposes. Will be removed.
             torch.cuda.set_device(self.rank)
             dim = 10000
             model = nn.Linear(dim, 1).to(self.rank)
