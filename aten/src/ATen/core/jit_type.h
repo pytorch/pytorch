@@ -1005,7 +1005,6 @@ struct TORCH_API EnumType : public NamedType {
     switch (value->kind()) {
       case TypeKind::IntType:
       case TypeKind::FloatType:
-      case TypeKind::ComplexDoubleType:
       case TypeKind::StringType:
         return EnumTypePtr(new EnumType(qualified_class_name, std::move(value), std::move(enum_names_values), std::move(cu)));
       default:
@@ -2403,11 +2402,6 @@ inline bool IValue::isDoubleList() const {
   // note: avoids calling type() to avoid extra referencing counting for the returned type.
   return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == FloatType::Kind;
 }
-
-// inline bool IValue::isComplexDoubleList() const {
-//   // note: avoids calling type() to avoid extra referencing counting for the returned type.
-//   return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == ComplexDoubleType::Kind;
-// }
 
 inline bool IValue::isTensorList() const {
   return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == TensorType::Kind;

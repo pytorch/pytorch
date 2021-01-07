@@ -544,7 +544,6 @@ void Unpickler::readGlobal(
     rebuildTensor(quantized);
   } else if (module_name == "builtins" && class_name == "complex") {
     globals_.emplace_back([this] {
-      //intrusive ptr to complex holder
       auto elements = pop(stack_).toTuple()->elements();
       auto c_holder = ivalue::ComplexHolder(c10::complex<double>(elements.at(0).toDouble(), elements.at(1).toDouble()));
       stack_.emplace_back(c10::make_intrusive<ivalue::ComplexHolder>(c_holder));

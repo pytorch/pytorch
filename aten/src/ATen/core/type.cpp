@@ -202,10 +202,6 @@ ListTypePtr ListType::ofFloats() {
   static auto value = ListType::create(FloatType::get());
   return value;
 }
-ListTypePtr ListType::ofComplexDoubles() {
-  static auto value = ListType::create(ComplexDoubleType::get());
-  return value;
-}
 ListTypePtr ListType::ofBools() {
   static auto value = ListType::create(BoolType::get());
   return value;

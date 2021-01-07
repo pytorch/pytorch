@@ -5,10 +5,7 @@
 namespace torch {
 namespace jit {
 
-inline IValue toIValue(
-    py::handle obj,
-    const TypePtr& type,
-    c10::optional<int32_t> N) {
+IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType: {
       auto var = py::cast<autograd::Variable>(obj);
@@ -157,6 +154,15 @@ inline IValue toIValue(
         const auto& attrType = classType->getAttribute(slot);
         const auto& attrName = classType->getAttributeName(slot);
 
+        if (!py::hasattr(obj, attrName.c_str())) {
+          throw py::cast_error(c10::str(
+              "Tried to cast object to type ",
+              type->repr_str(),
+              " but object",
+              " was missing attribute ",
+              attrName));
+        }
+
         const auto& contained = py::getattr(obj, attrName.c_str());
         userObj->setSlot(slot, toIValue(contained, attrType));
       }
@@ -187,7 +193,7 @@ inline IValue toIValue(
               "a TorchScript compatible type, did you forget to",
               "turn it into a user defined TorchScript class?"));
         }
-        res = toIValue(std::move(obj), classType);
+        res = toIValue(obj, classType);
       }
       // check if the classType conform with the interface or not
       std::stringstream why_not;
@@ -235,8 +241,7 @@ inline IValue toIValue(
       return c10::ivalue::ConcretePyObjectHolder::create(obj);
     }
     case TypeKind::CapsuleType: {
-      return IValue::make_capsule(
-          py::cast<c10::intrusive_ptr<CustomClassHolder>>(obj));
+      return IValue::make_capsule(py::cast<c10::Capsule>(obj).obj_ptr);
     }
     case TypeKind::FutureType: {
       return obj.cast<std::shared_ptr<PythonFutureWrapper>>()->fut;
@@ -245,6 +250,7 @@ inline IValue toIValue(
       return toTypeInferredIValue(obj);
     case TypeKind::FunctionType:
     case TypeKind::GeneratorType:
+    case TypeKind::StorageType:
     case TypeKind::QuantizerType:
     case TypeKind::VarType:
     case TypeKind::QSchemeType:
