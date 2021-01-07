@@ -934,14 +934,14 @@ class TestQuantizeFx(QuantizationTestCase):
 
 
         m = M().eval()
-        # since we don't quantize sub, we should have dequantize after the self.conv1
-        # and quantize before self.conv2
-        # however, the dequantize after conv2 should happen after x.transpose since
-        # it is configured with default_qconfig
         qconfig_dict = {"": default_qconfig, "module_name": [("sub", None)]}
         m = prepare_fx(m, qconfig_dict)
         m(torch.randn(2, 1, 3, 3))
         m = convert_fx(m)
+        # since sub is configured to have qconfig None, we should dequantize the output
+        # of self.conv1 and quantize the input of self.conv2
+        # dequantize after conv2 should happen after transpose since
+        # it is configured with default_qconfig
         node_list = [
             ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Conv2d),

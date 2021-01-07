@@ -108,7 +108,7 @@ class QuantizationTracer(Tracer):
         # We can change this if there is a use case that configures
         # qconfig using top level module type
         self.scope = Scope("", None)
-        self.node_name_to_scope = {}
+        self.node_name_to_scope : Dict[str, Tuple[str, Any]] = {}
 
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
         return (m.__module__.startswith("torch.nn") and
