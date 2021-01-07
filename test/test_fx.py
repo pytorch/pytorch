@@ -45,7 +45,7 @@ wrap('a_lifted_leaf')
 def fx_len(item):
     return len(item)
 
-wrap('fx_len')
+wrap(fx_len)
 
 class Pair(NamedTuple):
     x : torch.Tensor
