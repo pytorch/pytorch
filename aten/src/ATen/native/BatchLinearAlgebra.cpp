@@ -848,6 +848,11 @@ Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& i
 
 Tensor& cholesky_inverse_out(Tensor &result, const Tensor &input, bool upper) {
   // MAGMA doesn't have batched version of cholesky_inverse implemented.
+  // as a workaround we can use cholesky_solve
+  if (input.device() == kCUDA && input.dim() > 2) {
+    auto identity = at::eye(input.size(-1), input.options());
+    return at::cholesky_solve_out(result, identity, input);
+  }
   // Single matrix routine requires 'infos' to reside in CPU memory,
   // therefore we create 'infos' only on CPU for now.
   // This should be changed once batched version for CUDA is implemented.
@@ -864,12 +869,6 @@ Tensor& cholesky_inverse_out(Tensor &result, const Tensor &input, bool upper) {
 }
 
 Tensor cholesky_inverse(const Tensor &input, bool upper) {
-  // there is no specialized function for batched cholesky_inverse in MAGMA
-  // use cholesky_solve for this case
-  if (input.device() == kCUDA && input.dim() > 2) {
-    auto identity = at::eye(input.size(-1), input.options());
-    return at::cholesky_solve(identity, input);
-  }
   Tensor result = at::empty({0}, input.options());
   result = at::cholesky_inverse_out(result, input, upper);
   return result;
