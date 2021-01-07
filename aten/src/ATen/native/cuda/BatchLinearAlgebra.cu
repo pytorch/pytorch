@@ -1666,6 +1666,7 @@ static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
     TORCH_INTERNAL_ASSERT(infos.device() == at::kCPU);
     magmaCholeskyInverse<scalar_t>(uplo, n, input_data, lda, infos.data_ptr<magma_int_t>());
   } else {
+    // TODO: implement the batched version using apply_cholesky_solve
     TORCH_CHECK(false, "Batched version is not implemented for CUDA.")
   }
 #endif

@@ -864,6 +864,12 @@ Tensor& cholesky_inverse_out(Tensor &result, const Tensor &input, bool upper) {
 }
 
 Tensor cholesky_inverse(const Tensor &input, bool upper) {
+  // there is no specialized function for batched cholesky_inverse in MAGMA
+  // use cholesky_solve for this case
+  if (input.device() == kCUDA && input.dim() > 2) {
+    auto identity = at::eye(input.size(-1), input.options());
+    return at::cholesky_solve(identity, input);
+  }
   Tensor result = at::empty({0}, input.options());
   result = at::cholesky_inverse_out(result, input, upper);
   return result;
