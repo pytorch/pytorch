@@ -103,7 +103,7 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize: bool = Tr
     out = RecursiveScriptModule(torch._C._freeze_module(mod._c, preserved_attrs))
     RecursiveScriptModule._finalize_scriptmodule(out)
     if optimize:
-        optimize_frozen_graph(graph)
+        optimize_frozen_graph(out.graph)
 
     return out
 

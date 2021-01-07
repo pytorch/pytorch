@@ -1505,3 +1505,7 @@ class TestFrozenOptimizations(JitTestCase):
         FileCheck().check("batch_norm").run(frozen_mod.graph)
         torch.jit.optimize_frozen_module(frozen_mod)
         FileCheck().check_not("batch_norm").run(frozen_mod.graph)
+
+        # optimize_frozen_module should be run
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()))
+        FileCheck().check("batch_norm").run(frozen_mod.graph)
