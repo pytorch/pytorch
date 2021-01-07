@@ -681,8 +681,7 @@ class TestSaveLoad(JitTestCase):
         """
         @torch.jit.interface
         class MyInterface(object):
-            def bar(self, x):
-                # type: (Tensor) -> Tensor
+            def bar(self, x: Tensor) -> Tensor:
                 pass
 
         @torch.jit.script
@@ -712,8 +711,7 @@ class TestSaveLoad(JitTestCase):
 
         @torch.jit.interface
         class MyInterface(object):
-            def not_bar(self, x):
-                # type: (Tensor) -> Tensor
+            def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
         @torch.jit.script  # noqa: F811
@@ -768,8 +766,7 @@ class TestSaveLoad(JitTestCase):
 
         @torch.jit.interface
         class MyInterface(object):
-            def bar(self, x):
-                # type: (Tensor) -> Tensor
+            def bar(self, x: Tensor) -> Tensor:
                 pass
 
         @torch.jit.script
@@ -810,8 +807,7 @@ class TestSaveLoad(JitTestCase):
 
         @torch.jit.interface
         class MyInterface(object):
-            def not_bar(self, x):
-                # type: (Tensor) -> Tensor
+            def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
         @torch.jit.script   # noqa F811
