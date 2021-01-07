@@ -851,7 +851,7 @@ Tensor& cholesky_inverse_out(Tensor &result, const Tensor &input, bool upper) {
   // as a workaround we can use cholesky_solve
   if (input.device().is_cuda() && input.dim() > 2) {
     auto identity = at::eye(input.size(-1), input.options());
-    return at::cholesky_solve_out(result, identity, input);
+    return at::cholesky_solve_out(result, identity, input, upper);
   }
   // Single matrix routine requires 'infos' to reside in CPU memory,
   // therefore we create 'infos' only on CPU for now.
