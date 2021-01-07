@@ -327,7 +327,7 @@ def emit_trace_body(f: NativeFunction) -> List[str]:
     dispatcher_exprs = dispatcher_sig.exprs()
 
     ret_and_arg_types = ', '.join([dispatcher_sig.returns_type()] + [a.type.cpp_type() for a in dispatcher_exprs])
-    # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.
+    # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
     # See Note [Plumbing Keys Through The Dispatcher] for details.
     dispatch_key_set = 'ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::Tracer)'
     redispatch_args = ', '.join(['op', dispatch_key_set] + [a.expr for a in dispatcher_exprs])
@@ -367,7 +367,7 @@ def method_definition(f: NativeFunction) -> Optional[str]:
         return None
 
     formals = ', '.join(
-        # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.
+        # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
         # See Note [Plumbing Keys Through The Dispatcher] for details.
         ['c10::DispatchKeySet ks'] +
         [f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
