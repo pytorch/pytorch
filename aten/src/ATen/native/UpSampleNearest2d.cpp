@@ -8,12 +8,12 @@ namespace meta {
 static std::array<int64_t, 4> upsample_nearest2d_common_check(IntArrayRef input_size, IntArrayRef output_size) {
   TORCH_CHECK(
       output_size.size() == 2,
-      "It is expected output_size equals to 1, but got size ",
+      "It is expected output_size equals to 2, but got size ",
       output_size.size());
 
   TORCH_CHECK(
       input_size.size() == 4,
-      "It is expected input_size equals to 3, but got size ",
+      "It is expected input_size equals to 4, but got size ",
       input_size.size());
 
   int64_t output_width = output_size[0];
@@ -48,9 +48,7 @@ TORCH_META_FUNC(upsample_nearest2d) (
 
   // Allow for empty batch size but not other dimensions
   TORCH_CHECK(
-      (input.numel() != 0 ||
-        (input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0)
-        ) &&
+      (input.numel() != 0 || prod_intlist(input.sizes().begin() + 1, input.sizes().end())) &&
       input.dim() == 4,
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
@@ -59,14 +57,25 @@ TORCH_META_FUNC(upsample_nearest2d) (
 }
 
 TORCH_META_FUNC(upsample_nearest2d_backward) (
-  const Tensor& grad_output, IntArrayRef input_size, IntArrayRef output_size, c10::optional<double> scales_h, c10::optional<double> scales_w
+  const Tensor& grad_output,
+  IntArrayRef input_size,
+  IntArrayRef output_size,
+  c10::optional<double> scales_h,
+  c10::optional<double> scales_w
 ) {
   auto full_output_size = upsample_nearest2d_common_check(input_size, output_size);
 
-  check_dim_size(grad_output, 4, 0, full_output_size[0]);
-  check_dim_size(grad_output, 4, 1, full_output_size[1]);
-  check_dim_size(grad_output, 4, 2, full_output_size[2]);
-  check_dim_size(grad_output, 4, 3, full_output_size[3]);
+  TORCH_CHECK(
+      grad_output.dim() == 4,
+      "Expected grad_output to be a tensor of dimension 4 but got: dimension ", grad_output.dim());
+
+  for (int i = 0; i < 4; ++i) {
+    TORCH_CHECK(
+        grad_output.size(i) == full_output_size[i],
+        "Expected grad_output to have the same shape as output;",
+        " output.size(", i, ") = ", full_output_size[i],
+        " but got grad_output.size(", i, ") = ", grad_output.size(i));
+  }
 
   set_output(input_size, grad_output.options());
 }
