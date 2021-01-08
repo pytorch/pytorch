@@ -3044,10 +3044,10 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
     For int64, returns all 1s for negative dividend, half 1s for positive
     dividend. Example::
 
-    uint8: 0xff -> 255
-    int32: 0xffffffff -> -1
-    int64: 0xffffffffffffffff -> -1 (negative)
-           0x00000000ffffffff -> 4294967295 (positive)
+    uint8:          0xff               -> 255
+    int32:          0xffffffff         -> -1
+    int64 negative: 0xffffffffffffffff -> -1
+    int64 positive: 0x00000000ffffffff -> 4294967295
 
 Args:
     input (Tensor): the dividend
