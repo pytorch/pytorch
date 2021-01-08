@@ -86,7 +86,8 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
  * torch/csrc/jit/tensorexpr/cuda_random.h or
  * torch/csrc/jit/codegen/cuda/runtime/random_numbers.cu).
  * The "Philox" constructor computes offset/4 (a uint64_t division) to locate its
- * internal offset in its virtual bitstream of 128-bit chunks.
+ * internal start in its virtual bitstream viewed as 128-bit chunks, then, when called
+ * in a thread, returns one 32-bit chunk at a time from that start in the bitstream.
  * In other words, if the incoming offset is not a multiple of 4, each thread
  * might repeat some previously-generated 32-bit values in the bitstream. See
  * https://github.com/pytorch/pytorch/pull/50169.
