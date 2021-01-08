@@ -523,7 +523,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
   size[dimension] = cat_dim_size;
 
   // skip resizing if size of result is same as expected
-  if ((out.sizes() != size) || out.suggest_memory_format() != memory_format) {
+  if (out.sizes() != size) {
     out.resize_(size, memory_format);
   }
 
