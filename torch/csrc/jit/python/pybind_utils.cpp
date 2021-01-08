@@ -162,10 +162,12 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
           userObj->setSlot(slot, toIValue(contained, attrType));
         } catch (std::exception& e) {
           throw py::cast_error(c10::str(
-              "Could not cast attribute ",
+              "Could not cast attribute '",
               attrName,
-              " to type ",
-              attrType->repr_str()));
+              "' to type ",
+              attrType->repr_str(),
+              ": ",
+              e.what()));
         }
       }
       return userObj;

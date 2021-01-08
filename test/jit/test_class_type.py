@@ -1405,7 +1405,7 @@ class TestClassType(JitTestCase):
         to an IValue that has an attribute of the wrong type.
         """
         @torch.jit.script
-        class ValHolder(object):
+        class ValHolder(object):  # noqa: B903
             def __init__(self, val):
                 self.val = val
 
@@ -1422,5 +1422,5 @@ class TestClassType(JitTestCase):
                     mod = self.mod2
                 return mod.val
 
-        with self.assertRaisesRegex(RuntimeError, "Could not cast attribute val to type Tensor"):
+        with self.assertRaisesRegex(RuntimeError, "Could not cast attribute 'val' to type Tensor"):
             torch.jit.script(Mod())
