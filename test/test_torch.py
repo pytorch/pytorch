@@ -3308,6 +3308,16 @@ class TestTorchDeviceType(TestCase):
         x = torch.rand([1, 64, 8, 128, 172]).to(device)
         y = conv(x)
 
+    def test_bool_bitwise_representation(self, device):
+        # This test tests about an assumption that PyTorch made:
+        # C++ standard does not provide requirements about the bitwise
+        # representation of bool, but PyTorch assumes that bool is 1 byte
+        # and false := 0x00, true := anything else
+        t = torch.arange(256, dtype=torch.uint8, device=device)
+        tv = t.view(torch.bool)
+        self.assertFalse(tv[0].item())
+        self.assertTrue(tv[1:].all().item())
+
     def test_is_set_to(self, device):
         t1 = torch.empty(3, 4, 9, 10, device=device)
         t2 = torch.empty(3, 4, 9, 10, device=device)
