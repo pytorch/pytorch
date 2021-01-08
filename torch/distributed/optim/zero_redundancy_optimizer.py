@@ -6,7 +6,6 @@
 from collections import OrderedDict
 import copy
 from itertools import chain
-import io
 import logging
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from math import inf
@@ -22,33 +21,6 @@ if TYPE_CHECKING:  # pragma: no cover
     from torch.optim.optimizer import _params_t
 else:
     _params_t = Any
-
-
-def _broadcast_object(
-    obj: Any, src_rank: int, group: object = dist.group.WORLD, dist_device: torch.device = torch.device("cpu")
-) -> Any:
-    """
-    Either broadcast from master to the fleet (default), or use the src setting as the original rank.
-    """
-
-    if dist.get_rank() == src_rank:
-        # Emit data
-        buffer = io.BytesIO()
-        torch.save(obj, buffer)
-        data = bytearray(buffer.getbuffer())
-        length_tensor = torch.LongTensor([len(data)]).to(dist_device)
-        data_send_tensor = torch.ByteTensor(data).to(dist_device)
-        dist.broadcast(length_tensor, src=src_rank, group=group, async_op=False)
-        dist.broadcast(data_send_tensor, src=src_rank, group=group, async_op=False)
-    else:
-        # Fetch from the source
-        length_tensor = torch.LongTensor([0]).to(dist_device)
-        dist.broadcast(length_tensor, src=src_rank, group=group, async_op=False)
-        data_recv_tensor = torch.empty([int(length_tensor.item())], dtype=torch.uint8, device=dist_device)
-        dist.broadcast(data_recv_tensor, src=src_rank, group=group, async_op=False)
-        buffer = io.BytesIO(data_recv_tensor.cpu().numpy())
-        obj = torch.load(buffer, map_location=dist_device)
-    return obj
 
 
 # Credits:  classy_vision/generic/distributed_util.py
@@ -520,48 +492,51 @@ class ZeroRedundancyOptimizer(Optimizer):
     def _broadcast_params(self) -> None:
         """Helper function to broadcast all the parameters from a given device"""
 
-        with torch.no_grad():
-            # All the params on this device (inc all ranks)
-            for (device, device_params,), bucket_list in zip(self.per_device_params.items(), self._buckets.values()):
+        # All the params on this device (inc all ranks)
+        for (device, device_params,), bucket_list in zip(self.per_device_params.items(), self._buckets.values()):
 
-                # Go through all the ranks and broadcast the new parameters, bucket the smallest ones
-                for (src_rank, params), bucket in zip(enumerate(device_params), bucket_list):
+            # Go through all the ranks and broadcast the new parameters, bucket the smallest ones
+            for (src_rank, params), bucket in zip(enumerate(device_params), bucket_list):
 
-                    global_src_rank = self.get_global_rank(self.group, src_rank)
+                global_src_rank = self.get_global_rank(self.group, src_rank)
 
-                    for param in params:
-                        # Bucket broadcast
-                        if self.should_bucket_param[param]:
-                            assert bucket.append(param), "Bucket overflow: max %s - current %s - adding %s" % (
-                                bucket.max_size,
-                                bucket.current_offset,
-                                param.numel(),
-                            )
+                for param in params:
+                    # Bucket broadcast
+                    if self.should_bucket_param[param]:
+                        assert bucket.append(param), "Bucket overflow: max %s - current %s - adding %s" % (
+                            bucket.max_size,
+                            bucket.current_offset,
+                            param.numel(),
+                        )
 
-                            if bucket.full():
-                                self.work_handles.append(
-                                    _Workhandle(
-                                        handle=dist.broadcast(
-                                            tensor=bucket.buffer, src=global_src_rank, group=self.group, async_op=True
-                                        ),
-                                        callback=bucket.unroll,
-                                    )
-                                )
-
-                        # Direct
-                        else:
+                        if bucket.full():
                             self.work_handles.append(
                                 _Workhandle(
                                     handle=dist.broadcast(
-                                        tensor=param.data, src=global_src_rank, group=self.group, async_op=True
+                                        tensor=bucket.buffer, src=global_src_rank, group=self.group, async_op=True
                                     ),
-                                    callback=None,
+                                    callback=bucket.unroll,
                                 )
                             )
 
+                    # Direct
+                    else:
+                        self.work_handles.append(
+                            _Workhandle(
+                                handle=dist.broadcast(
+                                    tensor=param.data, src=global_src_rank, group=self.group, async_op=True
+                                ),
+                                callback=None,
+                            )
+                        )
+
     def _broadcast_state_dict(self) -> None:
         """Broadcast this rank's state shard, discard others"""
-        empty_buffer = torch.tensor([0], dtype=torch.uint8, device=self._device)
+
+        # Default to CPU space to gain some memory headroom
+        local_cpu_state = recursive_copy_to_device(
+            self.local_state_dict(), non_blocking=True, device=torch.device("cpu")
+        )
 
         for rank in range(self.world_size):
             if rank == self.rank:
@@ -569,37 +544,35 @@ class ZeroRedundancyOptimizer(Optimizer):
                 logging.debug(
                     "Sending the sharded optimizer state to the reference replica from rank %s", rank,
                 )
-                _broadcast_object(
-                    self.local_state_dict(), src_rank=self.global_rank, group=self.group, dist_device=self._device
-                )
+                dist.broadcast_object_list([local_cpu_state], src=self.global_rank, group=self.group)
             else:
-                global_rank = _get_global_rank(self.group, rank)
-                # Discard this tensor/rank, broadcast necessary for syncing
-                _broadcast_object(empty_buffer, src_rank=global_rank, group=self.group, dist_device=self._device)
+                global_rank = self.get_global_rank(self.group, rank)
+
+                # Discard this tensor/rank, broadcast necessary for syncing and because NCCL does not support gather
+                dist.broadcast_object_list([0], src=global_rank, group=self.group)
 
     def _collect_sharded_states(self) -> List[Dict[str, Any]]:
         """Collect all the state shards, in CPU memory."""
-        empty_buffer = torch.tensor([0], dtype=torch.uint8, device=self._device)
-        all_states: List[Dict[str, Any]] = []
+        all_states = []
 
         for rank in range(self.world_size):
             if rank == self.rank:
                 logging.debug("Saving self state")
                 all_states.append(
-                    _recursive_copy_to_device(self.local_state_dict(), non_blocking=True, device=torch.device("cpu"))
+                    recursive_copy_to_device(self.local_state_dict(), non_blocking=True, device=torch.device("cpu"))
                 )
 
                 # Sync with other replicas
-                _broadcast_object(empty_buffer, src_rank=self.global_rank, group=self.group, dist_device=self._device)
+                dist.broadcast_object_list([0], src=self.global_rank, group=self.group)
             else:
                 # Fetch the optim state from the other replicas
-                global_rank = _get_global_rank(self.group, rank)
-                replica_state = _broadcast_object(
-                    empty_buffer, src_rank=global_rank, group=self.group, dist_device=self._device
-                )
+                global_rank = self.get_global_rank(self.group, rank)
+
+                replica_state = [0]
+                dist.broadcast_object_list(replica_state, src=global_rank, group=self.group)
 
                 all_states.append(
-                    _recursive_copy_to_device(replica_state, non_blocking=True, device=torch.device("cpu"))
+                    recursive_copy_to_device(replica_state[0], non_blocking=True, device=torch.device("cpu"))
                 )
 
                 logging.debug("State from rank %s received", rank)

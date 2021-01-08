@@ -11,7 +11,6 @@ import unittest
 import torch
 import torch.distributed as dist
 from typing import List, Any
-import io
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.optim import SGD
 from torch.testing._internal.common_distributed import skip_if_no_gpu, MultiProcessTestCase
@@ -23,32 +22,6 @@ BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def _broadcast_object(
-    obj: Any, src_rank: int, group: object = dist.group.WORLD, dist_device: torch.device = torch.device("cpu")
-) -> Any:
-    """
-    Either broadcast from master to the fleet (default),
-    or use the src setting as the original rank.
-    """
-
-    if dist.get_rank() == src_rank:
-        # Emit data
-        buffer = io.BytesIO()
-        torch.save(obj, buffer)
-        data = bytearray(buffer.getbuffer())
-        length_tensor = torch.LongTensor([len(data)]).to(dist_device)
-        data_send_tensor = torch.ByteTensor(data).to(dist_device)
-        dist.broadcast(length_tensor, src=src_rank, group=group, async_op=False)
-        dist.broadcast(data_send_tensor, src=src_rank, group=group, async_op=False)
-    else:
-        # Fetch from the source
-        length_tensor = torch.LongTensor([0]).to(dist_device)
-        dist.broadcast(length_tensor, src=src_rank, group=group, async_op=False)
-        data_recv_tensor = torch.empty([int(length_tensor.item())], dtype=torch.uint8, device=dist_device)
-        dist.broadcast(data_recv_tensor, src=src_rank, group=group, async_op=False)
-        buffer = io.BytesIO(data_recv_tensor.cpu().numpy())
-        obj = torch.load(buffer, map_location=dist_device)
-    return obj
 
 
 class TestZeroRedundancyOptimizer(MultiProcessTestCase):
@@ -361,12 +334,13 @@ class TestZeroRedundancyOptimizerThreeRanks(TestZeroRedundancyOptimizer):
         else:
             optimizer_state_dict = {}
 
-        optimizer_state_dict = _broadcast_object(
-            optimizer_state_dict, src_rank=reference_rank, group=dist.group.WORLD, dist_device=device
-        )
+        optim_state = [optimizer_state_dict]
+        dist.broadcast_object_list(optim_state, src=reference_rank, group=dist.group.WORLD)
+
 
         # Load the optimizer state dict
-        optimizer.load_state_dict(optimizer_state_dict)
+        optimizer.load_state_dict(optim_state[0])
+        dist.destroy_process_group()
 
 
 class TestZeroRedundancyOptimizerSixRanks(TestZeroRedundancyOptimizer):
