@@ -147,6 +147,33 @@ class TestModuleInterface(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Tried to access nonexistent attribute or method"):
             self.checkScript(call_module_interface_on_other_method, (scripted_bar_mod, torch.rand(3, 4),))
 
+    def test_module_doc_string(self):
+        @torch.jit.interface
+        class TestInterface(nn.Module):
+            def one(self, inp1, inp2):
+                # type: (Tensor, Tensor) -> Tensor
+                pass
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                r"""stuff 1"""
+                r"""stuff 2"""
+                pass
+                r"""stuff 3"""
+
+        class TestModule(nn.Module):
+            proxy_mod : TestInterface
+
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.proxy_mod = OrigModule()
+
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                return self.proxy_mod.forward(input)
+
+        scripted_mod = torch.jit.script(TestModule())
+        input = torch.randn(3, 4)
+        self.assertEqual(scripted_mod(input), 3 * input + 2)
 
     def test_module_interface_subtype(self):
         global OneTwoModule
