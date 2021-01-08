@@ -287,7 +287,7 @@ void ProcessGroupAgent::shutdownImpl() {
   threadPool_.waitWorkComplete();
 }
 
-std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
+std::shared_ptr<JitFuture> ProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message,
     const float rpcTimeoutSeconds) {
@@ -369,7 +369,7 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   // to our receiving queue.
   if (to.id_ == (worker_id_t)pg_->getRank()) {
     sendToSelf(std::move(message));
-    return future;
+    return toJitFuture(std::move(future));
   }
 
   // NB: cannot directly pass ``to`` to the ``SendWork``, because it might no
@@ -382,7 +382,9 @@ std::shared_ptr<FutureMessage> ProcessGroupAgent::send(
   // the C++ land. Hence, we have to explicitly use the ``WorkerInfo`` in the
   // C++ land.
   enqueueSend(SendWork(allWorkerInfo_[to.id_], std::move(message)));
-  return future;
+
+  auto jitFuture = toJitFuture(std::move(future));
+  return jitFuture;
 }
 
 void ProcessGroupAgent::handleSend(const SendWork& work) {

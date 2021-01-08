@@ -56,7 +56,7 @@ std::unordered_map<MessageType, float, std::hash<int>> FaultyProcessGroupAgent::
   return delayMessages;
 }
 
-std::shared_ptr<FutureMessage> FaultyProcessGroupAgent::send(
+std::shared_ptr<JitFuture> FaultyProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message,
     const float rpcTimeoutSeconds) {
@@ -82,7 +82,7 @@ std::shared_ptr<FutureMessage> FaultyProcessGroupAgent::send(
     fm->setError(makeRPCError(
         c10::str("Send attempt failed intentionally for ", key),
         RPCErrorType::INTENTIONAL_FAILURE));
-    return fm;
+    return toJitFuture(std::move(fm));
   } else {
     lock.unlock();
     return ProcessGroupAgent::send(to, std::move(message), rpcTimeoutSeconds);
