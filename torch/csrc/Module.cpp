@@ -722,7 +722,6 @@ PyObject* initModule() {
      methods.data()
   };
   ASSERT_TRUE(module = PyModule_Create(&torchmodule));
-  ASSERT_TRUE(THPWrapper_init(module));
   ASSERT_TRUE(THPGenerator_init(module));
   ASSERT_TRUE(THPException_init(module));
   THPSize_init(module);

@@ -134,7 +134,7 @@ def get_class_properties(cls, self_name):
     """
     Get a list of Property objects representing the properties of a class.
 
-    Arguments:
+    Args:
         cls:  The class to get properties of.
         self_name: The name of the class that the properties should belong to.
     Returns:
@@ -188,7 +188,7 @@ def normalize_source_lines(sourcelines: List[str]) -> List[str]:
     all lines in the function body to a point at or greater than that
     level. This allows for comments and continued string literals that
     are at a lower indentation than the rest of the code.
-    Arguments:
+    Args:
         sourcelines: function source code, separated into lines by
                         the '\n' character
     Returns:
@@ -221,7 +221,7 @@ def get_jit_def(fn, def_name, self_name=None):
     """
     Build a JIT AST (TreeView) from the given function.
 
-    Arguments:
+    Args:
         fn: A function object to compile
         def_name: The name to give to the resulting AST object. This is not
             always the same as `fn.__name__`, for example:
@@ -389,6 +389,12 @@ class StmtBuilder(Builder):
         ast.Mult: '*',
         ast.Div: '/',
         ast.Mod: '%',
+        ast.BitOr: '|',
+        ast.BitAnd: '&',
+        ast.BitXor: '^',
+        ast.LShift: '<<',
+        ast.RShift: '>>',
+        ast.Pow: '**',
     }
 
     @staticmethod

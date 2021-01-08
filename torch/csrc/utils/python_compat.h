@@ -63,20 +63,5 @@ __PySlice_Unpack(PyObject *_r,
   (PySlice_Unpack(SLICE, START, STOP, STEP) == 0)
 #endif
 
-// https://bugsfiles.kde.org/attachment.cgi?id=61186
-#if PY_VERSION_HEX >= 0x03020000
 #define THPUtils_parseSlice(SLICE, LEN, START, STOP, LENGTH, STEP) \
   (PySlice_GetIndicesEx(SLICE, LEN, START, STOP, LENGTH, STEP) == 0)
-#else
-#define THPUtils_parseSlice(SLICE, LEN, START, STOP, LENGTH, STEP) \
-  (PySlice_GetIndicesEx((PySliceObject*)SLICE, LEN, START, STOP, LENGTH, STEP) == 0)
-#endif
-
-// This function was introduced in Python 3.4
-#if PY_VERSION_HEX < 0x03040000
-inline int
-PyGILState_Check() {
-  PyThreadState * tstate = _PyThreadState_Current;
-  return tstate && (tstate == PyGILState_GetThisThreadState());
-}
-#endif
