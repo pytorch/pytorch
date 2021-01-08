@@ -37,10 +37,19 @@ class SimpleTest(torch.nn.Module):
 def a_non_torch_leaf(a, b):
     return a + b
 
+# Test wrap() passing both a function name as well as a function
+# directly
 def a_lifted_leaf(a, b):
     return a[0] + a[1] + b
 
 wrap('a_lifted_leaf')
+# Test wrapping twice doesn't break anything
+wrap('a_lifted_leaf')
+
+def a_lifted_leaf2(a, b):
+    return a[0] + a[1] + b
+
+wrap(a_lifted_leaf2)
 
 def fx_len(item):
     return len(item)
@@ -225,6 +234,16 @@ class TestFX(JitTestCase):
 
         m = symbolic_trace(to_trace)
         self.assertIn('a_lifted_leaf', m.code)
+        self.assertEqual(27, m(2))
+
+    def test_wrap_fn_directly(self):
+        self.assertEqual(3 + 4 + 5, a_lifted_leaf2((3, 4), 5))
+
+        def to_trace(y):
+            return a_lifted_leaf2((4, y), 3) + a_lifted_leaf2((3, 4), 5) + a_lifted_leaf2((y, y), y)
+
+        m = symbolic_trace(to_trace)
+        self.assertIn('a_lifted_leaf2', m.code)
         self.assertEqual(27, m(2))
 
     def test_graph_edit_with_proxy(self):

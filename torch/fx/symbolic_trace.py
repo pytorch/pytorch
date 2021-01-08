@@ -1,6 +1,6 @@
 import inspect
 from types import CodeType, FunctionType
-from typing import Any, Dict, Optional, Tuple, List, Callable, Union
+from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
 import torch
 from torch._C import ScriptObject  # type: ignore
 
@@ -318,30 +318,9 @@ class Tracer(TracerBase):
             torch.nn.Module.__getattr__ = orig_getattr  # type: ignore
         return self.graph
 
-class _GlobalDictWrapper:
-    """
-    Hashable wrapper to use global dicts from Python frames
-    as keys.
-    """
-    def __init__(self, global_dict):
-        self.global_dict = global_dict
-
-    def __hash__(self):
-        return id(self.global_dict)
-
-    def __eq__(self, other):
-        return id(self.global_dict) == id(other.global_dict)
-
-    def __getitem__(self, key):
-        return self.global_dict[key]
-
-    def __setitem__(self, key, value):
-        self.global_dict[key] = value
-
-# This maps from global namespace dictionaries to
-# an ordered set of functions that should be patched
-# for wrapping during symbolic tracing
-_wrapped_fn_patch_table : Dict[_GlobalDictWrapper, Dict['str', Any]] = {}
+# List of pairs of (global dict, function name) functions
+# to patch for the purposes of the wrap() API.
+_wrapped_fns_to_patch : List[Tuple[dict, str]] = []
 
 def _call_wrapped_func(orig_fn, args, kwargs):
     """
@@ -366,39 +345,52 @@ def _call_wrapped_func(orig_fn, args, kwargs):
     else:
         return orig_fn(*args, **kwargs)
 
-def _patch_wrapped_functions() -> Dict[_GlobalDictWrapper, Dict['str', Any]]:
+class PatchedFn(NamedTuple):
+    frame_dict : Dict[str, Any]
+    fn_name : str
+    orig_fn : Any
+
+def _patch_wrapped_functions() -> List[PatchedFn]:
     """
     Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
     the listed global functions in the `call_wrapped_func` wrapper. Returns
-    a map from frame to dict mapping name to the original global function.
+    a list of PatchedFn, which is a record specifiying a single function
+    entry that was patched and contains the original function for unpatching
     """
-    orig_fns : Dict[_GlobalDictWrapper, Dict['str', Any]] = {}
+    orig_fns : List[PatchedFn] = []
+    # Set to deduplicate entries. Wrapping a function multiple times would
+    # be an error, since it would cause a `call_function` node for the
+    # wrapper to be emitted rather than the actual underlying function
+    #
+    # Use id(frame_dict) as a hashable identity here since none of the
+    # frame dicts should be destroyed during symtracing
+    processed_entries : Set[Tuple[int, str]] = set()
 
-    for frame_dict, names in _wrapped_fn_patch_table.items():
-        orig_fns.setdefault(frame_dict, {})
-        orig_fns_this_frame = orig_fns[frame_dict]
-        for name in names:
-            orig_fn = frame_dict[name]
-            orig_fns_this_frame[name] = orig_fn
+    for frame_dict, name in _wrapped_fns_to_patch:
+        if (id(frame_dict), name) in processed_entries:
+            continue
+        orig_fn = frame_dict[name]
+        orig_fns.append(PatchedFn(frame_dict, name, orig_fn))
 
-            def scope(orig_fn):
+        def scope(orig_fn):
 
-                def wrapped(*args, **kwargs):
-                    return _call_wrapped_func(orig_fn, args, kwargs)
-                return wrapped
-            frame_dict[name] = scope(orig_fn)
+            def wrapped(*args, **kwargs):
+                return _call_wrapped_func(orig_fn, args, kwargs)
+            return wrapped
+        frame_dict[name] = scope(orig_fn)
+
+        processed_entries.add((id(frame_dict), name))
 
     return orig_fns
 
-def _unpatch_wrapped_functions(orig_fns : Dict[_GlobalDictWrapper, Dict['str', Any]]):
+def _unpatch_wrapped_functions(orig_fns : List[PatchedFn]):
     """
     Given the ``orig_fns`` dict that ``_patch_wrapped_functions``,
     replace all of the global functions with the original global functions
     that were there before symbolic tracing.
     """
-    for frame_dict, to_revert in orig_fns.items():
-        for name, fn in to_revert.items():
-            frame_dict[name] = fn
+    for frame_dict, fn_name, orig_fn in orig_fns:
+        frame_dict[fn_name] = orig_fn
 
 def wrap(fn_or_name : Union[str, Callable]):
     """
@@ -430,6 +422,13 @@ def wrap(fn_or_name : Union[str, Callable]):
         raise RuntimeError('Unsupported type for global function! Must be either a callable or '
                            'string name')
 
+    if hasattr(fn_or_name, '__code__'):
+        assert not isinstance(fn_or_name, str)  # to make mypy happy
+        fn_name = fn_or_name.__code__.co_name
+    else:
+        assert isinstance(fn_or_name, str), "fn_or_name must be a global function or string name"
+        fn_name = fn_or_name
+
     currentframe = inspect.currentframe()
     assert currentframe is not None
     f = currentframe.f_back
@@ -437,10 +436,7 @@ def wrap(fn_or_name : Union[str, Callable]):
     if f.f_code.co_name != '<module>':
         raise NotImplementedError('wrap must be called at the top level of a module')
 
-    frame_globals_dict = _GlobalDictWrapper(f.f_globals)
-
-    _wrapped_fn_patch_table.setdefault(frame_globals_dict, {})
-    _wrapped_fn_patch_table[frame_globals_dict].setdefault(fn_name)
+    _wrapped_fns_to_patch.append((f.f_globals, fn_name))
 
 def symbolic_trace(root : Union[torch.nn.Module, Callable]) -> GraphModule:
     """Symbolic tracing API
