@@ -387,14 +387,6 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
   m.impl("detach", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach)));
   m.impl("detach_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach_)));
   m.impl("copy_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::copy_)));
-  // For backward() and requires_grad_(), we need the DefaultBackend kernel, but we also need the Autograd backend
-  // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
-  // which calls callBoxed(), which doesn't support optional tensor arguments yet and backward() has an optional
-  // tensor argument.
-  // TODO Once callBoxed() supports optional tensor arguments, we can enable `use_c10_dispatcher: full` for backward()
-  //      and requires_grad_(), then remove the backend Autograd kernel here, only leaving the Math kernel.
-  m.impl("_backward", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_backward)));
-  m.impl("requires_grad_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::requires_grad_)));
   m.impl("_fw_primal", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_fw_primal)));
 }
 

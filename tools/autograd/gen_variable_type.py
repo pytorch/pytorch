@@ -191,19 +191,6 @@ ${return_type} ${type_wrapper_name}(${formals}) {
 }
 """)
 
-# NOTE[UnboxedOnly] Many of our codegen templates currently exist twice, once
-# in an _UNBOXEDONLY_ variant and once without _UNBOXEDONLY_. This is because
-# ops that are `use_c10_dispatcher: full` need different c++ code than ops
-# that aren't `use_c10_dispatcher: full` yet. The _UNBOXEDONLY_ variants
-# are for ops that aren't `use_c10_dispatcher: full` yet and those code templates
-# can be deleted once all ops are `use_c10_dispatcher: full`.
-# If you update one of the templates, you likely also have to update the other.
-
-# See NOTE[UnboxedOnly]
-UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
-m.impl_UNBOXED("${unqual_operator_name_with_overload}", &${class_type}::${type_wrapper_name});
-""")
-
 WRAPPER_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        TORCH_FN(${class_type}::${type_wrapper_name})
@@ -349,30 +336,18 @@ def gen_variable_type(
 
 @with_native_function
 def gen_formals(f: NativeFunction) -> str:
-    if f.use_c10_dispatcher.dispatcher_uses_new_style():
-        formals = ', '.join(
-            f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
-            for a in f.func.schema_order_arguments()
-        )
-    else:
-        sig_group = CppSignatureGroup.from_native_function(f, method=False)
-        formals = ', '.join(f'{a.type} {a.name}' for a in sig_group.signature.arguments())
-    return formals
+    return ', '.join(
+        f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
+        for a in f.func.schema_order_arguments()
+    )
 
 @with_native_function
 def gen_wrapper_registration(f: NativeFunction) -> str:
-    if f.use_c10_dispatcher.dispatcher_uses_new_style():
-        return WRAPPER_REGISTRATION.substitute(
-            unqual_operator_name_with_overload=f.func.name,
-            type_wrapper_name=type_wrapper_name(f),
-            class_type='VariableType',
-        )
-    else:
-        return UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
-            unqual_operator_name_with_overload=f.func.name,
-            type_wrapper_name=type_wrapper_name(f),
-            class_type='VariableType',
-        )
+    return WRAPPER_REGISTRATION.substitute(
+        unqual_operator_name_with_overload=f.func.name,
+        type_wrapper_name=type_wrapper_name(f),
+        class_type='VariableType',
+    )
 
 def gen_variable_type_shard(
     fm: FileManager,
@@ -669,7 +644,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
                 api_name=cpp.name(
                     f.func,
-                    faithful_name_for_out_overloads=f.use_c10_dispatcher.dispatcher_uses_new_style(),
+                    faithful_name_for_out_overloads=True,
                 ),
                 unpacked_args=unpacked_args)
         else:
@@ -887,16 +862,12 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
     body: List[str] = []
     unpacked_bindings: List[Binding] = []
 
-    if f.use_c10_dispatcher.dispatcher_uses_new_style():
-        bindings = [r for a in f.func.schema_order_arguments()
-                    for r in cpp.argument(a,
-                                          method=False,
-                                          cpp_no_default_args=set(),
-                                          faithful=False,
-                                          has_tensor_options=False)]
-    else:
-        sig_group = CppSignatureGroup.from_native_function(f, method=False)
-        bindings = list(sig_group.signature.arguments())
+    bindings = [r for a in f.func.schema_order_arguments()
+                for r in cpp.argument(a,
+                                      method=False,
+                                      cpp_no_default_args=set(),
+                                      faithful=False,
+                                      has_tensor_options=False)]
 
     for i, binding in enumerate(bindings):
         assert not isinstance(binding.argument, SelfArgument)

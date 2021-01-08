@@ -4866,7 +4866,7 @@ class ModuleTest(TestBase):
 
         if self.should_test_pickle:
             # TODO: do this with in-memory files as soon as torch.save will support it
-            with TemporaryFile() as f:
+            with tempfile.TemporaryFile() as f:
                 test_case._forward(module, input)
                 torch.save(module, f)
                 f.seek(0)
