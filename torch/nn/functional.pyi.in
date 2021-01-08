@@ -229,6 +229,10 @@ def poisson_nll_loss(input: Tensor, target: Tensor, log_input: bool = ..., full:
                      reduction: str = ...) -> Tensor: ...
 
 
+def gaussian_nll_loss(input: Tensor, target: Tensor, var: Tensor, full: Optional[bool] = ...,
+                      eps: Optional[float] = ..., reduction: Optional[str] = ...) -> Tensor: ...
+
+
 def kl_div(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., reduce: Optional[bool] = ...,
            reduction: str = ..., log_target: bool = ...) -> Tensor: ...
 

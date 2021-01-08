@@ -307,20 +307,21 @@ class GaussianNLLLoss(_Loss):
     the loss is:
 
     .. math::
-        \text{loss} = \frac{1}{2}\sum_{i=1}^D \left(\log(\text{var}[i] + \text{eps}) 
-         + \frac{\left(\text{input}[i] - \text{target}[i]\right)^2}{\text{var}[i] + \text{eps}}\right) + \text{const.}
+        \text{loss} = \frac{1}{2}\sum_{i=1}^D \left(\log\left(\text{max}\left(\text{var}[i],
+        \ \text{eps}\right)\right) + \frac{\left(\text{input}[i] - \text{target}[i]\right)^2}
+        {\text{max}\left(\text{var}[i], \ \text{eps}\right)}\right) + \text{const.}
 
-    where :attr:`eps` is added for stability. By default, the constant term of
+    where :attr:`eps` is used for stability. By default, the constant term of
     the loss function is omitted unless :attr:`full` is ``True``. If ``var`` is
     a scalar (implying ``target`` tensor has homoscedastic Gaussian 
     distributions) it is broadcasted to be the same size as the input.
 
 
     Args:
-        eps (float, optional): value added to ``var``, for stability. Default:
-            1e-6.
         full (bool, optional): include the constant term in the loss
             calculation. Default: ``False``.
+        eps (float, optional): value used to clamp (a copy of) ``var``, for
+            stability. Default: 1e-6.
         reduction (string, optional): specifies the reduction to apply to the
             output:``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction
             will be applied, ``'mean'``: the output is the average of all batch
