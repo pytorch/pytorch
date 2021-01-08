@@ -89,6 +89,7 @@ bool Tensor::is_xpu() const {
 bool is_xpu(Tensor self) {
   // NB: this is not a native function to avoid dispatching overhead.
   return self.is_xpu();
+}
 
 bool Tensor::is_xla() const {
     return impl_->is_xla();

@@ -515,6 +515,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return key_set_.has(DispatchKey::XPU) ||
         key_set_.has(DispatchKey::SparseXPU) ||
         key_set_.has(DispatchKey::QuantizedXPU);
+  }
 
   bool is_xla() const {
     return key_set_.has(DispatchKey::XLA);

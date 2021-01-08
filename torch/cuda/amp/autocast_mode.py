@@ -6,7 +6,7 @@ try:
 except ModuleNotFoundError:
     np = None
 from torch._six import container_abcs, string_classes
-from .common import cuda_or_xla_gpu_available
+from .common import amp_definitely_not_available
 
 
 class autocast(object):
@@ -114,7 +114,7 @@ class autocast(object):
         enabled(bool, optional, default=True):  Whether autocasting should be enabled in the region.
     """
     def __init__(self, enabled=True):
-        if enabled and not cuda_or_xla_gpu_available():
+        if enabled and amp_definitely_not_available():
             warnings.warn("torch.cuda.amp.autocast only affects CUDA ops, but CUDA is not available.  Disabling.")
             self._enabled = False
         else:
