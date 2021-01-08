@@ -237,7 +237,7 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
 
   // Handle non-container types which do not subtype each other and unify
   if (t1->kind() == TensorType::Kind && t2->kind() == TensorType::Kind) {
-    return t1->expectRef<TensorType>().merge(*t2->expect<TensorType>());
+    return t1->expectRef<TensorType>().merge(t2->expectRef<TensorType>());
   }
 
   if (t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get())) {
@@ -613,12 +613,12 @@ bool TensorType::operator==(const c10::Type& rhs) const {
   if (rhs.kind() != kind()) {
     return false;
   }
-  auto rt = rhs.expect<TensorType>();
+  const auto& rt = rhs.expectRef<TensorType>();
 
-  return scalar_type_ == rt->scalarType() && sizes() == rt->sizes() &&
-      stride_properties() == rt->stride_properties() &&
-      device() == rt->device() && requiresGrad() == rt->requiresGrad() &&
-      undefined() == rt->undefined();
+  return scalar_type_ == rt.scalarType() && sizes() == rt.sizes() &&
+      stride_properties() == rt.stride_properties() &&
+      device() == rt.device() && requiresGrad() == rt.requiresGrad() &&
+      undefined() == rt.undefined();
 }
 
 template <typename T>
@@ -750,7 +750,7 @@ bool TupleType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const
   if (rhs_->kind() == AnyTupleType::Kind) {
     return true;
   }
-  auto rhs = rhs_->cast<TupleType>();
+  auto* rhs = rhs_->castRaw<TupleType>();
   if (!rhs)
     return false;
   // unnamed tuple is not a subtype of nametuple
@@ -796,14 +796,14 @@ bool ListType::isSubtypeOfExt(const TypePtr& rhs_, std::ostream* why_not) const 
   }
 
   // `compare` guarantees that rhs is always a TupleType.
-  auto rhsTuple = rhs.expect<TupleType>();
-  if (schema_ == nullptr && rhsTuple->schema_ == nullptr) {
+  const auto& rhsTuple = rhs.expectRef<TupleType>();
+  if (schema_ == nullptr && rhsTuple.schema_ == nullptr) {
     return typesSame;
   }
-  if (schema_ == nullptr || rhsTuple->schema_ == nullptr) {
+  if (schema_ == nullptr || rhsTuple.schema_ == nullptr) {
     return false;
   }
-  return *schema_ == *rhsTuple->schema_;
+  return *schema_ == *rhsTuple.schema_;
 }
 
 std::string TupleType::str() const {
