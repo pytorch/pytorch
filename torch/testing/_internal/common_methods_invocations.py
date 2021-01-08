@@ -58,6 +58,9 @@ class SampleInput(object):
         self.kwargs = kwargs if kwargs is not None else {}
         self.output_process_fn_grad = output_process_fn_grad
 
+    def __repr__(self):
+        return f'SampleInput(input[{len(self.input)}], args={self.args}, kwargs={self.kwargs}, output_process_fn_grad={self.output_process_fn_grad})'
+
 
 _NOTHING = object()  # Unique value to distinguish default from anything else
 
@@ -105,7 +108,6 @@ class OpInfo(object):
                  supports_tensor_out=True,  # whether the op supports the out kwarg, returning a Tensor
                  skips=tuple(),  # information about which tests to skip
                  decorators=None,  # decorators to apply to generated tests
-                 promotes_integers_to_float=False,  # whether op promotes unary output to float or not
                  sample_inputs_func=None,  # function to generate sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
                  supports_sparse=False  # supported for sparse
@@ -134,7 +136,6 @@ class OpInfo(object):
         self.test_inplace_grad = test_inplace_grad
         self.test_complex_grad = test_complex_grad
         self.supports_tensor_out = supports_tensor_out
-        self.promotes_integers_to_float = promotes_integers_to_float
 
         self.skips = skips
         self.decorators = decorators
@@ -633,7 +634,6 @@ op_db: List[OpInfo] = [
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-1,
                                                   torch.complex64: 1e-2}),),
-                   promotes_integers_to_float=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -656,7 +656,6 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool),
                    dtypesIfCPU=all_types_and(torch.bool),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    test_inplace_grad=False,
                    skips=(
@@ -690,7 +689,6 @@ op_db: List[OpInfo] = [
                    domain=(-1, 1),
                    supports_sparse=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
-                   promotes_integers_to_float=True,
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
@@ -709,7 +707,6 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool),
                    dtypesIfCPU=all_types_and(torch.bool),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    test_inplace_grad=False,
                    skips=(
@@ -725,7 +722,6 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
-                   promotes_integers_to_float=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -739,7 +735,6 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool),
                    dtypesIfCPU=all_types_and(torch.bool),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    test_inplace_grad=False),
     OpInfo('broadcast_to',
@@ -755,7 +750,6 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
                    handles_large_floats=False,
-                   promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
@@ -769,7 +763,6 @@ op_db: List[OpInfo] = [
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.cosh),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
-                   promotes_integers_to_float=True,
                    assert_autodiffed=True,
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/48641
@@ -873,7 +866,6 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
-                   promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
@@ -893,7 +885,6 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   promotes_integers_to_float=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
@@ -907,7 +898,6 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
-                   promotes_integers_to_float=True,
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True),
     UnaryUfuncInfo('log2',
@@ -918,7 +908,6 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
-                   promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
@@ -942,7 +931,6 @@ op_db: List[OpInfo] = [
                    skip_bfloat16_grad=True,
                    handles_large_floats=False,
                    handles_complex_extremals=False,
-                   promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
@@ -958,7 +946,6 @@ op_db: List[OpInfo] = [
                    skip_bfloat16_grad=True,
                    handles_large_floats=False,
                    handles_complex_extremals=False,
-                   promotes_integers_to_float=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2,
                                                   torch.float16: 1e-2}),),
                    skips=(
@@ -974,7 +961,6 @@ op_db: List[OpInfo] = [
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.sinh),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
-                   promotes_integers_to_float=True,
                    assert_autodiffed=True,
                    decorators=(precisionOverride({torch.float16: 1e-2}),),
                    skips=(
@@ -997,7 +983,6 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
-                   promotes_integers_to_float=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
@@ -1018,7 +1003,6 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
-                   promotes_integers_to_float=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
@@ -1037,14 +1021,12 @@ op_db: List[OpInfo] = [
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp2),
                    dtypes=all_types_and(torch.bool, torch.half),
                    dtypesIfCPU=all_types_and(torch.bool, torch.half),
-                   dtypesIfCUDA=all_types_and(torch.bool, torch.half),
-                   promotes_integers_to_float=True),
+                   dtypesIfCUDA=all_types_and(torch.bool, torch.half)),
     UnaryUfuncInfo('expm1',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.expm1),
                    dtypes=all_types_and(torch.bool, torch.half),
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
-                   promotes_integers_to_float=True,
                    assert_autodiffed=True,
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/pull/48926#issuecomment-739734774
@@ -1063,7 +1045,6 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=None,
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
-                   promotes_integers_to_float=True,
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/45690
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
@@ -1079,7 +1060,6 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    decorators=(precisionOverride({torch.half: 5e-2}),),
-                   promotes_integers_to_float=True,
                    assert_autodiffed=True,
                    handles_complex_extremals=False),
     UnaryUfuncInfo('sqrt',
@@ -1099,7 +1079,6 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/pull/47293#issuecomment-721774436
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.bfloat16])),
-                   promotes_integers_to_float=True,
                    handles_complex_extremals=False),
     UnaryUfuncInfo('angle',
                    ref=np.angle,
@@ -1109,7 +1088,6 @@ op_db: List[OpInfo] = [
                    dtypesIfROCM=all_types_and_complex_and(torch.bool),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
-                   promotes_integers_to_float=True,
                    supports_complex_to_float=True,
                    test_inplace_grad=False),
     OpInfo('linalg.solve',
@@ -1234,7 +1212,6 @@ if TEST_SCIPY:
                        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                        dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                        dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                       promotes_integers_to_float=True,
                        assert_autodiffed=True,
                        test_complex_grad=False),  # Reference: https://github.com/pytorch/pytorch/issues/48552
         UnaryUfuncInfo('digamma',
@@ -1248,8 +1225,7 @@ if TEST_SCIPY:
                            # negative integers) especially due to reduced precision
                            # in float16 and NaN's can't be tested for equality.
                            SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                    device_type='cuda', dtypes=[torch.float16]),),
-                       promotes_integers_to_float=True),
+                                    device_type='cuda', dtypes=[torch.float16]),)),
         UnaryUfuncInfo('erf',
                        ref=scipy.special.erf,
                        decorators=(precisionOverride({torch.float16: 1e-2,
@@ -1261,8 +1237,7 @@ if TEST_SCIPY:
                            # RuntimeError: "pow" not implemented for 'BFloat16'
                            SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                     dtypes=[torch.bfloat16]),),
-                       assert_autodiffed=True,
-                       promotes_integers_to_float=True),
+                       assert_autodiffed=True),
         UnaryUfuncInfo('erfc',
                        ref=scipy.special.erfc,
                        decorators=(precisionOverride({torch.float16: 1e-2,
@@ -1274,8 +1249,7 @@ if TEST_SCIPY:
                            # RuntimeError: "pow" not implemented for 'BFloat16'
                            SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                     dtypes=[torch.bfloat16]),),
-                       assert_autodiffed=True,
-                       promotes_integers_to_float=True),
+                       assert_autodiffed=True),
         UnaryUfuncInfo('erfinv',
                        ref=scipy.special.erfinv,
                        decorators=(precisionOverride({torch.float16: 1e-2,
@@ -1284,7 +1258,6 @@ if TEST_SCIPY:
                        dtypes=all_types_and(torch.bool),
                        dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
-                       promotes_integers_to_float=True,
                        domain=(-1, 1),
                        skips=(
                            # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
@@ -1301,7 +1274,6 @@ if TEST_SCIPY:
                dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                test_inplace_grad=True,
                supports_tensor_out=True,
-               promotes_integers_to_float=True,
                sample_inputs_func=sample_inputs_xlogy),
     ]
     op_db = op_db + op_db_scipy_reference
