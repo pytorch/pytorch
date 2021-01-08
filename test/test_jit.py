@@ -892,6 +892,53 @@ class TestJit(JitTestCase):
         m_dropout.eval()
         self.assertEqual(dropout(input) + 1, m_dropout(input))
 
+    def test_nn_padding(self):
+        class Mod(nn.Module):
+            def __init__(self, padding):
+                super().__init__()
+                self.padding = padding
+
+            def forward(self, input):
+                return self.padding(input)
+
+        m = Mod(nn.ConstantPad1d(2, 3.5))
+        inp = torch.randn(1, 2, 4)
+        self.checkModule(m, (inp,))
+
+        m = Mod(nn.ConstantPad2d(2, 3.5))
+        inp = torch.randn(1, 2, 2)
+        self.checkModule(m, (inp,))
+
+        m = Mod(nn.ConstantPad3d(3, 3.5))
+        inp = torch.randn(16, 3, 10, 20, 30)
+        self.checkModule(m, (inp,))
+
+        m = Mod(nn.ReflectionPad1d(2))
+        inp = torch.arange(8, dtype=torch.float).reshape(1, 2, 4)
+        self.checkModule(m, (inp,))
+
+        m = Mod(nn.ReflectionPad2d(2))
+        inp = torch.arange(9, dtype=torch.float).reshape(1, 1, 3, 3)
+        self.checkModule(m, (inp,))
+
+        m = Mod(nn.ReplicationPad1d(2))
+        inp = torch.arange(8, dtype=torch.float).reshape(1, 2, 4)
+        self.checkModule(m, (inp,))
+
+        m = Mod(nn.ReplicationPad2d(2))
+        inp = torch.arange(9, dtype=torch.float).reshape(1, 1, 3, 3)
+        self.checkModule(m, (inp,))
+
+        m = Mod(nn.ReplicationPad3d(3))
+        inp = torch.randn(16, 3, 8, 320, 480)
+        self.checkModule(m, (inp,))
+
+        m = Mod(nn.ZeroPad2d(2))
+        inp = torch.randn(1, 1, 3, 3)
+        self.checkModule(m, (inp,))
+
+
+
     def test_script_autograd_grad(self):
         def test_simple_grad(x, y):
             # type: (Tensor, Tensor) -> List[Optional[Tensor]]
