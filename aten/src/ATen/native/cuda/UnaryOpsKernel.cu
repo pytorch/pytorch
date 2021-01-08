@@ -103,6 +103,19 @@ void sigmoid_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void sinc_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, iter.common_dtype(), "sinc_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+      if (a == scalar_t(0)) {
+        return scalar_t(1);
+      } else {
+        scalar_t product = scalar_t(M_PI) * a;
+        return std::sin(product) / product;
+      }
+    });
+  });
+}
+
 void logit_kernel_cuda(TensorIterator& iter, Scalar eps_scalar) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
       at::ScalarType::Half,
@@ -147,7 +160,7 @@ void erfc_kernel_cuda(TensorIterator& iter) {
 }
 
 void erfinv_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "erfinv_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "erfinv_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
       return ::erfinv(a);
     });
@@ -245,6 +258,7 @@ REGISTER_DISPATCH(i0_stub, &i0_kernel_cuda);
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel_cuda);
 REGISTER_DISPATCH(sqrt_stub, &sqrt_kernel_cuda);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel_cuda);
+REGISTER_DISPATCH(sinc_stub, &sinc_kernel_cuda);
 REGISTER_DISPATCH(logit_stub, &logit_kernel_cuda);
 REGISTER_DISPATCH(erf_stub, &erf_kernel_cuda);
 REGISTER_DISPATCH(erfc_stub, &erfc_kernel_cuda);

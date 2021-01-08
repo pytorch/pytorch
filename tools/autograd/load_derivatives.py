@@ -63,7 +63,7 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
 
 @with_native_function
 def cpp_arguments(f: NativeFunction) -> Sequence[Binding]:
-    return CppSignatureGroup.from_schema(f.func, method=False).signature.arguments()
+    return CppSignatureGroup.from_native_function(f, method=False).signature.arguments()
 
 def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...]) -> Derivative:
     original_formula = formula
@@ -93,11 +93,6 @@ def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...
         saved_outputs=saved_outputs,
     )
 
-
-def find_required_inputs_fw_grads(formula: str) -> Tuple[str, ...]:
-    FW_GRAD_REGEX = r'(\w+).fw_grad'
-    return tuple(re.findall(FW_GRAD_REGEX, formula))
-
 def create_forward_derivative(f: NativeFunction, formula: str, names: Tuple[str, ...]) -> ForwardDerivative:
     assert len(names) == 1, "Forward derivatives can define gradients for only one output at a time"
     var_name = names[0]
@@ -122,7 +117,7 @@ def create_forward_derivative(f: NativeFunction, formula: str, names: Tuple[str,
         formula=formula,
         var_name=var_name,
         var_type=var_type,
-        required_inputs_fw_grad=find_required_inputs_fw_grads(formula),
+        required_inputs_fw_grad=None,
         required_inputs_primal=None)
 
 def postprocess_forward_derivatives(
@@ -134,11 +129,31 @@ def postprocess_forward_derivatives(
     args_with_derivatives: Sequence[Binding]
 ) -> List[ForwardDerivative]:
 
+    def find_required_inputs(formula: str, postfix: str) -> Tuple[str, ...]:
+        required_inputs = set()
+        for arg in args_with_derivatives:
+            if arg.type == 'TensorList':
+                # The functions taking TensorList handle everything internally
+                continue
+            arg_name = arg.name
+
+            found = re.search(IDENT_REGEX.format(arg_name), formula)
+            if found:
+                raise RuntimeError(f"The forward formula for {defn_name} is using the base name of the {arg_name} "
+                                   f"argument which is ambiguous. You should use {arg_name}_p to access the primal "
+                                   f"value and {arg_name}_t to access the tangent.")
+
+            found = re.search(IDENT_REGEX.format(arg_name + postfix), formula)
+            if found:
+                required_inputs.add(arg_name)
+
+        return tuple(required_inputs)
+
     updated_derivatives: List[ForwardDerivative] = []
 
     for defn in forward_derivatives:
         formula = defn.formula
-        required_inputs = defn.required_inputs_fw_grad
+        required_inputs_tangent = find_required_inputs(formula, "_t")
         if formula == "auto_element_wise":
             if (not len(args_with_derivatives) == 1) or len(forward_derivatives) > 1:
                 raise RuntimeError(f"Derivative definition of {defn_name} in derivatives.yaml defines the "
@@ -154,10 +169,17 @@ def postprocess_forward_derivatives(
             input_name = args_with_derivatives[0].name
 
             def repl(m: Any) -> str:
-                return f"{m.group(1)}{input_name}_fw_grad{m.group(2)}"
+                return f"{m.group(1)}{input_name}_t{m.group(2)}"
             fw_formula = re.sub(IDENT_REGEX.format("grad"), repl, backward_formula)
 
-            required_inputs = tuple(all_arg_names)
+            for arg in args_with_derivatives:
+                arg_name = arg.name
+
+                def repl(m: Any) -> str:
+                    return f"{m.group(1)}{arg_name}_p{m.group(2)}"
+                fw_formula = re.sub(IDENT_REGEX.format(arg_name), repl, fw_formula)
+
+            required_inputs_tangent = tuple(all_arg_names)
             formula = fw_formula
         elif formula == "auto_linear":
             if len(forward_derivatives) > 1:
@@ -171,7 +193,7 @@ def postprocess_forward_derivatives(
             new_args = []
             for arg_name in all_arg_names:
                 if arg_name in diff_arg_names:
-                    arg_name = arg_name + "_fw_grad"
+                    arg_name = arg_name + "_t"
                 new_args.append(arg_name)
 
             if Variant.function in f.variants:
@@ -181,28 +203,18 @@ def postprocess_forward_derivatives(
                 assert Variant.method in f.variants
                 fw_formula = "{}.{}({})".format(new_args[0], defn_name, ", ".join(new_args[1:]))
 
-            required_inputs = tuple(diff_arg_names)
+            required_inputs_tangent = tuple(diff_arg_names)
             formula = fw_formula
 
         # During forward formula, we use the primal instead of the input Tensors
-        required_inputs_primal = set()
-        for arg in args_with_derivatives:
-            if arg.type == 'TensorList':
-                # The functions taking TensorList handle everything internaly
-                continue
-            arg_name = arg.name
-
-            def repl(m: Any) -> str:
-                required_inputs_primal.add(arg_name)
-                return "{}{}_primal{}".format(m.group(1), arg_name, m.group(2))
-            formula = re.sub(IDENT_REGEX.format(arg_name), repl, formula)
+        required_inputs_primal = find_required_inputs(formula, "_p")
 
         updated_derivatives.append(ForwardDerivative(
             formula=formula,
             var_name=defn.var_name,
             var_type=defn.var_type,
-            required_inputs_fw_grad=required_inputs,
-            required_inputs_primal=tuple(required_inputs_primal)))
+            required_inputs_fw_grad=required_inputs_tangent,
+            required_inputs_primal=required_inputs_primal))
 
     return updated_derivatives
 

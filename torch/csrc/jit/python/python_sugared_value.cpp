@@ -217,6 +217,32 @@ std::shared_ptr<SugaredValue> PythonModuleValue::attr(
   return toSugaredValue(member, m, loc, /*is_constant=*/true);
 }
 
+#ifndef __HIP_PLATFORM_HCC__
+std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
+    const SourceRange& loc,
+    Function& m,
+    const std::string& field) {
+  // List of all the cuda operators which are supported in JIT
+  const std::unordered_set<std::string> cuda_ops = {"current_stream",
+                                                    "default_stream",
+                                                    "_current_device",
+                                                    "_set_device",
+                                                    "device_index",
+                                                    "device_count",
+                                                    "set_stream"};
+
+  if (cuda_ops.find(field) != cuda_ops.end()) {
+    return std::make_shared<BuiltinFunction>(Symbol::cuda(field), c10::nullopt);
+  }
+
+  py::object member = getattr(loc, field);
+  // note: is_constant = true because we consider that global properties
+  // on modules like math.pi or torch.float to be constants
+  // even though it is possible, though rare, for someone to mutate them
+  return toSugaredValue(member, m, loc, /*is_constant=*/true);
+}
+#endif
+
 Value* ModuleValue::asValue(const SourceRange& loc, Function& m) {
   return self_;
 }
@@ -938,6 +964,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (auto callee = as_function(obj)) {
     return std::make_shared<FunctionValue>(callee->function_);
   } else if (py::isinstance<py::module>(obj)) {
+#ifndef USE_ROCM
+    std::string obj_name = py::cast<py::str>(py::getattr(obj, "__name__"));
+    if (obj_name.compare("torch.cuda") == 0) {
+      return std::make_shared<CUDAPythonModuleValue>(obj);
+    }
+#endif
     return std::make_shared<PythonModuleValue>(obj);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr() ||
