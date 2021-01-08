@@ -214,7 +214,7 @@ class TestUnaryUfuncs(TestCase):
             if alt is None:
                 continue
 
-            if inplace and dtype in integral_types() + (torch.bool,) and expected.is_floating_point:
+            if inplace and torch.testing.is_integral(dtype) and not torch.testing.is_integral(expected.dtype):
                 # Assert that RuntimeError is raised
                 # for inplace variant of Operators that
                 # promote integer input to floating dtype.
