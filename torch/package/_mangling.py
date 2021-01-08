@@ -82,12 +82,6 @@ find a class to reconstruct its state, it typically looks at
 ``obj.__module__`` to record how to retrieve it. We need to ensure that any
 global references in the pickle bytecode are always demangled, which is taken
 care of in ``CustomImportPickler``.
-
-
-
-This is needed in two places:
-    - When converting the module name to a filename to for placing source code in the package.
-    - When saving the module name in the pickle GLOBAL opcode.
 """
 import re
 
@@ -126,7 +120,7 @@ class PackageMangler:
 
 
 def _is_mangled(name: str) -> bool:
-    return re.match(r"__torch_package_\d+__\.", name)
+    return bool(re.match(r"__torch_package_\d+__\.", name))
 
 
 def check_not_mangled(name: str):

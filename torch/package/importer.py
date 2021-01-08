@@ -143,17 +143,6 @@ class PackageImporter:
     def _read_extern(self):
         return self.zip_reader.get_record('extern_modules').decode('utf-8').splitlines(keepends=False)
 
-    def _get_empty_mangle_parent(self):
-        mangle_parent = self._mangler.parent_name()
-        module = self.modules.get(mangle_parent)
-        if module is not None:
-            return module
-
-        spec = importlib.machinery.ModuleSpec(mangle_parent, self, is_package=True)  # type: ignore
-        module = importlib.util.module_from_spec(spec)
-        self.modules[mangle_parent] = module
-        return module
-
     def _make_module(self, name: str, filename: Optional[str], is_package: bool, parent: str):
         spec = importlib.machinery.ModuleSpec(name, self, is_package=is_package)  # type: ignore
         module = importlib.util.module_from_spec(spec)

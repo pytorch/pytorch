@@ -160,8 +160,6 @@ class PackageExporter:
         module_name = self._demangle(module_name)
         self.provided[module_name] = True
         extension = '/__init__.py' if is_package else '.py'
-        # Demangle the module name before writing to a file. This ensures that
-        # no mangled names ever affect our packaged format.
         filename = module_name.replace('.', '/') + extension
         self._write(filename, src)
         if dependencies:
@@ -194,7 +192,7 @@ class PackageExporter:
             for dep in dep_list.keys():
                 self.require_module_if_not_provided(dep)
 
-    def _import_module(self, module_name: DemangledModuleName):
+    def _import_module(self, module_name: str):
         return import_module_from_importers(str(module_name), self.importers)
 
     def _module_exists(self, module_name: str) -> bool:
