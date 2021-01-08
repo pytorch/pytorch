@@ -559,7 +559,7 @@ void RequestCallbackImpl::processRRefBackward(
         Message m = RRefBackwardResp().toMessage();
         m.setId(messageId);
         responseFuture->markCompleted(
-              IValue(c10::make_intrusive<Message>(std::move(m))));
+            IValue(c10::make_intrusive<Message>(std::move(m))));
       } catch (const std::exception& /* unused */) {
         responseFuture->setError(std::current_exception());
       }
