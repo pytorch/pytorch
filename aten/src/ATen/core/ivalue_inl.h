@@ -406,7 +406,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
 
   // This accessor should only be used if we know that the future is
   // completed() with no error.
-  const IValue& constValue() {
+  const IValue& constValue() const {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     AT_ASSERT(!eptr_);
@@ -451,7 +451,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
   // Tries to retrieve the error message from std::exception_ptr.
-  std::string tryRetrieveErrorMessage() {
+  std::string tryRetrieveErrorMessage() const {
     TORCH_CHECK(hasError(), "No error present on the future.");
     std::unique_lock<std::mutex> lock(mutex_);
     return tryRetrieveErrorMessageInternal(eptr_);
@@ -543,7 +543,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
   // Tries to retrieve the error message from std::exception_ptr.
-  std::string tryRetrieveErrorMessageInternal(std::exception_ptr eptr) {
+  std::string tryRetrieveErrorMessageInternal(std::exception_ptr eptr) const {
     try {
       std::rethrow_exception(eptr);
     } catch (const std::exception& e) {
