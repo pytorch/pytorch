@@ -171,9 +171,8 @@ class TestModuleInterface(JitTestCase):
                 # type: (Tensor) -> Tensor
                 return self.proxy_mod.forward(input)
 
-        scripted_mod = torch.jit.script(TestModule())
         input = torch.randn(3, 4)
-        self.assertEqual(scripted_mod(input), 3 * input + 2)
+        self.checkModule(TestModule(), (input,))
 
     def test_module_interface_subtype(self):
         global OneTwoModule

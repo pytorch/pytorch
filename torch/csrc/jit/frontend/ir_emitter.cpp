@@ -4324,37 +4324,28 @@ void CompilationUnit::define_interface(
     arguments.insert(
         arguments.end(), schema.arguments().begin(), schema.arguments().end());
     iface->addMethod(schema.cloneWithArguments(std::move(arguments)));
-
+    // we need to make sure everything but the last element is just string
+    // literals (aka comments) unless there is "pass" in between
     auto stmts_size = method_def.statements().size();
-    // if there is only one element, it should be "pass" statement
-    if (stmts_size == 1 && method_def.statements()[0].kind() != TK_PASS) {
-      throw ErrorReport(method_def.range())
-          << "interfaces declarations should only contain a single 'pass' statement.";
+    for (size_t i = 0; i < stmts_size - 1; i++) {
+      auto cur_statement = method_def.statements()[i];
+      if (cur_statement.kind() == TK_EXPR_STMT) {
+        auto expr = ExprStmt(cur_statement).expr();
+        if (expr.kind() != TK_STRINGLITERAL) {
+          throw ErrorReport(method_def.range())
+              << "interfaces declarations should only contain a single 'pass' statement.";
+        }
+      }
+      // if we see a "pass", we just stop there
+      if (cur_statement.kind() == TK_PASS) {
+        this->register_type(iface);
+        return;
+      }
     }
 
-    // if there is more than one element, we need to make sure everything but
-    // the last element is just string literals (aka comments) unless there is
-    // "pass" in between
-    if (stmts_size != 1) {
-      for (size_t i = 0; i < stmts_size - 1; i++) {
-        auto cur_statement = method_def.statements()[i];
-        if (cur_statement.kind() == TK_EXPR_STMT) {
-          auto expr = ExprStmt(cur_statement).expr();
-          if (expr.kind() != TK_STRINGLITERAL) {
-            throw ErrorReport(method_def.range())
-                << "interfaces declarations should only contain a single 'pass' statement.";
-          }
-        }
-        // if we see a "pass", we just stop there
-        if (cur_statement.kind() == TK_PASS) {
-          this->register_type(iface);
-          return;
-        }
-      }
-      if (method_def.statements()[stmts_size - 1].kind() != TK_PASS) {
-        throw ErrorReport(method_def.range())
-            << "interfaces declarations should contain 'pass' statement.";
-      }
+    if (method_def.statements()[stmts_size - 1].kind() != TK_PASS) {
+      throw ErrorReport(method_def.range())
+          << "interfaces declarations should contain 'pass' statement.";
     }
   }
   this->register_type(iface);
