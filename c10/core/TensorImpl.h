@@ -1423,7 +1423,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * WARNING: This function doesn't rearrange data and assumes tensor is a memory
    * contiguous
    */
-  virtual void empty_tensor_restride(MemoryFormat memory_format) {
+  void empty_tensor_restride(MemoryFormat memory_format) {
     #ifdef DEBUG
         TORCH_INTERNAL_ASSERT(compute_numel() == numel_,
         "If you are seeing this error, that means empty_tensor_restride was "
