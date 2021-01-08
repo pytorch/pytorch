@@ -527,13 +527,13 @@ class TriangularOpInfo(OpInfo):
         for cholesky_inverse.
         """
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-        test_cases = (
+        inputs = (
             torch.zeros(0, 0, dtype=dtype, device=device),  # 0x0 matrix
             torch.zeros(0, 2, 2, dtype=dtype, device=device),  # zero batch of matrices
             random_hermitian_pd_matrix(S, dtype=dtype, device=device),  # single matrix
             random_hermitian_pd_matrix(S, 2, dtype=dtype, device=device),  # batch of matrices
         )
-        test_cases = (torch.linalg.cholesky(a) for a in test_cases)
+        test_cases = (torch.linalg.cholesky(a) for a in inputs)
         out = []
         for a in test_cases:
             a.requires_grad = requires_grad
