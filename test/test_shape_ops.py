@@ -607,6 +607,8 @@ class TestShapeOps(TestCase):
         self.assertFalse(nz.requires_grad)
 
 class TestShapeFuncs(TestCase):
+    """Test suite for Shape manipulating operators using the ShapeFuncInfo."""
+
     @dtypes(*(torch.uint8, torch.int64, torch.double, torch.complex128))
     @ops([op for op in shape_funcs if op.name in ['tile', 'repeat']])
     def test_repeat_tile_vs_numpy(self, device, dtype, op):

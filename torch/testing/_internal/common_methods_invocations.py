@@ -431,6 +431,8 @@ def sample_repeat_tile(op_info, device, dtype, requires_grad):
     for rep_dim, tensor in product(rep_dims, tensors):
         for t in (tensor, tensor.T):
             if op_info.name == 'repeat' and len(rep_dim) >= t.dim():
+                # `torch.repeat` errors for `len(rep_dims) < t.dim()`,
+                # so we filter such combinations.
                 samples.append(SampleInput((t, rep_dim),))
             elif op_info.name == 'tile':
                 samples.append(SampleInput((t, rep_dim),))
@@ -527,6 +529,7 @@ class SpectralFuncInfo(OpInfo):
 
 
 class ShapeFuncInfo(OpInfo):
+    """Early version of a specialized OpInfo for Shape manipulating operations like tile and roll"""
     def __init__(self,
                  name,  # the string name of the function
                  *,
