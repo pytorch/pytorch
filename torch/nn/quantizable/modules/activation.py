@@ -11,8 +11,14 @@ import warnings
 class MultiheadAttention(nn.MultiheadAttention):
     _FLOAT_MODULE = nn.MultiheadAttention
 
-    r"""Allows the model to jointly attend to information
-    from different representation subspaces.
+    r"""Quantizable implementation of the MultiheadAttention.
+
+    Note::
+        Please, refer to :class:`~torch.nn.MultiheadAttention` for more
+        information
+
+    Allows the model to jointly attend to information from different
+    representation subspaces.
     See reference: Attention Is All You Need
 
     .. math::
@@ -82,7 +88,7 @@ class MultiheadAttention(nn.MultiheadAttention):
                        other.add_zero_attn, other.kdim, other.vdim)
         observed.bias_k = other.bias_k
         observed.bias_v = other.bias_v
-        observed.qconfig = getattr(other, 'qconfig')
+        observed.qconfig = other.qconfig
 
         # Set the linear weights
         observed.out_proj.weight = other.out_proj.weight
@@ -148,14 +154,14 @@ class MultiheadAttention(nn.MultiheadAttention):
             sc, zp = torch._choose_qparams_per_tensor(bias_k,
                                                       reduce_range=False)
             bias_k = torch.quantize_per_tensor(bias_k, sc, zp, torch.quint8)
-            setattr(converted, 'bias_k', bias_k)
+            setattr(converted, 'bias_k', bias_k)  # noqa: B010
 
         if converted.bias_v is not None:
             bias_v = converted._parameters.pop('bias_v')
             sc, zp = torch._choose_qparams_per_tensor(bias_k,
                                                       reduce_range=False)
             bias_v = torch.quantize_per_tensor(bias_v, sc, zp, torch.quint8)
-            setattr(converted, 'bias_v', bias_v)
+            setattr(converted, 'bias_v', bias_v)  # noqa: B010
 
         return converted
 
@@ -163,6 +169,10 @@ class MultiheadAttention(nn.MultiheadAttention):
                 need_weights=True, attn_mask=None):
         # type: (Tensor, Tensor, Tensor, Optional[Tensor], bool, Optional[Tensor]) -> Tuple[Tensor, Optional[Tensor]]
         r"""
+    Note::
+        Please, refer to :func:`~torch.nn.MultiheadAttention.forward` for more
+        information
+
     Args:
         query, key, value: map a query and a set of key-value pairs to an output.
             See "Attention Is All You Need" for more details.
