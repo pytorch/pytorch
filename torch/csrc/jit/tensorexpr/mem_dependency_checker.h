@@ -1,7 +1,6 @@
 #pragma once
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
-#include <deque>
 #include <vector>
 
 #include <torch/csrc/jit/tensorexpr/bounds_overlap.h>
@@ -15,7 +14,16 @@ namespace jit {
 namespace tensorexpr {
 namespace analysis {
 
-enum class AccessType { Input, Output, Load, Store, Call, AtomicAdd };
+enum class AccessType {
+  Input,
+  Output,
+  Load,
+  Store,
+  Call,
+  AtomicAdd,
+  Alloc,
+  Free
+};
 const char* AccessToString(AccessType a);
 
 class AccessInfo;
@@ -221,16 +229,25 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
       const std::shared_ptr<AccessInfo>& A,
       const std::shared_ptr<AccessInfo>& B);
 
-  // Retuns the AccessInfo
+  // Returns the AccessInfo
   std::shared_ptr<AccessInfo> accessFor(const Stmt* A) const;
   std::shared_ptr<AccessInfo> accessFor(const Expr* A) const;
+
+  // Returns all AccessInfos.
+  std::unordered_set<std::shared_ptr<AccessInfo>> accessesWithin(
+      const Stmt* A) const;
+  // TODO: this will return only the AccessInfo for A. It's included for
+  // completeness but be aware it wont return accesses used in the computation
+  // of A.
+  std::unordered_set<std::shared_ptr<AccessInfo>> accessesWithin(
+      const Expr* A) const;
 
   // Accesses relating to input and output buffers.
   std::shared_ptr<AccessInfo> input(const Buf* B) const;
   std::shared_ptr<AccessInfo> output(const Buf* B) const;
 
   // Returns the full history of reads and writes.
-  const std::deque<std::shared_ptr<AccessInfo>>& getHistory() const;
+  const std::vector<std::shared_ptr<AccessInfo>>& getHistory() const;
 
   // Dumps the dependency graph in DOT format.
   void dumpDAG(const std::string& filename) const;
@@ -240,7 +257,6 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   void visit(const Store* v) override;
   void visit(const Load* v) override;
   void visit(const FunctionCall* v) override;
-  void visit(const ReduceOp* v) override;
   void visit(const For* v) override;
   void visit(const Cond* v) override;
   void visit(const IfThenElse* v) override;
@@ -248,18 +264,8 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   void visit(const Block* v) override;
   void visit(const Let* v) override;
   void visit(const AtomicAdd* v) override;
-
-#define STMT_ON_STACK(Op)                    \
-  virtual void visit(const Op* v) override { \
-    const Stmt* last = lastStmt_;            \
-    lastStmt_ = v;                           \
-    IRVisitor::visit(v);                     \
-    lastStmt_ = last;                        \
-  }
-  STMT_ON_STACK(Allocate);
-  STMT_ON_STACK(Free);
-
-#undef STMT_ON_STACK
+  void visit(const Allocate* v) override;
+  void visit(const Free* v) override;
 
   using BoundRelationship = std::pair<IndexBounds, std::shared_ptr<AccessInfo>>;
 
@@ -273,7 +279,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
     std::unordered_map<const Var*, Bound> shadowedVarBounds;
     std::unordered_set<const Var*> localVars;
 
-    std::deque<std::shared_ptr<AccessInfo>> accesses_;
+    std::vector<std::shared_ptr<AccessInfo>> accesses_;
 
     std::unordered_map<const Var*, std::list<BoundRelationship>> openWrites_;
   };
@@ -285,6 +291,8 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
       stmtToAccess_;
   std::unordered_multimap<const Expr*, std::shared_ptr<AccessInfo>>
       exprToAccess_;
+  std::unordered_map<const Stmt*, std::vector<std::shared_ptr<AccessInfo>>>
+      scopeToAccesses_;
 
   VarBoundMap knownVarBounds_;
 
@@ -303,7 +311,8 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
       }
     };
 
-    // Look for and insert accesses belonging to all nodes that act like reads.
+    // Look for and insert accesses belonging to all nodes that act like
+    // reads.
     insertAllReads(NodeFinder<Load>::find(v));
     insertAllReads(NodeFinder<FunctionCall>::find(v));
     insertAllReads(NodeFinder<ReduceOp>::find(v));
@@ -367,6 +376,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
   // Maps for inputs and outputs, since they aren't present directly in the IR.
   std::unordered_map<const Buf*, std::shared_ptr<AccessInfo>> inputs_;
   std::unordered_map<const Buf*, std::shared_ptr<AccessInfo>> outputs_;
+  std::unordered_map<const Var*, std::shared_ptr<AccessInfo>> intermediates_;
 
   // Inserts accesses for Buf's: specifically for inputs and outputs.
   void insertBuffers(

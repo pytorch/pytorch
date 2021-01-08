@@ -61,7 +61,7 @@ struct AnnotatedSchema final {
 // Concurrent writes to OperatorEntry are protected by the GLOBAL Dispatcher
 // lock (this is important because some methods in OperatorEntry access
 // dispatcher state)
-class CAFFE2_API OperatorEntry final {
+class TORCH_API OperatorEntry final {
 public:
   explicit OperatorEntry(OperatorName&& operator_name);
 
@@ -148,25 +148,18 @@ public:
 
   const DispatchKeyExtractor& dispatchKeyExtractor() const { return dispatchKeyExtractor_; }
 
-  // This function is a temporary hack that allows generated_unboxing_wrappers.cpp to register its codegen'ed
-  // unboxing wrapper for aten operators. We still need those for some operators because not all work
-  // with the templated unboxing logic yet.
-  // TODO Delete setManuallyBoxedKernel_ once all operators work with the templated boxing logic
-  void setManuallyBoxedKernel_(const c10::Dispatcher& dispatcher, KernelFunction::InternalBoxedKernelFunction* func);
-
   // Asserts that the given FuncType is correct for calling this operator in an unboxed way.
   template<class FuncType>
   void assertSignatureIsCorrect() {
-    TORCH_INTERNAL_ASSERT(!cpp_signature_.has_value() || (CppSignature::make<FuncType>() == cpp_signature_->signature),
-        "Tried to access operator ", name_, " with a wrong signature. Accessed with ",
-        CppSignature::make<FuncType>().name(),
-        " but the operator was registered with ",
-        cpp_signature_->signature.name(),
-        " (schema: ",
-        (schema_.has_value() ? schema_->debug : "unknown debug info"),
-        ", kernel: ",
-        cpp_signature_->debug,
-        ") This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). Please make sure that the function signature matches the signature in the operator registration call."
+    TORCH_CHECK(!cpp_signature_.has_value() || (CppSignature::make<FuncType>() == cpp_signature_->signature),
+        "\nTried to access or call an operator with a wrong signature.\n",
+        "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
+        "    ", (schema_.has_value() ? schema_->debug : "unknown debug info"), "\n",
+        "  correct signature:  ", cpp_signature_->signature.name(), "\n",
+        "    ", cpp_signature_->debug, "\n",
+        "  accessed/called as: ", CppSignature::make<FuncType>().name(), "\n",
+        "This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
+        "Please make sure that the function signature matches the signature in the operator registration call."
     );
   }
 
@@ -189,12 +182,6 @@ private:
 
   std::array<KernelFunction, static_cast<uint8_t>(DispatchKey::NumDispatchKeys)> dispatchTable_;
   DispatchKeyExtractor dispatchKeyExtractor_;
-
-  // This manuallyBoxedKernel_ member is a temporary hack that allows generated_unboxing_wrappers.cpp to register its codegen'ed
-  // unboxing wrapper for aten operators. We still need those for some operators because not all work
-  // with the templated unboxing logic yet.
-  // TODO Delete manuallyBoxedKernel_ once all operators work with the templated boxing logic
-  c10::optional<KernelFunction::InternalBoxedKernelFunction*> manuallyBoxedKernel_;
 
   // kernels_ stores all registered kernels for the corresponding dispatch key
   // and catchAllKernels_ stores the catch-all kernels.
@@ -241,6 +228,7 @@ private:
   struct CppSignatureWithDebug {
     CppSignature signature;
     std::string debug;
+    c10::optional<DispatchKey> dispatch_key;
   };
   c10::optional<CppSignatureWithDebug> cpp_signature_;
 

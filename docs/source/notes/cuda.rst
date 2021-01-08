@@ -65,7 +65,7 @@ available on new NVIDIA GPUs since Ampere, internally to compute matmul (matrix 
 and batched matrix multiplies) and convolutions.
 
 TF32 tensor cores are designed to achieve better performance on matmul and convolutions on
-`torch.float32` tensors by truncating input data to have 10 bits of mantissa, and accumulating
+`torch.float32` tensors by rounding input data to have 10 bits of mantissa, and accumulating
 results with FP32 precision, maintaining FP32 dynamic range.
 
 matmuls and convolutions are controlled separately, and their corresponding flags can be accessed at:
@@ -113,6 +113,13 @@ is needed, users can disable TF32 by:
 
   torch.backends.cuda.matmul.allow_tf32 = False
   torch.backends.cudnn.allow_tf32 = False
+
+To toggle the TF32 flags off in C++, you can do
+
+.. code:: C++
+
+  at::globalContext().setAllowTF32CuBLAS(false);
+  at::globalContext().setAllowTF32CuDNN(false);
 
 For more information about TF32, see:
 
@@ -259,7 +266,7 @@ cuFFT plan cache
 ----------------
 
 For each CUDA device, an LRU cache of cuFFT plans is used to speed up repeatedly
-running FFT methods (e.g., :func:`torch.fft`) on CUDA tensors of same geometry
+running FFT methods (e.g., :func:`torch.fft.fft`) on CUDA tensors of same geometry
 with same configuration. Because some cuFFT plans may allocate GPU memory,
 these caches have a maximum capacity.
 

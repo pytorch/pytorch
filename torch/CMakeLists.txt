@@ -234,9 +234,9 @@ add_custom_command(
     "${TORCH_SRC_DIR}/nn/functional.pyi"
     COMMAND
     "${PYTHON_EXECUTABLE}" -mtools.pyi.gen_pyi
-      --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
+      --native-functions-path "aten/src/ATen/native/native_functions.yaml"
+      --deprecated-functions-path "tools/autograd/deprecated.yaml"
     DEPENDS
-    "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TORCH_SRC_DIR}/_C/__init__.pyi.in"
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi.in"
     "${TORCH_SRC_DIR}/nn/functional.pyi.in"

@@ -30,7 +30,6 @@ def generate_code(ninja_global=None,
                   operator_selector=None):
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
     from tools.autograd.gen_annotated_fn_args import gen_annotated
-    from tools.jit.gen_unboxing_wrappers import gen_unboxing_wrappers
     from tools.codegen.selective_build.selector import SelectiveBuilder
 
 
@@ -64,22 +63,16 @@ def generate_code(ninja_global=None,
 
         gen_autograd(
             declarations_path or DECLARATIONS_PATH,
+            native_functions_path or NATIVE_FUNCTIONS_PATH,
             autograd_gen_dir,
             autograd_dir,
             disable_autograd=disable_autograd,
             operator_selector=operator_selector,
         )
-        gen_unboxing_wrappers(
-            declarations_path or DECLARATIONS_PATH,
-            jit_gen_dir,
-            tools_jit_templates,
-            disable_autograd=disable_autograd,
-            operator_selector=operator_selector,
-            force_schema_registration=force_schema_registration)
 
     if subset == "python" or not subset:
         gen_annotated(
-            declarations_path or DECLARATIONS_PATH,
+            native_functions_path or NATIVE_FUNCTIONS_PATH,
             python_install_dir,
             autograd_dir)
 
@@ -153,7 +146,7 @@ def main():
     )
     parser.add_argument(
         '--selected-op-list-path',
-        help='Path to the yaml file that contains the list of operators to include for custom build.',
+        help='Path to the YAML file that contains the list of operators to include for custom build.',
     )
     parser.add_argument(
         '--operators_yaml_path',

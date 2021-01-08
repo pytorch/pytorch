@@ -91,7 +91,25 @@ Tensor& fill_diagonal_(Tensor& self, Scalar fill_value, bool wrap) {
   return self;
 }
 
+Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
+  void* ptr = self.data_ptr();
+  if (nullptr == ptr) {
+    return self.fill_(0);
+  }
+  int64_t size_bytes = nelements * self.dtype().itemsize();
+  if (size_bytes > 0) {
+    std::memset(ptr, 0, size_bytes);
+  }
+  return self;
+}
+
 Tensor& zero_(Tensor &self) {
+  int64_t nelements = at::prod_intlist(self.sizes());
+  if (self.device() == at::kCPU &&
+      self.is_non_overlapping_and_dense() &&
+      nelements < internal::GRAIN_SIZE) {
+    return zero_cpu_(self, nelements);
+  }
   return self.fill_(0);
 }
 

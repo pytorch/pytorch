@@ -6,7 +6,7 @@
 #include <dlfcn.h>
 #include <libgen.h>
 #else
-#include <Windows.h>
+#include <c10/util/win32-headers.h>
 #endif
 
 namespace at {

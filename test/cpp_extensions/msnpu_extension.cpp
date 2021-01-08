@@ -20,9 +20,10 @@ Tensor get_tensor(caffe2::TypeMeta dtype, IntArrayRef size) {
   return Tensor(std::move(tensor_impl));
 }
 
-Tensor empty_override(IntArrayRef size, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor empty_override(IntArrayRef size, c10::optional<ScalarType> dtype, c10::optional<Layout> layout, c10::optional<Device> device,
+                      c10::optional<bool> pin_memory, c10::optional<c10::MemoryFormat> optional_memory_format) {
   test_int = 0;
-  return get_tensor(options.dtype(), size);
+  return get_tensor(scalarTypeToTypeMeta(dtype_or_default(dtype)), size);
 }
 
 Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
@@ -52,10 +53,10 @@ std::tuple<Tensor,Tensor,Tensor> fake_convolution_backward(
 }
 
 TORCH_LIBRARY_IMPL(aten, MSNPU, m) {
-  m.impl_UNBOXED("empty.memory_format",                empty_override);
-  m.impl_UNBOXED("add.Tensor",                         add_override);
-  m.impl_UNBOXED("convolution_overrideable",           fake_convolution);
-  m.impl_UNBOXED("convolution_backward_overrideable",  fake_convolution_backward);
+  m.impl("empty.memory_format",                empty_override);
+  m.impl("add.Tensor",                         add_override);
+  m.impl("convolution_overrideable",           fake_convolution);
+  m.impl("convolution_backward_overrideable",  fake_convolution_backward);
 }
 
 // TODO: Extend this to exercise multi-device setting.  In that case,

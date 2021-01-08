@@ -65,7 +65,7 @@ PyTorchStreamReader::PyTorchStreamReader(std::istream* in)
 }
 
 PyTorchStreamReader::PyTorchStreamReader(
-    std::unique_ptr<ReadAdapterInterface> in)
+    std::shared_ptr<ReadAdapterInterface> in)
     : ar_(std::make_unique<mz_zip_archive>()), in_(std::move(in)) {
   init();
 }

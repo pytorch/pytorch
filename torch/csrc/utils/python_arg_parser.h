@@ -80,7 +80,7 @@ namespace torch {
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, COMPLEX, TENSOR_LIST, INT_LIST, GENERATOR,
   BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STREAM, STRING,
-  DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST
+  DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST, SCALAR_LIST
 };
 
 struct FunctionParameter;
@@ -158,7 +158,9 @@ struct PythonArgs {
   inline c10::optional<at::Tensor> optionalTensor(int i);
   inline at::Scalar scalar(int i);
   inline at::Scalar scalarWithDefault(int i, at::Scalar default_scalar);
+  inline std::vector<at::Scalar> scalarlist(int i);
   inline std::vector<at::Tensor> tensorlist(int i);
+  inline torch::List<c10::optional<at::Tensor>> list_of_optional_tensors(int i);
   template<int N>
   inline std::array<at::Tensor, N> tensorlist_n(int i);
   inline std::vector<int64_t> intlist(int i);
@@ -206,6 +208,7 @@ struct PythonArgs {
 private:
   at::Tensor tensor_slow(int i);
   at::Scalar scalar_slow(int i);
+  at::Scalar scalar_slow(PyObject* arg);
 };
 
 struct FunctionParameter {
@@ -287,6 +290,19 @@ inline at::Scalar PythonArgs::scalar(int i) {
   return scalar_slow(i);
 }
 
+inline std::vector<at::Scalar> PythonArgs::scalarlist(int i) {
+  if (!args[i]) return std::vector<at::Scalar>();
+  auto tuple = six::isTuple(args[i]);
+  THPObjectPtr arg = six::maybeAsTuple(args[i]);
+  auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
+  std::vector<at::Scalar> res(size);
+  for (int idx = 0; idx < size; idx++) {
+    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
+    res[idx] = scalar_slow(obj);
+  }
+  return res;
+}
+
 inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar) {
   if (!args[i]) return default_scalar;
   return scalar_slow(i);
@@ -308,6 +324,22 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
     // This is checked by the argument parser so it's safe to cast without checking
     // if this is a tensor first
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
+  }
+  return res;
+}
+
+inline torch::List<c10::optional<at::Tensor>> PythonArgs::list_of_optional_tensors(int i) {
+  if (!args[i]) return torch::List<c10::optional<at::Tensor>>();
+  auto tuple = six::isTuple(args[i]);
+  THPObjectPtr arg = six::maybeAsTuple(args[i]);
+  auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
+  torch::List<c10::optional<at::Tensor>> res;
+  res.reserve(size);
+  for (int idx = 0; idx < size; idx++) {
+    PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx) : PyList_GET_ITEM(arg.get(), idx);
+    // This is checked by the argument parser so it's safe to cast without checking
+    // if this is a tensor first
+    res.push_back(reinterpret_cast<THPVariable*>(obj)->cdata);
   }
   return res;
 }
@@ -820,8 +852,8 @@ auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObje
 // Used for functions which needs to parse python args.
 auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*;
 
-// Used for functions that accept no keyword arguments and have no argument parsing
-auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args=nullptr, PyObject* torch_api=THPVariableClass, const std::string& module_name="torch.Tensor") -> PyObject*;
+// Used for functions that have no argument parsing.
+auto handle_torch_function(PyObject* self, const std::string& func_name, PyObject* args=nullptr, PyObject* kwargs=nullptr, PyObject* torch_api=THPVariableClass, const std::string& module_name="torch.Tensor") -> PyObject*;
 
 // Used for functions created in C++, e.g., C++ custom op, which doesn't use PythonArgParser to get overloaded_args.
 auto handle_torch_function_no_python_arg_parser(const std::vector<py::handle> &overloaded_args, PyObject* args, PyObject* kwargs, const char* func_name, PyObject* torch_api_function, const char* module_name) -> PyObject*;

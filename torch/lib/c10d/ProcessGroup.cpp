@@ -58,7 +58,7 @@ ProcessGroup::Work::Work(int rank, OpType opType, const char* profilingTitle)
     : rank_(rank), opType_(opType) {
   if (profilingTitle != nullptr) {
     auto recordingFunction = std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
-    if (recordingFunction->active) {
+    if (recordingFunction->isActive()) {
         recordingFunction->before(profilingTitle, {});
         std::function<void()> end_handler = [this, recordingFunction]() {
           recordingFunction->end();
@@ -164,7 +164,7 @@ ProcessGroup::~ProcessGroup() {}
 
 // This is introduced so that implementors of ProcessGroup would not need to
 // have this implmentation.
-std::shared_ptr<ProcessGroup::Work> ProcessGroup::allgather_coalesced(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroup::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& /* usused */,
     std::vector<at::Tensor>& /* usused */,
     const AllgatherOptions& /* usused */) {

@@ -123,7 +123,10 @@ std::vector<InlinedCallStackEntry> InlinedCallStack::vec() {
   std::vector<InlinedCallStackEntry> r;
   c10::optional<InlinedCallStackPtr> current = intrusive_from_this();
   while (current) {
-    r.emplace_back(std::make_pair((*current)->fn_, (*current)->source_range_));
+    r.emplace_back(std::make_tuple(
+        (*current)->fn_,
+        (*current)->source_range_,
+        (*current)->module_instance_info_));
     current = (*current)->callee_;
   }
   return r;
