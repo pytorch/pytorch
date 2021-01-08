@@ -59,7 +59,14 @@ class SampleInput(object):
         self.output_process_fn_grad = output_process_fn_grad
 
     def __repr__(self):
-        return f'SampleInput(input[{len(self.input)}], args={self.args}, kwargs={self.kwargs}, output_process_fn_grad={self.output_process_fn_grad})'
+        arguments = [
+            f'input[{len(self.input)}]',
+            f'args={self.args}' if len(self.args) > 0 else None,
+            f'kwargs={self.kwargs}' if len(self.kwargs) > 0 else None,
+            (f'output_process_fn_grad={self.output_process_fn_grad}'
+             if self.output_process_fn_grad is not None else None)]
+
+        return f'SampleInput({", ".join(a for a in arguments if a is not None)})'
 
 
 _NOTHING = object()  # Unique value to distinguish default from anything else
@@ -642,6 +649,30 @@ def sample_inputs_pinverse(op_info, device, dtype, requires_grad=False):
     return out
 
 
+def sample_inputs_flip(op_info, device, dtype, requires_grad):
+    tensors = (
+        make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad)
+    )
+
+    dims = ((0, 1, 2), (0,), (0, 2), (-1,))
+
+    # On CUDA, `dims=()` errors out with IndexError
+    # Reference: https://github.com/pytorch/pytorch/issues/49982
+    if device == 'cpu':
+        dims = dims + ((),)  # type: ignore
+
+    samples = [SampleInput(tensor, kwargs={'dims': dim}) for tensor, dim in product(tensors, dims)]
+
+    return samples
+
+def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad):
+    tensors = (
+        make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad)
+    )
+    return [SampleInput(tensor) for tensor in tensors]
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
@@ -809,7 +840,7 @@ op_db: List[OpInfo] = [
                      ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
-                     supports_tensor_out=False,
+                     supports_tensor_out=True,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.fftn',
                      aten_name='fft_fftn',
@@ -817,7 +848,7 @@ op_db: List[OpInfo] = [
                      ndimensional=True,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
-                     supports_tensor_out=False,
+                     supports_tensor_out=True,
                      test_inplace_grad=False,
                      decorators=[precisionOverride(
                          {torch.float: 1e-4, torch.cfloat: 1e-4})],),
@@ -827,7 +858,7 @@ op_db: List[OpInfo] = [
                      ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
-                     supports_tensor_out=False,
+                     supports_tensor_out=True,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.rfft',
                      aten_name='fft_rfft',
@@ -835,7 +866,7 @@ op_db: List[OpInfo] = [
                      ndimensional=False,
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
-                     supports_tensor_out=False,
+                     supports_tensor_out=True,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.rfftn',
                      aten_name='fft_rfftn',
@@ -843,7 +874,7 @@ op_db: List[OpInfo] = [
                      ndimensional=True,
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
-                     supports_tensor_out=False,
+                     supports_tensor_out=True,
                      test_inplace_grad=False,
                      decorators=[precisionOverride({torch.float: 1e-4})],),
     SpectralFuncInfo('fft.ifft',
@@ -852,7 +883,7 @@ op_db: List[OpInfo] = [
                      ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
-                     supports_tensor_out=False,
+                     supports_tensor_out=True,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.ifftn',
                      aten_name='fft_ifftn',
@@ -860,7 +891,7 @@ op_db: List[OpInfo] = [
                      ndimensional=True,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
-                     supports_tensor_out=False,
+                     supports_tensor_out=True,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.ihfft',
                      aten_name='fft_ihfft',
@@ -868,7 +899,7 @@ op_db: List[OpInfo] = [
                      ndimensional=False,
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_types(),
-                     supports_tensor_out=False,
+                     supports_tensor_out=True,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.irfft',
                      aten_name='fft_irfft',
@@ -876,7 +907,7 @@ op_db: List[OpInfo] = [
                      ndimensional=False,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
-                     supports_tensor_out=False,
+                     supports_tensor_out=True,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.irfftn',
                      aten_name='fft_irfftn',
@@ -884,8 +915,26 @@ op_db: List[OpInfo] = [
                      ndimensional=True,
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
-                     supports_tensor_out=False,
+                     supports_tensor_out=True,
                      test_inplace_grad=False,),
+    OpInfo('flip',
+           op=torch.flip,
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_flip,
+           test_inplace_grad=False,
+           supports_tensor_out=False),
+    OpInfo('fliplr',
+           op=torch.fliplr,
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_fliplr_flipud,
+           test_inplace_grad=False,
+           supports_tensor_out=False),
+    OpInfo('flipud',
+           op=torch.flipud,
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_fliplr_flipud,
+           test_inplace_grad=False,
+           supports_tensor_out=False),
     UnaryUfuncInfo('log',
                    ref=np.log,
                    domain=(0, float('inf')),
@@ -1537,13 +1586,6 @@ def method_tests():
         ('reshape_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
         ('reshape_as', (), (non_differentiable(torch.tensor(42.)),), 'scalar'),
         ('reshape_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
-        ('flip', (S, S, S), ([0],), 'd0'),
-        ('flip', (S, S, S), ([0, 1, 2],), 'd012'),
-        ('flip', (S, S, S), ([0, 2],), 'd02'),
-        ('flip', (S, S, S), ([2, 0],), 'd20'),
-        ('flip', (S, S, S), ([-1],), 'neg_d'),
-        ('fliplr', (S, S, S), ()),
-        ('flipud', (S, S, S), ()),
         ('roll', (S, S, S), (0, 0), 'd0'),
         ('roll', (S, S, S), (1, 2), 'd12'),
         ('roll', (S, S, S), (0, 2,), 'd02'),
