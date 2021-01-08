@@ -507,10 +507,11 @@ void minimum_kernel(TensorIterator& iter) {
 
 void fmax_kernel(TensorIterator& iter) {
   if (isFloatingType(iter.common_dtype())) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "fmax_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmax_cpu", [&]() {
       cpu_kernel(iter,
-        [](scalar_t a, scalar_t b) -> scalar_t {return std::fmax(a, b);
-      });
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return std::fmax(a, b);
+        });
     });
   } else {
     maximum_kernel(iter);
@@ -519,10 +520,11 @@ void fmax_kernel(TensorIterator& iter) {
 
 void fmin_kernel(TensorIterator& iter) {
   if (isFloatingType(iter.common_dtype())) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "fmin_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmin_cpu", [&]() {
       cpu_kernel(iter,
-        [](scalar_t a, scalar_t b) -> scalar_t {return std::fmin(a, b);
-      });
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return std::fmin(a, b);
+        });
     });
   } else {
     minimum_kernel(iter);

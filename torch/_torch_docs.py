@@ -5116,8 +5116,8 @@ Only if both elements are NaN is NaN propagated.
 
 This function is a wrapper around C++'s ``std::fmax`` and is similar to NumPy's ``fmax`` function.
 
-Supports :ref:broadcasting to a common shape <broadcasting-semantics>,
-:ref:type promotion <type-promotion-doc>, and integer and floating-point inputs.
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer and floating-point inputs.
 
 Args:
     {input}
@@ -5591,8 +5591,8 @@ Only if both elements are NaN is NaN propagated.
 
 This function is a wrapper around C++'s ``std::fmin`` and is similar to NumPy's ``fmin`` function.
 
-Supports :ref:broadcasting to a common shape <broadcasting-semantics>,
-:ref:type promotion <type-promotion-doc>, and integer and floating-point inputs.
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer and floating-point inputs.
 
 Args:
     {input}
