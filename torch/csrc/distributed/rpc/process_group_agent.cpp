@@ -540,26 +540,26 @@ bool ProcessGroupAgent::handleRecv(RecvWork& work) {
       // Use a weak_ptr, so we can std::move the future's value.
       auto fromId = work.from_.id_;
       auto requestId = work.id_;
-      futureResponse->addCallback([this,
-                                   fromId,
-                                   requestId,
-                                   weak = std::weak_ptr<JitFuture>(
-                                       futureResponse)]() {
-        auto futureResponse = weak.lock();
-        TORCH_INTERNAL_ASSERT(futureResponse);
-        --serverActiveCalls_;
-        --serverActiveAsyncCalls_;
-        if (!futureResponse->hasError()) {
-          send(
-              getWorkerInfo(fromId),
-              std::move(*futureResponse->value().toCustomClass<Message>()));
-        } else {
-          send(
-              getWorkerInfo(fromId),
-              createExceptionResponse(
-                  futureResponse->tryRetrieveErrorMessage(), requestId));
-        }
-      });
+      futureResponse->addCallback(
+          [this,
+           fromId,
+           requestId,
+           weak = std::weak_ptr<JitFuture>(futureResponse)]() {
+            auto futureResponse = weak.lock();
+            TORCH_INTERNAL_ASSERT(futureResponse);
+            --serverActiveCalls_;
+            --serverActiveAsyncCalls_;
+            if (!futureResponse->hasError()) {
+              send(
+                  getWorkerInfo(fromId),
+                  std::move(*futureResponse->value().toCustomClass<Message>()));
+            } else {
+              send(
+                  getWorkerInfo(fromId),
+                  createExceptionResponse(
+                      futureResponse->tryRetrieveErrorMessage(), requestId));
+            }
+          });
     }
   } else if (message.isResponse()) {
     auto id = message.id();
