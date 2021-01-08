@@ -1413,7 +1413,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
   // Use user defined GPU device ids if provided
   if (!opts.device_ids.empty()) {
     for (auto device : opts.device_ids) {
-      devices.push_back(at::Device(at::DeviceType::CUDA, device));
+      devices.emplace_back(at::DeviceType::CUDA, device);
     }
   } else if (usedDeviceIdxs_.empty()) {
     // This means there is not yet a NCCL collective being called
@@ -1423,10 +1423,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
     // ensure that each process is on a different GPU
     auto numGPUs = at::cuda::getNumGPUs();
     int16_t deviceIdx = static_cast<int16_t>(rank_ % numGPUs);
-    devices.push_back(at::Device(at::DeviceType::CUDA, deviceIdx));
+    devices.emplace_back(at::DeviceType::CUDA, deviceIdx);
   } else {
     for (auto usedDeviceIdx : usedDeviceIdxs_) {
-      devices.push_back(at::Device(at::DeviceType::CUDA, usedDeviceIdx));
+      devices.emplace_back(at::DeviceType::CUDA, usedDeviceIdx);
     }
   }
 

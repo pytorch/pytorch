@@ -3845,7 +3845,6 @@ class TestLinalg(TestCase):
         """Compare torch and scipy.sparse.linalg implementations of lobpcg
         """
         import time
-        import scipy
         from torch.testing._internal.common_utils import random_sparse_pd_matrix
         from torch._linalg_utils import matmul as mm
         from scipy.sparse.linalg import lobpcg as scipy_lobpcg
