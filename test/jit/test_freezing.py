@@ -1511,4 +1511,4 @@ class TestFrozenOptimizations(JitTestCase):
 
         # optimize_frozen_module should be run
         frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()))
-        FileCheck().check("batch_norm").run(frozen_mod.graph)
+        FileCheck().check_not("batch_norm").run(frozen_mod.graph)
