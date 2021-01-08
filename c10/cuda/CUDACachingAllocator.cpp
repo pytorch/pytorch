@@ -62,7 +62,7 @@ constexpr size_t kSmallSize = 1048576;      // largest "small" allocation is 1 M
 constexpr size_t kSmallBuffer = 2097152;    // "small" allocations are packed in 2 MiB blocks
 constexpr size_t kLargeBuffer = 20971520;   // "large" allocations may be packed in 20 MiB blocks
 constexpr size_t kMinLargeAlloc = 10485760; // allocations between 1 and 10 MiB may use kLargeBuffer
-constexpr size_t kRoundLarge = 2097152;     // round up large allocs to 2 MiB
+constexpr size_t kRoundLarge = 2097152;     // round up large allocations to 2 MiB
 
 typedef std::bitset<static_cast<size_t>(StatType::NUM_TYPES)> StatTypes;
 
