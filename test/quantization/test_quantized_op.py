@@ -2453,8 +2453,8 @@ class TestQuantizedOps(TestCase):
                     Bias, Add_bias_kv, Add_zero_attn):
                 # Assume 12dB is sufficient for functional equivalence
                 # Without the bias, linear might perform poorly
-                min_power = 12
-                max_mse = 5
+                min_power = 12 if bias else 10
+                max_mse = 5 if bias else 10
 
                 mha = MultiheadAttentionModel(embed_dim, num_heads, dropout,
                                               bias, add_bias_kv, add_zero_attn)
@@ -2484,7 +2484,10 @@ class TestQuantizedOps(TestCase):
                     self.assertTrue(
                         power > min_power or mse < max_mse,
                         msg=(f"Error is too high: SNR(dB): {power}, "
-                             f"Signal: {signal}, MSE: {mse}"))
+                             f"Signal: {signal}, MSE: {mse}; "
+                             f"Run with bias={bias}, "
+                             f"add_bias_kv={add_bias_kv}, "
+                             f"add_zero_attn={add_zero_attn}"))
 
 
 class TestDynamicQuantizedLinear(TestCase):

@@ -2405,7 +2405,6 @@ class TestNN(NNTestCase):
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(expected_mask, computed_mask)
 
-
     def test_l1_unstructured_pruning(self):
         r"""Test that l1 unstructured pruning actually removes the lowest
         entries by l1 norm (by hand). It also checks that applying l1
@@ -2430,6 +2429,35 @@ class TestNN(NNTestCase):
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(expected_weight, m.weight)
 
+    def test_l1_unstructured_pruning_with_importance_scores(self):
+        r"""Test that l1 unstructured pruning actually removes the lowest
+        entries of importance scores and not the parameter by l1 norm (by hand).
+        It also checks that applying l1 unstructured pruning more than once
+        respects the previous mask.
+        """
+        m = nn.Linear(4, 2)
+        # modify its weight matrix by hand
+        m.weight = torch.nn.Parameter(
+            torch.tensor(
+                [[1, 2, 3, 4], [-4, -3, -2, -1]], dtype=torch.float32
+            )
+        )
+        importance_scores = torch.tensor(
+            [[4, 2, 1, 3], [-3, -1, -2, -4]], dtype=torch.float32
+        )
+
+        prune.l1_unstructured(m, 'weight', amount=2, importance_scores=importance_scores)
+        expected_weight = torch.tensor([[1, 2, 0, 4], [-4, 0, -2, -1]])
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(expected_weight, m.weight)
+
+        # check that pruning again removes two entries of m.weight that are colocated with
+        # the next two smallest absolute values of importance scores.
+        prune.l1_unstructured(m, 'weight', amount=2, importance_scores=importance_scores)
+        expected_weight = torch.tensor([[1, 0, 0, 4], [-4, 0, 0, -1]])
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(expected_weight, m.weight)
+
     def test_unstructured_pruning_same_magnitude(self):
         r"""Since it may happen that the tensor to prune has entries with the
         same exact magnitude, it is important to check that pruning happens
@@ -2447,7 +2475,6 @@ class TestNN(NNTestCase):
         self.assertEqual(nparams_toprune, nparams_pruned)
 
     def test_random_structured_pruning_amount(self):
-
         AMOUNT = 0.6
         AXIS = 2
         p = prune.RandomStructured(amount=AMOUNT, dim=AXIS)
@@ -2463,7 +2490,6 @@ class TestNN(NNTestCase):
             torch.sum(computed_mask == 0, axis=remaining_axes)
         )
         assert per_column_sums == [0, 20]
-
 
     def test_ln_structured_pruning(self):
         r"""Check Ln structured pruning by hand.
@@ -2488,6 +2514,33 @@ class TestNN(NNTestCase):
         prune.ln_structured(m, 'weight', amount=1, n=1, dim=-1)
         self.assertEqual(expected_mask_axis3, m.weight_mask)
 
+    def test_ln_structured_pruning_importance_scores(self):
+        r"""Check Ln structured pruning by hand.
+        """
+        m = nn.Conv2d(3, 1, 2)
+        m.weight.data = torch.Tensor(
+            [[[[1., 2.], [1., 2.5]],
+             [[0.5, 1.], [0.1, 0.1]],
+             [[-3., -5.], [0.1, -1.]]]]
+        )
+        importance_scores = torch.Tensor(
+            [[[[10., 1.], [10., 1.]],
+             [[30., 3.], [30., 3.]],
+             [[-20., -2.], [-20., -2.]]]]
+        )
+        # expected effect of pruning 1 of the 3 channels by L2-norm
+        expected_mask_axis1 = torch.ones_like(m.weight)
+        expected_mask_axis1[:, 0] = 0.
+
+        prune.ln_structured(m, 'weight', amount=1, n=2, dim=1, importance_scores=importance_scores)
+        self.assertEqual(expected_mask_axis1, m.weight_mask)
+
+        # expected effect of pruning 1 of the 2 columns along axis -1 by L1-norm
+        expected_mask_axis3 = expected_mask_axis1
+        expected_mask_axis3[:, :, :, 1] = 0.
+
+        prune.ln_structured(m, 'weight', amount=1, n=1, dim=-1, importance_scores=importance_scores)
+        self.assertEqual(expected_mask_axis3, m.weight_mask)
 
     def test_remove_pruning(self):
         r"""`prune.remove` removes the hook and the reparametrization
@@ -2567,6 +2620,49 @@ class TestNN(NNTestCase):
         expected_nweight = torch.tensor([[0, 0, -2]]).to(dtype=n.weight.dtype)
         self.assertEqual(expected_nweight, n.weight)
 
+    def test_global_pruning_importance_scores(self):
+        r"""Test that global l1 unstructured pruning over 2 parameters removes
+        the `amount=4` smallest global weights across the 2 parameters.
+        """
+        m = nn.Linear(4, 2)
+        n = nn.Linear(3, 1)
+        # modify the weight matrices by hand
+        m.weight = torch.nn.Parameter(
+            torch.tensor([[1, 2, 3, 4], [-4, -3, -2, -1]]).to(
+                dtype=torch.float32)
+        )
+        m_importance_scores = torch.tensor(
+            [[4, 2, 1, 3], [-3, -1, -2, -4]], dtype=torch.float32
+        )
+        n.weight = torch.nn.Parameter(
+            torch.tensor([[0, 0.1, -2]]).to(
+                dtype=torch.float32)
+        )
+        n_importance_scores = torch.tensor([[0, 10., -0.2]]).to(dtype=torch.float32)
+
+        params_to_prune = (
+            (m, 'weight'),
+            (n, 'weight'),
+        )
+        importance_scores = {
+            (m, 'weight'): m_importance_scores,
+            (n, 'weight'): n_importance_scores,
+        }
+
+        # prune the 4 smallest weights globally by L1 magnitude
+        prune.global_unstructured(
+            params_to_prune,
+            pruning_method=prune.L1Unstructured,
+            amount=4,
+            importance_scores=importance_scores,
+        )
+
+        expected_m_weight = torch.tensor([[1, 2, 0, 4], [-4, 0, -2, -1]])
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(expected_m_weight, m.weight)
+
+        expected_n_weight = torch.tensor([[0, 0.1, 0]]).to(dtype=n.weight.dtype)
+        self.assertEqual(expected_n_weight, n.weight)
 
     def test_custom_from_mask_pruning(self):
         r"""Test that the CustomFromMask is capable of receiving
@@ -2656,7 +2752,6 @@ class TestNN(NNTestCase):
 
         self.assertEqual(pruned_weight, new_model[0].weight)
 
-
     def test_pruning_serialization_state_dict(self):
         # create a model
         model = torch.nn.Sequential(
@@ -2707,7 +2802,6 @@ class TestNN(NNTestCase):
 
         self.assertEqual(pruned_weight, new_model[0].weight)
 
-
     def test_prune(self):
         # create a new pruning method
         p = prune.L1Unstructured(amount=2)
@@ -2720,6 +2814,37 @@ class TestNN(NNTestCase):
         expected_mask = torch.tensor([[0, 0, 1, 0], [1, 1, 0, 1]])
         pruned_tensor = p.prune(t, default_mask)
         self.assertEqual(t * expected_mask, pruned_tensor)
+
+    def test_prune_importance_scores(self):
+        # create a new pruning method
+        p = prune.L1Unstructured(amount=2)
+        # create tensor to be pruned
+        t = torch.tensor([[1, 2, 3, 4], [5, 6, 7, 8]]).to(dtype=torch.float32)
+        importance_scores = torch.tensor(
+            [[1, 2, 3, 4], [1.5, 1.6, 1.7, 1.8]]
+        ).to(dtype=torch.float32)
+        # create prior mask by hand
+        default_mask = torch.tensor([[1, 1, 1, 0], [1, 1, 0, 1]])
+        # since we are pruning the two lowest magnitude units, the outcome of
+        # the calculation should be this:
+        expected_mask = torch.tensor([[0, 1, 1, 0], [0, 1, 0, 1]])
+        pruned_tensor = p.prune(t, default_mask, importance_scores=importance_scores)
+        self.assertEqual(t * expected_mask, pruned_tensor)
+
+    def test_prune_importance_scores_mimic_default(self):
+        # create a new pruning method
+        p = prune.L1Unstructured(amount=2)
+        # create tensor to be pruned
+        t = torch.tensor([[1, 2, 3, 4], [5, 6, 7, 8]]).to(dtype=torch.float32)
+        # create prior mask by hand
+        default_mask = torch.tensor([[1, 1, 1, 0], [1, 1, 0, 1]])
+        # since we are pruning the two lowest magnitude units, the outcome of
+        # the calculation should be this:
+        expected_mask = torch.tensor([[0, 0, 1, 0], [1, 1, 0, 1]])
+        pruned_tensor_without_importance_scores = p.prune(t, default_mask)
+        pruned_tensor_with_importance_scores = p.prune(t, default_mask, importance_scores=t)
+        self.assertEqual(pruned_tensor_without_importance_scores, pruned_tensor_with_importance_scores)
+        self.assertEqual(t * expected_mask, pruned_tensor_without_importance_scores)
 
     def test_rnn_pruning(self):
         l = torch.nn.LSTM(32, 32)
@@ -2751,6 +2876,7 @@ class TestNN(NNTestCase):
         assert 'weight_ih_l0' in dict(l.named_parameters())
         assert dict(l.named_parameters())['weight_ih_l0'] is not None
         assert 'weight_ih_l0_orig' not in dict(l.named_parameters())
+
 
     def test_rnn_weight_norm(self):
         def check_weight_norm(l, name, num_params):
@@ -6897,8 +7023,9 @@ class TestNN(NNTestCase):
         output.backward(grad.contiguous())
         self.assertEqual(result, input.grad.data, atol=dtype2prec_DONTUSE[dtype], rtol=0)
 
-    def test_pixel_shuffle(self):
-        def _test_pixel_shuffle_helper(num_input_dims, valid_channels_dim=True):
+    def test_pixel_shuffle_unshuffle(self):
+        def _test_pixel_shuffle_unshuffle_helper(num_input_dims, valid_channels_dim=True,
+                                                 upscale_factor=None):
             # Function to imperatively ensure pixels are shuffled to the correct locations.
             # Used to validate the batch operations in pixel_shuffle.
             def _verify_pixel_shuffle(input, output, upscale_factor):
@@ -6911,7 +7038,7 @@ class TestNN(NNTestCase):
                                           (c * upscale_factor ** 2)
                             self.assertEqual(output[..., c, h, w], input[..., channel_idx, height_idx, weight_idx])
 
-            upscale_factor = random.randint(2, 5)
+            upscale_factor = random.randint(2, 5) if upscale_factor is None else upscale_factor
             # If valid_channels_dim=False, add 1 to make channels dim indivisible by upscale_factor ** 2.
             channels = random.randint(1, 4) * upscale_factor ** 2 + (0 if valid_channels_dim else 1)
             height = random.randint(5, 10)
@@ -6925,47 +7052,76 @@ class TestNN(NNTestCase):
                 batch_sizes = [random.randint(1, 3) for _ in range(num_input_dims - 3)]
                 input = torch.rand(*batch_sizes, channels, height, width, requires_grad=True)
             ps = nn.PixelShuffle(upscale_factor)
+            pus = nn.PixelUnshuffle(downscale_factor=upscale_factor)
 
-            if num_input_dims >= 3 and valid_channels_dim:
+            if num_input_dims >= 3 and valid_channels_dim and upscale_factor > 0:
                 output = ps(input)
                 _verify_pixel_shuffle(input, output, upscale_factor)
                 output.backward(output.data)
                 self.assertEqual(input.data, input.grad.data)
+
+                # Ensure unshuffle properly inverts shuffle.
+                unshuffle_output = pus(output)
+                self.assertEqual(input, unshuffle_output)
             else:
                 self.assertRaises(RuntimeError, lambda: ps(input))
 
-        def test_pixel_shuffle_1D():
-            _test_pixel_shuffle_helper(num_input_dims=1)
+        def _test_pixel_unshuffle_error_case_helper(num_input_dims, valid_height_dim=True, valid_width_dim=True,
+                                                    downscale_factor=None):
+            downscale_factor = random.randint(2, 5) if downscale_factor is None else downscale_factor
+            channels = random.randint(1, 4)
+            # If valid_height_dim=False, add 1 to make height dim indivisible by downscale_factor.
+            height = random.randint(3, 5) * abs(downscale_factor) + (0 if valid_height_dim else 1)
+            # If valid_width_dim=False, add 1 to make width dim indivisible by downscale_factor.
+            width = random.randint(3, 5) * abs(downscale_factor) + (0 if valid_width_dim else 1)
 
-        def test_pixel_shuffle_2D():
-            _test_pixel_shuffle_helper(num_input_dims=2)
+            if num_input_dims == 1:
+                input = torch.rand(channels, requires_grad=True)
+            elif num_input_dims == 2:
+                input = torch.rand(height, width, requires_grad=True)
+            else:
+                batch_sizes = [random.randint(1, 3) for _ in range(num_input_dims - 3)]
+                input = torch.rand(*batch_sizes, channels, height, width, requires_grad=True)
 
-        def test_pixel_shuffle_3D_with_valid_channels_dim():
-            _test_pixel_shuffle_helper(num_input_dims=3)
+            pus = nn.PixelUnshuffle(downscale_factor)
+            self.assertRaises(RuntimeError, lambda: pus(input))
 
-        def test_pixel_shuffle_4D_with_valid_channels_dim():
-            _test_pixel_shuffle_helper(num_input_dims=4)
+        def _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims):
+            # For 1D - 2D, this is an error case.
+            # For 3D - 5D, this is a success case for pixel_shuffle + pixel_unshuffle.
+            _test_pixel_shuffle_unshuffle_helper(num_input_dims=num_input_dims)
 
-        def test_pixel_shuffle_5D_with_valid_channels_dim():
-            _test_pixel_shuffle_helper(num_input_dims=5)
+            # Error cases for pixel_shuffle.
+            _test_pixel_shuffle_unshuffle_helper(num_input_dims=num_input_dims, valid_channels_dim=False)
+            _test_pixel_shuffle_unshuffle_helper(num_input_dims=num_input_dims, upscale_factor=0)
+            _test_pixel_shuffle_unshuffle_helper(num_input_dims=num_input_dims, upscale_factor=-2)
 
-        def test_pixel_shuffle_3D_with_invalid_channels_dim():
-            _test_pixel_shuffle_helper(num_input_dims=3, valid_channels_dim=False)
+            # Error cases for pixel_unshuffle.
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, valid_height_dim=False)
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, valid_width_dim=False)
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, downscale_factor=0)
+            _test_pixel_unshuffle_error_case_helper(num_input_dims=num_input_dims, downscale_factor=-2)
 
-        def test_pixel_shuffle_4D_with_invalid_channels_dim():
-            _test_pixel_shuffle_helper(num_input_dims=4, valid_channels_dim=False)
+        def test_pixel_shuffle_unshuffle_1D():
+            _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=1)
 
-        def test_pixel_shuffle_5D_with_invalid_channels_dim():
-            _test_pixel_shuffle_helper(num_input_dims=5, valid_channels_dim=False)
+        def test_pixel_shuffle_unshuffle_2D():
+            _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=2)
 
-        test_pixel_shuffle_1D()
-        test_pixel_shuffle_2D()
-        test_pixel_shuffle_3D_with_valid_channels_dim()
-        test_pixel_shuffle_4D_with_valid_channels_dim()
-        test_pixel_shuffle_5D_with_valid_channels_dim()
-        test_pixel_shuffle_3D_with_invalid_channels_dim()
-        test_pixel_shuffle_4D_with_invalid_channels_dim()
-        test_pixel_shuffle_5D_with_invalid_channels_dim()
+        def test_pixel_shuffle_unshuffle_3D():
+            _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=3)
+
+        def test_pixel_shuffle_unshuffle_4D():
+            _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=4)
+
+        def test_pixel_shuffle_unshuffle_5D():
+            _test_pixel_shuffle_unshuffle_for_input_dims(num_input_dims=5)
+
+        test_pixel_shuffle_unshuffle_1D()
+        test_pixel_shuffle_unshuffle_2D()
+        test_pixel_shuffle_unshuffle_3D()
+        test_pixel_shuffle_unshuffle_4D()
+        test_pixel_shuffle_unshuffle_5D()
 
     def test_elu_inplace_view(self):
         v = torch.tensor([1.0, -1.0, 1.0, -1.0], requires_grad=True)
@@ -9253,18 +9409,19 @@ class TestNN(NNTestCase):
     def test_unflatten(self):
         tensor_input = torch.randn(2, 50)
 
-        # Unflatten Tensor
+        # Unflatten Tensor (unflattened_size as a tuple of ints and list of ints)
 
-        unflatten = nn.Unflatten(dim=1, unflattened_size=(2, 5, 5))
-        tensor_output = unflatten(tensor_input)
-        self.assertEqual(tensor_output.size(), torch.Size([2, 2, 5, 5]))
+        for us in ((2, 5, 5), [2, 5, 5]):
+            unflatten = nn.Unflatten(dim=1, unflattened_size=us)
+            tensor_output = unflatten(tensor_input)
+            self.assertEqual(tensor_output.size(), torch.Size([2, 2, 5, 5]))
 
         # Unflatten NamedTensor
 
         unflatten = nn.Unflatten(dim='features', unflattened_size=(('C', 2), ('H', 5), ('W', 5)))
         named_tensor_input = tensor_input.refine_names('N', 'features')
         named_tensor_output = unflatten(named_tensor_input)
-        self.assertEqual(tensor_output.size(), torch.Size([2, 2, 5, 5]))
+        self.assertEqual(named_tensor_output.size(), torch.Size([2, 2, 5, 5]))
 
     def test_unflatten_invalid_arg(self):
         # Wrong type for unflattened_size (tuple of floats)
@@ -9274,6 +9431,13 @@ class TestNN(NNTestCase):
                 r"unflattened_size must be tuple of ints, but found element of type float at pos 2"):
             nn.Unflatten(dim=1, unflattened_size=(2, 5, 5.0))
 
+        # Wrong type for unflattened_size (list of lists and list of tuples)
+        for us in ([['C', 2], ['W', 5], ['H', 5]], [('C', 2), ('W', 5), ('H', 5)]):
+            with self.assertRaisesRegex(
+                    TypeError,
+                    r"unflattened_size must be a tuple of tuples, but found type list"):
+                nn.Unflatten(dim='features', unflattened_size=us)
+
         # Wrong type for unflattened_size (tuple of lists)
 
         with self.assertRaisesRegex(
@@ -9281,19 +9445,12 @@ class TestNN(NNTestCase):
                 r"unflattened_size must be tuple of tuples, but found element of type list at pos 0"):
             nn.Unflatten(dim='features', unflattened_size=(['C', 2], ['W', 5], ['H', 5]))
 
-        # Wrong type for unflattened_size (list of ints)
+        # Wrong type for unflattened_size (tuple of dicts)
 
         with self.assertRaisesRegex(
                 TypeError,
-                r"unflattened_size must be a tuple of ints, but found type list"):
-            nn.Unflatten(dim=1, unflattened_size=[2, 5, 5])
-
-        # Wrong type for unflattened_size (list of lists)
-
-        with self.assertRaisesRegex(
-                TypeError,
-                r"unflattened_size must be a tuple of tuples, but found type list"):
-            nn.Unflatten(dim='features', unflattened_size=[['C', 2], ['W', 5], ['H', 5]])
+                r"unflattened_size must be tuple of tuples, but found element of type dict at pos 0"):
+            nn.Unflatten(dim='features', unflattened_size=({'C': 2}, {'W': 5}, {'H': 5}))
 
     def test_layer_norm_grads_with_create_graph_flag(self):
         atol = 1e-5

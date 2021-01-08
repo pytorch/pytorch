@@ -442,15 +442,14 @@ class TestTesting(TestCase):
     @slowTest
     def test_cuda_assert_should_stop_test_suite(self, device):
         # This test is slow because it spawn another process to run another test suite.
-        import subprocess
-        import sys
 
-        problematic_test_script = """\
+        # Test running of cuda assert test suite should early terminate.
+        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
 #!/usr/bin/env python
 
 import torch
 
-from torch.testing._internal.common_utils import (TestCase, run_tests)
+from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
 # This test is added to ensure that test suite terminates early when
@@ -459,11 +458,13 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 # This test file should be invoked from test_testing.py
 class TestThatContainsCUDAAssertFailure(TestCase):
 
+    @slowTest
     def test_throw_unrecoverable_cuda_exception(self, device):
         x = torch.rand(10, device=device)
         # cause unrecoverable CUDA exception, recoverable on CPU
         y = x[torch.tensor([25])].cpu()
 
+    @slowTest
     def test_trivial_passing_test_case_on_cpu_cuda(self, device):
         x1 = torch.tensor([0., 1.], device=device)
         x2 = torch.tensor([0., 1.], device='cpu')
@@ -472,19 +473,17 @@ class TestThatContainsCUDAAssertFailure(TestCase):
 instantiate_device_type_tests(
     TestThatContainsCUDAAssertFailure,
     globals(),
-    except_for=None
+    only_for='cuda'
 )
 
 if __name__ == '__main__':
     run_tests()
-"""
-
-        # Test running of cuda assert test suite should early terminate.
-        p = subprocess.run([sys.executable, '-c', problematic_test_script], capture_output=True, timeout=120)
+""")
         # should capture CUDA error
-        self.assertIn('CUDA error: device-side assert triggered', p.stderr.decode('ascii'))
-        # should run only 3 tests - 2 CPUs and 1 CUDA (remaining CUDA test should skip)
-        self.assertIn('Ran 3 tests', p.stderr.decode('ascii'))
+        self.assertIn('CUDA error: device-side assert triggered', stderr)
+        # should run only 1 test because it throws unrecoverable error.
+        self.assertIn('Ran 1 test', stderr)
+
 
 instantiate_device_type_tests(TestTesting, globals())
 

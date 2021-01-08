@@ -54,7 +54,9 @@ class MultiheadAttention(nn.MultiheadAttention):
         self.linear_V = nn.Linear(self.vdim, self.embed_dim, bias=bias)
 
         # TODO: The use of the `_LinearWithBias` increases the quantization noise
-        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=True)
+        # The `out_proj` in the parent is ``_LinearWithBias`, so need to ignore
+        # the type for mypy not to complain.
+        self.out_proj = nn.Linear(self.embed_dim, self.embed_dim, bias=True)  # type: ignore
 
         # Functionals
         self.q_scaling_product = nnq.FloatFunctional()
