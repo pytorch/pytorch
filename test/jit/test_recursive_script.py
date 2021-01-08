@@ -2,11 +2,10 @@ import os
 import sys
 import typing
 import typing_extensions
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 
 import torch
 import torch.nn as nn
-from torch import Tensor
 from torch.testing import FileCheck
 from collections import OrderedDict
 
@@ -285,8 +284,7 @@ class TestRecursiveScript(JitTestCase):
         test_module_dir(nn.ModuleDict(OrderedDict([("conv", conv), ("linear", linear)])))
 
     def test_class_compile(self):
-        def other_fn(a, b):
-            # type: (int, Tensor) -> Tensor
+        def other_fn(a: int, b: Tensor) -> Tensor:
             return a * b
 
         class B(object):
@@ -308,8 +306,7 @@ class TestRecursiveScript(JitTestCase):
         self.checkModule(N(), (torch.randn(2, 2),))
 
     def test_error_stack(self):
-        def d(x):
-            # type: (int) -> int
+        def d(x: int) -> int:
             return x + 10
 
         def c(x):
@@ -332,8 +329,7 @@ class TestRecursiveScript(JitTestCase):
             checker.run(str(e))
 
     def test_error_stack_module(self):
-        def d(x):
-            # type: (int) -> int
+        def d(x: int) -> int:
             return x + 10
 
         def c(x):
@@ -566,8 +562,7 @@ class TestRecursiveScript(JitTestCase):
                 self.a = 4
                 self.inner = Inner2()
 
-            def __setstate__(self, obj):
-                # type: (Tuple[int, Inner2]) -> None
+            def __setstate__(self, obj: Tuple[int, Inner2]) -> None:
                 a, inner = obj
                 self.a = a
                 self.inner = inner
