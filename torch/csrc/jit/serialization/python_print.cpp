@@ -1302,14 +1302,14 @@ struct PythonPrintImpl {
     // this class is a custom-bound C++ class. Skip serialization
     // of this class, we will depend on the ClassType being defined
     // in the target process.
-    for (auto& method : classType->methods()) {
+    for (auto& method : classType.methods()) {
       if (!method->isGraphFunction()) {
         return;
       }
     }
 
-    bool is_module = classType->is_module();
-    body_ << "class " << classType->name()->name();
+    bool is_module = classType.is_module();
+    body_ << "class " << classType.name()->name();
     if (is_module) {
       body_ << "(Module)";
     }
@@ -1317,7 +1317,7 @@ struct PythonPrintImpl {
     body_ << ":\n";
     {
       const auto guard = WithIndented();
-      size_t numAttrs = classType->numAttributes();
+      size_t numAttrs = classType.numAttributes();
       // For modules, we need to print special information about the module's
       // attributes and parameters.
       if (is_module) {
@@ -1326,11 +1326,11 @@ struct PythonPrintImpl {
         // Populate the __parameters__ field. This tells the importer which
         // attributes are parameters.
         for (size_t i = 0; i < numAttrs; i++) {
-          if (classType->is_parameter(i)) {
-            params.push_back(classType->getAttributeName(i));
+          if (classType.is_parameter(i)) {
+            params.push_back(classType.getAttributeName(i));
           }
-          if (classType->is_buffer(i)) {
-            buffers.push_back(classType->getAttributeName(i));
+          if (classType.is_buffer(i)) {
+            buffers.push_back(classType.getAttributeName(i));
           }
         }
         indent();
@@ -1349,8 +1349,8 @@ struct PythonPrintImpl {
       }
 
       for (size_t i = 0; i < numAttrs; i++) {
-        const auto& name = classType->getAttributeName(i);
-        const auto& type = classType->getAttribute(i);
+        const auto& name = classType.getAttributeName(i);
+        const auto& type = classType.getAttribute(i);
         registerClassDependencies(type);
 
         indent();
@@ -1375,10 +1375,10 @@ struct PythonPrintImpl {
         }
       }
 
-      size_t numConstants = classType->numConstants();
+      size_t numConstants = classType.numConstants();
       for (size_t i = 0; i < numConstants; i++) {
-        const auto& name = classType->getConstantName(i);
-        IValue v = classType->getConstant(i);
+        const auto& name = classType.getConstantName(i);
+        IValue v = classType.getConstant(i);
 
         indent();
         body_ << name << " : "
@@ -1389,7 +1389,7 @@ struct PythonPrintImpl {
       }
 
       // TODO fields
-      for (auto& method : classType->methods()) {
+      for (auto& method : classType.methods()) {
         printFunction(*method);
       }
     }

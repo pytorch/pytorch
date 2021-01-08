@@ -2403,6 +2403,24 @@ inline std::shared_ptr<const NamedType> Type::cast<NamedType>() const {
   return nullptr;
 }
 
+template<>
+inline NamedType* Type::castRaw() {
+  if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
+      kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
+    return static_cast<NamedType*>(this);
+  }
+  return nullptr;
+}
+
+template<>
+inline const NamedType* Type::castRaw() const {
+  if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
+      kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
+    return static_cast<const NamedType*>(this);
+  }
+  return nullptr;
+}
+
 // Used as a return type when inferring the IValue type of a Python object.
 struct InferredType {
   /* implicit */ InferredType(TypePtr type) : type_(std::move(type)) {}

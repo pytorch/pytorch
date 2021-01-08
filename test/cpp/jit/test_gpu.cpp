@@ -1101,7 +1101,7 @@ TEST(NVFuserTest, FusionParser_CUDA) {
   // strides are not yet supported in the irparser.
   for (auto val : g->block()->inputs()) {
     if (val->isCompleteTensor())
-      val->setType(val->type()->expectRef<TensorType>().contiguous());
+      val->setType(val->type()->castRaw<TensorType>()->contiguous());
   }
   for (auto node : g->block()->nodes()) {
     for (auto val : node->outputs()) {
