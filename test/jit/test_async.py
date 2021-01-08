@@ -41,7 +41,8 @@ class TestAsync(JitTestCase):
 
     def test_async_parsing(self):
         @torch.jit.script
-        def foo(x: Tensor) -> List[Tensor]:
+        def foo(x):
+            # type: (Tensor) -> List[Tensor]
             return [torch.neg(x), x.t()]
 
         @torch.jit.script
@@ -256,7 +257,8 @@ class TestAsync(JitTestCase):
                 self.traced = torch.jit.trace(Traced(), (x), _force_outplace=True)
 
             @torch.jit.script_method
-            def forward(self, x: Tensor) -> Tuple[List[Tensor], Tuple[Tensor, Tensor], Tensor]:
+            def forward(self, x):
+                # type: (Tensor) -> Tuple[List[Tensor], Tuple[Tensor, Tensor], Tensor]
                 future1 = torch.jit._fork(self.traced, x)
                 future2 = torch.jit._fork(torch.neg, x)
 
