@@ -1600,6 +1600,26 @@
     CPU, CUDA: div_out
     SparseCPU, SparseCUDA: div_out_sparse_zerodim
 
+- func: div.Tensor_mode(Tensor self, Tensor other, str rounding_mode) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU, CUDA: div
+    SparseCPU, SparseCUDA: div_sparse
+
+- func: div_.Tensor_mode(Tensor(a!) self, Tensor other, str rounding_mode) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    CPU, CUDA: div_
+    SparseCPU, SparseCUDA: div_sparse_
+
+- func: div.out_mode(Tensor self, Tensor other, str rounding_mode, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: full
+  dispatch:
+    CPU, CUDA: div_out
+    SparseCPU, SparseCUDA: div_out_sparse_zerodim
+
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: div.Scalar(Tensor self, Scalar other) -> Tensor
   use_c10_dispatcher: full
@@ -1608,6 +1628,18 @@
     DefaultBackend: div
 
 - func: div_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    DefaultBackend: div_
+
+- func: div.Scalar_mode(Tensor self, Scalar other, str rounding_mode) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    DefaultBackend: div
+
+- func: div_.Scalar_mode(Tensor(a!) self, Scalar other, str rounding_mode) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   dispatch:
@@ -1630,6 +1662,25 @@
   variants: function, method
 
 - func: divide_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+
+- func: divide.Tensor_mode(Tensor self, Tensor other, str rounding_mode) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: divide_.Tensor_mode(Tensor(a!) self, Tensor other, str rounding_mode) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+
+- func: divide.out_mode(Tensor self, Tensor other, str rounding_mode, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+
+- func: divide.Scalar_mode(Tensor self, Scalar other, str rounding_mode) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: divide_.Scalar_mode(Tensor(a!) self, Scalar other, str rounding_mode) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
 

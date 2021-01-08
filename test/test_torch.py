@@ -2881,6 +2881,34 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(a.size(), deepcopy(a).size())
         self.assertEqual(a, deepcopy(a))
 
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_complex=False))
+    def test_div_rounding_modes(self, device, dtype):
+        if dtype.is_floating_point:
+            a = 10 * torch.randn(100, device=device, dtype=dtype)
+            # Avoid division by zero so we can test (a / b) * b == a
+            b = 0.1 + 2 * torch.rand(100, device=device, dtype=dtype)
+        else:
+            info = torch.iinfo(dtype)
+            low, high = info.min, info.max
+            a = torch.randint(low, high, (100,), device=device, dtype=dtype)
+            b = torch.randint(1, high, (100,), device=device, dtype=dtype)
+
+        d_true = torch.divide(a, b, rounding_mode='true')
+        self.assertTrue(d_true.is_floating_point())
+        self.assertEqual(d_true * b, a.to(d_true.dtype))
+
+        d_floor = torch.divide(a, b, rounding_mode='floor')
+        d_trunc = torch.divide(a, b, rounding_mode='trunc')
+
+        rounding_unsupported = (
+            dtype == torch.half and device != 'cuda' or
+            dtype == torch.bfloat16 and device != 'cpu')
+        if rounding_unsupported:
+            d_true = d_true.float()
+
+        self.assertEqual(d_floor, d_true.floor().to(dtype))
+        self.assertEqual(d_trunc, d_true.trunc().to(dtype))
+
     def check_internal_mem_overlap(self, inplace_op, num_inputs,
                                    dtype, device,
                                    expected_failure=False):
