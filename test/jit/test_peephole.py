@@ -58,7 +58,8 @@ class TestPeephole(JitTestCase):
             return torch.relu(y)
 
         self.run_pass('peephole', test_peephole.graph)
-        FileCheck().check_not("aten::add").check_not("aten::sub").check_not("aten::mul").check_not("aten::div").run(test_peephole.graph)
+        FileCheck().check_not("aten::add").check_not("aten::sub").check_not("aten::mul")\
+                   .check_not("aten::div").run(test_peephole.graph)
 
         def foo(x):
             a = x + 2
