@@ -312,6 +312,7 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::Capsule:
     case Tag::Generator:
     case Tag::Quantizer:
+      return ptrEqual(lhs, rhs);
     case Tag::Enum:
       return lhs.toEnumHolder()->is(*rhs.toEnumHolder());
     case Tag::Uninitialized:

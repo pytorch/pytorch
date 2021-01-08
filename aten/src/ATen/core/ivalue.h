@@ -17,7 +17,6 @@ struct Module;
 } // namespace jit
 } // namespace torch
 namespace c10 {
-
 template <class Key, class Value>
 class Dict;
 template <class T>
