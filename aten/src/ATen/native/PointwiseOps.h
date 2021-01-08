@@ -16,6 +16,7 @@ using pointwise_fn_beta = void (*)(TensorIterator&, Scalar scalar, double beta);
 DECLARE_DISPATCH(pointwise_fn, addcmul_stub);
 DECLARE_DISPATCH(pointwise_fn, addcdiv_stub);
 DECLARE_DISPATCH(pointwise_fn_beta, smooth_l1_backward_stub);
+DECLARE_DISPATCH(pointwise_fn_beta, huber_backward_stub);
 DECLARE_DISPATCH(pointwise_fn, mse_backward_stub);
 
 } // namespace native

@@ -1308,6 +1308,10 @@
   self: smooth_l1_loss_backward(grad, self, target, reduction, beta)
   target: smooth_l1_loss_backward(grad, target, self, reduction, beta)
 
+- name: huber_loss(Tensor self, Tensor target, int reduction=Mean, float beta=1.0) -> Tensor
+  self: huber_loss_backward(grad, self, target, reduction, beta)
+  target: huber_loss_backward(grad, target, self, reduction, beta)
+
 - name: soft_margin_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: soft_margin_loss_backward(grad, self, target, reduction)
 
@@ -1692,6 +1696,11 @@
   grad_output: smooth_l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction, beta)
   self: smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction, beta)
   target: -smooth_l1_loss_double_backward(grad * grad_output, self, target, reduction, beta)
+
+- name: huber_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta) -> Tensor
+  grad_output: huber_loss_double_backward_grad_output(grad, grad_output, self, target, reduction, beta)
+  self: huber_loss_double_backward(grad * grad_output, self, target, reduction, beta)
+  target: -huber_loss_double_backward(grad * grad_output, self, target, reduction, beta)
 
 - name: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold, Tensor output) -> Tensor
   grad_output: softplus_backward(grad, self, beta, threshold, output)

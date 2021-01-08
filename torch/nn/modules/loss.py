@@ -860,15 +860,22 @@ class SmoothL1Loss(_Loss):
         |x_i - y_i| - 0.5 * beta, & \text{otherwise }
         \end{cases}
 
-    :math:`x` and :math:`y` arbitrary shapes with a total of :math:`n` elements each
-    the sum operation still operates over all the elements, and divides by :math:`n`.
+    beta is an optional parameter that defaults to 1.
 
-    :attr:`beta` is an optional parameter that defaults to 1.
+    Smooth L1 loss is equal to huber(x) / beta. This leads to the following
+    differences:
+     - As beta -> 0, Smooth L1 loss converges to L1 loss, while Huber loss
+       converges to a constant 0 loss.
+     - As beta -> +inf, Smooth L1 converges to a constant 0 loss, while Huber loss
+       converges to L2 loss.
+     - For Smooth L1 loss, as beta varies, the L1 segment of the loss has a constant
+       slope of 1. For Huber loss, the slope of the L1 segment is beta.
+    Smooth L1 loss can be seen as exactly L1 loss, but with the abs(x) < beta
+    portion replaced with a quadratic function such that at abs(x) = beta, its
+    slope is 1. The quadratic segment smooths the L1 loss near x = 0.
 
-    Note: When :attr:`beta` is set to 0, this is equivalent to :class:`L1Loss`.
-    Passing a negative value in for :attr:`beta` will result in an exception.
-
-    The division by :math:`n` can be avoided if sets ``reduction = 'sum'``.
+    When beta is set to 0, it is equivalent to :class:`L1Loss`.
+    Passing a negative value in for beta will result in an exception.
 
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
@@ -905,6 +912,54 @@ class SmoothL1Loss(_Loss):
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         return F.smooth_l1_loss(input, target, reduction=self.reduction, beta=self.beta)
+
+
+class HuberLoss(_Loss):
+    r"""Creates a criterion that uses a squared term if the absolute
+    element-wise error falls below beta and an L1 term otherwise.
+
+    .. math::
+        \text{loss}(x, y) = \frac{1}{n} \sum_{i} z_{i}
+
+    where :math:`z_{i}` is given by:
+
+    .. math::
+        z_{i} =
+        \begin{cases}
+        0.5 (x_i - y_i)^2, & \text{if } |x_i - y_i| < beta \\
+        beta * (|x_i - y_i| - 0.5 * beta), & \text{otherwise }
+        \end{cases}
+
+    beta is an optional parameter that defaults to 1.
+    When beta is set to 1, this is equivalent to :class:`SmoothL1Loss`.
+    Passing a negative value in for beta will result in an exception.
+
+    Args:
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+        beta (float, optional): Specifies the threshold at which to change between L1 and L2 loss.
+            This value defaults to 1.0.
+
+    Shape:
+        - Input: :math:`(N, *)` where :math:`*` means any number of additional
+          dimensions
+        - Target: :math:`(N, *)`, same shape as the input
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then
+          :math:`(N, *)`, same shape as the input
+
+    """
+    __constants__ = ['reduction', 'beta']
+
+    def __init__(self, reduction: str = 'mean', beta: float = 1.0) -> None:
+        super(HuberLoss, self).__init__(reduction)
+        self.beta = beta
+
+    def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        return F.huber_loss(input, target, reduction=self.reduction, beta=self.beta)
 
 
 class SoftMarginLoss(_Loss):

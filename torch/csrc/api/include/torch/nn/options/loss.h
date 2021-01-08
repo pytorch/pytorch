@@ -502,6 +502,42 @@ using SmoothL1LossFuncOptions = SmoothL1LossOptions;
 
 // ============================================================================
 
+/// Options for the `HuberLoss` module.
+///
+/// Example:
+/// ```
+/// HuberLoss model(HuberLossOptions().reduction(torch::kNone).beta(0.5));
+/// ```
+struct TORCH_API HuberLossOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+
+  TORCH_OPTIONS_CTOR_VARIANT_ARG3(HuberLossOptions, reduction, kNone, kMean, kSum)
+
+  /// Specifies the reduction to apply to the output: 'none' | 'mean' | 'sum'.
+  /// 'none': no reduction will be applied, 'mean': the sum of the output will
+  /// be divided by the number of elements in the output, 'sum': the output will
+  /// be summed. Default: 'mean'
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
+  /// Specifies the threshold at which to change between L1 and L2 loss. Default: 1.0
+  TORCH_ARG(double, beta) = 1.0;
+};
+
+namespace functional {
+/// Options for `torch::nn::functional::huber_loss`.
+///
+/// See the documentation for `torch::nn::HuberLossOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::huber_loss(input, target, F::HuberLossFuncOptions(torch::kNone));
+/// ```
+using HuberLossFuncOptions = HuberLossOptions;
+} // namespace functional
+
+// ============================================================================
+
 /// Options for the `PoissonNLLLoss` module.
 ///
 /// Example:

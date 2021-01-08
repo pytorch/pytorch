@@ -24,6 +24,8 @@ namespace at { namespace native {
 
 DEFINE_DISPATCH(smooth_l1_stub);
 DEFINE_DISPATCH(smooth_l1_backward_stub);
+DEFINE_DISPATCH(huber_stub);
+DEFINE_DISPATCH(huber_backward_stub);
 DEFINE_DISPATCH(mse_stub);
 DEFINE_DISPATCH(mse_backward_stub);
 
@@ -338,6 +340,59 @@ Tensor smooth_l1_loss_backward(const Tensor& grad_output, const Tensor& input, c
       return at::native::l1_loss_backward(grad_output, input, target, reduction);
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   return at::smooth_l1_loss_backward_out(grad_input, grad_output, input, target, reduction, beta);
+}
+
+Tensor huber_loss(const Tensor& input, const Tensor& target, const int64_t reduction, double beta) {
+  TORCH_CHECK(beta >= 0, "huber_loss does not support negative values for beta.")
+  if (beta == 0) {
+      return at::native::l1_loss(input, target, reduction);
+  }
+  Tensor loss;
+  auto iter = TensorIterator::binary_op(loss, input, target);
+  huber_stub(iter.device_type(), iter, beta);
+  return apply_loss_reduction(iter.output(), reduction);
+}
+
+Tensor& huber_loss_out(Tensor& result, const Tensor& input, const Tensor& target, int64_t reduction, double beta) {
+  TORCH_CHECK(beta >= 0, "huber_loss does not support negative values for beta.")
+  if (beta == 0) {
+      return at::native::l1_loss_out(result, input, target, reduction);
+  }
+  if (reduction != Reduction::None) {
+    Tensor loss;
+    auto iter = TensorIterator::binary_op(loss, input, target);
+    huber_stub(iter.device_type(), iter, beta);
+    if (reduction == Reduction::Mean) {
+      at::mean_out(result, iter.output(), 0);
+    } else {
+      at::sum_out(result, iter.output(), 0);
+    }
+  } else {
+    auto iter = TensorIterator::binary_op(result, input, target);
+    huber_stub(iter.device_type(), iter, beta);
+  }
+  return result;
+}
+
+Tensor huber_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double beta) {
+  if (beta == 0)
+      return at::native::l1_loss_backward(grad_output, input, target, reduction);
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  return at::huber_loss_backward_out(grad_input, grad_output, input, target, reduction, beta);
+}
+
+Tensor& huber_loss_backward_out(Tensor& grad_input, const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double beta) {
+  if (beta == 0)
+      return at::native::l1_loss_backward_out(grad_input, grad_output, input, target, reduction);
+  auto norm = reduction == Reduction::Mean ? 1. / input.numel() : 1.;
+  auto iter = at::TensorIteratorConfig()
+    .add_output(grad_input)
+    .add_input(input)
+    .add_input(target)
+    .add_input(grad_output)
+    .build();
+  huber_backward_stub(iter.device_type(), iter, norm, beta);
+  return grad_input;
 }
 
 Tensor mse_loss(const Tensor& input, const Tensor& target, int64_t reduction) {

@@ -2866,6 +2866,35 @@ def smooth_l1_loss(
     return torch._C._nn.smooth_l1_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction), beta)
 
 
+def huber_loss(
+    input: Tensor,
+    target: Tensor,
+    reduction: str ='mean',
+    beta: float = 1.0,
+) -> Tensor:
+    r"""Function that uses a squared term if the absolute
+    element-wise error falls below beta and an L1 term otherwise.
+
+    See :class:`~torch.nn.HuberLoss` for details.
+    """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, target)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                huber_loss, tens_ops, input, target,
+                reduction=reduction, beta=beta)
+    if not (target.size() == input.size()):
+        warnings.warn("Using a target size ({}) that is different to the input size ({}). "
+                      "This will likely lead to incorrect results due to broadcasting. "
+                      "Please ensure they have the same size.".format(target.size(), input.size()),
+                      stacklevel=2)
+    if size_average is not None or reduce is not None:
+        reduction = _Reduction.legacy_get_string(size_average, reduce)
+
+    expanded_input, expanded_target = torch.broadcast_tensors(input, target)
+    return torch._C._nn.huber_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction), beta)
+
+
 def l1_loss(
     input: Tensor,
     target: Tensor,
