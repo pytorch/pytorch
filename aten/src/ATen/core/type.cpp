@@ -237,7 +237,7 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
 
   // Handle non-container types which do not subtype each other and unify
   if (t1->kind() == TensorType::Kind && t2->kind() == TensorType::Kind) {
-    return t1->expectRef<TensorType>().merge(t2->expectRef<TensorType>());
+    return t1->castRaw<TensorType>()->merge(*t2->castRaw<TensorType>());
   }
 
   if (t1->isSubtypeOf(NoneType::get()) && !t2->isSubtypeOf(NoneType::get())) {
