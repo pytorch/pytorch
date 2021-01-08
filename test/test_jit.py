@@ -849,6 +849,37 @@ class TestJit(JitTestCase):
 
         self.assertTrue(check(x, y))
 
+    def test_nn_conv(self):
+        class Mod(nn.Module):
+            def __init__(self, conv):
+                super().__init__()
+                self.conv = conv
+
+            def forward(self, input):
+                return self.conv(input)
+
+        inputs = [
+            # Conv
+            (Mod(nn.Conv1d(16, 33, 3, stride=2)), torch.randn(20, 16, 50)),
+            (Mod(nn.Conv2d(16, 33, 3, stride=2)), torch.randn(20, 16, 50, 100)),
+            (Mod(nn.Conv3d(16, 33, 3, stride=2)), torch.randn(20, 16, 10, 50, 100)),
+            # ConvTransposed
+            (Mod(nn.ConvTranspose1d(16, 33, 3, stride=2)), torch.randn(20, 16, 50)),
+            (Mod(nn.ConvTranspose2d(16, 33, 3, stride=2)), torch.randn(20, 16, 50, 100)),
+            (Mod(nn.ConvTranspose3d(16, 33, 3, stride=2)), torch.randn(20, 16, 10, 50, 100)),
+            # LazyConv
+            (Mod(nn.LazyConv1d(16, 33, 3, stride=2)), torch.randn(20, 16, 50)),
+            (Mod(nn.LazyConv2d(16, 33, 3, stride=2)), torch.randn(20, 16, 50, 100)),
+            (Mod(nn.LazyConv3d(16, 33, 3, stride=2)), torch.randn(20, 16, 10, 50, 100)),
+            # LazyConvTransposed
+            (Mod(nn.LazyConvTranspose1d(16, 33, 3, stride=2)), torch.randn(20, 16, 50)),
+            (Mod(nn.LazyConvTranspose2d(16, 33, 3, stride=2)), torch.randn(20, 16, 50, 100)),
+            (Mod(nn.LazyConvTranspose3d(16, 33, 3, stride=2)), torch.randn(20, 16, 10, 50, 100)),
+        ]
+
+        for m, inp in inputs:
+            self.checkModule(m, (inp,))
+
     def test_numel(self):
         @torch.jit.script
         def get_numel_script(x):
