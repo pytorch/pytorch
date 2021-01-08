@@ -82,6 +82,7 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 # Standard library
+from typing import Tuple
 import copy
 import io
 import unittest
@@ -726,6 +727,20 @@ class TestPostTrainingStatic(QuantizationTestCase):
         ref_res = ref_m(data)
         self.assertEqual(res, ref_res)
 
+    @skipIfNoFBGEMM
+    def test_convtranspose_per_channel_fails_early(self):
+        r"""
+        Verifies that attempting to quantize a ConvTranspose module with per-Channel
+        weight observers fails in the prepare step, as opposed to the convert step.
+        """
+        m = torch.nn.Sequential(torch.nn.ConvTranspose2d(1, 1, 1))
+        m.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+        with self.assertRaises(AssertionError) as context:
+            mp = torch.quantization.prepare(m)
+        self.assertTrue(
+            str(context.exception) ==
+            'Per channel weight observer is not supported yet for ConvTranspose{n}d.')
+
 
 @skipIfNoFBGEMM
 class TestPostTrainingDynamic(QuantizationTestCase):
@@ -993,10 +1008,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
                     super(ScriptWrapperPackedLSTM, self).__init__()
                     self.cell = cell
 
-                def forward(self,
-                            x  # type: PackedSequence
-                            ):
-                    # type: (...) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]
+                def forward(self, x: PackedSequence) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]:
                     return self.cell(x)
 
             class ScriptWrapperPackedGRU(torch.nn.Module):
@@ -1004,10 +1016,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
                     super(ScriptWrapperPackedGRU, self).__init__()
                     self.cell = cell
 
-                def forward(self,
-                            x  # type: PackedSequence
-                            ):
-                    # type: (...) -> Tuple[PackedSequence, torch.Tensor]
+                def forward(self, x: PackedSequence) -> Tuple[PackedSequence, torch.Tensor]:
                     return self.cell(x)
 
             script_wrapper_map = {'LSTM': ScriptWrapperPackedLSTM,
