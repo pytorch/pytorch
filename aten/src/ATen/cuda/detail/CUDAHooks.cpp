@@ -21,7 +21,7 @@
 #endif
 
 #ifdef USE_MAGMA
-#include <magma.h>
+#include <magma_v2.h>
 #endif
 
 #ifdef __HIP_PLATFORM_HCC__
@@ -367,6 +367,11 @@ void CUDAHooks::cuFFTClearPlanCache(int64_t device_index) const {
 
 int CUDAHooks::getNumGPUs() const {
   return at::cuda::device_count();
+}
+
+void CUDAHooks::deviceSynchronize(int64_t device_index) const {
+  at::DeviceGuard device_guard(at::Device(at::DeviceType::CUDA, device_index));
+  c10::cuda::device_synchronize();
 }
 
 // Sigh, the registry doesn't support namespaces :(

@@ -345,6 +345,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
 
   py::class_<::c10d::BarrierOptions>(module, "BarrierOptions")
       .def(py::init<>())
+      .def_readwrite("device_ids", &::c10d::BarrierOptions::device_ids)
       .def_readwrite("timeout", &::c10d::BarrierOptions::timeout);
 
   py::class_<::c10d::AllToAllOptions>(module, "AllToAllOptions")
@@ -383,7 +384,8 @@ Arguments:
 
 Example::
     >>> import torch.distributed as dist
-    >>> store = dist.TCPStore("127.0.0.1", 0, True, timedelta(seconds=30))
+    >>> from datetime import timedelta
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> store.set("first_key", "first_value")
     >>> # Should return "first_value"
     >>> store.get("first_key")
@@ -411,7 +413,8 @@ Returns:
 
 Example::
     >>> import torch.distributed as dist
-    >>> store = dist.TCPStore("127.0.0.1", 0, True, timedelta(seconds=30))
+    >>> from datetime import timedelta
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> store.set("first_key", "first_value")
     >>> # Should return "first_value"
     >>> store.get("first_key")
@@ -434,8 +437,9 @@ Arguments:
 
 Example::
     >>> import torch.distributed as dist
+    >>> from datetime import timedelta
     >>> # Using TCPStore as an example, other store types can also be used
-    >>> store = dist.TCPStore("127.0.0.1", 0, True, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> store.add("first_key", 1)
     >>> store.add("first_key", 6)
     >>> # Should return 7
@@ -461,8 +465,9 @@ Returns:
 
 Example::
     >>> import torch.distributed as dist
+    >>> from datetime import timedelta
     >>> # Using TCPStore as an example, HashStore can also be used
-    >>> store = dist.TCPStore("127.0.0.1", 0, True, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> store.set("first_key")
     >>> # This should return true
     >>> store.delete_key("first_key")
@@ -487,8 +492,9 @@ Returns:
 
 Example::
     >>> import torch.distributed as dist
+    >>> from datetime import timedelta
     >>> # Using TCPStore as an example, other store types can also be used
-    >>> store = dist.TCPStore("127.0.0.1", 0, True, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> store.set("first_key", "first_value")
     >>> # This should return 2
     >>> store.num_keys()
@@ -506,8 +512,9 @@ Arguments:
 
 Example::
     >>> import torch.distributed as dist
+    >>> from datetime import timedelta
     >>> # Using TCPStore as an example, other store types can also be used
-    >>> store = dist.TCPStore("127.0.0.1", 0, True, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> store.set_timeout(timedelta(seconds=10))
     >>> # This will throw an exception after 10 seconds
     >>> store.wait(["bad_key"])
@@ -528,8 +535,9 @@ Arguments:
 
 Example::
     >>> import torch.distributed as dist
+    >>> from datetime import timedelta
     >>> # Using TCPStore as an example, other store types can also be used
-    >>> store = dist.TCPStore("127.0.0.1", 0, True, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> # This will throw an exception after 30 seconds
     >>> store.wait(["bad_key"])
 )")
@@ -551,8 +559,9 @@ Arguments:
 
 Example::
     >>> import torch.distributed as dist
+    >>> from datetime import timedelta
     >>> # Using TCPStore as an example, other store types can also be used
-    >>> store = dist.TCPStore("127.0.0.1", 0, True, timedelta(seconds=30))
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> # This will throw an exception after 10 seconds
     >>> store.wait(["bad_key"], timedelta(seconds=10))
 )");
@@ -617,8 +626,11 @@ Arguments:
 
 Example::
     >>> import torch.distributed as dist
-    >>> server_store = dist.TCPStore("127.0.0.1", 0, True, timedelta(seconds=30))
-    >>> client_store = dist.TCPStore("127.0.0.1", 0, False)
+    >>> from datetime import timedelta
+    >>> # Run on process 1 (server)
+    >>> server_store = dist.TCPStore("127.0.0.1", 1234, 2, True, timedelta(seconds=30))
+    >>> # Run on process 2 (client)
+    >>> client_store = dist.TCPStore("127.0.0.1", 1234, 2, False)
     >>> # Use any of the store methods from either the client or server after initialization
     >>> server_store.set("first_key", "first_value")
     >>> client_store.get("first_key")
@@ -633,7 +645,9 @@ Example::
           py::arg("host_name"),
           py::arg("port"),
           py::arg("world_size"),
-          py::arg("is_master"),
+          // using noconvert() requires this argument to be True or False
+          // prevents accidental implicit conversion to bool
+          py::arg("is_master").noconvert(),
           py::arg("timeout") =
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
 
@@ -1246,10 +1260,24 @@ static const auto TCPStoreTorchBind =
         .def(torch::init([](const std::string& host_name,
                             int64_t port,
                             int64_t world_size,
-                            bool is_master) {
+                            bool is_master,
+                            int64_t timeout) {
+          auto timeout_miliseconds = std::chrono::milliseconds(timeout);
           return c10::make_intrusive<::c10d::TCPStore>(
-              host_name, port, world_size, is_master);
+              host_name, port, world_size, is_master, timeout_miliseconds);
         }));
+
+// TODO: This should really take Store as constructor argument instead of
+// TCPStore, but the fact that TorchScript does not support polymorphism
+// forced us to cast in C++ instead of automatic casting
+static const auto PrefixStoreTorchBind =
+    torch::class_<::c10d::PrefixStore>("dist_c10d", "PrefixStore")
+        .def(torch::init([](const std::string& prefix,
+                            const c10::intrusive_ptr<::c10d::TCPStore>& store) {
+            return c10::make_intrusive<::c10d::PrefixStore>(
+                prefix, store);
+        }));
+
 
 // Torchbind the ProcessGroup to make it available in TorchScript
 static const auto ProcessGroupWorkTorchBind =
@@ -1610,7 +1638,14 @@ static const auto ProcessGroupNCCLTorchBind =
                   outputSplitSizes,
                   inputSplitSizes,
                   ::c10d::AllToAllOptions());
-            });
+
+            })
+        .def("size", [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
+            return (int64_t) self->getSize();
+        })
+        .def("rank", [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
+            return (int64_t) self->getRank();
+        });
 #endif
 
 static const auto DistributedC10dFrontendTorchBind =
