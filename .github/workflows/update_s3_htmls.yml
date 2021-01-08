@@ -9,6 +9,7 @@ on:
 jobs:
   update-html:
     runs-on: ubuntu-latest
+    if: ${{ github.repository_owner == 'pytorch' }}
     strategy:
       matrix:
         prefix: ["whl", "whl/test", "whl/nightly"]

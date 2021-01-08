@@ -2405,7 +2405,6 @@ class TestNN(NNTestCase):
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(expected_mask, computed_mask)
 
-
     def test_l1_unstructured_pruning(self):
         r"""Test that l1 unstructured pruning actually removes the lowest
         entries by l1 norm (by hand). It also checks that applying l1
@@ -2430,6 +2429,35 @@ class TestNN(NNTestCase):
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(expected_weight, m.weight)
 
+    def test_l1_unstructured_pruning_with_importance_scores(self):
+        r"""Test that l1 unstructured pruning actually removes the lowest
+        entries of importance scores and not the parameter by l1 norm (by hand).
+        It also checks that applying l1 unstructured pruning more than once
+        respects the previous mask.
+        """
+        m = nn.Linear(4, 2)
+        # modify its weight matrix by hand
+        m.weight = torch.nn.Parameter(
+            torch.tensor(
+                [[1, 2, 3, 4], [-4, -3, -2, -1]], dtype=torch.float32
+            )
+        )
+        importance_scores = torch.tensor(
+            [[4, 2, 1, 3], [-3, -1, -2, -4]], dtype=torch.float32
+        )
+
+        prune.l1_unstructured(m, 'weight', amount=2, importance_scores=importance_scores)
+        expected_weight = torch.tensor([[1, 2, 0, 4], [-4, 0, -2, -1]])
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(expected_weight, m.weight)
+
+        # check that pruning again removes two entries of m.weight that are colocated with
+        # the next two smallest absolute values of importance scores.
+        prune.l1_unstructured(m, 'weight', amount=2, importance_scores=importance_scores)
+        expected_weight = torch.tensor([[1, 0, 0, 4], [-4, 0, 0, -1]])
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(expected_weight, m.weight)
+
     def test_unstructured_pruning_same_magnitude(self):
         r"""Since it may happen that the tensor to prune has entries with the
         same exact magnitude, it is important to check that pruning happens
@@ -2447,7 +2475,6 @@ class TestNN(NNTestCase):
         self.assertEqual(nparams_toprune, nparams_pruned)
 
     def test_random_structured_pruning_amount(self):
-
         AMOUNT = 0.6
         AXIS = 2
         p = prune.RandomStructured(amount=AMOUNT, dim=AXIS)
@@ -2463,7 +2490,6 @@ class TestNN(NNTestCase):
             torch.sum(computed_mask == 0, axis=remaining_axes)
         )
         assert per_column_sums == [0, 20]
-
 
     def test_ln_structured_pruning(self):
         r"""Check Ln structured pruning by hand.
@@ -2488,6 +2514,33 @@ class TestNN(NNTestCase):
         prune.ln_structured(m, 'weight', amount=1, n=1, dim=-1)
         self.assertEqual(expected_mask_axis3, m.weight_mask)
 
+    def test_ln_structured_pruning_importance_scores(self):
+        r"""Check Ln structured pruning by hand.
+        """
+        m = nn.Conv2d(3, 1, 2)
+        m.weight.data = torch.Tensor(
+            [[[[1., 2.], [1., 2.5]],
+             [[0.5, 1.], [0.1, 0.1]],
+             [[-3., -5.], [0.1, -1.]]]]
+        )
+        importance_scores = torch.Tensor(
+            [[[[10., 1.], [10., 1.]],
+             [[30., 3.], [30., 3.]],
+             [[-20., -2.], [-20., -2.]]]]
+        )
+        # expected effect of pruning 1 of the 3 channels by L2-norm
+        expected_mask_axis1 = torch.ones_like(m.weight)
+        expected_mask_axis1[:, 0] = 0.
+
+        prune.ln_structured(m, 'weight', amount=1, n=2, dim=1, importance_scores=importance_scores)
+        self.assertEqual(expected_mask_axis1, m.weight_mask)
+
+        # expected effect of pruning 1 of the 2 columns along axis -1 by L1-norm
+        expected_mask_axis3 = expected_mask_axis1
+        expected_mask_axis3[:, :, :, 1] = 0.
+
+        prune.ln_structured(m, 'weight', amount=1, n=1, dim=-1, importance_scores=importance_scores)
+        self.assertEqual(expected_mask_axis3, m.weight_mask)
 
     def test_remove_pruning(self):
         r"""`prune.remove` removes the hook and the reparametrization
@@ -2567,6 +2620,49 @@ class TestNN(NNTestCase):
         expected_nweight = torch.tensor([[0, 0, -2]]).to(dtype=n.weight.dtype)
         self.assertEqual(expected_nweight, n.weight)
 
+    def test_global_pruning_importance_scores(self):
+        r"""Test that global l1 unstructured pruning over 2 parameters removes
+        the `amount=4` smallest global weights across the 2 parameters.
+        """
+        m = nn.Linear(4, 2)
+        n = nn.Linear(3, 1)
+        # modify the weight matrices by hand
+        m.weight = torch.nn.Parameter(
+            torch.tensor([[1, 2, 3, 4], [-4, -3, -2, -1]]).to(
+                dtype=torch.float32)
+        )
+        m_importance_scores = torch.tensor(
+            [[4, 2, 1, 3], [-3, -1, -2, -4]], dtype=torch.float32
+        )
+        n.weight = torch.nn.Parameter(
+            torch.tensor([[0, 0.1, -2]]).to(
+                dtype=torch.float32)
+        )
+        n_importance_scores = torch.tensor([[0, 10., -0.2]]).to(dtype=torch.float32)
+
+        params_to_prune = (
+            (m, 'weight'),
+            (n, 'weight'),
+        )
+        importance_scores = {
+            (m, 'weight'): m_importance_scores,
+            (n, 'weight'): n_importance_scores,
+        }
+
+        # prune the 4 smallest weights globally by L1 magnitude
+        prune.global_unstructured(
+            params_to_prune,
+            pruning_method=prune.L1Unstructured,
+            amount=4,
+            importance_scores=importance_scores,
+        )
+
+        expected_m_weight = torch.tensor([[1, 2, 0, 4], [-4, 0, -2, -1]])
+        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+        self.assertEqualIgnoreType(expected_m_weight, m.weight)
+
+        expected_n_weight = torch.tensor([[0, 0.1, 0]]).to(dtype=n.weight.dtype)
+        self.assertEqual(expected_n_weight, n.weight)
 
     def test_custom_from_mask_pruning(self):
         r"""Test that the CustomFromMask is capable of receiving
@@ -2656,7 +2752,6 @@ class TestNN(NNTestCase):
 
         self.assertEqual(pruned_weight, new_model[0].weight)
 
-
     def test_pruning_serialization_state_dict(self):
         # create a model
         model = torch.nn.Sequential(
@@ -2707,7 +2802,6 @@ class TestNN(NNTestCase):
 
         self.assertEqual(pruned_weight, new_model[0].weight)
 
-
     def test_prune(self):
         # create a new pruning method
         p = prune.L1Unstructured(amount=2)
@@ -2720,6 +2814,37 @@ class TestNN(NNTestCase):
         expected_mask = torch.tensor([[0, 0, 1, 0], [1, 1, 0, 1]])
         pruned_tensor = p.prune(t, default_mask)
         self.assertEqual(t * expected_mask, pruned_tensor)
+
+    def test_prune_importance_scores(self):
+        # create a new pruning method
+        p = prune.L1Unstructured(amount=2)
+        # create tensor to be pruned
+        t = torch.tensor([[1, 2, 3, 4], [5, 6, 7, 8]]).to(dtype=torch.float32)
+        importance_scores = torch.tensor(
+            [[1, 2, 3, 4], [1.5, 1.6, 1.7, 1.8]]
+        ).to(dtype=torch.float32)
+        # create prior mask by hand
+        default_mask = torch.tensor([[1, 1, 1, 0], [1, 1, 0, 1]])
+        # since we are pruning the two lowest magnitude units, the outcome of
+        # the calculation should be this:
+        expected_mask = torch.tensor([[0, 1, 1, 0], [0, 1, 0, 1]])
+        pruned_tensor = p.prune(t, default_mask, importance_scores=importance_scores)
+        self.assertEqual(t * expected_mask, pruned_tensor)
+
+    def test_prune_importance_scores_mimic_default(self):
+        # create a new pruning method
+        p = prune.L1Unstructured(amount=2)
+        # create tensor to be pruned
+        t = torch.tensor([[1, 2, 3, 4], [5, 6, 7, 8]]).to(dtype=torch.float32)
+        # create prior mask by hand
+        default_mask = torch.tensor([[1, 1, 1, 0], [1, 1, 0, 1]])
+        # since we are pruning the two lowest magnitude units, the outcome of
+        # the calculation should be this:
+        expected_mask = torch.tensor([[0, 0, 1, 0], [1, 1, 0, 1]])
+        pruned_tensor_without_importance_scores = p.prune(t, default_mask)
+        pruned_tensor_with_importance_scores = p.prune(t, default_mask, importance_scores=t)
+        self.assertEqual(pruned_tensor_without_importance_scores, pruned_tensor_with_importance_scores)
+        self.assertEqual(t * expected_mask, pruned_tensor_without_importance_scores)
 
     def test_rnn_pruning(self):
         l = torch.nn.LSTM(32, 32)
@@ -2751,6 +2876,7 @@ class TestNN(NNTestCase):
         assert 'weight_ih_l0' in dict(l.named_parameters())
         assert dict(l.named_parameters())['weight_ih_l0'] is not None
         assert 'weight_ih_l0_orig' not in dict(l.named_parameters())
+
 
     def test_rnn_weight_norm(self):
         def check_weight_norm(l, name, num_params):
