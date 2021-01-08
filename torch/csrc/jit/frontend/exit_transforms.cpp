@@ -273,8 +273,8 @@ struct ExitTransformer {
       return constructWontExitPair();
     }
 
-    // for the block that is not exitting, its' exit values will not get
-    // used so we create uninitialized values of the same type as the other
+    // The exit values of the block that is not exiting will not get
+    // used, so we create uninitialized values of the same type as the other
     // block.
     if (then_status == ExitStatus::WONT || then_status == ExitStatus::THROWS) {
       std::vector<Value*> exit_vals =

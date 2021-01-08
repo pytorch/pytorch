@@ -187,6 +187,9 @@ def _construct_test_name(test_name, op, device_type, dtype):
 class DeviceTypeTestBase(TestCase):
     device_type: str = 'generic_device_type'
 
+    # Flag to disable test suite early due to unrecoverable error such as CUDA error.
+    _stop_test_suite = False
+
     # Precision is a thread-local setting since it may be overridden per test
     _tls = threading.local()
     _tls.precision = TestCase._precision
@@ -226,6 +229,9 @@ class DeviceTypeTestBase(TestCase):
         if not hasattr(test, 'precision_overrides'):
             return self.precision
         return test.precision_overrides.get(dtype, self.precision)
+
+    def _should_stop_test_suite(self, rte):
+        return False
 
     # Creates device-specific tests.
     @classmethod
@@ -271,6 +277,11 @@ class DeviceTypeTestBase(TestCase):
                     self.precision = self._get_precision_override(test_fn, dtype)
                     args = (arg for arg in (device_arg, dtype, op) if arg is not None)
                     result = test_fn(self, *args)
+                except RuntimeError as rte:
+                    # check if rte should stop entire test suite.
+                    self._stop_test_suite = self._should_stop_test_suite(rte)
+                    # raise the runtime error as is for the test suite to record.
+                    raise rte
                 finally:
                     self.precision = guard_precision
 
@@ -313,6 +324,12 @@ class DeviceTypeTestBase(TestCase):
             for dtype in dtypes:
                 instantiate_test_helper(cls, name, test=test, dtype=dtype, op=None)
 
+    def run(self, result=None):
+        super().run(result=result)
+        # Early terminate test if _stop_test_suite is set.
+        if self._stop_test_suite:
+            result.stop()
+
 
 class CPUTestBase(DeviceTypeTestBase):
     device_type = 'cpu'
@@ -327,6 +344,14 @@ class CUDATestBase(DeviceTypeTestBase):
     no_magma: ClassVar[bool]
     no_cudnn: ClassVar[bool]
 
+    def _should_stop_test_suite(self, rte):
+        # CUDA device side error will cause subsequence test cases to fail.
+        # stop entire test suite if catches RuntimeError during torch.cuda.synchronize().
+        try:
+            torch.cuda.synchronize()
+        except RuntimeError as rte:
+            return True
+        return False
 
     def has_cudnn(self):
         return not self.no_cudnn

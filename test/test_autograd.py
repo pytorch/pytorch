@@ -10,7 +10,7 @@ import unittest
 import warnings
 from copy import deepcopy
 from collections import OrderedDict
-from itertools import product
+from itertools import product, permutations
 from operator import mul
 from functools import reduce
 import torch
@@ -32,7 +32,8 @@ from torch.utils.checkpoint import checkpoint
 from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
                                                   load_tests, random_symmetric_matrix,
-                                                  IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck)
+                                                  IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck,
+                                                  TemporaryFileName)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
@@ -1945,60 +1946,6 @@ class TestAutograd(TestCase):
         expected[3:5] = v_expanded
         self.assertEqual(result, expected)
 
-    def test_stack(self):
-        x = torch.randn(10, 10, requires_grad=True)
-        y = torch.randn(10, 10, requires_grad=True)
-        z = torch.randn(10, 10, requires_grad=True)
-        stacked = torch.stack([x, y, z], 0)
-        grad = torch.randn(3, 10, 10)
-        stacked.backward(grad)
-        self.assertEqual(x.grad, grad[0])
-        self.assertEqual(y.grad, grad[1])
-        self.assertEqual(z.grad, grad[2])
-
-    def test_hstack(self):
-        x = torch.randn(10, 10, requires_grad=True)
-        y = torch.randn(10, 10, requires_grad=True)
-        z = torch.randn(10, 10, requires_grad=True)
-        stacked = torch.hstack([x, y, z])
-        grad = torch.randn(10, 30)
-        stacked.backward(grad)
-        self.assertEqual(x.grad, grad[:, 0:10])
-        self.assertEqual(y.grad, grad[:, 10:20])
-        self.assertEqual(z.grad, grad[:, 20:30])
-
-        x = torch.randn(10, requires_grad=True)
-        y = torch.randn(10, requires_grad=True)
-        z = torch.randn(10, requires_grad=True)
-        stacked = torch.hstack([x, y, z])
-        grad = torch.randn(30)
-        stacked.backward(grad)
-        self.assertEqual(x.grad, grad[0:10])
-        self.assertEqual(y.grad, grad[10:20])
-        self.assertEqual(z.grad, grad[20:30])
-
-    def test_vstack(self):
-        x = torch.randn(10, 10, requires_grad=True)
-        y = torch.randn(10, 10, requires_grad=True)
-        z = torch.randn(10, 10, requires_grad=True)
-        stacked = torch.vstack([x, y, z])
-        grad = torch.randn(30, 10)
-        stacked.backward(grad)
-        self.assertEqual(x.grad, grad[0:10])
-        self.assertEqual(y.grad, grad[10:20])
-        self.assertEqual(z.grad, grad[20:30])
-
-    def test_dstack(self):
-        x = torch.randn(10, 10, requires_grad=True)
-        y = torch.randn(10, 10, requires_grad=True)
-        z = torch.randn(10, 10, requires_grad=True)
-        stacked = torch.dstack([x, y, z])
-        grad = torch.randn(10, 10, 3)
-        stacked.backward(grad)
-        self.assertEqual(x.grad, grad[:, :, 0])
-        self.assertEqual(y.grad, grad[:, :, 1])
-        self.assertEqual(z.grad, grad[:, :, 2])
-
     def test_unbind(self):
         stacked = torch.randn(3, 10, 10, requires_grad=True)
         x, y, z = stacked.unbind()
@@ -2970,6 +2917,20 @@ class TestAutograd(TestCase):
         run_test((10,), 3)
         run_test((10,), 1)
         run_test((10,), 1.5)
+        run_test((10,), inf)
+
+    def test_norm_inf_subgradient(self):
+        def run_test(input, expected, dim=None):
+            x = torch.tensor(input, requires_grad=True)
+            out = x.norm(inf, dim=dim, keepdim=True)
+            out.backward(torch.ones(out.size()))
+            self.assertEqual(x.grad, expected)
+
+        run_test([0., 0., 0.], [0., 0., 0.])
+        run_test([1., 0., 1.], [0.5, 0., 0.5])
+        run_test([[1., 0., 1.], [0., 1., 1.]], [[0.25, 0., 0.25], [0., 0.25, 0.25]])
+        run_test([[1., 0., 1.], [0., 1., 0.]], [[0.5, 0., 0.5], [0., 1., 0.]], (1,))
+        run_test(torch.ones((2, 2, 2)), torch.full((2, 2, 2), 0.25), (0, 2))
 
     def test_pow_zero_tensor_gradient(self):
         def run_test(input_size, exponent):
@@ -3001,30 +2962,6 @@ class TestAutograd(TestCase):
         gradcheck(torch.igamma, (s, x))
         gradgradcheck(torch.igamma, (s, x))
 
-    @skipIfNoLapack
-    def test_pinverse(self):
-        # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
-        # 1. Pseudo-inverses are not generally continuous, which means that they are not differentiable
-        # 2. Derivatives for pseudo-inverses exist typically for constant rank (Golub et al, 1973)
-        # 3. This method creates two orthogonal matrices, and a constructs a test case with large
-        #    singular values (given by x to the function).
-        # 4. This will ensure that small perturbations don't affect the rank of matrix, in which case
-        #    a derivative exists.
-        # 5. This test exists since pinverse is implemented using SVD, and is hence a backpropable method
-        m, n = 5, 10
-        U = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
-        V = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
-
-        def func(x):
-            S = torch.cat([x, torch.zeros(n - m)], 0)
-            M = U.mm(torch.diag(S)).mm(V.t())
-            return M.pinverse()
-
-        gradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
-        gradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
-        gradgradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
-        gradgradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
-
     def test_chain_matmul(self):
         def gen_matrices(p):
             matrices = []
@@ -3039,18 +2976,17 @@ class TestAutograd(TestCase):
         gradgradcheck(torch.chain_matmul, gen_matrices([3, 5, 2, 6]))
         gradgradcheck(torch.chain_matmul, gen_matrices([6, 2, 4, 8, 10]))
 
-    @unittest.skipIf(IS_WINDOWS, """File open permission error on Windows,
-            https://github.com/pytorch/pytorch/issues/34086""")
     def test_profiler_tracing(self):
         t1, t2 = torch.ones(1), torch.ones(1)
         with torch.autograd.profiler.profile(use_kineto=kineto_available()) as prof:
             torch.add(t1, t2)
 
-        with tempfile.NamedTemporaryFile(mode="w+") as f:
-            prof.export_chrome_trace(f.name)
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
             # read the trace and expect valid json
             # if the JSON generated by export_chrome_trace is not valid, this will throw and fail the test.
-            json.load(f)
+            with io.open(fname, 'r') as f:
+                json.load(f)
 
         # Same test but for cuda.
         if not torch.cuda.is_available():
@@ -3061,10 +2997,11 @@ class TestAutograd(TestCase):
         with torch.autograd.profiler.profile(use_cuda=True, use_kineto=kineto_available()) as prof:
             torch.add(t1, t2)
 
-        with tempfile.NamedTemporaryFile(mode="w+") as f:
-            prof.export_chrome_trace(f.name)
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
             # Now validate the json
-            json.load(f)
+            with io.open(fname, 'r') as f:
+                json.load(f)
 
     def test_profiler(self):
         x = torch.randn(10, 10)
@@ -5004,14 +4941,17 @@ for shape in [(1,), ()]:
                                          return_counts=return_counts)
                     assert_only_first_requires_grad(res)
 
-
-
-def index_variable(shape, max_indices):
-    if not isinstance(shape, tuple):
-        shape = (shape,)
-    index = torch.rand(*shape).mul_(max_indices).floor_().long()
-    return index
-
+    def test_linalg_qr_r(self):
+        # torch.linalg.qr(mode='r') returns only 'r' and discards 'q', but
+        # without 'q' you cannot compute the backward pass. Check that
+        # linalg_qr_backward complains cleanly in that case.
+        inp = torch.randn((5, 7), requires_grad=True)
+        q, r = torch.linalg.qr(inp, mode='r')
+        assert q.shape == (0,)  # empty tensor
+        b = torch.sum(r)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "linalg_qr_backward: cannot compute backward"):
+            b.backward()
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -5019,20 +4959,6 @@ def index_perm_variable(shape, max_indices):
 
     index = torch.randperm(max_indices).narrow(0, 0, reduce(mul, shape)).view(shape)
     return index
-
-
-def gather_variable(shape, index_dim, max_indices, duplicate=False):
-    assert len(shape) == 2
-    assert index_dim < 2
-    batch_dim = 1 - index_dim
-    index = torch.LongTensor(*shape)
-    for i in range(shape[index_dim]):
-        index.select(index_dim, i).copy_(
-            torch.randperm(max_indices)[:shape[batch_dim]])
-    if duplicate:
-        index.select(batch_dim, 0).copy_(index.select(batch_dim, 1))
-    return index
-
 
 def bernoulli_scalar():
     return torch.tensor(0, dtype=torch.uint8).bernoulli_()
@@ -5109,7 +5035,8 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'cosh', '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'atan', 'angle', 'tanh', 'fill_', 'sub',
                 'exp', 'mean', 'inverse', 'triangular_solve', 'solve', 'addcmul',
-                'addcdiv', 'linalg.tensorinv', 'matrix_exp', 'qr', ] + separate_complex_tests
+                'addcdiv', 'linalg.tensorinv', 'matrix_exp', 'qr',
+                'narrow', 'swapaxes', 'swapdims', 'tensor_split', 'tile'] + separate_complex_tests
 
 def add_test(
         name,
@@ -7381,18 +7308,6 @@ class TestAutogradDeviceType(TestCase):
         (c * d).sum().backward()
         self.assertEqual(c.grad.stride(), (2, 1))
 
-    def test_movedim(self, device):
-        for fn in [torch.movedim, torch.moveaxis]:
-            x = torch.randn(4, 3, 2, 1, dtype=torch.double, device=device, requires_grad=True)
-
-            # Positive axis
-            gradcheck(lambda x: fn(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
-            gradgradcheck(lambda x: fn(x, (0, 1, 2, 3), (3, 2, 1, 0)), x)
-
-            # Negative axis
-            gradcheck(lambda x: fn(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
-            gradgradcheck(lambda x: fn(x, (0, -1, -2, -3), (-3, -2, -1, -0)), x)
-
     def _test_atleast(self, device, torch_fn):
         # 0-dim
         s = torch.tensor(0.5, dtype=torch.double, requires_grad=True)
@@ -7419,6 +7334,54 @@ class TestAutogradDeviceType(TestCase):
         self._test_atleast(device, torch.atleast_1d)
         self._test_atleast(device, torch.atleast_2d)
         self._test_atleast(device, torch.atleast_3d)
+
+    def test_xlogy(self, device):
+
+        def _tensor_tensor_helper(x, y):
+            gradcheck(lambda x, y: torch.xlogy(x, y), (x, y))
+            gradgradcheck(lambda x, y: torch.xlogy(x, y), (x, y))
+
+            with torch.no_grad():
+                x = x.clone()
+                x[torch.rand_like(x) > 0.5] = 0
+
+            gradcheck(lambda y: torch.xlogy(x, y), (y))
+            gradgradcheck(lambda y: torch.xlogy(x, y), (y))
+
+        shapes = ((4,), (1, 4), (1, 1, 4), (1, 1, 1, 4))
+
+        # For broadcastible shapes and scalar.
+        for x_shape, y_shape in permutations(shapes, 2):
+            x = torch.rand(*x_shape, dtype=torch.double, device=device, requires_grad=True)
+            y = torch.rand(*y_shape, dtype=torch.double, device=device, requires_grad=True)
+
+            _tensor_tensor_helper(x, y)
+            _tensor_tensor_helper(y, x)
+
+            gradcheck(lambda y: torch.xlogy(0, y), (y))
+            gradgradcheck(lambda y: torch.xlogy(0, y), (y))
+
+            gradcheck(lambda y: torch.xlogy(2, y), (y))
+            gradgradcheck(lambda y: torch.xlogy(2, y), (y))
+            gradcheck(lambda y: torch.xlogy(y, 2), (y))
+            gradgradcheck(lambda y: torch.xlogy(y, 2), (y))
+
+        # Different shape
+        x = torch.rand(2, 3, 4, 5, dtype=torch.double, device=device, requires_grad=True)
+        y = torch.rand(4, 5, dtype=torch.double, device=device, requires_grad=True)
+        _tensor_tensor_helper(x, y)
+        _tensor_tensor_helper(y, x)
+        _tensor_tensor_helper(x, x)
+        _tensor_tensor_helper(y, y)
+
+        # Same shape
+        x = torch.rand(4, 5, dtype=torch.double, device=device, requires_grad=True)
+        y = torch.rand(4, 5, dtype=torch.double, device=device, requires_grad=True)
+        _tensor_tensor_helper(x, y)
+        _tensor_tensor_helper(y, x)
+        _tensor_tensor_helper(x, x)
+        _tensor_tensor_helper(y, y)
+
 
 class TestMultithreadAutograd(TestCase):
     def _run_py_multithread_fn(self, fn, args=(), num_threads=10, kwargs=None):
