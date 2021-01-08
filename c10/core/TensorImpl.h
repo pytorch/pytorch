@@ -245,6 +245,21 @@ struct C10_API VariableVersion {
 };
 
 /**
+ * NOTE: Some TensorImpl methods are small and not overridden in the
+ * PyTorch codebase itself, but may theoretically need to be
+ * overridden by third-party TensorImpl subclasses. This macro allows
+ * users that need maximum performance and don't need these extension
+ * points to disable them with a build-time flag. (In particular,
+ * XLA's XLATensorImpl currently overrides these methods, so we can't
+ * enable this flag by default.)
+ */
+#ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
+#define TENSORIMPL_MAYBE_VIRTUAL
+#else
+#define TENSORIMPL_MAYBE_VIRTUAL virtual
+#endif
+
+/**
  * The low-level representation of a tensor, which contains a pointer
  * to a storage (which contains the actual data) and metadata (e.g., sizes and
  * strides) describing this particular view of the data as a tensor.
@@ -412,7 +427,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * is no longer true; numel always accurately reports the product
    * of sizes of a tensor.
    */
-  virtual int64_t numel() const {
+  TENSORIMPL_MAYBE_VIRTUAL int64_t numel() const {
 #ifdef DEBUG
     TORCH_INTERNAL_ASSERT(compute_numel() == numel_);
 #endif
