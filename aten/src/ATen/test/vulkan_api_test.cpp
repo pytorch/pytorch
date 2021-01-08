@@ -243,7 +243,6 @@ TEST(VulkanAPITest, addmm_expand) {
   ASSERT_TRUE(check);
 }
 
-/*
 TEST(VulkanAPITest, avg_pool2d) {
   if (!at::is_vulkan_available()) {
     return;
@@ -949,7 +948,6 @@ TEST(VulkanAPITest, mobilenetv2) {
 
   ASSERT_TRUE(check);
 }
-*/
 
 } // namespace
 
