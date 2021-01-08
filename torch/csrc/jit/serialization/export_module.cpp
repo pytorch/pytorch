@@ -640,8 +640,15 @@ namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
   c10::optional<std::vector<c10::IValue>> debug_info_elements;
+  std::unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>
+      empty_map;
+
   moduleMethodsTuple(
-      m, elements, debug_info_elements, {}, false /* save_mobile_debug_info */);
+      m,
+      elements,
+      debug_info_elements,
+      empty_map,
+      false /* save_mobile_debug_info */);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =
