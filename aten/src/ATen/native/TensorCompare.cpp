@@ -195,6 +195,7 @@ bool is_nonzero(const Tensor& self) {
 
 namespace {
 
+// DO NOT USE THIS -- it's just an implementation detail of wrapped_scalar tensor below.
 at::Tensor scalar_to_tensor_default_dtype(
     Scalar s,
     const Device device = at::kCPU) {
@@ -207,11 +208,16 @@ at::Tensor scalar_to_tensor_default_dtype(
     return at::scalar_tensor(
         s, at::device(device).dtype(at::get_default_complex_dtype()));
   } else {
-    AT_ASSERT(s.isIntegral(false));
+    TORCH_INTERNAL_ASSERT(s.isIntegral(false));
     return at::scalar_tensor(s, at::device(device).dtype(at::kLong));
   }
 }
 
+// TLDR: Don't call with `use_default_dtype` true -- this is only necessary to support the partial
+// type-promotion that torch.where supports.  Once torch.where fully supports type promotion, we
+// won't need this function.
+//
+// Longer explanation:
 // `use_default_dtype` is a bit of a hack because torch.where doesn't support type promotion, but
 // does support `torch.where(tensor, scalar1, scalar2)` with default scalar types.  The trickiness is we
 // usually convert double scalars to doubles, and `set_wrapped_number` defines type promotion priority
