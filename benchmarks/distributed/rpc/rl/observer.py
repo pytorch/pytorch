@@ -19,8 +19,8 @@ class ObserverBase:
         r"""
         Further initializes observer to be aware of rpc environment
         Args:
-        state_size (list): list of integers denoting dimensions of state
-        batch (bool): Whether agent will be using batch select action
+            state_size (list): List of integers denoting dimensions of state
+            batch (bool): Whether agent will be using batch select action
         """
         self.state_size = state_size
         self.select_action = AgentBase.select_action_batch if batch else AgentBase.select_action_non_batch
@@ -35,6 +35,8 @@ class ObserverBase:
     def step(self, action):
         r"""
         Generates random state and reward
+        Args:
+            action (int): Int received from agent representing action to take on state
         """
         state = torch.rand(self.state_size)
         reward = random.randint(0, 1)
@@ -45,6 +47,9 @@ class ObserverBase:
         r"""
         Runs single observer episode where for n_steps, an action is selected
         from the agent based on curent state and state is updated
+        Args:
+            agent_rref (PyRRef): Pytorch RPC reference to agent
+            n_steps (int): Number of times to select an action to transform state per episode
         """
         state, ep_reward = self.reset(), None
         rewards = torch.zeros(n_steps)

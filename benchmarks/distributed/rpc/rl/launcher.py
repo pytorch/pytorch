@@ -86,7 +86,7 @@ def find_graph_variable(args):
     variable argument's entries on the x-axis. Args is modified in accordance with this.  
     More than 1 argument with multiple entries is not permitted.  
     Args:
-        args (dict): dictionary containing arguments passed by the user (and default arguments)
+        args (dict): Dictionary containing arguments passed by the user (and default arguments)
     """
     var_types = {'world_size': int,
                  'state_size': str,
@@ -108,8 +108,8 @@ def append_spaces(string, length):
     is greater than or equal to length, a single space is appended, otherwise x spaces are appended
     where x is the difference between the length of string and the length argument
     Args:
-        string (str): string to be modified
-        length (int): size of desired return string with spaces appended
+        string (str): String to be modified
+        length (int): Size of desired return string with spaces appended
     Return: (str)
     """
     string = str(string)

@@ -36,26 +36,9 @@ nlayers : 5
 out_features : 10
 output_file_path : benchmark_report.json
 x_axis_name : world_size
----------
-Benchmark
-world_size : 10
-agent latency -- {50: 0.002, 75: 0.002, 90: 0.002, 95: 0.002}
-
-agent throughput -- {50: 4071, 75: 4374, 90: 4579, 95: 4686}
-
-observer latency -- {50: 0.003, 75: 0.003, 90: 0.003, 95: 0.003}
-
-observer throughput -- {50: 370, 75: 386, 90: 397, 95: 404}
-
----------
-Benchmark
-world_size : 20
-agent latency -- {50: 0.005, 75: 0.005, 90: 0.005, 95: 0.005}
-
-agent throughput -- {50: 3824, 75: 4124, 90: 4471, 95: 4697}
-
-observer latency -- {50: 0.006, 75: 0.006, 90: 0.006, 95: 0.007}
-
-observer throughput -- {50: 176, 75: 187, 90: 198, 95: 202}
+world_size | agent latency (seconds)     agent throughput            observer latency (seconds)  observer throughput         
+            p50    p75    p90    p95    p50    p75    p90    p95    p50    p75    p90    p95    p50    p75    p90    p95    
+10          0.002  0.002  0.002  0.002  4432   4706   4948   5128   0.002  0.003  0.003  0.003  407    422    434    443    
+20          0.004  0.005  0.005  0.005  4244   4620   4884   5014   0.005  0.005  0.006  0.006  191    207    215    220   
 
 ```

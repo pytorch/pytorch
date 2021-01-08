@@ -20,6 +20,12 @@ class CoordinatorBase:
         Coordinator object to run on worker.  Only one coordinator exists.  Responsible
         for facilitating communication between agent and observers and recording benchmark
         throughput and latency data. 
+        Args:
+            batch_size (int): Number of observer requests to process in a batch
+            batch (bool): Whether to process and respond to observer requests as a batch or 1 at a time
+            state_size (list): List of ints dictating the dimensions of the state
+            nlayers (int): Number of layers in the model
+            out_features (int): Number of out features in the model
         """
         self.batch_size = batch_size
         self.batch = batch

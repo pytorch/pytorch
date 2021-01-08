@@ -18,9 +18,9 @@ class Policy(nn.Module):
         r"""
         Inits policy class
         Args:
-            in_features (int): number of input features the model takes         
-            nlayers (int): number of layers in the model
-            out_features (int): number of features the model outputs
+            in_features (int): Number of input features the model takes         
+            nlayers (int): Number of layers in the model
+            out_features (int): Number of features the model outputs
         """
         super(Policy, self).__init__()
 
@@ -41,7 +41,7 @@ class AgentBase:
         r"""
         Inits agent class
         Args:
-            batch (bool): whether to process and respond to observer requests as a batch or 1 at a time
+            batch (bool): Whether to process and respond to observer requests as a batch or 1 at a time
         """
         self.id = rpc.get_worker_info().id
         self.running_reward = 0
@@ -59,7 +59,7 @@ class AgentBase:
 
     def reset_metrics(self):
         r"""
-        sets all benchmark metrics to their empty values
+        Sets all benchmark metrics to their empty values
         """
         self.agent_latency_start = None
         self.agent_latency_end = None
@@ -69,6 +69,12 @@ class AgentBase:
     def set_world(self, batch_size, state_size, nlayers, out_features, batch=True):
         r"""
         Further initializes agent to be aware of rpc environment
+        Args:
+            batch_size (int): size of batches of observer requests to process
+            state_size (list): List of ints dictating the dimensions of the state
+            nlayers (int): Number of layers in the model
+            out_features (int): Number of out features in the model
+            batch (bool): Whether to process and respond to observer requests as a batch or 1 at a time
         """
         self.batch = batch
         self.policy = Policy(reduce((lambda x, y: x * y), state_size), nlayers, out_features)
@@ -96,7 +102,7 @@ class AgentBase:
         actions are selected for all pending observer requests and communicated back to observers
         Args:
             agent_rref (Rref): Rref of this agent
-            observer_id (int): observer id of observer calling this function
+            observer_id (int): Observer id of observer calling this function
             state (Tensor): Tensor representing current state held by observer
         """
         self = agent_rref.local_value()
@@ -135,7 +141,7 @@ class AgentBase:
         Select actions based on observer state and communicates back to observer
         Args:
             agent_rref (Rref): Rref of this agent
-            observer_id (int): observer id of observer calling this function
+            observer_id (int): Observer id of observer calling this function
             state (Tensor): Tensor representing current state held by observer
         """
         self = agent_rref.local_value()
