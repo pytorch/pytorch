@@ -1398,3 +1398,29 @@ class TestClassType(JitTestCase):
 
         scripted = torch.jit.script(A())
         self.getExportImportCopy(scripted)
+
+    def test_class_attribute_wrong_type(self):
+        """
+        Test that the error message displayed when convering a class type
+        to an IValue that has an attribute of the wrong type.
+        """
+        @torch.jit.script
+        class ValHolder(object):
+            def __init__(self, val):
+                self.val = val
+
+        class Mod(nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.mod1 = ValHolder(1)
+                self.mod2 = ValHolder(2)
+
+            def forward(self, cond: bool):
+                if cond:
+                    mod = self.mod1
+                else:
+                    mod = self.mod2
+                return mod.val
+
+        with self.assertRaisesRegex(RuntimeError, "Could not cast attribute val to type Tensor"):
+            torch.jit.script(Mod())
