@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/frontend/convert_to_ssa.h>
+#include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
@@ -32,7 +33,6 @@
 #include <climits>
 #include <set>
 #include <stack>
-#include "jit/frontend/lexer.h"
 
 namespace torch {
 namespace jit {
