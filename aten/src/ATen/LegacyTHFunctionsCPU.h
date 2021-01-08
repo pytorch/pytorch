@@ -18,7 +18,6 @@ namespace native {
 namespace legacy {
 namespace cpu {
 
-Tensor & _th_masked_scatter_(Tensor & self, const Tensor & mask, const Tensor & source);
 Tensor & _th_masked_scatter_bool_(Tensor & self, const Tensor & mask, const Tensor & source);
 Tensor & _th_nonzero_out(Tensor & result, const Tensor & self);
 Tensor _th_nonzero(const Tensor & self);

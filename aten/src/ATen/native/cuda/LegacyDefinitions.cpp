@@ -26,7 +26,7 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, Scalar value) {
   if (b_mask.dtype() == at::ScalarType::Byte) {
     TORCH_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
-    legacy::cuda::_th_masked_fill_(self, b_mask, value);
+    legacy::cuda::_th_masked_fill_bool_(self, b_mask.view(kBool), value);
   } else {
     legacy::cuda::_th_masked_fill_bool_(self, b_mask, value);
   }
@@ -53,7 +53,7 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & val
   if (b_mask.dtype() == at::ScalarType::Byte) {
     TORCH_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
-    legacy::cuda::_th_masked_fill_(self, b_mask, value.item());
+    legacy::cuda::_th_masked_fill_bool_(self, b_mask.view(kBool), value.item());
   } else {
     legacy::cuda::_th_masked_fill_bool_(self, b_mask, value.item());
   }
