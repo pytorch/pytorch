@@ -4,23 +4,25 @@ import torch
 from torch.fx import GraphModule  # type: ignore
 from torch.fx import map_arg  # type: ignore
 from torch.fx.graph import Graph
+from torch.quantization import get_default_compare_output_module_list
 from torch.quantization._numeric_suite import (
+    _find_match,
     get_logger_dict,
-    get_matching_activations,
     prepare_model_with_stubs,
     compare_weights,
+    Logger,
     OutputLogger,
     ShadowLogger,
 )
 from torch.quantization.fx.quantization_patterns import NumericSuiteQuantizeHandler
 from torch.quantization.fx.quantize import _remove_qconfig, is_activation_post_process
 from torch.quantization.quantize_fx import prepare_fx
-from torch.quantization import get_default_compare_output_module_list
+
 
 def remove_qconfig_observer_fx(model):
     # remove activation post process
     act_post_process_removed_graph = Graph()
-    env = {}  # type: Dict[str, Any]
+    env: Dict[str, Any] = {}
 
     modules = dict(model.named_modules())
 
@@ -42,6 +44,35 @@ def remove_qconfig_observer_fx(model):
     _remove_qconfig(model)
     model = GraphModule(model, act_post_process_removed_graph)
     return model
+
+
+def _get_logger_dict_helper_fx(model, target_dict):
+    modules = dict(model.named_modules())
+
+    for node in model.graph.nodes:
+        if node.op == "call_module":
+            if isinstance(modules[node.target], Logger):
+                input_node = node.args[0]
+                if (
+                    input_node.op == "call_function"
+                    and input_node.target == torch.quantize_per_tensor
+                ):
+                    # stats of activation before applying quantized op
+                    target_dict[input_node.args[0].name + ".stats"] = modules[
+                        node.target
+                    ].stats
+                else:
+                    # stats for activation after applying quantized op
+                    target_dict[node.args[0].name + ".stats"] = modules[
+                        node.target
+                    ].stats
+
+
+def get_logger_dict_fx(model):
+    torch._C._log_api_usage_once("quantization_api._numeric_suite.get_logger_dict_fx")
+    target_dict: Dict[str, Dict] = {}
+    _get_logger_dict_helper_fx(model, target_dict)
+    return target_dict
 
 
 def compare_weights_fx(float_dict, quantized_dict):
@@ -141,6 +172,33 @@ def compare_model_stub_fx(
     return ob_dict
 
 
+def get_matching_activations_fx(float_module, q_module):
+    r"""Find the matching activation between float and quantized modules.
+
+    Args:
+        float_module: float module used to generate the q_module
+        q_module: module quantized from float_module
+
+    Return:
+        act_dict: dict with key corresponding to quantized module names and each
+        entry being a dictionary with two keys 'float' and 'quantized', containing
+        the matching float and quantized activations
+    """
+    torch._C._log_api_usage_once(
+        "quantization_api._numeric_suite.get_matching_activations_fx"
+    )
+    float_dict = get_logger_dict_fx(float_module)
+    quantized_dict = get_logger_dict_fx(q_module)
+    act_dict: Dict[str, Dict] = {}
+    for key in quantized_dict:
+        match_key = _find_match(sorted(float_dict, reverse=True), key, "stats")
+        if match_key is not None:
+            act_dict[key] = {}
+            act_dict[key]["float"] = float_dict[match_key]["tensor_val"]
+            act_dict[key]["quantized"] = quantized_dict[key]["tensor_val"]
+    return act_dict
+
+
 def prepare_model_outputs_fx(
     float_module, q_module, Logger=OutputLogger, allow_list=None
 ):
@@ -210,8 +268,10 @@ def compare_model_outputs_fx(
     if allow_list is None:
         allow_list = get_default_compare_output_module_list()
 
-    float_model, q_model = prepare_model_outputs_fx(float_model, q_model, Logger, allow_list)
+    float_model, q_model = prepare_model_outputs_fx(
+        float_model, q_model, Logger, allow_list
+    )
     float_model(*data)
     q_model(*data)
-    act_compare_dict = get_matching_activations(float_model, q_model)
+    act_compare_dict = get_matching_activations_fx(float_model, q_model)
     return act_compare_dict

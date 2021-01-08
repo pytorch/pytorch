@@ -13,7 +13,7 @@ from torch.quantization.fx.quantize import is_activation_post_process
 from torch.quantization.quantize_fx import convert_fx, fuse_fx, prepare_fx
 from torch.testing._internal.common_quantization import (
     ConvBnModel,
-    ConvBNReLU,
+    ConvBnReLUModel,
     ConvModel,
     QuantizationTestCase,
     SingleLayerLinearDynamicModel,
@@ -64,7 +64,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         qconfig = get_default_qconfig(qengine)
         qconfig_dict = {"": qconfig}
 
-        model_list = [ConvModel(), ConvBnModel(), ConvBNReLU()]
+        model_list = [ConvModel(), ConvBnModel(), ConvBnReLUModel()]
         for float_model in model_list:
             float_model.eval()
 
@@ -184,7 +184,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         qconfig = get_default_qconfig(qengine)
         qconfig_dict = {"": qconfig}
 
-        model_list = [ConvModel(), ConvBNReLU()]
+        model_list = [ConvModel(), ConvBnReLUModel()]
 
         for float_model in model_list:
             float_model.eval()
@@ -281,7 +281,9 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
     def test_compare_model_stub_lstm_dynamic_fx(self):
         r"""Compare the output of dynamic quantized linear layer and its float shadow module"""
 
-        def compare_and_validate_results(float_model, q_model, module_swap_list, input, hidden):
+        def compare_and_validate_results(
+            float_model, q_model, module_swap_list, input, hidden
+        ):
             ob_dict = compare_model_stub_fx(
                 float_model, q_model, module_swap_list, input, hidden
             )
@@ -320,9 +322,9 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
         def compare_and_validate_results(float_model, q_model, data):
             act_compare_dict = compare_model_outputs_fx(float_model, q_model, data)
-            expected_ob_dict_keys = {"stats"}
+            expected_ob_dict_keys = {"x.stats", "conv.stats"}
+
             self.assertTrue(act_compare_dict.keys() == expected_ob_dict_keys)
-            self.assertEqual(len(act_compare_dict), 1)
             for k, v in act_compare_dict.items():
                 self.assertTrue(len(v["float"]) == 1)
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
@@ -333,7 +335,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         qconfig = get_default_qconfig(qengine)
         qconfig_dict = {"": qconfig}
 
-        model_list = [ConvModel(), ConvBNReLU()]
+        model_list = [ConvModel(), ConvBnReLUModel()]
 
         for float_model in model_list:
             float_model.eval()
@@ -356,9 +358,9 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
         def compare_and_validate_results(float_model, q_model, data):
             act_compare_dict = compare_model_outputs_fx(float_model, q_model, data)
-            expected_ob_dict_keys = {"stats"}
+            expected_ob_dict_keys = {"x.stats", "fc1.stats"}
+
             self.assertTrue(act_compare_dict.keys() == expected_ob_dict_keys)
-            self.assertEqual(len(act_compare_dict), 1)
             for k, v in act_compare_dict.items():
                 self.assertTrue(len(v["float"]) == 1)
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
@@ -391,8 +393,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
         def compare_and_validate_results(float_model, q_model, data):
             act_compare_dict = compare_model_outputs_fx(float_model, q_model, data)
-            print(act_compare_dict)
-            expected_act_compare_dict_keys = {"stats"}
+            expected_act_compare_dict_keys = {"x.stats", "fc1.stats"}
 
             self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
             for k, v in act_compare_dict.items():
@@ -411,3 +412,43 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
         linear_data = self.calib_data[0][0]
         compare_and_validate_results(backup_prepared_model, q_model, linear_data)
+
+    @override_qengines
+    def test_compare_model_outputs_lstm_dynamic_fx(self):
+        r"""Compare the output of LSTM layer in dynamic quantized model and corresponding
+        output of linear layer in float model
+        """
+
+        def compare_and_validate_results(float_model, q_model, input, hidden):
+            act_compare_dict = compare_model_outputs_fx(
+                float_model, q_model, input, hidden
+            )
+            expected_act_compare_dict_keys = {"x.stats", "hid.stats", "lstm_1.stats"}
+
+            self.assertTrue(act_compare_dict.keys() == expected_act_compare_dict_keys)
+            for k, v in act_compare_dict.items():
+                self.assertTrue(len(v["float"]) == len(v["quantized"]))
+                for i, val in enumerate(v["quantized"]):
+                    self.assertTrue(
+                        v["float"][i][0].shape == v["quantized"][i][0].shape
+                    )
+                    if i == 1:
+                        self.assertTrue(
+                            v["float"][i][1].shape == v["quantized"][i][1].shape
+                        )
+
+        float_model = LSTMwithHiddenDynamicModel()
+        float_model.eval()
+
+        qconfig_dict = {"object_type": [(nn.LSTM, default_dynamic_qconfig)]}
+        prepared_model = prepare_fx(float_model, qconfig_dict)
+
+        backup_prepared_model = copy.deepcopy(prepared_model)
+        q_model = convert_fx(prepared_model)
+
+        lstm_input = torch.rand((1, 1, 2))
+        lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
+
+        compare_and_validate_results(
+            backup_prepared_model, q_model, lstm_input, lstm_hidden
+        )

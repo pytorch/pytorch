@@ -23,7 +23,7 @@ def PyTorchModule(helper, model, sample_arguments, caffe2_inputs, prefix_name=No
     """
     Embed an ONNX-exportable PyTorch Model into a Caffe2 model being built.
 
-    Arguments:
+    Args:
         helper (caffe2.python.core.ModelHelder): the model helper where
             this imported network should be inserted
         model (torch.nn.Module): the model to be exported
