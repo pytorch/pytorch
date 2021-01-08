@@ -1411,7 +1411,7 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
 
     if (compute_uv) {
       if (some) {
-        VT_working_copy = VT_working_copy.narrow(-1, 0, k);
+        VT_working_copy = VT_working_copy.narrow(-2, 0, k);
       }
     } else {
       VT_working_copy.zero_();
@@ -1421,24 +1421,71 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
     U_working_copy.zero_();
     VT_working_copy.zero_();
   }
+  // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
+  VT_working_copy.transpose_(-2, -1);
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
 
 std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compute_uv) {
   TORCH_CHECK(self.dim() >= 2,
-              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+              "svd input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   return at::_svd_helper(self, some, compute_uv);
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& VT,
+std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& V,
                                               const Tensor& self, bool some, bool compute_uv) {
   TORCH_CHECK(self.dim() >= 2,
-              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  Tensor U_tmp, S_tmp, VT_tmp;
-  std::tie(U_tmp, S_tmp, VT_tmp) = at::_svd_helper(self, some, compute_uv);
+              "svd input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  Tensor U_tmp, S_tmp, V_tmp;
+  std::tie(U_tmp, S_tmp, V_tmp) = at::_svd_helper(self, some, compute_uv);
   U.resize_as_(U_tmp).copy_(U_tmp);
   S.resize_as_(S_tmp).copy_(S_tmp);
-  VT.resize_as_(VT_tmp).copy_(VT_tmp);
+  V.resize_as_(V_tmp).copy_(V_tmp);
+  return std::tuple<Tensor&, Tensor&, Tensor&>(U, S, V);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/* torch.linalg.svd, implemented in terms of torch.svd. There are two main
+   differences:
+
+    1. the 2nd parameter is bool some=True, which if effectively the opposite
+       of full_matrices=True
+
+    2. svd returns V, while linalg.svd returns VT. To accommodate the
+       difference, we transpose() V upon return
+*/
+
+std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matrices, bool compute_uv) {
+  TORCH_CHECK(self.dim() >= 2,
+              "svd input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+
+    bool some = !full_matrices;
+    Tensor U, S, V;
+    std::tie(U, S, V) = at::_svd_helper(self, some, compute_uv);
+    if (compute_uv) {
+        Tensor VT = V.transpose(-2, -1);
+        return std::make_tuple(U, S, VT);
+    } else {
+        Tensor empty_U = at::empty({0}, self.options());
+        Tensor empty_VT = at::empty({0}, self.options());
+        return std::make_tuple(empty_U, S, empty_VT);
+    }
+}
+
+static void svd_resize_and_copy(const char *name, const Tensor& src, Tensor &dst) {
+  TORCH_CHECK(src.device() == dst.device(), "svd output tensor ", name, " is on the wrong device: expected ", src.device(), " got ", dst.device());
+  at::native::resize_output(dst, src.sizes());
+  dst.copy_(src);
+}
+
+std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(Tensor& U, Tensor& S, Tensor& VT,
+                                                     const Tensor& self, bool full_matrices, bool compute_uv) {
+  Tensor U_tmp, S_tmp, VT_tmp;
+  std::tie(U_tmp, S_tmp, VT_tmp) = at::linalg_svd(self, full_matrices, compute_uv);
+  svd_resize_and_copy("U", U_tmp, U);
+  svd_resize_and_copy("S", S_tmp, S);
+  svd_resize_and_copy("V", VT_tmp, VT);
   return std::tuple<Tensor&, Tensor&, Tensor&>(U, S, VT);
 }
 

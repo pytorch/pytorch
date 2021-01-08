@@ -284,6 +284,19 @@ static bool varargsCanBeUsedAsList(
       !typevar_list;
 }
 
+// Note (@zasdfgbnm):
+// This is a workaround for https://github.com/pytorch/pytorch/issues/47964
+// Currently JIT does not distinguish ScalarType vs int, so there is really
+// no way to distinguish x.view(1) vs x.view(torch.int8). So we have to hardcode
+// the aten::view.dtype here to block this overload. This blocklist should be
+// removed when JIT fully suports ScalarType as its own type.
+bool isBlockListedSchema(const FunctionSchema& schema) {
+  if (schema.name() == "aten::view" && schema.overload_name() == "dtype") {
+    return true;
+  }
+  return false;
+}
+
 static c10::optional<MatchedSchema> tryMatchSchema(
     const FunctionSchema& schema,
     const SourceRange& loc,
@@ -293,6 +306,10 @@ static c10::optional<MatchedSchema> tryMatchSchema(
     c10::optional<NamedValue> self,
     std::ostream* failure_messages,
     bool allow_conversions) {
+  if (isBlockListedSchema(schema)) {
+    return c10::nullopt;
+  }
+
   auto err = [&]() -> std::ostream& {
     *failure_messages << "\n" << schema << ":\n";
     return *failure_messages;
