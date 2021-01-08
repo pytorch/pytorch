@@ -285,8 +285,7 @@ if __name__ == '__main__':
         real_inputs = 0
         for i, arg in enumerate(o['arguments']):
             env['arguments'].append(arg['name'])
-            # Emulate logic in gen_unboxing_wrappers.py. Pretend the flat argument
-            # list is a stack where the end is the top.
+            # Pretend the flat argument list is a stack where the end is the top.
             view_length = 'InputSize()' if has_tensorlist and i < tensorlist_idx else static_tensor_inputs
             if arg['type'] == 'TensorList':
                 # NOTE: do not advance real_inputs here. After this we will

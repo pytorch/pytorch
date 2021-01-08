@@ -22,8 +22,7 @@ class EmbeddingPackedParams(torch.nn.Module):
             raise NotImplementedError('Unsupported dtype on quantized embedding! Supports quint8 and quint4x2.')
 
     @torch.jit.export
-    def set_weight(self, weight):
-        # type: (torch.Tensor) -> None
+    def set_weight(self, weight: torch.Tensor) -> None:
         if self.dtype in [torch.quint8, torch.quint4x2]:
             self._packed_weight = torch.ops.quantized.embedding_bag_prepack(weight)
         else:
@@ -125,8 +124,7 @@ class Embedding(torch.nn.Module):
 
         return extra_repr_str
 
-    def set_weight(self, w):
-        # type: (torch.Tensor) -> None
+    def set_weight(self, w: torch.Tensor) -> None:
         self._packed_params.set_weight(w)
 
     def weight(self):
