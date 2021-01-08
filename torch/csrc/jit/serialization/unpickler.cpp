@@ -545,8 +545,8 @@ void Unpickler::readGlobal(
   } else if (module_name == "builtins" && class_name == "complex") {
     globals_.emplace_back([this] {
       auto elements = pop(stack_).toTuple()->elements();
-      auto c_holder = ivalue::ComplexHolder(c10::complex<double>(elements.at(0).toDouble(), elements.at(1).toDouble()));
-      stack_.emplace_back(c10::make_intrusive<ivalue::ComplexHolder>(c_holder));
+      auto c_holder = at::ivalue::ComplexHolder(c10::complex<double>(elements.at(0).toDouble(), elements.at(1).toDouble()));
+      stack_.emplace_back(c10::make_intrusive<at::ivalue::ComplexHolder>(c_holder));
     });
 
   } else if (module_name == "collections" && class_name == "OrderedDict") {
@@ -642,7 +642,7 @@ void Unpickler::rebuildTensor(bool quantized) {
     auto tup = pop(stack_).toTuple();
     const auto& elements = tup->elements();
     size_t idx = 0;
-    auto storage_tensor = elements.at(idx++).toTensor();
+    auto& storage_tensor = elements.at(idx++).toTensor();
     int64_t storage_offset = elements.at(idx++).toInt();
     std::vector<int64_t> size = tupleToIntList(elements.at(idx++));
     std::vector<int64_t> stride = tupleToIntList(elements.at(idx++));

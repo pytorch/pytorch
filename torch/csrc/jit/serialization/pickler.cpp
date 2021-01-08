@@ -79,8 +79,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
         pushDouble(item);
       }
     });
-  }
-  else if (ivalue.isBoolList()) {
+  } else if (ivalue.isBoolList()) {
     pushSpecializedList(ivalue, "build_boollist", [=](const IValue& ivalue) {
       for (bool item : ivalue.toBoolList()) {
         pushBool(item);
@@ -357,7 +356,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
   //
   // The format here is the same one used by `torch.save()`. The code for the
   // format can be found in `torch/serialization.py`.
-  auto tensor = ivalue.toTensor();
+  auto& tensor = ivalue.toTensor();
   bool quantized = tensor.is_quantized();
   // The arguments to this function are:
   //    storage, storage_offset, size, stride, requires_grad, backward_hooks

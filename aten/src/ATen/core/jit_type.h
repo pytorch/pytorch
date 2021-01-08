@@ -1555,6 +1555,8 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
     return TensorType::createContiguous(at::kFloat, at::kCPU, {});
   } else if (typ->isSubtypeOf(BoolType::get())) {
     return TensorType::createContiguous(at::kLong, at::kCPU, {});
+  } else if (typ->isSubtypeOf(ComplexDoubleType::get())) {
+    return TensorType::createContiguous(at::kComplexDouble, at::kCPU, {});
   }
   TORCH_CHECK(false, "Unknown number type: ", typ->str());
 }
@@ -1565,6 +1567,8 @@ inline TypePtr TensorType::fromBoolType() {
 inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const c10::TypePtr & type) {
   if (type == FloatType::get()) {
     return at::typeMetaToScalarType(c10::get_default_dtype());
+  } else if (type == ComplexDoubleType::get()) {
+    return at::typeMetaToScalarType(c10::get_default_complex_dtype());
   } else if (type == IntType::get()) {
     return at::ScalarType::Long;
   } else if (type == BoolType::get()) {
@@ -2400,19 +2404,19 @@ private:
 
 inline bool IValue::isDoubleList() const {
   // note: avoids calling type() to avoid extra referencing counting for the returned type.
-  return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == FloatType::Kind;
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == FloatType::Kind;
 }
 
 inline bool IValue::isTensorList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == TensorType::Kind;
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == TensorType::Kind;
 }
 
 inline bool IValue::isIntList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == IntType::Kind;
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == IntType::Kind;
 }
 
 inline bool IValue::isBoolList() const {
-  return isList() && static_cast<detail::ListImpl*>(payload.as_intrusive_ptr)->elementType->kind() == BoolType::Kind;
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == BoolType::Kind;
 }
 
 template<>

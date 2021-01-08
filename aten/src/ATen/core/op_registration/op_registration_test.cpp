@@ -896,10 +896,6 @@ TEST(OperatorRegistrationTest, testAvailableArgTypes) {
     c10::List<double>(), [] (const c10::List<double>& v) {EXPECT_EQ(0, v.size());},
     c10::List<double>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<double>>().size());},
     "(float[] a) -> float[]");
-  // testArgTypes<c10::List<c10::complex<double>>>::test(
-  //   c10::List<c10::complex<double>>(), [] (const c10::List<c10::complex<double>>& v) {EXPECT_EQ(0, v.size());},
-  //   c10::List<c10::complex<double>>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<c10::complex<double>>>().size());},
-  //   "(c10::complex<double>[] a) -> c10::complex<double>[]");
   testArgTypes<c10::List<int64_t>>::test(
     c10::List<int64_t>(), [] (const c10::List<int64_t>& v) {EXPECT_EQ(0, v.size());},
     c10::List<int64_t>(), [] (const IValue& v) {EXPECT_EQ(0, v.to<c10::List<int64_t>>().size());},
@@ -1913,7 +1909,7 @@ TEST(NewOperatorRegistrationTest, CppFunction) {
   m.def("fn3", [](const Tensor& x) { return x; });
   // These require explicit schema
   m.def("fn4(Tensor x) -> Tensor", CppFunction::makeFallthrough());
-  m.def("fn5(Tensor x) -> Tensor", CppFunction::makeUnboxedOnly(dummy_fn));
+  m.def("fn5(Tensor x) -> Tensor", CppFunction::makeFromUnboxedFunction(dummy_fn));
   m.def("fn6(Tensor x) -> Tensor", CppFunction::makeFromBoxedFunction<&backend_fallback_kernel>());
 }
 
