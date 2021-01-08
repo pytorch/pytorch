@@ -78,6 +78,19 @@ Generator createCUDAGenerator(DeviceIndex device_index) {
 } // namespace detail
 } // namespace cuda
 
+/**
+ * Note [Why enforce RNG offset % 4 == 0?]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ * Curand philox does allow offsets that aren't a multiple of 4.
+ * But jit kernels don't use curand, they use a custom "Philox" class (see
+ * torch/csrc/jit/tensorexpr/cuda_random.h or
+ * torch/csrc/jit/codegen/cuda/runtime/random_numbers.cu).
+ * The "Philox" constructor computes offset/4 (a uint64_t division) to locate its
+ * internal offset in its virtual bitstream of 128-bit chunks.
+ * In other words, if the incoming offset is not a multiple of 4, each thread
+ * might repeat some previously-generated 32-bit values in the bitstream. See
+ * https://github.com/pytorch/pytorch/pull/50169.
+ */
 
 /**
  * CUDAGeneratorImpl class implementation
@@ -137,6 +150,7 @@ uint64_t CUDAGeneratorImpl::seed() {
  */
 void CUDAGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
   at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::set_philox_offset_per_thread");
+  // see Note [Why enforce RNG offset % 4 == 0?]
   TORCH_CHECK(offset % 4 == 0, "offset must be a multiple of 4");
   philox_offset_per_thread_ = offset;
 }
@@ -196,6 +210,7 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
     TORCH_CHECK(graph_expects_this_gen_,
                 "philox_cuda_state for an unexpected CUDA generator used during capture. "
                 CAPTURE_DEFAULT_GENS_MSG);
+    // see Note [Why enforce RNG offset % 4 == 0?]
     TORCH_INTERNAL_ASSERT(this->offset_intragraph_ % 4 == 0);
     uint32_t offset = this->offset_intragraph_;
     TORCH_INTERNAL_ASSERT(this->offset_intragraph_ <=
@@ -208,6 +223,7 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
     TORCH_CHECK(!graph_expects_this_gen_,
                 "CUDA generator expects graph capture to be underway, "
                 "but the current stream is not capturing.");
+    // see Note [Why enforce RNG offset % 4 == 0?]
     TORCH_INTERNAL_ASSERT(this->philox_offset_per_thread_ % 4 == 0);
     uint64_t offset = this->philox_offset_per_thread_;
     this->philox_offset_per_thread_ += increment;
@@ -222,6 +238,7 @@ PhiloxCudaState CUDAGeneratorImpl::philox_cuda_state(uint64_t increment) {
 std::pair<uint64_t, uint64_t> CUDAGeneratorImpl::philox_engine_inputs(uint64_t increment) {
   at::cuda::assertNotCapturing("Refactor this op to use CUDAGeneratorImpl::philox_cuda_state. "
                                "Cannot call CUDAGeneratorImpl::philox_engine_inputs");
+  // see Note [Why enforce RNG offset % 4 == 0?]
   TORCH_INTERNAL_ASSERT(this->philox_offset_per_thread_ % 4 == 0);
   uint64_t offset = this->philox_offset_per_thread_;
   this->philox_offset_per_thread_ += increment;
