@@ -8,7 +8,7 @@
 #include <ATen/native/cuda/MiscUtils.h>
 
 #ifdef USE_MAGMA
-#include <magma.h>
+#include <magma_v2.h>
 #endif
 
 #ifndef DIVUP
