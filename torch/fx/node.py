@@ -63,7 +63,7 @@ class Node:
         # The public API for this is `all_input_nodes`, this private attribute
         # should not be accessed directly.
         self._input_nodes : Dict[Node, None] = {}
-        self._update_args_kwargs(map_arg(args, lambda x: x), map_arg(kwargs, lambda x: x))  # type: ignore
+        self.__update_args_kwargs(map_arg(args, lambda x: x), map_arg(kwargs, lambda x: x))  # type: ignore
 
         # All of the nodes that use the value produced by this Node
         # Note one user may correspond to several uses, e.g. the node fo ``x + x``
@@ -159,7 +159,9 @@ class Node:
         depends on the node's opcode. See the ``fx.Graph`` docstring for more
         information.
         """
-        self._update_args_kwargs(map_arg(a, lambda x: x), self._kwargs)  # type: ignore
+        # DO NOT CALL `__update_args_kwargs` directly. The correct way to
+        # set `args` is via direct assignment, i.e. `node.args = new_args`
+        self.__update_args_kwargs(map_arg(a, lambda x: x), self._kwargs)  # type: ignore
 
     @property
     def kwargs(self) -> Dict[str, Argument]:
@@ -180,7 +182,9 @@ class Node:
         depends on the node's opcode. See the ``fx.Graph`` docstring for more
         information.
         """
-        self._update_args_kwargs(self._args, map_arg(k, lambda x: x))  # type: ignore
+        # DO NOT CALL `__update_args_kwargs` directly. The correct way to
+        # set `args` is via direct assignment, i.e. `node.kwargs = new_kwargs`
+        self.__update_args_kwargs(self._args, map_arg(k, lambda x: x))  # type: ignore
 
     @property
     def all_input_nodes(self) -> List['Node']:
@@ -196,7 +200,7 @@ class Node:
         """
         return list(self._input_nodes.keys())
 
-    def _update_args_kwargs(self, new_args : Tuple[Argument, ...], new_kwargs : Dict[str, Argument]):
+    def __update_args_kwargs(self, new_args : Tuple['Argument', ...], new_kwargs : Dict[str, 'Argument']):
         """
         This API is internal. Do *not* call it directly.
         """
@@ -240,18 +244,14 @@ class Node:
             new_kwargs = map_arg(use_node.kwargs, maybe_replace_node)
             assert isinstance(new_args, tuple)
             assert isinstance(new_kwargs, dict)
-            use_node._update_args_kwargs(new_args, new_kwargs)
+            use_node.__update_args_kwargs(new_args, new_kwargs)
 
         assert len(self.users) == 0
         return to_process
 
-
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
     """ Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys. """
-    if isinstance(a, tuple) and hasattr(a, '_fields'):
-        elements = tuple(map_arg(elem, fn) for elem in a)
-        return type(a)(*elements)  # type: ignore
-    elif isinstance(a, tuple):
+    if isinstance(a, tuple):
         return tuple(map_arg(elem, fn) for elem in a)
     elif isinstance(a, list):
         return immutable_list(map_arg(elem, fn) for elem in a)

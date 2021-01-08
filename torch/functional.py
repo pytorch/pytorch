@@ -118,7 +118,7 @@ def split(tensor, split_size_or_sections, dim=0):
     into ``len(split_size_or_sections)`` chunks with sizes in :attr:`dim` according
     to :attr:`split_size_or_sections`.
 
-    Arguments:
+    Args:
         tensor (Tensor): tensor to split.
         split_size_or_sections (int) or (list(int)): size of a single chunk or
             list of sizes for each chunk
@@ -189,7 +189,7 @@ def lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
 
     Returns a tuple of tensors as ``(the pivots, the L tensor, the U tensor)``.
 
-    Arguments:
+    Args:
         LU_data (Tensor): the packed LU factorization data
         LU_pivots (Tensor): the packed LU factorization pivots
         unpack_data (bool): flag indicating if the data should be unpacked
@@ -464,9 +464,13 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
     r"""Short-time Fourier transform (STFT).
 
     .. warning::
-        Setting :attr:`return_complex` explicitly will be required in a future
-        PyTorch release. Set it to False to preserve the current behavior or
-        True to return a complex output.
+        From version 1.8.0, :attr:`return_complex` must always be given
+        explicitly for real inputs and `return_complex=False` has been
+        deprecated. Strongly prefer `return_complex=True` as in a future
+        pytorch release, this function will only return complex tensors.
+
+        Note that :func:`torch.view_as_real` can be used to recover a real
+        tensor with an extra last dimension for real and imaginary components.
 
     The STFT computes the Fourier transform of short overlapping windows of the
     input. This giving frequency components of the signal as they change over
@@ -536,7 +540,7 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
       This function changed signature at version 0.4.1. Calling with the
       previous signature may cause error or return incorrect result.
 
-    Arguments:
+    Args:
         input (Tensor): the input tensor
         n_fft (int): size of Fourier transform
         hop_length (int, optional): the distance between neighboring sliding window
@@ -613,7 +617,7 @@ def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
     [1] D. W. Griffin and J. S. Lim, "Signal estimation from modified short-time Fourier transform,"
     IEEE Trans. ASSP, vol.32, no.2, pp.236-243, Apr. 1984.
 
-    Arguments:
+    Args:
         input (Tensor): The input tensor. Expected to be output of :func:`~torch.stft`,
             can either be complex (``channel``, ``fft_size``, ``n_frame``), or real
             (``channel``, ``fft_size``, ``n_frame``, 2) where the ``channel``
@@ -681,7 +685,7 @@ def _unique_impl(input: Tensor, sorted: bool = True,
         Sorting could be slow, so if your input tensor is already sorted, it is recommended to use
         :func:`torch.unique_consecutive` which avoids the sorting.
 
-    Arguments:
+    Args:
         input (Tensor): the input tensor
         sorted (bool): Whether to sort the unique elements in ascending order
             before returning as output.
@@ -762,7 +766,7 @@ def _unique_consecutive_impl(input: Tensor, return_inverse: bool = False,
         only eliminates consecutive duplicate values. This semantics is similar to `std::unique`
         in C++.
 
-    Arguments:
+    Args:
         input (Tensor): the input tensor
         return_inverse (bool): Whether to also return the indices for where
             elements in the original input ended up in the returned unique list.
@@ -1017,7 +1021,7 @@ def cartesian_prod(*tensors):
     """Do cartesian product of the given sequence of tensors. The behavior is similar to
     python's `itertools.product`.
 
-    Arguments:
+    Args:
         *tensors: any number of 1 dimensional tensors.
 
     Returns:
@@ -1049,7 +1053,7 @@ def cartesian_prod(*tensors):
 def block_diag(*tensors):
     """Create a block diagonal matrix from provided tensors.
 
-    Arguments:
+    Args:
         *tensors: One or more tensors with 0, 1, or 2 dimensions.
 
     Returns:
@@ -1511,7 +1515,7 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
         The LU factorization does have backward support,
         but only for square inputs of full rank.
 
-    Arguments:
+    Args:
         A (Tensor): the tensor to factor of size :math:`(*, m, n)`
         pivot (bool, optional): controls whether pivoting is done. Default: ``True``
         get_infos (bool, optional): if set to ``True``, returns an info IntTensor.

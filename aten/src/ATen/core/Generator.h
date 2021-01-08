@@ -56,7 +56,9 @@
 
 namespace at {
 
-struct CAFFE2_API Generator {
+class Tensor;
+
+struct TORCH_API Generator {
   Generator() {}
 
   explicit Generator(c10::intrusive_ptr<c10::GeneratorImpl> gen_impl)
@@ -96,6 +98,12 @@ struct CAFFE2_API Generator {
 
   uint64_t seed() { return impl_->seed(); }
 
+  // Implementation not inlined to prevent cycle reference between
+  // `ATen/core/Generator.h` and `ATen/core/Tensor.h`
+  void set_state(const at::Tensor& new_state);
+
+  at::Tensor get_state() const;
+
   std::mutex& mutex() {
     return impl_->mutex_;
   }
@@ -129,5 +137,25 @@ template<class Impl, class... Args>
 Generator make_generator(Args&&... args) {
   return Generator(c10::make_intrusive<Impl>(std::forward<Args>(args)...));
 }
+
+namespace detail {
+
+/**
+ * Helper function for checking the validity of new random generator
+ * state. Right now following conditions are checked:
+ * 
+ * - The new state tensor must be a torch.ByteTensor
+ * - Data of the new state tensor must be contiguous
+ */
+static inline void check_rng_state(const c10::TensorImpl& new_state) {
+  TORCH_CHECK_TYPE(
+    new_state.layout() == kStrided && new_state.device().type() == kCPU && new_state.dtype() == kByte,
+    "RNG state must be a torch.ByteTensor"
+  );
+
+  TORCH_CHECK(new_state.is_contiguous(), "RNG state must be contiguous");
+}
+
+} // namespace detail
 
 } // namespace at

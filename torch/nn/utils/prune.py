@@ -587,7 +587,6 @@ class RandomStructured(BasePruningMethod):
         # Compute number of units to prune: amount if int,
         # else amount * tensor_size
         nparams_toprune = _compute_nparams_toprune(self.amount, tensor_size)
-        nparams_tokeep = tensor_size - nparams_toprune
         # This should raise an error if the number of units to prune is larger
         # than the number of units in the tensor
         _validate_pruning_amount(nparams_toprune, tensor_size)
