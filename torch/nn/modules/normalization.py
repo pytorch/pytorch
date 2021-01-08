@@ -7,7 +7,7 @@ from .. import functional as F
 from .. import init
 
 from torch import Tensor, Size
-from typing import Union, Sequence, Tuple
+from typing import Union, List, Tuple
 
 
 class LocalResponseNorm(Module):
@@ -80,7 +80,7 @@ class CrossMapLRN2d(Module):
         return '{size}, alpha={alpha}, beta={beta}, k={k}'.format(**self.__dict__)
 
 
-_shape_t = Union[int, Sequence[int], Size]
+_shape_t = Union[int, List[int], Size]
 
 
 class LayerNorm(Module):
