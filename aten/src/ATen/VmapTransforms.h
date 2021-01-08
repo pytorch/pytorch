@@ -96,8 +96,17 @@ struct VmapPhysicalToLogicalMap;
 // The levels bitset specifies which vmap levels correspond to the batch
 // dimensions at the front of the tensor. In particular, the number of set bits
 // corresponds to the number of batch dimensions on `tensor` and the rightmost
-// bit of `levels` specifies the minimum number of nested vmaps we are in at
+// bit of `levels` specifies the maximum number of nested vmaps we are in at
 // this point in time.
+// For example, given:
+//   physical_view = VmapPhysicalView(tensor=ones(2, 3, 4, 5, 6), levels={1, 3})
+//
+// Rightmost bit of `levels` is 3 indicating the number of nested vmaps less
+// than or equal to 3.
+//   bitset: 010100
+//              ^
+//              |
+//   levels: 012345
 struct TORCH_API VmapPhysicalView {
   VmapPhysicalView(Tensor&& tensor, std::bitset<kVmapNumLevels> levels)
       : levels_(levels), tensor_(tensor) {
