@@ -344,6 +344,10 @@ def _propagate_and_assign_input_shapes(
     propagate: _bool
 ) -> Graph: ...
 
+# Defined in torch/csrc/jit/runtime/graph_executor.h
+class GraphExecutorState:
+    ...
+
 # Defined in torch/torch/csrc/jit/ir/ir.h
 class Graph:
     def eraseInput(self, i: _int) -> None: ...

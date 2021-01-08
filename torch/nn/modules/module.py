@@ -845,7 +845,6 @@ class Module:
             # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any] 
             name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None  # type: ignore
             if name:
-                cur_scope_name = tracing_state.current_scope()
                 tracing_state.push_scope(name)
             else:
                 recording_scopes = False

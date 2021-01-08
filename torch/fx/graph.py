@@ -577,7 +577,9 @@ class Graph:
         free_vars: List[str] = []
         modules_used : Set[str] = set()
         body: List[str] = []
-        maybe_return_annotation : str = ''
+
+        # Wrap string in list to pass by reference
+        maybe_return_annotation : List[str] = ['']
 
         def register_modules_used(qualified_name : str):
             if '.' in qualified_name:
@@ -675,7 +677,7 @@ class Graph:
                 return
             elif node.op == 'output':
                 if node.type is not None:
-                    maybe_return_annotation = f" -> {type_repr(node.type)}"
+                    maybe_return_annotation[0] = f" -> {type_repr(node.type)}"
                 body.append(f'return {repr(node.args[0])}')
                 return
             raise NotImplementedError(f'node: {node.op} {node.target}')
@@ -691,13 +693,18 @@ class Graph:
         import_strs = [f'import {name}' for name in sorted(modules_used)]
         import_block = '\n'.join(import_strs)
 
+        if len(body) == 0:
+            # If the Graph has no non-placeholder nodes, no lines for the body
+            # have been emitted. To continue to have valid Python code, emit a
+            # single pass statement
+            body.append('pass\n')
+
         code = ''.join(body)
-        code = '\n'.join('    ' + line for line in code.split('\n')) + '\n'
+        code = '\n'.join('    ' + line for line in code.split('\n'))
         fn_code = f"""\
 {import_block}
-def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
-{code}
-"""
+def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
+{code}"""
 
         return fn_code
 
