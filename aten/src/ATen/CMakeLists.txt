@@ -253,6 +253,15 @@ if(MKLDNN_FOUND)
   list(APPEND ATen_CPU_DEPENDENCY_LIBS ${MKLDNN_LIBRARIES})
 endif(MKLDNN_FOUND)
 
+##############################################################################
+# NOTE: LLGA would not be a standalone repo
+#       This CMAKE dependency should not be included in the final PR
+#       All LLGA source code should live in third_party/ideep/mkl-dnn
+#############################################################################
+if(LLGA_FOUND)
+  list(APPEND ATen_CPU_DEPENDENCY_LIBS ${LLGA_LIBRARIES})
+endif(LLGA_FOUND)
+
 list(APPEND ATen_CPU_DEPENDENCY_LIBS cpuinfo)
 
 if(NOT MSVC AND NOT EMSCRIPTEN AND NOT INTERN_BUILD_MOBILE)

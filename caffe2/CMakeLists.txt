@@ -532,7 +532,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     endif()
   endif()
 
-  if(MKLDNN_FOUND)
+  if(LLGA_FOUND)
     list(APPEND Caffe2_CPU_SRCS
       ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/graph_fuser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/onednn/graph_helper.cpp

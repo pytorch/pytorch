@@ -133,3 +133,6 @@
 [submodule "third_party/kineto"]
 	path = third_party/kineto
 	url = https://github.com/pytorch/kineto
+[submodule "third_party/llga"]
+	path = third_party/llga
+	url = https://github.com/oneapi-src/oneDNN.git

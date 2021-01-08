@@ -1704,6 +1704,13 @@ if(NOT INTERN_BUILD_MOBILE)
       set(USE_MKLDNN OFF)
     endif()
   endif()
+  ##############################################################################
+  # NOTE: LLGA would not be a standalone repo
+  #       This CMAKE rule should not be included in the final PR
+  #       All LLGA source code should live in third_party/ideep/mkl-dnn
+  ##############################################################################
+  set(USE_MKLDNN OFF)
+  find_package(LLGA QUIET)
   if(USE_MKLDNN)
     include(${CMAKE_CURRENT_LIST_DIR}/public/mkldnn.cmake)
     if(MKLDNN_FOUND)
