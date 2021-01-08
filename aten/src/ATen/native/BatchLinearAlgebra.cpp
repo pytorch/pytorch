@@ -1011,13 +1011,13 @@ std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& self, std::string
 
 std::tuple<Tensor,Tensor> linalg_qr(const Tensor& self, std::string mode) {
   TORCH_CHECK(self.dim() >= 2,
-              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+              "qr input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   return at::_linalg_qr_helper(self, mode);
 }
 
 std::tuple<Tensor&,Tensor&> linalg_qr_out(Tensor& Q, Tensor& R, const Tensor& self, std::string mode) {
   TORCH_CHECK(self.dim() >= 2,
-              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+              "qr input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   Tensor Q_tmp, R_tmp;
   std::tie(Q_tmp, R_tmp) = at::_linalg_qr_helper(self, mode);
   at::native::resize_output(Q, Q_tmp.sizes());
