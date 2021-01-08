@@ -43,12 +43,13 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
   auto scriptCall = std::make_unique<ScriptCall>(
       qualifiedName, std::move(stack), isAsyncExecution);
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
-  auto futMessage = autograd::sendMessageWithAutograd(
-      *rpcAgentPtr,
-      rpcAgentPtr->getWorkerInfo(dstWorkerName),
-      std::move(*scriptCall).toMessage(),
-      true /*forceGradRecording*/,
-      rpcTimeoutSeconds);
+  auto futMessage = RpcAgent::toFutureMessage(
+      autograd::sendMessageWithAutograd(
+          *rpcAgentPtr,
+          rpcAgentPtr->getWorkerInfo(dstWorkerName),
+          std::move(*scriptCall).toMessage(),
+          true /*forceGradRecording*/,
+          rpcTimeoutSeconds));
 
   // Get function return type to construct c10::ivalue::Future.
   auto returns = functionSchema.returns();
@@ -112,14 +113,15 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         userRRefPtr->forkId(),
         isAsyncExecution);
 
-    auto fm = torch::distributed::autograd::sendMessageWithAutograd(
+    auto jitFuture = torch::distributed::autograd::sendMessageWithAutograd(
         *rpcAgentPtr,
         dstWorkerInfo,
         std::move(*scriptRemoteCall).toMessage(),
         true /*forceGradRecording*/,
         rpcTimeoutSeconds /* timeout */);
 
-    userRRefPtr->registerOwnerCreationFuture(fm);
+    userRRefPtr->registerOwnerCreationFuture(jitFuture);
+    auto fm = RpcAgent::toFutureMessage(std::move(jitFuture));
 
     ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
     std::weak_ptr<FutureMessage> wp = fm;
@@ -142,14 +144,16 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         ownerRRefPtr->rrefId(),
         isAsyncExecution);
 
-    auto fm = torch::distributed::autograd::sendMessageWithAutograd(
+    auto jitFuture = torch::distributed::autograd::sendMessageWithAutograd(
         *rpcAgentPtr,
         dstWorkerInfo,
         std::move(*scriptRemoteCall).toMessage(),
         true /*forceGradRecording*/,
         rpcTimeoutSeconds /* timeout */);
 
-    ownerRRefPtr->registerOwnerCreationFuture(fm);
+    ownerRRefPtr->registerOwnerCreationFuture(jitFuture);
+    auto fm = RpcAgent::toFutureMessage(std::move(jitFuture));
+
     std::weak_ptr<FutureMessage> wp = fm;
     fm->addCallback(at::wrapPropagateTLSState<void>(
         [wp, ownerRRefId = ownerRRefPtr->rrefId()]() {
