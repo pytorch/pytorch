@@ -122,7 +122,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
         // Capture a copy of the ivalue::Future instead of the `this` pointer
         // because the PythonFutureWrapper object could have been deleted
         // when the callbacks are fired. For example, RPC only captures the
-        // ivalue::Future instead of PythonFutureWrapper in FutureMessage's
+        // ivalue::Future instead of PythonFutureWrapper in JitFuture's
         // callback functions. Hence, if user code does not hold a reference to
         // this PythonFutureWrapper object, there is no guarantee that the
         // PythonFutureWrapper is still valid when running the callback.
