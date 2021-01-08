@@ -1,3 +1,4 @@
+import pickle
 import tempfile
 import warnings
 
@@ -7,6 +8,7 @@ from torch.utils.data import IterableDataset, RandomSampler
 from torch.utils.data.datasets import \
     (CallableIterableDataset, CollateIterableDataset, BatchIterableDataset,
      ListDirFilesIterableDataset, LoadFilesFromDiskIterableDataset, SamplerIterableDataset)
+from typing import List, Tuple, Dict, Any, Type
 
 
 def create_temp_dir_and_files():
@@ -75,6 +77,23 @@ class IterDatasetWithLen(IterableDataset):
 
 
 class TestFunctionalIterableDataset(TestCase):
+    def test_picklable(self):
+        arr = range(10)
+        picklable_datasets: List[Tuple[Type[IterableDataset], IterableDataset, Dict[str, Any]]] = [
+            (CallableIterableDataset, IterDatasetWithLen(arr), {}),
+            (CollateIterableDataset, IterDatasetWithLen(arr), {}),
+        ]
+        for ds, d, kargs in picklable_datasets:
+            p = pickle.dumps(ds(d, **kargs))  # type: ignore
+
+        unpicklable_datasets: List[Tuple[Type[IterableDataset], IterableDataset, Dict[str, Any]]] = [
+            (CallableIterableDataset, IterDatasetWithLen(arr), {'fn': lambda x: x}),
+            (CollateIterableDataset, IterDatasetWithLen(arr), {'collate_fn': lambda x: x}),
+        ]
+        for ds, d, kargs in unpicklable_datasets:
+            with self.assertRaises(AttributeError):
+                p = pickle.dumps(ds(d, **kargs))  # type: ignore
+
     def test_callable_dataset(self):
         arr = range(10)
         ds_len = IterDatasetWithLen(arr)
@@ -83,14 +102,14 @@ class TestFunctionalIterableDataset(TestCase):
         def fn(item):
             return torch.tensor(item, dtype=torch.float)
 
-        callable_ds = CallableIterableDataset(ds_len, fn=fn)
+        callable_ds = CallableIterableDataset(ds_len, fn=fn)  # type: ignore
         self.assertEqual(len(ds_len), len(callable_ds))
         ds_iter = iter(ds_len)
         for x in callable_ds:
             y = next(ds_iter)
             self.assertEqual(x, torch.tensor(y, dtype=torch.float))
 
-        callable_ds_nolen = CallableIterableDataset(ds_nolen)
+        callable_ds_nolen = CallableIterableDataset(ds_nolen)  # type: ignore
         with self.assertRaises(NotImplementedError):
             len(callable_ds_nolen)
         ds_nolen_iter = iter(ds_nolen)

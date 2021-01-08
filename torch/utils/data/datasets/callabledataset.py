@@ -1,3 +1,4 @@
+import warnings
 from torch.utils.data import IterableDataset, _utils
 from typing import TypeVar, Callable, Iterator, Sized
 
@@ -29,6 +30,9 @@ class CallableIterableDataset(IterableDataset[T_co]):
                  ) -> None:
         super(CallableIterableDataset, self).__init__()
         self.dataset = dataset
+        if fn.__name__ == '<lambda>':
+            warnings.warn("Lambda function is not supported for pickle, "
+                          "please use regular python function instead.")
         self.fn = fn  # type: ignore
 
     def __iter__(self) -> Iterator[T_co]:
