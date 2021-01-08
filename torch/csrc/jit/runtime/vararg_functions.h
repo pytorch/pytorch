@@ -25,7 +25,7 @@ void namedTupleConstruct(
 
 void listConstruct(
     Stack& stack,
-    const at::ListTypePtr& list_type,
+    const at::ListType& list_type,
     size_t num_inputs);
 
 void dictConstruct(

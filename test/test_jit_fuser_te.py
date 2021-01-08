@@ -1281,6 +1281,7 @@ class TestTEFuser(JitTestCase):
             self.assertEqual(ref, mod.forward(x))
             self.assertLastGraphAllFused()
 
+    @unittest.skip("Temporarily disabled")
     def test_masked_fill(self):
         dtypes = [
             torch.int8,
