@@ -1038,7 +1038,7 @@ void Reducer::prepare_for_backward(
   }
 
   // Warn user about unnecessary perf hit if all parameters were used.
-  if (unused_parameters_.empty() && !foundUnusedParametersOnce_) {
+  if (unused_parameters_.empty()) {
     TORCH_WARN_ONCE(
       "find_unused_parameters=True was specified in DDP constructor, "
       "but did not find any unused parameters. This flag results in an extra "
@@ -1048,9 +1048,6 @@ void Reducer::prepare_for_backward(
       "be a false positive your model has flow control causing later iterations "
       "to have unused parameters."
     );
-  } else if (!foundUnusedParametersOnce_) {
-    // Some parameters went unused at least once during training.
-    foundUnusedParametersOnce_ = true;
   }
 }
 
