@@ -735,6 +735,22 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
             else:
                 return str(arg)
 
+        def pretty_print_target(target):
+            """
+            Make target printouts more user-friendly.
+            1) builtins will be printed as `builtins.xyz`
+            2) operators will be printed as `operator.xyz`
+            3) other callables will be printed with qualfied name, e.g. torch.add
+            """
+            if isinstance(target, str):
+                return target
+            if hasattr(target, '__module__'):
+                if target.__module__ == 'builtins':
+                    return f'builtins.{target.__name__}'
+                elif target.__module__ == '_operator':
+                    return f'operator.{target.__name__}'
+            return get_qualified_name(target)
+
         def format_node(n : Node) -> Optional[str]:
             if n.op == 'placeholder':
                 assert isinstance(n.target, str)
@@ -751,7 +767,7 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
                 return f'return {n.args[0]}'
             else:
                 maybe_typename = f'{_type_repr(n.type)} ' if n.type is not None else ''
-                return f'%{n.name} : {maybe_typename}[#users={len(n.users)}] = {n.op}[target={n.target}](' \
+                return f'%{n.name} : {maybe_typename}[#users={len(n.users)}] = {n.op}[target={pretty_print_target(n.target)}](' \
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
 
 

@@ -646,6 +646,20 @@ class TestFX(JitTestCase):
         with self.assertRaisesRegex(TraceError, 'Proxy object cannot be iterated.'):
             symbolic_trace(ud)
 
+    def test_pretty_print_targets(self):
+        # Test that Graph pretty-print prints friendly name for targets
+        # in `operator` and `builtins`
+
+        class SomeMod(torch.nn.Module):
+            def forward(self, x):
+                return torch.add(x.foo + x.bar, 3.0)
+
+        traced = symbolic_trace(SomeMod())
+        graph_str = str(traced.graph)
+        self.assertIn('builtins.getattr', graph_str)
+        self.assertIn('operator.add', graph_str)
+        self.assertIn('torch.add', graph_str)
+
     def test_script_tensor_constant(self):
         # TorchScript seems to ignore attributes that start with `__`.
         # We used to call anonymous Tensor values `__tensor_constant*`, but
