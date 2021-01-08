@@ -48,8 +48,7 @@ TORCH_META_FUNC(upsample_nearest2d) (
 
   // Allow for empty batch size but not other dimensions
   TORCH_CHECK(
-      (input.numel() != 0 || prod_intlist(input.sizes().begin() + 1, input.sizes().end())) &&
-      input.dim() == 4,
+      input.numel() != 0 || prod_intlist(input.sizes().begin() + 1, input.sizes().end()),
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
