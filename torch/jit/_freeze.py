@@ -28,7 +28,7 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize: bool = Tr
 
         optimize (bool): If ``True``, a set of optimization passes will be run to prepare the graph for inference,
         in addition to the graph cleanup that already occurs. The details of the optimizations can be found in
-        `torch.jit.optimize_frozen_graph.`
+        `torch.jit.optimize_frozen_module.`
 
 
     Returns:
