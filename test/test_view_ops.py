@@ -163,6 +163,7 @@ class TestViewOps(TestCase):
         for fp_tensor in generate_inputs():
             run_test(fp_tensor)
 
+        # Test that requires_grad is dropped, because view(dtype) does not support backward
         if dtype is torch.double:
             t = make_tensor((5, 5, 5), device, torch.double, low=-5, high=5, requires_grad=True)
             self.assertFalse(t.view(torch.complex64).requires_grad)
