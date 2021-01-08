@@ -138,7 +138,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
       // broadcasting logic; instead, it will blast the elements from one
       // to the other so long as the numel is the same
       indicesSlice.copy_(indices1D);
-      indices1D.floor_divide_(self.size(d));
+      indices1D.divide_(self.size(d), "trunc");
       indicesSlice.add_(indices1D, -self.size(d));
     }
   }
