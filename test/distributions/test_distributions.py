@@ -727,7 +727,7 @@ class TestDistributions(TestCase):
         # performs gradient checks on log_prob
         distribution = dist_ctor(*ctor_params)
         s = distribution.sample()
-        if s.is_floating_point():
+        if not distribution.support.is_discrete:
             s = s.detach().requires_grad_()
 
         expected_shape = distribution.batch_shape + distribution.event_shape
@@ -1422,7 +1422,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Uniform(0.0, 1.0).sample((1,)).size(), (1,))
 
         # Check log_prob computation when value outside range
-        uniform = Uniform(low_1d, high_1d)
+        uniform = Uniform(low_1d, high_1d, validate_args=False)
         above_high = torch.tensor([4.0])
         below_low = torch.tensor([-1.0])
         self.assertEqual(uniform.log_prob(above_high).item(), -inf)
@@ -1517,7 +1517,7 @@ class TestDistributions(TestCase):
 
     def test_halfnormal(self):
         std = torch.randn(5, 5).abs().requires_grad_()
-        std_1d = torch.randn(1, requires_grad=True)
+        std_1d = torch.randn(1).abs().requires_grad_()
         std_delta = torch.tensor([1e-5, 1e-5])
         self.assertEqual(HalfNormal(std).sample().size(), (5, 5))
         self.assertEqual(HalfNormal(std).sample((7,)).size(), (7, 5, 5))
@@ -1978,6 +1978,8 @@ class TestDistributions(TestCase):
                     sigma = 0.5 * (sigma + sigma.transpose(-1, -2))  # Ensure symmetry of covariance
                 if prec is not None:
                     prec = 0.5 * (prec + prec.transpose(-1, -2))  # Ensure symmetry of precision
+                if scale_tril is not None:
+                    scale_tril = scale_tril.tril()
                 return MultivariateNormal(mu, sigma, prec, scale_tril).log_prob(samples)
             gradcheck(gradcheck_func, (mvn_samples, mean, covariance, precision, scale_tril), raise_exception=True)
 
@@ -2643,7 +2645,7 @@ class TestDistributions(TestCase):
             for i, param in enumerate(params):
                 dist = Dist(**param)
                 samples = dist.sample()
-                if samples.dtype.is_floating_point:
+                if not dist.support.is_discrete:
                     samples.requires_grad_()
                 try:
                     cdfs = dist.cdf(samples)
@@ -3050,11 +3052,9 @@ class TestDistributionShapes(TestCase):
         self.scalar_sample = 1
         self.tensor_sample_1 = torch.ones(3, 2)
         self.tensor_sample_2 = torch.ones(3, 2, 3)
-        Distribution.set_default_validate_args(True)
 
     def tearDown(self):
         super(TestDistributionShapes, self).tearDown()
-        Distribution.set_default_validate_args(False)
 
     def test_entropy_shape(self):
         for Dist, params in EXAMPLES:
@@ -3186,23 +3186,23 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.sample().size(), torch.Size((3,)))
         self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2, 3)))
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_1)
-        simplex_sample = self.tensor_sample_2 / self.tensor_sample_2.sum(-1, keepdim=True)
-        self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3, 2,)))
+        sample = torch.tensor([0., 1., 0.]).expand(3, 2, 3)
+        self.assertEqual(dist.log_prob(sample).size(), torch.Size((3, 2,)))
         self.assertEqual(dist.log_prob(dist.enumerate_support()).size(), torch.Size((3,)))
-        simplex_sample = torch.ones(3, 3) / 3
-        self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3,)))
+        sample = torch.eye(3)
+        self.assertEqual(dist.log_prob(sample).size(), torch.Size((3,)))
         # batched
         dist = OneHotCategorical(torch.tensor([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
         self.assertEqual(dist._batch_shape, torch.Size((3,)))
         self.assertEqual(dist._event_shape, torch.Size((2,)))
         self.assertEqual(dist.sample().size(), torch.Size((3, 2)))
         self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2, 3, 2)))
-        simplex_sample = self.tensor_sample_1 / self.tensor_sample_1.sum(-1, keepdim=True)
-        self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3,)))
+        sample = torch.tensor([0., 1.])
+        self.assertEqual(dist.log_prob(sample).size(), torch.Size((3,)))
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
         self.assertEqual(dist.log_prob(dist.enumerate_support()).size(), torch.Size((2, 3)))
-        simplex_sample = torch.ones(3, 1, 2) / 2
-        self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3, 3)))
+        sample = torch.tensor([0., 1.]).expand(3, 1, 2)
+        self.assertEqual(dist.log_prob(sample).size(), torch.Size((3, 3)))
 
     def test_cauchy_shape_scalar_params(self):
         cauchy = Cauchy(0, 1)
@@ -3531,12 +3531,15 @@ class TestKL(TestCase):
                                                          [0.2, 0.7, 0.1],
                                                          [0.33, 0.33, 0.34],
                                                          [0.2, 0.2, 0.6]])
-        pareto = pairwise(Pareto, [2.5, 4.0, 2.5, 4.0], [2.25, 3.75, 2.25, 3.75])
+        pareto = (Pareto(torch.tensor([2.5, 4.0, 2.5, 4.0]).expand(4, 4),
+                         torch.tensor([2.25, 3.75, 2.25, 3.75]).expand(4, 4)),
+                  Pareto(torch.tensor([2.25, 3.75, 2.25, 3.8]).expand(4, 4),
+                         torch.tensor([2.25, 3.75, 2.25, 3.75]).expand(4, 4)))
         poisson = pairwise(Poisson, [0.3, 1.0, 5.0, 10.0])
-        uniform_within_unit = pairwise(Uniform, [0.15, 0.95, 0.2, 0.8], [0.1, 0.9, 0.25, 0.75])
+        uniform_within_unit = pairwise(Uniform, [0.1, 0.9, 0.2, 0.75], [0.15, 0.95, 0.25, 0.8])
         uniform_positive = pairwise(Uniform, [1, 1.5, 2, 4], [1.2, 2.0, 3, 7])
         uniform_real = pairwise(Uniform, [-2., -1, 0, 2], [-1., 1, 1, 4])
-        uniform_pareto = pairwise(Uniform, [6.5, 8.5, 6.5, 8.5], [7.5, 7.5, 9.5, 9.5])
+        uniform_pareto = pairwise(Uniform, [6.5, 7.5, 6.5, 8.5], [7.5, 8.5, 9.5, 9.5])
         continuous_bernoulli = pairwise(ContinuousBernoulli, [0.1, 0.2, 0.5, 0.9])
 
         # These tests should pass with precision = 0.01, but that makes tests very expensive.
@@ -4148,8 +4151,8 @@ class TestLazyLogitsInitialization(TestCase):
                 probs = param.pop('probs')
                 param['logits'] = probs_to_logits(probs)
                 dist = Dist(**param)
-                shape = (1,) if not dist.event_shape else dist.event_shape
-                dist.log_prob(torch.ones(shape))
+                # Create new instance to generate a valid sample
+                dist.log_prob(Dist(**param).sample())
                 message = 'Failed for {} example 0/{}'.format(Dist.__name__, len(params))
                 self.assertFalse('probs' in vars(dist), msg=message)
                 try:
@@ -4455,7 +4458,6 @@ class TestFunctors(TestCase):
 class TestValidation(TestCase):
     def setUp(self):
         super(TestCase, self).setUp()
-        Distribution.set_default_validate_args(True)
 
     def test_valid(self):
         for Dist, params in EXAMPLES:
@@ -4475,7 +4477,6 @@ class TestValidation(TestCase):
 
     def tearDown(self):
         super(TestValidation, self).tearDown()
-        Distribution.set_default_validate_args(False)
 
 
 class TestJit(TestCase):
