@@ -405,14 +405,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Return the number of dimensions of this tensor.  Note that 0-dimension
    * represents a Tensor that is a Scalar, e.g., one that has a single element.
    */
-  TENSORIMPL_MAYBE_VIRTUAL int64_t dim() const
-#ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-  {
-    return sizes_.size();
-  }
-#else
-  ;
-#endif
+  virtual int64_t dim() const;
 
   /**
    * True if this tensor has storage. See storage() for details.
