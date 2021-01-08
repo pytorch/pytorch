@@ -31,7 +31,6 @@ bool canRunNatively(Node* n) {
   // In alphabetical order
   const static std::unordered_set<std::string> native_nodes{
       "aten::flatten",
-      "aten::narrow",
       "aten::reshape",
       "aten::slice",
       "aten::transpose",
@@ -299,6 +298,29 @@ REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
     auto& out_t = p_node->Output(0).toTensor();
     at::native::resize_as_(out_t, in0_t, c10::nullopt);
     at::native::copy_(out_t, in0_t, false);
+  };
+});
+
+// The out variant takes precedence over native
+REGISTER_OPERATOR_FUNCTOR(aten::narrow, aten_narrow, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    auto self = p_node->Input(0).toTensor(); // self
+    auto dim = p_node->Input(1).toInt(); // dim
+    int64_t start = 0;
+    if (p_node->Input(2).isScalar()) {
+      start = p_node->Input(2).toInt();
+    } else {
+      auto t = p_node->Input(2).toTensor();
+      start = t.item<int64_t>();
+    }
+    auto length = p_node->Input(3).toInt(); // length
+
+    if (p_node->Output(0).isNone()) {
+      p_node->Output(0) = create_empty_from(self);
+    }
+    auto output = p_node->Output(0).toTensor();
+    output.resize_({0});
+    at::native::narrow_copy_dense_cpu_out(self, dim, start, length, output);
   };
 });
 
