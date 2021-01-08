@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, make_tensor)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA,
-     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA)
+     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, onlyCPU)
 
 # TODO: remove this
 SIZE = 100
@@ -113,27 +113,25 @@ class TestSortAndSelect(TestCase):
         self.assertIsOrdered('descending', x, res2val, res2ind,
                              'random with NaNs')
 
+    @onlyCPU
     def test_stable_sort(self, device):
         # no stable sort for CUDA yet
-        if device == "cuda":
-            return
         for dtype in (
             torch.float, torch.double,
             torch.int8, torch.int16, torch.int32,
             torch.bool
         ):
-            for device in ["cpu"]:
-                for ncopies in (100, 1000, 10000):
-                    x = torch.tensor([0, 1] * ncopies, dtype=dtype, device=torch.device(device))
-                    _, idx = x.sort(stable=True)
-                    self.assertEqual(
-                        idx[:ncopies],
-                        torch.arange(start=0, end=2 * ncopies, step=2, device=torch.device(device))
-                    )
-                    self.assertEqual(
-                        idx[ncopies:],
-                        torch.arange(start=1, end=2 * ncopies, step=2, device=torch.device(device))
-                    )
+            for ncopies in (100, 1000, 10000):
+                x = torch.tensor([0, 1] * ncopies, dtype=dtype, device=torch.device(device))
+                _, idx = x.sort(stable=True)
+                self.assertEqual(
+                    idx[:ncopies],
+                    torch.arange(start=0, end=2 * ncopies, step=2, device=torch.device(device))
+                )
+                self.assertEqual(
+                    idx[ncopies:],
+                    torch.arange(start=1, end=2 * ncopies, step=2, device=torch.device(device))
+                )
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_msort(self, device, dtype):
