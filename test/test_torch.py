@@ -937,10 +937,6 @@ class AbstractTestCases:
                         # index_add calls atomicAdd on cuda.
                         zeros = torch.zeros(size, dtype=dtype, device=device)
 
-                        # index_add is not supported for complex dtypes on cuda yet
-                        if device.startswith('cuda') and dtype.is_complex:
-                            continue
-
                         added = zeros.index_add(0, torch.arange(0, size[0], dtype=idx_dtype, device=device), tensor)
                         self.assertEqual(added, tensor)
 
@@ -5693,7 +5689,8 @@ class TestTorchDeviceType(TestCase):
             x = torch.tensor([], device=device)
             self.assertEqual(x.dtype, x.storage().dtype)
 
-    @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half)
+    @dtypes(torch.float, torch.double)
     def test_multinomial(self, device, dtype):
         def make_prob_dist(shape, is_contiguous):
             if is_contiguous:
