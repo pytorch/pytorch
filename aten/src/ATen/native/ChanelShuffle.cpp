@@ -7,6 +7,7 @@
 #endif
 #include <c10/util/Exception.h>
 
+#include <ATen/native/cpu/ChannelShuffleKernel.h>
 #include <algorithm>
 #include <vector>
 
@@ -33,6 +34,19 @@ Tensor channel_shuffle(const Tensor& self, int64_t groups) {
   }
 #endif
 
+  // custom path for CPU on both Contiuous and ChannelsLast memory format
+  if (self.device().type() == c10::DeviceType::CPU &&
+      (self.scalar_type() == kFloat || self.scalar_type() == kDouble)) {
+    auto memory_format = self.suggest_memory_format();
+    auto output = at::empty({0}, self.options());
+    output.resize_(self.sizes(), memory_format);
+    auto input = self.contiguous(memory_format);
+    channel_shuffle_kernel(kCPU, output, input, groups);
+    return namedinference::propagate_names_if_nonempty(
+        output,
+        self.names());
+  }
+
   int64_t oc = c / groups;
 
   auto input_reshaped = self.view({b, groups, oc, -1});
@@ -56,5 +70,7 @@ Tensor channel_shuffle(const Tensor& self, int64_t groups) {
       output_tensor,
       self.names());
 }
+
+DEFINE_DISPATCH(channel_shuffle_kernel);
 
 }} // namespace at::native
