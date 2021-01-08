@@ -1,7 +1,7 @@
 import os
 import sys
 
-from typing import Any, List
+from typing import Any
 
 import torch
 from torch.testing._internal.jit_utils import JitTestCase
@@ -50,7 +50,8 @@ class TestWith(JitTestCase):
             def __exit__(self, type: Any, value: Any, tb: Any):
                 self.count.sub_(0.3)
 
-        def test_basic(x: torch.Tensor) -> torch.Tensor:
+        def test_basic(x):
+            # type: (Tensor) -> Tensor
             """Basic test with one with-statement."""
 
             c = Context(1)
@@ -61,7 +62,8 @@ class TestWith(JitTestCase):
             y *= c.count
             return y
 
-        def test_pass(x: torch.Tensor) -> torch.Tensor:
+        def test_pass(x):
+            # type: (Tensor) -> Tensor
             """
             Test with a pass statement inside a with-statement. Although
             the body of the with is empty, __enter__ and __exit__ should
@@ -75,7 +77,8 @@ class TestWith(JitTestCase):
             x *= c.count
             return x
 
-        def test_early_return(x: torch.Tensor, c: Context) -> torch.Tensor:
+        def test_early_return(x, c):
+            # type: (Tensor, Context) -> Tensor
             """
             Test that returning early from inside a with-statement works
             as expected.
@@ -87,7 +90,8 @@ class TestWith(JitTestCase):
             x = y + y
             return x
 
-        def test_conditional_early_return(x: torch.Tensor, c: Context) -> torch.Tensor:
+        def test_conditional_early_return(x, c):
+            # type: (Tensor, Context) -> Tensor
             """
             Test that conditionally returning early from inside a with-statement works
             as expected.
@@ -100,7 +104,8 @@ class TestWith(JitTestCase):
             x = y + y
             return x
 
-        def test_break(x: torch.Tensor, c: Context, l: List[int]) -> torch.Tensor:
+        def test_break(x, c, l):
+            # type: (Tensor, Context, List[int]) -> Tensor
             """
             Test that breaking early from inside a with-statement works
             as expected.
@@ -113,7 +118,8 @@ class TestWith(JitTestCase):
 
             return x
 
-        def test_continue(x: torch.Tensor, c: Context, l: List[int]) -> torch.Tensor:
+        def test_continue(x, c, l):
+            # type: (Tensor, Context, List[int]) -> Tensor
             """
             Test that using continue inside a with-statement works
             as expected.
@@ -126,7 +132,8 @@ class TestWith(JitTestCase):
 
             return x
 
-        def test_serial(x: torch.Tensor) -> torch.Tensor:
+        def test_serial(x):
+            # type: (Tensor) -> Tensor
             """
             Test two with-statements in a row.
             """
@@ -140,7 +147,8 @@ class TestWith(JitTestCase):
 
             return y
 
-        def test_nested(x: torch.Tensor) -> torch.Tensor:
+        def test_nested(x):
+            # type: (Tensor) -> Tensor
             """
             Test nested with-statements.
             """
@@ -154,7 +162,8 @@ class TestWith(JitTestCase):
 
             return y
 
-        def test_combined(x: torch.Tensor) -> torch.Tensor:
+        def test_combined(x):
+            # type: (Tensor) -> Tensor
             """
             Test a with-statement with multiple with items.
             """
@@ -206,7 +215,8 @@ class TestWith(JitTestCase):
             def __exit__(self, type: Any, value: Any, tb: Any):
                 self.count.sub_(0.3)
 
-        def test_basic(x: torch.Tensor) -> torch.Tensor:
+        def test_basic(x):
+            # type: (Tensor) -> Tensor
             """Basic test with one with-statement."""
 
             c = Context(1)
@@ -217,7 +227,8 @@ class TestWith(JitTestCase):
             y *= c.count
             return y
 
-        def test_pass(x: torch.Tensor) -> torch.Tensor:
+        def test_pass(x):
+            # type: (Tensor) -> Tensor
             """
             Test with a pass statement inside a with-statement. Although
             the body of the with is empty, __enter__ and __exit__ should
@@ -231,7 +242,8 @@ class TestWith(JitTestCase):
             x *= c.count
             return x
 
-        def test_early_return(x: torch.Tensor, c: Context) -> torch.Tensor:
+        def test_early_return(x, c):
+            # type: (Tensor, Context) -> Tensor
             """
             Test that returning early from inside a with-statement works
             as expected.
@@ -243,7 +255,8 @@ class TestWith(JitTestCase):
             x = y + y
             return x
 
-        def test_conditional_early_return(x: torch.Tensor, c: Context) -> torch.Tensor:
+        def test_conditional_early_return(x, c):
+            # type: (Tensor, Context) -> Tensor
             """
             Test that conditionally returning early from inside a with-statement works
             as expected.
@@ -256,7 +269,8 @@ class TestWith(JitTestCase):
             x = y + y
             return x
 
-        def test_break(x: torch.Tensor, c: Context, l: List[int]) -> torch.Tensor:
+        def test_break(x, c, l):
+            # type: (Tensor, Context, List[int]) -> Tensor
             """
             Test that breaking early from inside a with-statement works
             as expected.
@@ -269,7 +283,8 @@ class TestWith(JitTestCase):
 
             return x
 
-        def test_continue(x: torch.Tensor, c: Context, l: List[int]) -> torch.Tensor:
+        def test_continue(x, c, l):
+            # type: (Tensor, Context, List[int]) -> Tensor
             """
             Test that using continue inside a with-statement works
             as expected.
@@ -282,7 +297,8 @@ class TestWith(JitTestCase):
 
             return x
 
-        def test_serial(x: torch.Tensor) -> torch.Tensor:
+        def test_serial(x):
+            # type: (Tensor) -> Tensor
             """
             Test two with-statements in a row.
             """
@@ -296,7 +312,8 @@ class TestWith(JitTestCase):
 
             return y
 
-        def test_nested(x: torch.Tensor) -> torch.Tensor:
+        def test_nested(x):
+            # type: (Tensor) -> Tensor
             """
             Test nested with-statements.
             """
@@ -310,7 +327,8 @@ class TestWith(JitTestCase):
 
             return y
 
-        def test_combined(x: torch.Tensor) -> torch.Tensor:
+        def test_combined(x):
+            # type: (Tensor) -> Tensor
             """
             Test a with-statement with multiple with items.
             """
@@ -363,11 +381,13 @@ class TestWith(JitTestCase):
                 self.count.sub_(0.3)
 
         @torch.jit.script
-        def method_that_raises() -> torch.Tensor:
+        def method_that_raises():
+            # type: () -> Tensor
             raise Exception("raised exception")
 
         @torch.jit.script
-        def test_exception(x: torch.Tensor, c: Context) -> torch.Tensor:
+        def test_exception(x, c):
+            # type: (Tensor, Context) -> Tensor
             """
             Test the case in which an exception is thrown while executing the body of a with-statement.
             """
@@ -377,7 +397,8 @@ class TestWith(JitTestCase):
             return x
 
         @torch.jit.script
-        def test_exception_nested(x: torch.Tensor, c: Context) -> torch.Tensor:
+        def test_exception_nested(x, c):
+            # type: (Tensor, Context) -> Tensor
             """
             Test the case in which an exception is thrown while executing the body of a nested with-statement.
             """
@@ -388,7 +409,8 @@ class TestWith(JitTestCase):
             return x
 
         @torch.jit.script
-        def with_that_raises(c: Context) -> torch.Tensor:
+        def with_that_raises(c):
+            # type: (Context) -> Tensor
             a = torch.tensor([1])
 
             with c as _:
@@ -397,7 +419,8 @@ class TestWith(JitTestCase):
             return a
 
         @torch.jit.script
-        def test_exception_fn_call(x: torch.Tensor, c: Context) -> torch.Tensor:
+        def test_exception_fn_call(x, c):
+            # type: (Tensor, Context) -> Tensor
             """
             Test the case in which an exception is thrown while there are active with-statements in two different
             frames.
@@ -483,25 +506,29 @@ class TestWith(JitTestCase):
             def __exit__(self, type: Any, value: int, tb: int):
                 pass
 
-        def test_no_enter_no_exit(x: torch.Tensor, c: NoEnterNoExit) -> torch.Tensor:
+        def test_no_enter_no_exit(x, c):
+            # type: (Tensor, NoEnterNoExit) -> Tensor
             with c as _:
                 pass
 
             return x
 
-        def test_bad_enter(x: torch.Tensor, c: BadEnter) -> torch.Tensor:
+        def test_bad_enter(x, c):
+            # type: (Tensor, BadEnter) -> Tensor
             with c as _:
                 pass
 
             return x
 
-        def test_bad_exit(x: torch.Tensor, c: BadExit) -> torch.Tensor:
+        def test_bad_exit(x, c):
+            # type: (Tensor, BadExit) -> Tensor
             with c as _:
                 pass
 
             return x
 
-        def test_exit_incorrect_types(x: torch.Tensor, c: ExitIncorrectTypes) -> torch.Tensor:
+        def test_exit_incorrect_types(x, c):
+            # type: (Tensor, ExitIncorrectTypes) -> Tensor
             with c as _:
                 pass
 
@@ -538,7 +565,8 @@ class TestWith(JitTestCase):
         """
 
         # Basic no_grad test.
-        def test_no_grad(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        def test_no_grad(x, y):
+            # type: (Tensor, Tensor) -> Tensor
             with torch.no_grad():
                 w = x + y
 
@@ -555,7 +583,8 @@ class TestWith(JitTestCase):
 
         # Test assignment of a grad-less Tensor to a Tensor with gradients
         # in a no_grad block.
-        def test_no_grad_assignment(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        def test_no_grad_assignment(x, y):
+            # type: (Tensor, Tensor) -> Tensor
             with torch.no_grad():
                 x[0] = y
 
@@ -574,11 +603,13 @@ class TestWith(JitTestCase):
                 super().__init__()
 
             @torch.jit.ignore
-            def adder(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            def adder(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
                 w = x + y
                 return w
 
-            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            def forward(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
                 with torch.no_grad():
                     w = self.adder(x, y)
 
@@ -594,7 +625,8 @@ class TestWith(JitTestCase):
         Check that torch.autograd.profiler.record_function context manager is
         torchscriptable.
         """
-        def with_rf(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        def with_rf(x, y):
+            # type: (Tensor, Tensor) -> Tensor
             with torch.autograd.profiler.record_function("foo"):
                 # Nested record_function.
                 with torch.autograd.profiler.record_function("nested"):

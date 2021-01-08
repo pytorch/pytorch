@@ -284,7 +284,8 @@ class TestRecursiveScript(JitTestCase):
         test_module_dir(nn.ModuleDict(OrderedDict([("conv", conv), ("linear", linear)])))
 
     def test_class_compile(self):
-        def other_fn(a: int, b: Tensor) -> Tensor:
+        def other_fn(a, b):
+            # type: (int, Tensor) -> Tensor
             return a * b
 
         class B(object):
@@ -306,7 +307,8 @@ class TestRecursiveScript(JitTestCase):
         self.checkModule(N(), (torch.randn(2, 2),))
 
     def test_error_stack(self):
-        def d(x: int) -> int:
+        def d(x):
+            # type: (int) -> int
             return x + 10
 
         def c(x):
@@ -329,7 +331,8 @@ class TestRecursiveScript(JitTestCase):
             checker.run(str(e))
 
     def test_error_stack_module(self):
-        def d(x: int) -> int:
+        def d(x):
+            # type: (int) -> int
             return x + 10
 
         def c(x):
@@ -562,7 +565,8 @@ class TestRecursiveScript(JitTestCase):
                 self.a = 4
                 self.inner = Inner2()
 
-            def __setstate__(self, obj: Tuple[int, Inner2]) -> None:
+            def __setstate__(self, obj):
+                # type: (Tuple[int, Inner2]) -> None
                 a, inner = obj
                 self.a = a
                 self.inner = inner
