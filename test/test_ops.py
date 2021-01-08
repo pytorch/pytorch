@@ -215,7 +215,7 @@ class TestCommon(JitCommonTestCase):
             for variant in variants:
                 # Verifies that inplace operations that promote int->float fail
                 #   on tensors with integer dtypes.
-                if (variant is inplace and expected_forward.is_floating_point() and
+                if (variant is inplace and not torch.testing.is_integral(expected_forward.dtype) and
                         torch.testing.is_integral(dtype)):
                     try:
                         variant_forward = variant(*(clone_input_helper(input) for input in sample.input),
