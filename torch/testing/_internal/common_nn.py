@@ -2517,6 +2517,12 @@ new_module_tests = [
         input_size=(1, 9, 4, 4),
     ),
     dict(
+        module_name='PixelUnshuffle',
+        constructor_args=(3,),
+        cpp_constructor_args='torch::nn::PixelUnshuffleOptions(3)',
+        input_size=(1, 1, 12, 12),
+    ),
+    dict(
         constructor=wrap_functional(F.interpolate, size=12, scale_factor=None, mode='nearest'),
         cpp_options_args='''F::InterpolateFuncOptions()
                             .size(std::vector<int64_t>({12})).scale_factor(c10::nullopt).mode(torch::kNearest)''',
@@ -2982,7 +2988,7 @@ new_module_tests = [
                             .scale_factor(std::vector<double>({3., 3., 3.}))
                             .mode(torch::kTrilinear)
                             .align_corners(false)''',
-        input_size=(1, 2, 3, 4, 4),
+        input_size=(1, 2, 3, 4, 5),
         fullname='interpolate_trilinear_scale_3d',
         # See https://github.com/pytorch/pytorch/issues/5006
         precision=3e-4,
@@ -4860,7 +4866,7 @@ class ModuleTest(TestBase):
 
         if self.should_test_pickle:
             # TODO: do this with in-memory files as soon as torch.save will support it
-            with TemporaryFile() as f:
+            with tempfile.TemporaryFile() as f:
                 test_case._forward(module, input)
                 torch.save(module, f)
                 f.seek(0)

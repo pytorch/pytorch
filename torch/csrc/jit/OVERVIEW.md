@@ -180,7 +180,7 @@ For Nodes representing built-in Operators, the method `Node::schema` can also lo
 
 All of the strings correspond to different `FunctionSchema` objects. A `Node` can be queried for its schema using the `schema()` method (it will check the argument types, and will try to match one of the options for its `kind()`).
 
-Note that the chosen overload is not shown in any way in the textual output. If you're unsure which function does a node resolve to, you might need to check the type annotations of its input values.
+Note that the chosen overload is not shown in any way in the textual output. If you're unsure which function a node resolves to, you might need to check the type annotations of its input values.
 
 
 Each node also has a set of attributes which are named integers, strings, floats, Tensors, and subgraphs, or lists of these types. These are used by special primitive operators to encode additional data in the Node. For instance `prim::Constant` defines a compile-time constant value. For Tensor constants, it will have a single Tensor attribute with the name `attr::value` which contains the value of the constant.
@@ -204,7 +204,7 @@ Iterators for the `nodes()` list are invalided when the current Node they point 
 
 Block also contain a list of input and output values. The meaning of these values depends on where the block is used. For the Graph's top-level block, these are inputs and outputs to the Graph, and line up with the FunctionSchema associated with a Method.
 
-**Control-flow** is represented with using sub-blocks rather than a control-flow graph representation. A `prim::If` has one block for the true branch and one block for the else.A `prim:Loop` has a block for the loop body (there is no condition block, instead the end of the loop body computes whether to re-enter the loop body). This representation ensures we have structured control-flow. This limitation makes a lot of optimizations easier and is true for the vast majority of networks. A Node can lookup what Block it is in, and a Block and can look up its parent (either the Node that has it as a subblock, or `nullptr` for the main Block).
+**Control-flow** is represented with using sub-blocks rather than a control-flow graph representation. A `prim::If` has one block for the true branch and one block for the else.A `prim:Loop` has a block for the loop body (there is no condition block, instead the end of the loop body computes whether to re-enter the loop body). This representation ensures we have structured control-flow. This limitation makes a lot of optimizations easier and is true for the vast majority of networks. A Node can look up what Block it is in, and a Block and can look up its parent (either the Node that has it as a subblock, or `nullptr` for the main Block).
 
 ### If ###
 For if-statements (`prim::If`) the Blocks have no inputs, and the outputs are the new values of variables in the outer block whose values were altered in an if-statement.
@@ -1209,7 +1209,7 @@ a = torch.rand(2, 3)
 b = a
 # At this point, `a` and `b` share their storage.
 c = b[0]
-# `c` is shares storage with `a` and `b`, but only sees a slice of the allocated memory.
+# `c` shares storage with `a` and `b`, but only sees a slice of the allocated memory.
 ```
 
 Some operators will *mutate* one or more of their operands in-place. These are typically denoted with a trailing underscore, or by taking an `out` argument as input:
@@ -1293,7 +1293,7 @@ So to determine whether  `a` and `b` may alias, we traverse the `AliasTracker` D
 ### Writing optimization passes with `AliasDb`
 `AliasDb` provides a high-level interface to help people write mutability-safe optimization passes.
 
-In particular, `moveAfterTopologicallyValid()` (and it's `moveBefore` variant) will reorder nodes in a way that preserves data dependencies and avoids any data hazards.  The rules for this are that all mutable *writes* to a given memory location must occur in the same order (avoid WAW hazards), and that no reads can be reordered before or after any write (WAR, RAW hazards).
+In particular, `moveAfterTopologicallyValid()` (and its `moveBefore` variant) will reorder nodes in a way that preserves data dependencies and avoids any data hazards.  The rules for this are that all mutable *writes* to a given memory location must occur in the same order (avoid WAW hazards), and that no reads can be reordered before or after any write (WAR, RAW hazards).
 
 However, reordering of reads across writes *is allowed* if we can prove that the read cannot alias the thing being written. This happens whenever we have tensors that come from functions that produce fresh results (common) inside of the function. It also happens whenever the creation of the mutable tensor is seen in the function (so it gets assigned a fresh variable), and all of its writes occur in that function.
 

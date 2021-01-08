@@ -1082,13 +1082,13 @@ class TestBinaryUfuncs(TestCase):
         ops = (torch.maximum, torch.minimum)
 
         for torch_op in ops:
-            with self.assertRaisesRegex(RuntimeError, 
+            with self.assertRaisesRegex(RuntimeError,
                                         "Expected all tensors to be on the same device"):
                 torch_op(a, b)
 
-            with self.assertRaisesRegex(RuntimeError, 
+            with self.assertRaisesRegex(RuntimeError,
                                         "Expected all tensors to be on the same device"):
-                torch_op(b, a) 
+                torch_op(b, a)
 
         # test cuda tensor and cpu scalar
         ops = ((torch.maximum, np.maximum), (torch.minimum, np.minimum))
@@ -2424,7 +2424,7 @@ class TestBinaryUfuncs(TestCase):
 
             # Case of Tensor x Tensor
             if op is torch.Tensor.float_power_ and base_dtype != out_dtype:
-                with self.assertRaisesRegex(RuntimeError, "is not the desired type"):
+                with self.assertRaisesRegex(RuntimeError, "operation's result requires dtype"):
                     op(base.clone(), exp)
             else:
                 result = op(base.clone(), exp)
@@ -2441,7 +2441,7 @@ class TestBinaryUfuncs(TestCase):
                 expected_scalar_exp = torch.from_numpy(np.float_power(to_np(base), i))
 
                 if op is torch.Tensor.float_power_ and base_dtype != out_dtype_scalar_exp:
-                    with self.assertRaisesRegex(RuntimeError, "is not the desired type"):
+                    with self.assertRaisesRegex(RuntimeError, "operation's result requires dtype"):
                         op(base.clone(), i)
                 else:
                     result = op(base.clone(), i)
@@ -2483,13 +2483,13 @@ class TestBinaryUfuncs(TestCase):
                 if out.dtype == required_dtype:
                     torch.float_power(base, exp, out=out)
                 else:
-                    with self.assertRaisesRegex(RuntimeError, "is not the desired output type"):
+                    with self.assertRaisesRegex(RuntimeError, "operation's result requires dtype"):
                         torch.float_power(base, exp, out=out)
 
                 if base.dtype == required_dtype:
                     torch.Tensor.float_power_(base.clone(), exp)
                 else:
-                    with self.assertRaisesRegex(RuntimeError, "is not the desired type"):
+                    with self.assertRaisesRegex(RuntimeError, "operation's result requires dtype"):
                         torch.Tensor.float_power_(base.clone(), exp)
 
     @skipIf(not TEST_SCIPY, "Scipy required for the test.")
@@ -2559,6 +2559,17 @@ class TestBinaryUfuncs(TestCase):
         reference_fn = partial(scipy.special.xlogy, 0)
         self.compare_with_numpy(torch_fn, reference_fn, t, exact_dtype=False)
         out_variant_helper(torch.xlogy, 0, t)
+
+    def test_xlogy_scalar_type_promotion(self, device):
+        # Test that python numbers don't participate in type promotion at the same
+        # priority level as 0-dim tensors
+        t = torch.randn((), dtype=torch.float32, device=device)
+
+        self.assertEqual(t.dtype, torch.xlogy(t, 5).dtype)
+        self.assertEqual(t.dtype, torch.xlogy(t, 5.).dtype)
+
+        self.assertEqual(t.dtype, torch.xlogy(5, t).dtype)
+        self.assertEqual(t.dtype, torch.xlogy(5., t).dtype)
 
     @skipIf(not TEST_SCIPY, "Scipy required for the test.")
     def test_xlogy_bfloat16(self, device):
