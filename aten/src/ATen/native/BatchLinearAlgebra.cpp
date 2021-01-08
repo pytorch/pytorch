@@ -846,7 +846,7 @@ Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& i
   return result;
 }
 
-Tensor& cholesky_inverse_out(Tensor &result, const Tensor &input, bool upper) {
+Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
   // MAGMA doesn't have batched version of cholesky_inverse implemented.
   // as a workaround we can use cholesky_solve
   if (input.device().is_cuda() && input.dim() > 2) {
