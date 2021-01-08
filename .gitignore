@@ -10,6 +10,7 @@
 
 .coverage
 coverage.xml
+.dmypy.json
 .gradle
 .hypothesis
 .mypy_cache
@@ -76,6 +77,7 @@ torch/lib/*.exe*
 torch/lib/*.dylib*
 torch/lib/*.h
 torch/lib/*.lib
+torch/lib/*.pdb
 torch/lib/*.so*
 torch/lib/protobuf*.pc
 torch/lib/build

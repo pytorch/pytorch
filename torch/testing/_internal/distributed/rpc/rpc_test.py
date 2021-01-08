@@ -317,6 +317,10 @@ expected_err = "Expected error"
 def raise_func():
     raise ValueError(expected_err)
 
+expected_err_escape = "\nFirst line of error \n next line of error \n last line of error"
+def raise_func_escape():
+    raise ValueError(expected_err_escape)
+
 
 global_rref = None
 
@@ -606,14 +610,14 @@ class RpcTest(RpcAgentTestFixture):
     def test_rref_proxy_non_exist(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         rref = rpc.remote(dst, my_function, args=(torch.ones(2, 2), 1, 3))
-        msg = "non_exist is not an attribute of type"
-        with self.assertRaisesRegex(ValueError, msg):
+        msg = "has no attribute \'non_exist\'"
+        with self.assertRaisesRegex(AttributeError, msg):
             rref.rpc_sync().non_exist()
 
-        with self.assertRaisesRegex(ValueError, msg):
+        with self.assertRaisesRegex(AttributeError, msg):
             rref.rpc_async().non_exist()
 
-        with self.assertRaisesRegex(ValueError, msg):
+        with self.assertRaisesRegex(AttributeError, msg):
             rref.remote().non_exist()
 
     def _test_rref_proxy_tensor(self, dst):
@@ -1331,7 +1335,11 @@ class RpcTest(RpcAgentTestFixture):
                 for event in events
                 if convert_remote_to_local(event.name) in EXPECTED_REMOTE_EVENTS
             ]
-            self.assertEqual(remote_events_list, EXPECTED_REMOTE_EVENTS)
+            self.assertEqual(
+                set(remote_events_list),
+                set(EXPECTED_REMOTE_EVENTS),
+                f"Mismatch between profiled events: {set(remote_events_list)} and expected events: {set(EXPECTED_REMOTE_EVENTS)}",
+            )
 
     @dist_init
     def test_profiler_remote_events_profiled(self):
@@ -1575,8 +1583,8 @@ class RpcTest(RpcAgentTestFixture):
                 scope_event = get_function_event(events, "foo")
                 # Since RPC call is within the scope, its CPU interval should be
                 # contained within foo's interval.
-                self.assertTrue(scope_event.time_range.start < rpc_event.time_range.start)
-                self.assertTrue(scope_event.time_range.end > rpc_event.time_range.end)
+                self.assertLessEqual(scope_event.time_range.start, rpc_event.time_range.start)
+                self.assertGreaterEqual(scope_event.time_range.end, rpc_event.time_range.end)
             # the sender, dest worker, function run, and type of RPC should all
             # be recorded.
             self_worker_name = worker_name(self.rank)
@@ -1772,7 +1780,13 @@ class RpcTest(RpcAgentTestFixture):
                 if time_range.start > last_end_time:
                     top_level_event_names.append(event_name)
                     last_end_time = time_range.end
-        self.assertEqual(sorted(top_level_event_names), sorted(expected_top_level_event_names))
+        top_level_event_names = sorted(top_level_event_names)
+        expected_top_level_event_names = sorted(expected_top_level_event_names)
+        self.assertEqual(
+            top_level_event_names,
+            expected_top_level_event_names,
+            f"Expected events {expected_top_level_event_names}, but got {top_level_event_names}",
+        )
 
     @dist_init
     def test_server_process_global_profiler(self):
@@ -1795,9 +1809,12 @@ class RpcTest(RpcAgentTestFixture):
         outer_profile_rref.rpc_sync().__exit__(None, None, None)
 
         inner_events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (inner_profile_rref,))
-        self._assert_top_level_events(inner_events, ['aten::sub'])
+        expected_inner_events = ['aten::sub']
+        expected_outer_events = expected_inner_events + ['aten::add']
+
+        self._assert_top_level_events(inner_events, expected_inner_events)
         outer_events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (outer_profile_rref,))
-        self._assert_top_level_events(outer_events, ['aten::add', 'aten::sub'])
+        self._assert_top_level_events(outer_events, expected_outer_events)
 
         inner_profile_rref.rpc_sync().key_averages()
         outer_profile_rref.rpc_sync().key_averages()
@@ -1981,6 +1998,20 @@ class RpcTest(RpcAgentTestFixture):
         # Validate that trainers log errors when running functions.
         stderr_lines = err.getvalue()
         self.assertTrue(expected_err in stderr_lines)
+
+    @dist_init
+    def test_py_raise_in_user_func_escaped_str(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        fut = rpc.rpc_async(worker_name(dst_rank), raise_func_escape)
+        try:
+            fut.wait()
+        except ValueError as e:
+            msg = str(e)
+            # Ensure newlines are unescaped to provide a better repr of error.
+            self.assertEqual(msg, msg.encode("utf-8").decode("unicode_escape"))
+        else:
+            self.assertTrue(False, "expected raise_func_escape to raise ValueError.")
 
     @dist_init
     def test_nested_rpc(self):
@@ -4841,3 +4872,11 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         self.assertEqual(rref.to_here(), torch.ones(2).to(1))
 
         rpc.shutdown()
+
+    @dist_init
+    def test_op_with_invalid_args(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        with self.assertRaisesRegex(
+            RuntimeError, "Overloaded torch operator invoked from Python failed to many any schema"
+        ):
+            rpc.rpc_sync(dst, torch.add, args=())

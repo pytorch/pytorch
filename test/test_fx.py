@@ -21,6 +21,8 @@ from typing import Any, Callable, Dict, NamedTuple, List, Optional, Tuple, Union
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, IS_WINDOWS, IS_SANDCASTLE, IS_MACOS
 from torch.testing._internal.jit_utils import JitTestCase
 
+from fx.named_tup import MyNamedTup
+
 try:
     from torchvision.models import resnet18
     HAS_TORCHVISION = True
@@ -656,6 +658,22 @@ class TestFX(JitTestCase):
         traced = torch.fx.symbolic_trace(IHaveATensorConstant())
         torch.jit.script(traced)
 
+    def test_len(self):
+        class LenTest(torch.nn.Module):
+            def forward(self, x):
+                return len(x)
+
+        lt = LenTest()
+        with self.assertRaisesRegex(RuntimeError, "'len' is not supported. Replace it with 'torch.fx.len'."):
+            symbolic_trace(lt)
+
+    def test_torch_fx_len(self):
+        class FXLenTest(torch.nn.Module):
+            def forward(self, x):
+                return torch.fx.len(x)
+
+        traced = symbolic_trace(FXLenTest())
+
     def test_torch_custom_ops(self):
         class M(torch.nn.Module):
             def forward(self, a):
@@ -842,6 +860,11 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(f)
         x, w = torch.rand(3, 4), torch.rand(4, 4)
         self.assertTrue(any(n.target == torch.relu for n in traced.graph.nodes))
+
+    def test_empty_graph_codegen(self):
+        graph = torch.fx.Graph()
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertEqual(gm(), None)
 
     def test_sequential(self):
         m = torch.nn.Sequential(torch.nn.Conv2d(1, 1, 1))
@@ -1139,6 +1162,57 @@ class TestFX(JitTestCase):
         m = M()
         self.checkGraphModule(m, ())
 
+    def test_namedtuple_return_qualname(self):
+        class NamedTupReturn(torch.nn.Module):
+            def forward(self, x):
+                return MyNamedTup(x, x)
+
+        traced = symbolic_trace(NamedTupReturn())
+        input = torch.rand(3, 4)
+        self.assertEqual(traced(input), MyNamedTup(input, input))
+
+    def test_update_args_kwargs_yells_at_you(self):
+        symtraced = symbolic_trace(SimpleTest())
+        node = next(iter(symtraced.graph.nodes))
+        with self.assertRaisesRegex(AttributeError, '__update_args_kwargs'):
+            node.__update_args_kwargs((), {})
+
+    def test_torchbind_class_attribute_in_fx(self):
+        if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
+            self.skipTest("torch.classes._TorchScriptTesting._StackString is registered, skipping")
+
+        class FooBar1234(torch.nn.Module):
+            def __init__(self):
+                super(FooBar1234, self).__init__()
+                self.f = torch.classes._TorchScriptTesting._StackString(["3", "4"])
+
+            def forward(self):
+                return self.f.top()
+
+        m = FooBar1234()
+        self.checkGraphModule(m, ())
+
+    def test_namedtuple_return_trace(self):
+        class NamedTupReturn(torch.nn.Module):
+            def forward(self, x):
+                return Pair(x, x)
+
+        traced = symbolic_trace(NamedTupReturn())
+        input = torch.rand(3, 4)
+        self.assertEqual(traced(input), Pair(input, input))
+
+    def test_return_type_exists(self):
+        class ReturnTypeModule(torch.nn.Module):
+            def other(self, x: List[str]) -> List[str]:
+                return x
+
+            def forward(self, x: List[str]) -> List[str]:
+                return self.other(x)
+
+        traced = symbolic_trace(ReturnTypeModule())
+        self.assertIn("-> typing.List[str]", traced._code)
+        scripted = torch.jit.script(traced)
+        self.assertIn("-> List[str]", scripted.code)
 
 if __name__ == '__main__':
     run_tests()

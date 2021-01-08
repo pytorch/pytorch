@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ATen/Functions.h>
+#include <ATen/Utils.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/core/TensorOptions.h>

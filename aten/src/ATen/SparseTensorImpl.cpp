@@ -46,6 +46,8 @@ SparseTensorImpl::SparseTensorImpl(at::DispatchKeySet key_set, const caffe2::Typ
   AT_ASSERT(values_.sizes() == IntArrayRef({0}));
   AT_ASSERT(values_.device() == indices_.device());
   AT_ASSERT(values_.device() == device());
+
+  is_non_overlapping_and_dense_ = false;
 }
 
 IntArrayRef SparseTensorImpl::strides() const {
@@ -68,6 +70,7 @@ void SparseTensorImpl::set_storage_offset(int64_t storage_offset) {
 }
 
 int64_t SparseTensorImpl::dim() const {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(sparse_dim_ + dense_dim_ == TensorImpl::dim());
   return sparse_dim_ + dense_dim_;
 }
 bool SparseTensorImpl::has_storage() const {

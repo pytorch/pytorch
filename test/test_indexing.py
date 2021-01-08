@@ -764,7 +764,7 @@ class TestIndexing(TestCase):
 
     @dtypes(torch.float, torch.bfloat16, torch.long, torch.bool)
     @dtypesIfCPU(torch.float, torch.long, torch.bool, torch.bfloat16)
-    @dtypesIfCUDA(torch.half, torch.long, torch.bool)
+    @dtypesIfCUDA(torch.half, torch.long, torch.bool, torch.bfloat16)
     def test_index_put_src_datatype(self, device, dtype):
         src = torch.ones(3, 2, 4, device=device, dtype=dtype)
         vals = torch.ones(3, 2, 4, device=device, dtype=dtype)
