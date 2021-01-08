@@ -71,13 +71,14 @@ class TestE2EBase : public ::testing::Test {
         false);
 
     ownerRRef->registerOwnerCreationFuture(jitFuture);
-    auto fm = RpcAgent::toFutureMessage(std::move(jitFuture));
 
     // Builtin operators does not return py::object, and hence does not require
     // GIL for destructing the potentially deleted OwerRRef.
-    fm->addCallback(
-        [ownerRRefId = ownerRRef->rrefId()](const FutureMessage& fm) {
-          callback::finishCreatingOwnerRRef(fm, ownerRRefId);
+    std::weak_ptr<JitFuture> wp = jitFuture;
+    jitFuture->addCallback(
+        [wp, ownerRRefId = ownerRRef->rrefId()]() {
+          auto jitFuture = wp.lock();
+          callback::finishCreatingOwnerRRef(*jitFuture, ownerRRefId);
         });
     return ownerRRef;
   }
