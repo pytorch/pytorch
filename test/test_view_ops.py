@@ -143,8 +143,7 @@ class TestViewOps(TestCase):
             yield make_tensor((1, 5, 1), device, dtype, low=-5, high=5).expand(5, 5, 5)
             yield make_tensor((10, 5, 10), device, dtype, low=-5, high=5)[::2, :, ::2]
             yield make_tensor((0, 5, 10), device, dtype, low=-5, high=5)
-            # commented out due to https://github.com/pytorch/pytorch/issues/47948
-            # yield make_tensor((), device, dtype, low=-5, high=5)
+            yield make_tensor((), device, dtype, low=-5, high=5)
 
         def run_test(fp_tensor):
             self.assertRaises(RuntimeError, lambda: fp_tensor.view(torch.complex128))
@@ -163,6 +162,11 @@ class TestViewOps(TestCase):
 
         for fp_tensor in generate_inputs():
             run_test(fp_tensor)
+
+        if dtype is torch.double:
+            t = make_tensor((5, 5, 5), device, torch.double, low=-5, high=5, requires_grad=True)
+            self.assertFalse(t.view(torch.complex64).requires_grad)
+
 
     @onlyOnCPUAndCUDA
     def test_view_as_complex(self, device):
