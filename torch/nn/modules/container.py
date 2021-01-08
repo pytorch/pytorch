@@ -8,11 +8,7 @@ import torch
 from .module import Module
 from torch._jit_internal import _copy_to_script_wrapper
 
-from typing import Any, Iterable, Iterator, Mapping, Optional, overload, Tuple, TypeVar, Union, \
-    TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from torch.nn import Parameter
+from typing import Any, Iterable, Iterator, Mapping, Optional, overload, Tuple, TypeVar, Union
 
 
 T = TypeVar('T', bound=Module)
@@ -432,11 +428,13 @@ class ParameterList(Module):
         ...
 
     def __getitem__(self, idx):
-        if isinstance(idx, slice):
-            return self.__class__(list(self._parameters.values())[idx])
-        else:
-            idx = self._get_abs_string_index(idx)
-            return self._parameters[str(idx)]
+        idx = self._get_abs_string_index(idx)
+        return self._parameters[str(idx)]
+        # if isinstance(idx, slice):
+        #     return self.__class__(list(self._parameters.values())[idx])
+        # else:
+        #     idx = self._get_abs_string_index(idx)
+        #     return self._parameters[str(idx)]
 
     def __setitem__(self, idx: int, param: 'Parameter') -> None:
         idx = self._get_abs_string_index(idx)
