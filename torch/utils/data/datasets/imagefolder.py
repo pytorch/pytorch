@@ -55,7 +55,7 @@ class ImageFolder:
                 tinfo = tarfile.TarInfo(basename + ".json")
                 tinfo.size = bio.tell()
                 bio.seek(0)
-                tinfo.mtime = time.time()
+                tinfo.mtime = int(time.time())
                 tinfo.uname = path_info.owner()
                 tinfo.gname = path_info.group()
                 tinfo.mode = path_info.stat().st_mode & 0o0777
