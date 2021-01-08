@@ -78,11 +78,12 @@ std::shared_ptr<JitFuture> FaultyProcessGroupAgent::send(
   if (failMessageCountMap_[key] < failNumSends_) {
     failMessageCountMap_[key]++;
     lock.unlock();
-    auto fm = std::make_shared<FutureMessage>();
-    fm->setError(makeRPCError(
-        c10::str("Send attempt failed intentionally for ", key),
-        RPCErrorType::INTENTIONAL_FAILURE));
-    return toJitFuture(std::move(fm));
+    auto jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
+    jitFuture->setError(
+        std::make_exception_ptr(std::runtime_error(makeRPCError(
+            c10::str("Send attempt failed intentionally for ", key),
+            RPCErrorType::INTENTIONAL_FAILURE))));
+    return jitFuture;
   } else {
     lock.unlock();
     return ProcessGroupAgent::send(to, std::move(message), rpcTimeoutSeconds);
