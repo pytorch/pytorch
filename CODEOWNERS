@@ -12,8 +12,9 @@
 /torch/autograd/ @albanD
 
 # Tensorpipe RPC Agent.
-/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @jiayisuse @osalpekar @lw @beauby
-/torch/csrc/distributed/rpc/tensorpipe_agent.h @jiayisuse @osalpekar @lw @beauby
+/torch/csrc/distributed/rpc/tensorpipe_agent.cpp @lw @beauby
+/torch/csrc/distributed/rpc/tensorpipe_agent.h @lw @beauby
+/third_party/tensorpipe @lw @beauby
 
 # Distributed package
 # This list is mostly if you'd like to be tagged as reviewer, feel free to add
