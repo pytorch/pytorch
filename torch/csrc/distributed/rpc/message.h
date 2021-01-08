@@ -93,7 +93,7 @@ enum MessageType {
 // Layers above ``RpcAgent`` only converts ScriptCall, ScriptResp, PythonCall,
 // and PythonResp into a Message, and it is up to the RpcAgent
 // implementation to determine how to serialize a message.
-class TORCH_API Message final {
+class TORCH_API Message final : public torch::CustomClassHolder {
  public:
   Message();
 
@@ -154,9 +154,6 @@ TORCH_API Message createExceptionResponse(const std::exception& e, int64_t id);
 TORCH_API Message
 createExceptionResponse(const std::string& exceptionStr, int64_t id);
 
-// FutureMessage is an internal type used in the communication layer. All
-// user-facing surface APIs should use JitFuture instead.
-using FutureMessage = torch::utils::Future<Message>;
 using JitFuture = c10::ivalue::Future;
 
 } // namespace rpc
