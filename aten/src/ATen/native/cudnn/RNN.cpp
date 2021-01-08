@@ -722,6 +722,11 @@ namespace {
                 (tensors.seq_length >=10 && bsize <=32));
       }
     } else if (prop->major >= 8) {
+      if (prop->minor == 6) {
+        // Excludes sm_86 GPU devices from using persistent rnn.
+        // This is because there are some edge cases that will throw exceptions with cudnn 8.0.5 on Nvidia A40 GPU.
+        return false;
+      }
       // Based on tests by Vasily Volkov and xwang233.  Vasily only tried bsize <= 128,
       // so conservatively enable persistence for bsize <= 128 only.
       // TODO:  Run more tests for bsize > 128.

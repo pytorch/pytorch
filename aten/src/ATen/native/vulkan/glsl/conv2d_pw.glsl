@@ -16,7 +16,6 @@ layout(set = 0, binding = 4)          uniform PRECISION restrict           Block
   ivec2 stride;
   ivec2 padding;
   vec2 clamp;
-  int stacks_per_tower;
 } uBlock;
 
 layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
@@ -27,9 +26,6 @@ void main() {
   /* Dynamically Uniform */
   const ivec3 size = imageSize(uOutput);
   const ivec3 isize = textureSize(uInput, 0);
-  const int tower = pos.z/(uBlock.stacks_per_tower);
-  const int tower_offset = pos.z % uBlock.stacks_per_tower;
-  const ivec4 block = tower_offset * uBlock.kernel.x + ivec4(0, 1, 2, 3);
 
   if (all(lessThan(pos, size))) {
     const ivec2 ipos = pos.xy * uBlock.stride - uBlock.padding;
@@ -38,12 +34,11 @@ void main() {
 
     for (int z = 0; z < uBlock.kernel.x; z+=4) {
       const vec4 In = texelFetch(uInput, ivec3(ipos.x, ipos.y, z/4), 0);
-      const ivec4 kz = block + z;
 
-      sum = fma(In.xxxx, texelFetch(uKernel, ivec3(0, tower, kz.x), 0), sum);
-      sum = fma(In.yyyy, texelFetch(uKernel, ivec3(0, tower, kz.y), 0), sum);
-      sum = fma(In.zzzz, texelFetch(uKernel, ivec3(0, tower, kz.z), 0), sum);
-      sum = fma(In.wwww, texelFetch(uKernel, ivec3(0, tower, kz.w), 0), sum);
+      sum = fma(In.xxxx, texelFetch(uKernel, ivec3(z+0, pos.z, 0), 0), sum);
+      sum = fma(In.yyyy, texelFetch(uKernel, ivec3(z+1, pos.z, 0), 0), sum);
+      sum = fma(In.zzzz, texelFetch(uKernel, ivec3(z+2, pos.z, 0), 0), sum);
+      sum = fma(In.wwww, texelFetch(uKernel, ivec3(z+3, pos.z, 0), 0), sum);
     }
 
     imageStore(

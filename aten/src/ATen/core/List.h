@@ -87,17 +87,6 @@ public:
   // assigning another ref to this assigns the underlying value
   ListElementReference& operator=(ListElementReference&& rhs) &&;
 
-  // returns the underlying std::string by reference (only enabled if this is from a torch::List<std::string>).
-  template<class _T = T>
-  std::enable_if_t<std::is_same<std::string, T>::value && std::is_same<_T, T>::value, const std::string&> toStringRef() {
-    return iterator_->toStringRef();
-  }
-
-  template<class _T = T>
-  std::enable_if_t<std::is_same<c10::optional<std::string>, T>::value && std::is_same<_T, T>::value, c10::optional<std::reference_wrapper<const std::string>>> toOptionalStringRef() {
-    return iterator_->toOptionalStringRef();
-  }
-
   friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
 
 private:
