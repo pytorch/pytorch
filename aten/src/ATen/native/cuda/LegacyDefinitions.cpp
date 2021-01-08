@@ -70,7 +70,7 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor & mask, const Tensor & 
   if (b_mask.dtype() == at::ScalarType::Byte) {
     TORCH_WARN("masked_scatter_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
-    return legacy::cuda::_th_masked_scatter_(self, b_mask, source);
+    return legacy::cuda::_th_masked_scatter_bool_(self, b_mask.view(kBool), source);
   } else {
     return legacy::cuda::_th_masked_scatter_bool_(self, b_mask, source);
   }
