@@ -110,10 +110,10 @@ void insertEnterMethodCalls(Graph& g) {
   // For each prim::Enter, emit a prim::MethodCall after it that actually
   // calls __enter__ on the object.
   for (auto& enter : enter_nodes) {
-    auto cls = enter->input(0)->type()->expect<ClassType>();
+    const auto& cls = enter->input(0)->type()->expectRef<ClassType>();
 
     MatchedSchema enter_matched_schema = matchSchema(
-        cls->findMethod("__enter__")->getSchema(),
+        cls.findMethod("__enter__")->getSchema(),
         enter->input(0)->node()->sourceRange(),
         g,
         {enter->input(0)},
@@ -802,17 +802,17 @@ struct CodeImpl {
 
   void emitGetAttr(Node* node) {
     emitLoadInputs(node->inputs());
-    const auto type = node->input()->type()->expect<ClassType>();
+    const auto& type = node->input()->type()->expectRef<ClassType>();
     const auto& field = node->s(attr::name);
-    const auto slot = type->getAttributeSlot(field);
+    const auto slot = type.getAttributeSlot(field);
     insertInstruction(GET_ATTR, slot);
   }
 
   void emitSetAttr(Node* node) {
     emitLoadInputs(node->inputs());
-    const auto type = node->inputs().at(0)->type()->expect<ClassType>();
+    const auto& type = node->inputs().at(0)->type()->expectRef<ClassType>();
     const auto& field = node->s(attr::name);
-    const auto slot = type->getAttributeSlot(field);
+    const auto slot = type.getAttributeSlot(field);
     insertInstruction(SET_ATTR, slot);
   }
 
@@ -941,7 +941,8 @@ struct CodeImpl {
             node->inputs().slice(1));
         break;
       case prim::CallMethod:
-        if (auto* class_type = node->inputs().at(0)->type()->castRaw<ClassType>()) {
+        if (auto* class_type =
+                node->inputs().at(0)->type()->castRaw<ClassType>()) {
           emitCall(&class_type->getMethod(node->s(attr::name)), node->inputs());
         } else {
           emitInterfaceCall(node->s(attr::name), node->inputs());
@@ -1420,7 +1421,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               auto& input = peek(stack, i, num_inputs);
               auto& t = input.toTensor();
               const TypePtr& expected = frame.function->type_table_[inst.X + i];
-              auto expected_type = expected->cast<TensorType>();
+              auto* expected_type = expected->castRaw<TensorType>();
               if (t.defined() && !expected_type->matchTensor(t)) {
                 push(stack, false);
                 break;
@@ -1441,7 +1442,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             } else {
               auto& t = stack.back().toTensor();
               const TypePtr& expected = frame.function->type_table_[inst.X];
-              auto expected_type = expected->cast<TensorType>();
+              auto* expected_type = expected->castRaw<TensorType>();
               if (t.defined() &&
                   !frames.back().symbols2dims.bindSymbolicShapes(
                       t.sizes(), expected_type->symbolic_sizes())) {
@@ -1501,7 +1502,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++frame.pc;
           } break;
           case DICT_CONSTRUCT: {
-            auto type = frame.function->type_table_[inst.X]->expect<DictType>();
+            const auto& type =
+                frame.function->type_table_[inst.X]->expectRef<DictType>();
             dictConstruct(stack, type, inst.N);
             ++frame.pc;
           } break;
