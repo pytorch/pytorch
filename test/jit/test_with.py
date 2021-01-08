@@ -630,11 +630,24 @@ class TestWith(JitTestCase):
             x = x + 1
             return x
 
+        no_grad = torch.no_grad
+
+        @no_grad()
+        def gn(x: int) -> int:
+            x = x + 1
+            return x
+
         with self.assertRaisesRegex(
             torch.jit.frontend.NotSupportedError,
             r"Using no_grad as a decorator is not supported",
         ):
             torch.jit.script(fn)
+
+        with self.assertRaisesRegex(
+            torch.jit.frontend.NotSupportedError,
+            r"Using no_grad as a decorator is not supported",
+        ):
+            torch.jit.script(gn)
 
     def test_with_record_function(self):
         """
