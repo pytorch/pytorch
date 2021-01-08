@@ -514,10 +514,9 @@ if(NOT IOS AND CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES M
                   RESULT_VARIABLE BUILD_HOST_PROTOC_RESULT)
   if(NOT BUILD_HOST_PROTOC_RESULT EQUAL "0")
     message(FATAL_ERROR "Could not compile universal protoc.")
-  else()
-    set(PROTOBUF_PROTOC_EXECUTABLE "${PROJECT_SOURCE_DIR}/build_host_protoc/bin/protoc")
-    set(CAFFE2_CUSTOM_PROTOC_EXECUTABLE "${PROJECT_SOURCE_DIR}/build_host_protoc/bin/protoc")
   endif()
+  set(PROTOBUF_PROTOC_EXECUTABLE "${PROJECT_SOURCE_DIR}/build_host_protoc/bin/protoc")
+  set(CAFFE2_CUSTOM_PROTOC_EXECUTABLE "${PROJECT_SOURCE_DIR}/build_host_protoc/bin/protoc")
 endif()
 
 # ---[ Misc checks to cope with various compiler modes
