@@ -747,9 +747,7 @@ Tensor as_strided_qtensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef 
 }
 
 Tensor &as_strided_(Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
-  auto storage_offset = storage_offset_.value_or(self.storage_offset());
-  setStrided(self, size, stride, storage_offset);
-  return self;
+  return self.as_strided_(size, stride, storage_offset_);
 }
 
 Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_t length) {

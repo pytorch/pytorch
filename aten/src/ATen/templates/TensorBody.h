@@ -67,6 +67,14 @@ inline bool variable_excluded_from_dispatch() {
 }
 }
 
+namespace native {
+void setStrided(
+    const Tensor& self,
+    IntArrayRef size,
+    IntArrayRef stride,
+    int64_t storage_offset);
+}
+
 // Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
 // has an embedded reference count. In this way, Tensor is similar to boost::intrusive_ptr.
 //
@@ -135,6 +143,15 @@ class TORCH_API Tensor {
     // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
     dim = c10::maybe_wrap_dim(dim, this->dim(), false);
     return strides()[dim];
+  }
+
+  Tensor& as_strided_(
+      IntArrayRef size,
+      IntArrayRef stride,
+      optional<int64_t> storage_offset_ = c10::nullopt) {
+    auto storage_offset = storage_offset_.value_or(this->storage_offset());
+    native::setStrided(*this, size, stride, storage_offset);
+    return *this;
   }
 
   TensorImpl * unsafeGetTensorImpl() const {

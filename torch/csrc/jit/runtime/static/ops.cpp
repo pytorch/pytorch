@@ -213,8 +213,8 @@ SROperator aten_stack(Node* n) {
           i);
     }
 #endif
-    for (auto i = 0; i < inputs.size(); i++) {
-      inputs[i] = inputs[i].unsqueeze(dim);
+    for (at::Tensor& input : inputs) {
+      at::native::unsqueeze_(input, dim);
     }
     auto& out_t = p_node->Output(0).toTensor();
     out_t.resize_({0});
