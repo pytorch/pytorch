@@ -56,11 +56,13 @@ static bool IsStandardOp(const NodeKind& nkind) {
 
 // For these operators, all inputs share the same scalar type.
 // The output scalar type is always Bool.
-static const std::unordered_set<NodeKind> comparisonOps = {onnx::Greater,
-                                                           onnx::Less,
-                                                           onnx::Equal,
-                                                           onnx::GreaterOrEqual,
-                                                           onnx::LessOrEqual};
+static const std::unordered_set<NodeKind> comparisonOps = {
+    onnx::Greater,
+    onnx::Less,
+    onnx::Equal,
+    onnx::GreaterOrEqual,
+    onnx::LessOrEqual,
+};
 
 static bool IsComparisonOp(const NodeKind& nkind) {
   return comparisonOps.find(nkind) != comparisonOps.end();
@@ -103,7 +105,7 @@ static c10::optional<c10::ScalarType> PromoteScalarTypesWithCategory(
     if (c10::kBool == t) {
       return 1;
     }
-    if (c10::isIntegralType(t)) {
+    if (c10::isIntegralType(t, /*includeBool=*/false)) {
       return 2;
     }
     if (c10::isFloatingType(t)) {
