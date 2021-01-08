@@ -7,11 +7,10 @@
 
 
 import copy
-import onnx
 import numpy as np
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
-from onnx import helper, TensorProto
+from onnx import TensorProto
 
 import caffe2.python.onnx.frontend as c2_onnx
 from caffe2.python.onnx.helper import c2_native_run_net
