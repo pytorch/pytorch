@@ -7407,7 +7407,7 @@
   dispatch:
     CPU, CUDA: elu
 
-- func: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result, Tensor self) -> Tensor
+- func: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result, Tensor self_or_result) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
   dispatch:
