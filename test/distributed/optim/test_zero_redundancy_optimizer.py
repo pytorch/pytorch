@@ -22,8 +22,6 @@ BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-
-
 class TestZeroRedundancyOptimizer(MultiProcessTestCase):
     def setUp(self):
         super(TestZeroRedundancyOptimizer, self).setUp()
@@ -266,10 +264,10 @@ class TestZeroRedundancyOptimizerTwoRanks(TestZeroRedundancyOptimizer):
         self.assertFalse(m.bias.grad)
 
 
-class TestZeroRedundancyOptimizerThreeRanks(TestZeroRedundancyOptimizer):
+class TestZeroRedundancyOptimizerFourRanks(TestZeroRedundancyOptimizer):
     @property
     def world_size(self):
-        return 3
+        return 4
 
     def test_add_param_group(self):
         self.dist_init(self.rank)
@@ -337,23 +335,16 @@ class TestZeroRedundancyOptimizerThreeRanks(TestZeroRedundancyOptimizer):
         optim_state = [optimizer_state_dict]
         dist.broadcast_object_list(optim_state, src=reference_rank, group=dist.group.WORLD)
 
-
         # Load the optimizer state dict
         optimizer.load_state_dict(optim_state[0])
         dist.destroy_process_group()
-
-
-class TestZeroRedundancyOptimizerSixRanks(TestZeroRedundancyOptimizer):
-    @property
-    def world_size(self):
-        return 6
 
     def test_multiple_groups(self):
         # Only work with the even ranks, to check that the global_rank indexing is properly used
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "29501"
         dist.init_process_group(backend="gloo", rank=self.rank, world_size=self.world_size)
-        sub_group_ranks = [0, 2, 4]
+        sub_group_ranks = [0, 2]
         process_group = torch.distributed.new_group(ranks=sub_group_ranks, backend="gloo")
 
         # Make sure that all the ranks get different training data
@@ -416,6 +407,74 @@ class TestZeroRedundancyOptimizerSixRanks(TestZeroRedundancyOptimizer):
             )
             check(optimizer)
 
+    def test_parity(rank, world_size, backend, temp_file_name):
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29501"
+        dist.init_process_group(backend="gloo", rank=self.rank, world_size=self.world_size)
+
+        device = torch.device("cuda")
+        torch.cuda.set_device(rank)
+        torch.manual_seed(rank)
+        np.random.seed(rank)
+
+        def check_optimizer_equivalence(optimizer: Type[torch.optim.Optimizer]):
+            # Any model works. Add one different buffer per rank
+            model = torch.nn.Sequential(torch.nn.Linear(2, 3), torch.nn.Linear(3, 3), torch.nn.Linear(3, 3),)
+            model.register_buffer("test_buffer", torch.ones((1)) * rank)
+            model.to(device)
+
+            sharded_optimizer = optim.OSS(params=model.parameters(), optim=optimizer, lr=1e-3)
+            sharded_ddp_model = DDP(module=model, device_ids=[rank], broadcast_buffers=True)
+
+            ddp_model_single = copy.deepcopy(model)
+            ddp_optimizer = optimizer(ddp_model_single.parameters(), lr=1e-3)
+            ddp_model = DDP(ddp_model_single, device_ids=[rank], broadcast_buffers=True)
+
+            def check_same_model_params():
+                for pg, ddp_pg in zip(sharded_optimizer.param_groups, ddp_optimizer.param_groups):
+                    for p, ddp_p in zip(pg["params"], ddp_pg["params"]):
+                        assert torch.allclose(
+                            p, ddp_p, atol=1e-3
+                        ), f"Model parameters differ in between Pytorch optim and OSS \n{p} {ddp_p}\nworld size {world_size}"
+
+                for b, ddp_b in zip(sharded_ddp_model.buffers(), ddp_model.buffers()):
+                    assert torch.allclose(
+                        b, ddp_b
+                    ), f"Model buffers differ in between Pytorch optim and OSS\nworld size {world_size}"
+
+            # The model should be synchronized in between the ranks at construction time, check that
+            check_same_model_params()
+
+            # The models should stay the same in between the ranks
+            for i in range(20):
+                input_tensor = torch.rand((64, 2)).to(device)
+
+                def closure_ddp(input_tensor=input_tensor):
+                    ddp_optimizer.zero_grad()
+                    ddp_loss = ddp_model(input_tensor).abs().sum()
+                    ddp_loss.backward()
+                    return ddp_loss
+
+                def closure_sharded(input_tensor=input_tensor):
+                    sharded_optimizer.zero_grad()
+                    sharded_loss = sharded_ddp_model(input_tensor).abs().sum()
+                    sharded_loss.backward()
+                    return sharded_loss
+
+                loss_ddp = cast(torch.Tensor, ddp_optimizer.step(closure=closure_ddp))
+                loss_sharded_optim = cast(torch.Tensor, sharded_optimizer.step(closure=closure_sharded))
+
+                assert torch.allclose(
+                    loss_ddp, loss_sharded_optim
+                ), f"Losses differ in between Pytorch optim and OSS\nworld size {world_size}"
+
+                check_same_model_params()
+
+        for opt in [torch.optim.SGD, torch.optim.Adam]:
+            check_optimizer_equivalence(opt)
+
+        dist.destroy_process_group()
+
     @skip_if_no_gpu
     def test_gradient_clipping(self):
         device = torch.device(self.rank)
@@ -440,16 +499,10 @@ class TestZeroRedundancyOptimizerSixRanks(TestZeroRedundancyOptimizer):
             # Normally OSS would use ShardedDDP and only reduce to the proper rank, but this does not change the
             # gradient norm computation from OSS and adds a dependency.
             # to keep the comparison apples-to-apples DDP is used in both cases
-            model_oss = DDP(
-                module=model_base,
-                device_ids=[self.rank],
-            )
+            model_oss = DDP(module=model_base, device_ids=[self.rank],)
             sharded_optimizer = ZeroRedundancyOptimizer(model_oss.parameters(), lr=0.1, momentum=0.99)
 
-            model_ddp = DDP(
-                model,
-                device_ids=[self.rank],
-            )
+            model_ddp = DDP(model, device_ids=[self.rank],)
 
             loss_fn = torch.nn.L1Loss()
             loss_fn.to(device)
