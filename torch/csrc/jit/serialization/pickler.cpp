@@ -467,7 +467,7 @@ void Pickler::pushDouble(double value) {
   push<double>(swapDouble(value));
 }
 void Pickler::pushComplexDouble(const IValue& value) {
-  c10::complex<double> d = (*(value.toComplexDouble())).val;
+  c10::complex<double> d = value.toComplexDouble();
   pushGlobal("builtins", "complex");
   pushIValue(d.real());
   pushIValue(d.imag());

@@ -177,6 +177,38 @@ TEST(IValueTest, TuplePrint) {
   }
 }
 
+TEST(IValueTest, ComplexIValuePrint) {
+  {
+    IValue complex(c10::complex<double>(2, -3));
+    std::stringstream ss;
+    ss << complex;
+    ASSERT_EQ(ss.str(), "2-3j");
+  }
+
+  {
+    IValue complex(c10::complex<double>(2, 0));
+    std::stringstream ss;
+    ss << complex;
+    ASSERT_EQ(ss.str(), "2+0j");
+  }
+}
+
+TEST(IValueTest, Complex) {
+  auto c = c10::complex<double>(2, 3);
+  auto c_ = c10::complex<double>(2, -3);
+  IValue c1(c), c2(c_), c3(Scalar(c));
+
+  ASSERT_TRUE(c1.isComplexDouble());
+  // ASSERT_TRUE(c3.isComplexDouble());
+
+  ASSERT_EQ(c, c1.toComplexDouble());
+  ASSERT_FALSE(c1 == c2);
+  ASSERT_TRUE(c1 == c3);
+
+  ASSERT_TRUE(c1.isScalar());
+  ASSERT_TRUE(c2.toScalar().equal(c_));
+}
+
 TEST(IValueTest, BasicFuture) {
   auto f1 = c10::make_intrusive<ivalue::Future>(IntType::get());
   ASSERT_FALSE(f1->completed());
@@ -485,7 +517,7 @@ TEST(IValueTest, IdentityComparisonAndHashing) {
 
 TEST(IValueTest, getSubValues) {
   // Scalars have no subvalues.
-  IValue integer(42), float_(1.5);
+  IValue integer(42), float_(1.5), complex(c10::complex<double>(2, 3));
 
   IValue::HashAliasedIValues subvalues;
 
@@ -495,6 +527,11 @@ TEST(IValueTest, getSubValues) {
   subvalues.clear();
 
   float_.getSubValues(subvalues);
+  EXPECT_TRUE(subvalues.empty());
+
+  subvalues.clear();
+
+  complex.getSubValues(subvalues);
   EXPECT_TRUE(subvalues.empty());
 
   subvalues.clear();

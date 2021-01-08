@@ -286,6 +286,8 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isStorage() && lhs.toStorage().unsafeGetStorageImpl() == rhs.toStorage().unsafeGetStorageImpl();
     case Tag::Double:
       return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
+    case Tag::ComplexDouble:
+      return rhs.isComplexDouble() && lhs.toComplexDouble() == rhs.toComplexDouble();
     case Tag::Int:
       return rhs.isInt() && lhs.toInt() == rhs.toInt();
     case Tag::Bool:
@@ -310,8 +312,6 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::Capsule:
     case Tag::Generator:
     case Tag::Quantizer:
-    case Tag::ComplexDouble:
-      return ptrEqual(lhs, rhs);
     case Tag::Enum:
       return lhs.toEnumHolder()->is(*rhs.toEnumHolder());
     case Tag::Uninitialized:
@@ -692,7 +692,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
         << v.toDouble()
         << std::setprecision(orig_prec);
     } case IValue::Tag::ComplexDouble: {
-      c10::complex<double> d = (*(v.toComplexDouble())).val;
+      c10::complex<double> d = v.toComplexDouble();
       IValue real(d.real()), imag(std::abs(d.imag()));
       auto sign = "";
       if (d.imag() >= 0) {

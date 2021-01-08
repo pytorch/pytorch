@@ -11,10 +11,10 @@
 using c10::AliasInfo;
 using c10::BoolType;
 using c10::CapsuleType;
+using c10::ComplexDoubleType;
 using c10::DeviceObjType;
 using c10::DictType;
 using c10::FloatType;
-using c10::ComplexDoubleType;
 using c10::FutureType;
 using c10::GeneratorType;
 using c10::IntType;

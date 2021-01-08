@@ -53,7 +53,10 @@ struct PyObjectHolder;
 struct EnumHolder;
 struct ComplexHolder : c10::intrusive_ptr_target {
   public:
-    ComplexHolder(c10::complex<double> c) : val(c) {}
+    template <typename T>
+    ComplexHolder(c10::complex<T> c) {
+      val = convert<decltype(val), c10::complex<T>>(c);
+    }
     ComplexHolder() {}
     c10::complex<double> val;
 };
@@ -452,10 +455,10 @@ struct TORCH_API IValue final {
   }
 
   // ComplexDouble
-  IValue(c10::intrusive_ptr<ivalue::ComplexHolder> c);
+  template <typename T>
+  IValue(c10::complex<T> c);
   bool isComplexDouble() const { return Tag::ComplexDouble == tag; }
-  c10::intrusive_ptr<ivalue::ComplexHolder> toComplexDouble() &&;
-  c10::intrusive_ptr<ivalue::ComplexHolder> toComplexDouble() const&;
+  c10::complex<double> toComplexDouble() const;
 
   // Future
   IValue(c10::intrusive_ptr<ivalue::Future> v);
@@ -650,8 +653,7 @@ struct TORCH_API IValue final {
     if (s.isFloatingPoint()) {
       *this = s.toDouble();
     } else if (s.isComplex()) {
-      auto c_val = ivalue::ComplexHolder(s.toComplexDouble());
-      *this = IValue(c10::make_intrusive<ivalue::ComplexHolder>(c_val));
+      *this = s.toComplexDouble();
     } else {
       *this = s.toLong();
     }
@@ -667,7 +669,7 @@ struct TORCH_API IValue final {
     else if (isInt())
       return toInt();
     else if (isComplexDouble())
-      return (*toComplexDouble()).val;
+      return toComplexDouble();
     throw std::runtime_error("IValue is not a Scalar");
   }
 

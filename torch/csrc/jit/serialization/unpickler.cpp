@@ -544,9 +544,10 @@ void Unpickler::readGlobal(
     rebuildTensor(quantized);
   } else if (module_name == "builtins" && class_name == "complex") {
     globals_.emplace_back([this] {
-      auto elements = pop(stack_).toTuple()->elements();
-      auto c_holder = at::ivalue::ComplexHolder(c10::complex<double>(elements.at(0).toDouble(), elements.at(1).toDouble()));
-      stack_.emplace_back(c10::make_intrusive<at::ivalue::ComplexHolder>(c_holder));
+      auto elems = pop(stack_).toTuple()->elements();
+      auto complex =
+          c10::complex<double>(elems.at(0).toDouble(), elems.at(1).toDouble());
+      stack_.emplace_back(complex);
     });
 
   } else if (module_name == "collections" && class_name == "OrderedDict") {
