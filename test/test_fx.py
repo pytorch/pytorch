@@ -861,6 +861,11 @@ class TestFX(JitTestCase):
         x, w = torch.rand(3, 4), torch.rand(4, 4)
         self.assertTrue(any(n.target == torch.relu for n in traced.graph.nodes))
 
+    def test_empty_graph_codegen(self):
+        graph = torch.fx.Graph()
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertEqual(gm(), None)
+
     def test_sequential(self):
         m = torch.nn.Sequential(torch.nn.Conv2d(1, 1, 1))
         gm = torch.fx.symbolic_trace(m)
@@ -1166,6 +1171,12 @@ class TestFX(JitTestCase):
         input = torch.rand(3, 4)
         self.assertEqual(traced(input), MyNamedTup(input, input))
 
+    def test_update_args_kwargs_yells_at_you(self):
+        symtraced = symbolic_trace(SimpleTest())
+        node = next(iter(symtraced.graph.nodes))
+        with self.assertRaisesRegex(AttributeError, '__update_args_kwargs'):
+            node.__update_args_kwargs((), {})
+
     def test_torchbind_class_attribute_in_fx(self):
         if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
             self.skipTest("torch.classes._TorchScriptTesting._StackString is registered, skipping")
@@ -1189,6 +1200,19 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(NamedTupReturn())
         input = torch.rand(3, 4)
         self.assertEqual(traced(input), Pair(input, input))
+
+    def test_return_type_exists(self):
+        class ReturnTypeModule(torch.nn.Module):
+            def other(self, x: List[str]) -> List[str]:
+                return x
+
+            def forward(self, x: List[str]) -> List[str]:
+                return self.other(x)
+
+        traced = symbolic_trace(ReturnTypeModule())
+        self.assertIn("-> typing.List[str]", traced._code)
+        scripted = torch.jit.script(traced)
+        self.assertIn("-> List[str]", scripted.code)
 
 if __name__ == '__main__':
     run_tests()

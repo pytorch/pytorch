@@ -52,6 +52,12 @@ using CheckedFrom = const char*;
 TORCH_API std::ostream& operator<<(std::ostream& out, TensorGeometryArg t);
 TORCH_API void checkDim(
     CheckedFrom c,
+    const Tensor& tensor,
+    const char* name,
+    int pos, // 1-indexed
+    int64_t dim);
+TORCH_API void checkDim(
+    CheckedFrom c,
     const TensorGeometryArg& t,
     int64_t dim);
 // NB: this is an inclusive-exclusive range
