@@ -7,7 +7,7 @@ class Adamax(Optimizer):
 
     It has been proposed in `Adam: A Method for Stochastic Optimization`__.
 
-    Arguments:
+    Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         lr (float, optional): learning rate (default: 2e-3)
@@ -40,7 +40,7 @@ class Adamax(Optimizer):
     def step(self, closure=None):
         """Performs a single optimization step.
 
-        Arguments:
+        Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """

@@ -75,6 +75,6 @@ DECLARE_DISPATCH(fft_fill_with_conjugate_symmetry_fn, fft_fill_with_conjugate_sy
 // self should be the shape of the full signal and dims.back() should be the
 // one-sided dimension.
 // See NOTE [ Fourier Transform Conjugate Symmetry ]
-CAFFE2_API void _fft_fill_with_conjugate_symmetry_(const Tensor& self, IntArrayRef dims);
+TORCH_API void _fft_fill_with_conjugate_symmetry_(const Tensor& self, IntArrayRef dims);
 
 }} // at::native

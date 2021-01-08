@@ -357,7 +357,7 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
 #endif // USE_FBGEMM
 
     template <int kSpatialDim = 2>
-    CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>>
+    TORCH_API torch::class_<ConvPackedParamsBase<kSpatialDim>>
     register_conv_params() {
   static auto register_conv_params =
     torch::class_<ConvPackedParamsBase<kSpatialDim>>(
@@ -397,9 +397,9 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
 }
 
 template
-CAFFE2_API torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
+TORCH_API torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
 template
-CAFFE2_API torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
+TORCH_API torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
 
 torch::class_<LinearPackedParamsBase> register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>>;
