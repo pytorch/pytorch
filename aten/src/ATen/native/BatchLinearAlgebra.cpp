@@ -809,11 +809,10 @@ Tensor& _cholesky_inverse_out_helper_cpu(Tensor &result, Tensor& infos, bool upp
 }
 
 Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& input, bool upper) {
-  squareCheckInputs(input);
-  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
-  TORCH_CHECK(result.device() == input.device(),
-    "result device ", result.device(), " does not match input device ", input.device());
+  TORCH_INTERNAL_ASSERT(input.dim() >= 2);
+  TORCH_INTERNAL_ASSERT(input.size(-1) == input.size(-2));
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == input.scalar_type());
+  TORCH_INTERNAL_ASSERT(result.device() == input.device());
   TORCH_INTERNAL_ASSERT(infos.scalar_type() == at::kInt);
 
   // if result has no elements we can modify it
@@ -822,11 +821,11 @@ Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& i
     result.transpose_(-2, -1);
   } else {
     // Resize messes up the strides and we expect strictly column major order, so let's not use at::native::resize_output
-    TORCH_CHECK(result.sizes().equals(input.sizes()),
-    "result shape ", result.sizes(), " does not match input shape ", input.sizes());
+    TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
   }
 
-  TORCH_CHECK(result.transpose(-2, -1).is_contiguous(), "result tensor must be in batched column major order (Fortran contiguous).");
+  // result tensor must be in batched column major order (Fortran contiguous)
+  TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
   result.copy_(input);
 
   at::native::resize_output(infos, {std::max<int64_t>(1, batchCount(input))});
@@ -847,17 +846,37 @@ Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& i
 }
 
 Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
+  squareCheckInputs(input);
+  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
+  TORCH_CHECK(result.device() == input.device(),
+    "result device ", result.device(), " does not match input device ", input.device());
+  if (result.numel() != 0) {
+    // Resize messes up the strides, so let's not use at::native::resize_output
+    TORCH_CHECK(result.sizes().equals(input.sizes()),
+    "result shape ", result.sizes(), " does not match input shape ", input.sizes());
+  }
+
   // MAGMA doesn't have batched version of cholesky_inverse implemented.
   // as a workaround we can use cholesky_solve
   if (input.device().is_cuda() && input.dim() > 2) {
     auto identity = at::eye(input.size(-1), input.options());
     return at::cholesky_solve_out(result, identity, input, upper);
   }
-  // Single matrix routine requires 'infos' to reside in CPU memory,
+  // Single matrix MAGMA routine requires 'infos' to reside in CPU memory,
   // therefore we create 'infos' only on CPU for now.
   // This should be changed once batched version for CUDA is implemented.
   auto infos = at::empty({0}, input.options().dtype(kInt).device(kCPU));
-  result = cholesky_inverse_out_info(result, infos, input, upper);
+
+  // if result is empty and not in batched column major format we have to allocate a temporary tensor
+  if (result.numel() != 0 && !result.transpose(-2, -1).is_contiguous()) {
+    Tensor result_tmp = at::empty({0}, input.options());
+    result_tmp = cholesky_inverse_out_info(result_tmp, infos, input, upper);
+    result.copy_(result_tmp);
+  } else {
+    // use result's memory directly
+    result = cholesky_inverse_out_info(result, infos, input, upper);
+  }
 
   // Now check LAPACK/MAGMA error codes
   if (result.dim() > 2) {
