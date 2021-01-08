@@ -356,6 +356,11 @@ class TestSparse(TestCase):
         sp, _, _ = self._gen_sparse(2, 10, [3, 3, 3])
         self.assertRaises(RuntimeError, lambda: sp.to_sparse())
 
+    def test_sparse_bool(self):
+        a = self.value_tensor([True, False]).to(torch.bool)
+        b = a.to_sparse().to_dense()
+        self.assertEqual(a, b)
+
     def test_scalar(self):
         # tensor with value
         a = self.sparse_tensor(self.index_tensor([]).unsqueeze(1), 12.3, [])
@@ -3167,6 +3172,14 @@ class TestSparse(TestCase):
         test_sparse_matmul(2, 0, [0, 0], [0, 0])
         test_sparse_matmul(2, 0, [0, 10], [10, 0])
         test_error_cases()
+
+    def test_assign(self):
+        def assign_to(a):
+            a, i_a, v_a = self._gen_sparse(2, 5, [2, 3])
+            a[0] = 100
+
+        self.assertRaises(TypeError, assign_to)
+
 
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):

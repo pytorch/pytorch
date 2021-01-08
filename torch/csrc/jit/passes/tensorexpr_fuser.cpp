@@ -15,6 +15,11 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
 
+// NOLINTNEXTLINE
+C10_DEFINE_bool(
+    torch_jit_disable_cat,
+    false,
+    "disable aten::cat in TE fusion groups");
 namespace torch {
 namespace jit {
 
@@ -122,7 +127,7 @@ bool isSupported(Node* node) {
       "aten::round(Tensor self) -> Tensor",
       "aten::trunc(Tensor self) -> Tensor",
       "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
-      "aten::masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor",
+      // "aten::masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor",
       // "aten::masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> Tensor", TODO: requires 0-dim Tensor
       "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
@@ -200,6 +205,10 @@ bool isSupported(Node* node) {
           return false;
         }
       }
+    }
+
+    if (FLAGS_torch_jit_disable_cat && node->kind() == aten::cat) {
+      return false;
     }
 
     return true;
