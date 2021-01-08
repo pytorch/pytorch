@@ -513,7 +513,6 @@ static void leaky_relu_backward_kernel(TensorIterator& iter, Scalar negval_) {
     cpu_kernel_vec(
         iter,
         [&](scalar_t a, scalar_t b) -> scalar_t {
-          std::cout << a << " " << b << " " << negval << std::endl;
           return a > scalar_t(0) ? b : b * negval;
         },
         [&](Vec a, Vec b) -> Vec {
