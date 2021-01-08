@@ -331,11 +331,11 @@ void PyRRef::backward(
 
     // Invoke distributed backward remotely.
     auto rpcAgent = rpc::RpcAgent::getCurrentRpcAgent();
-    rpc::RpcAgent::toFutureMessage(
-        rpcAgent->send(
+    rpcAgent
+        ->send(
             rpcAgent->getWorkerInfo(rref->owner()),
-            std::move(rrefBackwardReq).toMessage()))
-        ->wait();
+            std::move(rrefBackwardReq).toMessage())
+        ->waitAndThrow();
   }
 }
 
