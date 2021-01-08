@@ -34,5 +34,13 @@ Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs);
 Value* addInputToBlock(Block* block);
 
 TORCH_API c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type);
+
+Node* createONNXUnsqueeze(
+    Graph* graph,
+    Node* n_to_insert_before,
+    Value* input,
+    int axis,
+    int opset_version);
+
 } // namespace jit
 } // namespace torch
