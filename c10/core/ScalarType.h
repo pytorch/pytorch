@@ -23,6 +23,10 @@ namespace c10 {
 // macros below, which are designed to behave similarly to the Dispatch macros
 // with the same name.
 
+static_assert(sizeof(bool) == 1,
+  "PyTorch assumes bool has size one, if you want to compile PyTorch on a platform "
+  "that does not satisfy this assumption, please open an issue on GitHub");
+
 // NB: Order matters for this macro; it is relied upon in
 // _promoteTypesLookup and the serialization format.
 #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(_) \
