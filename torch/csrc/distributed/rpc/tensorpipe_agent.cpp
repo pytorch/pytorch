@@ -604,7 +604,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
       });
 }
 
-std::shared_ptr<FutureMessage> TensorPipeAgent::send(
+std::shared_ptr<JitFuture> TensorPipeAgent::send(
     const WorkerInfo& toWorkerInfo,
     Message&& requestMessage,
     const float rpcTimeoutSeconds) {
@@ -778,8 +778,8 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
             });
       });
 
-  return std::shared_ptr<FutureMessage>(
-      futureResponseMessage, &futureResponseMessage->futMsg);
+  return toJitFuture(std::shared_ptr<FutureMessage>(
+      futureResponseMessage, &futureResponseMessage->futMsg));
 }
 
 void TensorPipeAgent::pollTimeoutRpcs() {

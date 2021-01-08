@@ -62,7 +62,7 @@ std::shared_ptr<FutureMessage> RpcAgent::sendWithRetries(
       computeNewRpcRetryTime(retryOptions, /* retryCount */ 0);
   // Making a copy of the message so it can be retried after the first send.
   Message msgCopy = message;
-  auto fm = send(to, std::move(message));
+  auto fm = toFutureMessage(send(to, std::move(message)));
   auto firstRetryRpc = std::make_shared<RpcRetryInfo>(
       to,
       std::move(msgCopy),
@@ -133,7 +133,7 @@ void RpcAgent::retryExpiredRpcs() {
       // with an error, since this RPC never succeeded and can no longer be
       // retried.
       try {
-        fm = send(earliestRpc->to_, std::move(msgCopy));
+        fm = toFutureMessage(send(earliestRpc->to_, std::move(msgCopy)));
         futures.emplace_back(fm, earliestRpc);
       } catch (std::exception& e) {
         // We must store the futures and exception messages here and only mark
