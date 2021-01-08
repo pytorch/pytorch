@@ -329,7 +329,7 @@ void moduleMethodsTuple(
     const Module& module,
     std::vector<c10::IValue>& elements,
     c10::optional<std::vector<c10::IValue>>& debug_info_elements,
-    std::unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>
+    const std::unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
         constants_from_jit,
     bool save_mobile_debug_info) {
   auto methods = module.get_methods();
