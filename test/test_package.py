@@ -2,7 +2,7 @@ from unittest import main, skipIf
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS
 from tempfile import NamedTemporaryFile
 from torch.package import PackageExporter, PackageImporter
-from torch.package._mangling import PackageMangler, PackageDemangler, _was_mangled
+from torch.package._mangling import PackageMangler, demangle, _is_mangled
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import torch
@@ -158,6 +158,36 @@ import module_a
         self.assertIsNot(package_a, package_a_im)
         self.assertIs(package_a.subpackage, package_a_im.subpackage)
 
+    @skipIf(version_info < (3, 7), 'mock uses __getattr__ a 3.7 feature')
+    def test_mock_from_imported_package(self):
+        """
+        Test that mocking will mock out an imported module. In particular,
+        the pattern matching should ignore name mangling.
+        """
+        import package_a.subpackage
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+        f1 = self.temp()
+        with PackageExporter(f1, verbose=False) as pe:
+            pe.save_pickle("obj", "obj.pkl", obj)
+
+        importer1 = PackageImporter(f1)
+        loaded1 = importer1.load_pickle("obj", "obj.pkl")
+
+        f2 = self.temp()
+        with PackageExporter(f2, verbose=False) as pe:
+            pe.importers.insert(0, importer1.import_module)
+            # These names are actually different, since loaded1's module should be mangled
+            self.assertNotEqual('package_a.subpackage', loaded1.__module__)
+            pe.mock('package_a.subpackage')
+            pe.require_module(loaded1.__module__)
+
+        importer2 = PackageImporter(f2)
+        m = importer2.import_module('package_a.subpackage')
+        r = m.result
+        with self.assertRaisesRegex(NotImplementedError, 'was mocked out'):
+            r()
+
     def test_exporting_mismatched_code(self):
         """
         If an object with the same qualified name is loaded from different
@@ -209,7 +239,7 @@ import module_a
         obj = package_a.subpackage.PackageASubpackageObject()
         obj2 = package_a.PackageAObject(obj)
         f1 = self.temp()
-        with PackageExporter(f1) as pe:
+        with PackageExporter(f1, verbose=False) as pe:
             pe.save_pickle("obj", "obj.pkl", obj2)
 
         importer1 = PackageImporter(f1)
@@ -503,14 +533,14 @@ class ManglingTest(TestCase):
         a_mangled = a.mangle("foo.bar.baz")
         self.assertEqual(a_mangled, b.demangle(a_mangled))
 
-    def test_was_mangled(self):
+    def test_is_mangled(self):
         a = PackageMangler()
         b = PackageMangler()
-        self.assertTrue(_was_mangled(a.mangle("foo.bar")))
-        self.assertTrue(_was_mangled(b.mangle("foo.bar")))
+        self.assertTrue(_is_mangled(a.mangle("foo.bar")))
+        self.assertTrue(_is_mangled(b.mangle("foo.bar")))
 
-        self.assertFalse(_was_mangled("foo.bar"))
-        self.assertFalse(_was_mangled(a.demangle(a.mangle("foo.bar"))))
+        self.assertFalse(_is_mangled("foo.bar"))
+        self.assertFalse(_is_mangled(a.demangle(a.mangle("foo.bar"))))
 
     def test_demangler_multiple_manglers(self):
         """
@@ -518,33 +548,9 @@ class ManglingTest(TestCase):
         """
         a = PackageMangler()
         b = PackageMangler()
-        d = PackageDemangler()
 
-        self.assertEqual("foo.bar", d.demangle(a.mangle("foo.bar")))
-        self.assertEqual("bar.foo", d.demangle(b.mangle("bar.foo")))
-
-    def test_demangler_collision(self):
-        """
-        PackageDemangler when demangling would produce a name collision with something previously demangled.
-        """
-        a = PackageMangler()
-        b = PackageMangler()
-        d = PackageDemangler()
-
-        a_mangled = a.mangle("foo.bar")
-        b_mangled = b.mangle("foo.bar")
-        d.demangle(a_mangled)
-        with self.assertRaises(RuntimeError):
-            d.demangle(b_mangled)
-
-        # A more subtle case of the above, where "foo.bar" collides with a mangled "foo.bar"
-        a = PackageMangler()
-        d = PackageDemangler()
-        a_mangled = a.mangle("foo.bar")
-
-        d.demangle("foo.bar")
-        with self.assertRaises(RuntimeError):
-            d.demangle(a_mangled)
+        self.assertEqual("foo.bar", demangle(a.mangle("foo.bar")))
+        self.assertEqual("bar.foo", demangle(b.mangle("bar.foo")))
 
 
 if __name__ == '__main__':

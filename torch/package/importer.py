@@ -93,6 +93,7 @@ class PackageImporter:
         Returns:
             types.ModuleType: the (possibly already) loaded module.
         """
+        name = self._mangler.demangle(name)
         return self._gcd_import(name)
 
     def load_binary(self, package: str, resource: str) -> bytes:
@@ -253,12 +254,6 @@ class PackageImporter:
         the loader did not.
 
         """
-        if name == self._mangler.parent_name():
-            # If an external part tries to load the top-level parent module
-            # directly, just return to them an empty module.
-            return self._get_empty_mangle_parent()
-
-        name = self._mangler.demangle(name)
         _sanity_check(name, package, level)
         if level > 0:
             name = _resolve_name(name, package, level)
@@ -304,6 +299,7 @@ class PackageImporter:
         return module
 
     def __import__(self, name, globals=None, locals=None, fromlist=(), level=0):
+        name = self._mangler.demangle(name)
         if level == 0:
             module = self._gcd_import(name)
         else:

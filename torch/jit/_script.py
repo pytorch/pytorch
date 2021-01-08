@@ -741,6 +741,43 @@ else:
         def __init__(self, arg=None):
             super().__init__()
 
+def call_prepare_scriptable_func_impl(obj, memo):
+    if not isinstance(obj, torch.nn.Module):
+        return obj
+
+    obj_id = id(obj)
+
+    # If obj_id is in memo, obj has already been prepared or is being
+    # prepared in another call up the stack.
+    if obj_id in memo:
+        return memo[id(obj)]
+
+    obj = obj.__prepare_scriptable__() if hasattr(obj, '__prepare_scriptable__') else obj  # type: ignore
+    # Record obj in memo to avoid infinite recursion in the case of cycles in the module
+    # hierarchy when recursing below.
+    memo[obj_id] = obj
+
+    new_obj_dict = {}
+
+    for name in obj.__dict__:
+        sub_module = obj.__dict__.get(name)
+        if name == '_modules':
+            for k, v in sub_module.items():
+                sub_module[k] = call_prepare_scriptable_func_impl(v, memo)
+            new_obj_dict[name] = sub_module
+        elif isinstance(sub_module, torch.nn.Module) and not isinstance(sub_module, ScriptModule):
+            new_obj_dict[name] = call_prepare_scriptable_func_impl(sub_module, memo)
+        else:
+            new_obj_dict[name] = sub_module
+
+    for k, v in new_obj_dict.items():
+        obj.__dict__[name] = v
+
+    return obj
+
+def call_prepare_scriptable_func(obj):
+    memo: Dict[int, torch.nn.Module] = {}
+    return call_prepare_scriptable_func_impl(obj, memo)
 
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
     r"""
@@ -894,6 +931,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         return obj
 
     if isinstance(obj, torch.nn.Module):
+        obj = call_prepare_scriptable_func(obj)
         return torch.jit._recursive.create_script_module(
             obj, torch.jit._recursive.infer_methods_to_compile
         )

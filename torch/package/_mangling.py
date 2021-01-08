@@ -26,8 +26,8 @@ up ``sys.modules``, and get the right module back, including:
 In these cases, we may silently pick up the wrong module for ``loaded_resnet18``
 and e.g. TorchScript the wrong source code for our model.
 
-How are names mangled?
-----------------------
+Mangling in PackageImporter
+---------------------------
 On import, all modules produced by a given ``PackageImporter`` are given a
 new top-level module as their parent. This is called the `mangle parent`. For example:
 ::
@@ -39,6 +39,11 @@ becomes
 The mangle parent is made unique to a given ``PackageImporter`` instance by
 bumping the ``mangle_index``, i.e. ``__torch__package{mangle_index}__``.
 
+Additionally, when we want to import a module from the PackageImporter
+(either by calling ``import_module`` or through ``__import__``), we need to
+make sure to demangle the user-provided name before looking it up in the
+package.
+
 It is important to note that this mangling happens `on import`, and the
 results are never saved into a package. Assigning mangle parents on import
 means that we can enforce that mangle parents are unique within the
@@ -48,19 +53,43 @@ maintaining backward compatibility for) this detail.
 .. note::
     No mangle parents should ever be saved into a package.
 
-Mangled names in PackageExporter
+Demangling in PackageExporter
 --------------------------------
 Occasionally ``PackageExporter`` may encounter mangled names during export. For
 example, the user may be re-packaging an object that was imported (and thus
 had its module name mangled).
 
-This means that ``PackageExporter`` must demangle all module names before it
-writes them to the package. This is needed in two places:
+This means that all entry points to ``PackageExporter`` must properly
+demangle any module names passed to them before doing anything else. That
+way, internally ``PackageExporter`` only ever deals with unmangled names.
+
+There are two additional complications with demangling in PackageExporter.
+
+First, name collisions. Consider the following user code:
+::
+    pe = PackageExporter('package.pt')
+    pe.save_module('foo.bar')
+    pe.save_module('__torch_package0__.foo.bar')
+    pe.save_module('__torch_package1__.foo.bar')
+
+All three packages demangle to the same ``'foo.bar'`` package, which leads to
+confusing behavior. To guard against this, ``PackageExporter`` keeps track of
+the demanglings it has performed and errors when a collision would have
+occurred.
+
+Second, pickled ``GLOBAL`` opcodes. When the pickler is writing out where to
+find a class to reconstruct its state, it typically looks at
+``obj.__module__`` to record how to retrieve it. We need to ensure that any
+global references in the pickle bytecode are always demangled, which is taken
+care of in ``CustomImportPickler``.
+
+
+
+This is needed in two places:
     - When converting the module name to a filename to for placing source code in the package.
     - When saving the module name in the pickle GLOBAL opcode.
 """
 import re
-from typing import Dict
 
 _mangle_index = 0
 
@@ -96,46 +125,26 @@ class PackageMangler:
         return self._mangle_parent
 
 
-class PackageDemangler:
-    """
-    Used on export, to ensure that we are only writing demangled names to the pacakge.
-    """
-
-    def __init__(self):
-        # Map of demangled name => original name
-        # This is to detect name collisions when you are trying to save something like:
-        #    foo.bar => foo.bar
-        #    __torch0__.foo.bar => foo.bar   # collision!
-        #    __torch1__.foo.bar => foo.bar   # collision!
-        self.demangled_names: Dict[str, str] = {}
-
-    def demangle(self, name):
-        """
-        Note: Unlike PackageMangler.demangle, this version work on any
-        mangled name, irrespective of which PackageMangler created it.
-        """
-        if not _was_mangled(name):
-            self.demangled_names[name] = name
-            return name
-
-        demangled = name.partition(".")[2]
-        # Check for whether this demangled name collides with a previously saved module.
-        existing_name = self.demangled_names.get(demangled)
-        if existing_name is None:
-            self.demangled_names[demangled] = name
-            return demangled
-
-        if name != existing_name:
-            raise RuntimeError(
-                "Name collision! Tried to save two different packaged modules:"
-                f"'{name}' and '{existing_name}' which resolve to the same name: '{demangled}'."
-            )
-        return demangled
-
-
-def _was_mangled(name):
+def _is_mangled(name: str) -> bool:
     return re.match(r"__torch_package_\d+__\.", name)
 
 
-def check_not_mangled(name):
-    assert not _was_mangled(name)
+def check_not_mangled(name: str):
+    assert not _is_mangled(name)
+
+
+class DemangledModuleName(str):
+    """
+    Tracks whether a name has passed through `demangle`. Otherwise behaves like a string.
+    """
+
+    pass
+
+
+def demangle(name: str) -> DemangledModuleName:
+    """
+    Note: Unlike PackageMangler.demangle, this version works on any
+    mangled name, irrespective of which PackageMangler created it.
+    """
+    demangled = name.partition(".")[2] if _is_mangled(name) else name
+    return DemangledModuleName(demangled)
