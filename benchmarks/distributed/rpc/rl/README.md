@@ -1,10 +1,10 @@
 # Distributed RPC Reinforcement Learning Benchmark
 
-This tool is used to measure pytorch distributed rpc throughput and latency for reinforcement learning.
+This tool is used to measure `torch.distributed.rpc` throughput and latency for reinforcement learning.
 
 The benchmark spawns one *agent* process and a configurable number of *observer* processes. As this benchmark focuses on RPC throughput and latency, the agent uses a dummy policy and observers all use randomly generated states and rewards. In each iteration, observers pass their state to the agent through `torch.distributed.rpc` and wait for the agent to respond with an action. If `batch=False`, then the agent will process and respond to a single observer request at a time. Otherwise, the agent will accumulate requests from multiple observers and run them through the policy in one shot. There is also a separate *coordinator* process that manages the *agent* and *observers*. 
 
-In addition to printing measurements, this benchmark produces a JSON file.  Users may choose a single argument to provide multiple comma separated entries for (ie: `world_size="10,50,100"`) in which case the JSON file produced can be passed to the plotting repo to visually see how results differ.  In this case, each entry for the variable argument will be placed on the x axis.
+In addition to printing measurements, this benchmark produces a JSON file.  Users may choose a single argument to provide multiple comma-separated entries for (ie: `world_size="10,50,100"`) in which case the JSON file produced can be passed to the plotting repo to visually see how results differ.  In this case, each entry for the variable argument will be placed on the x axis.
 
 The benchmark results comprise of 4 key metrics:
 1. _Agent Latency_ - How long does it take from the time the first action request in a batch is received from an observer to the time an action is selected by the agent for each request in that batch.  If `batch=False` you can think of it as `batch_size=1`.
@@ -20,7 +20,7 @@ This benchmark depends on PyTorch.
 
 For any environments you are interested in, pass the corresponding arguments to `python launcher.py`.
 
-`python launcher.py --world_size="10,20" --master_addr="127.0.0.1" --master_port="29501 --batch="True" --state_size="10-20-10" --nlayers="5" --out_features="10" --output_file_path="benchmark_report.json"`
+```python launcher.py --world_size="10,20" --master_addr="127.0.0.1" --master_port="29501 --batch="True" --state_size="10-20-10" --nlayers="5" --out_features="10" --output_file_path="benchmark_report.json"```
 
 Example Output:
 

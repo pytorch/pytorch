@@ -37,11 +37,9 @@ class Policy(nn.Module):
 
 
 class AgentBase:
-    def __init__(self, batch=True):
+    def __init__(self):
         r"""
         Inits agent class
-        Args:
-            batch (bool): Whether to process and respond to observer requests as a batch or 1 at a time
         """
         self.id = rpc.get_worker_info().id
         self.running_reward = 0
@@ -101,7 +99,7 @@ class AgentBase:
         for an action until queue size equals batch size named during Agent initiation, at which point
         actions are selected for all pending observer requests and communicated back to observers
         Args:
-            agent_rref (Rref): Rref of this agent
+            agent_rref (RRef): RRFef of this agent
             observer_id (int): Observer id of observer calling this function
             state (Tensor): Tensor representing current state held by observer
         """
@@ -140,26 +138,22 @@ class AgentBase:
         r"""
         Select actions based on observer state and communicates back to observer
         Args:
-            agent_rref (Rref): Rref of this agent
+            agent_rref (RRef): RRef of this agent
             observer_id (int): Observer id of observer calling this function
             state (Tensor): Tensor representing current state held by observer
         """
         self = agent_rref.local_value()
         observer_id -= 2
-
         agent_latency_start = time.time()
 
         state = state.float().unsqueeze(0)
         probs = self.policy(state)
         m = Categorical(probs)
         action = m.sample()
-
         self.saved_log_probs[observer_id].append(m.log_prob(action))
-
+        
         agent_latency_end = time.time()
-
         non_batch_latency = agent_latency_end - agent_latency_start
-
         self.agent_latency.append(non_batch_latency)
         self.agent_throughput.append(1 / non_batch_latency)
 

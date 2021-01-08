@@ -48,7 +48,7 @@ class ObserverBase:
         Runs single observer episode where for n_steps, an action is selected
         from the agent based on curent state and state is updated
         Args:
-            agent_rref (PyRRef): Pytorch RPC reference to agent
+            agent_rref (RRef): Remote Reference to the agent
             n_steps (int): Number of times to select an action to transform state per episode
         """
         state, ep_reward = self.reset(), None
