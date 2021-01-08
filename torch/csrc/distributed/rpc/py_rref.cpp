@@ -137,7 +137,7 @@ c10::intrusive_ptr<JitFuture> PyRRef::getFuture() const {
   // Marking hasValue to false, as this Future is only used for signaling
   // profiler to update profiling result and the profiler does not retrieve
   // any value from it.
-  return wrapFutureMessageInJitFuture(
+  return toPyJitFuture(
       rref_->getOwnerCreationFuture(), false /* hasValue */);
 }
 
