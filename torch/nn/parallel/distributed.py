@@ -18,7 +18,7 @@ if dist.is_available():
     from torch.distributed.distributed_c10d import ReduceOp
 if torch.distributed.rpc.is_available():
     RPC_AVAILABLE = True
-    from torch.distributed.pipeline.sync import Pipe
+    from torch.distributed.rpc import RRef
 from ..modules import Module
 from .replicate import replicate
 from .scatter_gather import scatter_kwargs, gather, is_namedtuple
@@ -30,6 +30,12 @@ def _find_tensors(obj):
     r"""
     Recursively find all tensors contained in the specified object.
     """
+    if RPC_AVAILABLE and isinstance(obj, RRef):
+        # If the current node is the owner of the RRef, unwrap it and try to
+        # find Tensors.
+        # TODO: Expand to remote RRefs.
+        if obj.is_owner():
+            return _find_tensors(obj.local_value())
     if isinstance(obj, torch.Tensor):
         return [obj]
     if isinstance(obj, (list, tuple)):
@@ -701,12 +707,7 @@ class DistributedDataParallel(Module):
             # this forward pass, to ensure we short circuit reduction for any
             # unused parameters. Only if `find_unused_parameters` is set.
             if self.find_unused_parameters:
-                if RPC_AVAILABLE and isinstance(self.module, Pipe):
-                    # Unwrap RRef to get real output for Pipe.
-                    # TODO: Needs to be reworked for cross host pipelining.
-                    self.reducer.prepare_for_backward(list(_find_tensors(output.local_value())))
-                else:
-                    self.reducer.prepare_for_backward(list(_find_tensors(output)))
+                self.reducer.prepare_for_backward(list(_find_tensors(output)))
             else:
                 self.reducer.prepare_for_backward([])
         else:
