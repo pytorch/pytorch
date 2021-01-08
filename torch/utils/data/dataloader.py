@@ -55,7 +55,7 @@ class _InfiniteConstantSampler(Sampler):
     r"""Analogous to ``itertools.repeat(None, None)``.
     Used as sampler for :class:`~torch.utils.data.IterableDataset`.
 
-    Arguments:
+    Args:
         data_source (Dataset): dataset to sample from
     """
 
@@ -78,7 +78,7 @@ class DataLoader(Generic[T_co]):
 
     See :py:mod:`torch.utils.data` documentation page for more details.
 
-    Arguments:
+    Args:
         dataset (Dataset): dataset from which to load the data.
         batch_size (int, optional): how many samples per batch to load
             (default: ``1``).
@@ -308,10 +308,6 @@ class DataLoader(Generic[T_co]):
     def multiprocessing_context(self, multiprocessing_context):
         if multiprocessing_context is not None:
             if self.num_workers > 0:
-                if not multiprocessing._supports_context:
-                    raise ValueError('multiprocessing_context relies on Python >= 3.4, with '
-                                     'support for different start methods')
-
                 if isinstance(multiprocessing_context, string_classes):
                     valid_start_methods = multiprocessing.get_all_start_methods()
                     if multiprocessing_context not in valid_start_methods:
