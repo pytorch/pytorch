@@ -500,6 +500,48 @@ class SpectralFuncInfo(OpInfo):
             ]
 
 
+class TriangularOpInfo(OpInfo):
+    """Operator information for function that take lower or upper triangular matrices as input.
+    They require a modified function to be tested for gradcheck, because the finite-difference algorithm
+    for calculating derivatives does not preserve the triangular property of the input and returning incorrect results.
+    """
+
+    def get_op(self):
+        """
+        Returns the function variant of the operator, torch.<op_name>,
+        compatible with gradcheck for triangular input functions.
+        It works only for single input argument and upper kwarg
+        """
+        def triangular_func(non_triangular_input, upper=False):
+            if upper:
+                triangular_input = non_triangular_input.triu()
+            else:
+                triangular_input = non_triangular_input.tril()
+            return self.op(triangular_input, upper=upper)
+
+        return triangular_func
+
+    def sample_inputs(self, device, dtype, requires_grad=False):
+        """
+        This function generates Cholesky factors of positive-definite (non-singular) Hermitian (symmetric) matrices
+        for cholesky_inverse.
+        """
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+        test_cases = (
+            torch.zeros(0, 0, dtype=dtype, device=device),  # 0x0 matrix
+            torch.zeros(0, 2, 2, dtype=dtype, device=device),  # zero batch of matrices
+            random_hermitian_pd_matrix(S, dtype=dtype, device=device),  # single matrix
+            random_hermitian_pd_matrix(S, 2, dtype=dtype, device=device),  # batch of matrices
+        )
+        test_cases = (torch.linalg.cholesky(a) for a in test_cases)
+        out = []
+        for a in test_cases:
+            a.requires_grad = requires_grad
+            out.append(SampleInput(a))
+            out.append(SampleInput(a, kwargs=dict(upper=True)))
+        return out
+
+
 def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False):
     """
     This function generates always solvable input for torch.linalg.solve
@@ -771,6 +813,24 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_broadcast_to),
+    TriangularOpInfo('cholesky_inverse',
+                     op=torch.cholesky_inverse,
+                     dtypes=floating_and_complex_types(),
+                     test_inplace_grad=False,
+                     supports_tensor_out=True,
+                     decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+                     skips=(
+                         # RuntimeError: cholesky_inverse does not support automatic differentiation for outputs with complex dtype.
+                         SkipInfo('TestGradients', 'test_fn_grad',
+                                  dtypes=[torch.complex64, torch.complex128]),
+                         SkipInfo('TestGradients', 'test_fn_gradgrad',
+                                  dtypes=[torch.complex64, torch.complex128]),
+                         SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                  dtypes=[torch.complex64, torch.complex128]),
+                         SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                                  dtypes=[torch.complex64, torch.complex128]),
+                         # These tests do not take into account custom op.get_op()
+                         SkipInfo('TestCommon', 'test_variant_consistency_jit'),),),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
