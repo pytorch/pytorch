@@ -82,6 +82,7 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 # Standard library
+from typing import Tuple
 import copy
 import io
 import unittest
@@ -1007,10 +1008,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
                     super(ScriptWrapperPackedLSTM, self).__init__()
                     self.cell = cell
 
-                def forward(self,
-                            x  # type: PackedSequence
-                            ):
-                    # type: (...) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]
+                def forward(self, x: PackedSequence) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]:
                     return self.cell(x)
 
             class ScriptWrapperPackedGRU(torch.nn.Module):
@@ -1018,10 +1016,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
                     super(ScriptWrapperPackedGRU, self).__init__()
                     self.cell = cell
 
-                def forward(self,
-                            x  # type: PackedSequence
-                            ):
-                    # type: (...) -> Tuple[PackedSequence, torch.Tensor]
+                def forward(self, x: PackedSequence) -> Tuple[PackedSequence, torch.Tensor]:
                     return self.cell(x)
 
             script_wrapper_map = {'LSTM': ScriptWrapperPackedLSTM,

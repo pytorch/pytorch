@@ -44,6 +44,7 @@ from torch._C import TensorType, BoolType, parse_ir, _propagate_shapes
 from torch._six import PY37, StringIO
 from torch.autograd import Variable
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3, Any  # noqa: F401
+from torch.nn.utils.rnn import PackedSequence
 from torch.testing import FileCheck
 import torch.autograd.profiler
 import torch.cuda
@@ -80,30 +81,30 @@ from torch.testing._internal.test_module.no_future_div import div_int_nofuture, 
 
 # Standard library
 from collections import defaultdict, namedtuple, OrderedDict
-import copy
 from copy import deepcopy
 from itertools import product
-import itertools
 from textwrap import dedent
 from typing import List, Dict, NamedTuple, Optional, Tuple, Union
-import inspect
-import math
+import copy
 import functools
-import numpy as np
+import inspect
 import io
+import itertools
+import math
+import numpy as np
 import os
 import pickle
 import pickletools
 import random
+import re
 import shutil
+import string
 import sys
 import tempfile
 import types
 import unittest
 import warnings
 import zipfile
-import re
-import string
 
 
 def canonical(graph):
@@ -14369,7 +14370,6 @@ dedent """
         self.assertEqual(eager_out, script_out)
 
     def test_nn_LSTM(self):
-        from torch.nn.utils.rnn import PackedSequence
         input = torch.nn.utils.rnn.pack_sequence([torch.randn(5, 5)])
 
         class S(torch.jit.ScriptModule):
@@ -14378,8 +14378,7 @@ dedent """
                 self.x = torch.nn.LSTM(5, 5)
 
             @torch.jit.script_method
-            def forward(self, input):
-                # type: (PackedSequence) -> Tuple[PackedSequence, Tuple[Tensor, Tensor]]  # noqa
+            def forward(self, input: PackedSequence) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]:
                 return self.x(input)
 
         eager_out = self.runAndSaveRNG(lambda x: torch.nn.LSTM(5, 5)(x), (input,))[0]
@@ -14388,7 +14387,6 @@ dedent """
         self.assertEqual(eager_out, script_out)
 
     def test_nn_GRU(self):
-        from torch.nn.utils.rnn import PackedSequence
         seq_input = torch.nn.utils.rnn.pack_sequence([torch.randn(5, 5)])
         tensor_input = torch.randn(5, 5, 5)
 
@@ -14398,8 +14396,7 @@ dedent """
                 self.x = torch.nn.GRU(5, 5)
 
             @torch.jit.script_method
-            def forward(self, input):
-                # type: (PackedSequence) -> Tuple[PackedSequence, Tensor]
+            def forward(self, input: PackedSequence) -> Tuple[PackedSequence, torch.Tensor]:
                 return self.x(input)
 
         class TensorGRU(torch.jit.ScriptModule):
@@ -14408,8 +14405,7 @@ dedent """
                 self.x = torch.nn.GRU(5, 5)
 
             @torch.jit.script_method
-            def forward(self, input):
-                # type: (Tensor) -> Tuple[Tensor, Tensor]
+            def forward(self, input: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
                 return self.x(input)
 
         seq_eager_out = self.runAndSaveRNG(lambda x: torch.nn.GRU(5, 5)(x), (seq_input,))[0]
