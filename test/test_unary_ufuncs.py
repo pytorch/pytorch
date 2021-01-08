@@ -285,7 +285,7 @@ class TestUnaryUfuncs(TestCase):
                 msg = None
 
             exact_dtype = True
-            if op.promotes_integers_to_float and dtype in integral_types() + (torch.bool,):
+            if torch.testing.is_integral(dtype) and expected.dtype.kind in 'fc':
                 exact_dtype = False
 
                 if dtype in [torch.uint8, torch.int8, torch.bool]:
@@ -402,53 +402,33 @@ class TestUnaryUfuncs(TestCase):
 
         self.assertEqual(actual, expected)
 
-    def _test_out_arg(self, op, input, output):
-        dtype = input.dtype
-        out_dtype = output.dtype
-        if dtype is out_dtype:
-            expected = op(input)
-            op(input, out=output)
-            self.assertEqual(output, expected)
+    def _test_out_arg(self, op, input, output, expected):
+        if op.safe_casts_outputs:
+            expect_fail = (
+                # Can't cast complex to real
+                expected.dtype.is_complex and not output.dtype.is_complex or
+                # Can't cast float to integer
+                expected.dtype.is_floating_point and torch.testing.is_integral(output.dtype))
         else:
+            expect_fail = output.dtype != expected.dtype
+
+        if expect_fail:
             with self.assertRaises(RuntimeError):
                 op(input, out=output)
-
-    def _test_out_promote_int_to_float_op(self, op, input, output):
-        def compare_out(op, input, out):
-            out_dtype = out.dtype
-            expected = op(input)
-            op(input, out=out)
-            self.assertEqual(out, expected.to(out_dtype))
-
-        dtype = input.dtype
-        out_dtype = output.dtype
-        if out_dtype.is_floating_point and not dtype.is_complex:
-            compare_out(op, input, output)
-        elif out_dtype.is_floating_point and dtype.is_complex:
-            if op.supports_complex_to_float:
-                compare_out(op, input, output)
-            else:
-                # Can't cast complex to float
-                with self.assertRaises(RuntimeError):
-                    op(input, out=output)
-        elif out_dtype.is_complex:
-            compare_out(op, input, output)
         else:
-            # Can't cast to Integral types
-            with self.assertRaises(RuntimeError):
-                op(input, out=output)
+            res = op(input, out=output)
+            self.assertTrue(res is output)
+            self.assertEqual(output, expected.to(output.dtype))
 
     @ops(unary_ufuncs, dtypes=OpDTypes.supported)
     def test_out_arg_all_dtypes(self, device, dtype, op):
         input = make_tensor((64, 64), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])
+        expected = op(input)
 
         for out_dtype in all_types_and_complex_and(torch.bool, torch.half):
             out = torch.empty_like(input, dtype=out_dtype)
-            if op.promotes_integers_to_float:
-                self._test_out_promote_int_to_float_op(op, input, out)
-            else:
-                self._test_out_arg(op, input, out)
+            self._test_out_arg(op, input, out, expected)
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool] +
               torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
