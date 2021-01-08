@@ -86,7 +86,7 @@
 #     e.g., it is used by _cudnn_rnn
 #
 # If you need a complex expression, e.g., with local variables,
-# write a _backward function in tools/autograd/templates/Functions.cpp
+# write a _backward function in torch/csrc/autograd/FunctionsManual.cpp
 # and invoke it from here.  By the way, go read
 # https://github.com/zdevito/ATen/issues/163; this describes an
 # important hazard that occurs when porting backwards from Python to C++
@@ -896,8 +896,8 @@
   index: non_differentiable
   source: grad.take(index)
 
-- name: qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)
-  self: qr_backward(grads, self, some, Q, R)
+- name: linalg_qr(Tensor self, str mode='reduced') -> (Tensor Q, Tensor R)
+  self: linalg_qr_backward(grads, self, mode, Q, R)
 
 - name: rad2deg(Tensor self) -> Tensor
   self: rad2deg_backward(grad)
