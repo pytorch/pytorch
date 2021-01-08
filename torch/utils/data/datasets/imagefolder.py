@@ -7,7 +7,7 @@ from pathlib import Path
 from torch.utils.data.datasets.common import get_file_pathnames_from_root
 
 
-def is_img_ext(ext:str):
+def is_img_ext(ext: str):
     return ext.lower() in [".png", ".jpg", ".jpeg", ".img", ".image", ".pbm", ".pgm", ".ppm"]
 
 class ImageFolder:
@@ -15,7 +15,7 @@ class ImageFolder:
 
     This is a class to do pre-processing for an image folder
     args:
-        root : the root of the image files
+        root: the root of the image files
 
     """
 
@@ -23,7 +23,7 @@ class ImageFolder:
         self.root : str = root
 
 
-    def to_tar(self, tar_pathname:str, create_label:bool = True):
+    def to_tar(self, tar_pathname: str, create_label: bool = True):
 
         # always compress for now
         tarstream = tarfile.open(tar_pathname, mode="w:gz")
@@ -39,7 +39,7 @@ class ImageFolder:
                 try:
                     tarstream.close()
                     os.remove(tar_pathname)
-                except:
+                except Exception as e:
                     pass
                 raise TypeError("Image folder {} should only contain image file, but got non-image file {}".format(
                     self.root, pathname))
