@@ -266,13 +266,15 @@ class Distribution(object):
                 raise ValueError('Value is not broadcastable with batch_shape+event_shape: {} vs {}.'.
                                  format(actual_shape, expected_shape))
         try:
-            assert self.support is not None
-            if not self.support.check(value).all():
-                raise ValueError('The value argument must be within the support')
+            support = self.support
         except NotImplementedError:
             warnings.warn(f'{self.__class__} does not define `support` to enable ' +
                           'sample validation. Please initialize the distribution with ' +
                           '`validate_args=False` to turn off validation.')
+            return
+        assert support is not None
+        if not support.check(value).all():
+            raise ValueError('The value argument must be within the support')
 
     def _get_checked_instance(self, cls, _instance=None):
         if _instance is None and type(self).__init__ != cls.__init__:
