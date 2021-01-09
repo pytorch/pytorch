@@ -151,7 +151,7 @@ class AgentBase:
         m = Categorical(probs)
         action = m.sample()
         self.saved_log_probs[observer_id].append(m.log_prob(action))
-        
+
         agent_latency_end = time.time()
         non_batch_latency = agent_latency_end - agent_latency_start
         self.agent_latency.append(non_batch_latency)
