@@ -28,7 +28,6 @@ TEST(IValueTest, Basic) {
   IValue i(4);
   ASSERT_TRUE(i.isInt());
   ASSERT_EQ(i.toInt(), 4);
-
   IValue dlist(c10::List<double>({3.5}));
   ASSERT_TRUE(dlist.isDoubleList());
   ASSERT_TRUE(dlist.toDoubleVector() == std::vector<double>({3.5}));
@@ -182,24 +181,31 @@ TEST(IValueTest, ComplexIValuePrint) {
     IValue complex(c10::complex<double>(2, -3));
     std::stringstream ss;
     ss << complex;
-    ASSERT_EQ(ss.str(), "2-3j");
+    ASSERT_EQ(ss.str(), "2.-3.j");
   }
 
   {
     IValue complex(c10::complex<double>(2, 0));
     std::stringstream ss;
     ss << complex;
-    ASSERT_EQ(ss.str(), "2+0j");
+    ASSERT_EQ(ss.str(), "2.+0.j");
+  }
+
+  {
+    IValue complex(c10::complex<double>(0, 3));
+    std::stringstream ss;
+    ss << complex;
+    ASSERT_EQ(ss.str(), "0.+3.j");
   }
 }
 
 TEST(IValueTest, Complex) {
   auto c = c10::complex<double>(2, 3);
   auto c_ = c10::complex<double>(2, -3);
-  IValue c1(c), c2(c_), c3(Scalar(c));
+  IValue c1(c), c2(c_), c3{at::Scalar(c)};
 
   ASSERT_TRUE(c1.isComplexDouble());
-  // ASSERT_TRUE(c3.isComplexDouble());
+  ASSERT_TRUE(c3.isComplexDouble());
 
   ASSERT_EQ(c, c1.toComplexDouble());
   ASSERT_FALSE(c1 == c2);
