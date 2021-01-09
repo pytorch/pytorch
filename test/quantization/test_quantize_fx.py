@@ -958,7 +958,7 @@ class TestQuantizeFx(QuantizationTestCase):
         ]
 
         qconfig_dict2 = {"": None, "module_name": [("sub", default_qconfig)]}
-        # Only nodes in Sub module instance is quantized
+        # Only nodes in Sub module instance are quantized
         # the first transpose is not quantized because the input is not quantized
         node_list2 = [
             ns.call_module(nn.Conv2d),

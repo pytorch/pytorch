@@ -207,7 +207,7 @@ cmake_dependent_option(
     USE_VALGRIND "Use Valgrind. Only available on Linux." ON
     "LINUX" OFF)
 option(USE_VULKAN "Use Vulkan GPU backend" OFF)
-option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference even on fp32 tensors" ON)
+option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference even on fp32 tensors" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation (needs libshaderc)" OFF)
 option(USE_VULKAN_WRAPPER "Vulkan - Dynamically load Vulkan functions" ON)
@@ -318,7 +318,7 @@ set(OP_DEPENDENCY "" CACHE STRING
 # symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk
 # https://software.intel.com/en-us/articles/symbol-lookup-error-when-linking-intel-mkl-with-gcc-on-ubuntu
 if(LINUX)
-  set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-as-needed ${CMAKE_SHARED_LINKER_FLAGS}")
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-as-needed")
 endif()
 
 if(MSVC)

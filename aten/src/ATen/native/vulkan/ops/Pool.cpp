@@ -33,10 +33,10 @@ Tensor adaptive_avg_pool2d(
     v_self.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if (v_self.has_image()) {
+    if C10_LIKELY(v_self.has_image()) {
       const uvec3 v_output_size = v_output.extents();
       const uvec3 v_self_size = v_self.extents();
 
@@ -45,7 +45,7 @@ Tensor adaptive_avg_pool2d(
         static_cast<float>(v_self_size.data[1u]) / v_output_size.data[1u],
       };
 
-      const struct {
+      const struct Block final {
         uvec3 size;
         uint32_t _;
         vec2 stride;
@@ -88,8 +88,7 @@ Tensor adaptive_avg_pool2d(
       TORCH_CHECK(false, "Not implemented!");
     }
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
   return convert(v_output);
 }
@@ -171,13 +170,11 @@ Tensor avg_pool2d(
     v_self.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    using namespace utils;
-
-    if (v_self.has_image()) {
-      const struct {
+    if C10_LIKELY(v_self.has_image()) {
+      const struct Block final {
         uvec3 extents;
         int32_t range;
         ivec2 iextents;
@@ -235,8 +232,7 @@ Tensor avg_pool2d(
       TORCH_CHECK(false, "Not implemented!");
     }
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
   return convert(v_output);
 }
