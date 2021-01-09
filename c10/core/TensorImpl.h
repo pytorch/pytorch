@@ -582,9 +582,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   /**
    * Set whether or not a tensor requires gradient.
-   *
-   * It is only valid to call this method on a Variable.
-   * See Note [Tensor versus Variable in C++].
    */
   void set_requires_grad(bool requires_grad);
 
@@ -594,27 +591,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * we can automatically differentiate back to them.  A tensor that
    * requires gradient and has no history is a "leaf" tensor, which we
    * accumulate gradients into.
-   *
-   * It is only valid to call this method on a Variable.
-   * See Note [Tensor versus Variable in C++].
    */
   bool requires_grad() const;
 
   /**
    * Return a mutable reference to the gradient.  This is conventionally
    * used as `t.grad() = x` to set a gradient to a completely new tensor.
-   *
-   * It is only valid to call this method on a Variable.
-   * See Note [Tensor versus Variable in C++].
    */
   at::Tensor& mutable_grad();
 
   /**
    * Return the accumulated gradient of a tensor.  This gradient is written
    * into when performing backwards, when this tensor is a leaf tensor.
-   *
-   * It is only valid to call this method on a Variable.
-   * See Note [Tensor versus Variable in C++].
    */
   const at::Tensor& grad() const;
 
