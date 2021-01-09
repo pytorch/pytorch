@@ -3,7 +3,6 @@
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAGuard.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
@@ -12,7 +11,6 @@
 // some cusolver functions don't work well on cuda 9.2 or cuda 10.1.105, cusolver is used on cuda >= 10.1.243
 #define USE_CUSOLVER
 #endif
-
 
 #ifdef USE_CUSOLVER
 
