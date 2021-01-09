@@ -745,6 +745,12 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
             if isinstance(target, str):
                 return target
             if hasattr(target, '__module__'):
+                if not hasattr(target, '__name__'):
+                    # Just to be defensive, if we don't have `__name__`, get the
+                    # qualname. Not sure if this happens for any members of `operator`
+                    # or `builtins`. This fallback path is not as good, since e.g.
+                    # things in `operator` have `_operator` as their __module__.
+                    return get_qualified_name(target)
                 if target.__module__ == 'builtins':
                     return f'builtins.{target.__name__}'
                 elif target.__module__ == '_operator':
