@@ -722,12 +722,12 @@ class DistributedDataParallel(Module):
                     output = obj.to(target_gpu)
                 # synchronize with the copy stream
                 with torch.cuda.device(target_gpu):
-                    main_stream = torch.cuda.current_stream()
+                    current_stream = torch.cuda.current_stream()
                     # Sync the current stream with the copy stream
-                    main_stream.wait_stream(stream)
+                    current_stream.wait_stream(stream)
                     # Ensure tensor memory is not reused until work on
                     # main stream is complete
-                    output.record_stream(main_stream)
+                    output.record_stream(current_stream)
                 return (output, )
             if is_namedtuple(obj):
                 return [type(obj)(*args) for args in zip(*map(to_map, obj))]
