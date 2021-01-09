@@ -108,7 +108,7 @@ class QuantizationTracer(Tracer):
         # We can change this if there is a use case that configures
         # qconfig using top level module type
         self.scope = Scope("", None)
-        self.node_name_to_scope : Dict[str, Tuple[str, Any]] = {}
+        self.node_name_to_scope : Dict[str, Tuple[str, type]] = {}
 
     def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
         return (m.__module__.startswith("torch.nn") and
@@ -119,14 +119,10 @@ class QuantizationTracer(Tracer):
 
     def call_module(self, m: torch.nn.Module, forward: Callable[..., Any], args : Tuple[Any, ...], kwargs : Dict[str, Any]) -> Any:
         module_qualified_name = self.path_of_module(m)
-        if not self.is_leaf_module(m, module_qualified_name):
-            def scoped_forward(_args, _kwargs):
-                # Creating scope with information of current module
-                # scope will be restored automatically upon exit
-                with ScopeContextManager(self.scope, m, module_qualified_name):
-                    return forward(*_args, **_kwargs)
-            return scoped_forward(args, kwargs)
-        return self.create_proxy("call_module", module_qualified_name, args, kwargs)
+        # Creating scope with information of current module
+        # scope will be restored automatically upon exit
+        with ScopeContextManager(self.scope, m, module_qualified_name):
+            return super().call_module(m, forward, args, kwargs)
 
     def create_node(self, kind : str, target : Target,
                     args : Tuple[Argument, ...], kwargs : Dict[str, Argument], name : Optional[str] = None,

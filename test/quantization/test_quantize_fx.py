@@ -916,7 +916,13 @@ class TestQuantizeFx(QuantizationTestCase):
 
     def test_qconfig_for_call_method(self):
         class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
             def forward(self, x):
+                x = x.transpose(2, 3)
+                x = self.conv(x)
                 return x.transpose(2, 3)
 
         class M(torch.nn.Module):
@@ -927,35 +933,55 @@ class TestQuantizeFx(QuantizationTestCase):
                 self.conv2 = torch.nn.Conv2d(1, 1, 1)
 
             def forward(self, x):
-                x = self.conv1(x)  # default_qconfig
-                x = self.sub(x)  # None
-                x = self.conv2(x)  # default_qconfig
-                return x.transpose(2, 3)  # default_qconfig
+                x = self.conv1(x)
+                x = self.sub(x)
+                x = self.conv2(x)
+                return x.transpose(2, 3)
 
-
-        m = M().eval()
-        qconfig_dict = {"": default_qconfig, "module_name": [("sub", None)]}
-        m = prepare_fx(m, qconfig_dict)
-        m(torch.randn(2, 1, 3, 3))
-        m = convert_fx(m)
+        qconfig_dict1 = {"": default_qconfig, "module_name": [("sub", None)]}
         # since sub is configured to have qconfig None, we should dequantize the output
         # of self.conv1 and quantize the input of self.conv2
         # dequantize after conv2 should happen after transpose since
         # it is configured with default_qconfig
-        node_list = [
+        # nodes in Sub module instance is not quantized
+        node_list1 = [
             ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Conv2d),
             ns.call_method("dequantize"),
+            ns.call_method("transpose"),
+            ns.call_module(nn.Conv2d),
             ns.call_method("transpose"),
             ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Conv2d),
             ns.call_method("transpose"),
             ns.call_method("dequantize")
         ]
-        self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
-        # make sure it runs
-        m(torch.randn(2, 1, 3, 3))
+        qconfig_dict2 = {"": None, "module_name": [("sub", default_qconfig)]}
+        # Only nodes in Sub module instance is quantized
+        # the first transpose is not quantized because the input is not quantized
+        node_list2 = [
+            ns.call_module(nn.Conv2d),
+            ns.call_method("transpose"),
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Conv2d),
+            ns.call_method("transpose"),
+            ns.call_method("dequantize"),
+            ns.call_module(nn.Conv2d),
+            ns.call_method("transpose"),
+        ]
+
+        for qconfig_dict, node_list in [
+                (qconfig_dict1, node_list1),
+                (qconfig_dict2, node_list2)
+        ]:
+            m = M().eval()
+            m = prepare_fx(m, qconfig_dict)
+            m(torch.randn(2, 1, 3, 3))
+            m = convert_fx(m)
+            self.checkGraphModuleNodes(m, expected_node_list=node_list)
+            # make sure it runs
+            m(torch.randn(2, 1, 3, 3))
 
     @skipIfNoFBGEMM
     def test_qat_and_script(self):

@@ -345,7 +345,7 @@ class Quantizer:
             root: torch.nn.Module,
             input_graph: Graph,
             qconfig_dict: Any,
-            node_name_to_scope: Dict[str, Tuple[str, Any]]) -> None:
+            node_name_to_scope: Dict[str, Tuple[str, type]]) -> None:
         global_qconfig = qconfig_dict.get("", None)
 
         self.qconfig_map = dict()
@@ -382,7 +382,7 @@ class Quantizer:
             self,
             model: GraphModule,
             qconfig_dict: Any,
-            node_name_to_scope: Dict[str, Tuple[str, Any]],
+            node_name_to_scope: Dict[str, Tuple[str, type]],
             prepare_custom_config_dict: Optional[Dict[str, Any]],
             is_standalone_module: bool) -> GraphModule:
         """ standalone_module means it a submodule that is not inlined in
@@ -578,7 +578,7 @@ class Quantizer:
             self,
             model: GraphModule,
             qconfig_dict: Any,
-            node_name_to_scope: Dict[str, Tuple[str, Any]],
+            node_name_to_scope: Dict[str, Tuple[str, type]],
             prepare_custom_config_dict: Dict[str, Any] = None,
             is_standalone_module: bool = False) -> GraphModule:
         return self._prepare(
