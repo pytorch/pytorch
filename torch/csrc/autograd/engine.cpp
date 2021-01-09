@@ -257,7 +257,7 @@ void Engine::decrement_non_reentrant_thread_count() {
 }
 
 void Engine::thread_init(int device, const std::shared_ptr<ReadyQueue>& ready_queue, bool should_increment) {
-// On Windows, std::set_terminate is used on a thread basis. So we need to
+// On Windows, std::set_terminate is used on a per-thread basis. So we need to
 // do this for every thread.
 #ifdef _WIN32
   c10::set_terminate_handler();
@@ -421,7 +421,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
 // thread, but sharing the same cpu_ready_queue with parent thread is a
 // performance improvement and cuda thread still have to do the same thing.
 void Engine::reentrant_thread_init() {
-// On Windows, std::set_terminate is used on a thread basis. So we need to
+// On Windows, std::set_terminate is used on a per-thread basis. So we need to
 // do this for every thread.
 #ifdef _WIN32
   c10::set_terminate_handler();
