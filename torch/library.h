@@ -59,7 +59,6 @@
 /// ```
 
 #include <c10/core/DispatchKey.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/op_whitelist.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #if defined(EXPOSE_C2_OPS) || !defined(CAFFE2_IS_XPLAT_BUILD)

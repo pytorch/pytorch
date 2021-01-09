@@ -1,6 +1,7 @@
 #include <ATen/BatchedFallback.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/VmapTransforms.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/util/llvmMathExtras.h>
 
 namespace at {
