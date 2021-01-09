@@ -175,7 +175,7 @@ static PyObject * THPModule_crashIfATenASAN(PyObject *module, PyObject *arg) {
 }
 
 static PyObject * THPModule_crashImmediately(PyObject *module, PyObject *noargs) {
-  throw std::exception("Emulate uncaught exception that leads to the crash");
+  throw std::runtime_error("Emulate uncaught exception that leads to the crash");
   Py_RETURN_NONE;
 }
 
