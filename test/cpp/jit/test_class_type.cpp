@@ -99,7 +99,12 @@ TEST(ClassTypeTest, IdenticalTypesDifferentCus) {
         ->check("foo(0x")
         ->check_same(")")
         ->run(e.what());
+
+    return;
   }
+
+  // This should never execute.
+  ASSERT_TRUE(false);
 }
 
 } // namespace jit
