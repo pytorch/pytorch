@@ -305,7 +305,8 @@ void setstateTuple(
   if (checkHasValidSetGetState(type)) {
     Function& setstate = type->getMethod("__setstate__");
     if (setstate.isGraphFunction()) {
-      std::unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal> empty_map;
+      std::unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>
+          empty_map;
       auto func_tuple =
           getFunctionTuple(module, setstate, empty_map, save_mobile_debug_info);
       elements.push_back(func_tuple.first);
