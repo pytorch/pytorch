@@ -174,7 +174,7 @@ static PyObject * THPModule_crashIfATenASAN(PyObject *module, PyObject *arg) {
   return THPUtils_packInt32(at::_crash_if_asan(THPUtils_unpackInt(arg)));
 }
 
-static PyObject * THPModule_crashImmediately(PyObject *module, PyObject *arg) {
+static PyObject * THPModule_crashImmediately(PyObject *module, PyObject *noargs) {
   throw std::exception("Emulate uncaught exception that leads to the crash");
   Py_RETURN_NONE;
 }
