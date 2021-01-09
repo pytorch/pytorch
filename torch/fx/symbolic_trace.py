@@ -322,28 +322,30 @@ class Tracer(TracerBase):
 # to patch for the purposes of the wrap() API.
 _wrapped_fns_to_patch : List[Tuple[dict, str]] = []
 
-def _call_wrapped_func(orig_fn, args, kwargs):
-    """
-    Given an ``orig_function`` to invoke, search the args and kwargs for
-    a Proxy object. If there is one, emit a ``call_function`` node to
-    preserve the call to this leaf function directly. Otherwise, just
-    return the results of this function call, as this function is not
-    being traced.
-    """
-    proxy = None
+def _create_wrapped_func(orig_fn):
+    def wrapped(*args, **kwargs):
+        """
+        Given an closed-over ``orig_function`` to invoke, search the args and kwargs for
+        a Proxy object. If there is one, emit a ``call_function`` node to preserve the
+        call to this leaf function directly. Otherwise, just return the results of
+        this function call, as this function is not being traced.
+        """
+        proxy = None
 
-    def find_proxy(x):
-        nonlocal proxy
-        if isinstance(x, Proxy):
-            proxy = x
+        def find_proxy(x):
+            nonlocal proxy
+            if isinstance(x, Proxy):
+                proxy = x
 
-    map_aggregate(args, find_proxy)
-    map_aggregate(kwargs, find_proxy)
+        map_aggregate(args, find_proxy)
+        map_aggregate(kwargs, find_proxy)
 
-    if proxy is not None:
-        return proxy.tracer.create_proxy('call_function', orig_fn, args, kwargs)
-    else:
-        return orig_fn(*args, **kwargs)
+        if proxy is not None:
+            return proxy.tracer.create_proxy('call_function', orig_fn, args, kwargs)
+        else:
+            return orig_fn(*args, **kwargs)
+
+    return wrapped
 
 class PatchedFn(NamedTuple):
     frame_dict : Dict[str, Any]
@@ -353,7 +355,7 @@ class PatchedFn(NamedTuple):
 def _patch_wrapped_functions() -> List[PatchedFn]:
     """
     Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
-    the listed global functions in the `call_wrapped_func` wrapper. Returns
+    the listed global functions in the `_create_wrapped_func` wrapper. Returns
     a list of PatchedFn, which is a record specifiying a single function
     entry that was patched and contains the original function for unpatching
     """
@@ -372,12 +374,7 @@ def _patch_wrapped_functions() -> List[PatchedFn]:
         orig_fn = frame_dict[name]
         orig_fns.append(PatchedFn(frame_dict, name, orig_fn))
 
-        def scope(orig_fn):
-
-            def wrapped(*args, **kwargs):
-                return _call_wrapped_func(orig_fn, args, kwargs)
-            return wrapped
-        frame_dict[name] = scope(orig_fn)
+        frame_dict[name] = _create_wrapped_func(orig_fn)
 
         processed_entries.add((id(frame_dict), name))
 
