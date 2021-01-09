@@ -31,19 +31,6 @@ def _reverse_repeat_padding(padding: List[int]) -> List[int]:
     return _reversed_padding_repeated_twice
 
 class _ConvNd(nn.Module):
-    def __init__(self,
-                 in_channels: int,
-                 out_channels: int,
-                 kernel_size: _size_1_t,
-                 stride: _size_1_t,
-                 padding: _size_1_t,
-                 dilation: _size_1_t,
-                 transposed: bool,
-                 output_padding: _size_1_t,
-                 groups: int,
-                 bias: bool,
-                 padding_mode: str = 'zeros'):
-
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros'):
