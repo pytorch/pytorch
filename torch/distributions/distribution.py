@@ -42,8 +42,8 @@ class Distribution(object):
             except NotImplementedError:
                 arg_constraints = {}
                 warnings.warn(f'{self.__class__} does not define `arg_constraints`. ' +
-                               'Please set `arg_constraints = {}` or initialize the distribution ' +
-                               'with `validate_args=False` to turn off validation.')
+                              'Please set `arg_constraints = {}` or initialize the distribution ' +
+                              'with `validate_args=False` to turn off validation.')
             for param, constraint in arg_constraints.items():
                 if constraints.is_dependent(constraint):
                     continue  # skip constraints that cannot be checked
@@ -271,8 +271,8 @@ class Distribution(object):
                 raise ValueError('The value argument must be within the support')
         except NotImplementedError:
             warnings.warn(f'{self.__class__} does not define `support` to enable ' +
-                           'sample validation. Please set `validate_args=False` ' +
-                           'to turn off validation.')
+                          'sample validation. Please set `validate_args=False` ' +
+                          'to turn off validation.')
 
     def _get_checked_instance(self, cls, _instance=None):
         if _instance is None and type(self).__init__ != cls.__init__:
