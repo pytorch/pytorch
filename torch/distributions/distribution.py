@@ -270,8 +270,8 @@ class Distribution(object):
             if not self.support.check(value).all():
                 raise ValueError('The value argument must be within the support')
         except NotImplementedError:
-            warnings.warn(f'The class {self.__class__} does not define `support` ' +
-                           'to enable sample validation. Please set `validate_args=False` ' +
+            warnings.warn(f'{self.__class__} does not define `support` to enable ' +
+                           'sample validation. Please set `validate_args=False` ' +
                            'to turn off validation.')
 
     def _get_checked_instance(self, cls, _instance=None):
