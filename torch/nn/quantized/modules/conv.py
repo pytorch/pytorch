@@ -1,7 +1,7 @@
 # coding=utf-8
 r"""Quantized convolution modules."""
 
-from typing import Optional, List
+from typing import Optional, List, TypeVar
 
 import torch
 import torch.nn as nn
@@ -44,6 +44,20 @@ class _ConvNd(nn.Module):
                  bias: bool,
                  padding_mode: str = 'zeros'):
 
+<<<<<<< HEAD
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+                 padding=0, dilation=1, groups=1, bias=True,
+                 padding_mode='zeros'):
+        # All subclasses have this signature - See PR #49702s
+        raise NotImplementedError
+
+    def _init(self, in_channels, out_channels, kernel_size, stride,
+              padding, dilation,
+              transposed, output_padding,
+              groups, bias,
+              padding_mode='zeros'):
+=======
+>>>>>>> [quant] Add reflection padding to conv
         super(_ConvNd, self).__init__()
         if in_channels % groups != 0:
             raise ValueError('in_channels must be divisible by groups')
@@ -75,6 +89,15 @@ class _ConvNd(nn.Module):
         self.set_weight_bias(qweight, bias_float)
         self.scale = 1.0
         self.zero_point = 0
+
+    def set_weight_bias(self, qweight, bias_float):
+        raise NotImplementedError
+
+    def bias(self):
+        raise NotImplementedError
+
+    def _weight_bias(self):
+        raise NotImplementedError
 
     def extra_repr(self):
         s = ('{in_channels}, {out_channels}, kernel_size={kernel_size}'
@@ -177,7 +200,8 @@ class _ConvNd(nn.Module):
         assert weight_post_process.dtype == torch.qint8, \
             'Weight observer must have a dtype of qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
-        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
+        # the __init__ call used is the one from derived classes and not the one from _ConvNd
+        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,  # type: ignore[call-arg]
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
@@ -262,13 +286,20 @@ class Conv1d(_ConvNd):
         padding = _pair_from_first(padding)
         dilation = _pair_from_first(dilation)
 
-        super(Conv1d, self).__init__(
+        # Subclasses of _ConvNd needs to call _init rather than __init__. See
+        # discussion on PR #49702
+        super(Conv1d, self)._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _single(0), groups, bias, padding_mode)
 
     def _get_name(self):
         return 'QuantizedConv1d'
 
+<<<<<<< HEAD
+    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+        self._packed_params = torch.ops.quantized.conv1d_prepack(
+            w, b, self.stride, self.padding, self.dilation, self.groups)
+=======
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
         if self.padding_mode == 'zeros':
@@ -278,6 +309,7 @@ class Conv1d(_ConvNd):
             self._packed_params = torch.ops.quantized.conv1d_prepack(
                 w, b, self.stride, _pair_from_first(0), self.dilation,
                 self.groups)
+>>>>>>> [quant] Add reflection padding to conv
 
     def _weight_bias(self):
         w, b = torch.ops.quantized.conv1d_unpack(self._packed_params)
@@ -358,13 +390,20 @@ class Conv2d(_ConvNd):
         stride = _pair(stride)
         padding = _pair(padding)
         dilation = _pair(dilation)
-        super(Conv2d, self).__init__(
+        # Subclasses of _ConvNd need to call _init rather than __init__. See
+        # discussion on PR #49702
+        super(Conv2d, self)._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _pair(0), groups, bias, padding_mode)
 
     def _get_name(self):
         return 'QuantizedConv2d'
 
+<<<<<<< HEAD
+    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+        self._packed_params = torch.ops.quantized.conv2d_prepack(
+            w, b, self.stride, self.padding, self.dilation, self.groups)
+=======
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
         if self.padding_mode == 'zeros':
@@ -373,6 +412,7 @@ class Conv2d(_ConvNd):
         else:
             self._packed_params = torch.ops.quantized.conv2d_prepack(
                 w, b, self.stride, _pair(0), self.dilation, self.groups)
+>>>>>>> [quant] Add reflection padding to conv
 
     def _weight_bias(self):
         return self._packed_params.unpack()
@@ -452,13 +492,20 @@ class Conv3d(_ConvNd):
         stride = _triple(stride)
         padding = _triple(padding)
         dilation = _triple(dilation)
-        super(Conv3d, self).__init__(
+        # Subclasses of _ConvNd need to call _init rather than __init__. See
+        # discussion on PR #49702
+        super(Conv3d, self)._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _triple(0), groups, bias, padding_mode)
 
     def _get_name(self):
         return 'QuantizedConv3d'
 
+<<<<<<< HEAD
+    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+        self._packed_params = torch.ops.quantized.conv3d_prepack(
+            w, b, self.stride, self.padding, self.dilation, self.groups)
+=======
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
         if self.padding_mode == 'zeros':
@@ -467,6 +514,7 @@ class Conv3d(_ConvNd):
         else:
             self._packed_params = torch.ops.quantized.conv3d_prepack(
                 w, b, self.stride, _triple(0), self.dilation, self.groups)
+>>>>>>> [quant] Add reflection padding to conv
 
     def _weight_bias(self):
         return self._packed_params.unpack()
@@ -508,21 +556,25 @@ class Conv3d(_ConvNd):
         return cls.get_qconv(mod, activation_post_process)
 
 # === Transposed Convolutions ===
+MOD = TypeVar('MOD', bound=nn.modules.conv._ConvNd)
 
 class _ConvTransposeNd(_ConvNd):
+
+    _FLOAT_MODULE = MOD
+
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
                  groups, bias, padding_mode):
         if padding_mode != 'zeros':
             raise ValueError('Only "zeros" padding mode is supported for {}'.format(self.__class__.__name__))
-
-        super(_ConvTransposeNd, self).__init__(
+        # Subclasses of _ConvNd need to call _init rather than __init__. See
+        # discussion on PR #49702
+        super(_ConvTransposeNd, self)._init(
             in_channels, out_channels, kernel_size, stride,
             padding, dilation, transposed, output_padding,
             groups, bias, padding_mode)
 
-    def _input_padding(self, kernel_size, dilation, padding):
-        # type: (List[int], List[int], List[int]) -> List[int]
+    def _input_padding(self, kernel_size: List[int], dilation: List[int], padding: List[int]) -> List[int]:
         res = torch.jit.annotate(List[int], [])
         for kdx in range(len(kernel_size)):
             pad = (dilation[kdx] * (kernel_size[kdx] - 1) - padding[kdx])
@@ -536,9 +588,10 @@ class _ConvTransposeNd(_ConvNd):
             mod (Module): a float module, either produced by torch.quantization
               utilities or provided by the user
         """
-        assert type(mod) == cls._FLOAT_MODULE, \
-            ' nnq.' + cls.__name__ + '.from_float only works for ' + \
-            cls._FLOAT_MODULE.__name__
+        # derived classes override cls._FLOAT_MODULE attribute
+        msg = ' nnq.' + cls.__name__ + '.from_float only works for ' + \
+              cls._FLOAT_MODULE.__name__
+        assert type(mod) == cls._FLOAT_MODULE, msg
         assert hasattr(mod, 'qconfig'), \
             'Input float module must have qconfig defined.'
         weight_post_process = mod.qconfig.weight()
@@ -547,7 +600,8 @@ class _ConvTransposeNd(_ConvNd):
         assert weight_post_process.dtype == torch.qint8, \
             'Weight observer must have a dtype of qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
-        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
+        # the __init__ call used is the one from derived classes and not the one from _ConvTransposeNd
+        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,  # type: ignore[call-arg]
                     mod.stride, mod.padding, mod.output_padding, mod.groups,
                     mod.bias is not None, mod.dilation, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
@@ -616,8 +670,7 @@ class ConvTranspose1d(_ConvTransposeNd):
     def _get_name(self):
         return 'QuantizedConvTranpose1d'
 
-    def set_weight_bias(self, w, b):
-        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         self._packed_params = torch.ops.quantized.conv_transpose1d_prepack(
             w, b, self.stride, self.padding, self.output_padding, self.dilation,
             self.groups)
@@ -700,8 +753,7 @@ class ConvTranspose2d(_ConvTransposeNd):
     def _get_name(self):
         return 'QuantizedConvTranpose2d'
 
-    def set_weight_bias(self, w, b):
-        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         self._packed_params = torch.ops.quantized.conv_transpose2d_prepack(
             w, b, self.stride, self.padding, self.output_padding, self.dilation,
             self.groups)
@@ -785,8 +837,7 @@ class ConvTranspose3d(_ConvTransposeNd):
     def _get_name(self):
         return 'QuantizedConvTranpose3d'
 
-    def set_weight_bias(self, w, b):
-        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
+    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
         self._packed_params = torch.ops.quantized.conv_transpose3d_prepack(
             w, b, self.stride, self.padding, self.output_padding, self.dilation,
             self.groups)
