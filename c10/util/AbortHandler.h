@@ -1,11 +1,14 @@
-#include <c10/util/Exception.h>
+#include <c10/util/Backtrace.h>
 #include <cstdlib>
+#include <iostream>
 #include <exception>
 
 namespace c10 {
 namespace detail {
 void terminate_handler() {
-  TORCH_CHECK(false, "Unhandled exception caught");
+  std::cout << "Unhandled exception caught in c10/util/AbortHandler.h" << std::endl;
+  auto backtrace = get_backtrace();
+  std::cout << backtrace << std::endl;
   std::abort();
 }
 }
