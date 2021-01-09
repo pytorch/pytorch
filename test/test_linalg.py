@@ -3059,11 +3059,33 @@ class TestLinalg(TestCase):
             exp_r = np.linalg.qr(np_t, mode='r')
             q, r = torch.linalg.qr(t, mode='r')
             # check that q is empty
-            assert q.shape == (0,)
-            assert q.dtype == t.dtype
-            assert q.device == t.device
+            self.assertEqual(q.shape, (0,))
+            self.assertEqual(q.dtype, t.dtype)
+            self.assertEqual(q.device, t.device)
             # check r
             self.assertEqual(r, exp_r)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float)
+    def test_linalg_qr_autograd_errors(self, device, dtype):
+        # torch.linalg.qr(mode='r') returns only 'r' and discards 'q', but
+        # without 'q' you cannot compute the backward pass. Check that
+        # linalg_qr_backward complains cleanly in that case.
+        inp = torch.randn((5, 7), device=device, dtype=dtype, requires_grad=True)
+        q, r = torch.linalg.qr(inp, mode='r')
+        self.assertEqual(q.shape, (0,))  # empty tensor
+        b = torch.sum(r)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "The derivative of qr is not implemented when mode='r'"):
+            b.backward()
+        #
+        inp = torch.randn((7, 5), device=device, dtype=dtype, requires_grad=True)
+        q, r = torch.linalg.qr(inp, mode='complete')
+        b = torch.sum(r)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "The derivative of qr is not implemented when mode='complete' and nrows > ncols"):
+            b.backward()
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -3078,10 +3100,17 @@ class TestLinalg(TestCase):
             all_q = []
             all_r = []
             for matrix in a:
-                q, r = np.linalg.qr(matrix, mode=mode)
-                all_q.append(q)
-                all_r.append(r)
-            return np.array(all_q), np.array(all_r)
+                result = np.linalg.qr(matrix, mode=mode)
+                if mode == 'r':
+                    all_r.append(result)
+                else:
+                    q, r = result
+                    all_q.append(q)
+                    all_r.append(r)
+            if mode == 'r':
+                return np.array(all_r)
+            else:
+                return np.array(all_q), np.array(all_r)
 
         t = torch.randn((3, 7, 5), device=device, dtype=dtype)
         np_t = t.cpu().numpy()
@@ -3090,6 +3119,15 @@ class TestLinalg(TestCase):
             q, r = torch.linalg.qr(t, mode=mode)
             self.assertEqual(q, exp_q)
             self.assertEqual(r, exp_r)
+        # for mode='r' we need a special logic because numpy returns only r
+        exp_r = np_qr_batched(np_t, mode='r')
+        q, r = torch.linalg.qr(t, mode='r')
+        # check that q is empty
+        self.assertEqual(q.shape, (0,))
+        self.assertEqual(q.dtype, t.dtype)
+        self.assertEqual(q.device, t.device)
+        # check r
+        self.assertEqual(r, exp_r)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -3112,10 +3150,21 @@ class TestLinalg(TestCase):
                 out = (torch.empty((0), dtype=dtype, device=device),
                        torch.empty((0), dtype=dtype, device=device))
                 q2, r2 = torch.linalg.qr(t, mode=mode, out=out)
-                assert q2 is out[0]
-                assert r2 is out[1]
+                self.assertIs(q2, out[0])
+                self.assertIs(r2, out[1])
                 self.assertEqual(q2, q)
                 self.assertEqual(r2, r)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float)
+    def test_qr_error_cases(self, device, dtype):
+        t1 = torch.randn(5, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, 'qr input should have at least 2 dimensions, but has 1 dimensions instead'):
+            torch.linalg.qr(t1)
+        t2 = torch.randn((5, 7), device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "qr received unrecognized mode 'hello'"):
+            torch.linalg.qr(t2, mode='hello')
 
     @dtypes(torch.double, torch.cdouble)
     def test_einsum(self, device, dtype):
