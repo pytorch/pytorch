@@ -19,6 +19,15 @@ namespace py = pybind11;
 
 namespace torch {
 namespace jit {
+
+// This is a variant of shared_ptr that "sees through" a wrapper.
+// We use it to convert Value, Node, Block and node to "wrapped" Python
+// values. When we destruct the C++ object, the wrapper's pointer will
+// be set to 0 and any future dereferencing will throw. We need this
+// because the Python objects may hang around after the C++ object
+// has already been destroyed.
+// This also needs the magic type_caster below, which is from the
+// workaround offered in https://github.com/pybind/pybind11/issues/2751
 template <typename T>
 class unwrapping_shared_ptr {
  private:
@@ -26,12 +35,8 @@ class unwrapping_shared_ptr {
 
  public:
   unwrapping_shared_ptr() = default;
-  unwrapping_shared_ptr(std::shared_ptr<T> p) : impl(p) {
-    std::cerr << "construct shared_ptr\n";
-  }
-  unwrapping_shared_ptr(T* p) : impl(p->wrap()) {
-    std::cerr << "construct T*\n";
-  }
+  unwrapping_shared_ptr(std::shared_ptr<T> p) : impl(p) {}
+  unwrapping_shared_ptr(T* p) : impl(p->wrap()) {}
   T* get() const {
     if (!impl->elem) {
       throw std::logic_error("has been invalidated");
