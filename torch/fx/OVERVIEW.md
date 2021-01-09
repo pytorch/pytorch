@@ -1,6 +1,6 @@
 # FX Technical Overview (WIP)
 
-We are building a toolkit for pass writers to facilitate Python-to-Python transformation of nn.Module instances. This toolkit aims to support a subset of Python language semantics—rather than the whole Python language—to facilitate ease of implementation of transforms. The toolkit is available on master in the `torch.fx` namespace. Currently, this feature is unstable, but our goal is to stabilize the toolkit by the end of this year for a prototype release through collaboration with first-party partners.
+FX is a toolkit for pass writers to facilitate Python-to-Python transformation of `nn.Module` instances. This toolkit aims to support a subset of Python language semantics—rather than the whole Python language—to facilitate ease of implementation of transforms. Currently, this feature is unstable, but our goal is to stabilize the toolkit by the end of this year for a prototype release through collaboration with first-party partners.
 
 ## Table of Contents
 
@@ -9,6 +9,9 @@ We are building a toolkit for pass writers to facilitate Python-to-Python transf
 - [Introduction](#introduction)
   - [Motivation](#motivation)
   - [Use Cases](#use-cases)
+- [Internal Structure](#internal-structure)
+  - [Graph](#graph)
+  - [Graph Module](#graph-module)
 - [Symbolic Tracing](#symbolic-tracing)
   - [About](#about)
   - [Tracer](#tracer)
@@ -20,23 +23,31 @@ We are building a toolkit for pass writers to facilitate Python-to-Python transf
 
 ## Motivation ##
 
-Due to strategic objectives, TorchScript has been optimized for the framework interchange use-case over the transformation and device lowering use-cases. These two use-cases actually represent different customer/partner segments with different requirements. This has been apparent ever since the ONNX days, when most of the disagreements about code representation centered around expressivity v.s. analyzability/transformability. To acknowledge this reality, we’d like to deliver a component separate from (and composable with) TorchScript that focuses more on the transformation and lowering use cases. Ultimately, we’d like to create an ecosystem of separate components that serve different customer segments well.
-
-TorchScript IR resides in the “low level of abstraction, many language features” category. FX is meant to flip us about the origin: let’s build a system that lives in the “high level of abstraction, few language features” quadrant. To provide a higher level of abstraction, we would like to represent code as higher-level blocks—namely the standard `torch.nn` Module blocks—as opposed to TorchScript IR, which represented everything as low-level ATen/primitive operators. To provide a restricted set of language features, we would like to be judicious in which features we support capturing and representing, namely things like control flow, aliasing, complex data structures, hierarchical representation, and the like.
-
-We believe building a component that occupies this point in the space will serve the transformation and lowering customer segments well.
+TODO
 
 ## Use Cases ##
 
 FX should be used by pass writers to provide functionality for capturing and constructing nn.Module code in a structured way. We do not expect end users to utilize FX directly. A useful property of framing FX in this way is that passes can be seen as functions of the form `pass(in_mod : nn.Module) -> nn.Module`. This means we can create composable pipelines of transformations.
 
-![An image of a sample nn.Module transformation pipeline that starts with a Quantize transformation, which is then composed with a Split transformation, then a Lower to Accelerator transformation](https://scontent.xx.fbcdn.net/v/t1.0-9/p720x720/118780346_998065427281509_1321963618820011983_o.png?_nc_cat=104&ccb=2&_nc_sid=32a93c&_nc_ohc=8YbXsAHKRjoAX-Hwj4g&_nc_ht=scontent.xx&_nc_tp=30&uss=d63649d5ad92822b&odm=ZmIud29ya3BsYWNlLmNvbQ&_nc_rmd=260&_nc_log=1&oe2=601C8940&oh=225eeda6b37d2198ffbe409a2276b43d&oe=5FF78064 "nn.Module transformation pipeline")
+![An image of a sample nn.Module transformation pipeline that starts with a Quantize transformation, which is then composed with a Split transformation, then a Lower to Accelerator transformation](https://imgur.com/a/o4c5zjJ "nn.Module transformation pipeline")
 
 In this example pipeline, we have a Quantize transformation, which is then composed with a Split transformation, then a Lower to Accelerator transformation. Finally, the transformed Modules are compiled with TorchScript for deployment. This last point emphasizes that not only should FX transforms be composable with each other, but their products are composable with other systems like TorchScript compilation or tracing.
+
+By using `nn.Module` as the interface between passes, FX transforms are interoperable with each other, and the resulting model can be used anywhere an `nn.Module` can be used.
+
+# Internal Structure
+
+## [Graph](https://pytorch.org/docs/master/fx.html#torch.fx.Graph) ##
+TODO
+
+## [GraphModule](https://pytorch.org/docs/master/fx.html#torch.fx.GraphModule) ##
+TODO
 
 # Symbolic Tracing
 
 ## About ##
+
+The following sections will walk us through the components that transform from original Module to FX IR and finally to generated Python code and a GraphModule instance:
 
 FX’s front-end makes use of the dynamic nature of Python to intercept call-sites for various entities (PyTorch operators, Module invocations, and Tensor method invocations). This functionality is exposed through an API called `torch.fx.symbolic_trace`.  We can see how this works by way of an example:
 
@@ -63,7 +74,7 @@ torch.testing.assert_allclose(symbolic_traced(input), module(input))
 
 Here, we set up a simple Module that exercises different language features: fetching a parameter, applying an arithmetic operator, applying a submodule (linear), and applying a Tensor method. `symbolic_trace` returns an instance of GraphModule, which is in itself a subclass of `nn.Module`. We can see that the `symbolic_traced` instance runs and returns the same result as the original module instance module.
 
-## Tracer ##
+## [Tracer](https://pytorch.org/docs/master/fx.html#torch.fx.Tracer) ##
 
 `Tracer` is the class that implements the symbolic tracing functionality of `torch.fx.symbolic_trace`. A call to `symbolic_trace(m)` is equivalent to `Tracer().trace(m)`. Tracer can be subclassed to override various behaviors of the tracing process. The different behaviors that can be overridden are described in the docstrings of the methods on the class.
 
@@ -71,9 +82,7 @@ In the default implementation of `Tracer().trace`, the tracer first creates Prox
 
 ## Proxy ##
 
-Proxy objects are Node wrappers used by the Tracer to record operations seen during symbolic tracing. If you're doing graph transforms, you can wrap your own Proxy method around a raw Node so that you can use the overloaded operators to add additional things to a Graph.
-
-The mechanism through which Proxy objects record computation is [`__torch_function__`](https://pytorch.org/docs/stable/notes/extending.html). If any custom Python type defines a method named `__torch_function__`, PyTorch will invoke that `__torch_function__` implementation when an instance of that custom type is passed to a function in the `torch` namespace. In the Proxy implementation of `__torch_function__`, we simply create a new Proxy object with the passed-in operator. Creating a new Proxy means that a new Node--the Node wrapped by the Proxy--will be added to the Graph as well. When this new Proxy object is used later in the code, it “transforms” its user into another Proxy object and the process is repeated.
+Proxy objects are Node wrappers used by the Tracer to record operations seen during symbolic tracing. The mechanism through which Proxy objects record computation is [`__torch_function__`](https://pytorch.org/docs/stable/notes/extending.html#extending-torch). If any custom Python type defines a method named `__torch_function__`, PyTorch will invoke that `__torch_function__` implementation when an instance of that custom type is passed to a function in the `torch` namespace. In FX, when operations on Proxy are dispatched to the `__torch_function__` handler, the `__torch_function__` handler records the operation in the Graph as a Node. The Node that was recorded in the Graph is then itself wrapped in a Proxy, facilitating further application of ops on that value.
 
 Consider the following example:
 
@@ -86,7 +95,9 @@ Consider the following example:
   traced = symbolic_trace(m)
 ```
 
-First, the parameter `x` is transformed into a Proxy object and the corresponding Node (a Node with op = “placeholder” and target = “x”) is added to the Graph. The next operation is `torch.relu`, which takes `x` as a parameter. Because `x` is a Proxy, `__torch_function__` is called on `torch.relu`. This, in turn, transforms `torch.relu` into a Proxy object and adds a `torch.relu` Node to the Graph.
+During the call to `symbolic_trace`, the parameter `x` is transformed into a Proxy object and the corresponding Node (a Node with op = “placeholder” and target = “x”) is added to the Graph. Then, the Module is run with Proxies as inputs, and recording happens via the `__torch_function__` dispatch path.
+
+If you're doing graph transforms, you can wrap your own Proxy method around a raw Node so that you can use the overloaded operators to add additional things to a Graph.
 
 # The FX IR
 
@@ -101,7 +112,7 @@ Node is the data structure that represents individual operations within a Graph.
 - `call_method` calls a method on a value. `name` is as similar. `target` is the string name of the method to apply to the `self` argument. `args` and `kwargs` represent the arguments to invoke the module on, *including the self argument*
 - `output` contains the output of the traced function in its `args[0]` attribute. This corresponds to the "return" statement in the Graph printout.
 
-Each Node also has a reference to the Nodes that it takes as input (`input_nodes`) and the Nodes that use it (`users`). Although Nodes are represented as a doubly-linked list, the use-def relationships form an acyclic graph and can be traversed as such.
+To facilitate easier analysis of data dependencies, Nodes have read-only properties `input_nodes` and `users`, which specify which Nodes in the Graph are used by this Node and which Nodes use this Node, respectively. Although Nodes are represented as a doubly-linked list, the use-def relationships form an acyclic graph and can be traversed as such.
 
 # Transformation and Codegen
 
