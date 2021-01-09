@@ -206,7 +206,8 @@ static inline std::tuple<bool, bool> _parse_qr_mode(std::string mode) {
     compute_q = false;
     reduced = true; // this is actually irrelevant in this mode
   } else {
-    TORCH_CHECK(false, "Unrecognized mode '", mode, "'");
+      TORCH_CHECK(false, "qr received unrecognized mode '", mode,
+                  "' but expected one of 'reduced' (default), 'r', or 'complete'");
   }
   return std::make_tuple(compute_q, reduced);
 }
@@ -262,10 +263,12 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   Tensor U_empty = at::empty_strided(sizes, strides, input.options().device(usvt_device));
   U_empty.zero_();
 
+  // VT should be a column-major or a batch of column-major matrices
   sizes[input.dim() - 2] = n;
   sizes[input.dim() - 1] = n;
   // VT should be a row-major or a batch of row-major matrices
   Tensor VT_empty = at::zeros(sizes, input.options().device(usvt_device));
+  VT_empty.transpose_(-2, -1);
 
   sizes.pop_back();
   sizes[input.dim() - 2] = std::min(m, n);
