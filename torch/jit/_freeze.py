@@ -20,7 +20,7 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None):
 
     Freezing currently only accepts ScriptModules that are in eval mode.
 
-    Arguments:
+    Args:
         mod (:class:`ScriptModule`): a module to be frozen
 
         preserved_attrs (Optional[List[str]]): a list of attributes to preserve in addition to the forward method.

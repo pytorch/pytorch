@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/mobile/function.h>
 
@@ -10,12 +12,12 @@ class Module;
 struct TORCH_API Method {
   Method(const Module* owner, Function* function);
 
-  void run(Stack& stack) const;
-  void run(Stack&& stack) const {
+  void run(Stack& stack);
+  void run(Stack&& stack) {
     run(stack);
   }
 
-  c10::IValue operator()(std::vector<c10::IValue> stack) const;
+  c10::IValue operator()(std::vector<c10::IValue> stack);
 
   const std::string& name() const {
     return function_->name();

@@ -44,6 +44,7 @@ from torch.jit._async import fork, wait
 from torch.jit._serialization import save, load
 from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph
 
+from torch.jit.cuda import stream
 from torch.jit._freeze import freeze
 
 # For backwards compatibility
@@ -81,7 +82,7 @@ def script_if_tracing(fn):
     ``@torch.jit.script_if_tracing`` to substitute for
     ``torch.jit.script``.
 
-    Arguments:
+    Args:
         fn: A function to compile.
 
     Returns:
@@ -100,7 +101,7 @@ def isinstance(obj, target_type):
     ``Dict[str, List[torch.Tensor]]``, ``Optional[Tuple[int,str,int]]``. It can also 
     refine basic types such as bools and ints that are available in TorchScript.
 
-    Arguments:
+    Args:
         obj: object to refine the type of
         target_type: type to try to refine obj to 
     Returns:

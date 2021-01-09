@@ -204,19 +204,16 @@ void namedTupleConstruct(
       c10::ivalue::Tuple::createNamed(std::move(elems), std::move(type)));
 }
 
-void listConstruct(
-    Stack& stack,
-    const at::ListTypePtr& type,
-    size_t num_inputs) {
+void listConstruct(Stack& stack, const at::ListType& type, size_t num_inputs) {
   // Structuring the implementation this way allows NRVO to avoid
   // move-constructing vals on its way onto the stack. Moving a List
   // isn't free.
   auto makeList =
-      [](Stack& stack, const at::ListTypePtr& type, size_t num_inputs) {
-        c10::List<IValue> vals(type->getElementType());
+      [](Stack& stack, const at::ListType& type, size_t num_inputs) {
+        c10::List<IValue> vals(type.getElementType());
         vals.reserve(num_inputs);
         for (size_t i = stack.size() - num_inputs; i < stack.size(); ++i) {
-          vals.emplace_back(std::move(stack[i]));
+          vals.push_back(std::move(stack[i]));
         }
         drop(stack, num_inputs);
         return vals;

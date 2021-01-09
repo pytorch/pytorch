@@ -60,6 +60,14 @@ inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<doub
   return torch::linalg_matrix_rank_out(result, input, tol, hermitian);
 }
 
+inline Tensor solve(const Tensor& input, const Tensor& other) {
+  return torch::linalg_solve(input, other);
+}
+
+inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
+  return torch::linalg_solve_out(result, input, other);
+}
+
 inline Tensor tensorinv(const Tensor& self, int64_t ind) {
   return torch::linalg_tensorinv(self, ind);
 }
@@ -148,6 +156,17 @@ inline Tensor matrix_rank(const Tensor input, optional<double> tol, bool hermiti
 
 inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<double> tol, bool hermitian) {
   return detail::matrix_rank_out(result, input, tol, hermitian);
+}
+
+/// Computes a tensor `x` such that `matmul(input, x) = other`.
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.solve
+inline Tensor solve(const Tensor& input, const Tensor& other) {
+  return detail::solve(input, other);
+}
+
+inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
+  return detail::solve_out(result, input, other);
 }
 
 /// Computes the inverse of a tensor

@@ -24,11 +24,11 @@ using c10::OptionalType;
 using c10::QSchemeType;
 using c10::QuantizerType;
 using c10::RRefType;
+using c10::StorageType;
 using c10::StreamObjType;
 using c10::StringType;
 using c10::Symbol;
 using c10::TensorType;
-using c10::StorageType;
 using c10::TupleType;
 using c10::VarType;
 
