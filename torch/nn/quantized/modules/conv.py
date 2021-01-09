@@ -44,7 +44,6 @@ class _ConvNd(nn.Module):
                  bias: bool,
                  padding_mode: str = 'zeros'):
 
-<<<<<<< HEAD
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros'):
@@ -56,9 +55,8 @@ class _ConvNd(nn.Module):
               transposed, output_padding,
               groups, bias,
               padding_mode='zeros'):
-=======
->>>>>>> [quant] Add reflection padding to conv
         super(_ConvNd, self).__init__()
+
         if in_channels % groups != 0:
             raise ValueError('in_channels must be divisible by groups')
         if out_channels % groups != 0:
@@ -295,13 +293,7 @@ class Conv1d(_ConvNd):
     def _get_name(self):
         return 'QuantizedConv1d'
 
-<<<<<<< HEAD
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
-        self._packed_params = torch.ops.quantized.conv1d_prepack(
-            w, b, self.stride, self.padding, self.dilation, self.groups)
-=======
-    def set_weight_bias(self, w, b):
-        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
         if self.padding_mode == 'zeros':
             self._packed_params = torch.ops.quantized.conv1d_prepack(
                 w, b, self.stride, self.padding, self.dilation, self.groups)
@@ -309,7 +301,6 @@ class Conv1d(_ConvNd):
             self._packed_params = torch.ops.quantized.conv1d_prepack(
                 w, b, self.stride, _pair_from_first(0), self.dilation,
                 self.groups)
->>>>>>> [quant] Add reflection padding to conv
 
     def _weight_bias(self):
         w, b = torch.ops.quantized.conv1d_unpack(self._packed_params)
@@ -399,20 +390,13 @@ class Conv2d(_ConvNd):
     def _get_name(self):
         return 'QuantizedConv2d'
 
-<<<<<<< HEAD
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
-        self._packed_params = torch.ops.quantized.conv2d_prepack(
-            w, b, self.stride, self.padding, self.dilation, self.groups)
-=======
-    def set_weight_bias(self, w, b):
-        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
         if self.padding_mode == 'zeros':
             self._packed_params = torch.ops.quantized.conv2d_prepack(
                 w, b, self.stride, self.padding, self.dilation, self.groups)
         else:
             self._packed_params = torch.ops.quantized.conv2d_prepack(
                 w, b, self.stride, _pair(0), self.dilation, self.groups)
->>>>>>> [quant] Add reflection padding to conv
 
     def _weight_bias(self):
         return self._packed_params.unpack()
@@ -501,20 +485,13 @@ class Conv3d(_ConvNd):
     def _get_name(self):
         return 'QuantizedConv3d'
 
-<<<<<<< HEAD
     def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
-        self._packed_params = torch.ops.quantized.conv3d_prepack(
-            w, b, self.stride, self.padding, self.dilation, self.groups)
-=======
-    def set_weight_bias(self, w, b):
-        # type: (torch.Tensor, Optional[torch.Tensor]) -> None
         if self.padding_mode == 'zeros':
             self._packed_params = torch.ops.quantized.conv3d_prepack(
                 w, b, self.stride, self.padding, self.dilation, self.groups)
         else:
             self._packed_params = torch.ops.quantized.conv3d_prepack(
                 w, b, self.stride, _triple(0), self.dilation, self.groups)
->>>>>>> [quant] Add reflection padding to conv
 
     def _weight_bias(self):
         return self._packed_params.unpack()
