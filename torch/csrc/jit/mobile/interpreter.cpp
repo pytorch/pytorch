@@ -50,7 +50,7 @@ bool InterpreterState::run(Stack& stack) {
           // enable only for the RecordFunction
           enableRecordFunction(true);
         }
-        RECORD_FUNCTION(code_->op_names_[inst.X].name, stack);
+        RECORD_USER_SCOPE_WITH_INPUTS(code_->op_names_[inst.X].name, stack);
         if (!prev_value) {
           enableRecordFunction(false);
         }
@@ -148,7 +148,7 @@ bool InterpreterState::run(Stack& stack) {
       case RET:
         return false;
       case LIST_CONSTRUCT: {
-        auto type = code_->types_[inst.X]->expect<at::ListType>();
+        const auto& type = code_->types_[inst.X]->expectRef<at::ListType>();
         listConstruct(stack, type, inst.N);
         ++pc;
       } break;

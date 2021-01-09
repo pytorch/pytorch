@@ -6,7 +6,7 @@
 #include <sys/stat.h>
 
 #ifdef _WIN32
-#include <windows.h>
+#include <c10/util/win32-headers.h>
 #include <fileapi.h>
 #include <io.h>
 #else
@@ -355,7 +355,11 @@ int64_t FileStore::add(const std::string& key, int64_t value) {
 }
 
 int64_t FileStore::getNumKeys() {
-  TORCH_CHECK(false, "getNumKeys not implemented for FileStore");
+  std::unique_lock<std::mutex> l(activeFileOpLock_);
+  File file(path_, O_RDONLY, timeout_);
+  auto lock = file.lockShared();
+  pos_ = refresh(file, pos_, cache_);
+  return cache_.size();
 }
 
 bool FileStore::deleteKey(const std::string& /* unused */) {

@@ -55,7 +55,7 @@ struct TORCH_API EnableProfilingGuard {
 struct GraphExecutorImplBase;
 struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
-  GraphExecutor(std::shared_ptr<Graph> graph, std::string function_name);
+  GraphExecutor(const std::shared_ptr<Graph>& graph, std::string function_name);
 
   void run(Stack& inputs);
   c10::intrusive_ptr<Future> runAsync(

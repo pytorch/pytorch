@@ -46,6 +46,8 @@ endif()
 # 3. If MSVC_Z7_OVERRIDE is ON, then /Zi and /ZI will be replaced with /Z7
 #    for Debug and RelWithDebInfo builds
 if(MSVC)
+  # skip unwanted includes from windows.h
+  add_definitions(-DWIN32_LEAN_AND_MEAN)
   foreach(flag_var
       CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
       CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
@@ -107,6 +109,8 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
 endif()
 
 # ---[ BLAS
+
+# setting default preferred BLAS options if not already present.
 if(NOT INTERN_BUILD_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
 else()
@@ -146,7 +150,6 @@ elseif(BLAS STREQUAL "MKL")
     set(CAFFE2_USE_MKL ON)
   else()
     message(WARNING "MKL could not be found. Defaulting to Eigen")
-    set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
     set(CAFFE2_USE_EIGEN_FOR_BLAS ON)
     set(CAFFE2_USE_MKL OFF)
   endif()
@@ -173,9 +176,6 @@ if(NOT INTERN_BUILD_MOBILE)
     find_package(BLAS)
     if(NOT BLAS_FOUND)
       set(USE_BLAS 0)
-      set(BLAS "" CACHE STRING "Selected BLAS library")
-    else()
-      set(BLAS BLAS_INFO CACHE STRING "Selected BLAS library")
     endif()
   endif()
 
@@ -189,6 +189,26 @@ if(NOT INTERN_BUILD_MOBILE)
       set(AT_MKL_MT 1)
     endif()
     set(AT_MKL_ENABLED 1)
+  endif()
+elseif(INTERN_USE_EIGEN_BLAS)
+  # Eigen BLAS for Mobile
+  set(USE_BLAS 1)
+  include(${CMAKE_CURRENT_LIST_DIR}/External/EigenBLAS.cmake)
+  list(APPEND Caffe2_DEPENDENCY_LIBS eigen_blas)
+endif()
+
+# ---[ FFTW
+set(AT_FFTW_ENABLED 0)
+set(USE_FFTW OFF)
+if(USE_FFTW OR NOT MKL_FOUND)
+  find_library(LIBFFTW3 fftw3)
+  if(LIBFFTW3)
+    find_path(FFTW3_INCLUDE_DIR NAMES fftw3.h ONLY_CMAKE_FIND_ROOT_PATH)
+    if(FFTW3_INCLUDE_DIR)
+      SET(AT_FFTW_ENABLED 1)
+      SET(USE_FFTW ON)
+      include_directories(${FFTW3_INCLUDE_DIR})
+    endif()
   endif()
 endif()
 
@@ -273,17 +293,17 @@ else()
   set(DISABLE_NNPACK_AND_FAMILY ON)
 endif()
 
+if(USE_QNNPACK AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" AND CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  message(WARNING
+    "QNNPACK does not compile for Apple Silicon. "
+    "Turn this warning off by explicit USE_QNNPACK=OFF.")
+  caffe2_update_option(USE_QNNPACK OFF)
+endif()
+
 set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
   CACHE PATH "Confu-style dependencies source directory")
 set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
   CACHE PATH "Confu-style dependencies binary directory")
-
-# ---[ Eigen BLAS for Mobile
-if(INTERN_BUILD_MOBILE AND INTERN_USE_EIGEN_BLAS)
-  set(USE_BLAS 1)
-  include(${CMAKE_CURRENT_LIST_DIR}/External/EigenBLAS.cmake)
-  list(APPEND Caffe2_DEPENDENCY_LIBS eigen_blas)
-endif()
 
 # ---[ pthreadpool
 # Only add a dependency on pthreadpool if we are on a mobile build
@@ -713,7 +733,6 @@ else()
     "Turning USE_FAKELOWP off as it depends on USE_FBGEMM.")
   caffe2_update_option(USE_FAKELOWP OFF)
 endif()
-
 
 # ---[ LMDB
 if(USE_LMDB)
@@ -1193,8 +1212,9 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -std=c++14)
 
     if(CMAKE_BUILD_TYPE MATCHES Debug)
-       list(APPEND HIP_CXX_FLAGS -g)
+       list(APPEND HIP_CXX_FLAGS -g2)
        list(APPEND HIP_CXX_FLAGS -O0)
+       list(APPEND HIP_HIPCC_FLAGS -fdebug-info-for-profiling)
     endif(CMAKE_BUILD_TYPE MATCHES Debug)
 
     set(HIP_HCC_FLAGS ${HIP_CXX_FLAGS})
@@ -1206,7 +1226,7 @@ if(USE_ROCM)
     endforeach()
 
     set(Caffe2_HIP_INCLUDE
-       ${thrust_INCLUDE_DIRS} ${hipcub_INCLUDE_DIRS} ${rocprim_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${roctracer_INCLUDE_DIRS} ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDE})
+       $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDE})
     # This is needed for library added by hip_add_library (same for hip_add_executable)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
@@ -1495,8 +1515,6 @@ if(NOT INTERN_BUILD_MOBILE)
   if(MSVC)
     # we want to respect the standard, and we are bored of those **** .
     add_definitions(-D_CRT_SECURE_NO_DEPRECATE=1)
-    # skip unwanted includes from windows.h
-    add_definitions(-DWIN32_LEAN_AND_MEAN)
     list(APPEND CUDA_NVCC_FLAGS "-Xcompiler=/wd4819,/wd4503,/wd4190,/wd4244,/wd4251,/wd4275,/wd4522")
   endif()
 
@@ -1620,6 +1638,7 @@ if(NOT INTERN_BUILD_MOBILE)
     add_compile_options(-DUSE_GCC_GET_CPUID)
   endif()
 
+  find_package(VSX) # checks VSX
   find_package(AVX) # checks AVX and AVX2
 
   # we don't set -mavx and -mavx2 flags globally, but only for specific files
@@ -1752,7 +1771,8 @@ endif()
 #
 # End ATen checks
 #
-
+set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
 add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 
 # Disable compiler feature checks for `fmt`.
@@ -1765,3 +1785,46 @@ add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
 
 list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
+set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
+
+# ---[ Kineto
+if(USE_KINETO)
+  if(USE_KINETO AND NOT TARGET kineto)
+    set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party" CACHE STRING "")
+    set(KINETO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/kineto/libkineto" CACHE STRING "")
+    set(KINETO_BUILD_TESTS OFF CACHE BOOL "")
+    set(KINETO_LIBRARY_TYPE "static" CACHE STRING "")
+    set(CUDA_SOURCE_DIR "${CUDA_TOOLKIT_ROOT_DIR}" CACHE STRING "")
+
+    message(STATUS "Configuring Kineto dependency:")
+    message(STATUS "  KINETO_SOURCE_DIR = ${KINETO_SOURCE_DIR}")
+    message(STATUS "  KINETO_BUILD_TESTS = ${KINETO_BUILD_TESTS}")
+    message(STATUS "  KINETO_LIBRARY_TYPE = ${KINETO_LIBRARY_TYPE}")
+    message(STATUS "  CUDA_SOURCE_DIR = ${CUDA_SOURCE_DIR}")
+
+    if(EXISTS ${CUDA_SOURCE_DIR}/extras/CUPTI/include)
+      set(CUPTI_INCLUDE_DIR "${CUDA_SOURCE_DIR}/extras/CUPTI/include")
+    elseif(EXISTS ${CUDA_SOURCE_DIR}/include/cupti.h)
+      set(CUPTI_INCLUDE_DIR "${CUDA_SOURCE_DIR}/include")
+    endif()
+
+    if((NOT DEFINED CUDA_cupti_LIBRARY) OR (${CUDA_cupti_LIBRARY} STREQUAL "CUDA_cupti_LIBRARY-NOTFOUND"))
+      if(EXISTS ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64/libcupti_static.a)
+        set(CUDA_cupti_LIBRARY "${CUDA_SOURCE_DIR}/extras/CUPTI/lib64/libcupti_static.a")
+      elseif(EXISTS ${CUDA_SOURCE_DIR}/lib64/libcupti_static.a)
+        set(CUDA_cupti_LIBRARY "${CUDA_SOURCE_DIR}/lib64/libcupti_static.a")
+      elseif(EXISTS ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64/libcupti.so)
+        set(CUDA_cupti_LIBRARY "${CUDA_SOURCE_DIR}/extras/CUPTI/lib64/libcupti.so")
+      elseif(EXISTS ${CUDA_SOURCE_DIR}/lib64/libcupti.so)
+        set(CUDA_cupti_LIBRARY "${CUDA_SOURCE_DIR}/lib64/libcupti.so")
+      endif()
+    endif()
+    message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
+    message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
+
+    add_subdirectory("${KINETO_SOURCE_DIR}")
+    message(STATUS "Configured Kineto as a dependency.")
+  endif()
+
+  list(APPEND Caffe2_DEPENDENCY_LIBS kineto)
+endif()

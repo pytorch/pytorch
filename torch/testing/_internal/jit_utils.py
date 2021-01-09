@@ -15,14 +15,14 @@ import functools
 
 # Testing utils
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
-    freeze_rng_state, TemporaryFileName, enable_profiling_mode_for_profiling_tests, ProfilingMode, TEST_BAILOUTS
+from torch.testing._internal.common_utils import IS_WINDOWS, \
+    freeze_rng_state, enable_profiling_mode_for_profiling_tests, ProfilingMode, TEST_BAILOUTS
+from torch.testing._internal.common_jit import JitCommonTestCase
 from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
 
 # Standard library
 from contextlib import contextmanager
 from functools import reduce
-from itertools import chain
 from torch._six import StringIO
 from collections import defaultdict
 
@@ -93,7 +93,7 @@ class _AssertRaisesRegexWithHighlightContext(object):
 
 FUSION_GROUP = "prim::TensorExprGroup"
 
-class JitTestCase(TestCase):
+class JitTestCase(JitCommonTestCase):
     _do_cuda_memory_leak_check = True
     _restored_warnings = False
 
@@ -245,19 +245,6 @@ class JitTestCase(TestCase):
         self._compared_saved_loaded(module)
 
 
-    def getExportImportCopy(self, m, also_test_file=True, map_location=None):
-        buffer = io.BytesIO()
-        torch.jit.save(m, buffer)
-        buffer.seek(0)
-        imported = torch.jit.load(buffer, map_location=map_location)
-
-        if not also_test_file:
-            return imported
-
-        with TemporaryFileName() as fname:
-            torch.jit.save(imported, fname)
-            return torch.jit.load(fname, map_location=map_location)
-
     def getExportImportCopyWithPacking(self, m, also_test_file=True, map_location=None):
         buffer = io.BytesIO()
         m.apply(lambda s: s._pack() if s._c._has_method('_pack') else None)
@@ -332,22 +319,6 @@ class JitTestCase(TestCase):
         graph = torch._C._jit_pass_canonicalize(graph)
         torch._C._jit_pass_lint(graph)
         self.assertExpected(str(graph), *args, **kwargs)
-
-    def assertAutodiffNode(self, graph, should_autodiff_node, nonfusible_nodes, fusible_nodes):
-        diff_nodes = graph.findAllNodes('prim::DifferentiableGraph')
-        diff_subgraphs = [node.g('Subgraph') for node in diff_nodes]
-
-        # For any non-fusible node, it must show up in one of the DifferentiableGraph.
-        found_all_nonfusible_nodes = (len(diff_subgraphs) == 0 and len(nonfusible_nodes) == 0)\
-            or all([any(g.findNode(n) is not None for g in diff_subgraphs) for n in nonfusible_nodes])
-
-        # For any fusible node, it must show up in one of the FusionGroup in the DifferentiableGraph.
-        fusion_nodes = list(chain.from_iterable([g.findAllNodes('prim::FusionGroup') for g in diff_subgraphs]))
-        fusion_subgraphs = [node.g('Subgraph') for node in fusion_nodes]
-        found_all_fusible_nodes = (len(fusion_nodes) == 0 and len(fusible_nodes) == 0)\
-            or all([any(g.findNode(n) is not None for g in fusion_subgraphs) for n in fusible_nodes])
-
-        self.assertEqual(should_autodiff_node, found_all_nonfusible_nodes and found_all_fusible_nodes)
 
     def run_pass(self, name, trace):
         if isinstance(trace, torch._C.Graph):
@@ -599,26 +570,6 @@ class JitTestCase(TestCase):
                 self.assertTrue(torch.allclose(g2, g2_ge, atol=8e-4, rtol=8e-4))
 
         return ge
-
-    def createFunctionFromGraph(self, trace):
-        graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
-        return torch._C._create_function_from_graph("forward", graph)
-
-    def assertExportImport(self, trace, inputs):
-        m = self.createFunctionFromGraph(trace)
-        self.assertExportImportModule(m, inputs)
-
-    def assertExportImportModule(self, m, inputs):
-        m_import = self.getExportImportCopy(m)
-        a = self.runAndSaveRNG(m, inputs)
-        b = self.runAndSaveRNG(m_import, inputs)
-        self.assertEqual(a, b)
-
-    def runAndSaveRNG(self, func, inputs, kwargs=None):
-        kwargs = kwargs if kwargs else {}
-        with freeze_rng_state():
-            results = func(*inputs, **kwargs)
-        return results
 
     def checkModule(self, nn_module, args):
         """

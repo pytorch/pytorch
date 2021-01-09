@@ -1,6 +1,6 @@
 #pragma once
 
-#include <aten/src/ATen/Context.h>
+#include <ATen/Context.h>
 #include <c10/core/DeviceType.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
@@ -179,7 +179,7 @@ void setItem(const c10::List<T>& list, int64_t idx, T&& value) {
   if (normalized_idx < 0 || normalized_idx >= list_size) {
     throw std::out_of_range("list index out of range");
   }
-  list.set(normalized_idx, std::move(value));
+  list.set(normalized_idx, std::forward<T>(value));
 }
 
 void listAppend(Stack* stack);

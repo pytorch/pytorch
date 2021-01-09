@@ -104,7 +104,7 @@ std::ostream& operator<<(
 static void printAttribute(std::ostream& out, const at::Tensor& tensor) {
   // 1-elem tensors are usually boxed scalars, so print them like it
   if (tensor.numel() == 1) {
-    auto scalar_tensor = tensor.view({}).item();
+    auto scalar_tensor = tensor.view(std::vector<int64_t>{}).item();
     out << "{";
     if (scalar_tensor.isFloatingPoint()) {
       out << scalar_tensor.toDouble();
@@ -1079,6 +1079,11 @@ bool Node::hasSideEffects() const {
     case prim::rpc_sync: // It represents RPC message sent.
     case prim::rpc_remote: // It represents RPC message sent.
     case aten::wait: // It can represent RPC message received.
+#ifndef __HIP_PLATFORM_HCC__
+    case cuda::set_stream:
+    case cuda::_set_device:
+    case cuda::_current_device:
+#endif
     case prim::Enter:
     case prim::Exit:
       return true;
@@ -1094,7 +1099,7 @@ bool Node::hasSideEffects() const {
     return false;
   }
 
-  if (kind_.is_prim() || kind_.is_aten()) {
+  if (kind_.is_prim() || kind_.is_aten() || kind_.is_cuda()) {
     // TODO There is nothing in the system that relies on aten:: and prim::
     // ops using AliasAnalysisKind::FROM_SCHEMA,
     // AliasAnalysisKind::INTERNAL_SPECIAL_CASE, or
@@ -1114,9 +1119,7 @@ bool Node::hasSideEffects() const {
 
   switch (op->aliasAnalysisKind()) {
     case AliasAnalysisKind::PURE_FUNCTION:
-      return false;
     case AliasAnalysisKind::FROM_SCHEMA:
-      return false;
     case AliasAnalysisKind::INTERNAL_SPECIAL_CASE:
       return false;
     case AliasAnalysisKind::CONSERVATIVE:
@@ -1608,17 +1611,25 @@ Node* Graph::createTupleIndex(
   return n;
 }
 
-Node* Graph::createTupleSlice(Value* tup, int64_t beg, int64_t end) {
-  auto n = create(prim::TupleSlice, {tup});
-  auto tuple_type = tup->type()->expect<TupleType>();
-  n->i_(attr::beg, beg);
-  n->i_(attr::end, end);
-  std::vector<TypePtr> output_types;
-  for (auto i = beg; i < end; ++i) {
-    output_types.push_back(tuple_type->elements().at(i));
+Node* Graph::createTupleSlice(
+    Value* tup,
+    int64_t beg,
+    int64_t step_size,
+    int64_t num_values) {
+  std::vector<Value*> new_vals;
+  TupleTypePtr tt = tup->type()->expect<TupleType>();
+  new_vals.reserve(num_values);
+
+  int64_t i = beg;
+  for (int64_t j = 0; j < num_values; ++j) {
+    auto idx = insertConstant(IValue(static_cast<int64_t>(i)));
+    auto tupleIndex = insertNode(createTupleIndex(tup, idx, tt->elements()[i]));
+
+    new_vals.push_back(tupleIndex->output());
+    i += step_size;
   }
-  auto tt = TupleType::create(std::move(output_types));
-  n->output()->setType(tt);
+
+  auto n = createTuple(new_vals);
   return n;
 }
 
@@ -1917,6 +1928,33 @@ std::vector<Value*> inlineCallTo(
   // are missing nodes without outputs (e.g. prim::Print).
   std::unordered_set<Node*> updated_nodes;
   for (const auto& kv : value_map) {
+    /* Skip the old value if it is the graph input.
+     * The reason is that, value_map contains values not all for the nodes of
+     * the graph but primary inputs as well, and it will create duplicates when
+     * the first inlined graph is input to the next one. To avoid this issue,
+     * skip the old value when it is one of the
+     * callee->optimized_graph()->inputs() or callee->graph()->inputs(), depends
+     * on if it is inlined_optimized_graph
+     */
+
+    if (inline_optimized_graph) {
+      auto is_graph_input = std::find(
+          callee->optimized_graph()->inputs().begin(),
+          callee->optimized_graph()->inputs().end(),
+          kv.first);
+      if (is_graph_input != callee->optimized_graph()->inputs().end()) {
+        continue;
+      }
+    } else {
+      auto is_graph_input = std::find(
+          callee->graph()->inputs().begin(),
+          callee->graph()->inputs().end(),
+          kv.first);
+      if (is_graph_input != callee->graph()->inputs().end()) {
+        continue;
+      }
+    }
+
     Node* new_node = kv.second->node();
     if (!updated_nodes.insert(new_node).second) {
       continue;
@@ -1943,7 +1981,6 @@ std::vector<Value*> inlineCallTo(
     }
     new_node->setCallStack(new_callstack_entries.at(raw_callstack_ptr));
   }
-
   const auto& old_outputs = to_replace->outputs();
 
   AT_ASSERT(new_outputs.size() == old_outputs.size());
@@ -2029,6 +2066,16 @@ Node* ProfileOptionalOp::allocNewInstance(Graph* g) {
   return new ProfileOptionalOp(g, {nullptr});
 }
 
+void ProfileIValueOp::cloneFrom(Node* other_) {
+  Node::cloneFrom(other_);
+  auto other = other_->cast<ProfileIValueOp>();
+  this->callback_ = other->getCallback();
+}
+
+Node* ProfileIValueOp::allocNewInstance(Graph* g) {
+  return new ProfileIValueOp(g, {nullptr});
+}
+
 TypePtr NamedValue::type() const {
   if (value_) {
     return value_->type();
@@ -2037,8 +2084,9 @@ TypePtr NamedValue::type() const {
   }
 }
 
-constexpr Symbol ProfileOp::Kind;
-constexpr Symbol ProfileOptionalOp::Kind;
+const Symbol ProfileOp::Kind = ::c10::prim::profile;
+const Symbol ProfileOptionalOp::Kind = ::c10::prim::profile_optional;
+const Symbol ProfileIValueOp::Kind = ::c10::prim::profile_ivalue;
 
 OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
   for (const char* sig : sig_literals) {

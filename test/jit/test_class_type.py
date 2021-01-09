@@ -144,7 +144,7 @@ class TestClassType(JitTestCase):
             @torch.jit.script
             class FooTest(object):
                 def __init__(self, x):
-                    if True:
+                    if 1 == 1:
                         self.attr = x
 
     def test_class_type_as_param(self):
@@ -959,6 +959,26 @@ class TestClassType(JitTestCase):
             # Make sure class constant is accessible from module
             self.assertEqual(m.w, m_loaded.w)
 
+    def test_py_class_to_ivalue_missing_attribute(self):
+        global Foo  # see [local resolution in python]
+
+        class Foo(object):
+            i : int
+            f : float
+
+            def __init__(self, i : int, f : float):
+                self.i = i
+                self.f = f
+
+        @torch.jit.script
+        def test_fn(x : Foo) -> float:
+            return x.i + x.f
+
+        test_fn(Foo(3, 4.0))
+
+        with self.assertRaisesRegex(RuntimeError, 'missing attribute i'):
+            test_fn(torch.rand(3, 4))
+
     def test_unused_method(self):
         """
         Test unused methods on scripted classes.
@@ -1308,3 +1328,73 @@ class TestClassType(JitTestCase):
 
         with self.assertRaisesRegexWithHighlight(RuntimeError, r"Class does not define __delitem__", "example[key]"):
             self.checkScript(fn, ())
+
+    def test_recursive_script_builtin_type_resolution(self):
+        """
+        Test resolution of built-in torch types(e.g. torch.Tensor, torch.device) when a class is recursively compiled.
+        """
+        # A will be implicitly compiled because it is not annotated with @torch.jit.script
+        # but is used in g() below.
+        tensor_t = torch.Tensor
+        device_t = torch.device
+        device_ty = torch.device
+
+        class A(object):
+            def __init__(self):
+                pass
+
+            def f(self, x: tensor_t, y: torch.device) -> tensor_t:
+                return x.to(device=y)
+
+            def g(self, x: device_t) -> device_ty:
+                return x
+
+            def h(self, a: 'A') -> 'A':
+                return A()
+
+            def i(self, a: List[int]) -> int:
+                return a[0]
+
+            def j(self, l: List[device_t]) -> device_ty:
+                return l[0]
+
+        def call_f():
+            a = A()
+            return a.f(torch.tensor([1]), torch.device("cpu"))
+
+        def call_g():
+            a = A()
+            return a.g(torch.device("cpu"))
+
+        def call_i():
+            a = A()
+            return a.i([3])
+
+        def call_j():
+            a = A()
+            return a.j([torch.device("cpu"), torch.device("cpu")])
+
+        for fn in [call_f, call_g, call_i, call_j]:
+            self.checkScript(fn, ())
+            s = self.getExportImportCopy(torch.jit.script(fn))
+            self.assertEqual(s(), fn())
+
+    def test_recursive_script_module_builtin_type_resolution(self):
+        """
+        Test resolution of built-in torch types(e.g. torch.Tensor, torch.device) when a class is recursively compiled
+        when compiling a module.
+        """
+        class Wrapper():
+            def __init__(self, t):
+                self.t = t
+
+            def to(self, l: List[torch.device], device: Optional[torch.device] = None):
+                return self.t.to(device=device)
+
+
+        class A(nn.Module):
+            def forward(self):
+                return Wrapper(torch.rand(4, 4))
+
+        scripted = torch.jit.script(A())
+        self.getExportImportCopy(scripted)

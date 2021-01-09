@@ -56,11 +56,13 @@ static bool IsStandardOp(const NodeKind& nkind) {
 
 // For these operators, all inputs share the same scalar type.
 // The output scalar type is always Bool.
-static const std::unordered_set<NodeKind> comparisonOps = {onnx::Greater,
-                                                           onnx::Less,
-                                                           onnx::Equal,
-                                                           onnx::GreaterOrEqual,
-                                                           onnx::LessOrEqual};
+static const std::unordered_set<NodeKind> comparisonOps = {
+    onnx::Greater,
+    onnx::Less,
+    onnx::Equal,
+    onnx::GreaterOrEqual,
+    onnx::LessOrEqual,
+};
 
 static bool IsComparisonOp(const NodeKind& nkind) {
   return comparisonOps.find(nkind) != comparisonOps.end();
@@ -69,6 +71,7 @@ static bool IsComparisonOp(const NodeKind& nkind) {
 static TensorTypePtr CreateProfiledTensorTypeWithScalarType(
     const TensorTypePtr& typePtr,
     const c10::ScalarType& scalar_type) {
+  AT_ASSERT(typePtr != nullptr);
   return typePtr->withScalarType({scalar_type});
 }
 
@@ -103,7 +106,7 @@ static c10::optional<c10::ScalarType> PromoteScalarTypesWithCategory(
     if (c10::kBool == t) {
       return 1;
     }
-    if (c10::isIntegralType(t)) {
+    if (c10::isIntegralType(t, /*includeBool=*/false)) {
       return 2;
     }
     if (c10::isFloatingType(t)) {
@@ -130,6 +133,15 @@ static c10::optional<c10::ScalarType> PromoteScalarTypesWithCategory(
 static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
   std::vector<c10::ScalarType> typesFromTensors;
   std::vector<c10::ScalarType> typesFromScalars;
+
+  auto get_scalar_type =
+      [](const Value* input) -> c10::optional<at::ScalarType> {
+    if (auto tensor_type = input->type()->cast<TensorType>()) {
+      return tensor_type->scalarType();
+    }
+    return c10::nullopt;
+  };
+
   std::for_each(
       n->inputs().begin(), n->inputs().end(), [&](const Value* input) {
         auto nkind = input->node()->kind();
@@ -178,16 +190,13 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
           } else {
             typesFromTensors.emplace_back(scalar_type);
           }
-        } else if (
-            auto scalar_type =
-                input->type()->cast<TensorType>()->scalarType()) {
+        } else if (auto scalar_type = get_scalar_type(input)) {
           typesFromTensors.emplace_back(*scalar_type);
         }
       });
 
   c10::optional<c10::ScalarType> st = c10::nullopt;
-  const c10::optional<c10::ScalarType> output_st =
-      n->output()->type()->cast<TensorType>()->scalarType();
+  const auto output_st = get_scalar_type(n->output());
 
   if (IsComparisonOp(n->kind())) {
     // For comparison ops, always promote scalar type to highest among inputs,
@@ -234,7 +243,8 @@ static void UpdateScalarTypeForInputs(
 
   for (auto input : n->inputs()) {
     auto input_tensor_type = input->type()->cast<TensorType>();
-    auto input_scalar_type = input_tensor_type->scalarType();
+    auto input_scalar_type =
+        input_tensor_type ? input_tensor_type->scalarType() : c10::nullopt;
 
     if ((input->node()->kind() == onnx::Constant) ||
         (input_scalar_type && (*input_scalar_type != scalar_type))) {

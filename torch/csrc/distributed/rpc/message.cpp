@@ -76,44 +76,11 @@ MessageType Message::type() const {
 }
 
 bool Message::isRequest() const {
-  return MessageType::SCRIPT_CALL == type_ || // dist.rpc on builtin ops
-      MessageType::PYTHON_CALL == type_ || // dist.rpc on Python UDFs
-      MessageType::SCRIPT_REMOTE_CALL == type_ || // dist.remote on builtin ops
-      MessageType::PYTHON_REMOTE_CALL == type_ || // dist.remote on Python UDFs
-      // RRef related internal messages
-      MessageType::SCRIPT_RREF_FETCH_CALL == type_ ||
-      MessageType::PYTHON_RREF_FETCH_CALL == type_ ||
-      MessageType::RREF_USER_DELETE == type_ ||
-      MessageType::RREF_CHILD_ACCEPT == type_ ||
-      MessageType::RREF_FORK_REQUEST == type_ ||
-      // Autograd message
-      MessageType::BACKWARD_AUTOGRAD_REQ == type_ ||
-      MessageType::FORWARD_AUTOGRAD_REQ == type_ ||
-      // Cleanup Autograd context request
-      MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ == type_ ||
-      // Run with profiling request
-      MessageType::RUN_WITH_PROFILING_REQ == type_ ||
-      // RRef.backward() request
-      MessageType::RREF_BACKWARD_REQ == type_;
+  return MessageTypeFlags::REQUEST_TYPE & type_;
 }
 
 bool Message::isResponse() const {
-  return MessageType::SCRIPT_RET == type_ || // ret of dist.rpc on builtin ops
-      MessageType::PYTHON_RET == type_ || // ret of dist.rpc on Python UDFs
-      MessageType::REMOTE_RET == type_ || // ret of dist.remote
-      MessageType::SCRIPT_RREF_FETCH_RET == type_ || // ret on RRef::toHere()
-      MessageType::PYTHON_RREF_FETCH_RET == type_ || // ret on RRef::toHere()
-      MessageType::EXCEPTION == type_ || // propagate back exceptions
-      MessageType::RREF_ACK == type_ || // ret of other types
-      // Autograd response
-      MessageType::BACKWARD_AUTOGRAD_RESP == type_ ||
-      MessageType::FORWARD_AUTOGRAD_RESP == type_ ||
-      // Cleanup autograd context response
-      MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP == type_ ||
-      // Run with profiling response
-      MessageType::RUN_WITH_PROFILING_RESP == type_ ||
-      // RRef.backward() resp
-      MessageType::RREF_BACKWARD_RESP == type_;
+  return MessageTypeFlags::RESPONSE_TYPE & type_;
 }
 
 int64_t Message::id() const {
@@ -136,6 +103,18 @@ Message createExceptionResponse(const std::string& exceptionStr, int64_t id) {
       MessageType::EXCEPTION,
       id);
 }
+
+namespace {
+
+// NB: need to call torch::class_ to register Message in the map returned by
+// c10::getCustomClassTypeMap(). Otherwise, Message cannot be wrapped within
+// an IValue.
+// NB: add this line here instead of in rpc/init.cpp because 1) we have C++
+// only tests that won't run rpc/init.cpp; 2) Message is not meant to be
+// visible from Python.
+static const auto message = torch::class_<Message>("rpc", "_Message");
+
+} // namespace
 
 } // namespace rpc
 } // namespace distributed

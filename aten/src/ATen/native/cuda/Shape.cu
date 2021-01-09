@@ -294,7 +294,8 @@ void hip_parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
 #define HANDLE_CASE(DIMS) \
     HIP_CatArrayBatchedCopy<scalar_t, unsigned int, DIMS><<<\
         catGrid, applyBlock, 0, stream.stream()>>>(\
-            data, d_inputs, outputParam, dimension, outputParam.tensorStride[dimension]);
+            data, d_inputs, outputParam, dimension, outputParam.tensorStride[dimension]); \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     switch (nDims) {
       case 1:
         HANDLE_CASE(1);
@@ -310,7 +311,6 @@ void hip_parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
         break;
     }
 #undef HANDLE_CASE
-    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 
@@ -404,7 +404,8 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
 #define HANDLE_CASE(DIMS) \
     CatArrayBatchedCopy<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
         catGrid, applyBlock, 0, stream.stream()>>>(\
-            data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);
+            data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]); \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     switch (nDims) {
       case 1:
         HANDLE_CASE(1);
@@ -420,7 +421,6 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
         break;
     }
 #undef HANDLE_CASE
-    AT_CUDA_CHECK(cudaGetLastError());
   }
 }
 } // namespace

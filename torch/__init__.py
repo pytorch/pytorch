@@ -359,11 +359,13 @@ def set_deterministic(d):
         * :class:`torch.nn.FractionalMaxPool2d` when called on a CUDA tensor that requires grad
         * :class:`torch.nn.FractionalMaxPool3d` when called on a CUDA tensor that requires grad
         * :func:`torch.nn.functional.interpolate` when called on a CUDA tensor that requires grad
-            and one of the following modes is used:
-            - `linear`
-            - `bilinear`
-            - `bicubic`
-            - `trilinear`
+          and one of the following modes is used:
+
+          - `linear`
+          - `bilinear`
+          - `bicubic`
+          - `trilinear`
+
         * :class:`torch.nn.ReflectionPad1d` when called on a CUDA tensor that requires grad
         * :class:`torch.nn.ReflectionPad2d` when called on a CUDA tensor that requires grad
         * :class:`torch.nn.ReplicationPad1d` when called on a CUDA tensor that requires grad
@@ -374,10 +376,13 @@ def set_deterministic(d):
         * :class:`torch.nn.EmbeddingBag` when called on a CUDA tensor that requires grad
         * :func:`torch.scatter_add_` when called on a CUDA tensor
         * :func:`torch.index_add_` when called on a CUDA tensor
+        * :func:`torch.index_copy`
         * :func:`torch.index_select` when called on a CUDA tensor that requires grad
         * :func:`torch.repeat_interleave` when called on a CUDA tensor that requires grad
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
+        * :func:`torch.kthvalue` with called on a CUDA tensor
+        * :func:`torch.median` with indices output when called on a CUDA tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable `CUBLAS_WORKSPACE_CONFIG=:4096:8`
@@ -565,10 +570,11 @@ def _assert(condition, message):
 import torch.cuda
 import torch.autograd
 from torch.autograd import no_grad, enable_grad, set_grad_enabled
-# import torch.fft  # TODO: enable once torch.fft() is removed
+import torch.fft
 import torch.futures
 import torch.nn
 import torch.nn.intrinsic
+import torch.nn.quantizable
 import torch.nn.quantized
 import torch.optim
 import torch.optim._multi_tensor
@@ -591,6 +597,7 @@ import torch.quantization
 import torch.utils.data
 import torch.__config__
 import torch.__future__
+import torch.profiler
 
 _C._init_names(list(torch._storage_classes))
 

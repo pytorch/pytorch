@@ -2,6 +2,8 @@ import dis
 import torch
 import inspect
 import operator
+import builtins
+from typing import Union
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
 from typing import Tuple, Dict, Optional, Iterable, Any, Iterator
@@ -33,8 +35,8 @@ class TracerBase:
 
         If kind = 'placeholder', then we're creating a Node that
         represents the parameter of a function. If we need to encode
-        a default parameter, we use the `args` tuple. `args` is
-        otherwise empty for `placeholder` Nodes.
+        a default parameter, we use the ``args`` tuple. ``args`` is
+        otherwise empty for ``placeholder`` Nodes.
         '''
         args_ = self.create_arg(args)
         kwargs_ = self.create_arg(kwargs)
@@ -50,7 +52,13 @@ class TracerBase:
         Can be override to support more trace-specific types.
         """
         # aggregates
-        if isinstance(a, (tuple, list)):
+        if isinstance(a, tuple) and hasattr(a, '_fields'):
+            # NamedTuple constructors don't seem to like getting a generator
+            # expression as an argument to their constructor, so build this
+            # intermediate tuple and unpack it into the NamedTuple constructor
+            args = tuple(self.create_arg(elem) for elem in a)
+            return type(a)(*args)  # type: ignore
+        elif isinstance(a, (tuple, list)):
             return type(a)(self.create_arg(elem) for elem in a)
         elif isinstance(a, dict):
             r = {}
@@ -64,11 +72,55 @@ class TracerBase:
 
         if isinstance(a, Proxy):
             # base case: we unwrap the Proxy object
+            reasonable_name = self.find_reasonable_name(a)
+            if reasonable_name is not None and not a.node.name.startswith(reasonable_name):
+                a.node.name = a.tracer.graph._create_unique_name(reasonable_name)
             return a.node
         elif isinstance(a, base_types) or a is None:
             return a
 
         raise NotImplementedError(f"argument of type: {type(a)}")
+
+    def find_reasonable_name(self, obj: 'Proxy') -> Optional[str]:
+        """
+        Find a reasonable name for this proxy object. By default, this introspects
+        the Python interpreter state to find the name this Proxy was assigned to
+        in the user code
+        """
+        # We have to do a little dance here. Basically, walk up the callstack and
+        # record the last frame we've found in `proxy.py`. The user code being
+        # traced will be the next frame above that one. So, once we've found
+        # the uppermost proxy.py frame from the stack, get that frame's f_back
+        # for the purpose of looking up the names
+        frame = inspect.currentframe()
+        last_proxy_frame = None
+
+        while frame:
+            frame = frame.f_back
+            if frame and frame.f_code.co_filename.endswith('proxy.py'):
+                last_proxy_frame = frame
+
+        if not last_proxy_frame:
+            return None
+
+        user_frame = last_proxy_frame.f_back
+        if not user_frame:
+            return None
+
+        f_locals = user_frame.f_locals
+
+        found_name : Optional[str] = None
+        for k, v in f_locals.items():
+            if obj is v:
+                # Arbitrary tie-breaker: use the shortest name found in the
+                # frame. This will account for cases e.g. `x` and `identity`
+                # in the same frame (as in ResNet). This tie-breaker makes it
+                # so that we use a consistent name. TODO: Futher introspect
+                # into Python bytecode state to get the actual name used?
+                if not found_name or len(k) < len(found_name):
+                    found_name = k
+
+        return found_name
 
     def to_bool(self, obj: 'Proxy') -> bool:
         """Called when a proxy object is being converted to a boolean, such as
@@ -105,60 +157,6 @@ class TraceError(ValueError):
     pass
 
 
-def _create_friendly_names(args: Tuple[Any, ...], kwargs: Dict[str, Any], frames_up : int):
-    """
-    Given an args/kwargs object, go through and try to pull out the names for
-    each contained Proxy from the Python interpreter frame `frames_up` above
-    us in the stack. If found, assign that name to the Proxy's underlying Node's
-    unique name
-    """
-    frame = inspect.currentframe()
-    if not frame:
-        raise RuntimeError("failed to inspect frame")
-
-    i = 0
-    while i < frames_up + 1:
-        frame = frame.f_back
-        if not frame:
-            raise RuntimeError("failed to get frame")
-        i += 1
-
-    f_locals = frame.f_locals
-
-    def _assign_friendly_name(a : Any):
-        # aggregates
-        if isinstance(a, (tuple, list)):
-            for elem in a:
-                _assign_friendly_name(elem)
-        elif isinstance(a, dict):
-            for k, v in a.items():
-                if not isinstance(k, str):
-                    raise NotImplementedError(f"dictionaries with non-string keys: {a}")
-                _assign_friendly_name(v)
-        elif isinstance(a, slice):
-            _assign_friendly_name(a.start)
-            _assign_friendly_name(a.stop)
-            _assign_friendly_name(a.step)
-
-        if isinstance(a, Proxy):
-            # Base case: look for Proxy objects in locals:
-
-            found_name : Optional[str] = None
-            for k, v in f_locals.items():
-                if a is v:
-                    # Arbitrary tie-breaker: use the shortest name found in the
-                    # frame. This will account for cases e.g. `x` and `identity`
-                    # in the same frame (as in ResNet). This tie-breaker makes it
-                    # so that we use a consistent name. TODO: Futher introspect
-                    # into Python bytecode state to get the actual name used?
-                    if not found_name or len(k) < len(found_name):
-                        found_name = k
-            if found_name is not None and not a.node.name.startswith(found_name):
-                a.node.name = a.tracer.graph._create_unique_name(found_name)
-
-    _assign_friendly_name(args)
-    _assign_friendly_name(kwargs)
-
 # Proxy objects are stand-in values for normal values in a PyTorch computation.
 # Instead of performing compute they record computation into Graph.
 # Each proxy wraps the Node instance that represents the expression that define the
@@ -183,7 +181,6 @@ class Proxy:
         return Attribute(self, k)
 
     def __call__(self, *args, **kwargs) -> 'Proxy':
-        _create_friendly_names(args, kwargs, 1)
         return self.tracer.create_proxy('call_method', '__call__', (self,) + args, kwargs)
 
     def __iter__(self) -> Iterable['Proxy']:
@@ -203,15 +200,23 @@ class Proxy:
     def keys(self):
         return self.tracer.keys(self)
 
+    def __len__(self):
+        raise RuntimeError("'len' is not supported. Replace it with 'torch.fx.len'.")
+
     def __torch_function__(self, orig_method, types, args=None, kwargs=None):
         args = args if args else ()
         kwargs = kwargs if kwargs else {}
-        _create_friendly_names(args, kwargs, 1)
         if torch.overrides.is_tensor_method_or_property(orig_method):
             return self.tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:
             return self.tracer.create_proxy('call_function', orig_method, args, kwargs,
                                             name=self.tracer.graph._target_to_str(orig_method.__name__))
+
+def len(item: Any) -> Union[Proxy, int]:
+    if not isinstance(item, Proxy):
+        return builtins.len(item)
+
+    return item.tracer.create_proxy('call_function', builtins.len, (item,), {})
 
 class Attribute(Proxy):
     def __init__(self, root: Proxy, attr: str):
@@ -229,7 +234,6 @@ class Attribute(Proxy):
         return self._node
 
     def __call__(self, *args, **kwargs):
-        _create_friendly_names(args, kwargs, 1)
         return self.tracer.create_proxy('call_method', self.attr, (self.root,) + args, kwargs)
 
 for method in magic_methods:
@@ -237,7 +241,6 @@ for method in magic_methods:
         def impl(*args, **kwargs):
             tracer = args[0].tracer
             target = getattr(operator, method)
-            _create_friendly_names(args, kwargs, 1)
             return tracer.create_proxy('call_function', target, args, kwargs)
         impl.__name__ = method
         as_magic = f'__{method}__'

@@ -18,8 +18,8 @@ from .gradcheck import gradcheck, gradgradcheck
 from .grad_mode import no_grad, enable_grad, set_grad_enabled
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
 from ..overrides import has_torch_function, handle_torch_function
-from . import profiler
 from . import functional
+from . import forward_ad
 
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode']
 
@@ -102,7 +102,7 @@ def backward(
         in a user-specified CUDA stream context, see
         :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
-    Arguments:
+    Args:
         tensors (sequence of Tensor): Tensors of which the derivative will be
             computed.
         grad_tensors (sequence of (Tensor or None)): The "vector" in the Jacobian-vector
@@ -174,7 +174,7 @@ def grad(
         in a user-specified CUDA stream context, see
         :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
 
-    Arguments:
+    Args:
         outputs (sequence of Tensor): outputs of the differentiated function.
         inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
             returned (and not accumulated into ``.grad``).
@@ -251,6 +251,12 @@ if not torch._C._autograd_init():
     raise RuntimeError("autograd initialization failed")
 
 # Import all native method/classes
-from torch._C._autograd import (ProfilerState, ProfilerConfig, ProfilerEvent,
-                                _enable_profiler, _disable_profiler, _profiler_enabled,
-                                _enable_record_function, _set_empty_test_observer)
+from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, ProfilerConfig, ProfilerEvent,
+                                _enable_profiler_legacy, _disable_profiler_legacy, _profiler_enabled,
+                                _enable_record_function, _set_empty_test_observer, kineto_available)
+
+if kineto_available():
+    from torch._C._autograd import (ProfilerResult, KinetoEvent,
+                                    _prepare_profiler, _enable_profiler, _disable_profiler)
+
+from . import profiler

@@ -72,7 +72,7 @@ template<typename Factory>
 inline auto Cache<Factory>::retrieve(
     const Descriptor& descriptor) {
   auto iterator = cache_.find(descriptor);
-  if (cache_.cend() == iterator) {
+  if C10_UNLIKELY(cache_.cend() == iterator) {
     iterator = cache_.insert({descriptor, factory_(descriptor)}).first;
   }
 
