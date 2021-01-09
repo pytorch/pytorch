@@ -505,6 +505,15 @@ class AbstractTestCases:
                 assert torch.backends.quantized.engine == qe, 'qengine not set successfully'
             torch.backends.quantized.engine = original_qe
 
+        def test_terminate_handler_on_crash(self):
+            cmd = [sys.executable, '-c', 'import torch; import torch._C; torch._C._crash_immediately()']
+            with self.assertRaises(subprocess.CalledProcessError) as cm:
+                subprocess.check_output(cmd, shell=False)
+            e = cm.exception
+            self.assertNotEqual(e.returncode, 0)
+            self.assertNotEqual(e.output, None)
+            self.assertRegex(e.output, 'Unhandled exception caught in c10/util/AbortHandler.h')
+
         def _spawn_method(self, method, arg):
             try:
                 mp.set_start_method('spawn')
@@ -5177,15 +5186,6 @@ class TestTorchDeviceType(TestCase):
             torch.take(src, ind, out=src)
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             torch.take(ind.clone(), ind[1:], out=ind[:-1])
-
-    def test_terminate_handler_on_crash(self):
-        cmd = [sys.executable, '-c', 'import torch; import torch._C; torch._C._crash_immediately()']
-        with self.assertRaises(subprocess.CalledProcessError) as cm:
-            subprocess.check_output(cmd, shell=False)
-        e = cm.exception
-        self.assertNotEqual(e.returncode, 0)
-        self.assertNotEqual(e.output, None)
-        self.assertRegex(e.output, 'Unhandled exception caught in c10/util/AbortHandler.h')
 
     @onlyCUDA
     def test_multinomial_device_constrain(self, device):
