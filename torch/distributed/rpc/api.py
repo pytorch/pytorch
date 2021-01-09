@@ -381,7 +381,7 @@ try:
     # Combine the implementation class and the type class.
     class RRef(PyRRef, Generic[T]):
         pass
-except TypeError as exc:
+except TypeError:
     # TypeError: metaclass conflict: the metaclass of a derived class
     # must be a (non-strict) subclass of the metaclasses of all its bases
     # Mypy doesn't understand __class__ (mypy bug #4177)
