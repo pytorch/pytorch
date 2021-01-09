@@ -1922,7 +1922,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     // computes u @ diag(gsigma) @ vh
     sigma_term = at::matmul(u * gsigma.unsqueeze(-2), vh);
   } else {
-    sigma_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    sigma_term = at::zeros({1}, self.options()).expand_as(self);
   }
   // in case that there are no gu and gv, we can avoid the series of kernel
   // calls below
@@ -1953,7 +1953,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     }
     u_term = at::matmul(u_term, vh);
   } else {
-    u_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    u_term = at::zeros({1}, self.options()).expand_as(self);
   }
 
   if (gv.defined()) {
@@ -1967,7 +1967,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     }
     v_term = at::matmul(u, v_term);
   } else {
-    v_term = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    v_term = at::zeros({1}, self.options()).expand_as(self);
   }
 
   // for complex-valued input there is an additional term
