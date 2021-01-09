@@ -38,8 +38,12 @@ class TracerBase:
         a default parameter, we use the ``args`` tuple. ``args`` is
         otherwise empty for ``placeholder`` Nodes.
         '''
-        args_ = self.create_arg(args)
-        kwargs_ = self.create_arg(kwargs)
+        try:
+            self._cached_user_frame = self.find_user_frame()
+            args_ = self.create_arg(args)
+            kwargs_ = self.create_arg(kwargs)
+        finally:
+            self._cached_user_frame = None
         assert isinstance(args_, tuple)
         assert isinstance(kwargs_, dict)
         return self.proxy(self.create_node(kind, target, args_, kwargs_, name, type_expr))
@@ -81,18 +85,14 @@ class TracerBase:
 
         raise NotImplementedError(f"argument of type: {type(a)}")
 
-    def find_reasonable_name(self, obj: 'Proxy') -> Optional[str]:
+    def find_user_frame(self):
         """
-        Find a reasonable name for this proxy object. By default, this introspects
-        the Python interpreter state to find the name this Proxy was assigned to
-        in the user code
+        Find the Python stack frame executing the user code during
+        symbolic tracing.
         """
         # We have to do a little dance here. Basically, walk up the callstack and
         # record the first frame not in the FX source. This is the frame executing
         # the user code during tracing.
-        #
-        # TODO: doing this callstack lookup for every `create_arg` call is probably
-        #       slow. See if we can cache this away
         frame = inspect.currentframe()
 
         fx_files = ['torch/fx/proxy.py', 'torch/fx/symbolic_trace.py']
@@ -100,6 +100,24 @@ class TracerBase:
             frame = frame.f_back
             if frame and all(not frame.f_code.co_filename.endswith(file) for file in fx_files):
                 break
+
+        if not frame:
+            return None
+
+        return frame
+
+    def find_reasonable_name(self, obj: 'Proxy') -> Optional[str]:
+        """
+        Find a reasonable name for this proxy object. By default, this introspects
+        the Python interpreter state to find the name this Proxy was assigned to
+        in the user code
+        """
+
+        # Retrieve the cached user frame. This is a performance optimization
+        # so we don't have to do the frame lookup for every single proxy input
+        frame = getattr(self, '_cached_user_frame', None)
+        if not frame:
+            frame = self.find_user_frame()
 
         if not frame:
             return None
