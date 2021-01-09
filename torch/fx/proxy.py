@@ -88,26 +88,23 @@ class TracerBase:
         in the user code
         """
         # We have to do a little dance here. Basically, walk up the callstack and
-        # record the last frame we've found in `proxy.py`. The user code being
-        # traced will be the next frame above that one. So, once we've found
-        # the uppermost proxy.py frame from the stack, get that frame's f_back
-        # for the purpose of looking up the names
+        # record the first frame not in the FX source. This is the frame executing
+        # the user code during tracing.
+        #
+        # TODO: doing this callstack lookup for every `create_arg` call is probably
+        #       slow. See if we can cache this away
         frame = inspect.currentframe()
-        last_proxy_frame = None
 
+        fx_files = ['torch/fx/proxy.py', 'torch/fx/symbolic_trace.py']
         while frame:
             frame = frame.f_back
-            if frame and frame.f_code.co_filename.endswith('proxy.py'):
-                last_proxy_frame = frame
+            if frame and all(not frame.f_code.co_filename.endswith(file) for file in fx_files):
+                break
 
-        if not last_proxy_frame:
+        if not frame:
             return None
 
-        user_frame = last_proxy_frame.f_back
-        if not user_frame:
-            return None
-
-        f_locals = user_frame.f_locals
+        f_locals = frame.f_locals
 
         found_name : Optional[str] = None
         for k, v in f_locals.items():
@@ -117,7 +114,7 @@ class TracerBase:
                 # in the same frame (as in ResNet). This tie-breaker makes it
                 # so that we use a consistent name. TODO: Futher introspect
                 # into Python bytecode state to get the actual name used?
-                if not found_name or len(k) < len(found_name):
+                if not found_name or len(k) < len(found_name):  # type: ignore
                     found_name = k
 
         return found_name

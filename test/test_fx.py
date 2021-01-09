@@ -305,6 +305,26 @@ class TestFX(JitTestCase):
             if node.target in target_to_expected_name:
                 self.assertEqual(node.name, target_to_expected_name[node.target])
 
+    def test_friendly_names_call_module(self):
+        class FriendlyNameTest2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = torch.nn.ReLU()
+
+            def forward(self, x):
+                bar = torch.neg(x)
+                return self.submod(bar)
+
+        traced = symbolic_trace(FriendlyNameTest2())
+
+        target_to_expected_name = {
+            torch.neg : 'bar',
+        }
+
+        for node in traced.graph.nodes:
+            if node.target in target_to_expected_name:
+                self.assertEqual(node.name, target_to_expected_name[node.target])
+
     def test_unpack(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
