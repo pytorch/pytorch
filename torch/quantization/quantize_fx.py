@@ -179,8 +179,7 @@ forward graph of the parent module,
         prepare_custom_config_dict=prepare_custom_config_dict,
         is_standalone_module=is_standalone_module)
 
-
-    preserved_attributes = prepare_custom_config_dict.get("preserved_attributes")
+    preserved_attributes = prepare_custom_config_dict.get("preserved_attributes", [])
     for attr_name in preserved_attributes:
         setattr(prepared, attr_name, getattr(model, attr_name))
     return prepared
@@ -422,12 +421,17 @@ def _convert_fx(
         is_standalone_module: bool = False) -> GraphModule:
     """ `is_standalone_module`: see docs in :func:`~torch.quantization.prepare_standalone_module_fx`
     """
+    if convert_custom_config_dict is None:
+        convert_custom_config_dict = {}
+
     _check_is_graph_module(graph_module)
+
     quantizer = Quantizer()
     quantized = quantizer.convert(graph_module, debug, convert_custom_config_dict, is_standalone_module)
-    preserved_attributes = prepare_custom_config_dict.get("preserved_attributes")
+
+    preserved_attributes = convert_custom_config_dict.get("preserved_attributes", [])
     for attr_name in preserved_attributes:
-        setattr(quantized, attr_name, getattr(model, attr_name))
+        setattr(quantized, attr_name, getattr(graph_module, attr_name))
     return quantized
 
 def convert_fx(
