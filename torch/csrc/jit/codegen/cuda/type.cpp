@@ -6,6 +6,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 // Return highest on list (smallest enum val)
 DataType promote_type(const DataType& t1, const DataType& t2) {
@@ -535,6 +536,7 @@ size_t dataTypeSize(DataType type) {
   }
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

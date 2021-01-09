@@ -1,4 +1,3 @@
-from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
@@ -42,18 +41,13 @@ class Binomial(Distribution):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
             self.total_count, self.probs, = broadcast_all(total_count, probs)
-            self.total_count = self.total_count.type_as(self.logits)
-            is_scalar = isinstance(self.probs, Number)
+            self.total_count = self.total_count.type_as(self.probs)
         else:
             self.total_count, self.logits, = broadcast_all(total_count, logits)
             self.total_count = self.total_count.type_as(self.logits)
-            is_scalar = isinstance(self.logits, Number)
 
         self._param = self.probs if probs is not None else self.logits
-        if is_scalar:
-            batch_shape = torch.Size()
-        else:
-            batch_shape = self._param.size()
+        batch_shape = self._param.size()
         super(Binomial, self).__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

@@ -39,7 +39,7 @@ TORCH_CUDA_API bool isNodeParsible(const Node* node);
 
 // lowers PyTorch jit graph to `Fusion`.
 TORCH_CUDA_API std::unique_ptr<Fusion> parseJitIR(
-    std::shared_ptr<Graph>& graph);
+    const std::shared_ptr<Graph>& graph);
 
 } // namespace cuda
 } // namespace fuser

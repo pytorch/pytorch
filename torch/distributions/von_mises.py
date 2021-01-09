@@ -49,7 +49,7 @@ def _log_modified_bessel_fn(x, order=0):
     return result
 
 
-@torch.jit._script_if_tracing
+@torch.jit.script_if_tracing
 def _rejection_sample(loc, concentration, proposal_r, x):
     done = torch.zeros(x.shape, dtype=torch.bool, device=loc.device)
     while not done.all():

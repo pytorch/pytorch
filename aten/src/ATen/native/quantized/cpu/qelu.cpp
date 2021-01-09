@@ -24,8 +24,8 @@ Tensor quantized_celu(const Tensor& qx, double output_scale, int64_t output_zero
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("elu", quantized_elu);
-  m.impl("celu", quantized_celu);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::elu"), quantized_elu);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::celu"), quantized_celu);
 }
 
 }}  // namespace at::native

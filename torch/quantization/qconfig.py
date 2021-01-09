@@ -3,6 +3,8 @@ from .observer import *
 from .fake_quantize import *
 import torch.nn as nn
 
+from typing import Union
+
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
     """
     Describes how to quantize a layer or a part of the network by providing
@@ -67,8 +69,11 @@ float16_dynamic_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_arg
 per_channel_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
                                              weight=default_per_channel_weight_observer)
 
-float_qparams_dynamic_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
-                                               weight=default_float_qparams_observer)
+# TODO: this is weight only quant, change this to QConfigWeightOnly
+# or remove the QConfigDynamic later
+float_qparams_weight_only_qconfig = QConfigDynamic(
+    activation=default_placeholder_observer,
+    weight=default_float_qparams_observer)
 
 default_qat_qconfig = QConfig(activation=default_fake_quant,
                               weight=default_weight_fake_quant)
@@ -106,3 +111,18 @@ def get_default_qat_qconfig(backend='fbgemm'):
     else:
         qconfig = default_qat_qconfig
     return qconfig
+
+def assert_valid_qconfig(qconfig: Union[QConfig, QConfigDynamic],
+                         mod: torch.nn.Module) -> None:
+    is_conv_transpose_mod = (
+        isinstance(mod, torch.nn.ConvTranspose1d) or
+        isinstance(mod, torch.nn.ConvTranspose2d) or
+        isinstance(mod, torch.nn.ConvTranspose3d))
+    if is_conv_transpose_mod:
+        example_observer = qconfig.weight()
+        is_per_channel = (
+            isinstance(example_observer, torch.quantization.PerChannelMinMaxObserver) or
+            isinstance(example_observer, torch.quantization.MovingAveragePerChannelMinMaxObserver)
+        )
+        assert not is_per_channel, \
+            'Per channel weight observer is not supported yet for ConvTranspose{n}d.'

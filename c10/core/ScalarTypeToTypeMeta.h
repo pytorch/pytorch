@@ -44,4 +44,12 @@ static inline bool operator==(caffe2::TypeMeta m, ScalarType t) {
   return t == m;
 }
 
+static inline bool operator!=(ScalarType t, caffe2::TypeMeta m) {
+  return !(t == m);
+}
+
+static inline bool operator!=(caffe2::TypeMeta m, ScalarType t) {
+  return !(t == m);
+}
+
 } // namespace c10

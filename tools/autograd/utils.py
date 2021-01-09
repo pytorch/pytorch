@@ -2,6 +2,7 @@ import re
 import os
 import yaml
 from .nested_dict import nested_dict
+from typing import Dict, List
 
 
 __all__ = [
@@ -46,12 +47,18 @@ def split_name_params(prototype):
 def uninplace_api_name(api_name):
     if api_name.endswith('_') and not api_name.endswith('__'):
         api_name = api_name[:-1]
+    return unout_api_name(api_name)
+
+def make_out_api_name_faithful(api_name):
+    # Variable kernel needs to call the _outf overload instead of the _out overload
+    # because the _outf overload matches the argument order as it's passed into
+    # the variable kernel
     if api_name.endswith('_out'):
-        api_name = api_name[:-4]
+        api_name = api_name + 'f'
     return api_name
 
 
-def write(dirname, name, template, env):
+def write(dirname: str, name: str, template: CodeTemplate, env: Dict[str, List[str]]) -> None:
     env['generated_comment'] = GENERATED_COMMENT.substitute(filename=template.filename)
     path = os.path.join(dirname, name)
     # See Note [Unchanging results for ninja]
@@ -68,15 +75,11 @@ def write(dirname, name, template, env):
     else:
         print("Skipped writing {}".format(path))
 
-def is_tensor_method(declaration):
-    return 'Tensor' in declaration['method_of']
-
 def is_out_variant(decl):
     return decl['name'].endswith('_out')
 
-def op_name_without_overload(decl):
-    name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
-    return 'aten::{}'.format(name)
+def op_name_with_overload(decl):
+    return decl['operator_name_with_overload']
 
 def load_op_list_and_strip_overload(op_list, op_list_path):
     if op_list is None and op_list_path is None:
@@ -88,3 +91,24 @@ def load_op_list_and_strip_overload(op_list, op_list_path):
             op_list += yaml.load(f, Loader=YamlLoader)
     # strip out the overload part
     return {opname.split('.', 1)[0] for opname in op_list}
+
+def is_output(arg):
+    return arg.get('output', False)
+
+def has_outputs(declaration):
+    return any([is_output(arg) for arg in declaration['arguments']])
+
+def op_name(declaration):
+    name = declaration['name']
+    if has_outputs(declaration):
+        if not name.endswith("_out"):
+            raise RuntimeError(
+                '{} has output params, expecting name ending with \'_out\''.
+                format(declaration['name']))
+        return name[:-4]
+    else:
+        if name.endswith("_out"):
+            raise RuntimeError(
+                '{}: name ends with \'_out\', expecting output params'.
+                format(declaration['name']))
+        return name

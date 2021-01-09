@@ -1,9 +1,13 @@
 if((NOT BUILD_CAFFE2) OR (INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE))
   list(APPEND Caffe2_CPU_SRCS
     utils/string_utils.cc
-    utils/threadpool/pthreadpool-cpp.cc
     utils/threadpool/ThreadPool.cc
   )
+
+  if(USE_PTHREADPOOL AND NOT USE_INTERNAL_PTHREADPOOL_IMPL)
+    list(APPEND Caffe2_CPU_SRCS utils/threadpool/pthreadpool-cpp.cc)
+  endif()
+
   if(NOT BUILD_CAFFE2)
     list(APPEND Caffe2_CPU_SRCS
       utils/proto_wrap.cc

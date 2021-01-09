@@ -1,10 +1,12 @@
 #ifdef USE_CUDA
 
+#include <cmath>
 #include <sstream>
 #include <stdexcept>
-#include "test/cpp/tensorexpr/test_base.h"
 
-#include <cmath>
+#include <gtest/gtest.h>
+
+#include "test/cpp/tensorexpr/test_base.h"
 
 #include <torch/csrc/jit/testing/file_check.h>
 #include "test/cpp/tensorexpr/padded_buffer.h"
@@ -24,7 +26,7 @@ using namespace torch::jit::tensorexpr;
 using namespace torch::jit::tensorexpr;
 
 template <typename ctype>
-void testCudaTestVectorAdd01_impl() {
+static void testCudaTestVectorAdd01_impl() {
   KernelScope kernel_scope;
   const int num_iter = 3;
   const int block_count = 16;
@@ -40,7 +42,7 @@ void testCudaTestVectorAdd01_impl() {
           {block_size, "t_id"},
       },
       [&](const VarHandle& n, const VarHandle& b_id, const VarHandle& t_id) {
-        return a_buf(n, b_id, t_id) + b_buf(n, b_id, t_id);
+        return a_buf.load(n, b_id, t_id) + b_buf.load(n, b_id, t_id);
       });
   LoopNest l({c});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
@@ -90,7 +92,7 @@ float sigmoid(float x) {
   return 1.0f / (1.0f + expf(-0.0f - x));
 }
 
-void testCudaSigmoid() {
+TEST(Cuda, Sigmoid_CUDA) {
   KernelScope kernel_scope;
   const int num_iter = 3;
   const int block_count = 16;
@@ -105,7 +107,7 @@ void testCudaSigmoid() {
           {block_size, "t_id"},
       },
       [&](const VarHandle& n, const VarHandle& b_id, const VarHandle& t_id) {
-        return sigmoid(sigmoid(a_buf(n, b_id, t_id)));
+        return sigmoid(sigmoid(a_buf.load(n, b_id, t_id)));
       });
   LoopNest l({c});
   std::vector<For*> loops = l.getLoopStmtsFor(c);
@@ -145,7 +147,7 @@ void testCudaSigmoid() {
   cudaFree(c_dev);
 }
 
-void testCudaTestVectorAdd01() {
+TEST(Cuda, TestVectorAdd01_CUDA) {
   // floating types.
   testCudaTestVectorAdd01_impl<float>();
   testCudaTestVectorAdd01_impl<at::Half>();
@@ -168,7 +170,7 @@ static void testCudaTestVectorAdd02_impl(int N, int block_size) {
       {
           {N, "N"},
       },
-      [&](const VarHandle& n) { return a_buf(n) + b_buf(n); });
+      [&](const VarHandle& n) { return a_buf.load(n) + b_buf.load(n); });
   LoopNest l({c});
   For* n_outer;
   For* n_inner;
@@ -215,17 +217,17 @@ static void testCudaTestVectorAdd02_impl(int N, int block_size) {
   cudaFree(c_dev);
 }
 
-void testCudaTestVectorAdd02() {
+TEST(Cuda, TestVectorAdd02_CUDA) {
   testCudaTestVectorAdd02_impl(1024, 128);
   testCudaTestVectorAdd02_impl(1030, 128);
 }
 
-void testCudaHalfCast() {
+TEST(Cuda, HalfCast_CUDA) {
   KernelScope ks;
   auto half = ToDtype<at::Half>();
   Placeholder a("a", half, {4});
   Tensor* b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
-    return Cast::make(kFloat, a(i));
+    return Cast::make(kFloat, a.load(i));
   });
 
   LoopNest l({b});
@@ -259,7 +261,7 @@ void testCudaHalfCast() {
   cudaFree(bDev);
 }
 
-void testCudaDynamicShape2D() {
+TEST(Cuda, DynamicShape2D_CUDA) {
   KernelScope kernel_scope;
   auto testWithSize = [](int32_t M, int32_t N) {
     VarHandle m("m", kInt);
@@ -268,7 +270,7 @@ void testCudaDynamicShape2D() {
     Placeholder b(BufHandle("b", {m, n}, kFloat));
     Tensor* c = Compute(
         "c", {{m, "m"}, {n, "n"}}, [&](const VarHandle& i, const VarHandle& j) {
-          return a(i, j) + b(i, j);
+          return a.load(i, j) + b.load(i, j);
         });
     LoopNest l({c});
     l.prepareForCodegen();
@@ -322,7 +324,7 @@ void testCudaDynamicShape2D() {
   testWithSize(27, 13);
 }
 
-void testCudaTestRand01() {
+TEST(Cuda, TestRand01_CUDA) {
   KernelScope kernel_scope;
   const int num_iter = 3;
   const int block_count = 16;
@@ -381,13 +383,13 @@ void testCudaTestRand01() {
   cudaFree(c_dev);
 }
 
-void testCudaDynamicShapeSplit() {
+TEST(Cuda, DynamicShapeSplit_CUDA) {
   KernelScope ks;
   constexpr int N = 4096;
   VarHandle n("n", kInt);
   Placeholder a(BufHandle("a", {n}, kFloat));
-  Tensor* b =
-      Compute("b", {{n, "n"}}, [&](const VarHandle& i) { return a(i) * 2.0f; });
+  Tensor* b = Compute(
+      "b", {{n, "n"}}, [&](const VarHandle& i) { return a.load(i) * 2.0f; });
   LoopNest l({b});
   For* outer;
   For* inner;
@@ -432,7 +434,7 @@ void testCudaDynamicShapeSplit() {
   cudaFree(bDev);
 }
 
-void testCudaOneBlockOneThreadGlobalReduce1() {
+TEST(Cuda, OneBlockOneThreadGlobalReduce1_CUDA) {
   const static int N = 1024;
   KernelScope kernel_scope;
   Placeholder data_buf("data", kFloat, {N});
@@ -448,12 +450,12 @@ void testCudaOneBlockOneThreadGlobalReduce1() {
   //   }
   // }
 
-  Store* init_store = Store::make(output_buf, {0}, 0.f, 1);
+  Store* init_store = output_buf.store({0}, 0.f);
   VarHandle i1("i1", kInt);
-  ExprHandle load_data = Load::make(data_buf, {i1}, 1);
-  ExprHandle load_output = Load::make(output_buf, {0}, 1);
+  ExprHandle load_data = Load::make(BufHandle(data_buf.data()), {i1}, 1);
+  ExprHandle load_output = Load::make(BufHandle(output_buf.data()), {0}, 1);
   ExprHandle add_value = load_output + load_data;
-  Store* store_output = Store::make(output_buf, {0}, add_value, 1);
+  Store* store_output = output_buf.store({0}, add_value);
   For* for_output = For::make(i1, 0, N, store_output);
   Stmt* reduce_block = Block::make({init_store, for_output});
   VarHandle thread_idx("tidx", kInt);
@@ -499,7 +501,7 @@ void testCudaOneBlockOneThreadGlobalReduce1() {
   cudaFree(output_dev);
 }
 
-void testCudaOneBlockMultiThreadGlobalReduce1() {
+TEST(Cuda, OneBlockMultiThreadGlobalReduce1_CUDA) {
   const static int N = 1024;
   KernelScope kernel_scope;
 
@@ -517,7 +519,7 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
   Placeholder a_buf("a", kFloat, {N});
   Placeholder b_buf("b", kFloat, {1});
 
-  Store* init_store = Store::make(b_buf, {0}, 0.f, 1);
+  Store* init_store = b_buf.store({0}, 0.f);
   VarHandle t("t", kInt);
   VarHandle b("b", kInt);
 
@@ -533,10 +535,10 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
 
   //  for t in 0..1024: // thread-idx
   //    b[0] = b[0] + a[t] // implied atomic
-  ExprHandle load_a = Load::make(a_buf, {t}, 1);
-  ExprHandle load_b = Load::make(b_buf, {0}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a_buf.data()), {t}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b_buf.data()), {0}, 1);
   ExprHandle add_value = load_b + load_a;
-  Store* store_b = Store::make(b_buf, {0}, add_value, 1);
+  Store* store_b = b_buf.store({0}, add_value);
   For* for_b = For::make(t, 0, N, store_b, thread_idx_options);
 
   Stmt* reduce_block = Block::make({for_init, for_b});
@@ -577,7 +579,7 @@ void testCudaOneBlockMultiThreadGlobalReduce1() {
   cudaFree(b_dev);
 }
 
-void testCudaNoThreadIdxWrite_1() {
+TEST(Cuda, NoThreadIdxWrite_1_CUDA) {
   KernelScope kernel_scope;
 
   // This test does the following reduction:
@@ -607,15 +609,15 @@ void testCudaNoThreadIdxWrite_1() {
   //   a[0] = 0
   //   for n in 0..2:
   //     a[0] = a[0] + n
-  Store* store_a0_0 = Store::make(a_buf, {0}, 0.f, 1);
-  ExprHandle load_a0 = Load::make(a_buf, {0}, 1);
+  Store* store_a0_0 = a_buf.store({0}, 0.f);
+  ExprHandle load_a0 = Load::make(BufHandle(a_buf.data()), {0}, 1);
   ExprHandle v1 = load_a0 + n;
-  Store* store_a0_v1 = Store::make(a_buf, {0}, v1, 1);
+  Store* store_a0_v1 = a_buf.store({0}, v1);
   For* loop_a_0 = For::make(n, 0, 2, store_a0_v1);
 
   //   for m in 0..1024: // thread-idx
   //     b[m] = m
-  Store* store_bm_m = Store::make(b_buf, {m}, m + 0.f, 1);
+  Store* store_bm_m = b_buf.store({m}, m + 0.f);
   LoopOptions thread_idx_options;
   thread_idx_options.set_gpu_thread_index(0);
   For* loop_b_1 = For::make(m, 0, N, store_bm_m, thread_idx_options);
@@ -623,10 +625,10 @@ void testCudaNoThreadIdxWrite_1() {
   //   a[1] = 1
   //   for l in 0..2:
   //     a[1] = a[1] + l
-  Store* store_a1_1 = Store::make(a_buf, {1}, 1.f, 1);
-  ExprHandle load_a1 = Load::make(a_buf, {1}, 1);
+  Store* store_a1_1 = a_buf.store({1}, 1.f);
+  ExprHandle load_a1 = a_buf.load(1);
   ExprHandle v2 = load_a1 + l;
-  Store* store_a1_v2 = Store::make(a_buf, {1}, v2, 1);
+  Store* store_a1_v2 = a_buf.store({1}, v2);
   For* loop_a_1 = For::make(l, 0, 2, store_a1_v2);
 
   Stmt* reduce_block =
@@ -674,7 +676,7 @@ void testCudaNoThreadIdxWrite_1() {
   cudaFree(b_dev);
 }
 
-void testCudaSharedMemReduce_1() {
+TEST(Cuda, SharedMemReduce_1_CUDA) {
   // FIXME: this test is flaky in CI.
   KernelScope kernel_scope;
   // This test does the following:
@@ -728,7 +730,8 @@ void testCudaSharedMemReduce_1() {
     //    for n in 0..64:  // thread_idx
     //      c(n) = c(n) + a(k, m, n)
     ExprHandle load_cn = Load::make(kFloat, c, {n}, 1);
-    ExprHandle a_kmn = Load::make(a, {k * (M * N) + m * N + n}, 1);
+    ExprHandle a_kmn =
+        Load::make(BufHandle(a.data()), {k * (M * N) + m * N + n}, 1);
     ExprHandle v_add = load_cn + a_kmn;
     Store* store_cn_v = Store::make(c, {n}, v_add);
     For* loop_n2 = For::make(n, 0, N, store_cn_v, thread_idx_opt);
@@ -740,12 +743,12 @@ void testCudaSharedMemReduce_1() {
     //    b(k) = 0
     //    for n in 0..64:  // thread_idx
     //      b(k) = b(k) + c(n)
-    Store* store_bk_0 = Store::make(b, {k}, 0.f, 1);
+    Store* store_bk_0 = b.store({k}, 0.f);
     block.push_back(store_bk_0);
-    ExprHandle load_bk = Load::make(b, {k}, 1);
+    ExprHandle load_bk = b.load(k);
     ExprHandle load_cn = Load::make(kFloat, c, {n}, 1);
     ExprHandle v_add = load_bk + load_cn;
-    Store* store_bk = Store::make(b, {k}, v_add, 1);
+    Store* store_bk = b.store({k}, v_add);
     For* loop_n3 = For::make(n, 0, N, store_bk, thread_idx_opt);
     block.push_back(loop_n3);
   }
@@ -768,14 +771,14 @@ void testCudaSharedMemReduce_1() {
   // Check the c write is not masked, but the d write is.
   const std::string& verification_pattern =
       R"IR(
-# CHECK: c_ = 0
+# CHECK: c_1 = 0
 # CHECK: for (int m = 0; m < 128
-# CHECK:   c_ = c_ +
+# CHECK:   c_1 = c_1 +
 # CHECK: __syncthreads();
 # CHECK: if (threadIdx.x<1
 # CHECK:   b[blockIdx.x] =
 # CHECK: __syncthreads();
-# CHECK: atomicAdd(&b[blockIdx.x], c_)
+# CHECK: atomicAdd(&b[blockIdx.x], c_1)
 )IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
@@ -813,7 +816,7 @@ void testCudaSharedMemReduce_1() {
   cudaFree(b_dev);
 }
 
-void testCudaLocalMemReduce_1() {
+TEST(Cuda, LocalMemReduce_1_CUDA) {
   KernelScope kernel_scope;
   // This test does the following:
   //  for k in 0..1:  // block-idx
@@ -847,7 +850,7 @@ void testCudaLocalMemReduce_1() {
   std::vector<Stmt*> block_k;
   {
     //    b(k) = 0
-    Store* store_bk_0 = Store::make(b, {k}, 0.f, 1);
+    Store* store_bk_0 = b.store({k}, 0.f);
     block_k.push_back(store_bk_0);
   }
   std::vector<Stmt*> block_n;
@@ -865,7 +868,7 @@ void testCudaLocalMemReduce_1() {
     //      for m in 0..128:
     //        c(0) = c(0) + a(k, m, n)
     ExprHandle load_c0 = Load::make(kFloat, c, {0}, 1);
-    ExprHandle a_kmn = Load::make(a, {k * (M * N) + m * N + n}, 1);
+    ExprHandle a_kmn = a.load(k * (M * N) + m * N + n);
     ExprHandle v_add = load_c0 + a_kmn;
     Store* store_c0_v = Store::make(c, {0}, v_add);
     For* loop_m = For::make(m, 0, M, store_c0_v);
@@ -873,10 +876,10 @@ void testCudaLocalMemReduce_1() {
   }
   {
     //      b(k) = b(k) + c(0)
-    ExprHandle load_bk = Load::make(b, {k}, 1);
+    ExprHandle load_bk = b.load(k);
     ExprHandle load_c0 = Load::make(kFloat, c, {0}, 1);
     ExprHandle v_add = load_bk + load_c0;
-    Store* store_bk = Store::make(b, {k}, v_add, 1);
+    Store* store_bk = b.store({k}, v_add);
     block_n.push_back(store_bk);
   }
   {
@@ -926,12 +929,12 @@ void testCudaLocalMemReduce_1() {
   cudaFree(b_dev);
 }
 
-void testCudaHalfSupport() {
+TEST(Cuda, HalfSupport_CUDA) {
   KernelScope ks;
   auto half = ToDtype<at::Half>();
   Placeholder a("a", half, {4});
   Tensor* b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
-    return Cast::make(half, ExprHandle(2.0f) * a(i));
+    return Cast::make(half, ExprHandle(2.0f) * a.load(i));
   });
 
   Tensor* c = Compute("c", {{4, "n"}}, [&](const VarHandle& i) {
@@ -984,12 +987,12 @@ void testCudaHalfSupport() {
   cudaFree(dDev);
 }
 
-void testCudaHalfPropagation() {
+TEST(Cuda, HalfPropagation_CUDA) {
   KernelScope kernel_scope;
   auto half = ToDtype<at::Half>();
   Placeholder a("a", half, {4});
   Tensor* relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
-    return Max::make(a(i), ExprHandle(new HalfImm(0)), true);
+    return Max::make(a.load(i), ExprHandle(new HalfImm(0)), true);
   });
 
   LoopNest l({relu});
@@ -1033,7 +1036,64 @@ void testCudaHalfPropagation() {
   cudaFree(reluDev);
 }
 
-void testCudaPrioritizeDependents() {
+TEST(Cuda, UnusedHalfArgument_CUDA) {
+  KernelScope kernel_scope;
+  Placeholder a("a", kFloat, {4});
+  auto half = ToDtype<at::Half>();
+  Placeholder b("b", half, {4});
+  Tensor* relu = Compute("relu", {{4, "n"}}, [&](const VarHandle& i) {
+    return Max::make(a.load(i), ExprHandle(new FloatImm(0)), true);
+  });
+
+  LoopNest l({relu});
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+  CudaCodeGen cg(s, {a, b, relu});
+
+  std::ostringstream oss;
+  oss << *cg.stmt();
+
+  // Check the types used by the Max are Float.
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (
+# CHECK:  float v = a[n];
+# CHECK:  relu[n] = Max(v, 0.f
+# CHECK: })IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  // Sanity Cbeck;
+  std::vector<float> aData(4, 2.0f);
+  std::vector<at::Half> bData(4, 2.0f);
+  std::vector<float> reluData(4, 0.0f);
+  at::Half* aDev = nullptr;
+  at::Half* bDev = nullptr;
+  at::Half* reluDev = nullptr;
+  auto aSize = aData.size() * sizeof(aData[0]);
+  auto bSize = bData.size() * sizeof(bData[0]);
+  auto reluSize = reluData.size() * sizeof(reluData[0]);
+
+  cudaMalloc(&aDev, aSize);
+  cudaMalloc(&bDev, bSize);
+  cudaMalloc(&reluDev, reluSize);
+  cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(bDev, bData.data(), bSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(reluDev, reluData.data(), reluSize, cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cg.call({aDev, bDev, reluDev});
+  cudaMemcpy(reluData.data(), reluDev, reluSize, cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  assertAllEqual(aData, reluData);
+
+  cudaFree(aDev);
+  cudaFree(bDev);
+  cudaFree(reluDev);
+}
+
+TEST(Cuda, PrioritizeDependents_CUDA) {
   KernelScope kernel_scope;
   Placeholder a("a", kFloat, {10});
   Placeholder b("b", kFloat, {12});
@@ -1050,13 +1110,13 @@ void testCudaPrioritizeDependents() {
    *   c[i] = (i < 10 ? a[i] + b[i] : b[i]);
    * }
    */
-  ExprHandle load_a = Load::make(a, {i}, 1);
-  ExprHandle load_b = Load::make(b, {i}, 1);
+  ExprHandle load_a = Load::make(BufHandle(a.data()), {i}, 1);
+  ExprHandle load_b = Load::make(BufHandle(b.data()), {i}, 1);
   ExprHandle cmp = CompareSelect::make(i, 10, CompareSelectOperation::kLT);
   ExprHandle ite = IfThenElse::make(cmp, Add::make(load_a, load_b), load_b);
 
-  For* loop = For::make(
-      i, 0, 12, Block::make({Store::make(c, {i}, ite, 1)}), block_idx_opt);
+  For* loop =
+      For::make(i, 0, 12, Block::make({c.store({i}, ite)}), block_idx_opt);
 
   CudaCodeGen cuda_cg(loop, a, b, c);
 
@@ -1107,16 +1167,17 @@ void testCudaPrioritizeDependents() {
 
 /// Tests the case where there are two loops which have different extents bound
 /// to the same block dimension. We must mask the smaller extent loop body.
-void testCudaMaskBlockDim() {
+TEST(Cuda, MaskBlockDim_CUDA) {
   KernelScope kernel_scope;
   int A_SIZE = 100;
   int B_SIZE = 50;
   Placeholder a_buf("a", kFloat, {A_SIZE});
   Placeholder b_buf("b", kFloat, {B_SIZE});
-  Tensor* c = Compute(
-      "c", {{A_SIZE, "i"}}, [&](const VarHandle& i) { return a_buf(i) + 10; });
+  Tensor* c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
+    return a_buf.load(i) + 10;
+  });
   Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
-    return a_buf(i) + b_buf(i);
+    return a_buf.load(i) + b_buf.load(i);
   });
 
   LoopNest l({c, d});
@@ -1199,16 +1260,17 @@ void testCudaMaskBlockDim() {
 /// Tests the case with two loops, which have different extents that are bound
 /// to the same thread dimension. This is the same as the above - the smaller
 /// rank write should be masked. But this time we also need to syncthreads.
-void testCudaMaskThreadDim() {
+TEST(Cuda, MaskThreadDim_CUDA) {
   KernelScope kernel_scope;
   int A_SIZE = 50;
   int B_SIZE = 100;
   Placeholder a_buf("a", kFloat, {A_SIZE});
   Placeholder b_buf("b", kFloat, {B_SIZE});
-  Tensor* c = Compute(
-      "c", {{A_SIZE, "i"}}, [&](const VarHandle& i) { return a_buf(i) + 10; });
+  Tensor* c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
+    return a_buf.load(i) + 10;
+  });
   Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
-    return a_buf(i / 2) + b_buf(i);
+    return a_buf.load(i / 2) + b_buf.load(i);
   });
 
   LoopNest l({c, d});
@@ -1293,16 +1355,17 @@ void testCudaMaskThreadDim() {
 /// in distinct dimensions.
 // Note: this is an extremely dumb pattern which we should never see, but is a
 // useful edge case to make sure we've got things covered.
-void testCudaMaskMultiBlockDim() {
+TEST(Cuda, MaskMultiBlockDim_CUDA) {
   KernelScope kernel_scope;
   int A_SIZE = 100;
   int B_SIZE = 50;
   Placeholder a_buf("a", kFloat, {A_SIZE});
   Placeholder b_buf("b", kFloat, {B_SIZE});
-  Tensor* c = Compute(
-      "c", {{A_SIZE, "i"}}, [&](const VarHandle& i) { return a_buf(i) + 10; });
+  Tensor* c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
+    return a_buf.load(i) + 10;
+  });
   Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
-    return a_buf(i) + b_buf(i);
+    return a_buf.load(i) + b_buf.load(i);
   });
 
   LoopNest l({c, d});
@@ -1386,16 +1449,17 @@ void testCudaMaskMultiBlockDim() {
 /// distinct.
 // Note: this is an extremely dumb pattern which we should never see, but is a
 // useful edge case to make sure we've got things covered.
-void testCudaMaskBlockAndThreadDim() {
+TEST(Cuda, MaskBlockAndThreadDim_CUDA) {
   KernelScope kernel_scope;
   int A_SIZE = 100;
   int B_SIZE = 50;
   Placeholder a_buf("a", kFloat, {A_SIZE});
   Placeholder b_buf("b", kFloat, {B_SIZE});
-  Tensor* c = Compute(
-      "c", {{A_SIZE, "i"}}, [&](const VarHandle& i) { return a_buf(i) + 10; });
+  Tensor* c = Compute("c", {{A_SIZE, "i"}}, [&](const VarHandle& i) {
+    return a_buf.load(i) + 10;
+  });
   Tensor* d = Compute("d", {{B_SIZE, "i"}}, [&](const VarHandle& i) {
-    return a_buf(i) + b_buf(i);
+    return a_buf.load(i) + b_buf.load(i);
   });
 
   LoopNest l({c, d});
@@ -1477,7 +1541,7 @@ void testCudaMaskBlockAndThreadDim() {
 /// Tests the case where the loopnest has two loops of depth two: each with the
 /// outer loop bound to blockDim.x and the inner loop bound to threadDim.x. In
 /// this case all writes with a rank smaller than the max should be masked.
-void testCudaMaskMultiDim() {
+TEST(Cuda, MaskMultiDim_CUDA) {
   KernelScope kernel_scope;
   int OUTER_SIZE = 10;
   int A_SIZE = 100;
@@ -1488,13 +1552,13 @@ void testCudaMaskMultiDim() {
       "C",
       {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return ExprHandle(2) * a_buf(i, j);
+        return ExprHandle(2) * a_buf.load(i, j);
       });
   Tensor* d = Compute(
       "D",
       {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c->call(i, j * 2) + b_buf(i, j);
+        return c->call(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});
@@ -1607,7 +1671,7 @@ void testCudaMaskMultiDim() {
 // Tests the case where loop extents are symbolic and not known at compile time.
 // In this case both stores must be masked against the extent of the other loop,
 // incase it is larger.
-void testCudaMaskMultiDimSymbolic() {
+TEST(Cuda, MaskMultiDimSymbolic_CUDA) {
   KernelScope kernel_scope;
   VarHandle OUTER_SIZE("OUTER_SIZE", kInt);
   VarHandle A_SIZE("A_SIZE", kInt);
@@ -1618,13 +1682,13 @@ void testCudaMaskMultiDimSymbolic() {
       "C",
       {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return ExprHandle(2) * a_buf(i, j);
+        return ExprHandle(2) * a_buf.load(i, j);
       });
   Tensor* d = Compute(
       "D",
       {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c->call(i, j * 2) + b_buf(i, j);
+        return c->call(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});
@@ -1743,7 +1807,7 @@ void testCudaMaskMultiDimSymbolic() {
 // bound to the block dimension. Internally the inner loops have different
 // extents but are bound to the same thread dimension. The smaller loop should
 // be masked.
-void testCudaMaskCompoundInnerLoop() {
+TEST(Cuda, MaskCompoundInnerLoop_CUDA) {
   KernelScope kernel_scope;
   int OUTER_SIZE = 10;
   int A_SIZE = 100;
@@ -1771,13 +1835,13 @@ void testCudaMaskCompoundInnerLoop() {
                j,
                0,
                A_SIZE,
-               Store::make(c_buf, {i, j}, ExprHandle(2) * a_buf(i, j), 1),
+               c_buf.store({i, j}, ExprHandle(2) * a_buf.load(i, j)),
                threadBound),
            For::make(
                k,
                0,
                B_SIZE,
-               Store::make(d_buf, {i, k}, c_buf(i, k * 2) + b_buf(i, k), 1),
+               d_buf.store({i, k}, c_buf.load(i, k * 2) + b_buf.load(i, k)),
                threadBound)}),
       blockBound);
 
@@ -1880,9 +1944,9 @@ void testCudaMaskCompoundInnerLoop() {
 
 // Tests the case with two loops fused into a common parent, which is not bound
 // to any block or thread dimension - however it's two inner loops are bound to
-// the first thread dimenions. This should work just like the MaskThreadDim test
-// where the bigger loop is unmasked but the smaller is masked.
-void testCudaMaskInnerLoopOneBlock() {
+// the first thread dimensions. This should work just like the MaskThreadDim
+// test where the bigger loop is unmasked but the smaller is masked.
+TEST(Cuda, MaskInnerLoopOneBlock_CUDA) {
   KernelScope kernel_scope;
   int OUTER_SIZE = 10;
   int A_SIZE = 100;
@@ -1910,13 +1974,13 @@ void testCudaMaskInnerLoopOneBlock() {
                j,
                0,
                A_SIZE,
-               Store::make(c_buf, {i, j}, ExprHandle(2) * a_buf(i, j), 1),
+               c_buf.store({i, j}, ExprHandle(2) * a_buf.load(i, j)),
                threadBound),
            For::make(
                k,
                0,
                B_SIZE,
-               Store::make(d_buf, {i, k}, c_buf(i, k * 2) + b_buf(i, k), 1),
+               d_buf.store({i, k}, c_buf.load(i, k * 2) + b_buf.load(i, k)),
                threadBound)}));
 
   stmt = FlattenIndexes(stmt);
@@ -2021,7 +2085,7 @@ void testCudaMaskInnerLoopOneBlock() {
 // size, but with internal loops bound to different thread rank (ie x and y). In
 // this case both bodies must be masked against the other dimension being > 0.
 // Note: this is a bit degenerate no one would actually write this for perf.
-void testCudaMaskMultiDimMultiAxis() {
+TEST(Cuda, MaskMultiDimMultiAxis_CUDA) {
   KernelScope kernel_scope;
   int OUTER_SIZE = 10;
   int A_SIZE = 30;
@@ -2032,13 +2096,13 @@ void testCudaMaskMultiDimMultiAxis() {
       "C",
       {{OUTER_SIZE, "i"}, {A_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return ExprHandle(2) * a_buf(i, j);
+        return ExprHandle(2) * a_buf.load(i, j);
       });
   Tensor* d = Compute(
       "D",
       {{OUTER_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c->call(i, j * 2) + b_buf(i, j);
+        return c->call(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});
@@ -2151,7 +2215,7 @@ void testCudaMaskMultiDimMultiAxis() {
 // Tests the case with two loop nests, each bound to both Block and Thread but
 // the second loop is smaller in both cases - the second store must be masked
 // for both the block and thread dimension.
-void testCudaMaskMultiDimMultiLevel() {
+TEST(Cuda, MaskMultiDimMultiLevel_CUDA) {
   KernelScope kernel_scope;
   int OUTER_A_SIZE = 10;
   int OUTER_B_SIZE = 5;
@@ -2163,13 +2227,13 @@ void testCudaMaskMultiDimMultiLevel() {
       "C",
       {{OUTER_A_SIZE, "i"}, {A_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return ExprHandle(2) * a_buf(i, j);
+        return ExprHandle(2) * a_buf.load(i, j);
       });
   Tensor* d = Compute(
       "D",
       {{OUTER_B_SIZE, "i"}, {B_SIZE, "j"}},
       [&](const VarHandle& i, const VarHandle& j) {
-        return c->call(i, j * 2) + b_buf(i, j);
+        return c->call(i, j * 2) + b_buf.load(i, j);
       });
 
   LoopNest l({c, d});

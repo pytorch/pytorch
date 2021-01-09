@@ -1,13 +1,22 @@
 #include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_resource_strings.h>
+#include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
 #include <torch/csrc/jit/resource_guard.h>
+
+#include <nvfuser_resources/block_reduction.h>
+#include <nvfuser_resources/broadcast.h>
+#include <nvfuser_resources/fp16_support.h>
+#include <nvfuser_resources/grid_reduction.h>
+#include <nvfuser_resources/helpers.h>
+#include <nvfuser_resources/random_numbers.h>
+#include <nvfuser_resources/tensor.h>
 
 #include <fstream>
 
@@ -19,13 +28,18 @@ namespace executor_utils {
 
 std::string kernelPreamble() {
   std::stringstream ss;
-  ss << code_template_tensor_struct << "\n"
-     << code_fp16_support << "\n"
-     << code_random_number_gen << "\n"
-     << code_helper_funcs << "\n"
-     << code_template_block_reduction << "\n"
-     << code_template_grid_reduction << "\n"
-     << code_template_block_broadcast << "\n";
+
+#ifndef __HIP_PLATFORM_HCC__
+  ss << nvfuser_resources::fp16_support_cu;
+#endif
+
+  ss << nvfuser_resources::tensor_cu;
+  ss << nvfuser_resources::random_numbers_cu;
+  ss << nvfuser_resources::helpers_cu;
+  ss << nvfuser_resources::block_reduction_cu;
+  ss << nvfuser_resources::grid_reduction_cu;
+  ss << nvfuser_resources::broadcast_cu;
+
   return ss.str();
 }
 
@@ -246,18 +260,11 @@ NvrtcFunction nvrtcCompile(
   }
 
   const auto prop = at::cuda::getCurrentDeviceProperties();
-  int nvrtc_major, nvrtc_minor;
-  AT_CUDA_NVRTC_CHECK(
-      at::globalContext().getNVRTC().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
 
-  // Short-circuits if NVRTC version too low
-  TORCH_INTERNAL_ASSERT(nvrtc_major >= 6);
-  // Major and minor is determined by device properties and
-  // possibly "downcompiled" to a lower (compatible) compute architecture
-  // based on the NVRTC version
-  const int major = prop->major;
-  const int minor = prop->minor;
-  nvrtcProgram program;
+  int major = 0, minor = 0;
+  getMajorMinor(prop, major, minor);
+
+  nvrtcProgram program; // NOLINT(cppcoreguidelines-init-variables)
 
   {
     FUSER_PERF_SCOPE("nvrtcCreateProgram");
@@ -271,10 +278,14 @@ NvrtcFunction nvrtcCompile(
         at::globalContext().getNVRTC().nvrtcDestroyProgram(&program));
   });
 
+#ifdef __HIP_PLATFORM_HCC__
+  std::vector<const char*> args = {"--std=c++14"};
+#else
   const std::string compute = "--gpu-architecture=compute_" +
       std::to_string(major) + std::to_string(minor);
   std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
+#endif
 
   const char* disable_fma = getenv("PYTORCH_CUDA_FUSER_DISABLE_FMA");
   // int disable_fma_flag = disable_fma ? atoi(disable_fma) : 0;
@@ -345,6 +356,7 @@ NvrtcFunction nvrtcCompile(
   // TODO: We do go through different code path, should investigate whether this
   // has an impact on generated binary.
   const char* prefix_env = getenv("PYTORCH_CUDA_FUSER_CUBIN");
+#ifndef __HIP_PLATFORM_HCC__
   if (prefix_env) {
     FUSER_PERF_SCOPE("load CUBIN");
 
@@ -402,6 +414,12 @@ NvrtcFunction nvrtcCompile(
         options.data(),
         option_vals.data()));
   }
+#else
+  // load ptx directly
+  AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadData(
+      &(compiled_kernel_.module), ptx.data()));
+
+#endif
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleGetFunction(
       &(compiled_kernel_.function),
       compiled_kernel_.module,

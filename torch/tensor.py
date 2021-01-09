@@ -178,7 +178,7 @@ class Tensor(torch._C._TensorBase):
         # All strings are unicode in Python 3.
         return torch._tensor_str._str(self)
 
-    def backward(self, gradient=None, retain_graph=None, create_graph=False):
+    def backward(self, gradient=None, retain_graph=None, create_graph=False, inputs=None):
         r"""Computes the gradient of current tensor w.r.t. graph leaves.
 
         The graph is differentiated using the chain rule. If the tensor is
@@ -192,7 +192,13 @@ class Tensor(torch._C._TensorBase):
         See :ref:`Default gradient layouts<default-grad-layouts>`
         for details on the memory layout of accumulated gradients.
 
-        Arguments:
+        .. note::
+
+            If you run any forward ops, create ``gradient``, and/or call ``backward``
+            in a user-specified CUDA stream context, see
+            :ref:`Stream semantics of backward passes<bwd-cuda-stream-semantics>`.
+
+        Args:
             gradient (Tensor or None): Gradient w.r.t. the
                 tensor. If it is a tensor, it will be automatically converted
                 to a Tensor that does not require grad unless ``create_graph`` is True.
@@ -207,6 +213,11 @@ class Tensor(torch._C._TensorBase):
             create_graph (bool, optional): If ``True``, graph of the derivative will
                 be constructed, allowing to compute higher order derivative
                 products. Defaults to ``False``.
+            inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
+                accumulated into ``.grad``. All other Tensors will be ignored. If not
+                provided, the gradient is accumulated into all the leaf Tensors that were
+                used to compute the attr::tensors. All the provided inputs must be leaf
+                Tensors.
         """
         relevant_args = (self,)
         from torch.overrides import has_torch_function, handle_torch_function
@@ -217,8 +228,9 @@ class Tensor(torch._C._TensorBase):
                 self,
                 gradient=gradient,
                 retain_graph=retain_graph,
-                create_graph=create_graph)
-        torch.autograd.backward(self, gradient, retain_graph, create_graph)
+                create_graph=create_graph,
+                inputs=inputs)
+        torch.autograd.backward(self, gradient, retain_graph, create_graph, inputs=inputs)
 
     def register_hook(self, hook):
         r"""Registers a backward hook.
@@ -395,6 +407,29 @@ class Tensor(torch._C._TensorBase):
         from torch.overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(Tensor.lu, relevant_args, self, pivot=pivot, get_infos=get_infos)
+
+        if not torch._jit_internal.is_scripting():
+            if self.requires_grad:
+                if not (self.size(-2) == self.size(-1) and self.dtype.is_floating_point):
+                    raise ValueError(
+                        'lu.backward works only with batches of squared full-rank matrices'
+                        ' of floating types.'
+                    )
+
+                from torch._autograd_functions import _LU
+                LU, pivots, infos = _LU.apply(self, pivot, get_infos)
+                if get_infos:
+                    return LU, pivots, infos
+                else:
+                    return LU, pivots
+        else:
+            if self.requires_grad:
+                raise RuntimeError(
+                    'Script and require gradients is not supported at the moment.'
+                    'If you just want to do the forward, use .detach()'
+                    'on the input before calling the function.'
+                )
+
         LU, pivots, infos = torch._lu_with_info(self, pivot=pivot, check_errors=(not get_infos))
         if get_infos:
             return LU, pivots, infos
@@ -515,10 +550,7 @@ class Tensor(torch._C._TensorBase):
         from torch.overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and type(other) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(Tensor.__rdiv__, relevant_args, self, other)
-        if self.dtype.is_floating_point or self.dtype.is_complex:
-            return self.reciprocal() * other
-        else:
-            return (self.double().reciprocal() * other).type_as(self)
+        return self.reciprocal() * other
 
     __rtruediv__ = __rdiv__
     __itruediv__ = _C._TensorBase.__idiv__
@@ -552,19 +584,9 @@ class Tensor(torch._C._TensorBase):
 
     @_wrap_type_error_to_not_implemented
     def __rfloordiv__(self, other):
-        result = other / self
-        if result.dtype.is_floating_point:
-            result = result.trunc()
-        return result
+        return torch.floor_divide(other, self)
 
     __neg__ = _C._TensorBase.neg
-
-    __eq__ = _wrap_type_error_to_not_implemented(_C._TensorBase.eq)
-    __ne__ = _wrap_type_error_to_not_implemented(_C._TensorBase.ne)
-    __lt__ = _wrap_type_error_to_not_implemented(_C._TensorBase.lt)
-    __le__ = _wrap_type_error_to_not_implemented(_C._TensorBase.le)
-    __gt__ = _wrap_type_error_to_not_implemented(_C._TensorBase.gt)
-    __ge__ = _wrap_type_error_to_not_implemented(_C._TensorBase.ge)
     __abs__ = _C._TensorBase.abs
 
     def __len__(self):
@@ -649,7 +671,7 @@ class Tensor(torch._C._TensorBase):
     def __contains__(self, element):
         r"""Check if `element` is present in tensor
 
-        Arguments:
+        Args:
             element (Tensor or scalar): element to be checked
                 for presence in current tensor"
         """
@@ -750,7 +772,7 @@ class Tensor(torch._C._TensorBase):
         Python 2 does not support Ellipsis but one may use a string literal
         instead (``'...'``).
 
-        Arguments:
+        Args:
             names (iterable of str): The desired names of the output tensor. May
                 contain up to one Ellipsis.
 
@@ -796,7 +818,7 @@ class Tensor(torch._C._TensorBase):
         Python 2 does not support Ellipsis but one may use a string literal
         instead (``'...'``).
 
-        Arguments:
+        Args:
             names (iterable of str): The desired dimension ordering of the
                 output tensor. May contain up to one Ellipsis that is expanded
                 to all unmentioned dim names of :attr:`self`.
@@ -833,7 +855,7 @@ class Tensor(torch._C._TensorBase):
           if :attr:`self` is a `NamedTensor`. The total number of elements in sizes must match the number
           of elements in the original dim being unflattened.
 
-        Arguments:
+        Args:
             dim (Union[int, str]): Dimension to unflatten
             sizes (Union[Tuple[int] or torch.Size, Tuple[Tuple[str, int]]]): New shape of the unflattened dimension
 
@@ -1008,7 +1030,8 @@ def _convert(ret, cls):
     if isinstance(ret, Tensor):
         ret = ret.as_subclass(cls)
 
-    if isinstance(ret, tuple):
-        ret = tuple(_convert(r, cls) for r in ret)
+    if isinstance(ret, (tuple, list)):
+        # Also handles things like namedtuples
+        ret = type(ret)(_convert(r, cls) for r in ret)
 
     return ret

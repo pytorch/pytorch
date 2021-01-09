@@ -51,6 +51,12 @@ class PYBIND11_EXPORT PyRRef {
   // get the type of the data object referenced by this RRef.
   py::object getRRefType();
 
+  // Run the backward pass with the RRef as the root.
+  void backward(int64_t autogradContextId, bool retainGraph);
+
+  // Helper static function to run backward on a given rref.
+  static void backward(int64_t autogradContextId, bool retainGraph, const c10::intrusive_ptr<RRef>& rref);
+
  private:
   c10::intrusive_ptr<RRef> rref_;
   c10::optional<c10::intrusive_ptr<JitFuture>> profilingFuture_;

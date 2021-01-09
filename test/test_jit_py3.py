@@ -53,7 +53,7 @@ class TestScriptPy3(JitTestCase):
         def fn():
             return NormalizationInfo(1, 2, 3, 4, 5)
 
-        with self.assertRaisesRegex(OSError, "NormalizationInfo"):
+        with self.assertRaisesRegex(OSError, "could not get source code"):
             torch.jit.script(fn)
 
     def test_optional_dict_construct(self):
@@ -555,7 +555,7 @@ class TestScriptPy3(JitTestCase):
             @torch.jit.script
             def foo():
                 x = 5
-                if True:
+                if 1 == 1:
                     x : Optional[int] = 7
 
     def test_module_inplace_construct(self):
@@ -621,7 +621,7 @@ class TestScriptPy3(JitTestCase):
 
     def test_module_properties(self):
         class ModuleWithProperties(torch.nn.Module):
-            __ignored_properties__ = ["ignored_attr"]
+            __jit_unused_properties__ = ["ignored_attr"]
 
             def __init__(self, a: int):
                 super().__init__()
@@ -638,6 +638,15 @@ class TestScriptPy3(JitTestCase):
             @property
             def ignored_attr(self):
                 return sum([self.a])
+
+            @torch.jit.unused
+            @property
+            def ignored_attr_2(self):
+                return sum([self.a])
+
+            @ignored_attr_2.setter
+            def ignored_attr_2(self, value):
+                self.a = sum([self.a])
 
             @attr.setter
             def attr(self, a: int):
@@ -668,6 +677,56 @@ class TestScriptPy3(JitTestCase):
 
         with self.assertRaisesRegex(torch.nn.modules.module.ModuleAttributeError, "has no attribute"):
             scripted_mod.ignored_attr
+
+    def test_ignoring_module_attributes(self):
+        """
+        Test that module attributes can be ignored.
+        """
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a: int) -> int:
+                return sum([a])
+
+        class ModuleWithIgnoredAttr(torch.nn.Module):
+            __jit_ignored_attributes__ = ["a", "sub"]
+
+            def __init__(self, a: int, b: int):
+                super().__init__()
+                self.a = a
+                self.b = b
+                self.sub = Sub()
+
+            def forward(self) -> int:
+                return self.b
+
+            @torch.jit.ignore
+            def ignored_fn(self) -> int:
+                return self.sub.forward(self.a)
+
+        mod = ModuleWithIgnoredAttr(1, 4)
+        scripted_mod = torch.jit.script(mod)
+        self.assertEqual(scripted_mod(), 4)
+        self.assertEqual(scripted_mod.ignored_fn(), 1)
+
+        # Test the error message for ignored attributes.
+        class ModuleUsesIgnoredAttr(torch.nn.Module):
+            __jit_ignored_attributes__ = ["a", "sub"]
+
+            def __init__(self, a: int):
+                super().__init__()
+                self.a = a
+                self.sub = Sub()
+
+            def forward(self) -> int:
+                return self.sub(self.b)
+
+        mod = ModuleUsesIgnoredAttr(1)
+
+        with self.assertRaisesRegexWithHighlight(RuntimeError, r"attribute was ignored during compilation", "self.sub"):
+            scripted_mod = torch.jit.script(mod)
+
 
     def test_export_opnames_interface(self):
         global OneTwoModule
@@ -737,6 +796,22 @@ class TestScriptPy3(JitTestCase):
         self.assertTrue(len(torch.jit.export_opnames(scripted_M_mod)) == 0)
         # self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
         #     set(torch.jit.export_opnames(scripted_M_mod))))
+
+    def test_broadcasting_list(self):
+        """
+        Test BroadcastingList and torch.nn._size_N_t alias
+        """
+        from torch._jit_internal import BroadcastingList2
+        from torch.nn.common_types import _size_2_t
+
+        def sum_i(x: _size_2_t) -> int:
+            return x[0] + x[1]
+
+        def sum_f(x: BroadcastingList2[float]) -> float:
+            return x[0] + x[1]
+
+        self.assertTrue(torch.jit.script(sum_i)(4) == 8)
+        self.assertTrue(torch.jit.script(sum_f)(4.5) == 9.)
 
 
 if __name__ == '__main__':

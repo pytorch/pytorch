@@ -35,7 +35,7 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
  public:
   FaultyProcessGroupAgent(
       std::string workerName,
-      std::shared_ptr<c10d::ProcessGroup> pg,
+      c10::intrusive_ptr<c10d::ProcessGroup> pg,
       int numSendRecvThreads,
       std::chrono::milliseconds rpcTimeout,
       const std::vector<std::string>& messagesToFail,
@@ -43,7 +43,7 @@ class FaultyProcessGroupAgent : public ProcessGroupAgent {
       int failNumSends = 0);
 
   // Faulty send function for this class.
-  std::shared_ptr<FutureMessage> send(
+  std::shared_ptr<JitFuture> send(
       const WorkerInfo& to,
       Message&& message,
       const float rpcTimeoutSeconds =

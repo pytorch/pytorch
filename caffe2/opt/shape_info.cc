@@ -2,6 +2,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/utils/string_utils.h"
+#include <cctype>
 
 namespace caffe2 {
 

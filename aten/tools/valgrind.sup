@@ -25,6 +25,15 @@
 }
 
 {
+   ignore_cuda_ioctl_param_points_to_uninitialised_bytes
+   Memcheck:Param
+   ioctl(generic)
+   fun:ioctl
+   obj:*libcuda.so*
+   ...
+}
+
+{
    ignore_libomp_setaffinity_check
    Memcheck:Param
    sched_setaffinity(mask)

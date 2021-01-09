@@ -3,6 +3,7 @@ from typing import List, Optional
 import torch.distributed.rpc as rpc
 import torch.optim as optim
 import torch.jit as jit
+import torch.nn as nn
 from torch import Tensor
 from torch.distributed.rpc import RRef
 from .functional_adagrad import _FunctionalAdagrad
@@ -28,7 +29,12 @@ class _ScriptLocalOptimizerInterface(object):
     def step(self, autograd_ctx_id: int) -> None:
         pass
 
-class _ScriptLocalOptimizer(jit.ScriptModule):
+class _ScriptLocalOptimizer(nn.Module):
+    # TorchScript does not support multithread concurrent compiling.
+    # request_callback might invoke concurrent compiling, so we
+    # serialize the compiling with a lock
+    compile_lock = Lock()
+
     def __init__(self, optim_cls, local_params_rref, *args, **kwargs):
         super().__init__()
         self._local_params = [rref.local_value() for rref in local_params_rref]
@@ -37,7 +43,7 @@ class _ScriptLocalOptimizer(jit.ScriptModule):
             *args,
             **kwargs)
 
-    @jit.script_method
+    @jit.export
     def step(self, autograd_ctx_id: int):
         all_local_grads = dist_autograd.get_gradients(autograd_ctx_id)
         # apply functional optimizer step with a list of gradients
@@ -49,6 +55,8 @@ class _ScriptLocalOptimizer(jit.ScriptModule):
         self.optim.step(grads)
 
 
+# TODO (wanchaol): remove/merge this with ScriptLocalOptimizer once
+# we have converted all to functional optimizer in distributed.optim
 class _LocalOptimizer(object):
     # Ideally we would only need to share a lock for instances of
     # _LocalOptimizer that deal with the same parameters. We are
@@ -87,8 +95,12 @@ def _local_optimizer_step(local_optim_rref, autograd_ctx_id):
 
 # new/step functions combined with _ScriptLocalOptimizer to provide GIL-free optimizer
 def _new_script_local_optimizer(optim_cls, local_params_rref, *args, **kwargs):
-    return rpc.RRef(
-        _ScriptLocalOptimizer(optim_cls, local_params_rref, *args, **kwargs), _ScriptLocalOptimizerInterface)
+    optim = _ScriptLocalOptimizer(optim_cls, local_params_rref, *args, **kwargs)
+
+    with _ScriptLocalOptimizer.compile_lock:
+        script_optim = jit.script(optim)
+        return rpc.RRef(
+            script_optim, _ScriptLocalOptimizerInterface)
 
 @jit.script
 def _script_local_optimizer_step(

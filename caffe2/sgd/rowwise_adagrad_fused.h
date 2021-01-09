@@ -46,7 +46,7 @@ inline float compute_square_average_with_weight_decay_inlined_(
   for (; i + kSize <= len; i += kSize) {
     __m256 ai = _mm256_loadu_ps(a + i);
     __m256 wi = _mm256_loadu_ps(w + i);
-#ifdef __AVX2__
+#ifdef __FMA__
     ai = _mm256_fmadd_ps(weight_decay_v, wi, ai);
 #else
     ai = _mm256_add_ps(_mm256_mul_ps(weight_decay_v, wi), ai);
@@ -84,7 +84,7 @@ inline float compute_square_average_with_weight_decay_inlined_(
     __m256 ai = _mm256_loadu_ps(a + i);
     __m128i whi = _mm_loadu_si128(reinterpret_cast<const __m128i*>(w + i));
     __m256 wi = _mm256_cvtph_ps(whi);
-#ifdef __AVX2__
+#ifdef __FMA__
     ai = _mm256_fmadd_ps(weight_decay_v, wi, ai);
 #else
     ai = _mm256_add_ps(_mm256_mul_ps(weight_decay_v, wi), ai);
@@ -952,7 +952,7 @@ struct rowwise_adagrad_update_inlined {
       __m256 gi = _mm256_loadu_ps(g + i);
       __m256 wi = _mm256_loadu_ps(w + i);
       if (weight_decay != 0.0f) {
-#ifdef __AVX2__
+#ifdef __FMA__
         gi = _mm256_fmadd_ps(weight_decay_v, wi, gi);
 #else
         gi = _mm256_add_ps(_mm256_mul_ps(weight_decay_v, wi), gi);

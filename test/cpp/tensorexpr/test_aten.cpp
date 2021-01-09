@@ -2,6 +2,8 @@
 #include <sstream>
 #include <stdexcept>
 
+#include <gtest/gtest.h>
+
 #include <c10/macros/Macros.h>
 #include "test/cpp/tensorexpr/padded_buffer.h"
 #include "test/cpp/tensorexpr/test_base.h"
@@ -12,16 +14,16 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
-void testATen_cast_Float() {
+TEST(ATen, _cast_Float) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
+  ExprHandle load_a = a_buf.load(index);
   ExprHandle to_float = Cast::make(kFloat, load_a);
-  Stmt* store_b = Store::make(b_buf, {index}, to_float, 1);
+  Stmt* store_b = b_buf.store({index}, to_float);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<int> a_v(kTotalSize);
@@ -31,7 +33,7 @@ void testATen_cast_Float() {
     a_v(i) = i;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -40,16 +42,16 @@ void testATen_cast_Float() {
   }
 }
 
-void testATennegInt() {
+TEST(ATen, negInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
+  ExprHandle load_a = a_buf.load(index);
   ExprHandle to_float = Sub::make(0, load_a);
-  Stmt* store_b = Store::make(b_buf, {index}, to_float, 1);
+  Stmt* store_b = b_buf.store({index}, to_float);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<int> a_v(kTotalSize);
@@ -59,7 +61,7 @@ void testATennegInt() {
     a_v(i) = i;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -68,16 +70,16 @@ void testATennegInt() {
   }
 }
 
-void testATennegFloat() {
+TEST(ATen, negFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
+  ExprHandle load_a = a_buf.load(index);
   ExprHandle to_float = Sub::make(0, load_a);
-  Stmt* store_b = Store::make(b_buf, {index}, to_float, 1);
+  Stmt* store_b = b_buf.store({index}, to_float);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
@@ -87,7 +89,7 @@ void testATennegFloat() {
     a_v(i) = i;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -96,7 +98,7 @@ void testATennegFloat() {
   }
 }
 
-void testATenaddInt() {
+TEST(ATen, addInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -105,10 +107,10 @@ void testATenaddInt() {
   Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kInt));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  ExprHandle load_c = Load::make(c_buf, {index}, 1);
-  Stmt* store_d = Store::make(d_buf, {index}, load_a + load_b * load_c, 1);
+  ExprHandle load_a = a_buf.load(index);
+  ExprHandle load_b = b_buf.load(index);
+  ExprHandle load_c = c_buf.load(index);
+  Stmt* store_d = d_buf.store({index}, load_a + load_b * load_c);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
 
   PaddedBuffer<int> a_v(kTotalSize);
@@ -122,7 +124,7 @@ void testATenaddInt() {
     c_v(i) = 3 * i + 2;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -133,7 +135,7 @@ void testATenaddInt() {
   }
 }
 
-void testATenaddFloat() {
+TEST(ATen, addFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -142,10 +144,10 @@ void testATenaddFloat() {
   Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  ExprHandle load_c = Load::make(c_buf, {index}, 1);
-  Stmt* store_d = Store::make(d_buf, {index}, load_a + load_b * load_c, 1);
+  ExprHandle load_a = a_buf.load(index);
+  ExprHandle load_b = b_buf.load(index);
+  ExprHandle load_c = c_buf.load(index);
+  Stmt* store_d = d_buf.store({index}, load_a + load_b * load_c);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
 
   PaddedBuffer<float> a_v(kTotalSize);
@@ -159,7 +161,7 @@ void testATenaddFloat() {
     c_v(i) = 3 * i + 2;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -170,7 +172,7 @@ void testATenaddFloat() {
   }
 }
 
-void testATensubInt() {
+TEST(ATen, subInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -179,10 +181,10 @@ void testATensubInt() {
   Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kInt));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  ExprHandle load_c = Load::make(c_buf, {index}, 1);
-  Stmt* store_d = Store::make(d_buf, {index}, load_a - load_b * load_c, 1);
+  ExprHandle load_a = a_buf.load(index);
+  ExprHandle load_b = b_buf.load(index);
+  ExprHandle load_c = c_buf.load(index);
+  Stmt* store_d = d_buf.store({index}, load_a - load_b * load_c);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
 
   PaddedBuffer<int> a_v(kTotalSize);
@@ -196,7 +198,7 @@ void testATensubInt() {
     c_v(i) = 3 * i + 2;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -207,7 +209,7 @@ void testATensubInt() {
   }
 }
 
-void testATensubFloat() {
+TEST(ATen, subFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -216,10 +218,10 @@ void testATensubFloat() {
   Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  ExprHandle load_c = Load::make(c_buf, {index}, 1);
-  Stmt* store_d = Store::make(d_buf, {index}, load_a - load_b * load_c, 1);
+  ExprHandle load_a = a_buf.load(index);
+  ExprHandle load_b = b_buf.load(index);
+  ExprHandle load_c = c_buf.load(index);
+  Stmt* store_d = d_buf.store({index}, load_a - load_b * load_c);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
 
   PaddedBuffer<float> a_v(kTotalSize);
@@ -233,7 +235,7 @@ void testATensubFloat() {
     c_v(i) = 3 * i + 2;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -244,7 +246,7 @@ void testATensubFloat() {
   }
 }
 
-void testATenlerp() {
+TEST(ATen, lerp) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -253,11 +255,10 @@ void testATenlerp() {
   Placeholder d_buf(BufHandle("D", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  ExprHandle load_c = Load::make(c_buf, {index}, 1);
-  Stmt* store_d =
-      Store::make(d_buf, {index}, load_a + load_c * (load_b - load_a), 1);
+  ExprHandle load_a = a_buf.load(index);
+  ExprHandle load_b = b_buf.load(index);
+  ExprHandle load_c = c_buf.load(index);
+  Stmt* store_d = d_buf.store({index}, load_a + load_c * (load_b - load_a));
   Stmt* stmt = For::make(index, 0, kTotalSize, store_d);
 
   PaddedBuffer<float> a_v(kTotalSize);
@@ -271,7 +272,7 @@ void testATenlerp() {
     c_v(i) = 3 * i + 2;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf});
   ir_eval(a_v, b_v, c_v, d_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -282,7 +283,7 @@ void testATenlerp() {
   }
 }
 
-void testATenaddcmulInt() {
+TEST(ATen, addcmulInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -292,12 +293,11 @@ void testATenaddcmulInt() {
   Placeholder e_buf(BufHandle("E", {ExprHandle(kTotalSize)}, kInt));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  ExprHandle load_c = Load::make(c_buf, {index}, 1);
-  ExprHandle load_d = Load::make(d_buf, {index}, 1);
-  Stmt* store_e =
-      Store::make(e_buf, {index}, load_a + load_b * load_c * load_d, 1);
+  ExprHandle load_a = a_buf.load(index);
+  ExprHandle load_b = b_buf.load(index);
+  ExprHandle load_c = c_buf.load(index);
+  ExprHandle load_d = d_buf.load(index);
+  Stmt* store_e = e_buf.store({index}, load_a + load_b * load_c * load_d);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_e);
 
   PaddedBuffer<int> a_v(kTotalSize);
@@ -313,7 +313,7 @@ void testATenaddcmulInt() {
     d_v(i) = 5 * i + 3;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf, e_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf, e_buf});
   ir_eval(a_v, b_v, c_v, d_v, e_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -325,7 +325,7 @@ void testATenaddcmulInt() {
   }
 }
 
-void testATenaddcmulFloat() {
+TEST(ATen, addcmulFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -335,12 +335,11 @@ void testATenaddcmulFloat() {
   Placeholder e_buf(BufHandle("E", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  ExprHandle load_c = Load::make(c_buf, {index}, 1);
-  ExprHandle load_d = Load::make(d_buf, {index}, 1);
-  Stmt* store_e =
-      Store::make(e_buf, {index}, load_a + load_b * load_c * load_d, 1);
+  ExprHandle load_a = a_buf.load(index);
+  ExprHandle load_b = b_buf.load(index);
+  ExprHandle load_c = c_buf.load(index);
+  ExprHandle load_d = d_buf.load(index);
+  Stmt* store_e = e_buf.store({index}, load_a + load_b * load_c * load_d);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_e);
 
   PaddedBuffer<float> a_v(kTotalSize);
@@ -356,7 +355,7 @@ void testATenaddcmulFloat() {
     d_v(i) = 5 * i + 3;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf, d_buf, e_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf, d_buf, e_buf});
   ir_eval(a_v, b_v, c_v, d_v, e_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -368,7 +367,7 @@ void testATenaddcmulFloat() {
   }
 }
 
-void testATenmulInt() {
+TEST(ATen, mulInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -376,9 +375,9 @@ void testATenmulInt() {
   Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  Stmt* store_c = Store::make(c_buf, {index}, load_a * load_b, 1);
+  ExprHandle load_a = a_buf.load(index);
+  ExprHandle load_b = b_buf.load(index);
+  Stmt* store_c = c_buf.store({index}, load_a * load_b);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<int> a_v(kTotalSize);
@@ -390,7 +389,7 @@ void testATenmulInt() {
     b_v(i) = 2 * i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -400,7 +399,7 @@ void testATenmulInt() {
   }
 }
 
-void testATenmulFloat() {
+TEST(ATen, mulFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -408,9 +407,9 @@ void testATenmulFloat() {
   Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  Stmt* store_c = Store::make(c_buf, {index}, load_a * load_b, 1);
+  ExprHandle load_a = a_buf.load(index);
+  ExprHandle load_b = b_buf.load(index);
+  Stmt* store_c = c_buf.store({index}, load_a * load_b);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<float> a_v(kTotalSize);
@@ -422,7 +421,7 @@ void testATenmulFloat() {
     b_v(i) = 2 * i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -432,7 +431,7 @@ void testATenmulFloat() {
   }
 }
 
-void testATendivInt() {
+TEST(ATen, divInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -440,9 +439,9 @@ void testATendivInt() {
   Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  Stmt* store_c = Store::make(c_buf, {index}, load_a / load_b, 1);
+  ExprHandle load_a = a_buf.load(index);
+  ExprHandle load_b = b_buf.load(index);
+  Stmt* store_c = c_buf.store({index}, load_a / load_b);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<int> a_v(kTotalSize);
@@ -454,7 +453,7 @@ void testATendivInt() {
     b_v(i) = i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -464,7 +463,7 @@ void testATendivInt() {
   }
 }
 
-void testATendivFloat() {
+TEST(ATen, divFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -472,9 +471,9 @@ void testATendivFloat() {
   Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  Stmt* store_c = Store::make(c_buf, {index}, load_a / load_b, 1);
+  ExprHandle load_a = a_buf.load(index);
+  ExprHandle load_b = b_buf.load(index);
+  Stmt* store_c = c_buf.store({index}, load_a / load_b);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<float> a_v(kTotalSize);
@@ -486,7 +485,7 @@ void testATendivFloat() {
     b_v(i) = i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -496,7 +495,7 @@ void testATendivFloat() {
   }
 }
 
-void testATenmaxInt() {
+TEST(ATen, maxInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -504,10 +503,9 @@ void testATenmaxInt() {
   Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  Stmt* store_c =
-      Store::make(c_buf, {index}, Max::make(load_a, load_b, true), 1);
+  ExprHandle load_a = a_buf.load(index);
+  ExprHandle load_b = b_buf.load(index);
+  Stmt* store_c = c_buf.store({index}, Max::make(load_a, load_b, true));
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<int> a_v(kTotalSize);
@@ -519,7 +517,7 @@ void testATenmaxInt() {
     b_v(i) = 2 * i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -529,7 +527,7 @@ void testATenmaxInt() {
   }
 }
 
-void testATenmaxFloat() {
+TEST(ATen, maxFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -537,10 +535,9 @@ void testATenmaxFloat() {
   Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  Stmt* store_c =
-      Store::make(c_buf, {index}, Max::make(load_a, load_b, true), 1);
+  ExprHandle load_a = a_buf.load(index);
+  ExprHandle load_b = b_buf.load(index);
+  Stmt* store_c = c_buf.store({index}, Max::make(load_a, load_b, true));
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<float> a_v(kTotalSize);
@@ -552,7 +549,7 @@ void testATenmaxFloat() {
     b_v(i) = 2 * i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -562,7 +559,7 @@ void testATenmaxFloat() {
   }
 }
 
-void testATenminInt() {
+TEST(ATen, minInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
@@ -570,10 +567,9 @@ void testATenminInt() {
   Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kInt));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  Stmt* store_c =
-      Store::make(c_buf, {index}, Min::make(load_a, load_b, true), 1);
+  ExprHandle load_a = a_buf.load(index);
+  ExprHandle load_b = b_buf.load(index);
+  Stmt* store_c = c_buf.store({index}, Min::make(load_a, load_b, true));
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<int> a_v(kTotalSize);
@@ -585,7 +581,7 @@ void testATenminInt() {
     b_v(i) = 2 * i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -595,7 +591,7 @@ void testATenminInt() {
   }
 }
 
-void testATenminFloat() {
+TEST(ATen, minFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
@@ -603,10 +599,9 @@ void testATenminFloat() {
   Placeholder c_buf(BufHandle("C", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  ExprHandle load_b = Load::make(b_buf, {index}, 1);
-  Stmt* store_c =
-      Store::make(c_buf, {index}, Min::make(load_a, load_b, true), 1);
+  ExprHandle load_a = a_buf.load(index);
+  ExprHandle load_b = b_buf.load(index);
+  Stmt* store_c = c_buf.store({index}, Min::make(load_a, load_b, true));
   Stmt* stmt = For::make(index, 0, kTotalSize, store_c);
 
   PaddedBuffer<float> a_v(kTotalSize);
@@ -618,7 +613,7 @@ void testATenminFloat() {
     b_v(i) = 2 * i + 1;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf, c_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf, c_buf});
   ir_eval(a_v, b_v, c_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -635,8 +630,8 @@ void __ubsan_ignore_float_divide_by_zero__ testATenreciprocal() {
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  Stmt* store_b = Store::make(b_buf, {index}, FloatImm::make(1.0f) / load_a, 1);
+  ExprHandle load_a = a_buf.load(index);
+  Stmt* store_b = b_buf.store({index}, FloatImm::make(1.0f) / load_a);
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
@@ -646,7 +641,7 @@ void __ubsan_ignore_float_divide_by_zero__ testATenreciprocal() {
     a_v(i) = i;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -655,15 +650,15 @@ void __ubsan_ignore_float_divide_by_zero__ testATenreciprocal() {
   }
 }
 
-void testATenreluInt() {
+TEST(ATen, reluInt) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kInt));
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kInt));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  Stmt* store_b = Store::make(b_buf, {index}, Max::make(load_a, 0, false), 1);
+  ExprHandle load_a = a_buf.load(index);
+  Stmt* store_b = b_buf.store({index}, Max::make(load_a, 0, false));
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<int> a_v(kTotalSize);
@@ -673,7 +668,7 @@ void testATenreluInt() {
     a_v(i) = i - 64;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -682,19 +677,17 @@ void testATenreluInt() {
   }
 }
 
-void testATenreluFloat() {
+TEST(ATen, reluFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  Stmt* store_b = Store::make(
-      b_buf,
-      {index},
-      Max::make(load_a, 0, false), // relu does not propagate nans
-      1);
+  ExprHandle load_a = a_buf.load(index);
+  Stmt* store_b = b_buf.store(
+      {index}, Max::make(load_a, 0, false) // relu does not propagate nans
+  );
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
@@ -704,7 +697,7 @@ void testATenreluFloat() {
     a_v(i) = i - 64;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -713,15 +706,15 @@ void testATenreluFloat() {
   }
 }
 
-void testATenlogFloat() {
+TEST(ATen, logFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  Stmt* store_b = Store::make(b_buf, {index}, log(load_a), 1);
+  ExprHandle load_a = a_buf.load(index);
+  Stmt* store_b = b_buf.store({index}, log(load_a));
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
@@ -731,7 +724,7 @@ void testATenlogFloat() {
     a_v(i) = i + 10;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -740,15 +733,47 @@ void testATenlogFloat() {
   }
 }
 
-void testATenlog10Float() {
+TEST(ATen, fastLogFloat) {
+  KernelScope kernel_scope;
+  const int kTotalSize = 128 * 128;
+  Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
+  Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
+
+  VarHandle index = VarHandle("index", kInt);
+  ExprHandle load_a = a_buf.load(index);
+  Stmt* store_b = b_buf.store({index}, fast_log(load_a));
+  Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
+
+  PaddedBuffer<float> a_v(kTotalSize);
+  PaddedBuffer<float> b_v(kTotalSize);
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    a_v(i) = at::randn({1}).item().to<float>();
+  }
+
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
+  ir_eval(a_v, b_v);
+
+  for (int i = 0; i < kTotalSize; ++i) {
+    auto test = b_v(i);
+    auto ref = std::log(a_v(i));
+    if (std::isnan(ref)) {
+      ASSERT_EQ(std::isnan(test), true);
+    } else {
+      ASSERT_FLOAT_EQ(test, ref);
+    }
+  }
+}
+
+TEST(ATen, log10Float) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  Stmt* store_b = Store::make(b_buf, {index}, log10(load_a), 1);
+  ExprHandle load_a = a_buf.load(index);
+  Stmt* store_b = b_buf.store({index}, log10(load_a));
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
@@ -758,7 +783,7 @@ void testATenlog10Float() {
     a_v(i) = i + 10;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -767,15 +792,15 @@ void testATenlog10Float() {
   }
 }
 
-void testATenlog2Float() {
+TEST(ATen, log2Float) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  Stmt* store_b = Store::make(b_buf, {index}, log2(load_a), 1);
+  ExprHandle load_a = a_buf.load(index);
+  Stmt* store_b = b_buf.store({index}, log2(load_a));
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
@@ -785,7 +810,7 @@ void testATenlog2Float() {
     a_v(i) = i + 10;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -794,15 +819,15 @@ void testATenlog2Float() {
   }
 }
 
-void testATenexpFloat() {
+TEST(ATen, expFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  Stmt* store_b = Store::make(b_buf, {index}, exp(load_a), 1);
+  ExprHandle load_a = a_buf.load(index);
+  Stmt* store_b = b_buf.store({index}, exp(load_a));
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
@@ -812,7 +837,7 @@ void testATenexpFloat() {
     a_v(i) = i / 10.0f;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -821,15 +846,15 @@ void testATenexpFloat() {
   }
 }
 
-void testATenerfFloat() {
+TEST(ATen, erfFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  Stmt* store_b = Store::make(b_buf, {index}, erf(load_a), 1);
+  ExprHandle load_a = a_buf.load(index);
+  Stmt* store_b = b_buf.store({index}, erf(load_a));
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
@@ -839,7 +864,7 @@ void testATenerfFloat() {
     a_v(i) = i / 10.0f;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -848,15 +873,15 @@ void testATenerfFloat() {
   }
 }
 
-void testATencosFloat() {
+TEST(ATen, cosFloat) {
   KernelScope kernel_scope;
   const int kTotalSize = 128;
   Placeholder a_buf(BufHandle("A", {ExprHandle(kTotalSize)}, kFloat));
   Placeholder b_buf(BufHandle("B", {ExprHandle(kTotalSize)}, kFloat));
 
   VarHandle index = VarHandle("index", kInt);
-  ExprHandle load_a = Load::make(a_buf, {index}, 1);
-  Stmt* store_b = Store::make(b_buf, {index}, cos(load_a), 1);
+  ExprHandle load_a = a_buf.load(index);
+  Stmt* store_b = b_buf.store({index}, cos(load_a));
   Stmt* stmt = For::make(index, 0, kTotalSize, store_b);
 
   PaddedBuffer<float> a_v(kTotalSize);
@@ -866,7 +891,7 @@ void testATencosFloat() {
     a_v(i) = i / 10.0f;
   }
 
-  SimpleIREvaluator ir_eval(stmt, a_buf, b_buf);
+  SimpleIREvaluator ir_eval(stmt, {a_buf, b_buf});
   ir_eval(a_v, b_v);
 
   for (int i = 0; i < kTotalSize; ++i) {
@@ -875,7 +900,7 @@ void testATencosFloat() {
   }
 }
 
-void testATeneqInt() {
+TEST(ATen, eqInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -885,28 +910,23 @@ void testATeneqInt() {
   std::vector<int> b_buffer(N, 1);
   std::vector<int> c_buffer(N, 0);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto memcpy_expr = For::make(
       i,
       0,
       N,
-      Store::make(
-          c,
+      c.store(
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
-              CompareSelectOperation::kEQ),
-          mask));
+              a.load(i), b.load(i), CompareSelectOperation::kEQ)));
 
-  SimpleIREvaluator ir_eval(memcpy_expr, a, b, c);
+  SimpleIREvaluator ir_eval(memcpy_expr, {a, b, c});
   ir_eval(a_buffer, b_buffer, c_buffer);
 
   assertAllEqual(c_buffer, 1);
 }
 
-void testATengeInt() {
+TEST(ATen, geInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -916,28 +936,23 @@ void testATengeInt() {
   std::vector<int> b_buffer(N, 5);
   std::vector<int> c_buffer(N, 0);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto memcpy_expr = For::make(
       i,
       0,
       N,
-      Store::make(
-          c,
+      c.store(
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
-              CompareSelectOperation::kGE),
-          mask));
+              a.load(i), b.load(i), CompareSelectOperation::kGE)));
 
-  SimpleIREvaluator ir_eval(memcpy_expr, a, b, c);
+  SimpleIREvaluator ir_eval(memcpy_expr, {a, b, c});
   ir_eval(a_buffer, b_buffer, c_buffer);
 
   assertAllEqual(c_buffer, 1);
 }
 
-void testATengtInt() {
+TEST(ATen, gtInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -947,28 +962,23 @@ void testATengtInt() {
   std::vector<int> b_buffer(N, 3);
   std::vector<int> c_buffer(N, 0);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto memcpy_expr = For::make(
       i,
       0,
       N,
-      Store::make(
-          c,
+      c.store(
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
-              CompareSelectOperation::kGT),
-          mask));
+              a.load(i), b.load(i), CompareSelectOperation::kGT)));
 
-  SimpleIREvaluator ir_eval(memcpy_expr, a, b, c);
+  SimpleIREvaluator ir_eval(memcpy_expr, {a, b, c});
   ir_eval(a_buffer, b_buffer, c_buffer);
 
   assertAllEqual(c_buffer, 1);
 }
 
-void testATenleInt() {
+TEST(ATen, leInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -978,28 +988,23 @@ void testATenleInt() {
   std::vector<int> b_buffer(N, 5);
   std::vector<int> c_buffer(N, 0);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto memcpy_expr = For::make(
       i,
       0,
       N,
-      Store::make(
-          c,
+      c.store(
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
-              CompareSelectOperation::kLE),
-          mask));
+              a.load(i), b.load(i), CompareSelectOperation::kLE)));
 
-  SimpleIREvaluator ir_eval(memcpy_expr, a, b, c);
+  SimpleIREvaluator ir_eval(memcpy_expr, {a, b, c});
   ir_eval(a_buffer, b_buffer, c_buffer);
 
   assertAllEqual(c_buffer, 1);
 }
 
-void testATenltInt() {
+TEST(ATen, ltInt) {
   KernelScope kernel_scope;
   constexpr int N = 128;
   Placeholder a(BufHandle("A", {N}, kInt));
@@ -1009,22 +1014,17 @@ void testATenltInt() {
   std::vector<int> b_buffer(N, 5);
   std::vector<int> c_buffer(N, 1);
 
-  auto mask = IntImm::make(1);
   VarHandle i("i", kInt);
   auto memcpy_expr = For::make(
       i,
       0,
       N,
-      Store::make(
-          c,
+      c.store(
           {i},
           CompareSelect::make(
-              Load::make(a, {i}, mask),
-              Load::make(b, {i}, mask),
-              CompareSelectOperation::kLT),
-          mask));
+              a.load(i), b.load(i), CompareSelectOperation::kLT)));
 
-  SimpleIREvaluator ir_eval(memcpy_expr, a, b, c);
+  SimpleIREvaluator ir_eval(memcpy_expr, {a, b, c});
   ir_eval(a_buffer, b_buffer, c_buffer);
 
   assertAllEqual(c_buffer, 0);

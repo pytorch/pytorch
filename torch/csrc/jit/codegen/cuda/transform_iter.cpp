@@ -4,6 +4,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 // Transform dispatch
 void ReplayTransformations::handle(Expr* e) {
@@ -431,6 +432,7 @@ int BestEffortReplay::findFirstMismatchedID(
   return td1->nDims();
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

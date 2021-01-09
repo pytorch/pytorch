@@ -17,7 +17,7 @@ Produces a slice of the input tensor.
 
 - Start and end indices are either passed as two 1D input tensors or using the `starts` and `ends` arguments.
 
-- If a negative value is passed for any of the start or end indices, it represents the number of elements before the end of that dimension. End indices are non-inclusive unless negative (end index -1 means up to and including the last element).
+- If a negative value is passed for any of the start or end indices, it represents |value| - 1 elements before the end of that dimension. End indices are non-inclusive unless negative (end index -1 means up to and including the last element).
 
 Github Links:
 - https://github.com/pytorch/pytorch/blob/master/caffe2/operators/slice_op.cc
@@ -67,11 +67,11 @@ Y:
     .Input(
         1,
         "starts",
-        "(*Tensor`<int>`*): 1D tensor of start-indices for each dimension of data")
+        "(*Tensor`<int>`*): 1D tensor of start-indices for each dimension of data (dimensions following the sliced one might be omitted)")
     .Input(
         2,
         "ends",
-        "(*Tensor`<int>`*): 1D tensor of end-indices for each dimension of data")
+        "(*Tensor`<int>`*): 1D tensor of end-indices for each dimension of data (dimensions following the sliced one might be omitted)")
     .Arg("starts", "(*Tuple(int)*): list of starting indices")
     .Arg("ends", "(*Tuple(int)*): list of ending indices")
     .TensorInferenceFunction([](const OperatorDef& def,
@@ -90,9 +90,10 @@ Y:
 
       for (int i = 0; i < data.dims_size(); ++i) {
         if (i >= starts.size()) {
+          dst_sizes[i] = data.dims(i);
           continue;
         }
-        if (data.dims_size() > 0) {
+        if (data.dims(i) > 0) {
           auto start = starts[i];
           auto end = ends[i];
           if (start < 0) {

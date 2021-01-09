@@ -90,7 +90,7 @@ void RenameOutputs(
 void RenameInputsInChildren(
     const string& from,
     const string& to,
-    std::shared_ptr<caffe2::NetDef> net,
+    caffe2::NetDef* net,
     std::unordered_map<std::string, std::unordered_set<int>>& children) {
   VLOG(2) << "RenameInputsInChildren (from=" << from << ", to=" << to << ")";
   if (children.count(from) == 0) {
@@ -106,7 +106,7 @@ void RenameInputsInChildren(
 void RenameOutputInParents(
     const std::string& from,
     const std::string& to,
-    std::shared_ptr<caffe2::NetDef> net,
+    caffe2::NetDef* net,
     std::unordered_map<std::string, std::unordered_set<int>>& parents) {
   VLOG(2) << "RenameOutputInParents (from=" << from << ", to=" << to << ")";
   if (parents.count(from) == 0) {
@@ -225,7 +225,13 @@ bool FoundOpCandidate(
 // extra complexity is handled in FoundOpCandidate.
 void RemoveOpsByType(InferenceGraph& graph, const std::string& op_type) {
   int num_removed = 0;
-  std::shared_ptr<NetDef> net = graph.predict_net_def;
+  NetDef* net = graph.predict_net_def.get();
+  for (auto& op : net->op()) {
+    if (op.type() == "RecurrentNetwork") {
+      LOG(INFO) << "RemoveOpsByType does not support RecurrentNetwork yet";
+      return;
+    }
+  }
 
   std::unordered_set<std::string> inputs(
       graph.input_names.begin(), graph.input_names.end());
@@ -239,7 +245,7 @@ void RemoveOpsByType(InferenceGraph& graph, const std::string& op_type) {
     for (const auto& o : graph.output_names) {
       net->add_external_output(o);
     }
-    onnx::SsaRewrite(nullptr, net.get());
+    onnx::SsaRewrite(nullptr, net);
     // clear external_outputs
     net->mutable_external_output()->Clear();
     graph.predictor_net_ssa_rewritten = true;

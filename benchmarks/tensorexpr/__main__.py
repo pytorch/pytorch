@@ -111,6 +111,11 @@ Works only with Python3.\n A few examples:
         action='store_true',
         help="Print generated kernel(s).",
     )
+    parser.add_argument(
+        "--no-dynamic-shape",
+        action='store_true',
+        help="Disable shape randomization in dynamic benchmarks.",
+    )
 
     args = parser.parse_args()
 
@@ -128,6 +133,7 @@ Works only with Python3.\n A few examples:
     elif args.cuda_fuser == "nvf":
         import torch
         torch._C._jit_set_profiling_executor(True)
+        torch._C._jit_set_texpr_fuser_enabled(False)
         torch._C._jit_set_nvfuser_enabled(True)
         torch._C._jit_set_profiling_mode(True)
     else :

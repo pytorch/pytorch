@@ -303,14 +303,13 @@ class _Uninitialized final {};
 } // namespace detail
 
 //
-// note: these are outside TypeMeta bc gcc seems to have trouble
+// note: this is outside TypeMeta bc gcc seems to have trouble
 // with scalarTypeItemSizes as a constexpr static member used by
 // a public inline instance method
 //
-static constexpr uint16_t NumScalarTypes = static_cast<uint16_t>(ScalarType::NumOptions);
 
 // item sizes for TypeMeta::itemsize() fast path
-static constexpr size_t scalarTypeItemSizes[NumScalarTypes] = {
+static constexpr uint8_t scalarTypeItemSizes[NumScalarTypes] = {
 #define SCALAR_TYPE_SIZE(T, name) sizeof(T),
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_SIZE)
 #undef SCALAR_TYPE_SIZE
@@ -342,11 +341,16 @@ class C10_API TypeMeta final {
   TypeMeta(const TypeMeta& src) noexcept = default;
 
   /**
-   * Assignment operator.
+   * Assignment operators.
    */
   TypeMeta& operator=(const TypeMeta& src) noexcept = default;
 
   TypeMeta(TypeMeta&& rhs) noexcept = default;
+
+  inline TypeMeta& operator=(ScalarType scalar_type) noexcept {
+    index_ = static_cast<uint16_t>(scalar_type);
+    return *this;
+  }
 
 private:
   // TypeMeta can only be created by Make, making sure that we do not
@@ -542,7 +546,7 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_METADATA_INSTANCE)
 #undef DEFINE_SCALAR_METADATA_INSTANCE
 
 template <>
-constexpr uint16_t TypeMeta::_typeMetaData<detail::_Uninitialized>() noexcept {
+C10_EXPORT constexpr uint16_t TypeMeta::_typeMetaData<detail::_Uninitialized>() noexcept {
   return static_cast<uint16_t>(ScalarType::Undefined);
 }
 

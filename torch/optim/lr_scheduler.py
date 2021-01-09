@@ -20,8 +20,6 @@ EPOCH_DEPRECATION_WARNING = (
     "https://github.com/pytorch/pytorch/issues/new/choose."
 )
 
-SAVE_STATE_WARNING = "Please also save or load the state of the optimizer when saving or loading the scheduler."
-
 
 class _LRScheduler(object):
 
@@ -42,7 +40,7 @@ class _LRScheduler(object):
                 if 'initial_lr' not in group:
                     raise KeyError("param 'initial_lr' is not specified "
                                    "in param_groups[{}] when resuming an optimizer".format(i))
-        self.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
+        self.base_lrs = [group['initial_lr'] for group in optimizer.param_groups]
         self.last_epoch = last_epoch
 
         # Following https://github.com/pytorch/pytorch/issues/20124
@@ -91,7 +89,7 @@ class _LRScheduler(object):
     def load_state_dict(self, state_dict: dict) -> None:
         """Loads the schedulers state.
 
-        Arguments:
+        Args:
             state_dict (dict): scheduler state. Should be an object returned
                 from a call to :meth:`state_dict`.
         """
@@ -215,9 +213,10 @@ class LambdaLR(_LRScheduler):
         is not the optimizer.
         The learning rate lambda functions will only be saved if they are callable objects
         and not if they are functions or lambdas.
+
+        When saving or loading the scheduler, please make sure to also save or load the state of the optimizer.
         """
 
-        warnings.warn(SAVE_STATE_WARNING, UserWarning)
         state_dict = {key: value for key, value in self.__dict__.items() if key not in ('optimizer', 'lr_lambdas')}
         state_dict['lr_lambdas'] = [None] * len(self.lr_lambdas)
 
@@ -230,12 +229,13 @@ class LambdaLR(_LRScheduler):
     def load_state_dict(self, state_dict):
         """Loads the schedulers state.
 
-        Arguments:
+        When saving or loading the scheduler, please make sure to also save or load the state of the optimizer.
+
+        Args:
             state_dict (dict): scheduler state. Should be an object returned
                 from a call to :meth:`state_dict`.
         """
 
-        warnings.warn(SAVE_STATE_WARNING, UserWarning)
         lr_lambdas = state_dict.pop('lr_lambdas')
         self.__dict__.update(state_dict)
         # Restore state_dict keys in order to prevent side effects
@@ -312,7 +312,7 @@ class MultiplicativeLR(_LRScheduler):
     def load_state_dict(self, state_dict):
         """Loads the schedulers state.
 
-        Arguments:
+        Args:
             state_dict (dict): scheduler state. Should be an object returned
                 from a call to :meth:`state_dict`.
         """
@@ -871,7 +871,7 @@ class CyclicLR(_LRScheduler):
             if last_epoch == -1:
                 for momentum, group in zip(base_momentums, optimizer.param_groups):
                     group['momentum'] = momentum
-            self.base_momentums = list(map(lambda group: group['momentum'], optimizer.param_groups))
+            self.base_momentums = [group['momentum'] for group in optimizer.param_groups]
             self.max_momentums = self._format_param('max_momentum', optimizer, max_momentum)
 
         super(CyclicLR, self).__init__(optimizer, last_epoch, verbose)
@@ -1090,6 +1090,10 @@ class OneCycleLR(_LRScheduler):
     You must either provide a value for total_steps or provide a value for both
     epochs and steps_per_epoch.
 
+    The default behaviour of this scheduler follows the fastai implementation of 1cycle, which
+    claims that "unpublished work has shown even better results by using only two phases". To
+    mimic the behaviour of the original paper instead, set ``three_phase=True``.
+
     Args:
         optimizer (Optimizer): Wrapped optimizer.
         max_lr (float or list): Upper learning rate boundaries in the cycle
@@ -1134,6 +1138,10 @@ class OneCycleLR(_LRScheduler):
         final_div_factor (float): Determines the minimum learning rate via
             min_lr = initial_lr/final_div_factor
             Default: 1e4
+        three_phase (bool): If ``True``, use a third phase of the schedule to annihilate the
+            learning rate according to 'final_div_factor' instead of modifying the second
+            phase (the first two phases will be symmetrical about the step indicated by
+            'pct_start').
         last_epoch (int): The index of the last batch. This parameter is used when
             resuming a training job. Since `step()` should be invoked after each
             batch instead of after each epoch, this number represents the total
@@ -1159,9 +1167,9 @@ class OneCycleLR(_LRScheduler):
     def __init__(self,
                  optimizer: Optimizer,
                  max_lr: Union[float, List[float]],
-                 total_steps: int = None,
-                 epochs: int = None,
-                 steps_per_epoch: int = None,
+                 total_steps: Optional[int] = None,
+                 epochs: Optional[int] = None,
+                 steps_per_epoch: Optional[int] = None,
                  pct_start: float = 0.3,
                  anneal_strategy: str = 'cos',
                  cycle_momentum: bool = True,
@@ -1169,6 +1177,7 @@ class OneCycleLR(_LRScheduler):
                  max_momentum: Union[float, List[float]] = 0.95,
                  div_factor: float = 25.,
                  final_div_factor: float = 1e4,
+                 three_phase : bool = False,
                  last_epoch: int = -1,
                  verbose: bool = False) -> None:
 
@@ -1191,8 +1200,48 @@ class OneCycleLR(_LRScheduler):
             if steps_per_epoch <= 0 or not isinstance(steps_per_epoch, int):
                 raise ValueError("Expected positive integer steps_per_epoch, but got {}".format(steps_per_epoch))
             self.total_steps = epochs * steps_per_epoch
-        self.step_size_up = float(pct_start * self.total_steps) - 1
-        self.step_size_down = float(self.total_steps - self.step_size_up) - 1
+
+        if three_phase:
+            self._schedule_phases = [
+                {
+                    'end_step': float(pct_start * self.total_steps) - 1,
+                    'start_lr': 'initial_lr',
+                    'end_lr': 'max_lr',
+                    'start_momentum': 'max_momentum',
+                    'end_momentum': 'base_momentum',
+                },
+                {
+                    'end_step': float(2 * pct_start * self.total_steps) - 2,
+                    'start_lr': 'max_lr',
+                    'end_lr': 'initial_lr',
+                    'start_momentum': 'base_momentum',
+                    'end_momentum': 'max_momentum',
+                },
+                {
+                    'end_step': self.total_steps - 1,
+                    'start_lr': 'initial_lr',
+                    'end_lr': 'min_lr',
+                    'start_momentum': 'max_momentum',
+                    'end_momentum': 'max_momentum',
+                },
+            ]
+        else:
+            self._schedule_phases = [
+                {
+                    'end_step': float(pct_start * self.total_steps) - 1,
+                    'start_lr': 'initial_lr',
+                    'end_lr': 'max_lr',
+                    'start_momentum': 'max_momentum',
+                    'end_momentum': 'base_momentum',
+                },
+                {
+                    'end_step': self.total_steps - 1,
+                    'start_lr': 'max_lr',
+                    'end_lr': 'min_lr',
+                    'start_momentum': 'base_momentum',
+                    'end_momentum': 'max_momentum',
+                },
+            ]
 
         # Validate pct_start
         if pct_start < 0 or pct_start > 1 or not isinstance(pct_start, float):
@@ -1266,17 +1315,16 @@ class OneCycleLR(_LRScheduler):
                              .format(step_num + 1, self.total_steps))
 
         for group in self.optimizer.param_groups:
-            if step_num <= self.step_size_up:
-                computed_lr = self.anneal_func(group['initial_lr'], group['max_lr'], step_num / self.step_size_up)
-                if self.cycle_momentum:
-                    computed_momentum = self.anneal_func(group['max_momentum'], group['base_momentum'],
-                                                         step_num / self.step_size_up)
-            else:
-                down_step_num = step_num - self.step_size_up
-                computed_lr = self.anneal_func(group['max_lr'], group['min_lr'], down_step_num / self.step_size_down)
-                if self.cycle_momentum:
-                    computed_momentum = self.anneal_func(group['base_momentum'], group['max_momentum'],
-                                                         down_step_num / self.step_size_down)
+            start_step = 0
+            for i, phase in enumerate(self._schedule_phases):
+                end_step = phase['end_step']
+                if step_num <= end_step or i == len(self._schedule_phases) - 1:
+                    pct = (step_num - start_step) / (end_step - start_step)
+                    computed_lr = self.anneal_func(group[phase['start_lr']], group[phase['end_lr']], pct)
+                    if self.cycle_momentum:
+                        computed_momentum = self.anneal_func(group[phase['start_momentum']], group[phase['end_momentum']], pct)
+                    break
+                start_step = phase['end_step']
 
             lrs.append(computed_lr)
             if self.cycle_momentum:

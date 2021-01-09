@@ -285,7 +285,7 @@ def runDefaultTestWithSeed(seed):
     jit_o = traced_model(seed_tensor, *tensor_list)
     validate_o = zip(o, jit_o)
     for oo, jit_oo in validate_o:
-        if not oo.allclose(jit_oo, equal_nan=True):
+        if not oo.allclose(jit_oo, atol=1e-5, equal_nan=True):
             return False
     return True
 

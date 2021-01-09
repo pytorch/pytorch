@@ -7,7 +7,7 @@
 
 #ifdef _WIN32
 #include <WinError.h>
-#include <Windows.h>
+#include <c10/util/win32-headers.h>
 #include <fcntl.h>
 #include <io.h>
 #include <process.h>

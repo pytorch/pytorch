@@ -146,16 +146,18 @@ class TestNamedTensor(TestCase):
             names65 = ['A' * i for i in range(1, 66)]
             x = factory([1] * 65, names=names64, device=device)
 
-    def test_none_names_refcount(self):
+    def test_none_names_refcount(self, N=10):
         def scope():
             unnamed = torch.empty(2, 3)
             unnamed.names  # materialize [None, None]
 
         prev_none_refcnt = sys.getrefcount(None)
-        scope()
-        self.assertEqual(sys.getrefcount(None), prev_none_refcnt,
-                         msg='Using tensor.names should not change '
-                             'the refcount of Py_None')
+        # Ran it N times to reduce flakiness
+        [scope() for i in range(N)]
+        after_none_refcnt = sys.getrefcount(None)
+        self.assertTrue(after_none_refcnt - prev_none_refcnt < N / 2,
+                        msg='Using tensor.names should not change '
+                            'the refcount of Py_None')
 
     def test_has_names(self):
         unnamed = torch.empty(2, 3)
@@ -1218,6 +1220,7 @@ class TestNamedTensor(TestCase):
             Case(torch.mode, False, False, True, True, values_and_indices),
             Case(kthvalue_wrapper, False, False, True, True, values_and_indices),
             Case(torch.median, True, False, True, True, values_and_indices),
+            Case(torch.nanmedian, True, False, True, True, values_and_indices),
         ]
 
         for testcase, device in itertools.product(tests, torch.testing.get_all_device_types()):

@@ -30,7 +30,7 @@ void registerLayoutObject(THPLayout *thp_layout, at::Layout layout);
 
 PyObject* createPyObject(
     const at::Storage& storage,
-    const caffe2::TypeMeta& data_type);
+    const caffe2::TypeMeta data_type);
 at::Storage createStorage(PyObject* obj);
 bool isStorage(PyObject* obj);
 
