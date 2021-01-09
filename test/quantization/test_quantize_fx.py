@@ -75,12 +75,16 @@ from torch.testing._internal.common_quantization import NodeSpec as ns
 
 from torch.testing import FileCheck
 
+from torch.quantization.fx.quantization_types import QuantizerCls
+
+from torch.fx.graph import Node
+
 import copy
 import itertools
 import operator
 import unittest
 import io
-from typing import Callable
+from typing import Callable, Dict, Any
 
 class TestFuseFx(QuantizationTestCase):
     def test_fuse_conv_bn_relu(self):
@@ -1358,6 +1362,129 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertTrue(
             str(context.exception) ==
             'Per channel weight observer is not supported yet for ConvTranspose{n}d.')
+
+    @skipIfNoFBGEMM
+    def test_reference_bmm_subgraph(self):
+        r"""
+        Tests the e2e flow to replace bmm_fp32 with a bmm emulating quantization,
+        without using an int8 kernel (which does not currently exist).
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                pass
+
+            def forward(self, x, y):
+                return torch.bmm(x, y)
+
+        class RefQuantizedBMM(torch.nn.Module):
+            def __init__(self, scale, zero_point, dtype):
+                super().__init__()
+                self.scale = scale
+                self.zero_point = zero_point
+                self.dtype = dtype
+
+            def forward(self, x, y):
+                x_dq = x.dequantize()
+                y_dq = y.dequantize()
+                bmm_res = torch.bmm(x_dq, y_dq)
+                return torch.quantize_per_tensor(bmm_res, self.scale, self.zero_point, self.dtype)
+
+        m = M()
+
+        class RefBMMQuantizeHandler(torch.quantization.fx.quantization_patterns.QuantizeHandler):
+            def __init__(self, quantizer: QuantizerCls, node: Node):
+                super().__init__(quantizer, node)
+                self.bmm_node = node
+
+            def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
+                        debug: bool = False,
+                        convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+                # create
+                # input0_int8 -> dq \
+                # input1_int8 -> dq -> bmm_fp32 -> q -> output0
+                activation_post_process = quantizer.activation_post_process_map[node.name]
+                scale, zero_point = activation_post_process.calculate_qparams()
+                scale = float(scale)
+                zero_point = int(zero_point)
+                dtype = activation_post_process.dtype
+                ref_quantized_bmm = RefQuantizedBMM(scale, zero_point, dtype)
+                # always attach to top level module
+                parent_name = ''
+                # create an unused name for the new module
+                # Note: we cannot use get_new_attr_name_with_prefix because Quantizer
+                # does not expose the model object.  This is OK.
+                cur_name_idx = 0
+                existing_names = set(quantizer.modules.keys())
+                prefix = 'ref_quantized_bmm_'
+                while (prefix + str(cur_name_idx)) in existing_names:
+                    cur_name_idx += 1
+                name = prefix + str(cur_name_idx)
+                # add the module to the model
+                setattr(quantizer.modules[parent_name], name, ref_quantized_bmm)
+                quantizer.modules[name] = ref_quantized_bmm
+                # create and return the node
+                return quantizer.quantized_graph.create_node(
+                    'call_module',
+                    name,
+                    load_arg(quantized=True)(self.bmm_node.args),
+                    load_arg(quantized=False)(self.bmm_node.kwargs))
+
+
+        prepare_custom_config_dict = {
+            "additional_quant_pattern": {
+                (torch.bmm): RefBMMQuantizeHandler,
+            }
+        }
+        qconfig = torch.quantization.default_qconfig
+        qconfig_dict = {'': qconfig}
+
+        m.eval()
+        m_p = torch.quantization.quantize_fx.prepare_fx(m, qconfig_dict, prepare_custom_config_dict)
+        input1, input2 = torch.randn(4, 4, 4), torch.randn(4, 4, 4)
+        m_p(input1, input2)
+
+        m_q = torch.quantization.quantize_fx.convert_fx(m_p)
+
+        # Check that the expected nodes are present. Total, there are 3 quants
+        # and 3 dequants. The IR visible to GraphModule has 2 quants of the
+        # inputs, and 1 dequant of the output.  The rest are inside the subbed
+        # in module.
+        convert_count_check = {
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_method('dequantize'): 1,
+        }
+        self.checkGraphModuleNodes(m_q, expected_node_occurrence=convert_count_check)
+
+        # Check for numerical correctness against a reference Eager style
+        # flow.
+
+        class MRef(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.quant1 = torch.quantization.QuantStub()
+                self.quant2 = torch.quantization.QuantStub()
+                self.quant3 = torch.quantization.QuantStub()
+                self.dequant1 = torch.quantization.DeQuantStub()
+
+            def forward(self, x, y):
+                xq = self.quant1(x)
+                xdq = self.dequant1(xq)
+                yq = self.quant2(y)
+                ydq = self.dequant1(yq)
+                bmm_res = torch.bmm(xdq, ydq)
+                bmm_res_q = self.quant3(bmm_res)
+                return self.dequant1(bmm_res_q)
+
+        m_ref = MRef().eval()
+        m_ref.qconfig = qconfig
+        m_ref_p = torch.quantization.prepare(m_ref)
+        m_ref_p(input1, input2)
+        m_ref_q = torch.quantization.convert(m_ref_p)
+
+        res1 = m_q(input1, input2)
+        res2 = m_ref_q(input1, input2)
+        self.assertTrue(torch.allclose(res1, res2))
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
