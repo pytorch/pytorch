@@ -174,6 +174,11 @@ static PyObject * THPModule_crashIfATenASAN(PyObject *module, PyObject *arg) {
   return THPUtils_packInt32(at::_crash_if_asan(THPUtils_unpackInt(arg)));
 }
 
+static PyObject * THPModule_crashImmediately(PyObject *module, PyObject *arg) {
+  throw std::exception("Emulate uncaught exception that leads to the crash");
+  Py_RETURN_NONE;
+}
+
 static PyObject * THPModule_getNumThreads(PyObject *module, PyObject *noargs)
 {
   return THPUtils_packInt32(at::get_num_threads());
@@ -590,6 +595,7 @@ static PyMethodDef TorchMethods[] = {
   {"_set_default_tensor_type", THPModule_setDefaultTensorType, METH_O, nullptr},
   {"_set_default_dtype", THPModule_setDefaultDtype, METH_O, nullptr},
   {"_infer_size",     THPModule_inferSize,         METH_VARARGS, nullptr},
+  {"_crash_immediately", THPModule_crashImmediately, METH_NOARGS, nullptr},
   {"_crash_if_csrc_asan", THPModule_crashIfCsrcASAN, METH_O, nullptr},
   {"_crash_if_csrc_ubsan", THPModule_crashIfCsrcUBSAN, METH_O, nullptr},
   {"_crash_if_aten_asan", THPModule_crashIfATenASAN, METH_O, nullptr},
