@@ -216,9 +216,11 @@ void TensorImpl::release_resources() {
   }
 }
 
+#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 int64_t TensorImpl::dim() const {
   return sizes_.size();
 }
+#endif
 
 int64_t TensorImpl::size(int64_t d) const {
   d = at::maybe_wrap_dim(d, dim(), false);
