@@ -12,6 +12,13 @@ from torch._six import container_abcs
 
 _params_t = Union[Iterable[Tensor], Iterable[dict]]
 
+import torch
+from .. import Tensor
+from torch._six import container_abcs
+
+
+_params_t = Union[Iterable[Tensor], Iterable[dict]]
+
 
 class _RequiredParameter(object):
     """Singleton class representing a required parameter for an Optimizer."""
@@ -196,7 +203,7 @@ class Optimizer(object):
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({'state': state, 'param_groups': param_groups})
 
-    def zero_grad(self, set_to_none: bool = False):
+    def zero_grad(self, set_to_none: bool = False) -> None:
         r"""Sets the gradients of all optimized :class:`torch.Tensor` s to zero.
 
         Args:

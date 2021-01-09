@@ -21,8 +21,8 @@ EPOCH_DEPRECATION_WARNING = (
 )
 
 
-class _LRScheduler(object):
 
+class _LRScheduler(object):
     def __init__(self, optimizer: Optimizer, last_epoch: int = -1,
                  verbose: bool = False) -> None:
         # Attach optimizer
