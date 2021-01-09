@@ -373,7 +373,9 @@ NvrtcFunction nvrtcCompile(
 #ifndef __HIP_PLATFORM_HCC__
   if (prefix_env) {
 #if CUDA_VERSION == 11020
-    TORCH_CHECK(false, "PYTORCH_NVFUSER_CUBIN cannot be used when compile direct to SASS. Please set PYTORCH_NVFUSER_CUBIN to empty");
+    TORCH_CHECK(
+        false,
+        "PYTORCH_NVFUSER_CUBIN cannot be used when compile direct to SASS. Please set PYTORCH_NVFUSER_CUBIN to empty");
 #endif
     FUSER_PERF_SCOPE("load CUBIN");
 
