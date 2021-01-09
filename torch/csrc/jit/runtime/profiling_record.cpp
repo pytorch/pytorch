@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
@@ -26,6 +27,11 @@ class ProfileRegistry {
 
   bool shouldProfileNode(const Node* node) {
     std::lock_guard<std::mutex> guard(mutex_);
+    // to guard differentiable graphs, we want profiling information
+    // (in particular requires_grad) for nodes handled by autodiff
+    if (isDifferentiable(node)) {
+      return true;
+    }
     for (const auto& func : registry_funcs_) {
       if (func(node)) {
         return true;
