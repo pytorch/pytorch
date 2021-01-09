@@ -999,7 +999,7 @@ class TestQuantizeFx(QuantizationTestCase):
             "preserved_attributes": ["preserved_attr"]
         }
         m = prepare_fx(m, {"": default_qconfig}, prepare_custom_config_dict)
-        print(m)
+
         def assertAttrPreserved(m):
             self.assertTrue(hasattr(m, "preserved_attr"))
             self.assertTrue(m.preserved_attr, 3)
