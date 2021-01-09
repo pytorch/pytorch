@@ -505,6 +505,20 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build from: Debug Release RelWithDebInfo MinSizeRel Coverage." FORCE)
 endif()
 
+# The below means we are cross compiling for arm64 or x86_64 on MacOSX
+if(NOT IOS AND CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
+  set(CROSS_COMPILING_MACOSX TRUE)
+  # We need to compile a universal protoc to not fail protobuf build
+  execute_process(COMMAND ./scripts/build_host_protoc.sh --other-flags "-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64"
+                  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+                  RESULT_VARIABLE BUILD_HOST_PROTOC_RESULT)
+  if(NOT BUILD_HOST_PROTOC_RESULT EQUAL "0")
+    message(FATAL_ERROR "Could not compile universal protoc.")
+  endif()
+  set(PROTOBUF_PROTOC_EXECUTABLE "${PROJECT_SOURCE_DIR}/build_host_protoc/bin/protoc")
+  set(CAFFE2_CUSTOM_PROTOC_EXECUTABLE "${PROJECT_SOURCE_DIR}/build_host_protoc/bin/protoc")
+endif()
+
 # ---[ Misc checks to cope with various compiler modes
 include(cmake/MiscCheck.cmake)
 
