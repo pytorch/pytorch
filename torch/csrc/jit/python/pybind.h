@@ -17,6 +17,84 @@
 
 namespace py = pybind11;
 
+namespace torch {
+namespace jit {
+template <typename T>
+class unwrapping_shared_ptr {
+ private:
+  std::shared_ptr<torch::jit::Wrap<T>> impl;
+
+ public:
+  unwrapping_shared_ptr() = default;
+  unwrapping_shared_ptr(std::shared_ptr<T> p) : impl(p) {
+    std::cerr << "construct shared_ptr\n";
+  }
+  unwrapping_shared_ptr(T* p) : impl(p->wrap()) {
+    std::cerr << "construct T*\n";
+  }
+  T* get() const {
+    if (!impl->elem) {
+      throw std::logic_error("has been invalidated");
+    }
+    return impl->elem;
+  }
+  T** operator&() {
+    if (!impl->elem) {
+      throw std::logic_error("has been invalidated");
+    }
+    return &(impl->elem);
+  }
+};
+
+} // namespace jit
+} // namespace torch
+
+PYBIND11_DECLARE_HOLDER_TYPE(T, torch::jit::unwrapping_shared_ptr<T>, true);
+
+namespace pybind11 {
+namespace detail {
+
+#define CREATE_UNWRAPPING_CASTER(Class)                                                   \
+  template <>                                                                             \
+  struct type_caster<Class> : public type_caster_base<Class> {                            \
+   public:                                                                                \
+    using type = Class;                                                                   \
+    using holder_type = torch::jit::unwrapping_shared_ptr<Class>;                         \
+                                                                                          \
+    bool load(handle src, bool convert) {                                                 \
+      return load_impl<type_caster<Class>>(src, convert);                                 \
+    }                                                                                     \
+                                                                                          \
+    explicit operator type*() {                                                           \
+      return static_cast<type*>(value);                                                   \
+    }                                                                                     \
+    explicit operator type&() {                                                           \
+      return *static_cast<type*>(value);                                                  \
+    }                                                                                     \
+                                                                                          \
+   protected:                                                                             \
+    friend class type_caster_generic;                                                     \
+                                                                                          \
+    bool load_value(value_and_holder&& v_h) {                                             \
+      if (v_h.holder_constructed()) {                                                     \
+        value = v_h.template holder<holder_type>().get();                                 \
+        return true;                                                                      \
+      } else {                                                                            \
+        throw cast_error(                                                                 \
+            "Unable to cast from non-held to held instance (#Class& to Holder<#Class>)"); \
+      }                                                                                   \
+    }                                                                                     \
+  }
+
+CREATE_UNWRAPPING_CASTER(torch::jit::Node);
+CREATE_UNWRAPPING_CASTER(torch::jit::Value);
+CREATE_UNWRAPPING_CASTER(torch::jit::Block);
+
+#undef CREATE_UNWRAPPING_CASTER
+
+} // namespace detail
+} // namespace pybind11
+
 namespace pybind11 {
 namespace detail {
 
