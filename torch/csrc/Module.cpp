@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <libshm.h>
 #include <TH/TH.h>
+#include <c10/util/AbortHandler.h>
 #include <c10/util/Logging.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
@@ -694,6 +695,7 @@ __declspec(dllexport)
 #endif
 PyObject* initModule() {
   HANDLE_TH_ERRORS
+  c10::set_terminate_handler();
   at::internal::lazy_init_num_threads();
 
   C10_LOG_API_USAGE_ONCE("torch.python.import");
