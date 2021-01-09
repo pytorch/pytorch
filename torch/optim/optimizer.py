@@ -12,13 +12,6 @@ from torch._six import container_abcs
 
 _params_t = Union[Iterable[Tensor], Iterable[dict]]
 
-import torch
-from .. import Tensor
-from torch._six import container_abcs
-
-
-_params_t = Union[Iterable[Tensor], Iterable[dict]]
-
 
 class _RequiredParameter(object):
     """Singleton class representing a required parameter for an Optimizer."""
