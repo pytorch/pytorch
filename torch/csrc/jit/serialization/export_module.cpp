@@ -134,7 +134,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
     const Function& func,
     const std::
         unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
-            constants_from_jit = {},
+            constants_from_jit,
     bool save_mobile_debug_info = false) {
   auto graph = func.graph()->copy();
 
