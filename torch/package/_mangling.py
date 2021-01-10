@@ -54,7 +54,7 @@ maintaining backward compatibility for) this detail.
     No mangle parents should ever be saved into a package.
 
 Demangling in PackageExporter
---------------------------------
+-----------------------------
 Occasionally ``PackageExporter`` may encounter mangled names during export. For
 example, the user may be re-packaging an object that was imported (and thus
 had its module name mangled).
@@ -98,7 +98,10 @@ class PackageMangler:
         self._mangle_index = _mangle_index
         # Increment the global index
         _mangle_index += 1
-        self._mangle_parent = f"__torch_package_{self._mangle_index}__"
+        # Angle brackets are used so that there is almost no chance of
+        # confusing this module for a real module. Plus, it is Python's
+        # preferred way of denoting special modules.
+        self._mangle_parent = f"<torch_package_{self._mangle_index}>"
 
     def mangle(self, name):
         return self._mangle_parent + "." + name
@@ -120,7 +123,7 @@ class PackageMangler:
 
 
 def _is_mangled(name: str) -> bool:
-    return bool(re.match(r"__torch_package_\d+__\.", name))
+    return bool(re.match(r"<torch_package_\d+>\.", name))
 
 
 def check_not_mangled(name: str):
