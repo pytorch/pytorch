@@ -1271,6 +1271,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.cfloat, torch.cdouble)
+    @precisionOverride({torch.cfloat: 2e-4})
     def test_norm_complex(self, device, dtype):
         def gen_error_message(input_size, ord, keepdim, dim=None):
             return "complex norm failed for input size %s, ord=%s, keepdim=%s, dim=%s" % (
@@ -1730,7 +1731,7 @@ class TestLinalg(TestCase):
                 expected = np.linalg.norm(xn, p, keepdims=keepdim)
                 msg = gen_error_message(x.size(), p, keepdim)
                 self.assertEqual(res.shape, expected.shape, msg=msg)
-                self.assertEqual(res, expected, msg=msg)
+                self.assertEqual(res, expected, msg=msg, rtol=1.3e-6, atol=3e-4)
 
     # Ensure torch.norm with p='fro' and p=2 give the same results for mutually supported input combinations
     @dtypes(torch.float)
