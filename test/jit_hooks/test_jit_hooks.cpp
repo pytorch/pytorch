@@ -164,7 +164,7 @@ void test_forward_tuple_input(
   std::ostringstream stream;
   stream << output;
   std::string output_str =  stream.str();
-  AT_ASSERT("22" == output_str);;
+  AT_ASSERT("(11,)" == output_str);;
 }
 
 
