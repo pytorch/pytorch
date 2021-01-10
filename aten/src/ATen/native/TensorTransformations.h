@@ -10,7 +10,7 @@ namespace at {
 namespace native {
 
 static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size, IntArrayRef dims) {
-  if (flip_dims_size==0){
+  if (flip_dims_size==0) {
     return;
   } 
   // check if number of axis in dim is valid
