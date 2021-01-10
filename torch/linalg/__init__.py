@@ -431,8 +431,8 @@ always be real-valued, even if :attr:`input` is complex.
           then the singular values of each matrix in the batch is returned in descending order.
 
 .. note:: The implementation of SVD on CPU uses the LAPACK routine `?gesdd` (a divide-and-conquer
-          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the MAGMA routine
-          `gesdd` as well.
+          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the cuSOLVER routines
+          `gesvdj` and `gesvdjBatched`.
 
 .. note:: The returned matrix `U` will be transposed, i.e. with strides
           :code:`U.contiguous().transpose(-2, -1).stride()`.
