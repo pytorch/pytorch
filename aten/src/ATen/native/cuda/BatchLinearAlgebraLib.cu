@@ -245,7 +245,7 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
 
     if (compute_uv) {
       if (some) {
-        VT_working_copy = VT_working_copy.narrow(-1, 0, k);
+        VT_working_copy = VT_working_copy.narrow(-2, 0, k);
       }
     } else {
       VT_working_copy.zero_();
@@ -253,6 +253,8 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
     }
   }
 
+  // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
+  VT_working_copy.transpose_(-2, -1);
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
 
