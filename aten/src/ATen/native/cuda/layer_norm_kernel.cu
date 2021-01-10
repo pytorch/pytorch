@@ -423,47 +423,76 @@ void LayerNormBackwardKernelImpl(
 } // namespace
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
-    const Tensor& X,
-    const Tensor& gamma /* optional */,
-    const Tensor& beta /* optional */,
-    int64_t M,
-    int64_t N,
+    const Tensor& input,
+    IntArrayRef normalized_shape,
+    const Tensor& weight /* optional */,
+    const Tensor& bias /* optional */,
     double eps) {
+
+  auto inputs = _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
+  auto X = std::get<0>(inputs);
+  auto gamma = std::get<1>(inputs);
+  auto beta = std::get<2>(inputs);
+  auto M = std::get<3>(inputs);
+  auto N = std::get<4>(inputs);
+
   Tensor Y = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   Tensor mean = at::empty({M}, X.options());
   Tensor rstd = at::empty({M}, X.options());
   if (M > 0) {
     LayerNormKernelImpl(X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
+
+    const auto input_shape = input.sizes();
+    const size_t axis = input.dim() - normalized_shape.size();
+
+    std::vector<int64_t> stat_shape;
+    for (size_t idx = 0; idx < axis; ++idx) {
+      stat_shape.push_back(input_shape[idx]);
+    }
+    for (size_t idx = axis; idx < input.dim(); ++idx) {
+      stat_shape.push_back(1);
+    }
+
+    mean = mean.view(stat_shape);
+    rstd = rstd.view(stat_shape);
   }
   return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
 }
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
     const Tensor& dY,
-    const Tensor& X,
+    const Tensor& input,
+    IntArrayRef normalized_shape,
     const Tensor& mean,
     const Tensor& rstd,
-    const Tensor& gamma,
-    int64_t M,
-    int64_t N,
+    const Tensor& weight /* optional */,
+    const Tensor& bias /* optional */,
     std::array<bool, 3> grad_input_mask) {
-  Tensor dX;
-  Tensor dgamma;
-  Tensor dbeta;
-  if (grad_input_mask[0]) {
-    dX = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-  if (grad_input_mask[1]) {
-    dgamma = M > 0 ? at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-  if (grad_input_mask[2]) {
-    dbeta = M > 0 ? at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-  if (M > 0) {
-    LayerNormBackwardKernelImpl(
-        dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
-  }
-  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
+
+    auto inputs = _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
+    auto X = std::get<0>(inputs);
+    auto gamma = std::get<1>(inputs);
+    auto beta = std::get<2>(inputs);
+    auto M = std::get<3>(inputs);
+    auto N = std::get<4>(inputs);
+
+    Tensor dX;
+    Tensor dgamma;
+    Tensor dbeta;
+    if (grad_input_mask[0]) {
+      dX = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+    if (grad_input_mask[1]) {
+      dgamma = M > 0 ? at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+    if (grad_input_mask[2]) {
+      dbeta = M > 0 ? at::native::empty_like(beta, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(beta, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+    if (M > 0) {
+      LayerNormBackwardKernelImpl(
+          dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
+    }
+    return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
 }
 
 

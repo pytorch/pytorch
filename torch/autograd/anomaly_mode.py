@@ -89,7 +89,7 @@ class set_detect_anomaly(object):
 
     See ``detect_anomaly`` above for details of the anomaly detection behaviour.
 
-    Arguments:
+    Args:
         mode (bool): Flag whether to enable anomaly detection (``True``),
                      or disable (``False``).
 
