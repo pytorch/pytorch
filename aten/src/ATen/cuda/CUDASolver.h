@@ -48,7 +48,7 @@ void getrs<c10::complex<float>>(CUDASOLVER_GETRS_ARGTYPES(c10::complex<float>));
 
 template<class Dtype, class Vtype>
 void gesvdj(CUDASOLVER_GESVDJ_ARGTYPES(Dtype, Vtype)) {
-  TORCH_CHECK(false, "at::cuda::solver::gesvdj: not implemented for ", typeid(Dtype).name());
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::gesvdj: not implemented for ", typeid(Dtype).name());
 }
 template<>
 void gesvdj<float>(CUDASOLVER_GESVDJ_ARGTYPES(float, float));
@@ -66,7 +66,7 @@ void gesvdj<c10::complex<double>>(CUDASOLVER_GESVDJ_ARGTYPES(c10::complex<double
 
 template<class Dtype, class Vtype>
 void gesvdjBatched(CUDASOLVER_GESVDJ_BATCHED_ARGTYPES(Dtype, Vtype)) {
-  TORCH_CHECK(false, "at::cuda::solver::gesvdj: not implemented for ", typeid(Dtype).name());
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::gesvdj: not implemented for ", typeid(Dtype).name());
 }
 template<>
 void gesvdjBatched<float>(CUDASOLVER_GESVDJ_BATCHED_ARGTYPES(float, float));

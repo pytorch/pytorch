@@ -49,9 +49,9 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
   // heuristic:
   //   cublas_x_batched doesn't work very well for small batchsize
   //   cublas_x_batched is intended to be used for matrices of small sizes where the launch overhead is a significant factor.
-  const bool use_cusolver_parallel_launch = (batch_size <= 8) || (/* batch_size > 8 && */ n >= 512);
+  const bool use_cusolver_for_loop = (batch_size <= 8) || (/* batch_size > 8 && */ n >= 512);
 
-  if (use_cusolver_parallel_launch) {
+  if (use_cusolver_for_loop) {
     int* p_infos = infos.data_ptr<int>();
 
     auto dataPtr = allocator.allocate(sizeof(int) * n * batch_size);
@@ -132,8 +132,8 @@ inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& 
   auto U_stride = matrixStride(U);
   auto S_stride = S.size(-1);
   auto VT_stride = matrixStride(VT);
-  auto batchsize = batchCount(self);
 
+  int batchsize = cuda_int_cast(batchCount(self), "batch size");
   int m = cuda_int_cast(self.size(-2), "m");
   int n = cuda_int_cast(self.size(-1), "n");   
 
@@ -163,7 +163,8 @@ inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& 
 }
 
 inline static void apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv) {
-  const int64_t m = self.size(-2), n = self.size(-1);
+  const int64_t m = self.size(-2);
+  const int64_t n = self.size(-1);
   Tensor self_working_copy = cloneBatchedColumnMajor(self);
   VT = VT.transpose(-2, -1);  // gesvdj returns V instead of V^H
 
@@ -210,7 +211,8 @@ inline static void _apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, T
 }
 
 inline static void apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv) {
-  const int64_t m = self.size(-2), n = self.size(-1);
+  const int64_t m = self.size(-2);
+  const int64_t n = self.size(-1);
   Tensor self_working_copy = cloneBatchedColumnMajor(self);
   VT = VT.transpose(-2, -1);  // gesvdj returns V instead of V^H
 
@@ -224,7 +226,8 @@ inline static void apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, Te
 std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool some, bool compute_uv) {
   const int64_t batch_size = batchCount(self);
   at::Tensor infos = at::zeros({batch_size}, self.options().dtype(at::kInt));
-  const int64_t m = self.size(-2), n = self.size(-1);
+  const int64_t m = self.size(-2)
+  const int64_t n = self.size(-1);
   const int64_t k = std::min(m, n);
 
   char jobchar = compute_uv ? (some ? 'S' : 'A') : 'N';
@@ -235,12 +238,14 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
   // U, S, V working copies are already column majored now
 
   if (self.numel() > 0) {
+    // heuristic for using `gesvdjBatched` over `gesvdj`
     if (m <= 32 && n <= 32 && batch_size > 1 && (!some || m == n)) {
       apply_svd_lib_gesvdjBatched(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv);
     } else {
       apply_svd_lib_gesvdj(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv);
     }
 
+    // A device-host sync will be performed.
     batchCheckErrors(infos, "svd_cuda");
 
     if (compute_uv) {

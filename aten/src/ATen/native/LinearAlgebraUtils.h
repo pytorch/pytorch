@@ -242,11 +242,9 @@ static inline std::tuple<std::vector<int64_t>,
 static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& input, bool some, bool compute_uv,
     const bool svd_use_cusolver=false) {
 
-  // NB 1: U, S, VT are empty tensors created on the CPU intentionally, because magma_(d/s)gesdd
-  // (which is the driver routine for the divide and conquer SVD operation)
-  // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
-  // moves the inputs between devices internally.
-  // NB 2: cusolver requires U, S, VT tensors on CUDA device
+  // U, S, VT are initialized as empty tensors.
+  // For CPU LAPACK and GPU MAGMA backend, the tensors are initialized on CPU.
+  // For GPU cuSOLVER backend, the tensors are initialized on GPU.
   const auto usvt_device = svd_use_cusolver ? at::kCUDA : at::kCPU;
 
   auto sizes = input.sizes().vec();
