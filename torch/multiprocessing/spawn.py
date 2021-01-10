@@ -66,24 +66,8 @@ def _wrap(fn, i, args, error_queue):
         sys.exit(1)
 
 
-# Multiprocessing contexts are introduced at Python 3.4
-_supports_context = sys.version_info >= (3, 4)
-
-
-def _python_version_check():
-    if not _supports_context:
-        raise RuntimeError("Requires python 3.4 or higher to use "
-                           "torch.multiprocessing.spawn and "
-                           "torch.multiprocessing.ProcessContext helper "
-                           "to launch multiple processes. If you are using "
-                           "this for distributed training and have a lower "
-                           "version of python, please use "
-                           "torch.distributed.launch instead.")
-
-
 class ProcessContext:
     def __init__(self, processes, error_queues):
-        _python_version_check()
         self.error_queues = error_queues
         self.processes = processes
         self.sentinels = {
@@ -182,7 +166,6 @@ class SpawnContext(ProcessContext):
 # Currently we only add this API first, we can consider adding it to documentation as
 # needed in the future.
 def start_processes(fn, args=(), nprocs=1, join=True, daemon=False, start_method='spawn'):
-    _python_version_check()
     mp = multiprocessing.get_context(start_method)
     error_queues = []
     processes = []
