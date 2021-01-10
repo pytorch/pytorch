@@ -226,7 +226,7 @@ inline static void apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, Te
 std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool some, bool compute_uv) {
   const int64_t batch_size = batchCount(self);
   at::Tensor infos = at::zeros({batch_size}, self.options().dtype(at::kInt));
-  const int64_t m = self.size(-2)
+  const int64_t m = self.size(-2);
   const int64_t n = self.size(-1);
   const int64_t k = std::min(m, n);
 
