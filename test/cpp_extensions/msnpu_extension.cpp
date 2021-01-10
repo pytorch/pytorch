@@ -53,10 +53,10 @@ std::tuple<Tensor,Tensor,Tensor> fake_convolution_backward(
 }
 
 TORCH_LIBRARY_IMPL(aten, MSNPU, m) {
-  m.impl_UNBOXED("empty.memory_format",                empty_override);
-  m.impl_UNBOXED("add.Tensor",                         add_override);
-  m.impl_UNBOXED("convolution_overrideable",           fake_convolution);
-  m.impl_UNBOXED("convolution_backward_overrideable",  fake_convolution_backward);
+  m.impl("empty.memory_format",                empty_override);
+  m.impl("add.Tensor",                         add_override);
+  m.impl("convolution_overrideable",           fake_convolution);
+  m.impl("convolution_backward_overrideable",  fake_convolution_backward);
 }
 
 // TODO: Extend this to exercise multi-device setting.  In that case,
