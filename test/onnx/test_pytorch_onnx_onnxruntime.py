@@ -1555,6 +1555,35 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(IndexPutModel2(), (x, update))
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_loop(self):
+        @torch.jit.script
+        def ngram_attention_bias(sequence_length: int, ngram: int, device: torch.device, dtype: torch.dtype):
+            bias = torch.ones((ngram, sequence_length), device=device, dtype=dtype) * float("-inf")
+            for stream_idx in range(ngram):
+                for i in range(sequence_length):
+                    bias[stream_idx, i] = 5
+            return bias
+
+        class ScriptModel(torch.nn.Module):
+            def __init__(self):
+                super(ScriptModel, self).__init__()
+                self.ngram = 2
+                self.max_target_positions = 512
+
+            def forward(self, hidden_states):
+                seq_length, batch_size = hidden_states.shape[:2]
+                predict_causal_mask = ngram_attention_bias(
+                    self.max_target_positions, self.ngram, hidden_states.device, hidden_states.dtype
+                )
+                predict_causal_mask = predict_causal_mask[:, :seq_length]
+                return predict_causal_mask
+
+        x = torch.randn(6, 2)
+        y = torch.randn(4, 1)
+        self.run_test(ScriptModel(), x, input_names=['x'],
+                      dynamic_axes={'x': {0: 'seq_length', 1: 'batch_size'}}, test_with_inputs=[y])
+
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_copy_(self):
         class CopyModel(torch.nn.Module):
             def forward(self, x, data):
@@ -2103,6 +2132,31 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         model = VarianceUnbiased()
+        self.run_test(model, x)
+
+    def test_var_mean_mixed_dims(self):
+        class ReverseDims(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(2, 1), unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = ReverseDims()
+        self.run_test(model, x)
+
+        class SkipDims(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(0, 2), unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = SkipDims()
+        self.run_test(model, x)
+
+        class NonZeroDims(torch.nn.Module):
+            def forward(self, input):
+                return torch.var_mean(input, dim=(1, 2), unbiased=False)
+
+        x = torch.randn(2, 3, 4)
+        model = NonZeroDims()
         self.run_test(model, x)
 
     def test_var_mean_keepdim(self):

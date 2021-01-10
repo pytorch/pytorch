@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/fuser/cpu/fused_kernel.h>
+
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
@@ -45,11 +46,17 @@ constexpr int so_suffix_len = 3;
 constexpr int cpp_suffix_len = 4;
 #endif
 
+intptr_t run(const std::string& cmd);
+
 static bool programExists(const std::string& program) {
   TemplateEnv env;
   env.s("program", program);
   std::string cmd = format(check_exists_string, env);
+#ifdef _MSC_VER
+  return (run(cmd.c_str()) == 0);
+#else
   return (system(cmd.c_str()) == 0);
+#endif
 }
 
 #ifdef _MSC_VER
