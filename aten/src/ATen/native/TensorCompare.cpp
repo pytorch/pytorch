@@ -217,7 +217,7 @@ Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
               condition.device(), " and x and y are on ", self.device(), " and ", other.device(),
               " respectively");
   TORCH_CHECK(condition.scalar_type() == ScalarType::Byte || condition.scalar_type() == ScalarType::Bool,
-              "Expected condition to have ScalarType Byte, but got ScalarType ",
+              "Expected condition to have ScalarType Bool, but got ScalarType ",
               toString(condition.scalar_type()));
   Tensor b_condition, b_self, b_other;
   std::tie(b_condition, b_self, b_other) = expand_outplace(condition, self, other, "where");
