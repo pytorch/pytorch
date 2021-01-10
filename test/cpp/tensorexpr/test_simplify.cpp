@@ -3523,9 +3523,10 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
   {
     // Simple positive case.
     VarHandle x("x", kInt);
+    BufHandle b(x, {0}, kInt);
 
-    Allocate* alloc = Allocate::make(x, kInt, {0});
-    Free* free_ = Free::make(x);
+    Allocate* alloc = Allocate::make(b);
+    Free* free_ = Free::make(b);
 
     Block* block1 = new Block({alloc, free_});
     ASSERT_EQ(block1->nstmts(), 2);
@@ -3538,9 +3539,10 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
   {
     // Simple negative case.
     VarHandle x("x", kInt);
+    BufHandle b(x, {2}, kInt);
 
-    Allocate* alloc = Allocate::make(x, kInt, {2});
-    Free* free_ = Free::make(x);
+    Allocate* alloc = Allocate::make(b);
+    Free* free_ = Free::make(b);
 
     Block* block1 = new Block({alloc, free_});
     ASSERT_EQ(block1->nstmts(), 2);
@@ -3554,11 +3556,13 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
     // Finds right Alloc/Free.
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
+    BufHandle b1(x, {0}, kInt);
+    BufHandle b2(y, {2}, kInt);
 
-    Allocate* alloc1 = Allocate::make(x, kInt, {0});
-    Allocate* alloc2 = Allocate::make(y, kInt, {2});
-    Free* free2_ = Free::make(y);
-    Free* free1_ = Free::make(x);
+    Allocate* alloc1 = Allocate::make(b1);
+    Allocate* alloc2 = Allocate::make(b2);
+    Free* free2_ = Free::make(b2);
+    Free* free1_ = Free::make(b1);
 
     Block* block1 = new Block({alloc1, alloc2, free2_, free1_});
     ASSERT_EQ(block1->nstmts(), 4);
@@ -3577,11 +3581,13 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
     VarHandle z("z", kInt);
+    BufHandle b1(x, {0}, kInt);
+    BufHandle b2(y, {z}, kInt);
 
-    Allocate* alloc1 = Allocate::make(x, kInt, {0});
-    Allocate* alloc2 = Allocate::make(y, kInt, {z});
-    Free* free2_ = Free::make(y);
-    Free* free1_ = Free::make(x);
+    Allocate* alloc1 = Allocate::make(b1);
+    Allocate* alloc2 = Allocate::make(b2);
+    Free* free2_ = Free::make(b2);
+    Free* free1_ = Free::make(b1);
 
     Block* block1 = new Block({alloc1, alloc2, free2_, free1_});
     ASSERT_EQ(block1->nstmts(), 4);

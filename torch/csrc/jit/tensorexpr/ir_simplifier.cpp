@@ -1961,51 +1961,70 @@ const Expr* TermExpander::mutate(const RoundOff* v) {
   return term->accept_mutator(this);
 }
 
-Stmt* TermExpander::mutate(const Allocate* v) {
-  const Var* buffer_var_old = v->buffer_var();
-  const Var* buffer_var_new =
-      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
-  bool any_change = buffer_var_new == buffer_var_old;
+Expr* TermExpander::mutate(const Buf* v) {
+  const Var* var = v->base_handle();
+  const Var* var_new = dynamic_cast<const Var*>(var->accept_mutator(this));
+  bool any_change = var_new == var;
 
-  const Expr* flattened = getImmediateByType(kInt, 1);
   std::vector<const Expr*> dims_old = v->dims();
   std::vector<const Expr*> dims_new(dims_old.size());
   for (size_t i = 0; i < dims_old.size(); i++) {
     dims_new[i] = dims_old[i]->accept_mutator(this);
     any_change |= (dims_new[i] == dims_old[i]);
-    flattened = new Mul(flattened, dims_new[i]);
   }
 
-  // Safe to do this as there can't be an Allocate inside an Allocate:
+  if (!any_change) {
+    return (Expr*)v;
+  }
+
+  return new Buf(var_new, dims_new, v->dtype());
+}
+
+const Expr* buf_flattening_helper(const Buf* v) {
+  std::vector<const Expr*> dims = v->dims();
+
+  const Expr* flattened = getImmediateByType(kInt, 1);
+  for (size_t i = 0; i < dims.size(); i++) {
+    flattened = new Mul(flattened, dims[i]);
+  }
   flattened = IRSimplifier::simplify(flattened);
 
+  return flattened;
+}
+
+Stmt* TermExpander::mutate(const Allocate* v) {
+  const Buf* buf = v->buf();
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
+
+  // Safe to do this as there can't be an Allocate inside an Allocate:
+  const Expr* flattened = buf_flattening_helper(buf_new);
   if (flattened->isConstant() && immediateEquals(flattened, 0)) {
-    eliminated_allocations_.insert(buffer_var_new);
+    eliminated_allocations_.insert(buf_new->base_handle());
     return nullptr;
   }
 
+  bool any_change = buf_new == buf;
   if (!any_change) {
     return (Stmt*)v;
   }
 
-  return new Allocate(buffer_var_new, v->dtype(), dims_new);
+  return new Allocate(buf_new);
 }
 
 Stmt* TermExpander::mutate(const Free* v) {
-  const Expr* buffer_var_old = v->buffer_var();
-  const Var* buffer_var_new =
-      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
+  const Buf* buf = v->buf();
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
 
-  if (eliminated_allocations_.count(buffer_var_new)) {
-    eliminated_allocations_.erase(buffer_var_new);
+  if (eliminated_allocations_.count(buf_new->base_handle())) {
+    eliminated_allocations_.erase(buf_new->base_handle());
     return nullptr;
   }
 
-  if (buffer_var_new == buffer_var_old) {
+  if (buf_new == buf) {
     return (Stmt*)v;
   }
 
-  return new Free(buffer_var_new);
+  return new Free(buf_new);
 }
 
 // Combines adjactent Cond nodes with identical conditions.
