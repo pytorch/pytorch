@@ -33,10 +33,10 @@ void main() {
     const ivec2 end = min(ipos + uBlock.kernel.xy, uBlock.kernel.zw);
     ivec2 kstart = (start - ipos) / uBlock.dilate;
 
-    vec4 sum = uBias.data[pos.z];
-
     kstart.x *= 4;
     kstart.y += pos.z * uBlock.ikernel.y;
+
+    vec4 sum = uBias.data[pos.z];
 
     for (int z4 = 0; z4 < uBlock.size.w; ++z4, kstart.x += uBlock.ikernel.x) {
       for (int y = start.y, ky = kstart.y; y < end.y; y += uBlock.dilate.y, ++ky) {
