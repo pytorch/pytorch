@@ -40,7 +40,7 @@ constexpr auto kChunkIdSeparator = "#%";
  * approaches for specific classes. Acceptor should take care of writing data
  * to the actual storage.
  */
-CAFFE2_API void SerializeBlob(
+TORCH_API void SerializeBlob(
     const Blob& blob,
     const string& name,
     BlobSerializerBase::SerializationAcceptor acceptor,
@@ -56,15 +56,15 @@ CAFFE2_API void SerializeBlob(
  *
  * NOTE: this function doesn't do chunking and might break with big tensors.
  */
-CAFFE2_API string SerializeBlob(const Blob& blob, const string& name);
+TORCH_API string SerializeBlob(const Blob& blob, const string& name);
 
 /**
  * Deserializes from a string containing either BlobProto or TensorProto. If
  * the deserialization fails, the content in the blob should no longer be
  * trusted.
  */
-CAFFE2_API void DeserializeBlob(const string& content, Blob* result);
-CAFFE2_API void DeserializeBlob(const BlobProto& proto, Blob* result);
+TORCH_API void DeserializeBlob(const string& content, Blob* result);
+TORCH_API void DeserializeBlob(const BlobProto& proto, Blob* result);
 
 /*
  * Get an empty Tensor from the TensorProto given the meta data in proto (data
@@ -86,7 +86,7 @@ CAFFE2_API void DeserializeBlob(const BlobProto& proto, Blob* result);
  * these function calls. e.g. mutable_data will allocate memory on the first
  * call and it will return a pointer to the allocated memory on later calls.
  */
-CAFFE2_API Tensor EmptyTensorFromProto(const TensorProto& proto);
+TORCH_API Tensor EmptyTensorFromProto(const TensorProto& proto);
 
 /**
  * @brief TensorSerializer is the serializer for Tensors.
@@ -94,7 +94,7 @@ CAFFE2_API Tensor EmptyTensorFromProto(const TensorProto& proto);
  * TensorSerializer takes in a blob that contains a Tensor, and serializes it
  * into a TensorProto protocol buffer.
  */
-class CAFFE2_API TensorSerializer : public BlobSerializerBase {
+class TORCH_API TensorSerializer : public BlobSerializerBase {
  public:
   TensorSerializer() {}
   ~TensorSerializer() override {}
@@ -136,7 +136,7 @@ class CAFFE2_API TensorSerializer : public BlobSerializerBase {
  * tensor, change the TensorProto's corresponding fields before calling
  * Deserialize.
  */
-class CAFFE2_API TensorDeserializer : public BlobDeserializerBase {
+class TORCH_API TensorDeserializer : public BlobDeserializerBase {
  public:
   void Deserialize(const BlobProto& proto, Blob* blob) override;
 
@@ -240,7 +240,7 @@ inline void CopyFromProtoWithCast(
 // Converts MessageLite to string while also checking that SerializeAsString
 // succeeds. Pass description of class/function of the call if you'd
 // like it appended to the error message.
-CAFFE2_API std::string SerializeAsString_EnforceCheck(
+TORCH_API std::string SerializeAsString_EnforceCheck(
     const google::protobuf::MessageLite&,
     const char* error_location = nullptr);
 

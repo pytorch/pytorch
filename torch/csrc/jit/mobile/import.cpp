@@ -122,6 +122,7 @@ void parseMethods(
         "The numbers of bytecode values and debug info values do not match.");
   }
 
+  // Process all methods in this mobile module.
   for (size_t i = method_i_start; i < vals.size(); ++i) {
     const auto& element = vals[i];
     const auto& m_tuple = element.toTuple()->elements();
@@ -190,6 +191,8 @@ void parseMethods(
     }
 
     std::unordered_set<std::string> unsupported_op_names;
+    // ops_list is the list of operator names that were read in from
+    // bytecode.plk for the method that is currently being processed.
     for (const auto& op : ops_list) {
       auto op_item = op.toTuple()->elements();
       TORCH_CHECK(
@@ -271,6 +274,16 @@ mobile::Module BytecodeDeserializer::deserialize(
     }
   }
   auto mcu = std::make_shared<mobile::CompilationUnit>();
+
+  // bvals can have 2 possible formats:
+  //
+  // 1. Old format: bvals is an array (Tuple) of N elements, each element being
+  // itself a Tuple(method_name, method_table).
+  //
+  // 2. New format: bvals is an array (Tuple) of 1+N elements. The first element
+  // being a Tuple (int, table), and the integer stands for the bytecode version
+  // number. The rest of the elements are the same as before.
+  //
   auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
 
   c10::optional<std::vector<IValue>> debug_info_bvals;

@@ -318,6 +318,10 @@ expected_err = "Expected error"
 def raise_func():
     raise ValueError(expected_err)
 
+expected_err_escape = "\nFirst line of error \n next line of error \n last line of error"
+def raise_func_escape():
+    raise ValueError(expected_err_escape)
+
 
 global_rref = None
 
@@ -1332,7 +1336,11 @@ class RpcTest(RpcAgentTestFixture):
                 for event in events
                 if convert_remote_to_local(event.name) in EXPECTED_REMOTE_EVENTS
             ]
-            self.assertEqual(remote_events_list, EXPECTED_REMOTE_EVENTS)
+            self.assertEqual(
+                set(remote_events_list),
+                set(EXPECTED_REMOTE_EVENTS),
+                f"Mismatch between profiled events: {set(remote_events_list)} and expected events: {set(EXPECTED_REMOTE_EVENTS)}",
+            )
 
     @dist_init
     def test_profiler_remote_events_profiled(self):
@@ -1576,8 +1584,8 @@ class RpcTest(RpcAgentTestFixture):
                 scope_event = get_function_event(events, "foo")
                 # Since RPC call is within the scope, its CPU interval should be
                 # contained within foo's interval.
-                self.assertTrue(scope_event.time_range.start < rpc_event.time_range.start)
-                self.assertTrue(scope_event.time_range.end > rpc_event.time_range.end)
+                self.assertLessEqual(scope_event.time_range.start, rpc_event.time_range.start)
+                self.assertGreaterEqual(scope_event.time_range.end, rpc_event.time_range.end)
             # the sender, dest worker, function run, and type of RPC should all
             # be recorded.
             self_worker_name = worker_name(self.rank)
@@ -1773,7 +1781,13 @@ class RpcTest(RpcAgentTestFixture):
                 if time_range.start > last_end_time:
                     top_level_event_names.append(event_name)
                     last_end_time = time_range.end
-        self.assertEqual(sorted(top_level_event_names), sorted(expected_top_level_event_names))
+        top_level_event_names = sorted(top_level_event_names)
+        expected_top_level_event_names = sorted(expected_top_level_event_names)
+        self.assertEqual(
+            top_level_event_names,
+            expected_top_level_event_names,
+            f"Expected events {expected_top_level_event_names}, but got {top_level_event_names}",
+        )
 
     @dist_init
     def test_server_process_global_profiler(self):
@@ -1796,9 +1810,12 @@ class RpcTest(RpcAgentTestFixture):
         outer_profile_rref.rpc_sync().__exit__(None, None, None)
 
         inner_events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (inner_profile_rref,))
-        self._assert_top_level_events(inner_events, ['aten::sub'])
+        expected_inner_events = ['aten::sub']
+        expected_outer_events = expected_inner_events + ['aten::add']
+
+        self._assert_top_level_events(inner_events, expected_inner_events)
         outer_events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (outer_profile_rref,))
-        self._assert_top_level_events(outer_events, ['aten::add', 'aten::sub'])
+        self._assert_top_level_events(outer_events, expected_outer_events)
 
         inner_profile_rref.rpc_sync().key_averages()
         outer_profile_rref.rpc_sync().key_averages()
@@ -1982,6 +1999,20 @@ class RpcTest(RpcAgentTestFixture):
         # Validate that trainers log errors when running functions.
         stderr_lines = err.getvalue()
         self.assertTrue(expected_err in stderr_lines)
+
+    @dist_init
+    def test_py_raise_in_user_func_escaped_str(self):
+        n = self.rank + 1
+        dst_rank = n % self.world_size
+        fut = rpc.rpc_async(worker_name(dst_rank), raise_func_escape)
+        try:
+            fut.wait()
+        except ValueError as e:
+            msg = str(e)
+            # Ensure newlines are unescaped to provide a better repr of error.
+            self.assertEqual(msg, msg.encode("utf-8").decode("unicode_escape"))
+        else:
+            self.assertTrue(False, "expected raise_func_escape to raise ValueError.")
 
     @dist_init
     def test_nested_rpc(self):
@@ -4613,7 +4644,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
     @skip_if_lt_x_gpu(2)
     def test_device_maps_default_gpu(self):
-        torch.zeros(2).to(0).to(1)
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
         device = 0
@@ -4651,10 +4681,8 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         else:
             raise ValueError("Wrong device affinity")
 
-    #@unittest.skip("Skipping until Tensorpipe supports non default GPUs")
     @skip_if_lt_x_gpu(2)
     def test_device_maps_non_default_gpu(self):
-        torch.zeros(2).to(0).to(1)
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
         device = 1
@@ -4668,99 +4696,49 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             rpc_backend_options=options,
         )
 
-        # it would hang if I uncomment the if below...
-        if self.rank == 0:
+        x = torch.zeros(2).to(torch.uint8).to(device)
+        y = torch.ones(2).to(torch.uint8).to(device)
+        ret = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._gpu_add_given_gpu_x,
+            args=(x, x, device)
+        )
 
-            x = torch.zeros(2).to(torch.uint8).to(device)
-            y = torch.ones(2).to(torch.uint8).to(device)
-            # TODO: remove syncs
-            torch.cuda.synchronize(0)
-            torch.cuda.synchronize(1)
-            ret = rpc.rpc_sync(
-                dst,
-                TensorPipeAgentRpcTest._gpu_add_given_gpu_x,
-                args=(x, x, device)
-            )
-
-            torch.cuda.synchronize(0)
-            torch.cuda.synchronize(1)
-            #print("+++++ ret is ", ret)
-            self.assertEqual(ret.device.index, device)
-            self.assertEqual(ret, (torch.zeros(2) + torch.zeros(2)).to(torch.uint8).to(device))
-            #print("done !!!!!!!!!!!!!!")
-
+        torch.cuda.synchronize(0)
+        torch.cuda.synchronize(1)
+        self.assertEqual(ret.device.index, device)
+        self.assertEqual(ret, (torch.zeros(2) + torch.zeros(2)).to(torch.uint8).to(device))
 
         rpc.shutdown()
 
-    #@unittest.skip("Skipping until Tensorpipe supports non default GPUs")
     @skip_if_lt_x_gpu(2)
     def test_device_maps_default_to_non_default(self):
-        #torch.cuda.init()
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
+        src_d, dst_d = 0, 1
+        options.set_device_map(dst, {src_d: dst_d})
 
-        src_d = 1
-        dst_d = 1
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
 
-        # it would hang if I uncomment the if below...
-        if self.rank == 0:
-            torch.zeros(2).to(src_d).to(dst_d)
-            options.set_device_map(worker_name(1), {src_d: dst_d})
+        x = torch.ones(2).to(torch.uint8).to(src_d)
+        y = torch.zeros(2).to(torch.uint8).to(dst_d)
+        ret = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._gpu_add_given_gpu_x,
+            args=(x, x, dst_d)
+        )
 
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rank=self.rank,
-                world_size=self.world_size,
-                rpc_backend_options=options,
-            )
-
-            x = torch.ones(2).to(torch.uint8).to(src_d)
-            y = torch.zeros(2).to(torch.uint8).to(dst_d)
-            # TODO: remove syncs
-            torch.cuda.synchronize(0)
-            torch.cuda.synchronize(1)
-            ret = rpc.rpc_sync(
-                worker_name(1),
-                TensorPipeAgentRpcTest._gpu_add_given_gpu_x,
-                args=(x, x, dst_d)
-            )
-
-            torch.cuda.synchronize(0)
-            torch.cuda.synchronize(1)
-            #print("+++++ ret is ", ret)
-            self.assertEqual(ret.device.index, src_d)
-            self.assertEqual(ret, (torch.ones(2) + torch.ones(2)).to(torch.uint8).to(src_d))
-
-            """
-            for _ in range(10):
-                x = torch.ones(2).to(torch.uint8).to(0)
-                y = torch.zeros(2).to(torch.uint8).to(0)
-                # TODO: remove syncs
-                torch.cuda.synchronize(0)
-                torch.cuda.synchronize(1)
-                ret = rpc.rpc_sync(
-                    dst,
-                    TensorPipeAgentRpcTest._gpu_add_given_gpu_x,
-                    args=(x, y, 1)
-                )
-
-                torch.cuda.synchronize(0)
-                torch.cuda.synchronize(1)
-                print("+++++ ret is ", ret)
-                self.assertEqual(ret.device.index, 0)
-                self.assertEqual(ret, (torch.ones(2) + torch.zeros(2)).to(torch.uint8).to(0))
-            """
-        else:
-            if self.rank == 1:
-                torch.zeros(2).to(dst_d).to(src_d)
-            rpc.init_rpc(
-                name=worker_name(self.rank),
-                backend=self.rpc_backend,
-                rank=self.rank,
-                world_size=self.world_size,
-                rpc_backend_options=options,
-            )
+        # TODO: remove sync
+        torch.cuda.synchronize(0)
+        torch.cuda.synchronize(1)
+        self.assertEqual(ret.device.index, src_d)
+        self.assertEqual(ret, (torch.ones(2) + torch.ones(2)).to(torch.uint8).to(src_d))
         rpc.shutdown()
 
     @staticmethod
@@ -4771,7 +4749,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             raise ValueError("Wrong device affinity")
 
     def _test_device_maps_multi_gpu(self, dst):
-        torch.cuda.init()
         options = self.rpc_backend_options
         options.set_device_map(dst, {0: 1})
         options.set_device_map(dst, {1: 0})
@@ -4784,21 +4761,21 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             rpc_backend_options=options,
         )
 
-        if self.rank == 0:
-            x = torch.zeros(2).to(0)
-            y = torch.ones(2).to(1)
-            rets = rpc.rpc_sync(
-                dst,
-                TensorPipeAgentRpcTest._gpu_add_multi_gpu,
-                args=(x, y)
-            )
+        #if self.rank == 0:
+        x = torch.zeros(2).to(0)
+        y = torch.ones(2).to(1)
+        rets = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._gpu_add_multi_gpu,
+            args=(x, y)
+        )
 
-            torch.cuda.synchronize(0)
-            torch.cuda.synchronize(1)
-            self.assertEqual(rets[0].device, torch.device(1))
-            self.assertEqual(rets[1].device, torch.device(0))
-            self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(1))
-            self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))
+        torch.cuda.synchronize(0)
+        torch.cuda.synchronize(1)
+        self.assertEqual(rets[0].device, torch.device(1))
+        self.assertEqual(rets[1].device, torch.device(0))
+        self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(1))
+        self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))
         rpc.shutdown()
 
     @skip_if_lt_x_gpu(2)
@@ -4839,7 +4816,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         rets = rpc.rpc_sync(
             dst,
             TensorPipeAgentRpcTest._gpu_add_multi_gpu,
-            args=(torch.zeros(2).to(1), torch.ones(2).to(0))
+            args=(torch.zeros(2).to(0), torch.ones(2).to(1))
         )
         self.assertEqual(rets[0].device, torch.device(1))
         self.assertEqual(rets[1].device, torch.device(0))
@@ -5140,3 +5117,11 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             self._test_stream_nested_multi_async,
             {"cuda:0": "cuda:1", "cuda:1": "cuda:0"}
         )
+
+    @dist_init
+    def test_op_with_invalid_args(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        with self.assertRaisesRegex(
+            RuntimeError, "Overloaded torch operator invoked from Python failed to many any schema"
+        ):
+            rpc.rpc_sync(dst, torch.add, args=())

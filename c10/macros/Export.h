@@ -92,11 +92,10 @@
 #endif
 
 // This one is being used by libtorch.so
-// TODO: rename this to TORCH_API
 #ifdef CAFFE2_BUILD_MAIN_LIB
-#define CAFFE2_API C10_EXPORT
+#define TORCH_API C10_EXPORT
 #else
-#define CAFFE2_API C10_IMPORT
+#define TORCH_API C10_IMPORT
 #endif
 
 // NB: For now, HIP is overloaded to use the same macro, but ideally

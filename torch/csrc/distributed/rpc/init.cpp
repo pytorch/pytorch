@@ -44,7 +44,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   }
 
   auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
-  auto m = torch_C_m.def_submodule("_distributed_rpc", "distributed rpc bindings");
+  auto m =
+      torch_C_m.def_submodule("_distributed_rpc", "distributed rpc bindings");
 
   auto module = py::handle(m).cast<py::module>();
 
@@ -129,12 +130,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           .def(
               "get_worker_info",
               (const WorkerInfo& (RpcAgent::*)(void)const) &
-              RpcAgent::getWorkerInfo,
+                  RpcAgent::getWorkerInfo,
               py::call_guard<py::gil_scoped_release>())
-        .def(
+          .def(
               "get_worker_info",
               (const WorkerInfo& (RpcAgent::*)(const std::string&)const) &
-              RpcAgent::getWorkerInfo,
+                  RpcAgent::getWorkerInfo,
               py::call_guard<py::gil_scoped_release>())
           .def(
               "get_worker_infos",
@@ -245,7 +246,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   to the local node and returns it. If the current node is the
                   owner, returns a reference to the local value.
 
-                  Arguments:
+                  Args:
                       timeout (float, optional): Timeout for ``to_here``. If
                           the call does not complete within this timeframe, an
                           exception indicating so will be raised. If this
@@ -437,7 +438,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   the node calling this API has to be the owner of the RRef.
                   The value of the RRef is expected to be a scalar Tensor.
 
-                Arguments:
+                Args:
                     dist_autograd_ctx_id (int, optional): The distributed
                         autograd context id for which we should retrieve the
                         gradients (default: -1).
@@ -464,7 +465,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           The backend options class for ``ProcessGroupAgent``, which is derived
           from ``RpcBackendOptions``.
 
-          Arguments:
+          Args:
               num_send_recv_threads (int, optional): The number of threads in
                   the thread-pool used by ``ProcessGroupAgent`` (default: 4).
               rpc_timeout (float, optional): The default timeout, in seconds,
@@ -782,7 +783,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
     Set whether GIL wait times should be enabled or not. This incurs a slight
     overhead cost. Default is disabled for performance reasons.
 
-    Arguments:
+    Args:
         flag (bool): True to set GIL profiling, False to disable.
       )");
 
@@ -801,7 +802,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           :meth:`~torch.distributed.rpc.rpc_sync` and
           :meth:`~torch.distributed.rpc.rpc_async`.
 
-          Arguments:
+          Args:
             rpcTimeoutSeconds (float): Timeout value in seconds.
       )");
 

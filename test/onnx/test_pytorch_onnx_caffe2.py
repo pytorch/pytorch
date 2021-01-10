@@ -464,11 +464,11 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
                                                   do_constant_folding=False)[0])
         prepared = c2.prepare(mp, device='CPU')
         if self.embed_params:
-            assert len(prepared.init_net.op) == 875
-            assert len(prepared.predict_net.op) == 130
+            assert len(prepared.init_net.op) == 879
+            assert len(prepared.predict_net.op) == 133
         else:
-            assert len(prepared.init_net.op) == 8
-            assert len(prepared.predict_net.op) == 997
+            assert len(prepared.init_net.op) == 12
+            assert len(prepared.predict_net.op) == 1000
 
     def test_alexnet(self):
         state_dict = model_zoo.load_url(model_urls['alexnet'], progress=False)

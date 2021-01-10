@@ -12,7 +12,6 @@
 #include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
-
 // Forward-declare the TensorPipe classes we need, to avoid including its
 // headers in PyTorch's ones and thus have it become a public dependency.
 
@@ -87,7 +86,6 @@ struct CudaChannelRegistration {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeCudaChannelRegistry, CudaChannelRegistration);
-
 
 constexpr auto kDefaultNumWorkerThreads = 16;
 
@@ -181,7 +179,7 @@ class TensorPipeAgent : public RpcAgent {
   TensorPipeAgent(const TensorPipeAgent&) = delete;
   TensorPipeAgent& operator=(const TensorPipeAgent&) = delete;
 
-  std::shared_ptr<FutureMessage> send(
+  std::shared_ptr<JitFuture> send(
       const WorkerInfo& to,
       Message&& message,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout) override;
@@ -253,7 +251,7 @@ class TensorPipeAgent : public RpcAgent {
 
   void sendCompletedResponseMessage(
       std::shared_ptr<tensorpipe::Pipe>& pipe,
-      std::shared_ptr<FutureMessage>& futureResponseMessage,
+      std::shared_ptr<JitFuture>& futureResponseMessage,
       uint64_t messageId,
       std::shared_ptr<FullDeviceContext> ctx);
 
@@ -278,8 +276,9 @@ class TensorPipeAgent : public RpcAgent {
   // only if it isn't yet. It does exist for errors (setErrorIfNeeded) but, even
   // then, it ends up printing a log message, which may worry the user. To solve
   // both issues we use a separate atomic flag to know the status of the future.
-  struct AtomicFutureMessage {
-    FutureMessage futMsg;
+  struct AtomicJitFuture {
+    std::shared_ptr<JitFuture> jitFuture =
+        std::make_shared<JitFuture>(at::AnyClassType::get());
     std::atomic_flag isComplete = ATOMIC_FLAG_INIT;
   };
 
@@ -293,7 +292,7 @@ class TensorPipeAgent : public RpcAgent {
     std::shared_ptr<tensorpipe::Pipe> pipe_;
     bool readError_{false};
     // Map from Message Request ID's to corresponding futures.
-    std::unordered_map<uint64_t, std::shared_ptr<AtomicFutureMessage>>
+    std::unordered_map<uint64_t, std::shared_ptr<AtomicJitFuture>>
         pendingResponseMessage_;
   };
 
@@ -326,7 +325,7 @@ class TensorPipeAgent : public RpcAgent {
   std::map<
       steady_clock_time_point,
       std::vector<std::pair<
-          std::shared_ptr<AtomicFutureMessage>,
+          std::shared_ptr<AtomicJitFuture>,
           std::chrono::milliseconds>>>
       timeoutMap_;
 
@@ -399,10 +398,10 @@ class TensorPipeAgent : public RpcAgent {
 
   // Helpers to set the state of the requests.
   void markFutureAsComplete(
-      std::shared_ptr<AtomicFutureMessage> futureMessage,
+      std::shared_ptr<AtomicJitFuture> atomicFuture,
       Message message);
   void markFutureWithError(
-      std::shared_ptr<AtomicFutureMessage> futureMessage,
+      std::shared_ptr<AtomicJitFuture> atomicFuture,
       std::string errorMsg);
 };
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <aten/src/ATen/core/ivalue.h>
+#include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <memory>
