@@ -1711,7 +1711,7 @@ def log_softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, 
           is performed. This is useful for preventing data type overflows. Default: None.
     """
     if not torch.jit.is_scripting():
-        if has_torch_function_unary(logits):
+        if has_torch_function_unary(input):
             return handle_torch_function(log_softmax, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype)
     if dim is None:
         dim = _get_softmax_dim("log_softmax", input.dim(), _stacklevel)
