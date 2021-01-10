@@ -98,6 +98,7 @@ static void apply_single_inverse_lib(const Tensor& self, Tensor& self_inv, Tenso
     self.data_ptr<scalar_t>(), self_inv.data_ptr<scalar_t>(), ipiv.data_ptr<int>(), info.data_ptr<int>(), n);
 }
 
+// entrance of calculations of `inverse` using cusolver getrf + getrs, cublas getrfBatched + getriBatched
 Tensor _inverse_helper_cuda_lib(const Tensor& self) {
   Tensor self_working_copy = cloneBatchedColumnMajor(self);
   Tensor self_inv_working_copy = column_major_identity_matrix_like(self_working_copy);
@@ -223,6 +224,7 @@ inline static void apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, Te
   VT = VT.conj();
 }
 
+// entrance of calculations of `svd` using cusolver gesvdj and gesvdjBatched
 std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool some, bool compute_uv) {
   const int64_t batch_size = batchCount(self);
   at::Tensor infos = at::zeros({batch_size}, self.options().dtype(at::kInt));
