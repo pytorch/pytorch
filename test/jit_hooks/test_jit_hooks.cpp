@@ -8,22 +8,22 @@
 
 #include <iostream>
 
-void test_submodule_forward_and_pre_hooks_single_IO_multiple_hooks(
+void test_submodule_multiple_hooks_single_input(
     const std::string& path_to_exported_script_module) {
   torch::jit::Module module =
-      torch::jit::load(path_to_exported_script_module + "_" + "test_submodule_forward_and_pre_hooks_single_IO_multiple_hooks" + ".pt");
+      torch::jit::load(path_to_exported_script_module + "_" + "test_submodule_multiple_hooks_single_input" + ".pt");
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back("a");
 
   auto output = module(inputs);
   std::cout << "----- module output: " << output << std::endl;
-  AT_ASSERT("pre_hook_overrid_name2_inner_mod_fwh1" == output);
+  AT_ASSERT("pre_hook_override_name2_inner_mod_fwh1" == output);
 }
 
-void test_submodule_forward_and_pre_hooks_single_IO_no_change(
+void test_submodule_hook_return_nothing(
     const std::string& path_to_exported_script_module) {
   torch::jit::Module module =
-      torch::jit::load(path_to_exported_script_module + "_" + "test_submodule_forward_and_pre_hooks_single_IO_no_change" + ".pt");
+      torch::jit::load(path_to_exported_script_module + "_" + "test_submodule_hook_return_nothing" + ".pt");
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back("a");
 
@@ -32,10 +32,10 @@ void test_submodule_forward_and_pre_hooks_single_IO_no_change(
   AT_ASSERT("a_outermod_inner_mod" == output);
 }
 
-void test_submodule_forward_and_pre_hook_single_IO_same_hook_twice(
+void test_submodule_same_hook_repeated(
     const std::string& path_to_exported_script_module) {
   torch::jit::Module module =
-      torch::jit::load(path_to_exported_script_module + "_" + "test_submodule_forward_and_pre_hook_single_IO_same_hook_twice" + ".pt");
+      torch::jit::load(path_to_exported_script_module + "_" + "test_submodule_same_hook_repeated" + ".pt");
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back("a");
 
@@ -44,20 +44,20 @@ void test_submodule_forward_and_pre_hook_single_IO_same_hook_twice(
   AT_ASSERT("a_outermod_ph_ph_inner_mod_fh_fh" == output);
 }
 
-void test_module_hook_and_pre_hook_no_IO(
+void test_module_no_forward_input(
     const std::string& path_to_exported_script_module) {
   torch::jit::Module module =
-      torch::jit::load(path_to_exported_script_module + "_" + "test_module_hook_and_pre_hook_no_IO" + ".pt");
+      torch::jit::load(path_to_exported_script_module + "_" + "test_module_no_forward_input" + ".pt");
   std::vector<torch::jit::IValue> inputs;
   auto output = module(inputs);
   std::cout << "----- module output: " << output << std::endl;
   AT_ASSERT(torch::jit::IValue() == output);
 }
 
-void test_module_forward_and_pre_hook_single_IO_same_hook_twice(
+void test_module_same_hook_repeated(
     const std::string& path_to_exported_script_module) {
   torch::jit::Module module =
-      torch::jit::load(path_to_exported_script_module + "_" + "test_module_forward_and_pre_hook_single_IO_same_hook_twice" + ".pt");
+      torch::jit::load(path_to_exported_script_module + "_" + "test_module_same_hook_repeated" + ".pt");
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back("a");
 
@@ -66,22 +66,22 @@ void test_module_forward_and_pre_hook_single_IO_same_hook_twice(
   AT_ASSERT("a_ph_ph_outermod_inner_mod_fh_fh" == output);
 }
 
-void test_module_forward_and_pre_hook_single_IO(
+void test_module_forward_single_input(
     const std::string& path_to_exported_script_module) {
   torch::jit::Module module =
-      torch::jit::load(path_to_exported_script_module + "_" + "test_module_forward_and_pre_hook_single_IO" + ".pt");
+      torch::jit::load(path_to_exported_script_module + "_" + "test_module_forward_single_input" + ".pt");
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back("a");
 
   auto output = module(inputs);
   std::cout << "----- module output: " << output << std::endl;
-  AT_ASSERT("pre_hook_overrid_name_outermod_inner_mod_fh" == output);
+  AT_ASSERT("pre_hook_override_name_outermod_inner_mod_fh" == output);
 }
 
-void test_module_forward_and_pre_hook_single_IO_no_change(
+void test_module_hook_return_nothing(
     const std::string& path_to_exported_script_module) {
   torch::jit::Module module =
-      torch::jit::load(path_to_exported_script_module + "_" + "test_module_forward_and_pre_hook_single_IO_no_change" + ".pt");
+      torch::jit::load(path_to_exported_script_module + "_" + "test_module_hook_return_nothing" + ".pt");
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back("a");
 
@@ -91,35 +91,35 @@ void test_module_forward_and_pre_hook_single_IO_no_change(
 }
 
 
-void test_submodule_forward_and_pre_hooks_single_IO(
+void test_submodule_forward_single_input(
     const std::string& path_to_exported_script_module) {
   torch::jit::Module module =
-      torch::jit::load(path_to_exported_script_module + "_" + "test_submodule_forward_and_pre_hooks_single_IO" + ".pt");
+      torch::jit::load(path_to_exported_script_module + "_" + "test_submodule_forward_single_input" + ".pt");
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back("a");
 
   auto output = module(inputs);
   std::cout << "----- module output: " << output << std::endl;
-  AT_ASSERT("pre_hook_overrid_name_inner_mod" == output);
+  AT_ASSERT("pre_hook_override_name_inner_mod" == output);
 }
 
-void test_module_forward_and_pre_hook_single_IO_multiple_hooks(
+void test_module_multiple_hooks_single_input(
     const std::string& path_to_exported_script_module) {
   torch::jit::Module module =
-      torch::jit::load(path_to_exported_script_module + "_" + "test_module_forward_and_pre_hook_single_IO_multiple_hooks" + ".pt");
+      torch::jit::load(path_to_exported_script_module + "_" + "test_module_multiple_hooks_single_input" + ".pt");
   std::vector<torch::jit::IValue> inputs;
   inputs.push_back("a");
 
   auto output = module(inputs);
   std::cout << "----- module output: " << output << std::endl;
-  AT_ASSERT("pre_hook_overrid_name2_outermod_inner_mod_fh1_fh2" == output);
+  AT_ASSERT("pre_hook_override_name2_outermod_inner_mod_fh1_fh2" == output);
 }
 
 
-void test_submodule_hook_and_pre_hook_multiple_IO_multiple_hooks(
+void test_submodule_multiple_hooks_multiple_inputs(
     const std::string& path_to_exported_script_module) {
   torch::jit::Module module =
-      torch::jit::load(path_to_exported_script_module + "_" + "test_submodule_hook_and_pre_hook_multiple_IO_multiple_hooks" + ".pt");
+      torch::jit::load(path_to_exported_script_module + "_" + "test_submodule_multiple_hooks_multiple_inputs" + ".pt");
   std::vector<torch::jit::IValue> inputs;
   torch::List<std::string> list({"a"});
   inputs.push_back(list);
@@ -130,13 +130,13 @@ void test_submodule_hook_and_pre_hook_multiple_IO_multiple_hooks(
   std::ostringstream stream;
   stream << output;
   std::string output_str =  stream.str();
-  AT_ASSERT("([pre_hook_overrid_name, inner_mod_name], pre_hook_override2_fh1_fh2)" == output_str);
+  AT_ASSERT("([pre_hook_override_name, inner_mod_name], pre_hook_override2_fh1_fh2)" == output_str);
 }
 
-void test_module_hook_and_pre_hook_multiple_IO_multiple_hooks(
+void test_module_multiple_hooks_multiple_inputs(
     const std::string& path_to_exported_script_module) {
   torch::jit::Module module =
-      torch::jit::load(path_to_exported_script_module + "_" + "test_module_hook_and_pre_hook_multiple_IO_multiple_hooks" + ".pt");
+      torch::jit::load(path_to_exported_script_module + "_" + "test_module_multiple_hooks_multiple_inputs" + ".pt");
   std::vector<torch::jit::IValue> inputs;
   torch::List<std::string> list({"a"});
   inputs.push_back(list);
@@ -147,28 +147,31 @@ void test_module_hook_and_pre_hook_multiple_IO_multiple_hooks(
   std::ostringstream stream;
   stream << output;
   std::string output_str =  stream.str();
-  AT_ASSERT("([pre_hook_overrid_name2, outer_mod_name, inner_mod_name], pre_hook_override_fh1_fh2)" == output_str);
+  AT_ASSERT("([pre_hook_override_name2, outer_mod_name, inner_mod_name], pre_hook_override_fh1_fh2)" == output_str);
 }
 
-void test_nested_tuple_IO(
+void test_forward_tuple_input(
     const std::string& path_to_exported_script_module) {
   torch::jit::Module module =
-      torch::jit::load(path_to_exported_script_module + "_" + "test_nested_tuple_IO" + ".pt");
+      torch::jit::load(path_to_exported_script_module + "_" + "test_forward_tuple_input" + ".pt");
   std::vector<torch::jit::IValue> inputs;
 
-  std::tuple<std::string, std::string> input_tuple ("a","b");
+  std::tuple<int> input_tuple (11);
   inputs.push_back(input_tuple);
 
   auto output = module(inputs);
   std::cout << "----- module output: " << output << std::endl;
-  AT_ASSERT("howdy" == output);;
+  std::ostringstream stream;
+  stream << output;
+  std::string output_str =  stream.str();
+  AT_ASSERT("22" == output_str);;
 }
 
 
-void test_module_hook_and_pre_hook_multiple_IO(
+void test_module_forward_multiple_inputs(
     const std::string& path_to_exported_script_module) {
   torch::jit::Module module =
-      torch::jit::load(path_to_exported_script_module + "_" + "test_module_hook_and_pre_hook_multiple_IO" + ".pt");
+      torch::jit::load(path_to_exported_script_module + "_" + "test_module_forward_multiple_inputs" + ".pt");
   std::vector<torch::jit::IValue> inputs;
   torch::List<std::string> list({"a"});
   inputs.push_back(list);
@@ -179,13 +182,13 @@ void test_module_hook_and_pre_hook_multiple_IO(
   std::ostringstream stream;
   stream << output;
   std::string output_str =  stream.str();
-  AT_ASSERT("([pre_hook_overrid_name, outer_mod_name, inner_mod_name], pre_hook_override_fh)" == output_str);
+  AT_ASSERT("([pre_hook_override_name, outer_mod_name, inner_mod_name], pre_hook_override_fh)" == output_str);
 }
 
 void test_module_forward_invocation_no_hooks_run(
     const std::string& path_to_exported_script_module) {
   torch::jit::Module module =
-      torch::jit::load(path_to_exported_script_module + "_" + "test_module_hook_and_pre_hook_multiple_IO" + ".pt");
+      torch::jit::load(path_to_exported_script_module + "_" + "test_module_forward_multiple_inputs" + ".pt");
   std::vector<torch::jit::IValue> inputs;
   torch::List<std::string> list({"a"});
   inputs.push_back(list);
@@ -202,10 +205,10 @@ void test_module_forward_invocation_no_hooks_run(
 }
 
 
-void test_submodule_hook_and_pre_hook_multiple_IO(
+void test_submodule_forward_multiple_inputs(
     const std::string& path_to_exported_script_module) {
   torch::jit::Module module =
-      torch::jit::load(path_to_exported_script_module + "_" + "test_submodule_hook_and_pre_hook_multiple_IO" + ".pt");
+      torch::jit::load(path_to_exported_script_module + "_" + "test_submodule_forward_multiple_inputs" + ".pt");
   std::vector<torch::jit::IValue> inputs;
   torch::List<std::string> list({"a"});
   inputs.push_back(list);
@@ -216,7 +219,7 @@ void test_submodule_hook_and_pre_hook_multiple_IO(
   std::ostringstream stream;
   stream << output;
   std::string output_str =  stream.str();
-  AT_ASSERT("([pre_hook_overrid_name, inner_mod_name], pre_hook_override_fh)" == output_str);
+  AT_ASSERT("([pre_hook_override_name, inner_mod_name], pre_hook_override_fh)" == output_str);
 }
 
 int main(int argc, const char* argv[]) {
@@ -229,36 +232,36 @@ int main(int argc, const char* argv[]) {
   // Note: Modules loaded in this file are produced in /test/jit_hooks/model.py
 
   std::cout << "Tesing JIT Hooks in CPP" << std::endl; 
-  std::cout << "testing: test_submodule_forward_and_pre_hooks_single_IO_multiple_hooks" << std::endl;
-  test_submodule_forward_and_pre_hooks_single_IO_multiple_hooks(path_to_exported_script_module);
-  std::cout << "testing: test_submodule_forward_and_pre_hooks_single_IO_no_change" << std::endl;
-  test_submodule_forward_and_pre_hooks_single_IO_no_change(path_to_exported_script_module);
-  std::cout << "testing: test_submodule_forward_and_pre_hook_single_IO_same_hook_twice" << std::endl;
-  test_submodule_forward_and_pre_hook_single_IO_same_hook_twice(path_to_exported_script_module);
-  std::cout << "testing: test_submodule_forward_and_pre_hooks_single_IO" << std::endl;
-  test_submodule_forward_and_pre_hooks_single_IO(path_to_exported_script_module);
-  std::cout << "testing: test_submodule_hook_and_pre_hook_multiple_IO_multiple_hooks" << std::endl;
-  test_submodule_hook_and_pre_hook_multiple_IO_multiple_hooks(path_to_exported_script_module);
-  std::cout << "testing: test_submodule_hook_and_pre_hook_multiple_IO" << std::endl;
-  test_submodule_hook_and_pre_hook_multiple_IO(path_to_exported_script_module);
+  std::cout << "testing: test_submodule_multiple_hooks_single_input" << std::endl;
+  test_submodule_multiple_hooks_single_input(path_to_exported_script_module);
+  std::cout << "testing: test_submodule_hook_return_nothing" << std::endl;
+  test_submodule_hook_return_nothing(path_to_exported_script_module);
+  std::cout << "testing: test_submodule_same_hook_repeated" << std::endl;
+  test_submodule_same_hook_repeated(path_to_exported_script_module);
+  std::cout << "testing: test_submodule_forward_single_input" << std::endl;
+  test_submodule_forward_single_input(path_to_exported_script_module);
+  std::cout << "testing: test_submodule_multiple_hooks_multiple_inputs" << std::endl;
+  test_submodule_multiple_hooks_multiple_inputs(path_to_exported_script_module);
+  std::cout << "testing: test_submodule_forward_multiple_inputs" << std::endl;
+  test_submodule_forward_multiple_inputs(path_to_exported_script_module);
   
-  std::cout << "testing: test_module_forward_and_pre_hook_single_IO" << std::endl;
-  test_module_forward_and_pre_hook_single_IO(path_to_exported_script_module);
-  std::cout << "testing: test_module_forward_and_pre_hook_single_IO_multiple_hooks" << std::endl;
-  test_module_forward_and_pre_hook_single_IO_multiple_hooks(path_to_exported_script_module);
-  std::cout << "testing: test_module_forward_and_pre_hook_single_IO_no_change" << std::endl;
-  test_module_forward_and_pre_hook_single_IO_no_change(path_to_exported_script_module);
-  std::cout << "testing: test_module_forward_and_pre_hook_single_IO_same_hook_twice" << std::endl;
-  test_module_forward_and_pre_hook_single_IO_same_hook_twice(path_to_exported_script_module);
-  std::cout << "testing: test_module_hook_and_pre_hook_multiple_IO" << std::endl;
-  test_module_hook_and_pre_hook_multiple_IO(path_to_exported_script_module);
-  std::cout << "testing: test_module_hook_and_pre_hook_multiple_IO_multiple_hooks" << std::endl;
-  test_module_hook_and_pre_hook_multiple_IO_multiple_hooks(path_to_exported_script_module);
+  std::cout << "testing: test_module_forward_single_input" << std::endl;
+  test_module_forward_single_input(path_to_exported_script_module);
+  std::cout << "testing: test_module_multiple_hooks_single_input" << std::endl;
+  test_module_multiple_hooks_single_input(path_to_exported_script_module);
+  std::cout << "testing: test_module_hook_return_nothing" << std::endl;
+  test_module_hook_return_nothing(path_to_exported_script_module);
+  std::cout << "testing: test_module_same_hook_repeated" << std::endl;
+  test_module_same_hook_repeated(path_to_exported_script_module);
+  std::cout << "testing: test_module_forward_multiple_inputs" << std::endl;
+  test_module_forward_multiple_inputs(path_to_exported_script_module);
+  std::cout << "testing: test_module_multiple_hooks_multiple_inputs" << std::endl;
+  test_module_multiple_hooks_multiple_inputs(path_to_exported_script_module);
   
-  std::cout << "testing: test_module_hook_and_pre_hook_no_IO" << std::endl;
-  test_module_hook_and_pre_hook_no_IO(path_to_exported_script_module);
-  std::cout << "testing: test_nested_tuple_IO" << std::endl;
-  test_nested_tuple_IO(path_to_exported_script_module);
+  std::cout << "testing: test_module_no_forward_input" << std::endl;
+  test_module_no_forward_input(path_to_exported_script_module);
+  std::cout << "testing: test_forward_tuple_input" << std::endl;
+  test_forward_tuple_input(path_to_exported_script_module);
 
   std::cout << "testing: test_module_forward_invocation_no_hooks_run" << std::endl;
   test_module_forward_invocation_no_hooks_run(path_to_exported_script_module);
