@@ -1664,14 +1664,8 @@ def log_softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, 
           If specified, the input tensor is casted to :attr:`dtype` before the operation
           is performed. This is useful for preventing data type overflows. Default: None.
     """
-<<<<<<< HEAD
-    if not torch.jit.is_scripting():
-        if has_torch_function_unary(input):
-            return handle_torch_function(log_softmax, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype)
-=======
     if has_torch_function_unary(input):
         return handle_torch_function(log_softmax, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype)
->>>>>>> 59df3b4600... Treat has_torch_function and object_has_torch_function as static False when scripting
     if dim is None:
         dim = _get_softmax_dim("log_softmax", input.dim(), _stacklevel)
     if dtype is None:
