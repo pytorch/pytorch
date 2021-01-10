@@ -334,7 +334,7 @@ void append_overloaded_arg(std::vector<py::handle>* overloaded_args, PyObject* o
 
 bool is_tensor_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args) {
   if (THPVariable_CheckExact(obj)) {
-    // torch.Tensor instances (not subclasses)
+    // torch.Tensor instances (not subclasses, except for Parameter)
     return true;
   }
 
