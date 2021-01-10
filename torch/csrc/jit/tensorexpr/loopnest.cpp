@@ -941,8 +941,9 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
   // possible scope.
   for (const Buf* buf : intermediate_bufs_) {
     const Expr* flat_size = buf_flattening_helper(buf);
-    Stmt* alloc = new Allocate(new Buf(buf->base_handle(), {flat_size}, buf->dtype()));
-    Stmt* free = new Free(buf->base_handle());
+    Stmt* alloc =
+        new Allocate(new Buf(buf->base_handle(), {flat_size}, buf->dtype()));
+    Stmt* free = new Free(buf);
     Block* alloc_block = findLowestContainingBlock(uses.at(buf));
     alloc_block->prepend_stmt(alloc);
     alloc_block->append_stmt(free);

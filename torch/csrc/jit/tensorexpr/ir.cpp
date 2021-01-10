@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 
-#include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 
 namespace torch {
 namespace jit {
@@ -146,10 +146,11 @@ Store* Store::make(
 }
 
 Allocate* Allocate::make(
-      const VarHandle& buffer_var,
-      Dtype dtype,
-      const std::vector<ExprHandle>& dims) {
-    return new Allocate(new Buf(buffer_var.node(), ExprHandleVectorToExprVector(dims), dtype));
+    const VarHandle& buffer_var,
+    Dtype dtype,
+    const std::vector<ExprHandle>& dims) {
+  return new Allocate(
+      new Buf(buffer_var.node(), ExprHandleVectorToExprVector(dims), dtype));
 }
 
 const Expr* flatten_index(

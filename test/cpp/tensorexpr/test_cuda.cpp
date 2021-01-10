@@ -755,7 +755,7 @@ TEST(Cuda, SharedMemReduce_1_CUDA) {
 
   {
     //    free(c)
-    Free* free_stmt = Free::make(c_var);
+    Free* free_stmt = Free::make(c);
     block.push_back(free_stmt);
   }
 
@@ -884,7 +884,7 @@ TEST(Cuda, LocalMemReduce_1_CUDA) {
   }
   {
     //      free(c)
-    Free* free_stmt = Free::make(c_var);
+    Free* free_stmt = Free::make(c);
     block_n.push_back(free_stmt);
   }
   {

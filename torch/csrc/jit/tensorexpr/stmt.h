@@ -319,6 +319,9 @@ class TORCH_API Allocate : public StmtNode<Allocate> {
       const VarHandle& buffer_var,
       Dtype dtype,
       const std::vector<ExprHandle>& dims);
+  static Allocate* make(const BufHandle& buf_handle) {
+    return new Allocate(buf_handle.node());
+  }
 
   const Var* buffer_var() const {
     return buf_->base_handle();
@@ -337,6 +340,7 @@ class TORCH_API Allocate : public StmtNode<Allocate> {
   }
 
   Allocate(const Buf* buf) : buf_(buf) {}
+
  private:
   const Buf* buf_;
   // TODO: add memory types.
@@ -345,18 +349,22 @@ class TORCH_API Allocate : public StmtNode<Allocate> {
 // Free the specific buffer. It is an error.
 class TORCH_API Free : public StmtNode<Free> {
  public:
-  static Free* make(const VarHandle& buffer_var) {
-    return new Free(buffer_var.node());
+  static Free* make(const BufHandle& buf_handle) {
+    return new Free(buf_handle.node());
   }
 
   const Var* buffer_var() const {
-    return buffer_var_;
+    return buf_->base_handle();
   }
 
-  Free(const Var* buffer_var) : buffer_var_(buffer_var) {}
+  const Buf* buf() const {
+    return buf_;
+  }
+
+  Free(const Buf* buf) : buf_(buf) {}
 
  private:
-  const Var* buffer_var_;
+  const Buf* buf_;
 };
 
 class TORCH_API Let : public StmtNode<Let> {

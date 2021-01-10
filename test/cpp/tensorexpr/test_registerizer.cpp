@@ -814,7 +814,7 @@ TEST(Registerizer, RegisterizerAllocs) {
            Block::make(
                {Store::make(b, {0}, Add::make(Load::make(b, {0}, 1), x), 1),
                 Store::make(a, {0}, Load::make(c, {0}, 1), 1)})),
-       Free::make(b_)});
+       Free::make(b)});
 
   /*
    * Allocate(B, int, {C[0]});

@@ -187,8 +187,7 @@ const Expr* IRMutator::mutate(const Load* v) {
 
 const Expr* IRMutator::mutate(const Buf* v) {
   const Var* var = v->base_handle();
-  const Var* var_new =
-      dynamic_cast<const Var*>(var->accept_mutator(this));
+  const Var* var_new = dynamic_cast<const Var*>(var->accept_mutator(this));
   bool any_change = var_new != var;
 
   std::vector<const Expr*> dims_old = v->dims();
@@ -431,14 +430,14 @@ Stmt* IRMutator::mutate(const Allocate* v) {
 }
 
 Stmt* IRMutator::mutate(const Free* v) {
-  const Expr* buffer_var_old = v->buffer_var();
-  const Var* buffer_var_new =
-      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
-  if (buffer_var_new == buffer_var_old) {
+  const Buf* buf = v->buf();
+  const Buf* buf_new =
+      dynamic_cast<const Buf*>(buf->accept_mutator(this));
+  if (buf_new == buf) {
     return (Stmt*)v;
   }
 
-  return new Free(buffer_var_new);
+  return new Free(buf_new);
 }
 
 Stmt* IRMutator::mutate(const Let* v) {
@@ -524,7 +523,7 @@ Stmt* StmtClone::mutate(const Allocate* v) {
 }
 
 Stmt* StmtClone::mutate(const Free* v) {
-  return new Free(v->buffer_var());
+  return new Free(v->buf());
 }
 
 Stmt* StmtClone::mutate(const Let* v) {

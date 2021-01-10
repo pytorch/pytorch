@@ -1963,8 +1963,7 @@ const Expr* TermExpander::mutate(const RoundOff* v) {
 
 Expr* TermExpander::mutate(const Buf* v) {
   const Var* var = v->base_handle();
-  const Var* var_new =
-      dynamic_cast<const Var*>(var->accept_mutator(this));
+  const Var* var_new = dynamic_cast<const Var*>(var->accept_mutator(this));
   bool any_change = var_new == var;
 
   std::vector<const Expr*> dims_old = v->dims();
@@ -1995,8 +1994,7 @@ const Expr* buf_flattening_helper(const Buf* v) {
 
 Stmt* TermExpander::mutate(const Allocate* v) {
   const Buf* buf = v->buf();
-  const Buf* buf_new =
-      dynamic_cast<const Buf*>(buf->accept_mutator(this));
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
 
   // Safe to do this as there can't be an Allocate inside an Allocate:
   const Expr* flattened = buf_flattening_helper(buf_new);
@@ -2014,20 +2012,20 @@ Stmt* TermExpander::mutate(const Allocate* v) {
 }
 
 Stmt* TermExpander::mutate(const Free* v) {
-  const Expr* buffer_var_old = v->buffer_var();
-  const Var* buffer_var_new =
-      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
+  const Buf* buf = v->buf();
+  const Buf* buf_new =
+      dynamic_cast<const Buf*>(buf->accept_mutator(this));
 
-  if (eliminated_allocations_.count(buffer_var_new)) {
-    eliminated_allocations_.erase(buffer_var_new);
+  if (eliminated_allocations_.count(buf_new->base_handle())) {
+    eliminated_allocations_.erase(buf_new->base_handle());
     return nullptr;
   }
 
-  if (buffer_var_new == buffer_var_old) {
+  if (buf_new == buf) {
     return (Stmt*)v;
   }
 
-  return new Free(buffer_var_new);
+  return new Free(buf_new);
 }
 
 // Combines adjactent Cond nodes with identical conditions.
