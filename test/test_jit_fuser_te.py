@@ -28,6 +28,8 @@ from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_m
 
 from torch.testing._internal.te_utils import CudaCodeGenExecuted
 
+from jit.test_fuser_common import TestFuserCommon  # noqa: F401
+
 FUSION_GROUP = 'prim::TensorExprGroup'
 LLVM_ENABLED = torch._C._llvm_enabled()
 
@@ -655,7 +657,7 @@ class TestTEFuser(JitTestCase):
         y = torch.ones(1, requires_grad=True, device='cuda')
         warmup_forward(scripted_f, x, y)
         g = torch.jit.last_executed_optimized_graph()
-        diff_nodes = [n for n in g.nodes() if n.kind() == 'prim::DifferentiableGraph']
+        diff_nodes = g.findAllNodes('prim::DifferentiableGraph')
         self.assertEqual(len(diff_nodes), 1)
         g = diff_nodes[0].g('Subgraph')
         if_nodes = [n for n in g.nodes() if n.kind() == 'prim::If']
@@ -964,7 +966,7 @@ class TestTEFuser(JitTestCase):
             forward_graph = module.graph_for(*inputs)
             self.assertGraphContainsExactly(
                 forward_graph, FUSION_GROUP, 1, consider_subgraphs=True)
-            FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
+            FileCheck().check("DifferentiableGraph").check("TupleConstruct") \
                 .check_next("return").check(FUSION_GROUP).run(str(forward_graph))
             hy, cy = module(*inputs)
             warmup_backward((hy + cy).sum())
@@ -1281,6 +1283,7 @@ class TestTEFuser(JitTestCase):
             self.assertEqual(ref, mod.forward(x))
             self.assertLastGraphAllFused()
 
+    @unittest.skip("Temporarily disabled")
     def test_masked_fill(self):
         dtypes = [
             torch.int8,
