@@ -512,7 +512,7 @@ class AbstractTestCases:
             e = cm.exception
             self.assertNotEqual(e.returncode, 0)
             self.assertNotEqual(e.output, None)
-            self.assertTrue(b'Unhandled exception caught in c10/util/AbortHandler.h' in e.output)
+            self.assertIn(b'Unhandled exception caught in c10/util/AbortHandler.h', e.output)
 
         def _spawn_method(self, method, arg):
             try:
