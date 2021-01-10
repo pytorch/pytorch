@@ -2013,8 +2013,7 @@ Stmt* TermExpander::mutate(const Allocate* v) {
 
 Stmt* TermExpander::mutate(const Free* v) {
   const Buf* buf = v->buf();
-  const Buf* buf_new =
-      dynamic_cast<const Buf*>(buf->accept_mutator(this));
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
 
   if (eliminated_allocations_.count(buf_new->base_handle())) {
     eliminated_allocations_.erase(buf_new->base_handle());

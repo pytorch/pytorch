@@ -263,7 +263,10 @@ ExprHandle Buf::make(const std::vector<ExprHandle>& dims, Dtype dtype) {
   return Buf::make("", dims, dtype);
 }
 
-ExprHandle Buf::make(const VarHandle& var, const std::vector<ExprHandle>& dims, Dtype dtype){
+ExprHandle Buf::make(
+    const VarHandle& var,
+    const std::vector<ExprHandle>& dims,
+    Dtype dtype) {
   return ExprHandle(
       new Buf(var.node(), ExprHandleVectorToExprVector(dims), dtype));
 }

@@ -200,7 +200,10 @@ class TORCH_API Buf : public ExprNode<Buf> {
       const std::vector<ExprHandle>& dims,
       Dtype dtype);
   static ExprHandle make(const std::vector<ExprHandle>& dims, Dtype dtype);
-  static ExprHandle make(const VarHandle& var, const std::vector<ExprHandle>& dims, Dtype dtype);
+  static ExprHandle make(
+      const VarHandle& var,
+      const std::vector<ExprHandle>& dims,
+      Dtype dtype);
 
   // TODO: unique_name
   const Var* base_handle() const {

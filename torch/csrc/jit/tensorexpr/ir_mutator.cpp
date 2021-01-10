@@ -431,8 +431,7 @@ Stmt* IRMutator::mutate(const Allocate* v) {
 
 Stmt* IRMutator::mutate(const Free* v) {
   const Buf* buf = v->buf();
-  const Buf* buf_new =
-      dynamic_cast<const Buf*>(buf->accept_mutator(this));
+  const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
   if (buf_new == buf) {
     return (Stmt*)v;
   }
