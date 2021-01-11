@@ -37,11 +37,12 @@ std::string stringSlice(
   int64_t start_val = start.has_value() ? start.value() : INT64_MAX;
   int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
 
-  const int64_t num_vals = slice_indices_adjust(string.size(), &start_val, &end_val, step);
+  const int64_t num_vals =
+      slice_indices_adjust(string.size(), &start_val, &end_val, step);
 
   int64_t i = start_val;
   std::string result = "";
-  for (int64_t j = 0; j < num_vals; j++){
+  for (int64_t j = 0; j < num_vals; j++) {
     result += string[i];
     i += step;
   }
@@ -112,7 +113,7 @@ RegisterOperators reg(
          // depends on the type hint and input. The implementation of this
          // operator below is intended to be as close to the Python
          // implementation in torch/csrc/utils/tensor_list.cpp as possible.
-         [](const Node* /*node*/) -> Operation {
+         [](const Node * /*node*/) -> Operation {
            return [](Stack* stack) {
              int elem_ty_val;
              int dim_val;
