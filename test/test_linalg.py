@@ -1163,7 +1163,7 @@ class TestLinalg(TestCase):
             else:
                 self.assertEqual(result.dtype, from_dtype, msg=msg)
 
-            result_out = torch.empty((), dtype=to_dtype, device=device)
+            result_out = torch.empty((0), dtype=to_dtype, device=device)
             torch.linalg.norm(input, ord, keepdim=keepdim, out=result_out)
             self.assertEqual(result_out.dtype, to_dtype, msg=msg)
             self.assertEqual(result.to(compare_dtype), result_out.to(compare_dtype), msg=msg)
@@ -1194,6 +1194,8 @@ class TestLinalg(TestCase):
                 for ord in ord_settings:
                     dtypes = [torch.float, torch.double, torch.cfloat, torch.cdouble]
                     for from_dtype, to_dtype in itertools.product(dtypes, dtypes):
+                        if from_dtype.is_complex and not to_dtype.is_complex:
+                            continue
                         run_test_case(input_size, ord, keepdim, from_dtype, to_dtype)
 
         # Make sure that setting dtype != out.dtype raises an error
@@ -1211,6 +1213,136 @@ class TestLinalg(TestCase):
                         result = torch.Tensor().to(out_dtype)
                         with self.assertRaisesRegex(RuntimeError, r'provided dtype must match dtype of result'):
                             torch.linalg.norm(input, ord=ord, keepdim=keepdim, dtype=dtype, out=result)
+
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble, torch.bfloat16, torch.float16)
+    def test_vector_norm(self, device, dtype):
+        # This test compares torch.linalg.vector_norm's output with
+        # torch.linalg.norm given a flattened tensor
+        ord_vector = [0, 0.9, 1, 2, 3, inf, -0.5, -1, -2, -3, -inf, None]
+        input_sizes = [
+            (10, ),
+            (4, 5),
+            (3, 4, 5),
+            (0, ),
+            (0, 10),
+            (0, 0),
+            (10, 0, 10),
+        ]
+
+        def vector_norm_reference(input, ord, dim=None, keepdim=False, dtype=None):
+            if dim is None:
+                input_maybe_flat = input.flatten(0, -1)
+            else:
+                input_maybe_flat = input
+
+            result = torch.linalg.norm(input_maybe_flat, ord, dim=dim, keepdim=keepdim, dtype=dtype)
+            if keepdim and dim is None:
+                result = result.reshape([1] * input.dim())
+            return result
+
+        def run_test_case(input, ord, dim, keepdim, norm_dtype):
+            msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}, norm_dtype={norm_dtype}'
+            error_msg = None
+            if input.numel() == 0:
+                if ord is not None and ord < 0:
+                    error_msg = r'linalg.vector_norm of negative order cannot be performed on an empty tensor'
+                elif ord == inf and (dim is None or input.size(dim) == 0):
+                    error_msg = (
+                        r'linalg.vector_norm cannot compute the infinity norm on an empty '
+                        r'dimension because the operation does not have an identity')
+            if error_msg is None:
+                result_dtype_reference = vector_norm_reference(input, ord, dim=dim, keepdim=keepdim, dtype=norm_dtype)
+                result_dtype = torch.linalg.vector_norm(input, ord, dim=dim, keepdim=keepdim, dtype=norm_dtype)
+                self.assertEqual(result_dtype, result_dtype_reference, msg=msg)
+
+                if norm_dtype is not None:
+                    result_convert_before = torch.linalg.vector_norm(input.to(norm_dtype), ord, dim=dim, keepdim=keepdim)
+                    if norm_dtype.is_complex:
+                        result_convert_before = result_convert_before.to(norm_dtype)
+
+                    result_out = torch.empty((0), dtype=norm_dtype, device=device)
+                    torch.linalg.vector_norm(input, ord, dtype=norm_dtype, dim=dim, keepdim=keepdim, out=result_out)
+                    self.assertEqual(result_convert_before, result_out, msg=msg)
+                else:
+                    result_out = torch.empty((0), dtype=result_dtype.dtype, device=device)
+                    torch.linalg.vector_norm(input, ord, dim=dim, keepdim=keepdim, out=result_out)
+                    self.assertEqual(result_dtype, result_out, msg=msg)
+            else:
+                with self.assertRaises(RuntimeError):
+                    vector_norm_reference(input, ord, dim=dim, keepdim=keepdim)
+                with self.assertRaisesRegex(RuntimeError, error_msg):
+                    torch.linalg.vector_norm(input, ord, dim=dim, keepdim=keepdim)
+
+        if dtype.is_complex:
+            norm_dtypes = [None, torch.cfloat, torch.cdouble]
+        else:
+            norm_dtypes = [None, torch.float, torch.double, torch.cfloat, torch.cdouble, torch.float16, torch.bfloat16]
+
+        for input_size, ord, keepdim, norm_dtype in product(input_sizes, ord_vector, [True, False], norm_dtypes):
+            input = make_tensor(input_size, device, dtype, low=-9, high=9)
+            for dim in [None, random.randint(0, len(input_size) - 1)]:
+                run_test_case(
+                    input,
+                    ord,
+                    dim,
+                    keepdim,
+                    norm_dtype)
+
+    def test_vector_norm_dim_tuple_arg(self, device):
+        test_cases = [
+            # input size, dim, error, error message
+            ((4, ), (0, ), None, None),
+            ((4, ), (1, ), IndexError, r'Dimension out of range'),
+            ((4, ), (-2, ), IndexError, r'Dimension out of range'),
+            ((4, 3), (0, -1), None, None),
+            ((4, 3), (0, 0), RuntimeError, r'dim 0 appears multiple times in the list of dims'),
+            ((4, 3), (0, -2), RuntimeError, r'dim 0 appears multiple times in the list of dims'),
+            ((4, 3), (0, 1.0), TypeError, r"argument 'dim' must be tuple of ints"),
+            ((4, 3), (None, ), TypeError, r"argument 'dim' must be tuple of ints"),
+        ]
+        for input_size, dim_tuple, error, error_msg in test_cases:
+            input = torch.randn(input_size, device=device)
+            # vector_norm should accept a tuple or a list for dim arg
+            for dim in [dim_tuple, list(dim_tuple)]:
+                if error is None:
+                    torch.linalg.vector_norm(input, dim=dim)
+                else:
+                    with self.assertRaises(error):
+                        torch.linalg.vector_norm(input, dim=dim)
+
+    # Test that linalg.vector_norm throws an error if the out tensor's dtype
+    # does not match the expected output dtype
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble, torch.bfloat16, torch.float16)
+    def test_vector_norm_out_dtype_error(self, device, dtype):
+        input = torch.randn(10, device=device, dtype=dtype)
+        dtypes = [None, torch.float, torch.double, torch.cfloat, torch.cdouble, torch.float16, torch.bfloat16]
+
+        for norm_dtype, out_dtype in product(dtypes, dtypes):
+            if out_dtype is None:
+                continue
+
+            if norm_dtype is None:
+                if dtype == torch.cfloat:
+                    expected_dtype = torch.float
+                elif dtype == torch.cdouble:
+                    expected_dtype = torch.double
+                else:
+                    expected_dtype = dtype
+            else:
+                expected_dtype = norm_dtype
+
+            result = torch.empty((0), device=device, dtype=out_dtype)
+            msg = f'norm_dtype: {norm_dtype}, out_dtype: {out_dtype}, expected_dtype: {expected_dtype}'
+
+            if dtype.is_complex and norm_dtype is not None and not norm_dtype.is_complex:
+                with self.assertRaisesRegex(RuntimeError, r"linalg.vector_norm expected complex 'dtype'", msg=msg):
+                    torch.linalg.vector_norm(input, dtype=norm_dtype, out=result)
+
+            elif out_dtype != expected_dtype:
+                with self.assertRaisesRegex(RuntimeError, r'linalg.vector_norm expected out tensor dtype', msg=msg):
+                    torch.linalg.vector_norm(input, dtype=norm_dtype, out=result)
+            else:
+                torch.linalg.vector_norm(input, dtype=norm_dtype, out=result)
 
     # This test compares torch.linalg.norm and numpy.linalg.norm to ensure that
     # their vector norm results match
@@ -1439,7 +1571,7 @@ class TestLinalg(TestCase):
             ((S, S), ['fro', 0], (0, 0), RuntimeError, r'Expected dims to be different'),
             ((S, S), ['fro', 'nuc', 0], (0, 4), IndexError, r'Dimension out of range'),
             ((S, ), [0], (4, ), IndexError, r'Dimension out of range'),
-            ((S, ), [None], (0, 0), RuntimeError, r'Expected dims to be different, got this instead'),
+            ((S, ), [None], (0, 0), RuntimeError, r'dim 0 appears multiple times'),
             ((S, S, S), [1], (0, 1, 2), RuntimeError, r"'dim' must specify 1 or 2 dimensions"),
             ((S, S, S), [1], None, RuntimeError, r"'dim' must specify 1 or 2 dimensions"),
             ((S, S), ['garbage'], (0, 1), RuntimeError, r'Invalid norm order: garbage'),
@@ -1495,9 +1627,24 @@ class TestLinalg(TestCase):
                 self.assertEqual(res_out.shape, expected.shape, msg=msg)
                 self.assertEqual(res_out.cpu(), expected, msg=msg)
 
+    # Test that linal.vector_norm gives the same result as numpy when inputs
+    # contain extreme values (inf, -inf, nan)
+    def test_vector_norm_extreme_values(self, device):
+        vector_ords = [0, 1, 2, 3, inf, -1, -2, -3, -inf]
+        vectors = []
+        for pair in itertools.product([inf, -inf, 0.0, nan, 1.0], repeat=2):
+            vectors.append(list(pair))
+        for vector in vectors:
+            x = torch.tensor(vector, device=device)
+            x_n = x.cpu().numpy()
+            for ord in vector_ords:
+                msg = f'ord={ord}, vector={vector}'
+                result = torch.linalg.vector_norm(x, ord=ord)
+                result_n = np.linalg.norm(x_n, ord=ord)
+                self.assertEqual(result, result_n, msg=msg)
+
     # Test that linal.norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
-    @skipCUDAIf(True, r"GPU Test is blocking torch.svd https://github.com/pytorch/pytorch/pull/48436")
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_MACOS, "Skipped on MacOS!")
     @skipCUDAIfNoMagma
@@ -1528,6 +1675,10 @@ class TestLinalg(TestCase):
                         # These cases are broken because of an issue with svd
                         # https://github.com/pytorch/pytorch/issues/43567
                         return True
+                if ord in ['nuc', 2, -2]:
+                    # These cases are broken because of another issue with svd
+                    # https://github.com/pytorch/pytorch/issues/52633
+                    return True
             return False
 
         for matrix in matrices:
@@ -1535,12 +1686,11 @@ class TestLinalg(TestCase):
             x_n = x.cpu().numpy()
             for ord in matrix_ords:
                 msg = f'ord={ord}, matrix={matrix}'
-                result = torch.linalg.norm(x, ord=ord)
-                result_n = np.linalg.norm(x_n, ord=ord)
-
                 if is_broken_matrix_norm_case(ord, x):
                     continue
                 else:
+                    result = torch.linalg.norm(x, ord=ord)
+                    result_n = np.linalg.norm(x_n, ord=ord)
                     self.assertEqual(result, result_n, msg=msg)
 
     # Test degenerate shape results match numpy for linalg.norm vector norms
@@ -1549,15 +1699,20 @@ class TestLinalg(TestCase):
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped on ASAN since it checks for undefined behavior.")
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_norm_vector_degenerate_shapes(self, device, dtype):
-        def run_test_case(input, ord, dim, keepdim, should_error):
+        def run_test_case(input, ord, dim, keepdim):
             msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
-            input_numpy = input.cpu().numpy()
+            should_error = False
+            if ord is not None and ord < 0:
+                should_error = True
+            elif ord == inf:
+                if dim is None or input.size(dim) == 0:
+                    should_error = True
+
             if should_error:
-                with self.assertRaises(ValueError):
-                    np.linalg.norm(input_numpy, ord, dim, keepdim)
                 with self.assertRaises(RuntimeError):
                     torch.linalg.norm(input, ord, dim, keepdim)
             else:
+                input_numpy = input.cpu().numpy()
                 result_numpy = np.linalg.norm(input_numpy, ord, dim, keepdim)
                 result = torch.linalg.norm(input, ord, dim, keepdim)
                 self.assertEqual(result, result_numpy, msg=msg)
@@ -1565,18 +1720,18 @@ class TestLinalg(TestCase):
         ord_vector = [0, 0.5, 1, 2, 3, inf, -0.5, -1, -2, -3, -inf, None]
         S = 10
         test_cases = [
-            # input size, p settings that cause error, dim
-            ((0, ), [inf, -inf], None),
-            ((0, S), [inf, -inf], 0),
-            ((0, S), [], 1),
-            ((S, 0), [], 0),
-            ((S, 0), [inf, -inf], 1),
+            # input size, dim
+            ((0, ), None),
+            ((0, S), 0),
+            ((0, S), 1),
+            ((S, 0), 0),
+            ((S, 0), 1),
         ]
         for keepdim in [True, False]:
-            for input_size, error_ords, dim in test_cases:
+            for input_size, dim in test_cases:
                 input = torch.randn(*input_size, dtype=dtype, device=device)
                 for ord in ord_vector:
-                    run_test_case(input, ord, dim, keepdim, ord in error_ords)
+                    run_test_case(input, ord, dim, keepdim)
 
     # Test degenerate shape results match numpy for linalg.norm matrix norms
     @skipCUDAIfNoMagma
@@ -1840,6 +1995,16 @@ class TestLinalg(TestCase):
                     msg = gen_error_message(x.size(), p, keepdim, dim)
                     self.assertEqual(res.shape, expected.shape, msg=msg)
                     self.assertEqual(res, expected, msg=msg)
+
+    # Test that torch.norm with p=+/-inf propagates NaN
+    def test_norm_old_nan_propagation(self, device):
+        ords = [inf, -inf]
+        for pair in itertools.product([0.0, nan, 1.0], repeat=2):
+            x = torch.tensor(list(pair), device=device)
+            for ord in ords:
+                result = torch.norm(x, p=ord)
+                result_check = torch.linalg.norm(x, ord=ord)
+                self.assertEqual(result, result_check)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

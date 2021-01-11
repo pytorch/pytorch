@@ -524,6 +524,76 @@ Examples::
             [1, 2, 2, 2]])
 """)
 
+vector_norm = _add_docstr(_linalg.linalg_vector_norm, r"""
+linalg.vector_norm(input, ord=None, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
+
+Computes a vector norm over :attr:`input`.
+
+See :func:`torch.linalg.norm` for computing matrix norms.
+
+Supports floating and complex inputs.
+
+Args:
+    input (Tensor): The input tensor. For complex inputs, the norm is
+        calculated using the absolute value of each element. If the input is
+        complex and neither :attr:`dtype` nor :attr:`out` is specified, the
+        result's data type will be the corresponding floating point type (e.g.
+        float if :attr:`input` is complex float).
+
+    ord (int, float, inf, -inf, optional): The order of the norm.
+        The following norms can be calculated:
+
+        =====  ==========================
+        ord    norm
+        =====  ==========================
+        None   2-norm
+        inf    max(abs(x))
+        -inf   min(abs(x))
+        0      sum(x != 0)
+        other  sum(abs(x)**ord)**(1./ord)
+        =====  ==========================
+
+        Default: ``None``
+
+    dim (int, tuple of ints, list of ints, optional): If :attr:`dim` is an int,
+        the vector norm is calculated over the specified dimension. If
+        :attr:`dim` is a tuple of ints, the vector norm is calculated over the
+        elements in the specified dimensions. If :attr:`dim` is ``None``, the
+        vector norm is calculated across all dimensions. Default: ``None``
+
+    keepdim (bool, optional): If set to True, the reduced dimensions are retained
+        in the result as dimensions with size one. Default: ``False``
+
+Keyword args:
+
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+    dtype (:class:`torch.dtype`, optional): If specified, the :attr:`input` is
+        cast to :attr:`dtype` before performing the operation, and the returned
+        tensor's type will be :attr:`dtype`. If this argument is used in
+        conjunction with the :attr:`out` argument, the output tensor's type
+        must match this argument or a RuntimeError will be raised. Default:
+        ``None``
+
+Examples::
+
+    >>> import torch
+    >>> from torch import linalg as LA
+    >>> a = torch.arange(9, dtype=torch.float) - 4
+    >>> a
+    tensor([-4., -3., -2., -1.,  0.,  1.,  2.,  3.,  4.])
+    >>> b = a.reshape((3, 3))
+    >>> b
+    tensor([[-4., -3., -2.],
+            [-1.,  0.,  1.],
+            [ 2.,  3.,  4.]])
+
+    >>> LA.vector_norm(a, ord=3.5)
+    tensor(5.4345)
+    >>> LA.vector_norm(b, ord=3.5)
+    tensor(5.4345)
+""")
+
 norm = _add_docstr(_linalg.linalg_norm, r"""
 linalg.norm(input, ord=None, dim=None, keepdim=False, *, out=None, dtype=None) -> Tensor
 
