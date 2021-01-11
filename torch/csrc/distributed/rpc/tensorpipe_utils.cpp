@@ -79,12 +79,6 @@ inline void CudaFullDeviceContext::waitForCurrentStreams() const {
   }
 }
 
-inline void CudaFullDeviceContext::synchronize() const {
-  for (const auto& stream: streams_) {
-    stream.synchronize();
-  }
-}
-
 inline const std::vector<CUDAStream>& CudaFullDeviceContext::streams() const {
   return streams_;
 }
@@ -163,7 +157,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
             tensorpipe::CpuBuffer{tensorPtr, tensorData.sizeInBytes()},
             std::move(metadata)});
 #ifdef USE_CUDA_NOT_ROCM
-      } else {
+      } else if (tensorDataVec[i].device().is_cuda()) {
         tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
             tensorpipe::CudaBuffer{
                 tensorPtr,
@@ -171,6 +165,11 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
                 ctx->streams()[tensorDataVec[i].device().index()].stream()},
             std::move(metadata)});
 #endif
+      } else {
+        TORCH_CHECK(
+          false,
+          "Attempting to send a Tensor with unexpected device type ",
+          tensorDataVec[i].device());
       }
     }
   }

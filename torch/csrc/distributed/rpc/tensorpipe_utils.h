@@ -35,13 +35,12 @@ struct FullDeviceContext {
   FullDeviceContext& operator=(const FullDeviceContext& rhs) = delete;
   FullDeviceContext& operator=(FullDeviceContext&& rhs) & = delete;
 
-  explicit FullDeviceContext(bool /* unused */) {}
+  explicit FullDeviceContext(bool noCuda) {}
   virtual void recordDataPtrs(
       const std::vector<c10::DataPtr>& dataPtrs) const {}
   virtual void recordTensors(const std::vector<torch::Tensor>& tensors) const {}
   virtual void blockCurrentStreams() const {}
   virtual void waitForCurrentStreams() const {}
-  virtual void synchronize() const {}
 
 #ifdef USE_CUDA_NOT_ROCM
   virtual const std::vector<CUDAStream>& streams() const {
@@ -88,7 +87,6 @@ struct CudaFullDeviceContext : public FullDeviceContext {
 
   // let streams in this context wiat for current streams.
   void waitForCurrentStreams() const override;
-  void synchronize() const override;
   const std::vector<CUDAStream>& streams() const override;
 
  private:

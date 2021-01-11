@@ -304,7 +304,7 @@ class TensorPipeAgent : public RpcAgent {
   // then, it ends up printing a log message, which may worry the user. To solve
   // both issues we use a separate atomic flag to know the status of the future.
   struct AtomicJitFuture {
-    AtomicJitFuture(bool noCuda = true) : isComplete(ATOMIC_FLAG_INIT) {
+    AtomicJitFuture(bool noCuda = true) {
 #ifdef USE_CUDA_NOT_ROCM
       if (!noCuda) {
         jitFuture =
@@ -317,7 +317,7 @@ class TensorPipeAgent : public RpcAgent {
       }
     }
 
-    std::atomic_flag isComplete;
+    std::atomic_flag isComplete = ATOMIC_FLAG_INIT;
     std::shared_ptr<JitFuture> jitFuture;
   };
 

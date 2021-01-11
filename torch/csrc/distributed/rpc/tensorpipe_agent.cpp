@@ -10,6 +10,8 @@
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
+#include <ATen/cuda/CUDAMultiStreamGuard.h>
+
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -213,25 +215,11 @@ struct FullDeviceContextGuard {
   FullDeviceContextGuard(
       const std::shared_ptr<FullDeviceContext>&  /* unused */) {};
 #else
-  FullDeviceContextGuard(const std::shared_ptr<FullDeviceContext>& ctx) {
-    const auto& streams = ctx->streams();
-    std::vector<CUDAStream> prevStreams_;
-    prevStreams_.reserve(streams.size());
-    for (const auto& stream: streams) {
-      prevStreams_.emplace_back(
-          at::cuda::getCurrentCUDAStream(stream.device_index()));
-      at::cuda::setCurrentCUDAStream(stream);
-    }
-  }
-
-  ~FullDeviceContextGuard() noexcept {
-    for (auto& stream : prevStreams_) {
-      at::cuda::setCurrentCUDAStream(stream);
-    }
-  }
+  FullDeviceContextGuard(const std::shared_ptr<FullDeviceContext>& ctx)
+      : guard(ctx->streams()) {}
 
  private:
-  std::vector<CUDAStream> prevStreams_;
+  at::cuda::CUDAMultiStreamGuard guard;
 #endif
 };
 
@@ -459,7 +447,7 @@ void TensorPipeAgent::pipeRead(
         reverseDeviceMaps_.empty() && opts_.deviceMaps.empty());
 
     if (error) {
-      fn(error, Message(), std::move(ctx));
+      fn(error, Message(), nullptr);
       return;
     }
 
@@ -474,14 +462,14 @@ void TensorPipeAgent::pipeRead(
             const tensorpipe::Error& error,
             tensorpipe::Message tpMessage) mutable {
           if (error) {
-            fn(error, Message(), std::move(ctx));
+            fn(error, Message(), nullptr);
             return;
           }
 
-          // FIXME This does some unpickling, which could be a bit expensive:
-          // perhaps it would be best to perform it inside the worker threads?
           ctx->blockCurrentStreams();
           ctx->recordDataPtrs(tpBuffers->tensors);
+          // FIXME This does some unpickling, which could be a bit expensive:
+          // perhaps it would be best to perform it inside the worker threads?
           Message rpcMessage = tensorpipeDeserialize(
               std::move(tpMessage), std::move(*tpBuffers));
 
