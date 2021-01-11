@@ -194,20 +194,24 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         # Test JIT
         self.checkScriptable(qlinear, [[X_q]], check_save_load=True)
 
-        # Test from_float.
-        float_linear = torch.nn.Linear(in_features, out_features).float()
-        float_linear.qconfig = torch.quantization.default_qconfig
-        torch.quantization.prepare(float_linear, inplace=True)
-        float_linear(X.float())
-        # Sequential allows swapping using "convert".
-        quantized_float_linear = torch.nn.Sequential(float_linear)
-        quantized_float_linear = torch.quantization.convert(quantized_float_linear, inplace=True)
+        # Make sure `from_float` works for all linear variants
+        modules_under_test = [torch.nn.Linear, torch.nn.modules.linear._LinearWithBias]
 
-        # Smoke test to make sure the module actually runs
-        quantized_float_linear(X_q)
+        for mut in modules_under_test:
+            # Test from_float.
+            float_linear = mut(in_features, out_features).float()
+            float_linear.qconfig = torch.quantization.default_qconfig
+            torch.quantization.prepare(float_linear, inplace=True)
+            float_linear(X.float())
+            # Sequential allows swapping using "convert".
+            quantized_float_linear = torch.nn.Sequential(float_linear)
+            quantized_float_linear = torch.quantization.convert(quantized_float_linear, inplace=True)
 
-        # Smoke test extra_repr
-        self.assertTrue('QuantizedLinear' in str(quantized_float_linear))
+            # Smoke test to make sure the module actually runs
+            quantized_float_linear(X_q)
+
+            # Smoke test extra_repr
+            self.assertTrue('QuantizedLinear' in str(quantized_float_linear))
 
     def test_quant_dequant_api(self):
         r = torch.tensor([[1., -1.], [1., -1.]], dtype=torch.float)
@@ -928,16 +932,18 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         # Test JIT
         self.checkScriptable(qlinear, [[X]], check_save_load=True)
 
-        # Test from_float
-        float_linear = torch.nn.Linear(in_features, out_features).float()
-        if use_default_observer:
-            float_linear.qconfig = torch.quantization.default_dynamic_qconfig
-        prepare_dynamic(float_linear)
-        float_linear(X.float())
-        quantized_float_linear = nnqd.Linear.from_float(float_linear)
+        modules_under_test = [torch.nn.Linear, torch.nn.modules.linear._LinearWithBias]
+        for mut in modules_under_test:
+            # Test from_float
+            float_linear = mut(in_features, out_features).float()
+            if use_default_observer:
+                float_linear.qconfig = torch.quantization.default_dynamic_qconfig
+            prepare_dynamic(float_linear)
+            float_linear(X.float())
+            quantized_float_linear = nnqd.Linear.from_float(float_linear)
 
-        # Smoke test to make sure the module actually runs
-        quantized_float_linear(X)
+            # Smoke test to make sure the module actually runs
+            quantized_float_linear(X)
 
         # Smoke test extra_repr
         self.assertTrue('QuantizedLinear' in str(quantized_float_linear))

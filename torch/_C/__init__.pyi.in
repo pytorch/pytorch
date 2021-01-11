@@ -4,9 +4,10 @@ import torch
 from torch import Tensor
 from enum import Enum
 from pathlib import Path
-from typing import (Any, BinaryIO, Callable, ContextManager, Dict, Iterator, List, NamedTuple,
-                    Optional, overload, Sequence, Tuple, TypeVar, Type, Union, Generic,
-                    Set, AnyStr, Iterable)
+from typing import (
+    Any, BinaryIO, Callable, ContextManager, Dict, Iterable, Iterator, List,
+    NamedTuple, Optional, overload, Sequence, Tuple, TypeVar, Type, Union,
+    Generic, Set, AnyStr)
 from torch._six import inf
 
 from torch.types import _int, _float, _bool, _dtype, _device, _qscheme, _size, _layout, Device, Number, Storage
@@ -349,6 +350,10 @@ def _propagate_and_assign_input_shapes(
     propagate: _bool
 ) -> Graph: ...
 
+# Defined in torch/csrc/jit/runtime/graph_executor.h
+class GraphExecutorState:
+    ...
+
 # Defined in torch/torch/csrc/jit/ir/ir.h
 class Graph:
     def eraseInput(self, i: _int) -> None: ...
@@ -500,6 +505,9 @@ def _set_qengine(qegine: _int) -> None: ...  # THPModule_setQEngine
 def _supported_qengines() -> List[_int]: ...  # THPModule_supportedQEngines
 def _is_xnnpack_enabled() -> _bool: ...  # THPModule_isEnabledXNNPACK
 def _is_torch_function_enabled() -> _bool: ...  # THPModule_isEnabledTorchFunction
+def _has_torch_function(args: Iterable[Any]) -> _bool: ...  # THPModule_has_torch_function
+def _has_torch_function_unary(Any) -> _bool: ...  # THPModule_has_torch_function_unary
+def _has_torch_function_variadic(*args: Any) -> _bool: ...  # THPModule_has_torch_function_variadic
 def _vmapmode_increment_nesting() -> _int: ...  # THPModule_vmapmode_increment_nesting
 def _vmapmode_decrement_nesting() -> _int: ...  # THPModule_vmapmode_decrement_nesting
 def _log_api_usage_once(str) -> None: ...  # LogAPIUsageOnceFromPython
@@ -642,6 +650,8 @@ class _TensorBase(object):
     _cdata: _int 
     grad_fn: Any
     _grad_fn: Any
+    _grad: Optional[Tensor]
+    _backward_hooks: Optional[Dict[_int, Callable[[Tensor], Optional[Tensor]]]]
     ${tensor_method_hints}
 
 # Defined in torch/csrc/multiprocessing/init.cpp
