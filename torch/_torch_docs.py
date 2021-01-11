@@ -8368,7 +8368,7 @@ Flip the entries in each row in the left/right direction.
 Columns are preserved, but appear in a different order than before.
 
 Note:
-    Equivalent to input[:,::-1]. Requires the array to be at least 2-D.
+    Requires the array to be at least 2-D.
 
 .. note::
     `torch.fliplr` makes a copy of :attr:`input`'s data. This is different from NumPy's `np.fliplr`,
@@ -8399,7 +8399,7 @@ Flip the entries in each column in the up/down direction.
 Rows are preserved, but appear in a different order than before.
 
 Note:
-    Equivalent to input[::-1,...]. Requires the array to be at least 1-D.
+    Requires the array to be at least 1-D.
 
 .. note::
     `torch.flipud` makes a copy of :attr:`input`'s data. This is different from NumPy's `np.flipud`,
