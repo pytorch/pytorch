@@ -1255,6 +1255,14 @@ Arguments:
 static const auto StoreTorchBind =
     torch::class_<::c10d::Store>("dist_c10d", "Store");
 
+static const auto FileStoreTorchBind =
+    torch::class_<::c10d::FileStore>("dist_c10d", "FileStore")
+        .def(torch::init([](const std::string& path,
+                            int64_t num_workers) {
+          return c10::make_intrusive<::c10d::FileStore>(
+              path, num_workers);
+        }));
+
 static const auto TCPStoreTorchBind =
     torch::class_<::c10d::TCPStore>("dist_c10d", "TCPStore")
         .def(torch::init([](const std::string& host_name,
@@ -1273,7 +1281,7 @@ static const auto TCPStoreTorchBind =
 static const auto PrefixStoreTorchBind =
     torch::class_<::c10d::PrefixStore>("dist_c10d", "PrefixStore")
         .def(torch::init([](const std::string& prefix,
-                            const c10::intrusive_ptr<::c10d::TCPStore>& store) {
+                            const c10::intrusive_ptr<::c10d::Store>& store) {
             return c10::make_intrusive<::c10d::PrefixStore>(
                 prefix, store);
         }));
