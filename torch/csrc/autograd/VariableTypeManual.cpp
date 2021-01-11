@@ -66,10 +66,6 @@ Tensor unpack_opt(const Tensor & t, const char * name, int pos) {
   return unpack(t, name, pos);
 }
 
-c10::optional<Tensor> unpack_opt(const c10::optional<Tensor> & t, const char * name, int pos) {
-  return t;
-}
-
 std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
   std::vector<at::Tensor> ret(tl.size());
   for (size_t i = 0; i < tl.size(); ++i) {
@@ -94,7 +90,7 @@ void _backward(
   // instead of us having to unwrap it to Tensor _gradient here.
   Tensor _gradient = gradient.has_value() ? *gradient : Tensor();
   std::vector<torch::autograd::Variable> input_vars(inputs.begin(), inputs.end());
-  torch::autograd::backward({self}, {_gradient}, std::move(keep_graph), create_graph, input_vars);
+  torch::autograd::backward({self}, {_gradient}, keep_graph, create_graph, input_vars);
 }
 
 void set_data(Tensor & self, const Tensor & new_data) {
@@ -230,7 +226,6 @@ Tensor _fw_primal(const Tensor & self, int64_t level) {
 
 // We don't have an outplace copy, so this can't be generated automatically
 Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
-  jit::Value* output = nullptr;
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
   auto& self_ = unpack(self, "self", 0);
@@ -282,7 +277,7 @@ Tensor& resize_(
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    self_.resize_(size, std::move(optional_memory_format));
+    self_.resize_(size, optional_memory_format);
   }
 
   if (self.fw_grad(/* level */ 0).defined()) {
@@ -303,7 +298,7 @@ Tensor& resize_as_(
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    at::resize_as_(self_, the_template_, std::move(optional_memory_format));
+    at::resize_as_(self_, the_template_, optional_memory_format);
   }
 
   // Handle fw grad
@@ -392,14 +387,6 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
   m.impl("detach", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach)));
   m.impl("detach_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach_)));
   m.impl("copy_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::copy_)));
-  // For backward() and requires_grad_(), we need the DefaultBackend kernel, but we also need the Autograd backend
-  // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
-  // which calls callBoxed(), which doesn't support optional tensor arguments yet and backward() has an optional
-  // tensor argument.
-  // TODO Once callBoxed() supports optional tensor arguments, we can enable `use_c10_dispatcher: full` for backward()
-  //      and requires_grad_(), then remove the backend Autograd kernel here, only leaving the Math kernel.
-  m.impl("_backward", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_backward)));
-  m.impl("requires_grad_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::requires_grad_)));
   m.impl("_fw_primal", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_fw_primal)));
 }
 

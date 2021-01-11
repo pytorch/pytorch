@@ -345,6 +345,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
 
   py::class_<::c10d::BarrierOptions>(module, "BarrierOptions")
       .def(py::init<>())
+      .def_readwrite("device_ids", &::c10d::BarrierOptions::device_ids)
       .def_readwrite("timeout", &::c10d::BarrierOptions::timeout);
 
   py::class_<::c10d::AllToAllOptions>(module, "AllToAllOptions")
@@ -1254,15 +1255,37 @@ Arguments:
 static const auto StoreTorchBind =
     torch::class_<::c10d::Store>("dist_c10d", "Store");
 
+static const auto FileStoreTorchBind =
+    torch::class_<::c10d::FileStore>("dist_c10d", "FileStore")
+        .def(torch::init([](const std::string& path,
+                            int64_t num_workers) {
+          return c10::make_intrusive<::c10d::FileStore>(
+              path, num_workers);
+        }));
+
 static const auto TCPStoreTorchBind =
     torch::class_<::c10d::TCPStore>("dist_c10d", "TCPStore")
         .def(torch::init([](const std::string& host_name,
                             int64_t port,
                             int64_t world_size,
-                            bool is_master) {
+                            bool is_master,
+                            int64_t timeout) {
+          auto timeout_miliseconds = std::chrono::milliseconds(timeout);
           return c10::make_intrusive<::c10d::TCPStore>(
-              host_name, port, world_size, is_master);
+              host_name, port, world_size, is_master, timeout_miliseconds);
         }));
+
+// TODO: This should really take Store as constructor argument instead of
+// TCPStore, but the fact that TorchScript does not support polymorphism
+// forced us to cast in C++ instead of automatic casting
+static const auto PrefixStoreTorchBind =
+    torch::class_<::c10d::PrefixStore>("dist_c10d", "PrefixStore")
+        .def(torch::init([](const std::string& prefix,
+                            const c10::intrusive_ptr<::c10d::Store>& store) {
+            return c10::make_intrusive<::c10d::PrefixStore>(
+                prefix, store);
+        }));
+
 
 // Torchbind the ProcessGroup to make it available in TorchScript
 static const auto ProcessGroupWorkTorchBind =
@@ -1623,7 +1646,14 @@ static const auto ProcessGroupNCCLTorchBind =
                   outputSplitSizes,
                   inputSplitSizes,
                   ::c10d::AllToAllOptions());
-            });
+
+            })
+        .def("size", [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
+            return (int64_t) self->getSize();
+        })
+        .def("rank", [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self) {
+            return (int64_t) self->getRank();
+        });
 #endif
 
 static const auto DistributedC10dFrontendTorchBind =

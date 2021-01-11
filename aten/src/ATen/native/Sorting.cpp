@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/Parallel.h>
@@ -6,7 +7,6 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
-#include <ATen/MemoryOverlap.h>
 
 #include <utility>
 
@@ -92,15 +92,35 @@ void quick_select_template(
   } while (true);
 }
 
+QUANTILE_INTERPOLATION_MODE get_quantile_interpolation_mode(
+    const std::string& interpolation) {
+  if (interpolation == "linear") {
+    return QUANTILE_INTERPOLATION_MODE::LINEAR;
+  } else if (interpolation == "lower") {
+    return QUANTILE_INTERPOLATION_MODE::LOWER;
+  } else if (interpolation == "higher") {
+    return QUANTILE_INTERPOLATION_MODE::HIGHER;
+  } else if (interpolation == "midpoint") {
+    return QUANTILE_INTERPOLATION_MODE::MIDPOINT;
+  } else if (interpolation == "nearest") {
+    return QUANTILE_INTERPOLATION_MODE::NEAREST;
+  } else {
+    TORCH_CHECK(
+        false,
+        "quantile() interpolation must be one of linear, lower, higher, midpoint and nearest, but got ",
+        interpolation);
+  }
+}
+
 void quantile_impl(
     Tensor& out,
     const Tensor& self,
     const Tensor& q,
-    optional<int64_t> _dim,
-    const std::string interpolation,
-    bool keepdim,
-    bool ignore_nan) {
-  int64_t dim = at::maybe_wrap_dim(_dim.value_or(0), self.dim(), true);
+    const optional<int64_t> _dim,
+    const bool keepdim,
+    const QUANTILE_INTERPOLATION_MODE& interpolation,
+    const bool ignore_nan) {
+  int64_t dim = at::maybe_wrap_dim(_dim.value_or(0), self.dim());
 
   TORCH_CHECK(self.numel() > 0, "quantile() input tensor must be non-empty");
   TORCH_CHECK(q.dim() <= 1, "quantile() q must be a scalar or 1D tensor");
@@ -119,16 +139,6 @@ void quantile_impl(
   TORCH_CHECK(
       self.device() == out.device(),
       "quantile() out tensor must be on the same device as the input tensor");
-  const std::vector<string> interpolations{
-      "linear", "lower", "higher", "midpoint", "nearest"};
-  TORCH_CHECK(
-      std::find(interpolations.begin(), interpolations.end(), interpolation) !=
-          interpolations.end(),
-      "quantile() interpolation should be one of ",
-      c10::Join(", ", interpolations),
-      " but got ",
-      interpolation,
-      ".");
 
   // Compute output shape: q_size + reduced_size
   std::vector<int64_t> out_shape;
@@ -200,21 +210,24 @@ void quantile_impl(
   }
 
   // adjust ranks based on the interpolation mode
-  if (interpolation == "lower") {
+  if (interpolation == QUANTILE_INTERPOLATION_MODE::LOWER) {
     ranks.floor_();
-  } else if (interpolation == "higher") {
+  } else if (interpolation == QUANTILE_INTERPOLATION_MODE::HIGHER) {
     ranks.ceil_();
-  } else if (interpolation == "nearest") {
+  } else if (interpolation == QUANTILE_INTERPOLATION_MODE::NEAREST) {
     ranks.round_();
   }
 
   Tensor ranks_below = ranks.toType(kLong);
   Tensor values_below = sorted.gather(-1, ranks_below);
 
-  if (interpolation == "linear" || interpolation == "midpoint") {
+  // Actual interpolation is only needed for the liner and midpoint modes
+  if (interpolation == QUANTILE_INTERPOLATION_MODE::LINEAR ||
+      interpolation == QUANTILE_INTERPOLATION_MODE::MIDPOINT) {
     // calculate weights for linear and midpoint
-    Tensor weights = interpolation == "midpoint" ? at::full_like(ranks, 0.5)
-                                                 : ranks - ranks_below;
+    Tensor weights = interpolation == QUANTILE_INTERPOLATION_MODE::MIDPOINT
+        ? at::full_like(ranks, 0.5)
+        : ranks - ranks_below;
 
     // Interpolate to compute quantiles and store in values_below
     Tensor ranks_above = ranks.ceil_().toType(kLong);
@@ -443,18 +456,15 @@ Tensor& quantile_out(
     const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
-    bool keepdim) {
-  TORCH_WARN_ONCE(
-      "torch.quantile(input, q, dim=None, keepdim=False, *, out=None) is deprecated "
-      "in favor of the new signature torch.quantile(input, q, dim=None, interpolation='linear', "
-      "keepdim=False, *, out=None) with the interpolation parameter.");
+    bool keepdim,
+    const std::string interpolation) {
   quantile_impl(
       out,
       self,
       q,
-      std::move(_dim),
-      /*interpolation=*/"linear",
+      _dim,
       keepdim,
+      get_quantile_interpolation_mode(interpolation),
       /*ignore_nan=*/false);
   return out;
 }
@@ -464,39 +474,33 @@ Tensor& quantile_out(
     const Tensor& self,
     double q,
     optional<int64_t> _dim,
-    bool keepdim) {
-  TORCH_WARN_ONCE(
-      "torch.quantile(input, q, dim=None, keepdim=False, *, out=None) is deprecated "
-      "in favor of the new signature torch.quantile(input, q, dim=None, interpolation='linear', "
-      "keepdim=False, *, out=None) with the interpolation parameter.");
+    bool keepdim,
+    const std::string interpolation) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::quantile_out(
       out,
       self,
       at::scalar_tensor(q, self.options()),
-      std::move(_dim),
-      /*interpolation=*/"linear",
-      keepdim);
+      _dim,
+      keepdim,
+      interpolation);
 }
 
 Tensor quantile(
     const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
-    bool keepdim) {
-  TORCH_WARN_ONCE(
-      "torch.quantile(input, q, dim=None, keepdim=False) is deprecated "
-      "in favor of the new signature torch.quantile(input, q, dim=None, interpolation='linear', "
-      "keepdim=False) with the interpolation parameter.");
+    bool keepdim,
+    const std::string interpolation) {
   Tensor out = at::empty({0}, self.options());
   quantile_impl(
       out,
       self,
       q,
-      std::move(_dim),
-      /*interpolation=*/"linear",
+      _dim,
       keepdim,
+      get_quantile_interpolation_mode(interpolation),
       /*ignore_nan=*/false);
   return out;
 }
@@ -505,19 +509,12 @@ Tensor quantile(
     const Tensor& self,
     double q,
     optional<int64_t> _dim,
-    bool keepdim) {
-  TORCH_WARN_ONCE(
-      "torch.quantile(input, q, dim=None, keepdim=False) is deprecated "
-      "in favor of the new signature torch.quantile(input, q, dim=None, interpolation='linear', "
-      "keepdim=False) with the interpolation parameter.");
+    bool keepdim,
+    const std::string interpolation) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::quantile(
-      self,
-      at::scalar_tensor(q, self.options()),
-      std::move(_dim),
-      /*interpolation=*/"linear",
-      keepdim);
+      self, at::scalar_tensor(q, self.options()), _dim, keepdim, interpolation);
 }
 
 Tensor& nanquantile_out(
@@ -525,18 +522,15 @@ Tensor& nanquantile_out(
     const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
-    bool keepdim) {
-  TORCH_WARN_ONCE(
-      "torch.nanquantile(input, q, dim=None, keepdim=False, *, out=None) is deprecated "
-      "in favor of the new signature torch.nanquantile(input, q, dim=None, interpolation='linear', "
-      "keepdim=False, *, out=None) with the interpolation parameter.");
+    bool keepdim,
+    const std::string interpolation) {
   quantile_impl(
       out,
       self,
       q,
-      std::move(_dim),
-      /*interpolation=*/"linear",
+      _dim,
       keepdim,
+      get_quantile_interpolation_mode(interpolation),
       /*ignore_nan=*/true);
   return out;
 }
@@ -546,39 +540,33 @@ Tensor& nanquantile_out(
     const Tensor& self,
     double q,
     optional<int64_t> _dim,
-    bool keepdim) {
-  TORCH_WARN_ONCE(
-      "torch.nanquantile(input, q, dim=None, keepdim=False, *, out=None) is deprecated "
-      "in favor of the new signature torch.nanquantile(input, q, dim=None, interpolation='linear', "
-      "keepdim=False, *, out=None) with the interpolation parameter.");
+    bool keepdim,
+    const std::string interpolation) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::nanquantile_out(
       out,
       self,
       at::scalar_tensor(q, self.options()),
-      std::move(_dim),
-      /*interpolation=*/"linear",
-      keepdim);
+      _dim,
+      keepdim,
+      interpolation);
 }
 
 Tensor nanquantile(
     const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
-    bool keepdim) {
-  TORCH_WARN_ONCE(
-      "torch.nanquantile(input, q, dim=None, keepdim=False) is deprecated "
-      "in favor of the new signature torch.nanquantile(input, q, dim=None, interpolation='linear', "
-      "keepdim=False) with the interpolation parameter.");
+    bool keepdim,
+    const std::string interpolation) {
   Tensor out = at::empty({0}, self.options());
   quantile_impl(
       out,
       self,
       q,
-      std::move(_dim),
-      /*interpolation=*/"linear",
+      _dim,
       keepdim,
+      get_quantile_interpolation_mode(interpolation),
       /*ignore_nan=*/true);
   return out;
 }
@@ -587,159 +575,12 @@ Tensor nanquantile(
     const Tensor& self,
     double q,
     optional<int64_t> _dim,
-    bool keepdim) {
-  TORCH_WARN_ONCE(
-      "torch.nanquantile(input, q, dim=None, keepdim=False) is deprecated "
-      "in favor of the new signature torch.nanquantile(input, q, dim=None, interpolation='linear', "
-      "keepdim=False) with the interpolation parameter.");
+    bool keepdim,
+    const std::string interpolation) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::nanquantile(
-      self,
-      at::scalar_tensor(q, self.options()),
-      std::move(_dim),
-      /*interpolation=*/"linear",
-      keepdim);
-}
-
-Tensor& quantile_out(
-    Tensor& out,
-    const Tensor& self,
-    const Tensor& q,
-    optional<int64_t> _dim,
-    const std::string interpolation,
-    bool keepdim) {
-  quantile_impl(
-      out,
-      self,
-      q,
-      std::move(_dim),
-      interpolation,
-      keepdim,
-      /*ignore_nan=*/false);
-  return out;
-}
-
-Tensor& quantile_out(
-    Tensor& out,
-    const Tensor& self,
-    double q,
-    optional<int64_t> _dim,
-    const std::string interpolation,
-    bool keepdim) {
-  TORCH_CHECK(
-      q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
-  return at::quantile_out(
-      out,
-      self,
-      at::scalar_tensor(q, self.options()),
-      std::move(_dim),
-      interpolation,
-      keepdim);
-}
-
-Tensor quantile(
-    const Tensor& self,
-    const Tensor& q,
-    optional<int64_t> _dim,
-    const std::string interpolation,
-    bool keepdim) {
-  Tensor out = at::empty({0}, self.options());
-  quantile_impl(
-      out,
-      self,
-      q,
-      std::move(_dim),
-      interpolation,
-      keepdim,
-      /*ignore_nan=*/false);
-  return out;
-}
-
-Tensor quantile(
-    const Tensor& self,
-    double q,
-    optional<int64_t> _dim,
-    const std::string interpolation,
-    bool keepdim) {
-  TORCH_CHECK(
-      q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
-  return at::quantile(
-      self,
-      at::scalar_tensor(q, self.options()),
-      std::move(_dim),
-      interpolation,
-      keepdim);
-}
-
-Tensor& nanquantile_out(
-    Tensor& out,
-    const Tensor& self,
-    const Tensor& q,
-    optional<int64_t> _dim,
-    const std::string interpolation,
-    bool keepdim) {
-  quantile_impl(
-      out,
-      self,
-      q,
-      std::move(_dim),
-      interpolation,
-      keepdim,
-      /*ignore_nan=*/true);
-  return out;
-}
-
-Tensor& nanquantile_out(
-    Tensor& out,
-    const Tensor& self,
-    double q,
-    optional<int64_t> _dim,
-    const std::string interpolation,
-    bool keepdim) {
-  TORCH_CHECK(
-      q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
-  return at::nanquantile_out(
-      out,
-      self,
-      at::scalar_tensor(q, self.options()),
-      std::move(_dim),
-      interpolation,
-      keepdim);
-}
-
-Tensor nanquantile(
-    const Tensor& self,
-    const Tensor& q,
-    optional<int64_t> _dim,
-    const std::string interpolation,
-    bool keepdim) {
-  Tensor out = at::empty({0}, self.options());
-  quantile_impl(
-      out,
-      self,
-      q,
-      std::move(_dim),
-      interpolation,
-      keepdim,
-      /*ignore_nan=*/true);
-  return out;
-}
-
-Tensor nanquantile(
-    const Tensor& self,
-    double q,
-    optional<int64_t> _dim,
-    const std::string interpolation,
-    bool keepdim) {
-  TORCH_CHECK(
-      q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
-  return at::nanquantile(
-      self,
-      at::scalar_tensor(q, self.options()),
-      std::move(_dim),
-      interpolation,
-      keepdim);
+      self, at::scalar_tensor(q, self.options()), _dim, keepdim, interpolation);
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(

@@ -530,7 +530,7 @@ Tensor linalg_solve(const Tensor& input, const Tensor& other) {
 
 /*
 Computes the inverse of n-by-n matrix 'self'
-This is an in-place routine, content of 'self' is overriden.
+This is an in-place routine, it overwrites the content of 'self'.
 'infos_lu' and 'infos_getri' are int Tensors containing error codes for each matrix in the batched input.
 'infos_lu' is for holding lapackLU errors, and 'infos_getri' is for holding lapackGetri errors.
 For more information see LAPACK's documentation for GETRI and GETRF routines.
@@ -613,7 +613,7 @@ Tensor& inverse_out(Tensor &result, const Tensor &self) {
 Tensor& _linalg_inv_out_helper_cpu(Tensor &result, Tensor& infos_lu, Tensor& infos_getri) {
   // This function calculates the inverse matrix in-place
   // result should be in column major order and contain matrices to invert
-  // the content of result is overriden by 'apply_inverse'
+  // the content of result is overwritten by 'apply_inverse'
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_inv_out_cpu", [&]{
     apply_inverse<scalar_t>(result, infos_lu, infos_getri);
   });
@@ -1020,7 +1020,9 @@ static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t m, int64_t n_co
 #endif
 }
 
-std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
+std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& self, std::string mode) {
+  bool compute_q, reduced;
+  std::tie(compute_q, reduced) = _parse_qr_mode(mode);
   std::vector<int64_t> infos(batchCount(self), 0);
   int64_t m = self.size(-2), n = self.size(-1);
 
@@ -1030,25 +1032,22 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   self_sizes[self.dim() - 2] = std::min(m, n);
   auto tau_working_copy = at::empty(self_sizes, self.options());
   Tensor q_working_copy;
+  Tensor R;
 
   // Setup input geometry for apply_orgqr
   std::vector<int64_t> q_sizes, q_strides;
   int64_t n_columns_q;
-  Tensor R;
-  std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, some);
+  std::tie(q_sizes, q_strides, n_columns_q) = _compute_geometry_for_Q(self, reduced);
 
   // If there are no elements, then we simply return a pair of tensors of required dimensions
   if (self.numel() == 0) {
-    // Fix the number of columns of q appropriately
-    q_sizes[self.dim() - 1] = n_columns_q;
-    q_working_copy = at::eye(q_sizes[self.dim() - 2], q_sizes[self.dim() - 1], self.options());
-    q_working_copy = q_working_copy.expand_as(q_working_copy);
-
-    // We repurpose the same q_sizes for R
-    // Fix the number of rows and columns of q_working_copy appropriately
-    q_sizes[self.dim() - 1] = n;
-    q_sizes[self.dim() - 2] = n_columns_q;
-    R = at::empty(q_sizes, self.options());
+    R = at::empty({n_columns_q, n}, self.options());
+    if (compute_q) {
+      int64_t n_rows_q = q_sizes[self.dim() - 2];
+      q_working_copy = at::eye(n_rows_q, n_columns_q, self.options());
+    } else {
+      q_working_copy = at::empty({0}, self.options());
+    }
     return std::make_tuple(q_working_copy, R);
   }
 
@@ -1068,6 +1067,11 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   }
 
   R = q_working_copy.slice(-2, 0, n_columns_q).slice(-1, 0, n).triu();
+  if (!compute_q) {
+    // this is for mode='r'
+    Tensor empty_Q = at::empty({0}, self.options());
+    return std::make_tuple(empty_Q, R);
+  }
 
   // Next perform ORGQR for Q using the results (both raw R and TAU) from GEQRF
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "qr_cpu", [&]{
@@ -1081,20 +1085,32 @@ std::tuple<Tensor, Tensor> _qr_helper_cpu(const Tensor& self, bool some) {
   return std::make_tuple(q_working_copy.narrow(-1, 0, n_columns_q), R);
 }
 
-std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
+std::tuple<Tensor,Tensor> linalg_qr(const Tensor& self, std::string mode) {
   TORCH_CHECK(self.dim() >= 2,
-              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  return at::_qr_helper(self, some);
+              "qr input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  return at::_linalg_qr_helper(self, mode);
+}
+
+std::tuple<Tensor&,Tensor&> linalg_qr_out(Tensor& Q, Tensor& R, const Tensor& self, std::string mode) {
+  TORCH_CHECK(self.dim() >= 2,
+              "qr input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  Tensor Q_tmp, R_tmp;
+  std::tie(Q_tmp, R_tmp) = at::_linalg_qr_helper(self, mode);
+  at::native::resize_output(Q, Q_tmp.sizes());
+  Q.copy_(Q_tmp);
+  at::native::resize_output(R, R_tmp.sizes());
+  R.copy_(R_tmp);
+  return std::tuple<Tensor&, Tensor&>(Q, R);
+}
+
+std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
+  std::string mode = some ? "reduced" : "complete";
+  return at::linalg_qr(self, mode);
 }
 
 std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, bool some) {
-  TORCH_CHECK(self.dim() >= 2,
-              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  Tensor Q_tmp, R_tmp;
-  std::tie(Q_tmp, R_tmp) = at::_qr_helper(self, some);
-  Q.resize_as_(Q_tmp).copy_(Q_tmp);
-  R.resize_as_(R_tmp).copy_(R_tmp);
-  return std::tuple<Tensor&, Tensor&>(Q, R);
+  std::string mode = some ? "reduced" : "complete";
+  return at::linalg_qr_out(Q, R, self, mode);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1471,7 +1487,7 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
 
     if (compute_uv) {
       if (some) {
-        VT_working_copy = VT_working_copy.narrow(-1, 0, k);
+        VT_working_copy = VT_working_copy.narrow(-2, 0, k);
       }
     } else {
       VT_working_copy.zero_();
@@ -1481,24 +1497,71 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
     U_working_copy.zero_();
     VT_working_copy.zero_();
   }
+  // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
+  VT_working_copy.transpose_(-2, -1);
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
 
 std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compute_uv) {
   TORCH_CHECK(self.dim() >= 2,
-              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+              "svd input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
   return at::_svd_helper(self, some, compute_uv);
 }
 
-std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& VT,
+std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& V,
                                               const Tensor& self, bool some, bool compute_uv) {
   TORCH_CHECK(self.dim() >= 2,
-              "self should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
-  Tensor U_tmp, S_tmp, VT_tmp;
-  std::tie(U_tmp, S_tmp, VT_tmp) = at::_svd_helper(self, some, compute_uv);
+              "svd input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  Tensor U_tmp, S_tmp, V_tmp;
+  std::tie(U_tmp, S_tmp, V_tmp) = at::_svd_helper(self, some, compute_uv);
   U.resize_as_(U_tmp).copy_(U_tmp);
   S.resize_as_(S_tmp).copy_(S_tmp);
-  VT.resize_as_(VT_tmp).copy_(VT_tmp);
+  V.resize_as_(V_tmp).copy_(V_tmp);
+  return std::tuple<Tensor&, Tensor&, Tensor&>(U, S, V);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/* torch.linalg.svd, implemented in terms of torch.svd. There are two main
+   differences:
+
+    1. the 2nd parameter is bool some=True, which if effectively the opposite
+       of full_matrices=True
+
+    2. svd returns V, while linalg.svd returns VT. To accommodate the
+       difference, we transpose() V upon return
+*/
+
+std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matrices, bool compute_uv) {
+  TORCH_CHECK(self.dim() >= 2,
+              "svd input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+
+    bool some = !full_matrices;
+    Tensor U, S, V;
+    std::tie(U, S, V) = at::_svd_helper(self, some, compute_uv);
+    if (compute_uv) {
+        Tensor VT = V.transpose(-2, -1);
+        return std::make_tuple(U, S, VT);
+    } else {
+        Tensor empty_U = at::empty({0}, self.options());
+        Tensor empty_VT = at::empty({0}, self.options());
+        return std::make_tuple(empty_U, S, empty_VT);
+    }
+}
+
+static void svd_resize_and_copy(const char *name, const Tensor& src, Tensor &dst) {
+  TORCH_CHECK(src.device() == dst.device(), "svd output tensor ", name, " is on the wrong device: expected ", src.device(), " got ", dst.device());
+  at::native::resize_output(dst, src.sizes());
+  dst.copy_(src);
+}
+
+std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(Tensor& U, Tensor& S, Tensor& VT,
+                                                     const Tensor& self, bool full_matrices, bool compute_uv) {
+  Tensor U_tmp, S_tmp, VT_tmp;
+  std::tie(U_tmp, S_tmp, VT_tmp) = at::linalg_svd(self, full_matrices, compute_uv);
+  svd_resize_and_copy("U", U_tmp, U);
+  svd_resize_and_copy("S", S_tmp, S);
+  svd_resize_and_copy("V", VT_tmp, VT);
   return std::tuple<Tensor&, Tensor&, Tensor&>(U, S, VT);
 }
 

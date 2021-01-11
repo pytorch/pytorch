@@ -462,6 +462,93 @@ Using the :attr:`dim` argument to compute matrix norms::
     (tensor(3.7417), tensor(11.2250))
 """)
 
+svd = _add_docstr(_linalg.linalg_svd, r"""
+linalg.svd(input, full_matrices=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
+
+Computes the singular value decomposition of either a matrix or batch of
+matrices :attr:`input`." The singular value decomposition is represented as a
+namedtuple ``(U, S, Vh)``, such that :math:`input = U \mathbin{@} diag(S) \times
+Vh`. If :attr:`input` is a batch of tensors, then ``U``, ``S``, and ``Vh`` are
+also batched with the same batch dimensions as :attr:`input`.
+
+If :attr:`full_matrices` is ``False`` (default), the method returns the reduced singular
+value decomposition i.e., if the last two dimensions of :attr:`input` are
+``m`` and ``n``, then the returned `U` and `V` matrices will contain only
+:math:`min(n, m)` orthonormal columns.
+
+If :attr:`compute_uv` is ``False``, the returned `U` and `Vh` will be empy
+tensors with no elements and the same device as :attr:`input`. The
+:attr:`full_matrices` argument has no effect when :attr:`compute_uv` is False.
+
+The dtypes of ``U`` and ``V`` are the same as :attr:`input`'s. ``S`` will
+always be real-valued, even if :attr:`input` is complex.
+
+.. note:: Unlike NumPy's ``linalg.svd``, this always returns a namedtuple of
+          three tensors, even when :attr:`compute_uv=False`.
+
+.. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
+          then the singular values of each matrix in the batch is returned in descending order.
+
+.. note:: The implementation of SVD on CPU uses the LAPACK routine `?gesdd` (a divide-and-conquer
+          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the MAGMA routine
+          `gesdd` as well.
+
+.. note:: The returned matrix `U` will be transposed, i.e. with strides
+          :code:`U.contiguous().transpose(-2, -1).stride()`.
+
+.. note:: Gradients computed using `U` and `Vh` may be unstable if
+          :attr:`input` is not full rank or has non-unique singular values.
+
+.. note:: When :attr:`full_matrices` = ``True``, the gradients on :code:`U[..., :, min(m, n):]`
+          and :code:`V[..., :, min(m, n):]` will be ignored in backward as those vectors
+          can be arbitrary bases of the subspaces.
+
+.. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is True.
+
+
+Args:
+    input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
+                    batch dimensions consisting of :math:`m \times n` matrices.
+    full_matrices (bool, optional): controls whether to compute the full or reduced decomposition, and
+                                    consequently the shape of returned ``U`` and ``V``. Defaults to True.
+    compute_uv (bool, optional): whether to compute `U` and `V` or not. Defaults to True.
+    out (tuple, optional): a tuple of three tensors to use for the outputs. If compute_uv=False,
+                           the 1st and 3rd arguments must be tensors, but they are ignored. E.g. you can
+                           pass `(torch.Tensor(), out_S, torch.Tensor())`
+
+Example::
+
+    >>> import torch
+    >>> a = torch.randn(5, 3)
+    >>> a
+    tensor([[-0.3357, -0.2987, -1.1096],
+            [ 1.4894,  1.0016, -0.4572],
+            [-1.9401,  0.7437,  2.0968],
+            [ 0.1515,  1.3812,  1.5491],
+            [-1.8489, -0.5907, -2.5673]])
+    >>>
+    >>> # reconstruction in the full_matrices=False case
+    >>> u, s, vh = torch.linalg.svd(a, full_matrices=False)
+    >>> u.shape, s.shape, vh.shape
+    (torch.Size([5, 3]), torch.Size([3]), torch.Size([3, 3]))
+    >>> torch.dist(a, u @ torch.diag(s) @ vh)
+    tensor(1.0486e-06)
+    >>>
+    >>> # reconstruction in the full_matrices=True case
+    >>> u, s, vh = torch.linalg.svd(a)
+    >>> u.shape, s.shape, vh.shape
+    (torch.Size([5, 5]), torch.Size([3]), torch.Size([3, 3]))
+    >>> torch.dist(a, u[:, :3] @ torch.diag(s) @ vh)
+    >>> torch.dist(a, u[:, :3] @ torch.diag(s) @ vh)
+    tensor(1.0486e-06)
+    >>>
+    >>> # extra dimensions
+    >>> a_big = torch.randn(7, 5, 3)
+    >>> u, s, vh = torch.linalg.svd(a_big, full_matrices=False)
+    >>> torch.dist(a_big, u @ torch.diag_embed(s) @ vh)
+    tensor(3.0957e-06)
+""")
+
 cond = _add_docstr(_linalg.linalg_cond, r"""
 linalg.cond(input, p=None, *, out=None) -> Tensor
 
@@ -677,5 +764,86 @@ Examples::
     >>> a.shape[b.ndim:]
     torch.Size([6, 4])
     >>> torch.allclose(torch.tensordot(a, x, dims=x.ndim), b, atol=1e-6)
+    True
+""")
+
+
+qr = _add_docstr(_linalg.linalg_qr, r"""
+qr(input, mode='reduced', *, out=None) -> (Tensor, Tensor)
+
+Computes the QR decomposition of a matrix or a batch of matrices :attr:`input`,
+and returns a namedtuple (Q, R) of tensors such that :math:`\text{input} = Q R`
+with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
+:math:`R` being an upper triangular matrix or batch of upper triangular matrices.
+
+Depending on the value of :attr:`mode` this function returns the reduced or
+complete QR factorization. See below for a list of valid modes.
+
+.. note::  **Differences with** ``numpy.linalg.qr``:
+
+           * ``mode='raw'`` is not implemented
+
+           * unlike ``numpy.linalg.qr``, this function always returns a
+             tuple of two tensors. When ``mode='r'``, the `Q` tensor is an
+             empty tensor.
+
+.. note::
+          Backpropagation is not supported for ``mode='r'``. Use ``mode='reduced'`` instead.
+
+          Backpropagation is also not supported if the first
+          :math:`\min(input.size(-1), input.size(-2))` columns of any matrix
+          in :attr:`input` are not linearly independent. While no error will
+          be thrown when this occurs the values of the "gradient" produced may
+          be anything. This behavior may change in the future.
+
+.. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
+          and may produce different (valid) decompositions on different device types
+          or different platforms.
+
+Args:
+    input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
+                batch dimensions consisting of matrices of dimension :math:`m \times n`.
+    mode (str, optional): if `k = min(m, n)` then:
+
+          * ``'reduced'`` : returns `(Q, R)` with dimensions (m, k), (k, n) (default)
+
+          * ``'complete'``: returns `(Q, R)` with dimensions (m, m), (m, n)
+
+          * ``'r'``: computes only `R`; returns `(Q, R)` where `Q` is empty and `R` has dimensions (k, n)
+
+Keyword args:
+    out (tuple, optional): tuple of `Q` and `R` tensors.
+                The dimensions of `Q` and `R` are detailed in the description of :attr:`mode` above.
+
+Example::
+
+    >>> a = torch.tensor([[12., -51, 4], [6, 167, -68], [-4, 24, -41]])
+    >>> q, r = torch.linalg.qr(a)
+    >>> q
+    tensor([[-0.8571,  0.3943,  0.3314],
+            [-0.4286, -0.9029, -0.0343],
+            [ 0.2857, -0.1714,  0.9429]])
+    >>> r
+    tensor([[ -14.0000,  -21.0000,   14.0000],
+            [   0.0000, -175.0000,   70.0000],
+            [   0.0000,    0.0000,  -35.0000]])
+    >>> torch.mm(q, r).round()
+    tensor([[  12.,  -51.,    4.],
+            [   6.,  167.,  -68.],
+            [  -4.,   24.,  -41.]])
+    >>> torch.mm(q.t(), q).round()
+    tensor([[ 1.,  0.,  0.],
+            [ 0.,  1., -0.],
+            [ 0., -0.,  1.]])
+    >>> q2, r2 = torch.linalg.qr(a, mode='r')
+    >>> q2
+    tensor([])
+    >>> torch.equal(r, r2)
+    True
+    >>> a = torch.randn(3, 4, 5)
+    >>> q, r = torch.linalg.qr(a, mode='complete')
+    >>> torch.allclose(torch.matmul(q, r), a)
+    True
+    >>> torch.allclose(torch.matmul(q.transpose(-2, -1), q), torch.eye(5))
     True
 """)
