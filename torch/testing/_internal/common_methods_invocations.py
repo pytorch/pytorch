@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import \
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
-     torch_to_numpy_dtype_dict, TEST_WITH_SLOW)
+     torch_to_numpy_dtype_dict, TEST_WITH_SLOW, TEST_WITH_ASAN)
 
 from distutils.version import LooseVersion
 
@@ -753,6 +753,32 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad):
 
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
+    UnaryUfuncInfo('abs',
+                   ref=np.abs,
+                   dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                        # Reference: https://github.com/pytorch/pytorch/issues/49224
+                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                 dtypes=[torch.int8], active_if=TEST_WITH_ASAN),
+                        SkipInfo('TestUnaryUfuncs', 'test_variant_consistency',
+                                 dtypes=[torch.cfloat, torch.cdouble]),
+                        # TODO: Fix test_out_arg_all_dtypes as torch.empty_like(expected_output) where expected_output=op(input)
+                        # We can break the logic of the loop over all possible types but it is OK.
+                        # https://github.com/pytorch/pytorch/blob/master/test/test_unary_ufuncs.py#L440-L449
+                        SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes',
+                                 dtypes=[torch.cfloat, torch.cdouble]),
+                        SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                                 dtypes=[torch.cfloat, torch.cdouble]),
+                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                 dtypes=[torch.cfloat, torch.cdouble, torch.bfloat16]),
+                    ),
+                    test_inplace_grad=False,
+                    assert_autodiffed=True,
+                    aliases=['absolute', ]),
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
     UnaryUfuncInfo('acos',
                    ref=np.arccos,
@@ -836,7 +862,8 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=IS_WINDOWS)
-                   )),
+                   ),
+                   aliases=['arcsin', ]),
     # NOTE: derivative for inplace asinh is not implemented
     UnaryUfuncInfo('asinh',
                    ref=np.arcsinh,
