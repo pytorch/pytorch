@@ -1,6 +1,15 @@
 import re
 import torch
-from ..quant_type import QuantType, quant_type_to_str
+from ..utils import is_per_tensor, is_per_channel
+
+from torch.fx import GraphModule, map_arg
+
+from torch.fx.graph import (
+    Graph,
+    Node,
+)
+
+from typing import Callable, Optional, List, Dict, Any, Set
 
 # turn foo.bar -> ['foo', 'bar']
 def _parent_name(target):
@@ -76,15 +85,6 @@ def graph_pretty_str(g, shorten=True) -> str:
         res_str += "*obs_{n} = activation_post_process_{n}\n"
     return res_str
 
-def is_per_tensor(qscheme):
-    return qscheme == torch.per_tensor_affine or \
-        qscheme == torch.per_tensor_symmetric
-
-def is_per_channel(qscheme):
-    return qscheme in [torch.per_channel_affine,
-                       torch.per_channel_affine_float_qparams,
-                       torch.per_channel_symmetric]
-
 def get_per_tensor_qparams(activation_post_process):
     assert is_per_tensor(activation_post_process.qscheme), 'Only per tensor quantization is supported'
     scale, zero_point = activation_post_process.calculate_qparams()
@@ -108,7 +108,7 @@ def get_quantize_op_and_qparams(activation_post_process):
         scale = float(scale)
         zero_point = int(zero_point)
         qparams = {'_scale_': scale, '_zero_point_': zero_point, '_dtype_': dtype}
-        quantize_op = torch.quantize_per_tensor
+        quantize_op = torch.quantize_per_tensor  # type: ignore
     return quantize_op, qparams
 
 def quantize_node(root_module, graph, node, activation_post_process):
@@ -140,7 +140,7 @@ def quantize_node(root_module, graph, node, activation_post_process):
         inputs.append(graph.create_node('get_attr', qparam_full_path))
     return graph.create_node('call_function', quantize_op, tuple(inputs), {})
 
-def get_custom_module_class_keys(custom_config_dict, custom_config_dict_key):
+def get_custom_module_class_keys(custom_config_dict, custom_config_dict_key) -> List[Any]:
     r""" Get all the unique custom module keys in the custom config dict
     e.g.
     Input:
@@ -163,80 +163,13 @@ def get_custom_module_class_keys(custom_config_dict, custom_config_dict_key):
     [CustomModule1, CustomModule2, CustomModule3]
     """
     # using set to dedup
-    float_custom_module_classes = set()
+    float_custom_module_classes : Set[Any] = set()
     custom_module_mapping = custom_config_dict.get(custom_config_dict_key, {})
     for quant_mode in ["static", "dynamic", "weight_only"]:
         quant_mode_custom_module_config = custom_module_mapping.get(quant_mode, {})
         quant_mode_custom_module_classes = set(quant_mode_custom_module_config.keys())
         float_custom_module_classes |= quant_mode_custom_module_classes
     return list(float_custom_module_classes)
-
-def get_swapped_custom_module_class(custom_module, custom_module_class_mapping, qconfig):
-    """ Get the observed/quantized custom module class that we need
-    to swap `custom_module` to
-    Input:
-        custom_module: input, can be an instance of either a float or observed custom module
-        custom_module_class_mapping: the float to observed or observed to quantized custom module class mapping
-        qconfig: qconfig configured for the custom module
-
-    Output:
-        corresponding observed/quantized custom module class for input custom module instance
-    """
-    quant_type = get_quant_type(qconfig)
-    quant_type_str = quant_type_to_str(quant_type)
-    class_mapping = custom_module_class_mapping.get(quant_type_str, {})
-    assert type(custom_module) in class_mapping, "did not found corresponding observed " \
-        "module class for {} in mapping: {}".format(type(custom_module), class_mapping)
-    return class_mapping[type(custom_module)]
-
-def activation_is_statically_quantized(qconfig):
-    """ Given a qconfig, decide if the activation needs to be
-    statically quantized or not
-    """
-    assert qconfig is not None
-    activation = qconfig.activation()
-    return activation.dtype in [torch.quint8, torch.qint8]
-
-def weight_dtype(qconfig):
-    assert qconfig is not None
-    weight = qconfig.weight()
-    return weight.dtype
-
-def weight_is_quantized(qconfig):
-    """ Given a qconfig, decide if the activation needs to be
-    quantized or not
-    """
-    return weight_dtype(qconfig) in [torch.quint8, torch.qint8]
-
-def get_qconfig_dtypes(qconfig):
-    r""" returns the qconfig tuple for qconfig:
-    (activation_dtype, weight_dtype, activation_compute_dtype)
-    """
-    assert qconfig is not None
-    activation = qconfig.activation()
-    weight = qconfig.weight()
-    compute_dtype = activation.compute_dtype if hasattr(activation, 'compute_dtype') else None
-    return (activation.dtype, weight.dtype, compute_dtype)
-
-def get_quant_type(qconfig):
-    assert qconfig is not None
-    activation = qconfig.activation()
-    weight = qconfig.weight()
-    static_dtypes = [torch.quint8, torch.qint8]
-    if weight.dtype in static_dtypes:
-        if activation.dtype in static_dtypes:
-            return QuantType.STATIC
-        elif hasattr(activation, 'compute_dtype') and activation.compute_dtype in static_dtypes:
-            return QuantType.DYNAMIC
-        else:
-            return QuantType.WEIGHT_ONLY
-
-    if weight.dtype == torch.float16:
-        if activation.dtype == torch.float:
-            return QuantType.WEIGHT_ONLY
-
-    raise Exception("Unrecognized dtype combination in get_quant_type: activation({}),"
-                    "weight({})".format(activation.dtype, weight.dtype))
 
 def get_linear_prepack_op_for_dtype(dtype):
     if dtype == torch.float16:
@@ -245,3 +178,85 @@ def get_linear_prepack_op_for_dtype(dtype):
         return torch.ops.quantized.linear_prepack
     else:
         raise Exception("can't get linear prepack op for dtype:", dtype)
+
+# Returns a function that can get a new attribute name for module with given
+# prefix, for example,
+# >> get_new_observer_name = get_new_attr_name_with_prefix('_observer')
+# >> new_name = get_new_observer_name(module)
+# new_name will be an unused attribute name on module, e.g. `_observer_1`
+def get_new_attr_name_with_prefix(prefix: str) -> Callable:
+    def get_new_attr_name(module: torch.nn.Module):
+        def get_attr_name(i: int):
+            return prefix + str(i)
+        i = 0
+        attr_name = get_attr_name(i)
+        while hasattr(module, attr_name):
+            i += 1
+            attr_name = get_attr_name(i)
+        return attr_name
+    return get_new_attr_name
+
+def collect_producer_nodes(node: Node) -> Optional[List[Node]]:
+    r''' Starting from a target node, trace back until we hit inpu or
+    getattr node. This is used to extract the chain of operators
+    starting from getattr to the target node, for example
+    def forward(self, x):
+      observed = self.observer(self.weight)
+      return F.linear(x, observed)
+    collect_producer_nodes(observed) will either return a list of nodes that
+    produces the observed node or None if we can't extract a self contained
+    graph without free variables(inputs of the forward function).
+    '''
+    nodes = [node]
+    frontier = [node]
+    while frontier:
+        node = frontier.pop()
+        all_args = list(node.args) + list(node.kwargs.values())
+        for arg in all_args:
+            if not isinstance(arg, Node):
+                continue
+            if arg.op == 'placeholder':
+                # hit input, can't fold in this case
+                return None
+            nodes.append(arg)
+            if not (arg.op == 'call_function' and arg.target == getattr):
+                frontier.append(arg)
+    return nodes
+
+def graph_module_from_producer_nodes(
+        root: GraphModule, producer_nodes: List[Node]) -> GraphModule:
+    r''' Construct a graph module from extracted producer nodes
+    from `collect_producer_nodes` function
+    Args:
+      root: the root module for the original graph
+      producer_nodes: a list of nodes we use to construct the graph
+    Return:
+      A graph module constructed from the producer nodes
+    '''
+    assert len(producer_nodes) > 0, 'list of producer nodes can not be empty'
+    # since we traced back from node to getattrr
+    producer_nodes.reverse()
+    graph = Graph()
+    env: Dict[Any, Any] = {}
+
+    def load_arg(a):
+        return map_arg(a, lambda node: env[node])
+    for producer_node in producer_nodes:
+        env[producer_node] = graph.node_copy(producer_node, load_arg)
+    graph.output(load_arg(producer_nodes[-1]))
+    graph_module = GraphModule(root, graph)
+    return graph_module
+
+def assert_and_get_unique_device(module: torch.nn.Module) -> Any:
+    """
+    Returns the unique device for a module, or None if no device is found.
+    Throws an error if multiple devices are detected.
+    """
+    devices = {p.device for p in module.parameters()} | \
+        {p.device for p in module.buffers()}
+    assert len(devices) <= 1, (
+        "prepare only works with cpu or single-device CUDA modules, "
+        "but got devices {}".format(devices)
+    )
+    device = next(iter(devices)) if len(devices) > 0 else None
+    return device

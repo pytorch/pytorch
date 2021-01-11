@@ -5,7 +5,8 @@ from .module import Module
 from .utils import _single, _pair, _triple
 from .. import functional as F
 
-from ..common_types import _size_any_t, _size_1_t, _size_2_t, _size_3_t, _ratio_3_t, _ratio_2_t
+from ..common_types import (_size_any_t, _size_1_t, _size_2_t, _size_3_t,
+                            _ratio_3_t, _ratio_2_t, _size_any_opt_t, _size_2_opt_t, _size_3_opt_t)
 
 
 class _MaxPoolNd(Module):
@@ -601,7 +602,7 @@ class AvgPool2d(_AvgPoolNd):
     count_include_pad: bool
 
     def __init__(self, kernel_size: _size_2_t, stride: Optional[_size_2_t] = None, padding: _size_2_t = 0,
-                 ceil_mode: bool = False, count_include_pad: bool = True, divisor_override: bool = None) -> None:
+                 ceil_mode: bool = False, count_include_pad: bool = True, divisor_override: Optional[int] = None) -> None:
         super(AvgPool2d, self).__init__()
         self.kernel_size = kernel_size
         self.stride = stride if (stride is not None) else kernel_size
@@ -686,7 +687,7 @@ class AvgPool3d(_AvgPoolNd):
     count_include_pad: bool
 
     def __init__(self, kernel_size: _size_3_t, stride: Optional[_size_3_t] = None, padding: _size_3_t = 0,
-                 ceil_mode: bool = False, count_include_pad: bool = True, divisor_override=None) -> None:
+                 ceil_mode: bool = False, count_include_pad: bool = True, divisor_override: Optional[int] = None) -> None:
         super(AvgPool3d, self).__init__()
         self.kernel_size = kernel_size
         self.stride = stride if (stride is not None) else kernel_size
@@ -953,7 +954,7 @@ class _AdaptiveMaxPoolNd(Module):
     __constants__ = ['output_size', 'return_indices']
     return_indices: bool
 
-    def __init__(self, output_size: _size_any_t, return_indices: bool = False) -> None:
+    def __init__(self, output_size: _size_any_opt_t, return_indices: bool = False) -> None:
         super(_AdaptiveMaxPoolNd, self).__init__()
         self.output_size = output_size
         self.return_indices = return_indices
@@ -1020,7 +1021,7 @@ class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
 
     """
 
-    output_size: _size_2_t
+    output_size: _size_2_opt_t
 
     def forward(self, input: Tensor) -> Tensor:
         return F.adaptive_max_pool2d(input, self.output_size, self.return_indices)
@@ -1057,7 +1058,7 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
 
     """
 
-    output_size: _size_3_t
+    output_size: _size_3_opt_t
 
     def forward(self, input: Tensor) -> Tensor:
         return F.adaptive_max_pool3d(input, self.output_size, self.return_indices)
@@ -1066,7 +1067,7 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
 class _AdaptiveAvgPoolNd(Module):
     __constants__ = ['output_size']
 
-    def __init__(self, output_size: _size_any_t) -> None:
+    def __init__(self, output_size: _size_any_opt_t) -> None:
         super(_AdaptiveAvgPoolNd, self).__init__()
         self.output_size = output_size
 
@@ -1125,7 +1126,7 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
 
     """
 
-    output_size: _size_2_t
+    output_size: _size_2_opt_t
 
     def forward(self, input: Tensor) -> Tensor:
         return F.adaptive_avg_pool2d(input, self.output_size)
@@ -1159,7 +1160,7 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
 
     """
 
-    output_size: _size_3_t
+    output_size: _size_3_opt_t
 
     def forward(self, input: Tensor) -> Tensor:
         return F.adaptive_avg_pool3d(input, self.output_size)

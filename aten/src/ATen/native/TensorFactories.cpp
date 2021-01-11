@@ -1046,57 +1046,23 @@ Tensor vander(const Tensor& x, c10::optional<int64_t> N, bool increasing) {
 
 template <typename T>
 Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
-  auto result = at::empty(values.size(), options);
-  AT_ASSERT(result.is_contiguous());
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(result.scalar_type(), "tensor_cpu", [&] {
-    std::copy(values.begin(), values.end(), result.template data_ptr<scalar_t>());
-  });
-  return result;
+  return at::detail::tensor_cpu(values, options);
 }
 
 template <typename T>
 Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
-  auto cpu_tensor = tensor_cpu(values, options.device(DeviceType::CPU));
-  return cpu_tensor.to(options.device());
+  return at::detail::tensor_backend(values, options);
 }
 
 template <typename T>
 Tensor tensor_complex_cpu(ArrayRef<T> values, const TensorOptions& options) {
-  auto result = at::empty(values.size(), options);
-  AT_ASSERT(result.is_contiguous());
-  AT_DISPATCH_COMPLEX_TYPES(result.scalar_type(), "tensor_cpu", [&] {
-    std::copy(values.begin(), values.end(), result.template data_ptr<scalar_t>());
-  });
-  return result;
+  return at::detail::tensor_complex_cpu(values, options);
 }
 
 template <typename T>
 Tensor tensor_complex_backend(ArrayRef<T> values, const TensorOptions& options) {
-  auto cpu_tensor = tensor_complex_cpu(values, options.device(DeviceType::CPU));
-  return cpu_tensor.to(options.device());
+  return at::detail::tensor_complex_backend(values, options);
 }
-
-#define TENSOR(T, _1)                                               \
-  Tensor tensor(ArrayRef<T> values, const TensorOptions& options) { \
-    if (options.device().type() != c10::DeviceType::CPU) {          \
-      return tensor_backend(values, options);                       \
-    } else {                                                        \
-      return tensor_cpu(values, options);                           \
-    }                                                               \
-  }
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
-#undef TENSOR
-
-#define TENSOR(T, _1)                                               \
-  Tensor tensor(ArrayRef<T> values, const TensorOptions& options) { \
-    if (options.device().type() != c10::DeviceType::CPU) {          \
-      return tensor_complex_backend(values, options);               \
-    } else {                                                        \
-      return tensor_complex_cpu(values, options);                   \
-    }                                                               \
-  }
-AT_FORALL_COMPLEX_TYPES(TENSOR)
-#undef TENSOR
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {
     TORCH_CHECK(!options.pinned_memory(), "tensors constructed from a file cannot be pinned");

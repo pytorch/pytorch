@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
+
 #include <ATen/core/alias_info.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
@@ -24,6 +25,7 @@ using c10::OptionalType;
 using c10::QSchemeType;
 using c10::QuantizerType;
 using c10::RRefType;
+using c10::StorageType;
 using c10::StreamObjType;
 using c10::StringType;
 using c10::Symbol;
@@ -41,7 +43,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"ScalarType", IntType::get()},
       {"Layout", IntType::get()},
       {"MemoryFormat", IntType::get()},
-      {"Storage", IntType::get()},
+      {"Storage", StorageType::get()},
       {"QScheme", QSchemeType::get()},
       {"Quantizer", QuantizerType::get()},
       {"ConstQuantizerPtr",
@@ -150,7 +152,6 @@ c10::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
 }
 
 c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
-  c10::optional<c10::Device> device;
   L.expect('=');
   const std::string& dev = L.expect(TK_IDENT).text();
 

@@ -137,7 +137,8 @@ cmake_dependent_option(
     "NOT BUILD_SHARED_LIBS" OFF)
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
 option(BUILD_STATIC_RUNTIME_BENCHMARK "Build C++ binaries for static runtime benchmarks (need gbenchmark)" OFF)
-option(BUILD_MOBILE_BENCHMARKS "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
+option(BUILD_TENSOREXPR_BENCHMARK "Build C++ binaries for tensorexpr benchmarks (need gbenchmark)" OFF)
+option(BUILD_MOBILE_BENCHMARK "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_MOBILE_TEST "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_JNI "Build JNI bindings" OFF)
 option(BUILD_MOBILE_AUTOGRAD "Build autograd function in mobile build (in development)" OFF)
@@ -158,6 +159,7 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
+option(USE_KINETO "Use Kineto profiling library" OFF)
 option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
@@ -171,6 +173,8 @@ option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(
     USE_NCCL "Use NCCL" ON
     "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
+cmake_dependent_option(USE_RCCL "Use RCCL" ON
+    USE_NCCL OFF)
 cmake_dependent_option(
     USE_STATIC_NCCL "Use static NCCL" OFF
     "USE_NCCL" OFF)
@@ -203,10 +207,10 @@ cmake_dependent_option(
     USE_VALGRIND "Use Valgrind. Only available on Linux." ON
     "LINUX" OFF)
 option(USE_VULKAN "Use Vulkan GPU backend" OFF)
-option(USE_VULKAN_API "Use Vulkan GPU backend v2" OFF)
-option(USE_VULKAN_WRAPPER "Use Vulkan wrapper" ON)
-option(USE_VULKAN_SHADERC_RUNTIME "Use Vulkan Shader compilation runtime(Needs shaderc lib)" OFF)
-option(USE_VULKAN_RELAXED_PRECISION "Use Vulkan relaxed precision(mediump)" OFF)
+option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference even on fp32 tensors" OFF)
+option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
+option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation (needs libshaderc)" OFF)
+option(USE_VULKAN_WRAPPER "Vulkan - Dynamically load Vulkan functions" ON)
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
@@ -242,17 +246,17 @@ if(WIN32)
     find_library(
       libuv_tmp_LIBRARY
       NAMES uv libuv
-      HINTS $ENV{CONDA_PREFIX}\\Library
+      HINTS $ENV{CONDA_PREFIX}\\Library $ENV{PREFIX}\\Library
       PATH_SUFFIXES lib
-      REQUIRED
       NO_DEFAULT_PATH)
-    if(NOT EXISTS ${libuv_tmp_LIBRARY})
+    if(NOT libuv_tmp_LIBRARY)
       set(USE_DISTRIBUTED OFF)
       set(USE_GLOO OFF)
       message(
-        WARNING "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF.")
+        WARNING "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF. "
+        "Please run command 'conda install -c conda-forge libuv=1.39' to install libuv.")
     else()
-      set(ENV{libuv_ROOT} $ENV{CONDA_PREFIX}\\Library)
+      set(ENV{libuv_ROOT} ${libuv_tmp_LIBRARY}/../../)
     endif()
   endif()
 endif()
@@ -314,7 +318,7 @@ set(OP_DEPENDENCY "" CACHE STRING
 # symbol lookup error: miniconda3/envs/pytorch-py3.7/lib/libmkl_intel_lp64.so: undefined symbol: mkl_blas_dsyrk
 # https://software.intel.com/en-us/articles/symbol-lookup-error-when-linking-intel-mkl-with-gcc-on-ubuntu
 if(LINUX)
-  set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-as-needed")
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-as-needed")
 endif()
 
 if(MSVC)
@@ -501,6 +505,20 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build from: Debug Release RelWithDebInfo MinSizeRel Coverage." FORCE)
 endif()
 
+# The below means we are cross compiling for arm64 or x86_64 on MacOSX
+if(NOT IOS AND CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
+  set(CROSS_COMPILING_MACOSX TRUE)
+  # We need to compile a universal protoc to not fail protobuf build
+  execute_process(COMMAND ./scripts/build_host_protoc.sh --other-flags "-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64"
+                  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+                  RESULT_VARIABLE BUILD_HOST_PROTOC_RESULT)
+  if(NOT BUILD_HOST_PROTOC_RESULT EQUAL "0")
+    message(FATAL_ERROR "Could not compile universal protoc.")
+  endif()
+  set(PROTOBUF_PROTOC_EXECUTABLE "${PROJECT_SOURCE_DIR}/build_host_protoc/bin/protoc")
+  set(CAFFE2_CUSTOM_PROTOC_EXECUTABLE "${PROJECT_SOURCE_DIR}/build_host_protoc/bin/protoc")
+endif()
+
 # ---[ Misc checks to cope with various compiler modes
 include(cmake/MiscCheck.cmake)
 
@@ -513,10 +531,29 @@ if(USE_FBGEMM AND ((CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SIZEOF_VO
   set(USE_FBGEMM OFF)
 endif()
 
+if(USE_KINETO AND INTERN_BUILD_MOBILE)
+  message(STATUS "Not using libkineto in a mobile build.")
+  set(USE_KINETO OFF)
+endif()
+
+if(USE_KINETO AND (NOT USE_CUDA))
+  message(STATUS "Not using libkineto in a non-CUDA build.")
+  set(USE_KINETO OFF)
+endif()
+
+if(USE_KINETO AND MSVC)
+  message(STATUS "Not using libkineto in a Windows build.")
+  set(USE_KINETO OFF)
+endif()
+
 include(cmake/Dependencies.cmake)
 
 if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
+endif()
+
+if(USE_KINETO)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
 endif()
 
 if(USE_QNNPACK)
@@ -533,22 +570,23 @@ endif()
 
 if(USE_VULKAN)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN")
-endif()
-
-if(USE_VULKAN_API)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_API")
-endif()
 
-if(USE_VULKAN_WRAPPER)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_WRAPPER")
-endif()
+  if(USE_VULKAN_FP16_INFERENCE)
+    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_FP16_INFERENCE")
+  endif()
 
-if(USE_VULKAN_SHADERC_RUNTIME)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
-endif()
+  if(USE_VULKAN_RELAXED_PRECISION)
+    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_RELAXED_PRECISION")
+  endif()
 
-if(USE_VULKAN_RELAXED_PRECISION)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_RELAXED_PRECISION")
+  if(USE_VULKAN_SHADERC_RUNTIME)
+    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
+  endif()
+
+  if(USE_VULKAN_WRAPPER)
+    string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_WRAPPER")
+  endif()
 endif()
 
 if(USE_PYTORCH_METAL)
@@ -662,8 +700,8 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
 int main() {
   float a[] = {1.0, 1.0};
   float32x4x2_t v;
-  v.val[0] = vcombine_f32 (vcreate_f32 (__AARCH64_UINT64_C (0)), vcreate_f32 (__AARCH64_UINT64_C (0)));
-  v.val[1] = vcombine_f32 (vcreate_f32 (__AARCH64_UINT64_C (0)), vcreate_f32 (__AARCH64_UINT64_C (0)));
+  v.val[0] = vcombine_f32 (vcreate_f32 (0UL), vcreate_f32 (0UL));
+  v.val[1] = vcombine_f32 (vcreate_f32 (0UL), vcreate_f32 (0UL));
   vst1q_f32_x2(a, v);
   return 0;
 }" HAS_VST1)

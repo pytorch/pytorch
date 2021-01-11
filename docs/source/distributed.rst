@@ -384,15 +384,23 @@ Collective functions
 
 .. autofunction:: broadcast 
 
+.. autofunction:: broadcast_object_list
+
 .. autofunction:: all_reduce
 
 .. autofunction:: reduce
 
 .. autofunction:: all_gather
 
+.. autofunction:: all_gather_object
+
 .. autofunction:: gather
 
+.. autofunction:: gather_object
+
 .. autofunction:: scatter
+
+.. autofunction:: scatter_object_list
 
 .. autofunction:: reduce_scatter
 

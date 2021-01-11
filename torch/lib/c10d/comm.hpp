@@ -20,14 +20,21 @@ void broadcast_coalesced(
 class GradBucket {
  public:
   explicit GradBucket(
+      size_t index,
       const std::vector<at::Tensor>& tensors,
       const std::vector<size_t>& offsets = {},
       const std::vector<size_t>& lengths = {},
       const std::vector<c10::IntArrayRef>& sizes_vec = {})
-      : tensors_(tensors),
+      : index_(index),
+        tensors_(tensors),
         offsets_(offsets),
         lengths_(lengths),
         sizes_vec_(sizes_vec) {}
+
+  // Returns the index of the bucket, which is unique across all the buckets.
+  size_t getIndex() const {
+    return index_;
+  }
 
   // Each tensor in the list that getTensors returns refers to the replica on
   // each device. There will be multiple replicas only in the case of single
@@ -37,6 +44,7 @@ class GradBucket {
     return tensors_;
   }
 
+  // Returns a mutable tensor vector compared with the above method.
   std::vector<at::Tensor>& getTensorsRef() {
     return tensors_;
   }
@@ -58,6 +66,7 @@ class GradBucket {
   }
 
  private:
+  size_t index_;
   std::vector<at::Tensor> tensors_;
 
   // Per-variable info in tensors_[0].

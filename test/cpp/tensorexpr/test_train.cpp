@@ -1,6 +1,8 @@
-#include "test/cpp/tensorexpr/test_train.h"
+#include <gtest/gtest.h>
+
 #include "test/cpp/tensorexpr/padded_buffer.h"
 #include "test/cpp/tensorexpr/test_base.h"
+#include "test/cpp/tensorexpr/test_train.h"
 #include "test/cpp/tensorexpr/test_utils.h"
 #include "torch/csrc/jit/tensorexpr/eval.h"
 #include "torch/csrc/jit/tensorexpr/ir.h"
@@ -46,7 +48,7 @@ struct T {
   }
 };
 
-void testTrainBasic() {
+TEST(Train, TrainBasic) {
   {
     VGraph graph;
     auto A = graph.create_tensor({"K"});
@@ -302,14 +304,15 @@ void testTrainBasic() {
 
     for (auto i = 0; i < 100; ++i) {
       std::generate(X_.begin(), X_.end(), gen);
-      cg.call({X_.data(),
-               W_ref_.data(),
-               W_.data(),
-               one_.data(),
-               K_.data(),
-               LR_.data(),
-               W_.data(),
-               N});
+      cg.call(
+          {X_.data(),
+           W_ref_.data(),
+           W_.data(),
+           one_.data(),
+           K_.data(),
+           LR_.data(),
+           W_.data(),
+           N});
     }
     // Less than 1% difference after running regression
     for (auto i = 0; i < W_.size(); ++i) {

@@ -21,10 +21,10 @@ class DistributedSampler(Sampler[T_co]):
     .. note::
         Dataset is assumed to be of constant size.
 
-    Arguments:
+    Args:
         dataset: Dataset used for sampling.
         num_replicas (int, optional): Number of processes participating in
-            distributed training. By default, :attr:`rank` is retrieved from the
+            distributed training. By default, :attr:`world_size` is retrieved from the
             current distributed group.
         rank (int, optional): Rank of the current process within :attr:`num_replicas`.
             By default, :attr:`rank` is retrieved from the current distributed
@@ -67,6 +67,10 @@ class DistributedSampler(Sampler[T_co]):
             if not dist.is_available():
                 raise RuntimeError("Requires distributed package to be available")
             rank = dist.get_rank()
+        if rank >= num_replicas or rank < 0:
+            raise ValueError(
+                "Invalid rank {}, rank should be in the interval"
+                " [0, {}]".format(rank, num_replicas - 1))
         self.dataset = dataset
         self.num_replicas = num_replicas
         self.rank = rank
@@ -125,7 +129,7 @@ class DistributedSampler(Sampler[T_co]):
         use a different random ordering for each epoch. Otherwise, the next iteration of this
         sampler will yield the same ordering.
 
-        Arguments:
+        Args:
             epoch (int): Epoch number.
         """
         self.epoch = epoch

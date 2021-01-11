@@ -55,6 +55,7 @@ DECLARE_DISPATCH(unary_fn, sign_stub);
 DECLARE_DISPATCH(unary_fn, signbit_stub);
 DECLARE_DISPATCH(unary_fn, sgn_stub);
 DECLARE_DISPATCH(unary_fn, sin_stub);
+DECLARE_DISPATCH(unary_fn, sinc_stub);
 DECLARE_DISPATCH(unary_fn, sinh_stub);
 DECLARE_DISPATCH(unary_fn, sqrt_stub);
 DECLARE_DISPATCH(unary_fn, tan_stub);
@@ -76,7 +77,9 @@ DECLARE_DISPATCH(void(*)(TensorIterator&, c10::optional<Generator>), random_full
 DECLARE_DISPATCH(void(*)(TensorIterator&, c10::optional<Generator>), random_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, const int64_t), polygamma_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar a, Scalar b), clamp_stub);
-DECLARE_DISPATCH(void(*)(Tensor&, const Tensor&, int64_t, bool, c10::optional<Generator>), multinomial_stub);
+DECLARE_DISPATCH(
+    void (*)(Tensor&, const Tensor&, int64_t, c10::optional<Generator>),
+    multinomial_with_replacement_stub);
 DECLARE_DISPATCH(
     void (*)(
         TensorIterator&,

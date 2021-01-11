@@ -49,6 +49,8 @@ void testGetSet(std::string path, std::string prefix = "") {
     c10d::test::check(store, "key0", "value0");
     c10d::test::check(store, "key1", "value1");
     c10d::test::check(store, "key2", "value2");
+    auto numKeys = fileStore->getNumKeys();
+    EXPECT_EQ(numKeys, 3);
   }
 
   // Perform get on new instance
@@ -56,6 +58,10 @@ void testGetSet(std::string path, std::string prefix = "") {
     auto fileStore = c10::make_intrusive<c10d::FileStore>(path, 2);
     c10d::PrefixStore store(prefix, fileStore);
     c10d::test::check(store, "key0", "value0");
+    auto numKeys = fileStore->getNumKeys();
+    // There will be 4 keys since we still use the same underlying file as the
+    // other store above.
+    EXPECT_EQ(numKeys, 4);
   }
 }
 

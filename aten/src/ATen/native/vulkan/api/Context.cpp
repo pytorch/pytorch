@@ -43,6 +43,40 @@ VkDevice create_device(
     &queue_priorities,
   };
 
+  uint32_t device_extension_properties_count = 0;
+  VK_CHECK(vkEnumerateDeviceExtensionProperties(
+      physical_device,
+      nullptr,
+      &device_extension_properties_count,
+      nullptr));
+
+  std::vector<VkExtensionProperties> device_extension_properties(
+      device_extension_properties_count);
+
+  VK_CHECK(vkEnumerateDeviceExtensionProperties(
+      physical_device,
+      nullptr,
+      &device_extension_properties_count,
+      device_extension_properties.data()));
+
+  constexpr const char* const requested_device_extensions[]{
+  #ifdef VK_KHR_portability_subset
+    // https://vulkan.lunarg.com/doc/view/1.2.162.0/mac/1.2-extensions/vkspec.html#VUID-VkDeviceCreateInfo-pProperties-04451
+    VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
+  #endif
+  };
+
+  std::vector<const char*> enabled_device_extensions;
+
+  for (const auto& requested_device_extension : requested_device_extensions) {
+    for (const auto& extension : device_extension_properties) {
+      if (strcmp(requested_device_extension, extension.extensionName) == 0) {
+        enabled_device_extensions.push_back(requested_device_extension);
+        break;
+      }
+    }
+  }
+
   const VkDeviceCreateInfo device_create_info{
     VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
     nullptr,
@@ -51,7 +85,8 @@ VkDevice create_device(
     &device_queue_create_info,
     0u,
     nullptr,
-    0u,
+    static_cast<uint32_t>(enabled_device_extensions.size()),
+    enabled_device_extensions.data(),
     nullptr,
   };
 
@@ -111,7 +146,7 @@ Context::~Context() {
 }
 
 void Context::flush() {
-  VK_CHECK(vkDeviceWaitIdle(device()));
+  VK_CHECK(vkQueueWaitIdle(queue()));
 
   resource().pool.purge();
   descriptor().pool.purge();

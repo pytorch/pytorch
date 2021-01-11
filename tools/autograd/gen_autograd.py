@@ -23,9 +23,6 @@ torch/csrc/autograd/generated/
 
 import argparse
 import os
-import yaml
-import re
-from .utils import YamlLoader, op_name_with_overload
 from tools.codegen.selective_build.selector import SelectiveBuilder
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
@@ -86,130 +83,59 @@ MULTI_OUTPUT_SAFE_FUNCTIONS = {
 RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
     'chunk', 'detach', 'contiguous', 'reshape', 'reshape_as',
     'expand_as', 'view_as', 'real', 'imag', 'narrow', 'movedim',
-    'tensor_split'
+    'tensor_split', 'swapdims', 'swapaxes'
 })
 
-def format_return_type(returns):
-    if len(returns) == 0:
-        return 'void'
-    elif len(returns) == 1:
-        return returns[0]['type']
-    else:
-        return_types = [r['type'] for r in returns]
-        return 'std::tuple<{}>'.format(','.join(return_types))
-
-
-def get_simple_type(arg):
-    simple_type = arg['type']
-    simple_type = simple_type.replace(' &', '').replace('const ', '')
-    simple_type = simple_type.replace('Generator *', 'Generator')
-
-    opt_match = re.match(r'c10::optional<(.+)>', simple_type)
-    if opt_match:
-        simple_type = '{}?'.format(opt_match.group(1))
-    return simple_type
-
-def has_tensoroptions_argument(declaration):
-    for argument in declaration['arguments']:
-        if 'TensorOptions' == argument['dynamic_type']:
-            return True
-    return False
-
-
-def load_aten_declarations(path):
-    with open(path, 'r') as f:
-        declarations = yaml.load(f, Loader=YamlLoader)
-
-    # enrich declarations with additional information
-    selected_declarations = []
-    for declaration in declarations:
-        if declaration.get('deprecated'):
-            continue
-
-        for arg in declaration['arguments']:
-            arg['simple_type'] = get_simple_type(arg)
-        for arg in declaration['schema_order_arguments']:
-            arg['simple_type'] = get_simple_type(arg)
-        for ret in declaration['returns']:
-            ret['simple_type'] = get_simple_type(ret)
-
-        declaration['formals'] = [arg['type'] + ' ' + arg['name']
-                                  for arg in declaration['arguments']]
-        declaration['schema_order_formals'] = [arg['type'] + ' ' + arg['name']
-                                               for arg in declaration['schema_order_arguments']]
-        declaration['args'] = [arg['name'] for arg in declaration['arguments']]
-        declaration['schema_order_args'] = [arg['name'] for arg in declaration['schema_order_arguments']]
-        declaration['api_name'] = declaration['name']
-        if declaration.get('overload_name'):
-            declaration['type_wrapper_name'] = "{}_{}".format(
-                declaration['name'], declaration['overload_name'])
-        else:
-            declaration['type_wrapper_name'] = declaration['name']
-        declaration['operator_name_with_overload'] = declaration['schema_string'].split('(')[0]
-        declaration['unqual_operator_name_with_overload'] = declaration['operator_name_with_overload'].split('::')[1]
-        declaration['return_type'] = format_return_type(declaration['returns'])
-
-        declaration['base_name'] = declaration['name']
-        selected_declarations.append(declaration)
-
-    return selected_declarations
-
-
-def gen_autograd(aten_path, native_functions_path, out, autograd_dir, operator_selector: SelectiveBuilder, disable_autograd=False):
-    full_aten_decls = load_aten_declarations(aten_path)
-
-    def filter_decls(aten_decls, operator_selector):
-        def is_operator_selected_for_training(decl):
-            op_name = op_name_with_overload(decl)
-            return operator_selector.is_operator_selected_for_training(op_name)
-
-        return [decl for decl in aten_decls if is_operator_selected_for_training(decl)]
-
-    aten_decls = filter_decls(full_aten_decls, operator_selector)
-
+def gen_autograd(
+    aten_path: str,
+    native_functions_path: str,
+    out: str,
+    autograd_dir: str,
+    operator_selector: SelectiveBuilder,
+    disable_autograd: bool = False,
+) -> None:
     # Parse and load derivatives.yaml
     from .load_derivatives import load_derivatives
-    autograd_functions = load_derivatives(
-        os.path.join(autograd_dir, 'derivatives.yaml'), full_aten_decls)
+    differentiability_infos = load_derivatives(
+        os.path.join(autograd_dir, 'derivatives.yaml'), native_functions_path)
 
     template_path = os.path.join(autograd_dir, 'templates')
 
     # Generate VariableType.h/cpp
+    from .gen_trace_type import gen_trace_type
+    from .gen_variable_type import gen_variable_type
     if not disable_autograd:
-        from .gen_variable_type import gen_variable_type
-        gen_variable_type(out, aten_decls, template_path)
+        gen_variable_type(out, native_functions_path, differentiability_infos, template_path, operator_selector)
 
-        from . import gen_trace_type
         # operator filter not applied as tracing sources are excluded in selective build
-        gen_trace_type.gen_trace_type(out, native_functions_path, template_path)
+        gen_trace_type(out, native_functions_path, template_path)
 
     # Generate Functions.h/cpp
     from .gen_autograd_functions import gen_autograd_functions_lib
     gen_autograd_functions_lib(
-        out, autograd_functions, template_path)
+        out, differentiability_infos, template_path)
 
     # Generate variable_factories.h
     from .gen_variable_factories import gen_variable_factories
-    # Some non-selectable ops (e.g. prim ops) need factory methods so we pass in `full_aten_decls` here.
     gen_variable_factories(out, native_functions_path, template_path)
 
 
-def gen_autograd_python(aten_path, native_functions_path, out, autograd_dir):
-    # TODO Deduplicate these four variable assignments
-
-    aten_decls = load_aten_declarations(aten_path)
-
-    # Parse and load derivatives.yaml
+def gen_autograd_python(
+    aten_path: str,
+    native_functions_path: str,
+    out: str,
+    autograd_dir: str,
+) -> None:
     from .load_derivatives import load_derivatives
-    autograd_functions = load_derivatives(
-        os.path.join(autograd_dir, 'derivatives.yaml'), aten_decls)
+    differentiability_infos = load_derivatives(
+        os.path.join(autograd_dir, 'derivatives.yaml'), native_functions_path)
 
     template_path = os.path.join(autograd_dir, 'templates')
 
     # Generate Functions.h/cpp
     from .gen_autograd_functions import gen_autograd_functions_python
     gen_autograd_functions_python(
-        out, autograd_functions, template_path)
+        out, differentiability_infos, template_path)
 
     # Generate Python bindings
     from . import gen_python_functions
@@ -218,7 +144,7 @@ def gen_autograd_python(aten_path, native_functions_path, out, autograd_dir):
         out, native_functions_path, deprecated_path, template_path)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description='Generate autograd C++ files script')
     parser.add_argument('declarations', metavar='DECL',

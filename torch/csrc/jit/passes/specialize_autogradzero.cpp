@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -358,7 +359,7 @@ struct AutogradZeroSpecializer {
 // AutogradAdds when possible. Outputs of other nodes are conservatively
 // marked Unknown and not optimized.
 void specializeAutogradZero(std::shared_ptr<Graph> g) {
-  AutogradZeroSpecializer azs(g);
+  AutogradZeroSpecializer azs(std::move(g));
   azs.run();
 }
 

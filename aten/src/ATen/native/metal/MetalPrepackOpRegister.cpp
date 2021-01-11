@@ -3,7 +3,7 @@
 #include <ATen/ATen.h>
 
 
-#if defined(C10_IOS)
+#if (C10_IOS || TARGET_OS_MAC)
 #import <ATen/native/metal/mpscnn/MPSCNNOps.h>
 #endif
 
@@ -94,19 +94,19 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
 Tensor conv2d_prepack_run(
     const Tensor& input,
     const c10::intrusive_ptr<Conv2dOpContext>& op_context) {
-#if defined(C10_IOS)
+#if (C10_IOS || TARGET_OS_MAC)
   return mpscnn::conv2d(input, *op_context);
 #else
-  TORCH_CHECK(false, "conv2d_prepack_run can only be invoked on iOS");
+  TORCH_CHECK(false, "conv2d_prepack_run can only be invoked on iOS and MacOS");
   return input;
 #endif
 }
 
 Tensor copy_to_host(const Tensor& input) {
-#if defined(C10_IOS)
+#if (C10_IOS || TARGET_OS_MAC)
   return mpscnn::copy_to_host(input);
 #else
-  TORCH_CHECK(false, "copy_to_host can only be invoked on iOS");
+  TORCH_CHECK(false, "copy_to_host can only be invoked on iOS and MacOS");
   return input;
 #endif
 }

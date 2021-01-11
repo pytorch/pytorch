@@ -1,7 +1,7 @@
 torch
 =====
 The torch package contains data structures for multi-dimensional
-tensors and mathematical operations over these are defined.
+tensors and defines mathematical operations over these tensors.
 Additionally, it provides many utilities for efficient serializing of
 Tensors and arbitrary types, and other useful utilities.
 
@@ -92,16 +92,22 @@ Indexing, Slicing, Joining, Mutating Ops
     index_select
     masked_select
     movedim
+    moveaxis
     narrow
     nonzero
     reshape
     row_stack
+    scatter
+    scatter_add
     split
     squeeze
     stack
+    swapaxes
+    swapdims
     t
     take
     tensor_split
+    tile
     transpose
     unbind
     unsqueeze
@@ -293,11 +299,13 @@ Pointwise Ops
     exp2
     expm1
     fix
+    float_power
     floor
     floor_divide
     fmod
     frac
     imag
+    ldexp
     lerp
     lgamma
     log
@@ -314,6 +322,7 @@ Pointwise Ops
     hypot
     i0
     igamma
+    igammac
     mul
     multiply
     mvlgamma
@@ -333,6 +342,7 @@ Pointwise Ops
     sign
     signbit
     sin
+    sinc
     sinh
     sqrt
     square
@@ -342,6 +352,7 @@ Pointwise Ops
     tanh
     true_divide
     trunc
+    xlogy
 
 Reduction Ops
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -353,6 +364,8 @@ Reduction Ops
     argmin
     amax
     amin
+    all
+    any
     max
     min
     dist
@@ -407,6 +420,7 @@ Comparison Ops
     not_equal
     sort
     topk
+    msort
 
 
 Spectral Ops
@@ -415,10 +429,6 @@ Spectral Ops
     :toctree: generated
     :nosignatures:
 
-    fft
-    ifft
-    rfft
-    irfft
     stft
     istft
     bartlett_window
@@ -441,6 +451,8 @@ Other Operations
     bincount
     block_diag
     broadcast_tensors
+    broadcast_to
+    broadcast_shapes
     bucketize
     cartesian_prod
     cdist
@@ -503,6 +515,7 @@ BLAS and LAPACK Operations
     eig
     geqrf
     ger
+    inner
     inverse
     det
     logdet

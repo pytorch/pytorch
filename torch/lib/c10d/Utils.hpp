@@ -1,8 +1,5 @@
 #pragma once
 
-#ifndef _WIN32
-#include <sys/socket.h>
-#endif
 #include <sys/types.h>
 
 #include <chrono>
@@ -18,6 +15,19 @@
 #include <ATen/ATen.h>
 
 #include <c10d/Types.hpp>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+typedef SSIZE_T ssize_t;
+#pragma comment(lib, "Ws2_32.lib")
+#else
+#include <sys/socket.h>
+#include <sys/poll.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <fcntl.h>
+#endif
 
 namespace c10d {
 
@@ -464,6 +474,25 @@ using SizeType = uint64_t;
 // `success_cond` is an expression used to check if an error has happend. So for
 // `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function output
 // is stored in variable `__output` and may be used in `success_cond`.
+#ifdef _WIN32
+#define SYSCHECK(expr, success_cond)                                               \
+  while (true) {                                                                   \
+    auto __output = (expr);                                                        \
+    auto errno_local = WSAGetLastError();                                          \
+    (void)__output;                                                                \
+    if (!(success_cond)) {                                                         \
+      if (errno == EINTR) {                                                        \
+        continue;                                                                  \
+      } else if (errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK ) {  \
+        throw std::runtime_error("Socket Timeout");                                \
+      } else {                                                                     \
+        throw std::system_error(errno_local, std::system_category());              \
+      }                                                                            \
+    } else {                                                                       \
+      break;                                                                       \
+    }                                                                              \
+  }
+#else
 #define SYSCHECK(expr, success_cond)                            \
   while (true) {                                                \
     auto __output = (expr);                                     \
@@ -480,9 +509,11 @@ using SizeType = uint64_t;
       break;                                                    \
     }                                                           \
   }
+#endif
 
 // Most functions indicate error by returning `-1`. This is a helper macro for
 // this common case with `SYSCHECK`.
+// Since SOCKET_ERROR = -1 in MSVC, so also leverage SYSCHECK_ERR_RETURN_NEG1
 #define SYSCHECK_ERR_RETURN_NEG1(expr) SYSCHECK(expr, __output != -1)
 
 // Helper resource guard class
@@ -506,10 +537,10 @@ class ResourceGuard {
   bool released_;
 };
 
-#ifndef _WIN32
 namespace tcputil {
 
 constexpr std::chrono::milliseconds kNoTimeout = std::chrono::milliseconds(-1);
+const std::string kConnectTimeoutMsg = "connect() timed out.";
 
 // Send and receive
 template <typename T>
@@ -537,7 +568,7 @@ void sendBytes(
   while (bytesToSend > 0) {
     ssize_t bytesSent;
     SYSCHECK_ERR_RETURN_NEG1(
-        bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
+        bytesSent = ::send(socket, (const char*)currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
       throw std::system_error(ECONNRESET, std::system_category());
     }
@@ -560,7 +591,7 @@ void recvBytes(int socket, T* buffer, size_t length) {
   while (bytesToReceive > 0) {
     ssize_t bytesReceived;
     SYSCHECK_ERR_RETURN_NEG1(
-        bytesReceived = ::recv(socket, currentBytes, bytesToReceive, 0))
+        bytesReceived = recv(socket, (char*)currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
       throw std::system_error(ECONNRESET, std::system_category());
     }
@@ -636,5 +667,4 @@ std::tuple<int, std::string> accept(
     const std::chrono::milliseconds& timeout = kNoTimeout);
 
 } // namespace tcputil
-#endif
 } // namespace c10d

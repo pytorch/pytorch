@@ -292,12 +292,12 @@ inline bool FunctionSchema::isSubtypeOf(
     bool as_method,
     std::ostream* why_not) const {
   size_t start = as_method ? 1 : 0;
-  // functions are covariant in arguments but contravariant in returns
+  // functions are contravariant in arguments but covariant in returns
   return isSubtypeOfList(
-             ArrayRef<Argument>(arguments()).slice(start),
              ArrayRef<Argument>(rhs.arguments()).slice(start),
+             ArrayRef<Argument>(arguments()).slice(start),
              why_not) &&
-      isSubtypeOfList(rhs.returns(), returns(), why_not);
+      isSubtypeOfList(returns(), rhs.returns(), why_not);
 }
 
 } // namespace c10

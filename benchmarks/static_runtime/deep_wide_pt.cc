@@ -112,3 +112,19 @@ torch::jit::Module getLeakyReLUConstScriptModel() {
   module.define(leaky_relu_model_const);
   return module;
 }
+
+const std::string long_model = R"JIT(
+  def forward(self, a, b, c):
+      d = torch.relu(a * b)
+      e = torch.relu(a * c)
+      f = torch.relu(e * d)
+      g = torch.relu(f * f)
+      h = torch.relu(g * c)
+      return h
+)JIT";
+
+torch::jit::Module getLongScriptModel() {
+  torch::jit::Module module("m");
+  module.define(long_model);
+  return module;
+}
