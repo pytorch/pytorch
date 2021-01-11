@@ -50,12 +50,9 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
 
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
 
-  // heuristic:
-  //   cublas_x_batched doesn't work very well for small batchsize
-  //   cublas_x_batched is intended to be used for matrices of small sizes where the launch overhead is a significant factor.
-  const bool use_cusolver_for_loop = (batch_size <= 8) || (/* batch_size > 8 && */ n >= 512);
-
-  if (use_cusolver_for_loop) {
+  // Heuristic: For small batch size or large matrix size, we use for-loop to iterate over the batches instead of 
+  //            calling the batched cublas routine.
+  if (batch_size <= 8 || /* batch_size > 8 && */ n >= 512) {
     for (int64_t i = 0; i < batch_size; i++) {
       auto dataPtr = allocator.allocate(sizeof(int) * lda);
       int* pivot = reinterpret_cast<int*>(dataPtr.get());
@@ -218,8 +215,8 @@ inline static void _apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, T
   auto U_stride = matrixStride(U);
   auto S_stride = S.size(-1);
   auto VT_stride = matrixStride(VT);
-  auto batchsize = batchCount(self);
 
+  int batchsize = cuda_int_cast(batchCount(self), "batch size");
   int m = cuda_int_cast(self.size(-2), "m");
   int n = cuda_int_cast(self.size(-1), "n");   
 
