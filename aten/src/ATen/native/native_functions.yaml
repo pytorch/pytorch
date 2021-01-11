@@ -2676,6 +2676,11 @@
     SparseCPU: sparse_matrix_mask_helper_cpu
     SparseCUDA: sparse_matrix_mask_helper_cuda
 
+- func: _sparse_mask_helper(Tensor t, Tensor mask_indices) -> Tensor
+  dispatch:
+    SparseCPU: sparse_mask_helper_cpu
+    SparseCUDA: sparse_mask_helper_cuda
+
 - func: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
   dispatch:

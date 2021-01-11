@@ -19,6 +19,7 @@
 #include <thrust/transform.h>
 #include <thrust/unique.h>
 #include <thrust/system/cuda/execution_policy.h>
+#include <thrust/binary_search.h>
 #include <c10/macros/Macros.h>
 
 namespace at { namespace native {
@@ -150,6 +151,64 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
 
   THCudaCheck(cudaGetLastError());
   return dst;
+}
+
+
+Tensor sparse_mask_helper_cuda(const SparseTensor& t, const Tensor& mask_indices) 
+{
+  /*
+    This is a helper function which filter values from `t._values()` using the `mask_indices`.
+    This CUDA implementation uses `thrust::lower_bound` operation to find the intersection 
+    of the `mask_indices` and the `t._indices()` to then filter the values.  
+
+    Inputs:
+      `t`             - tensor input 
+      `mask_indices`  - mask indices tensor
+  */
+  int64_t r_nnz = mask_indices.size(1); 
+  auto t_v = t._values().contiguous();
+  auto full_size = t.sizes();
+  auto vsize = t_v.sizes().vec();
+  vsize[0] = r_nnz;
+ 
+  Tensor r_values = at::zeros({vsize}, t_v.options());
+
+  auto t_i = t._indices().contiguous();
+  auto t_nnz = t._nnz();
+
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  auto policy = thrust::cuda::par(allocator).on(stream);
+
+  auto t_n_cols = t.size(1);
+
+  // Step 1: flatten the sparse indices `t._indices()` tensor into a 1D indices tensor `t_flatten_indices`.  
+  auto t_flatten_indices = at::sparse::flatten_indices(t_i, full_size);
+
+  // Step 2: flatten the sparse indices `mask_indices` tensor into a 1D indices tensor `mask_flatten_indices`.  
+  // Note: This could be not sorted if the input indices in the constructor are not coalesced form
+  auto flattened_mask_indices = at::sparse::flatten_indices(mask_indices, full_size);
+
+  Tensor lower_bound_values = at::empty({t_nnz}, mask_indices.options());
+
+  thrust::lower_bound(
+    policy, 
+    t_flatten_indices.data_ptr<int64_t>(),
+    t_flatten_indices.data_ptr<int64_t>() + t_nnz,
+    flattened_mask_indices.data_ptr<int64_t>(),
+    flattened_mask_indices.data_ptr<int64_t>() + t_nnz,
+    lower_bound_values.data_ptr<int64_t>()
+  );
+  Tensor lower_bound_values_host = lower_bound_values.cpu();
+  at::parallel_for(0, r_nnz, 0, [&](int64_t start, int64_t end) {
+    for (auto i = start; i < end; i++) {
+      auto j = lower_bound_values_host.data_ptr<int64_t>()[i];
+      if (j < t_nnz) {
+        r_values[i] = t_v[j];
+      }
+    }
+  });
+ return r_values;
 }
 
 }} // namespace at::native
