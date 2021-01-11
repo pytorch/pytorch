@@ -7001,7 +7001,7 @@ Keyword args:
 add_docstr(torch.randperm,
            """
 randperm(n, *, generator=None, out=None, dtype=torch.int64,layout=torch.strided, \
-device=None, requires_grad=False, pin_memory=False) -> LongTensor
+device=None, requires_grad=False, pin_memory=False) -> Tensor
 """ + r"""
 Returns a random permutation of integers from ``0`` to ``n - 1``.
 
