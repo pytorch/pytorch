@@ -465,6 +465,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
                               cudnn_enabled: -1),
         torch.int_repr: lambda input: -1,
         torch.inverse: lambda input, out=None: -1,
+        torch.linalg.inv: lambda input, out=None: -1,
         torch.is_complex: lambda input: -1,
         torch.is_distributed: lambda input: -1,
         torch.is_floating_point: lambda input: -1,
