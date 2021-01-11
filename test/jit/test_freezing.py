@@ -1363,6 +1363,13 @@ class TestFreezing(JitTestCase):
         FileCheck().check_not("GetAttr").run(script_model.graph)
 
 class TestFrozenOptimizations(JitTestCase):
+    def setUp(self):
+        self.default_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(torch.double)
+
+    def tearDown(self):
+        torch.set_default_dtype(self.default_dtype)
+
     def test_conv_bn_folding(self):
         conv_bias = [True, False]
         module_pairs = [(nn.Conv1d, nn.BatchNorm1d), (nn.Conv2d, nn.BatchNorm2d), (nn.Conv3d, nn.BatchNorm3d)]
@@ -1498,8 +1505,6 @@ class TestFrozenOptimizations(JitTestCase):
             # broadcasting add
             test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False, add_tensor=torch.rand(1, 1), expect_success=True)
 
-            # # add with different dtype
+            # add with different dtype
             test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False,
                              add_tensor=torch.rand(1).to(torch.int), expect_success=False)
-            test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False,
-                             add_tensor=torch.rand(1).to(torch.half), expect_success=False)
