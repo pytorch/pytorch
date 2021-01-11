@@ -1,13 +1,12 @@
 import os
 import sys
 import inspect
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Any
 from textwrap import dedent
 from collections import OrderedDict
 
 import torch
 from torch.testing import FileCheck
-from torch import Tensor
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
