@@ -7,9 +7,6 @@ GENERATED_CPP = [
     "autograd/generated/VariableType_2.cpp",
     "autograd/generated/VariableType_3.cpp",
     "autograd/generated/VariableType_4.cpp",
-    "jit/generated/generated_unboxing_wrappers_0.cpp",
-    "jit/generated/generated_unboxing_wrappers_1.cpp",
-    "jit/generated/generated_unboxing_wrappers_2.cpp",
     "autograd/generated/TraceType_0.cpp",
     "autograd/generated/TraceType_1.cpp",
     "autograd/generated/TraceType_2.cpp",
@@ -39,9 +36,6 @@ libtorch_nvfuser_generated_headers = ["{}.h".format(name[36:-3]) for name in lib
 def libtorch_generated_sources(gencode_pattern):
     return [gencode_pattern.format(name) for name in [
         "autograd/generated/Functions.cpp",
-        "jit/generated/generated_unboxing_wrappers_0.cpp",
-        "jit/generated/generated_unboxing_wrappers_1.cpp",
-        "jit/generated/generated_unboxing_wrappers_2.cpp",
         "autograd/generated/VariableType_0.cpp",
         "autograd/generated/VariableType_1.cpp",
         "autograd/generated/VariableType_2.cpp",
@@ -162,6 +156,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/ir/scope.cpp",
     "torch/csrc/jit/ir/subgraph_matcher.cpp",
     "torch/csrc/jit/jit_log.cpp",
+    "torch/csrc/jit/jit_opt_limit.cpp",
     "torch/csrc/jit/passes/annotate_warns.cpp",
     "torch/csrc/jit/passes/bailout_graph.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
