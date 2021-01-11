@@ -1654,8 +1654,7 @@ For more information see MAGMA's documentation for POTRI routine.
 template <typename scalar_t>
 static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
 #ifndef USE_MAGMA
-  AT_ERROR("cholesky_inverse: MAGMA library not found in "
-      "compilation. Please rebuild with MAGMA.");
+  TORCH_CHECK(false, "cholesky_inverse: MAGMA library not found in compilation. Please rebuild with MAGMA.");
 #else
   magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
 
@@ -1666,9 +1665,9 @@ static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
   if (input.dim() == 2) {
     TORCH_INTERNAL_ASSERT(infos.device() == at::kCPU);
     magmaCholeskyInverse<scalar_t>(uplo, n, input_data, lda, infos.data_ptr<magma_int_t>());
-  } else {
-    TORCH_CHECK(false, "Batched version is not implemented for CUDA.")
+    return;
   }
+  TORCH_CHECK(false, "apply_cholesky_inverse does not support batched inputs on CUDA.")
 #endif
 }
 

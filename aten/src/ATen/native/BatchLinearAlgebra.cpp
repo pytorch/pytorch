@@ -778,7 +778,7 @@ For more information see LAPACK's documentation for POTRI routine.
 template<typename scalar_t>
 static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
 #ifndef USE_LAPACK
-  AT_ERROR("cholesky_inverse: LAPACK library not found in compilation");
+  TORCH_CHECK(false, "cholesky_inverse: LAPACK library not found in compilation");
 #else
   char uplo = upper ? 'U' : 'L';
 
