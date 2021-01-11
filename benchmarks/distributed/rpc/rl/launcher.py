@@ -204,7 +204,7 @@ def main():
     report['benchmark_results'] = benchmark_runs
     if args.get('x_axis_name'):
         # x_axis_name was variable so dont save a constant in the report for that variable
-        del report[args['x_axis_name']]  
+        del report[args['x_axis_name']]
     with open(args['output_file_path'], 'w') as f:
         json.dump(report, f)
     print_benchmark_results(report)

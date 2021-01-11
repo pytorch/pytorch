@@ -19,7 +19,7 @@ class CoordinatorBase:
         r"""
         Coordinator object to run on worker.  Only one coordinator exists.  Responsible
         for facilitating communication between agent and observers and recording benchmark
-        throughput and latency data. 
+        throughput and latency data.
         Args:
             batch_size (int): Number of observer requests to process in a batch
             batch (bool): Whether to process and respond to observer requests as a batch or 1 at a time

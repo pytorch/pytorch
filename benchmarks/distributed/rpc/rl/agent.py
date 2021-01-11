@@ -18,7 +18,7 @@ class Policy(nn.Module):
         r"""
         Inits policy class
         Args:
-            in_features (int): Number of input features the model takes         
+            in_features (int): Number of input features the model takes
             nlayers (int): Number of layers in the model
             out_features (int): Number of features the model outputs
         """
