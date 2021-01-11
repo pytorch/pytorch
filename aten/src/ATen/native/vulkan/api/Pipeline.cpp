@@ -169,6 +169,10 @@ Pipeline::Cache::Cache(Factory factory)
   : cache_(std::move(factory)) {
 }
 
+void Pipeline::Cache::purge() {
+  cache_.purge();
+}
+
 } // namespace api
 } // namespace vulkan
 } // namespace native
