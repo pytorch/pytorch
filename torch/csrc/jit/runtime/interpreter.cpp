@@ -744,8 +744,9 @@ struct CodeImpl {
 
     // Emit the expected type.
     size_t types_start = type_table_.size();
+    auto types = node->tys(attr::types);
     for (size_t i = 0; i < num_inputs; i++) {
-      emitType(node->outputs()[i]->type());
+      emitType(types[i]);
     }
     insertInstruction(TYPECHECK, types_start, num_inputs);
   }
@@ -1495,7 +1496,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             ++frame.pc;
           } break;
           case LIST_CONSTRUCT: {
-            auto type = frame.function->type_table_[inst.X]->expect<ListType>();
+            const auto& type =
+                frame.function->type_table_[inst.X]->expectRef<ListType>();
             listConstruct(stack, type, inst.N);
             ++frame.pc;
           } break;
