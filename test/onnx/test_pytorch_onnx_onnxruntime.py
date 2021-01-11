@@ -1771,6 +1771,7 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={'x': {0: 'seq_length', 1: 'batch_size'}}, test_with_inputs=[y])
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedOpsetVersion([13])
     def test_copy_(self):
         class CopyModel(torch.nn.Module):
             def forward(self, x, data):
