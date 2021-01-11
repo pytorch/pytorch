@@ -1079,13 +1079,14 @@ torch::jit::Function* ClassType::findForwardHook(const std::string& name) const 
   return nullptr;
 }
 
-std::string ClassType::getPreHookErrorMessage(const std::string& pre_hook_name) const {
+std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
+  const std::string& pre_hook_name = forward_pre_hooks_[pre_hook_idx]->name();
   std::stringstream input_types;
   const std::vector<Argument>& forward_args = getMethod("forward").getSchema().arguments();
   for (int i = 1; i < forward_args.size(); ++i) {
     input_types << forward_args[i].type()->annotation_str();
     if (forward_args.size() - 1 != i) {
-      input_types << " ";
+      input_types << ", ";
     }
   }
   if (forward_args.size() == 1) {
@@ -1111,7 +1112,8 @@ std::string ClassType::getPreHookErrorMessage(const std::string& pre_hook_name) 
   return return_string;
 }
 
-std::string ClassType::getHookErrorMessage(const std::string& hook_name) const {
+std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
+  const std::string& hook_name = forward_hooks_[hook_idx]->name();
   const FunctionSchema& forwardSchema = getMethod("forward").getSchema();
   std::stringstream input_types;
   // create expected input type string
@@ -1119,7 +1121,7 @@ std::string ClassType::getHookErrorMessage(const std::string& hook_name) const {
   for (int i = 1; i < forward_args.size(); ++i) {
     input_types << forward_args[i].type()->annotation_str();
     if (forward_args.size() - 1 != i) {
-      input_types << " ";
+      input_types << ", ";
     }
   }
   if (forward_args.size() == 1) {
@@ -1128,9 +1130,9 @@ std::string ClassType::getHookErrorMessage(const std::string& hook_name) const {
 
   // create expected output types string
   const Argument& pre_output =
-      (forward_hooks_.size() == 1)
+      (hook_idx == 0)
           ? forwardSchema.returns()[0]
-          : forward_hooks_[forward_hooks_.size() - 2]->getSchema().returns()[0];
+          : forward_hooks_[hook_idx - 1]->getSchema().returns()[0];
   std::string output_types = pre_output.type()->annotation_str();
   // create error message
   std::string hook_schema = hook_name + "(self, input: Tuple[" +
@@ -1149,11 +1151,12 @@ std::string ClassType::getHookErrorMessage(const std::string& hook_name) const {
   return return_string;
 }
 
-void ClassType::checkPreHookSchema(torch::jit::Function& pre_hook) const {
-  const FunctionSchema& pre_hook_schema = pre_hook.getSchema();
+void ClassType::checkForwardPreHookSchema(int pre_hook_idx) const {
+  const torch::jit::Function* pre_hook = forward_pre_hooks_[pre_hook_idx];
+  const FunctionSchema& pre_hook_schema = pre_hook->getSchema();
   std::string hook_id =
-      "Pre-hook '" + pre_hook.name() + "' on module '" + name()->name() + "' ";
-  std::string pre_hook_err_msg = getPreHookErrorMessage(pre_hook.name()) + "\n";
+      "Pre-hook '" + pre_hook->name() + "' on module '" + name()->name() + "' ";
+  std::string pre_hook_err_msg = getForwardPreHookErrorMessage(pre_hook_idx) + "\n";
 
   // Pre-hooks are expecting two inputs: self, and a Tuple containing the
   // non-self arguments passed to Forward
@@ -1283,11 +1286,12 @@ void ClassType::checkPreHookSchema(torch::jit::Function& pre_hook) const {
   }
 }
 
-void ClassType::checkHookSchema(torch::jit::Function& hook) const {
-  const FunctionSchema& hook_schema = hook.getSchema();
+void ClassType::checkForwardHookSchema(int hook_idx) const {
+  const torch::jit::Function* hook = forward_hooks_[hook_idx];
+  const FunctionSchema& hook_schema = hook->getSchema();
   std::string hook_id =
-      "Hook '" + hook.name() + "' on module '" + name()->name() + "' ";
-  std::string hook_err_msg = getHookErrorMessage(hook.name()) + "\n";
+      "Hook '" + hook->name() + "' on module '" + name()->name() + "' ";
+  std::string hook_err_msg = getForwardHookErrorMessage(hook_idx) + "\n";
   // Hooks are expecting three inputs: self, a Tuple containing the non-self
   // arguments passed to Forward, and the output of either Forward or the
   // previous hook
