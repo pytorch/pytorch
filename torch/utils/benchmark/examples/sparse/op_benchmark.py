@@ -23,9 +23,9 @@ def assert_dicts_equal(dict_0, dict_1):
 
 def run(n, stmt, fuzzer_cls):
     float_iter = fuzzer_cls(seed=0, dtype=torch.float32).take(n)
-    int_iter = fuzzer_cls(seed=0, dtype=torch.float64).take(n)
+    double_iter = fuzzer_cls(seed=0, dtype=torch.float64).take(n)
     raw_results = []
-    for i, (float_values, int_values) in enumerate(zip(float_iter, int_iter)):
+    for i, (float_values, int_values) in enumerate(zip(float_iter, double_iter)):
         float_tensors, float_tensor_params, float_params = float_values
         int_tensors, int_tensor_params, int_params = int_values
 
