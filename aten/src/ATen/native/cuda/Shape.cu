@@ -521,7 +521,12 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
 
   // Compute the size of the result
   size[dimension] = cat_dim_size;
-  out.resize_(size, memory_format);
+
+  // skip resizing if size of result is same as expected
+  if (out.sizes() != size) {
+    out.resize_(size, memory_format);
+  }
+
   if (out.numel() == 0) {
     return out;
   }
