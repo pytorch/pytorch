@@ -294,7 +294,6 @@ class TensorPipeAgent : public RpcAgent {
       return data_ptrs;
     }
   };
-#else
 #endif
 
   // When a request+response completes, we need to mark the future message as
