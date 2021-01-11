@@ -334,7 +334,7 @@ void append_overloaded_arg(std::vector<py::handle>* overloaded_args, PyObject* o
 
 bool is_tensor_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args) {
   if (THPVariable_CheckExact(obj)) {
-    // torch.Tensor instances (not subclasses)
+    // torch.Tensor instances (not subclasses, except for Parameter)
     return true;
   }
 
@@ -862,7 +862,7 @@ bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, 
   }
 
   int i = 0;
-  if (self != nullptr && !THPVariable_CheckExact(self) && check_has_torch_function(self)) {
+  if (self != nullptr && check_has_torch_function(self)) {
     append_overloaded_arg(&this->overloaded_args, self);
   }
   for (auto& param : params) {
