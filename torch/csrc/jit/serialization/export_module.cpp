@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
+#include <torch/csrc/jit/mobile/common_const.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/method.h>
@@ -30,8 +31,30 @@ namespace torch {
 namespace jit {
 
 char const* toString(OpCode op);
-
 namespace {
+
+struct tensor_value_hash {
+  std::size_t operator()(const at::Tensor& tensor) const {
+    std::stringstream tensor_stream;
+    tensor_stream << tensor;
+    std::string tensor_str = tensor_stream.str();
+    std::size_t h1 = std::hash<std::string>{}(tensor_str);
+    return h1;
+  }
+};
+
+struct tensor_value_equal {
+  bool operator()(const at::Tensor& a, const at::Tensor& b) const {
+    std::stringstream a_stream;
+    a_stream << a;
+    std::string a_str = a_stream.str();
+
+    std::stringstream b_stream;
+    b_stream << b;
+    std::string b_str = b_stream.str();
+    return a_str == b_str;
+  }
+};
 
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
@@ -109,7 +132,10 @@ std::string getModuleTypeName(const Module& module, const std::string& prefix) {
 std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
     const Module& module,
     const Function& func,
-    bool save_mobile_debug_info) {
+    const std::
+        unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
+            constants_from_jit,
+    bool save_mobile_debug_info = false) {
   auto graph = func.graph()->copy();
 
   Inline(*graph);
@@ -143,9 +169,10 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
         auto method_name_idx =
             code.constant_table().size() + method_names.size();
         method_names.emplace_back(node->s(attr::name));
-        Instruction new_instr{INTERFACE_CALL,
-                              static_cast<int32_t>(method_name_idx),
-                              static_cast<uint16_t>(node->inputs().size())};
+        Instruction new_instr{
+            INTERFACE_CALL,
+            static_cast<int32_t>(method_name_idx),
+            static_cast<uint16_t>(node->inputs().size())};
         instructions_copy[i] = new_instr;
       } else {
         TORCH_INTERNAL_ASSERT(
@@ -211,8 +238,27 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   // Make a copy of the constants and append the method names
   // that we emitted for the converted INTERFACE_CALL nodes above.
   auto constants = code.constant_table();
+  std::vector<IValue> deduplicated_constants;
+  for (const auto& constant : constants) {
+    if (constant.isTensor()) {
+      const auto& constant_tensor = constant.toTensor();
+      if (constants_from_jit.find(constant_tensor) ==
+          constants_from_jit.end()) {
+        deduplicated_constants.emplace_back(constant);
+      } else {
+        auto index = IValue(constants_from_jit.at(constant_tensor));
+        auto key_with_index =
+            Tup(std::vector<IValue>{IValue(mobile::kTensorJitIndex), index});
+
+        deduplicated_constants.emplace_back(key_with_index);
+      }
+    } else {
+      deduplicated_constants.emplace_back(constant);
+    }
+  }
+
   for (auto& method_name : method_names) {
-    constants.emplace_back(std::move(method_name));
+    deduplicated_constants.emplace_back(std::move(method_name));
   }
 
   // types
@@ -226,11 +272,12 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   // register size
   auto register_size = static_cast<int>(code.register_size());
 
-  auto table = Table({{"instructions", Tup(instructions)},
-                      {"operators", Tup(operators)},
-                      {"constants", Tup(constants)},
-                      {"types", Tup(types)},
-                      {"register_size", register_size}});
+  auto table = Table(
+      {{"instructions", Tup(instructions)},
+       {"operators", Tup(operators)},
+       {"constants", Tup(deduplicated_constants)},
+       {"types", Tup(types)},
+       {"register_size", register_size}});
   auto bytecode_vals = Tup({func.qualname().qualifiedName(), table});
 
   c10::optional<IValue> debug_info_vals;
@@ -260,8 +307,10 @@ void setstateTuple(
   if (checkHasValidSetGetState(type)) {
     Function& setstate = type->getMethod("__setstate__");
     if (setstate.isGraphFunction()) {
+      std::unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>
+          empty_map;
       auto func_tuple =
-          getFunctionTuple(module, setstate, save_mobile_debug_info);
+          getFunctionTuple(module, setstate, empty_map, save_mobile_debug_info);
       elements.push_back(func_tuple.first);
       if (save_mobile_debug_info) {
         debug_info_elements->push_back(func_tuple.second.value());
@@ -284,12 +333,15 @@ void moduleMethodsTuple(
     const Module& module,
     std::vector<c10::IValue>& elements,
     c10::optional<std::vector<c10::IValue>>& debug_info_elements,
+    const std::
+        unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
+            constants_from_jit,
     bool save_mobile_debug_info) {
   auto methods = module.get_methods();
   // top level methods
   for (const auto& method : methods) {
-    auto func_tuple =
-        getFunctionTuple(module, method.function(), save_mobile_debug_info);
+    auto func_tuple = getFunctionTuple(
+        module, method.function(), constants_from_jit, save_mobile_debug_info);
     elements.push_back(func_tuple.first);
     if (save_mobile_debug_info) {
       debug_info_elements->push_back(func_tuple.second.value());
@@ -338,9 +390,21 @@ class ScriptModuleSerializer {
     // so loading the code does not depend on loading the data
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
+
+    std::unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>
+        constants_from_jit;
+
+    for (size_t i = 0; i < ivalue_constants.size(); i++) {
+      if (ivalue_constants[i].isTensor() &&
+          constants_from_jit.find(ivalue_constants[i].toTensor()) ==
+              constants_from_jit.end()) {
+        constants_from_jit[ivalue_constants[i].toTensor()] = i;
+      }
+    }
+
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format) {
-      writeByteCode(module, save_mobile_debug_info);
+      writeByteCode(module, save_mobile_debug_info, constants_from_jit);
       writeMobileMetadata(module, extra_files);
     }
 
@@ -468,7 +532,12 @@ class ScriptModuleSerializer {
     }
   }
 
-  void writeByteCode(const Module& module, bool save_mobile_debug_info) {
+  void writeByteCode(
+      const Module& module,
+      bool save_mobile_debug_info,
+      const std::
+          unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
+              constants_from_jit) {
     std::vector<c10::IValue> elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
@@ -478,10 +547,15 @@ class ScriptModuleSerializer {
       debug_info_elements->emplace_back(
           static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
     }
-
     moduleMethodsTuple(
-        module, elements, debug_info_elements, save_mobile_debug_info);
+        module,
+        elements,
+        debug_info_elements,
+        constants_from_jit,
+        save_mobile_debug_info);
+
     auto telements = Tup(std::move(elements));
+
     writeArchive("bytecode", telements);
     if (save_mobile_debug_info) {
       auto debug_info_telements = Tup(std::move(debug_info_elements.value()));
@@ -570,8 +644,15 @@ namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
   c10::optional<std::vector<c10::IValue>> debug_info_elements;
+  std::unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>
+      empty_map;
+
   moduleMethodsTuple(
-      m, elements, debug_info_elements, false /* save_mobile_debug_info */);
+      m,
+      elements,
+      debug_info_elements,
+      empty_map,
+      false /* save_mobile_debug_info */);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =

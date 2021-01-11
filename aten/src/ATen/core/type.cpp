@@ -68,6 +68,21 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
         }
       }
       out << ")";
+    } else {
+      if (type_verbosity() >= TypeVerbosity::Full) {
+        size_t i = 0;
+        if (value->requiresGrad()) {
+          out << "("
+              << "requires_grad=" << *value->requiresGrad();
+          i++;
+        }
+        if (value->device()) {
+          out << ((i++ > 0) ? ", " : "(") << "device=" << *value->device();
+        }
+        if (i > 0) {
+          out << ")";
+        }
+      }
     }
 
     if (value->undefined() && *value->undefined()) {
@@ -600,8 +615,10 @@ bool TensorType::matchTensor(const at::Tensor& t) {
   }
   // Here we know t.defined() == true and compare all other properties.
   bool rg = at::GradMode::is_enabled() && t.requires_grad();
-  bool matched_strides = (!t.has_storage() && !stride_properties().isComplete())
-    || stride_properties() == computeStrideProps(t.sizes(), t.strides(), t.is_contiguous());
+  bool matched_strides = (!stride_properties().size()) ||
+      (!t.has_storage() && !stride_properties().isComplete()) ||
+      stride_properties() ==
+          computeStrideProps(t.sizes(), t.strides(), t.is_contiguous());
   return scalarType().value_or(t.scalar_type()) == t.scalar_type()
     && device().value_or(t.device()) == t.device()
     && requiresGrad().value_or(rg) == rg
