@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 import torch
 
 import torch.nn as nn
@@ -124,7 +125,7 @@ class Linear(torch.nn.Module):
         torch.Size([128, 30])
     """
     _version = 3
-    _FLOAT_MODULE = nn.Linear
+    _FLOAT_MODULE = (nn.Linear, nn.modules.linear._LinearWithBias)
 
     def __init__(self, in_features, out_features, bias_=True,
                  dtype=torch.qint8):
@@ -252,8 +253,14 @@ class Linear(torch.nn.Module):
             weight_post_process = mod.weight_fake_quant
             activation_post_process = mod.activation_post_process
         else:
-            assert type(mod) == cls._FLOAT_MODULE, ' nnq.' + cls.__name__ + '.from_float only works for ' + \
-                cls._FLOAT_MODULE.__name__
+            # This function does not participate in JIT, so it is OK to ignore
+            # the type mismatch in assignment. Also, mypy has an issue with
+            # iterables not being implemented, so we are ignoring those too.
+            if not isinstance(cls._FLOAT_MODULE, Iterable):
+                cls._FLOAT_MODULE = [cls._FLOAT_MODULE]  # type: ignore
+            supported_modules = ', '.join([float_mod.__name__ for float_mod in cls._FLOAT_MODULE])  # type: ignore
+            error_msg = 'nnq.{}.from_float only works for {}'.format(cls.__name__, supported_modules)
+            assert type(mod) in cls._FLOAT_MODULE, error_msg.format()  # type: ignore
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             activation_post_process = mod.activation_post_process
             if type(mod) == nni.LinearReLU:
