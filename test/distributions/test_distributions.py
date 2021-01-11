@@ -28,7 +28,6 @@ import unittest
 from collections import namedtuple
 from itertools import product
 from random import shuffle
-import warnings
 
 import torch
 
