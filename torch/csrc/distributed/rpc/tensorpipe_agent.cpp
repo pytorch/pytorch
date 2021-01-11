@@ -455,7 +455,6 @@ void TensorPipeAgent::pipeRead(
   pipe->readDescriptor([fn{std::move(fn)}, pipe, this](
                            const tensorpipe::Error& error,
                            tensorpipe::Message tpMessage) mutable {
-    // TODO: pass these streams to TensorPipe when it can accept streams
     auto ctx = createFullDeviceContext(
         reverseDeviceMaps_.empty() && opts_.deviceMaps.empty());
 
@@ -705,7 +704,8 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
   ClientPipe& clientPipe = it->second;
   auto& pendingResponseMessage = clientPipe.pendingResponseMessage_;
 
-  auto futureResponseMessage = std::make_shared<AtomicJitFuture>();
+  auto futureResponseMessage = std::make_shared<AtomicJitFuture>(
+      reverseDeviceMaps_.empty() && opts_.deviceMaps.empty());
   uint64_t messageId = nextMessageID_++;
   requestMessage.setId(messageId);
   pendingResponseMessage[messageId] = futureResponseMessage;

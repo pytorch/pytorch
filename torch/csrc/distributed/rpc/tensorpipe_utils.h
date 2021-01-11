@@ -25,6 +25,8 @@ using at::cuda::CUDAStream;
 #endif
 
 
+// A general device context class for both CPU and CUDA. If CUDA is not
+// available, all CUDA-related methods will be no-ops.
 struct FullDeviceContext {
 
   FullDeviceContext(const FullDeviceContext& other) = delete;
@@ -52,12 +54,14 @@ struct FullDeviceContext {
 
 #ifndef USE_CUDA_NOT_ROCM
 
+// CUDA is not available, use CPU device context.
 inline std::shared_ptr<FullDeviceContext> createFullDeviceContext(bool noCuda) {
   return std::make_shared<FullDeviceContext>(noCuda);
 }
 
 #else
 
+// CUDA is available. Implement CUDA-related operations.
 struct CudaFullDeviceContext : public FullDeviceContext {
 
   // Use the noCuda arg to disable streams management when deviceMaps are not
@@ -73,9 +77,16 @@ struct CudaFullDeviceContext : public FullDeviceContext {
     }
   }
 
+  // call c10::cuda::CUDACachingAllocator::recordStream with given DataPtrs
   void recordDataPtrs(const std::vector<c10::DataPtr>& dataPtrs) const override;
+
+  // call c10::cuda::CUDACachingAllocator::recordStream with given Tensors
   void recordTensors(const std::vector<torch::Tensor>& tensors) const override;
+
+  // let current streams wait for streams in this context.
   void blockCurrentStreams() const override;
+
+  // let streams in this context wiat for current streams.
   void waitForCurrentStreams() const override;
   void synchronize() const override;
   const std::vector<CUDAStream>& streams() const override;

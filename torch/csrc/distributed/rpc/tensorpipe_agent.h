@@ -12,6 +12,10 @@
 #include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
+#ifdef USE_CUDA_NOT_ROCM
+#include <ATen/cuda/CUDAFuture.h>
+#endif
+
 // Forward-declare the TensorPipe classes we need, to avoid including its
 // headers in PyTorch's ones and thus have it become a public dependency.
 
@@ -270,6 +274,29 @@ class TensorPipeAgent : public RpcAgent {
       const std::string& remoteName,
       const Message& message) const;
 
+#ifdef USE_CUDA_NOT_ROCM
+  // An RPC-specific CUDAFuture subclass. It overrides the extractDataPtrs
+  // function to handle and only handle RPC Messages.
+  struct TORCH_CUDA_API RpcCUDAFuture final : at::cuda::CUDAFuture {
+   public:
+    using at::cuda::CUDAFuture::CUDAFuture;
+
+   protected:
+    std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
+        const at::IValue& value) override {
+      const auto message = value.toCustomClass<Message>();
+      TORCH_INTERNAL_ASSERT(
+          message, "Passed a non-Message type to RpcCUDAFuture"):
+      std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
+      for (const auto& tensor : message->tensors()) {
+        data_ptrs.emplace_back(tensor.storage().data_ptr());
+      }
+      return data_ptrs;
+    }
+  };
+#else
+#endif
+
   // When a request+response completes, we need to mark the future message as
   // complete. However, if its timeout has already expired, it already has an
   // error set. There is no atomic "test-and-set" way to mark a future complete
@@ -277,9 +304,21 @@ class TensorPipeAgent : public RpcAgent {
   // then, it ends up printing a log message, which may worry the user. To solve
   // both issues we use a separate atomic flag to know the status of the future.
   struct AtomicJitFuture {
-    std::shared_ptr<JitFuture> jitFuture =
-        std::make_shared<JitFuture>(at::AnyClassType::get());
-    std::atomic_flag isComplete = ATOMIC_FLAG_INIT;
+    AtomicJitFuture(bool noCuda = true) : isComplete(ATOMIC_FLAG_INIT) {
+#ifdef USE_CUDA_NOT_ROCM
+      if (!noCuda) {
+        jitFuture =
+            std::make_shared<RpcCUDAFuture>(at::AnyClassType::get());
+      } else {
+#else
+      {
+#endif
+        jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
+      }
+    }
+
+    std::atomic_flag isComplete;
+    std::shared_ptr<JitFuture> jitFuture;
   };
 
   // Maintains state per client pipe to track pending response messages and
