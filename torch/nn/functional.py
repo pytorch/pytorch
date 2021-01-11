@@ -2347,11 +2347,12 @@ def gaussian_nll_loss(input, target, var, *, full=False, eps=1e-6, reduction='me
     if input.size() != target.size():
         raise ValueError("input and target must have same size")
 
-    # Second dim must be 1 ie shape (N, 1) if var and input do not have same shape
-    var = var.view(var.size(0), -1)
-    if var.size() != input.size() and var.size(1) != 1:
+    # Second dim of var must match that of input or be equal to 1
+    var = var.view(input.size(0), -1)
+    if var.size(1) != input.size(1) and var.size(1) != 1:
         raise ValueError("var is of incorrect size")
 
+    # Check validity of reduction mode
     if reduction != 'none' and reduction != 'mean' and reduction != 'sum':
         raise ValueError(reduction + " is not valid")
 
