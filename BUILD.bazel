@@ -193,9 +193,6 @@ libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/Functions.h",
         "torch/csrc/autograd/generated/Functions.cpp",
         "torch/csrc/autograd/generated/variable_factories.h",
-        "torch/csrc/jit/generated/generated_unboxing_wrappers_0.cpp",
-        "torch/csrc/jit/generated/generated_unboxing_wrappers_1.cpp",
-        "torch/csrc/jit/generated/generated_unboxing_wrappers_2.cpp",
 ]
 
 libtorch_python_generated_sources = [

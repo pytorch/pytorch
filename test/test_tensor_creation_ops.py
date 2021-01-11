@@ -621,6 +621,32 @@ class TestTensorCreation(TestCase):
         self.assertEqual(a, b)
         self.assertEqual(w[:6], y.view(-1)[:6])
 
+        # Case: 
+        # Reference: https://github.com/pytorch/pytorch/issues/49878
+        for dim in [0, 1]:
+            x = torch.zeros((10, 5, 2), device=device)
+
+            random_length = random.randint(1, 4)
+            y = x.narrow(dim, 0, x.shape[dim] - random_length)
+            val = torch.full_like(y[0], 3., device=device)
+
+            if dim == 0:
+                self.assertTrue(y.is_contiguous())
+            else:
+                self.assertFalse(y.is_contiguous())
+
+            torch.cat((val[None],) * y.shape[0], dim=0, out=y)
+
+            expected_y = torch.cat((val[None],) * y.shape[0], dim=0)
+            expected_x = torch.zeros((10, 5, 2), device=device)
+            if dim == 0:
+                expected_x[:x.shape[dim] - random_length, :, :] = expected_y
+            elif dim == 1:
+                expected_x[:, :x.shape[dim] - random_length, :] = expected_y
+
+            self.assertEqual(y, expected_y)
+            self.assertEqual(x, expected_x)
+
     def test_cat_out_channels_last(self, device):
         x = torch.randn((4, 3, 8, 8))
         y = torch.randn(x.shape)

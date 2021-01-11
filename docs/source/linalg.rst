@@ -20,7 +20,9 @@ Functions
 .. autofunction:: matrix_rank
 .. autofunction:: norm
 .. autofunction:: pinv
+.. autofunction:: svd
 .. autofunction:: solve
 .. autofunction:: tensorinv
 .. autofunction:: tensorsolve
+.. autofunction:: inv
 .. autofunction:: qr
