@@ -481,10 +481,10 @@ void TensorPipeAgent::pipeRead(
           // FIXME This does some unpickling, which could be a bit expensive:
           // perhaps it would be best to perform it inside the worker threads?
           ctx->blockCurrentStreams();
+          ctx->recordDataPtrs(tpBuffers->tensors);
           Message rpcMessage = tensorpipeDeserialize(
               std::move(tpMessage), std::move(*tpBuffers));
 
-          ctx->recordDataPtrs(tpBuffers->tensors);
           fn(error, std::move(rpcMessage), std::move(ctx));
         });
   });
