@@ -56,13 +56,7 @@ struct C10_API LocalDispatchKeySet {
 #ifdef _MSC_VER
 C10_API LocalDispatchKeySet tls_local_dispatch_key_set();
 #else // _MSC_VER
-/// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
-/// thread_local is not supported.
-#ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
   extern C10_API thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set;
-#else // defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
-  extern C10_API PODLocalDispatchKeySet raw_local_dispatch_key_set;
-#endif
 
 inline C10_API LocalDispatchKeySet tls_local_dispatch_key_set() {
   // Don't let people fiddle with the thread_local directly just
