@@ -862,7 +862,7 @@ bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, 
   }
 
   int i = 0;
-  if (self != nullptr && !THPVariable_CheckExact(self) && check_has_torch_function(self)) {
+  if (self != nullptr && check_has_torch_function(self)) {
     append_overloaded_arg(&this->overloaded_args, self);
   }
   for (auto& param : params) {
