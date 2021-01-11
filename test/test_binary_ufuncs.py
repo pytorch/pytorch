@@ -2424,7 +2424,7 @@ class TestBinaryUfuncs(TestCase):
 
             # Case of Tensor x Tensor
             if op is torch.Tensor.float_power_ and base_dtype != out_dtype:
-                with self.assertRaisesRegex(RuntimeError, "is not the desired type"):
+                with self.assertRaisesRegex(RuntimeError, "operation's result requires dtype"):
                     op(base.clone(), exp)
             else:
                 result = op(base.clone(), exp)
@@ -2441,7 +2441,7 @@ class TestBinaryUfuncs(TestCase):
                 expected_scalar_exp = torch.from_numpy(np.float_power(to_np(base), i))
 
                 if op is torch.Tensor.float_power_ and base_dtype != out_dtype_scalar_exp:
-                    with self.assertRaisesRegex(RuntimeError, "is not the desired type"):
+                    with self.assertRaisesRegex(RuntimeError, "operation's result requires dtype"):
                         op(base.clone(), i)
                 else:
                     result = op(base.clone(), i)
@@ -2483,13 +2483,13 @@ class TestBinaryUfuncs(TestCase):
                 if out.dtype == required_dtype:
                     torch.float_power(base, exp, out=out)
                 else:
-                    with self.assertRaisesRegex(RuntimeError, "is not the desired output type"):
+                    with self.assertRaisesRegex(RuntimeError, "operation's result requires dtype"):
                         torch.float_power(base, exp, out=out)
 
                 if base.dtype == required_dtype:
                     torch.Tensor.float_power_(base.clone(), exp)
                 else:
-                    with self.assertRaisesRegex(RuntimeError, "is not the desired type"):
+                    with self.assertRaisesRegex(RuntimeError, "operation's result requires dtype"):
                         torch.Tensor.float_power_(base.clone(), exp)
 
     @skipIf(not TEST_SCIPY, "Scipy required for the test.")

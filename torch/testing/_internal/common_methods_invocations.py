@@ -315,6 +315,31 @@ def sample_inputs_xlogy(self, device, dtype, requires_grad):
                                      low=0, high=None,
                                      requires_grad=requires_grad))),)
 
+def sample_inputs_linalg_inv(op_info, device, dtype, requires_grad=False):
+    """
+    This function generates always invertible input for torch.linalg.inv using
+    random_fullrank_matrix_distinct_singular_value.
+    The input is generated as the itertools.product of 'batches' and 'ns'.
+    In total this function generates 8 SampleInputs
+    'batches' cases include:
+        () - single input,
+        (0,) - zero batched dimension,
+        (2,) - batch of two matrices,
+        (2, 3) - 2x3 batch of matrices
+    'ns' gives 0x0 and 5x5 matrices.
+    Zeros in dimensions are edge cases in the implementation and important to test for in order to avoid unexpected crashes.
+    """
+    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+    batches = [(), (0, ), (2, ), (2, 3)]
+    ns = [0, 5]
+    out = []
+    for batch, n in product(batches, ns):
+        a = random_fullrank_matrix_distinct_singular_value(n, *batch, dtype=dtype).to(device)
+        a.requires_grad = requires_grad
+        out.append(SampleInput(a))
+    return out
+
 def np_sinc_with_fp16_as_fp32(x):
     # Wraps numpy's sinc function so that fp16 values are promoted to fp32
     # before sinc is invoked. Context: numpy's sinc returns NaN when evaluated
@@ -1179,6 +1204,14 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.bfloat16])),
                    promotes_integers_to_float=True,
                    handles_complex_extremals=False),
+    OpInfo('linalg.inv',
+           aten_name='linalg_inv',
+           op=torch.linalg.inv,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           supports_tensor_out=True,
+           sample_inputs_func=sample_inputs_linalg_inv,
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     UnaryUfuncInfo('angle',
                    ref=np.angle,
                    dtypes=all_types_and_complex_and(torch.bool),
