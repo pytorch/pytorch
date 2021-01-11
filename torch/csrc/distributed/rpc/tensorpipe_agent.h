@@ -286,7 +286,7 @@ class TensorPipeAgent : public RpcAgent {
         const at::IValue& value) override {
       const auto message = value.toCustomClass<Message>();
       TORCH_INTERNAL_ASSERT(
-          message, "Passed a non-Message type to RpcCUDAFuture"):
+          message, "Passed a non-Message type to RpcCUDAFuture");
       std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
       for (const auto& tensor : message->tensors()) {
         data_ptrs.emplace_back(tensor.storage().data_ptr());
