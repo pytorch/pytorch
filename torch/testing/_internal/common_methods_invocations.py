@@ -80,6 +80,19 @@ def _getattr_qual(obj, name, default=_NOTHING):
 class OpInfo(object):
     """Operator information and helper functions for acquiring it."""
 
+    class AliasInfo(object):
+        """Class holds alias information. For example, torch.abs ->
+        torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
+        """
+
+        def __init__(self, alias_name):
+            self.op = _getattr_qual(torch, alias_name)
+            self.method_variant = getattr(torch.Tensor, alias_name, None)
+            self.inplace_variant = getattr(torch.Tensor, alias_name + "_", None)
+
+        def __call__(self, *args, **kwargs):
+            return self.op(*args, **kwargs)
+
     def __init__(self,
                  name,  # the string name of the function
                  *,
@@ -108,6 +121,7 @@ class OpInfo(object):
                  promotes_integers_to_float=False,  # whether op promotes unary output to float or not
                  sample_inputs_func=None,  # function to generate sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
+                 aliases=None,  # iterable of aliases, e.g. ("absolute",) for torch.abs
                  supports_sparse=False  # supported for sparse
                  ):
 
@@ -149,7 +163,9 @@ class OpInfo(object):
             self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes
         self.supports_sparse = supports_sparse
 
-
+        self.aliases = []
+        if aliases is not None:
+            self.aliases = [OpInfo.AliasInfo(a) for a in aliases]
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
