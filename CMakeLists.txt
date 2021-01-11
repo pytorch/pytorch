@@ -87,6 +87,7 @@ if(WIN32)
   # On Windows, CMAKE_HOST_SYSTEM_PROCESSOR is calculated through `PROCESSOR_ARCHITECTURE`,
   # which only has the value of `x86` or `AMD64`. We cannot infer whether it's a Intel CPU
   # or not. However, the environment variable `PROCESSOR_IDENTIFIER` could be used.
+  set(CPU_AARCH64 OFF)
   if($ENV{PROCESSOR_IDENTIFIER} MATCHES "Intel")
     set(CPU_INTEL ON)
   else()
@@ -95,8 +96,13 @@ if(WIN32)
 else()
   if(${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "(x86_64|i[3-6]+86)")
     set(CPU_INTEL ON)
+    set(CPU_AARCH64 OFF)
+  elseif(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(aarch64.*|AARCH64.*|arm64.*|ARM64.*)")
+    set(CPU_INTEL OFF)
+    set(CPU_AARCH64 ON)
   else()
     set(CPU_INTEL OFF)
+    set(CPU_AARCH64 OFF)
   endif()
 endif()
 
@@ -214,9 +220,11 @@ option(USE_VULKAN_WRAPPER "Vulkan - Dynamically load Vulkan functions" ON)
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
+# Ensure that an MKLDNN build is the default for x86 CPUs
+# but optional for AArch64 (dependent on -DUSE_MKLDNN).
 cmake_dependent_option(
-  USE_MKLDNN "Use MKLDNN. Only available on x86 and x86_64." ON
-  "CPU_INTEL" OFF)
+  USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, and AArch64." ON
+  "CPU_INTEL OR CPU_AARCH64 AND USE_MKLDNN" OFF)
 set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 cmake_dependent_option(
     USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF
