@@ -16,13 +16,13 @@ static std::array<int64_t, 4> upsample_nearest2d_common_check(IntArrayRef input_
       "It is expected input_size equals to 4, but got size ",
       input_size.size());
 
-  int64_t output_width = output_size[0];
-  int64_t output_height = output_size[1];
+  int64_t output_height = output_size[0];
+  int64_t output_width = output_size[1];
 
   int64_t nbatch = input_size[0];
   int64_t channels = input_size[1];
-  int64_t input_width = input_size[2];
-  int64_t input_height = input_size[3];
+  int64_t input_height = input_size[2];
+  int64_t input_width = input_size[3];
 
   TORCH_CHECK(
       input_height > 0 && input_width > 0 && output_height > 0 &&
@@ -38,7 +38,7 @@ static std::array<int64_t, 4> upsample_nearest2d_common_check(IntArrayRef input_
       output_width,
       ")");
 
-  return {nbatch, channels, output_width, output_height};
+  return {nbatch, channels, output_height, output_width};
 }
 
 TORCH_META_FUNC(upsample_nearest2d) (
