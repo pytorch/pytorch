@@ -2,7 +2,6 @@ import os
 import sys
 
 import torch
-from typing import List, Tuple
 from jit.test_hooks_modules import *
 
 # Make the helper files in test/ importable

@@ -638,10 +638,11 @@ struct to_ir {
 
     // check schemas for hooks and prehooks
     if (self) {
-      if (self->getClassType()->findForwardHook(method.name())) {
-        self->getClassType()->checkHookSchema(method);
-      } else if (self->getClassType()->findForwardPreHook(method.name())) {
-        self->getClassType()->checkPreHookSchema(method);
+      const auto class_self = self->getClassType();
+      if (class_self->findForwardHook(method.name())) {
+        class_self->checkForwardHookSchema(class_self->getForwardHooks().size() - 1);
+      } else if (class_self->findForwardPreHook(method.name())) {
+        class_self->checkForwardPreHookSchema(class_self->getForwardPreHooks().size() - 1);
       }
     }
 
@@ -4301,7 +4302,7 @@ void CompilationUnit::define_hooks(
     functions.emplace_back(fn.get());
     this->register_function(std::move(fn));
     ErrorReport::HintStack hint(
-        self->getClassType()->getHookErrorMessage(functions.back()->name()));
+        self->getClassType()->getForwardHookErrorMessage(i));
     functions.back()->ensure_defined();
   }
 
@@ -4328,7 +4329,7 @@ void CompilationUnit::define_hooks(
     functions.emplace_back(fn.get());
     this->register_function(std::move(fn));
     ErrorReport::HintStack hint(
-        self->getClassType()->getPreHookErrorMessage(functions.back()->name()));
+        self->getClassType()->getForwardPreHookErrorMessage(i));
     functions.back()->ensure_defined();
   }
 }
