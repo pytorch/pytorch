@@ -268,7 +268,7 @@ def tanh(g, self):
     return g.op("Tanh", self)
 
 
-def sin(g, self):
+def sin(g, self, dtype=None):
     return g.op("Sin", self)
 
 
