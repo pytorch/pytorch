@@ -157,7 +157,6 @@ class PackageImporter:
         ns['__cached__'] = None
         ns['__builtins__'] = self.patched_builtins
 
-
         # pre-emptively install on the parent to prevent IMPORT_FROM from trying to
         # access sys.modules
         self._install_on_parent(parent, name, module)
