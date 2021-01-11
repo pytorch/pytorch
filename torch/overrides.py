@@ -781,7 +781,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.sign: lambda input, out=None: -1,
         torch.signbit: lambda input, out=None: -1,
         torch.sgn: lambda input, out=None: -1,
-        torch.sin: lambda input, out=None: -1,
+        torch.sin: lambda input, dtype=None, out=None: -1,
         torch.sinc: lambda input, out=None: -1,
         torch.sinh: lambda input, out=None: -1,
         torch.slogdet: lambda input: -1,
