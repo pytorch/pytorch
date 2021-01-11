@@ -13,9 +13,9 @@ std::vector<float> NC4_to_NCHW(
     const float* src,
     const std::vector<int64_t>& sizes);
 
-// When copying to a CPU tensor, the memory format becomes NCHW.
+// When copying the result back to a CPU tensor, the memory format becomes NCHW.
 // Thus,we compute the strides based on contiguous memory format.
-static inline std::vector<int64_t> compute_strides(std::vector<int64_t> sizes) {
+static inline std::vector<int64_t> compute_strides(const std::vector<int64_t>& sizes) {
   const auto dim = sizes.size();
   std::vector<int64_t> strides(dim, 0);
   if (dim > 0) {
