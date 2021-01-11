@@ -153,15 +153,9 @@ def _lazy_init():
         # immediately, while we are still guaranteed to have the GIL, because some
         # of the C calls we make below will release the GIL
         if _is_in_bad_fork():
-            from sys import version_info
-            if version_info < (3, 4):
-                msg = ("To use CUDA with multiprocessing, you must use Python "
-                       "3.4+ and the 'spawn' start method")
-            else:
-                msg = ("To use CUDA with multiprocessing, you must use the "
-                       "'spawn' start method")
             raise RuntimeError(
-                "Cannot re-initialize CUDA in forked subprocess. " + msg)
+                "Cannot re-initialize CUDA in forked subprocess. To use CUDA with "
+                "multiprocessing, you must use the 'spawn' start method")
         if not hasattr(torch._C, '_cuda_getDeviceCount'):
             raise AssertionError("Torch not compiled with CUDA enabled")
         if _cudart is None:
@@ -271,6 +265,9 @@ def get_device_name(device: Optional[_device_t] = None) -> str:
             name. This function is a no-op if this argument is a negative
             integer. It uses the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
+
+    Returns:
+        str: the name of the device
     """
     return get_device_properties(device).name
 
@@ -293,6 +290,15 @@ def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]
 
 
 def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
+    r"""Gets the properties of a device.
+
+    Args:
+        device (torch.device or int or str): device for which to return the
+            properties of the device.
+
+    Returns:
+        _CudaDeviceProperties: the properties of the device
+    """
     _lazy_init()  # will define _get_device_properties
     device = _get_device_index(device, optional=True)
     if device < 0 or device >= device_count():
