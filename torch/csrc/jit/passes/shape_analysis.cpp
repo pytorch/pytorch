@@ -869,7 +869,6 @@ class ShapePropagator {
             "aten::gelu(Tensor self) -> Tensor",
             "aten::sigmoid(Tensor self) -> Tensor",
             "aten::sign(Tensor self) -> Tensor",
-            "aten::sin(Tensor self, *, ScalarType? dtype=None) -> Tensor",
             "aten::sinh(Tensor self) -> Tensor",
             "aten::softplus(Tensor self, Scalar beta, Scalar threshold) -> Tensor",
             "aten::softshrink(Tensor self, Scalar lambd) -> Tensor",
@@ -888,6 +887,30 @@ class ShapePropagator {
         },
         [](Node* node) -> type_vec_t {
           auto input_type = node->input(0)->type()->cast<TensorType>();
+          return input_type ? type_vec_t{input_type->dimensionedOnly()}
+                            : type_vec_t{};
+        }};
+
+    // Requirements:
+    //   dims           : preserved
+    //   scalar type    : dtype if specified, usual type promotion rules apply
+    //   device         : preserved
+    //   tensor inputs  : 1
+    //   tensor outputs : 1
+    // Additionally:
+    //   - First input should be the only tensor input
+    static const register_formula_for unary_ops_with_dtype{
+        {
+            "aten::sin(Tensor self, *, ScalarType? dtype=None) -> Tensor",
+        },
+        [](Node* node) -> type_vec_t {
+          auto input_type = node->input(0)->type()->cast<TensorType>();
+          at::optional<IValue> maybe_dtype_option = node->get(attr::dtype);
+          if (maybe_dtype_option && !maybe_dtype_option->isNone()) {
+            return {
+                input_type->withScalarType(maybe_dtype_option->toScalarType())
+                    ->dimensionedOnly()};
+          }
           return input_type ? type_vec_t{input_type->dimensionedOnly()}
                             : type_vec_t{};
         }};
