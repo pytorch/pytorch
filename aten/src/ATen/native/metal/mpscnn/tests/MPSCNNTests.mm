@@ -65,8 +65,7 @@ bool almostEqualVec(
 }
 
 typedef bool (^Func)(void);
-bool TEST(const std::vector<int64_t>& sizes, std::string name, Func block) {
-  NSLog(@"begin testing %s", name.c_str());
+bool TEST(const std::vector<int64_t>& sizes, std::string name, Func block) { 
   std::stringstream ss;
   std::copy(sizes.begin(), sizes.end(), std::ostream_iterator<int>(ss, " "));
   __block std::string str1 = ss.str();
