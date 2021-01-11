@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
+#include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <torch/library.h>
 
 #include <c10/util/Optional.h>
@@ -33,22 +34,18 @@ std::string stringSlice(
     c10::optional<int64_t> start,
     c10::optional<int64_t> end,
     int64_t step) {
-  int64_t start_val = start.has_value() ? start.value() : 0;
+  int64_t start_val = start.has_value() ? start.value() : INT64_MAX;
   int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
-  TORCH_CHECK(step == 1, "Slicing a string only supports step=1");
 
-  const int64_t size = string.size();
+  const int64_t num_vals = slice_indices_adjust(string.size(), &start_val, &end_val, step);
 
-  // Clamp start and end to the bounds of the list
-  start_val = std::max(int64_t(0), normalizeIndex(start_val, size));
-  end_val = std::min(size, normalizeIndex(end_val, size));
-
-  if (end_val <= start_val) {
-    // Slice is empty
-    return std::string("");
+  int64_t i = start_val;
+  std::string result = "";
+  for (int64_t j = 0; j < num_vals; j++){
+    result += string[i];
+    i += step;
   }
 
-  std::string result(string.begin() + start_val, string.begin() + end_val);
   return result;
 }
 
@@ -115,7 +112,7 @@ RegisterOperators reg(
          // depends on the type hint and input. The implementation of this
          // operator below is intended to be as close to the Python
          // implementation in torch/csrc/utils/tensor_list.cpp as possible.
-         [](const Node * /*node*/) -> Operation {
+         [](const Node* /*node*/) -> Operation {
            return [](Stack* stack) {
              int elem_ty_val;
              int dim_val;

@@ -184,7 +184,12 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   // compute the size of the result
   auto result_size = notSkippedTensor.sizes().vec();
   result_size[dim] = cat_dim_size;
-  result.resize_(result_size, first_tensor_mem_format);
+
+  // skip resizing if size of result is same as expected
+  if (result.sizes() != result_size) {
+    result.resize_(result_size, first_tensor_mem_format);
+  }
+
   if (result.numel() == 0) {
     return result;
   }
@@ -1117,7 +1122,7 @@ Tensor slice(
   auto sizes = self.sizes().vec();
   auto strides = self.strides().vec();
 
-  // handle optinal parameters
+  // handle optional parameters
   int64_t start_val = start.has_value() ? start.value() : 0;
   int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
 
