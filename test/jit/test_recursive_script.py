@@ -2,11 +2,10 @@ import os
 import sys
 import typing
 import typing_extensions
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 
 import torch
 import torch.nn as nn
-from torch import Tensor
 from torch.testing import FileCheck
 from collections import OrderedDict
 
