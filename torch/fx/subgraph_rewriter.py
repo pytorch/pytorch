@@ -122,6 +122,10 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
     matches for ``pattern`` in the larger function, each non-overlapping
     match will be replaced. In the case of a match overlap, the first
     found match in the set of overlapping matches will be replaced.
+    ("First" here being defined as the first in a topological ordering
+    of the Nodes' use-def relationships. In most cases, the first Node
+    is the parameter that appears directly after ``self``, while the
+    last Node is whatever the function returns.)
 
     One important thing to note is that the parameters of the
     ``pattern`` Callable must be used in the Callable itself,

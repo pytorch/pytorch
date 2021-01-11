@@ -740,6 +740,12 @@ Tensor norm(const Tensor& self, Scalar p) {
   return at::native::_norm(self, p);
 }
 
+// Note [all, any : uint8 compatibility]:
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// For NumPy comptability, `all` and `any` return
+// Tensor of dtype `bool`. However for compatibility reason,
+// for `uint8`, they return Tensor of same dtype `uint8`.
+// Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
 inline Tensor & _all(Tensor & result, TensorIterator & iter) {
   if (iter.numel() == 0) {
     result.fill_(1);
@@ -756,14 +762,40 @@ Tensor all(const Tensor& self) {
   TORCH_CHECK(self.layout() == Layout::Strided,
               "all only supports strided layout, got: ", self.layout());
 
-  Tensor result = at::empty({0}, self.options());
-  auto iter = make_reduction(
-    "all", result, self, {}, false, self.scalar_type());
+  // Refer [all, any : uint8 compatibility]
+  Tensor result;
+  ScalarType out_dtype;
+  if (self.scalar_type() == ScalarType::Byte){
+    result = at::empty({0}, self.options());
+    out_dtype = self.scalar_type();
+  } else {
+    result = at::empty({0}, self.options().dtype(kBool));
+    out_dtype = ScalarType::Bool;
+  }
+
+  if (self.is_cuda()) {
+    // As CUDA supports dynamic type casting, we use this overload of
+    // `make_reduction`, which doesn't cast input to the result type i.e. kBool.,
+    // otherwise we use the overload below which casts the input to kBool (which is
+    // an extra operation).
+    auto iter = make_reduction(
+        "all", result, self, {}, false, self.scalar_type(), out_dtype);
+    return _all(result, iter);
+  }
+  auto iter =
+      make_reduction("all", result, self, {}, false, /*out_dtype=*/out_dtype);
   return _all(result, iter);
 }
 
 Tensor all(const Tensor& self, int64_t dim, bool keepdim) {
-  Tensor result = at::empty({0}, self.options());
+  // Refer [all, any : uint8 compatibility]
+  Tensor result;
+  if (self.scalar_type() == ScalarType::Byte){
+    result = at::empty({0}, self.options());
+  } else {
+    result = at::empty({0}, self.options().dtype(kBool));
+  }
+
   return at::native::all_out(result, self, dim, keepdim);
 }
 
@@ -772,13 +804,26 @@ Tensor &all_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
               "all only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "all only supports strided layout, got: ", self.layout());
+  // Refer [all, any : uint8 compatibility]
+  TORCH_CHECK(result.scalar_type() == ScalarType::Bool || result.scalar_type() == ScalarType::Byte,
+              "all only supports bool tensor for result, got: ", result.scalar_type());
 
+  auto out_dtype = result.scalar_type();
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, 1, dim, keepdim)) {
     return result;
   } else {
-    auto iter = make_reduction(
-      "all", result, self, dim, keepdim, self.scalar_type());
+    if (self.is_cuda()) {
+      // As CUDA supports dynamic type casting, we use this overload of
+      // `make_reduction`, which doesn't cast input to the result type i.e. kBool.,
+      // otherwise we use the overload below which casts the input to kBool (which is
+      // an extra operation).
+      auto iter = make_reduction(
+          "all", result, self, dim, keepdim, self.scalar_type(), out_dtype);
+      return _all(result, iter);
+    }
+    auto iter =
+        make_reduction("all", result, self, dim, keepdim, /*out_dtype=*/out_dtype);
     return _all(result, iter);
   }
 }
@@ -798,15 +843,41 @@ Tensor any(const Tensor& self) {
               "any only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided || self.layout() == Layout::Sparse,
               "any only supports strided AND sparse layout, got: ", self.layout());
+  
+  // Refer [all, any : uint8 compatibility]
+  Tensor result;
+  ScalarType out_dtype;
+  if (self.scalar_type() == ScalarType::Byte){
+    result = at::empty({0}, self.options());
+    out_dtype = self.scalar_type();
+  } else {
+    result = at::empty({0}, self.options().dtype(kBool));
+    out_dtype = ScalarType::Bool;
+  }
 
-  Tensor result = at::empty({0}, self.options());
-  auto iter = make_reduction(
-    "any", result, self, {}, false, self.scalar_type());
+  if (self.is_cuda()) {
+    // As CUDA supports dynamic type casting, we use this overload of
+    // `make_reduction`, which doesn't cast input to the result type i.e. kBool.,
+    // otherwise we use the overload below which casts the input to kBool (which is
+    // an extra operation).
+    auto iter = make_reduction(
+        "any", result, self, {}, false, self.scalar_type(), out_dtype);
+    return _any(result, iter);
+  }
+  auto iter =
+      make_reduction("any", result, self, {}, false, /*out_dtype=*/out_dtype);
   return _any(result, iter);
 }
 
 Tensor any(const Tensor& self, int64_t dim, bool keepdim) {
-  Tensor result = at::empty({0}, self.options());
+  // Refer [all, any : uint8 compatibility]
+  Tensor result;
+  if (self.scalar_type() == ScalarType::Byte){
+    result = at::empty({0}, self.options());
+  } else {
+    result = at::empty({0}, self.options().dtype(kBool));
+  }
+
   return at::native::any_out(result, self, dim, keepdim);
 }
 
@@ -815,13 +886,26 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
               "any only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "any only supports strided layout, got: ", self.layout());
+  // Refer [all, any : uint8 compatibility]
+  TORCH_CHECK(result.scalar_type() == ScalarType::Bool || result.scalar_type() == ScalarType::Byte,
+              "any only supports bool tensor for result, got: ", result.scalar_type());
 
+  auto out_dtype = result.scalar_type();
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, 0, dim, keepdim)) {
     return result;
   } else {
-    auto iter = make_reduction(
-      "any", result, self, dim, keepdim, self.scalar_type());
+    if (self.is_cuda()) {
+      // As CUDA supports dynamic type casting, we use this overload of
+      // `make_reduction`, which doesn't cast input to the result type i.e. kBool.,
+      // otherwise we use the overload below which casts the input to kBool (which is
+      // an extra operation).
+      auto iter = make_reduction(
+          "any", result, self, dim, keepdim, self.scalar_type(), out_dtype);
+      return _any(result, iter);
+    }
+    auto iter =
+        make_reduction("any", result, self, dim, keepdim, /*out_dtype=*/out_dtype);
     return _any(result, iter);
   }
 }
