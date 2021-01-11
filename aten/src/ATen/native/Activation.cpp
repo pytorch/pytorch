@@ -277,6 +277,7 @@ Tensor& rrelu_with_noise_out_cpu(
     });
     return output;
   } else {
+    TORCH_INTERNAL_ASSERT(false);
     auto lower_tensor = scalar_to_tensor(lower, self.device());
     auto upper_tensor = scalar_to_tensor(upper, self.device());
     auto negative = (lower_tensor + upper_tensor) / 2;
