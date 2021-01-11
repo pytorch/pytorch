@@ -146,7 +146,6 @@ class PackageImporter:
 
     def _make_module(self, name: str, filename: Optional[str], is_package: bool, parent: str):
         mangled_filename = self._mangler.mangle(filename) if filename else None
-
         spec = importlib.machinery.ModuleSpec(name, self, is_package=is_package)  # type: ignore
         module = importlib.util.module_from_spec(spec)
         self.modules[name] = module
@@ -158,17 +157,19 @@ class PackageImporter:
         ns['__cached__'] = None
         ns['__builtins__'] = self.patched_builtins
 
-        # pre-emptively install the source in `linecache` so that stack traces,
-        # `inspect`, etc. work.
-        assert mangled_filename not in linecache.cache
-        linecache.lazycache(mangled_filename, ns)
 
         # pre-emptively install on the parent to prevent IMPORT_FROM from trying to
         # access sys.modules
         self._install_on_parent(parent, name, module)
 
         if filename is not None:
-            code = self._compile_source(unmangled_filename, filename)
+            assert mangled_filename is not None
+            # pre-emptively install the source in `linecache` so that stack traces,
+            # `inspect`, etc. work.
+            assert filename not in linecache.cache  # type: ignore
+            linecache.lazycache(mangled_filename, ns)
+
+            code = self._compile_source(filename, mangled_filename)
             exec(code, ns)
 
         return module

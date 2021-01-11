@@ -6,6 +6,14 @@ import re
 _mangle_index = 0
 
 
+class DemangledModuleName(str):
+    """
+    Tracks whether a name has passed through `demangle`. Otherwise behaves like a string.
+    """
+
+    pass
+
+
 class PackageMangler:
     """
     Used on import, to ensure that all modules imported have a shared mangle parent.
@@ -21,10 +29,10 @@ class PackageMangler:
         # preferred way of denoting special modules.
         self._mangle_parent = f"<torch_package_{self._mangle_index}>"
 
-    def mangle(self, name):
+    def mangle(self, name) -> str:
         return self._mangle_parent + "." + name
 
-    def demangle(self, mangled):
+    def demangle(self, mangled) -> DemangledModuleName:
         """
         Note: This only demangles names that were mangled by this specific
         PackageMangler. It will pass through names created by a different
@@ -46,14 +54,6 @@ def _is_mangled(name: str) -> bool:
 
 def check_not_mangled(name: str):
     assert not _is_mangled(name)
-
-
-class DemangledModuleName(str):
-    """
-    Tracks whether a name has passed through `demangle`. Otherwise behaves like a string.
-    """
-
-    pass
 
 
 def demangle(name: str) -> DemangledModuleName:
