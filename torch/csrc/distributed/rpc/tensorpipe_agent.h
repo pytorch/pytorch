@@ -11,7 +11,6 @@
 #include <c10d/Store.hpp>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
-
 // Forward-declare the TensorPipe classes we need, to avoid including its
 // headers in PyTorch's ones and thus have it become a public dependency.
 
@@ -88,7 +87,6 @@ struct CudaChannelRegistration {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeCudaChannelRegistry, CudaChannelRegistration);
-
 
 constexpr auto kDefaultNumWorkerThreads = 16;
 

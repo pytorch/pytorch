@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
+
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
@@ -9,6 +10,12 @@ void UpdateDifferentiableGraphRequiresGrad(
     Block* block,
     c10::optional<bool> new_requires_grad) {
   for (Node* n : block->nodes()) {
+    for (Value* v : n->inputs()) {
+      auto ty = v->type()->cast<TensorType>();
+      if (ty) {
+        v->setType(ty->withRequiresGrad(new_requires_grad));
+      }
+    }
     if (n->kind() == prim::profile) {
       n->ty_(
           attr::profiled_type,

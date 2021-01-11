@@ -65,9 +65,7 @@ RRefForkData RRef::fork() const {
       getTypeStr(type_));
 }
 
-void RRef::handleError(
-    RPCErrorType errorType,
-    const JitFuture& jitFuture) {
+void RRef::handleError(RPCErrorType errorType, const JitFuture& jitFuture) {
   static std::unordered_map<
       RPCErrorType,
       std::function<void(const JitFuture& jitFuture)>,
