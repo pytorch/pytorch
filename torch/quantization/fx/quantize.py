@@ -138,7 +138,7 @@ def maybe_insert_observer_for_special_module(
         observed_standalone_module = \
             prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict)
         standalone_module_input_idxs = observed_standalone_module.\
-            _standalone_module_input_quantized_idxs
+            _standalone_module_input_quantized_idxs.int().tolist()
         observed_standalone_module = mark_observed_standalone_module(
             observed_standalone_module)
         parent_name, name = _parent_name(node.target)
@@ -221,8 +221,10 @@ def insert_observer_for_output_of_the_node(
         elif isinstance(quantize_handler,
                         StandaloneModuleQuantizeHandler):
             assert node.op == "call_module"
-            output_is_quantized = 0 in \
-                modules[node.target]._standalone_module_output_quantized_idxs  # type: ignore
+            assert isinstance(node.target, str)
+            sm_out_qidxs = modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # type: ignore
+            output_is_quantized = 0 in sm_out_qidxs
+
             if output_is_quantized:
                 observed_node_names_set.add(node.name)
         elif (quantize_handler.all_node_args and
@@ -552,9 +554,11 @@ class Quantizer:
             output_is_observed = \
                 result_node.args[0].name in observed_node_names_set
             # these inputs are observed in parent
+            # converting List[int] to Tensor since module attribute is
+            # Union[Tensor, Module]
             model._standalone_module_input_quantized_idxs = \
-                input_quantized_idxs
-            model._standalone_module_output_quantized_idxs = output_quantized_idxs
+                torch.Tensor(input_quantized_idxs)
+            model._standalone_module_output_quantized_idxs = torch.Tensor(output_quantized_idxs)
         return model
 
     def save_state(self, observed: GraphModule) -> None:
@@ -835,7 +839,7 @@ class Quantizer:
                     # for non-standalone module, since _standalone_module_output_quantized_idxs
                     # is only available in observed standalone module
                     if is_observed_standalone_module_node:
-                        out_quant_idxs = self.modules[node.target]._standalone_module_output_quantized_idxs
+                        out_quant_idxs = self.modules[node.target]._standalone_module_output_quantized_idxs.tolist()  # type: ignore
                         assert len(out_quant_idxs) <= 1, "Currently standalone only support one output"
                         quantized = 0 in out_quant_idxs
 
@@ -991,7 +995,7 @@ class Quantizer:
             standalone_module_names = []
 
         match_map: Dict[str, MatchResult] = {}
-        all_matched = set()
+        all_matched : Set[str] = set()
 
         def record_match(pattern, node, matched):
             if isinstance(pattern, tuple):
