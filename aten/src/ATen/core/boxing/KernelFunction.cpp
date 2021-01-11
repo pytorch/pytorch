@@ -24,7 +24,7 @@ void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle& op, S
     op.operator_name(), " has kernels registered to both Math and a backend mapped to AutogradOther. "
     "This makes the backend kernel unreachable (see Note [Ambiguity in AutogradOther kernel]). "
     "If it's intended to override Math kernel behavior, please open an issue to request a dedicated "
-    "Autograd dispatch key for the backend.");
+    "Autograd dispatch key for the backend.", "\nCanonical state\n~~~~~~~~~~~\n", op.dumpState(), "\n\n");
 }
 
 void named_not_supported_kernel(OperatorKernel*, const OperatorHandle& op, Stack*) {

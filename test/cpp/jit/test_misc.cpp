@@ -1044,7 +1044,7 @@ TEST(RecordFunctionTest, Callbacks) {
   ids.clear();
   { // START: global test
     addGlobalCallback(RecordFunctionCallback(
-        [](const RecordFunction &
+        [](const RecordFunction&
            /* unused */) -> std::unique_ptr<at::ObserverContext> {
           auto ctx = std::make_unique<TestContext>();
           ctx->a = 123;
@@ -1070,7 +1070,7 @@ TEST(RecordFunctionTest, Callbacks) {
       const int test_val = 234;
       const std::string test_str = "test thread str";
       addThreadLocalCallback(RecordFunctionCallback(
-          [](const RecordFunction &
+          [](const RecordFunction&
              /* unused */) -> std::unique_ptr<at::ObserverContext> {
             auto ctx = std::make_unique<TestContext>();
             ctx->a = 234;
