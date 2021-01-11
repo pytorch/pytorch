@@ -1,6 +1,6 @@
 import torch
 import torch._six
-from typing import Optional
+from typing import Optional, Any
 import warnings
 from collections import defaultdict
 import sys
@@ -446,8 +446,9 @@ def _get_device_attr(get_member):
 
 def _get_current_device_index():
     # current device index
-    return _get_device_attr(lambda m: m.current_device())
-
+    if torch.cuda.device_count() > 0:
+        return torch.cuda.current_device()
+    return -1
 
 def _get_all_device_indices():
     # all device index
@@ -458,8 +459,7 @@ def _get_devices_properties(device_ids):
     # all device properties
     return [_get_device_attr(lambda m: m.get_device_properties(i)) for i in device_ids]
 
-
-def _get_device_index(device, optional=False, allow_cpu=False) -> int:
+def _get_device_index(device:Any, optional:bool=False, allow_cpu:bool=False) -> int:
     r"""Gets the device index from :attr:`device`, which can be a torch.device
     object, a Python integer, or ``None``.
 
@@ -477,14 +477,17 @@ def _get_device_index(device, optional=False, allow_cpu=False) -> int:
     """
     if isinstance(device, str):
         device = torch.device(device)
-    device_idx: Optional[int]
-    device_idx = None
+
+    device_idx: Optional[int] = None
+
     if isinstance(device, torch.device):
         if not allow_cpu and device.type == 'cpu':
             raise ValueError('Expected a non cpu device, but got: {}'.format(device))
         device_idx = -1 if device.type == 'cpu' else device.index
+
     if isinstance(device, int):
         device_idx = device
+
     if device_idx is None:
         if optional:
             device_idx = _get_current_device_index()
