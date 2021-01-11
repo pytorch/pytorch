@@ -650,7 +650,7 @@ def get_hook_stubs(nn_module):
     Returns forward hook and pre_hook ScriptModuleStubs
     """
     check_module_initialized(nn_module)
-    hook_map = {}
+    hook_map: Dict = {}
 
     hook_stubs = []
     for hook in nn_module._forward_hooks.values():
