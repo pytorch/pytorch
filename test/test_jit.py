@@ -869,7 +869,7 @@ class TestJit(JitTestCase):
         element_size = get_element_size_script(x)
         self.assertEqual(element_size, x.element_size())
 
-    def test_sequential(self):
+    def test_Sequential(self):
         class Seq(nn.Module):
             def __init__(self):
                 super(Seq, self).__init__()
@@ -884,7 +884,7 @@ class TestJit(JitTestCase):
         m = torch.jit.script(Seq())
         assert m.graph  # ensure jit was able to compile
 
-    def test_module_list(self):
+    def test_ModuleList(self):
         class Mod(nn.Module):
             def __init__(self):
                 super(Mod, self).__init__()

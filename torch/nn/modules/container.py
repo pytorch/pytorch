@@ -428,13 +428,11 @@ class ParameterList(Module):
         ...
 
     def __getitem__(self, idx):
-        idx = self._get_abs_string_index(idx)
-        return self._parameters[str(idx)]
-        # if isinstance(idx, slice):
-        #     return self.__class__(list(self._parameters.values())[idx])
-        # else:
-        #     idx = self._get_abs_string_index(idx)
-        #     return self._parameters[str(idx)]
+        if isinstance(idx, slice):
+            return self.__class__(list(self._parameters.values())[idx])
+        else:
+            idx = self._get_abs_string_index(idx)
+            return self._parameters[str(idx)]
 
     def __setitem__(self, idx: int, param: 'Parameter') -> None:
         idx = self._get_abs_string_index(idx)
