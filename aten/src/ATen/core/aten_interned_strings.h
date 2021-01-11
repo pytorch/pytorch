@@ -294,6 +294,7 @@ _(aten, dim) \
 _(aten, dist) \
 _(aten, dot) \
 _(aten, dropout) \
+_(aten, dsplit) \
 _(aten, dstack) \
 _(aten, eig) \
 _(aten, einsum) \
@@ -367,6 +368,7 @@ _(aten, hardtanh_forward) \
 _(aten, heaviside) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
+_(aten, hsplit) \
 _(aten, hspmm) \
 _(aten, hstack) \
 _(aten, hypot) \
@@ -746,6 +748,7 @@ _(aten, vander) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \
+_(aten, vsplit) \
 _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \

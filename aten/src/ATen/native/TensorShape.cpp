@@ -1211,6 +1211,65 @@ std::vector<Tensor> unsafe_split_with_sizes(const Tensor& self, IntArrayRef spli
   return result;
 }
 
+std::vector<Tensor> dsplit(const Tensor& self, int64_t split_sizes) {
+  TORCH_CHECK(self.dim() >= 3,
+              "dsplit expects Tensor to have 3 or more dimensions. ",
+              "Input Tensor has dimension ", self.dim());
+  return self.split(split_sizes, 2);
+}
+
+
+std::vector<Tensor> dsplit(const Tensor& self, IntArrayRef split_sizes) {
+  TORCH_CHECK(self.dim() >= 3,
+              "dsplit expects Tensor to have 3 or more dimensions. ",
+              "Input Tensor has dimension ", self.dim());
+  return self.split_with_sizes(split_sizes, 2);
+}
+
+std::vector<Tensor> hsplit(const Tensor& self, int64_t split_sizes) {
+  TORCH_CHECK(self.dim() != 0,
+              "hsplit only works on tensors of 1 or more dimensions. ",
+              "Input Tensor has dimension ", self.dim());
+
+  return self.split(split_sizes, 0);
+}
+
+std::vector<Tensor> hsplit(const Tensor& self, IntArrayRef split_sizes) {
+  TORCH_CHECK(self.dim() != 0,
+              "hsplit only works on tensors of 1 or more dimensions. ",
+              "Input Tensor has dimension ", self.dim());
+
+  return self.split_with_sizes(split_sizes, 0);
+}
+
+std::vector<Tensor> vsplit(const Tensor& self, int64_t split_sizes) {
+  TORCH_CHECK(self.dim() >= 2,
+              "vsplit only works on tensors of 2 or more dimensions. "
+              "Input Tensor has dimension ", self.dim());
+
+  if(self.dim() > 1) {
+    return self.split(split_sizes, 1);
+  }
+  else {
+    return self.split(split_sizes, 0);
+  }
+
+}
+
+std::vector<Tensor> vsplit(const Tensor& self, IntArrayRef split_sizes) {
+  TORCH_CHECK(self.dim() >= 2,
+              "vsplit only works on tensors of 2 or more dimensions. "
+              "Input Tensor has dimension ", self.dim());
+
+  if(self.dim() > 1) {
+    return self.split_with_sizes(split_sizes, 1);
+  }
+  else {
+    return self.split_with_sizes(split_sizes, 0);
+  }
+
+}
+
 // Precondition: tensors is non-empty
 static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t dim) {
   std::vector<Tensor> inputs(tensors.size());

@@ -1358,7 +1358,7 @@
 
 - func: diagflat(Tensor self, int offset=0) -> Tensor
   variants: function, method
-
+  
 - func: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
   variants: function, method
   dispatch:
@@ -3480,6 +3480,42 @@
   device_guard: False
   dispatch:
     DefaultBackend: split_with_sizes
+
+- func: dsplit(Tensor self, int[] split_sizes) -> Tensor[]
+  variants: function, method
+  device_guard: False
+  dispatch:
+    DefaultBackend: dsplit
+
+- func: dsplit.int(Tensor self, int split_sizes) -> Tensor[]
+  variants: function, method
+  device_guard: False
+  dispatch:
+    DefaultBackend: dsplit
+
+- func: hsplit(Tensor self, int[] split_sizes) -> Tensor[]
+  variants: function, method
+  device_guard: False
+  dispatch:
+    DefaultBackend: hsplit
+
+- func: hsplit.int(Tensor self, int split_sizes) -> Tensor[]
+  variants: function, method
+  device_guard: False
+  dispatch:
+    DefaultBackend: hsplit
+
+- func: vsplit(Tensor self, int[] split_sizes) -> Tensor[]
+  variants: function, method
+  device_guard: False
+  dispatch:
+    DefaultBackend: vsplit
+
+- func: vsplit.int(Tensor self, int split_sizes) -> Tensor[]
+  variants: function, method
+  device_guard: False
+  dispatch:
+    DefaultBackend: vsplit
 
 - func: squeeze(Tensor(a) self) -> Tensor(a)
   variants: function, method
