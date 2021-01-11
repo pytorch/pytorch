@@ -4885,7 +4885,7 @@ a")
         with self.assertRaisesRegex(RuntimeError, "should have non-zero step"):
             check_indexing_list_int('[::0]', consec_list(42))
 
-        #striding strings
+        # striding strings
         check_indexing_str('[0]', random_string(6))
         check_indexing_str('[1]', random_string(7))
         check_indexing_str('[2]', random_string(8))
