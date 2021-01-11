@@ -295,7 +295,7 @@ def main():
                 print(f"Killing subprocess {process.pid}")
                 try:
                     process.kill()
-                except Exception as e:
+                except Exception:
                     pass
             if last_return_code is not None:
                 raise subprocess.CalledProcessError(returncode=last_return_code, cmd=cmd)

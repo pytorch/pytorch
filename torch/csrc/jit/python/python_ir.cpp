@@ -568,14 +568,12 @@ void initPythonIRBindings(PyObject* module_) {
       .AS(removeAttribute)
       .AS(attributeNames)
 #undef AS
-#define CREATE_ACCESSOR(Kind, method)                          \
-  def(#method "_",                                             \
-      [](Node& n, const char* name, Kind##Attr::ValueType v) { \
-        return n.method##_(Symbol::attr(name), std::move(v));  \
-      })                                                       \
-      .def(#method, [](Node& n, const char* name) {            \
-        return n.method(Symbol::attr(name));                   \
-      })
+#define CREATE_ACCESSOR(Kind, method)                                       \
+  def(#method "_", [](Node& n, const char* name, Kind##Attr::ValueType v) { \
+    return n.method##_(Symbol::attr(name), std::move(v));                   \
+  }).def(#method, [](Node& n, const char* name) {                           \
+    return n.method(Symbol::attr(name));                                    \
+  })
       .CREATE_ACCESSOR(Float, f)
       .CREATE_ACCESSOR(Floats, fs)
       .CREATE_ACCESSOR(String, s)
