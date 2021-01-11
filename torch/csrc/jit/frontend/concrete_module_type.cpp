@@ -256,8 +256,8 @@ void ConcreteModuleTypeBuilder::addFunctionAttribute(
   TORCH_INTERNAL_ASSERT(type);
   functionAttributes_.emplace(
       std::move(name),
-      ConcreteModuleTypeBuilder::FunctionAttribute{type->expect<FunctionType>(),
-                                                   std::move(pyFunction)});
+      ConcreteModuleTypeBuilder::FunctionAttribute{
+          type->expect<FunctionType>(), std::move(pyFunction)});
 }
 
 void ConcreteModuleTypeBuilder::addBuiltinFunction(

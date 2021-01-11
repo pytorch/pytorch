@@ -37,6 +37,7 @@ allow_list = [
     ("aten::ifft", datetime.date(2021, 1, 31)),
     ("aten::irfft", datetime.date(2021, 1, 31)),
     ("aten::rfft", datetime.date(2021, 1, 31)),
+    ("aten::_svd_helper", datetime.date(2021, 1, 31)),
     ("aten::_cudnn_rnn_flatten_weight", datetime.date(2020, 12, 31)),
     ("aten::_cudnn_rnn", datetime.date(2020, 12, 31)),
     ("aten::_cudnn_rnn_backward", datetime.date(2020, 12, 31)),
@@ -72,7 +73,7 @@ def allow_listed(schema, allow_list):
 dont_parse_list = [
     ("_TorchScriptTesting.*", datetime.date(2099, 9, 17)),
     ("test_backend", datetime.date(2099, 9, 17)),
-    ("c10d.frontend", datetime.date(2020, 12, 30)),
+    ("dist_c10d", datetime.date(2021, 1, 30)),
 ]
 
 

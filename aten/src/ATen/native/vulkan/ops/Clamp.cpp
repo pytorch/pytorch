@@ -28,11 +28,11 @@ Tensor clamp(
     v_self.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if (v_output.has_image() && v_self.has_image()) {
-      const struct {
+    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
+      const struct Block final {
         uvec3 extents;
         uint32_t _;
         vec2 clamp;
@@ -73,8 +73,7 @@ Tensor clamp(
       TORCH_CHECK(false, "Not implemented!");
     }
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
   return convert(v_output);
 }
@@ -95,11 +94,11 @@ Tensor& clamp_(
 
   vTensor& v_self = convert(self);
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if (v_self.has_image()) {
-      const struct {
+    if C10_LIKELY(v_self.has_image()) {
+      const struct Block final {
         uvec3 extents;
         uint32_t _;
         vec2 clamp;
@@ -134,8 +133,7 @@ Tensor& clamp_(
       TORCH_CHECK(false, "Not implemented!");
     }
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
   return self;
 }
@@ -167,10 +165,10 @@ Tensor& relu_(Tensor& self) {
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("clamp", TORCH_FN(clamp));
   m.impl("clamp_", TORCH_FN(clamp_));
-  m.impl_UNBOXED("hardtanh", hardtanh);
-  m.impl_UNBOXED("hardtanh_", hardtanh_);
-  m.impl_UNBOXED("relu", relu);
-  m.impl_UNBOXED("relu_", relu_);
+  m.impl("hardtanh", hardtanh);
+  m.impl("hardtanh_", hardtanh_);
+  m.impl("relu", relu);
+  m.impl("relu_", relu_);
 }
 
 #endif /* USE_VULKAN_API */

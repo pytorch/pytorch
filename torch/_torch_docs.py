@@ -610,6 +610,113 @@ Example::
     True
 """)
 
+add_docstr(torch.all,
+           r"""
+all(input) -> Tensor
+
+Tests if all elements in :attr:`input` evaluate to `True`.
+
+.. note:: This function matches the behaviour of NumPy in returning
+          output of dtype `bool` for all supported dtypes except `uint8`.
+          For `uint8` the dtype of output is `uint8` itself.
+
+Example::
+
+    >>> a = torch.rand(1, 2).bool()
+    >>> a
+    tensor([[False, True]], dtype=torch.bool)
+    >>> torch.all(a)
+    tensor(False, dtype=torch.bool)
+    >>> a = torch.arange(0, 3)
+    >>> a
+    tensor([0, 1, 2])
+    >>> torch.all(a)
+    tensor(False)
+
+.. function:: all(input, dim, keepdim=False, *, out=None) -> Tensor
+
+For each row of :attr:`input` in the given dimension :attr:`dim`,
+returns `True` if all elements in the row evaluate to `True` and `False` otherwise.
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.rand(4, 2).bool()
+    >>> a
+    tensor([[True, True],
+            [True, False],
+            [True, True],
+            [True, True]], dtype=torch.bool)
+    >>> torch.all(a, dim=1)
+    tensor([ True, False,  True,  True], dtype=torch.bool)
+    >>> torch.all(a, dim=0)
+    tensor([ True, False], dtype=torch.bool)
+""".format(**single_dim_common))
+
+add_docstr(torch.any,
+           r"""
+any(input) -> Tensor
+
+Args:
+    {input}
+
+Tests if any element in :attr:`input` evaluates to `True`.
+
+.. note:: This function matches the behaviour of NumPy in returning
+          output of dtype `bool` for all supported dtypes except `uint8`.
+          For `uint8` the dtype of output is `uint8` itself.
+
+Example::
+
+    >>> a = torch.rand(1, 2).bool()
+    >>> a
+    tensor([[False, True]], dtype=torch.bool)
+    >>> torch.any(a)
+    tensor(True, dtype=torch.bool)
+    >>> a = torch.arange(0, 3)
+    >>> a
+    tensor([0, 1, 2])
+    >>> torch.any(a)
+    tensor(True)
+
+.. function:: any(input, dim, keepdim=False, *, out=None) -> Tensor
+
+For each row of :attr:`input` in the given dimension :attr:`dim`,
+returns `True` if any element in the row evaluate to `True` and `False` otherwise.
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4, 2) < 0
+    >>> a
+    tensor([[ True,  True],
+            [False,  True],
+            [ True,  True],
+            [False, False]])
+    >>> torch.any(a, 1)
+    tensor([ True,  True,  True, False])
+    >>> torch.any(a, 0)
+    tensor([True, True])
+""".format(**single_dim_common))
+
 add_docstr(torch.angle,
            r"""
 angle(input, *, out=None) -> Tensor
@@ -3095,7 +3202,17 @@ add_docstr(torch.flatten,
            r"""
 flatten(input, start_dim=0, end_dim=-1) -> Tensor
 
-Flattens a contiguous range of dims in a tensor.
+Flattens :attr:`input` by reshaping it into a one-dimensional tensor. If :attr:`start_dim` or :attr:`end_dim`
+are passed, only dimensions starting with :attr:`start_dim` and ending with :attr:`end_dim` are flattened.
+The order of elements in :attr:`input` is unchanged.
+
+Unlike NumPy's flatten, which always copies input's data, this function may return the original object, a view,
+or copy. If no dimensions are flattened, then the original object :attr:`input` is returned. Otherwise, if input can
+be viewed as the flattened shape, then that view is returned. Finally, only if the input cannot be viewed as the
+flattened shape is input's data copied. See :meth:`torch.Tensor.view` for details on when a view will be returned.
+
+.. note::
+    Flattening a zero-dimensional tensor will return a one-dimensional view.
 
 Args:
     {input}
@@ -6666,11 +6783,10 @@ with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
 If :attr:`some` is ``True``, then this function returns the thin (reduced) QR factorization.
 Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
 
-.. warning:: ``torch.qr`` is deprecated. Please use ``torch.linalg.`` :meth:`~torch.linalg.qr`
-             instead, which provides a better compatibility with
-             ``numpy.linalg.qr``.
+.. warning:: ``torch.qr`` is deprecated. Please use ``torch.linalg.`` :func:`~torch.linalg.qr`
+             instead.
 
-             **Differences with** ``torch.linalg.`` :meth:`~torch.linalg.qr`:
+             **Differences with** ``torch.linalg.qr``:
 
              * ``torch.linalg.qr`` takes a string parameter ``mode`` instead of ``some``:
 
@@ -6688,21 +6804,21 @@ Otherwise, if :attr:`some` is ``False``, this function returns the complete QR f
 
 .. note:: This function uses LAPACK for CPU inputs and MAGMA for CUDA inputs,
           and may produce different (valid) decompositions on different device types
-          and different platforms, depending on the precise version of the
-          underlying library.
+          or different platforms.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
                 batch dimensions consisting of matrices of dimension :math:`m \times n`.
     some (bool, optional): Set to ``True`` for reduced QR decomposition and ``False`` for
-                complete QR decomposition.
+                complete QR decomposition. If `k = min(m, n)` then:
+
+                  * ``some=True`` : returns `(Q, R)` with dimensions (m, k), (k, n) (default)
+
+                  * ``'some=False'``: returns `(Q, R)` with dimensions (m, m), (m, n)
 
 Keyword args:
-    out (tuple, optional): tuple of `Q` and `R` tensors
-                satisfying :code:`input = torch.matmul(Q, R)`.
-                The dimensions of `Q` and `R` are :math:`(*, m, k)` and :math:`(*, k, n)`
-                respectively, where :math:`k = \min(m, n)` if :attr:`some:` is ``True`` and
-                :math:`k = m` otherwise.
+    out (tuple, optional): tuple of `Q` and `R` tensors.
+                The dimensions of `Q` and `R` are detailed in the description of :attr:`some` above.
 
 Example::
 
@@ -8132,18 +8248,45 @@ add_docstr(torch.svd,
            r"""
 svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
-This function returns a namedtuple ``(U, S, V)`` which is the singular value
-decomposition of a input matrix or batches of matrices :attr:`input` such that
-:math:`input = U \times diag(S) \times V^T`.
+Computes the singular value decomposition of either a matrix or batch of
+matrices :attr:`input`." The singular value decomposition is represented as a
+namedtuple ``(U, S, V)``, such that :math:`input = U \mathbin{@} diag(S) \times
+V^T`, where :math:`V^T` is the transpose of ``V``. If :attr:`input` is a batch
+of tensors, then ``U``, ``S``, and ``V`` are also batched with the same batch
+dimensions as :attr:`input`.
 
-If :attr:`some` is ``True`` (default), the method returns the reduced
-singular value decomposition i.e., if the last two dimensions of
-:attr:`input` are ``m`` and ``n``, then the returned `U` matrix will
-contain only :math:`min(n, m)` orthonormal columns and the size of `V`
-will be :math:`(*, n, n)`.
+If :attr:`some` is ``True`` (default), the method returns the reduced singular
+value decomposition i.e., if the last two dimensions of :attr:`input` are
+``m`` and ``n``, then the returned `U` and `V` matrices will contain only
+:math:`min(n, m)` orthonormal columns.
 
-If :attr:`compute_uv` is ``False``, the returned `U` and `V` matrices will be zero matrices
-of shape :math:`(m \times m)` and :math:`(n \times n)` respectively. :attr:`some` will be ignored here.
+If :attr:`compute_uv` is ``False``, the returned `U` and `V` will be
+zero-filled matrices of shape :math:`(m \times m)` and :math:`(n \times n)`
+respectively, and the same device as :attr:`input`. The :attr:`some`
+argument has no effect when :attr:`compute_uv` is False.
+
+The dtypes of ``U`` and ``V`` are the same as :attr:`input`'s. ``S`` will
+always be real-valued, even if :attr:`input` is complex.
+
+.. warning:: ``torch.svd`` is deprecated. Please use ``torch.linalg.``
+             :func:`~torch.linalg.svd` instead, which is similar to NumPy's
+             ``numpy.linalg.svd``.
+
+.. note:: **Differences with** ``torch.linalg.`` :func:`~torch.linalg.svd`:
+
+             * :attr:`some` is the opposite of ``torch.linalg.``
+               :func:`~torch.linalg.svd`'s :attr:`full_matricies`. Note that
+               default value for both is ``True``, so the default behavior is
+               effectively the opposite.
+
+             * it returns ``V``, whereas ``torch.linalg.``
+               :func:`~torch.linalg.svd` returns ``Vh``. The result is that
+               when using ``svd`` you need to manually transpose
+               ``V`` in order to reconstruct the original matrix.
+
+             * If :attr:`compute_uv=False`, it returns zero-filled tensors for
+               ``U`` and ``Vh``, whereas :meth:`~torch.linalg.svd` returns
+               empty tensors.
 
 Supports real-valued and complex-valued input.
 
@@ -8154,22 +8297,18 @@ Supports real-valued and complex-valued input.
           algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the MAGMA routine
           `gesdd` as well.
 
-.. note:: Irrespective of the original strides, the returned matrix `U`
-          will be transposed, i.e. with strides :code:`U.contiguous().transpose(-2, -1).stride()`
+.. note:: The returned matrix `U` will be transposed, i.e. with strides
+          :code:`U.contiguous().transpose(-2, -1).stride()`.
 
-.. note:: Extra care needs to be taken when backward through `U` and `V`
-          outputs. Such operation is really only stable when :attr:`input` is
-          full rank with all distinct singular values. Otherwise, ``NaN`` can
-          appear as the gradients are not properly defined. Also, notice that
-          double backward will usually do an additional backward through `U` and
-          `V` even if the original backward is only on `S`.
+.. note:: Gradients computed using `U` and `V` may be unstable if
+          :attr:`input` is not full rank or has non-unique singular values.
 
 .. note:: When :attr:`some` = ``False``, the gradients on :code:`U[..., :, min(m, n):]`
           and :code:`V[..., :, min(m, n):]` will be ignored in backward as those vectors
           can be arbitrary bases of the subspaces.
 
-.. note:: When :attr:`compute_uv` = ``False``, backward cannot be performed since `U` and `V`
-          from the forward pass is required for the backward operation.
+.. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is True.
+
 
 .. note:: With the complex-valued input the backward operation works correctly only
           for gauge invariant loss functions. Please look at `Gauge problem in AD`_ for more details.
@@ -8177,8 +8316,9 @@ Supports real-valued and complex-valued input.
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
                     batch dimensions consisting of :math:`m \times n` matrices.
-    some (bool, optional): controls the shape of returned `U` and `V`
-    compute_uv (bool, optional): option whether to compute `U` and `V` or not
+    some (bool, optional): controls whether to compute the reduced or full decomposition, and
+                           consequently the shape of returned ``U`` and ``V``. Defaults to True.
+    compute_uv (bool, optional): option whether to compute `U` and `V` or not. Defaults to True.
 
 Keyword args:
     out (tuple, optional): the output tuple of tensors

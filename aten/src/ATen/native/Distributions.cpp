@@ -118,7 +118,7 @@ DEFINE_DISPATCH(bernoulli_tensor_stub);
 DEFINE_DISPATCH(bernoulli_scalar_stub);
 DEFINE_DISPATCH(cauchy_stub);
 DEFINE_DISPATCH(exponential_stub);
-DEFINE_DISPATCH(multinomial_stub);
+DEFINE_DISPATCH(multinomial_with_replacement_stub);
 DEFINE_DISPATCH(geometric_stub);
 DEFINE_DISPATCH(log_normal_stub);
 DEFINE_DISPATCH(uniform_stub);
@@ -497,8 +497,10 @@ Tensor& multinomial_out(
   // Reference:
   // https://github.com/pytorch/pytorch/issues/11931#issuecomment-625882503
   // Half is not supported on CPU.
-  if (!with_replacement &&
-      !(self.device().is_cpu() && self.scalar_type() == ScalarType::Half)) {
+  TORCH_CHECK(
+      !(self.device().is_cpu() && self.scalar_type() == ScalarType::Half),
+      "multinomial is not implemented for half on CPU");
+  if (!with_replacement) {
     // Sanity checks on `self`.
     auto is_valid = ((self.max() < INFINITY) & (self.min() >= 0)).item();
     TORCH_CHECK(
@@ -537,13 +539,8 @@ Tensor& multinomial_out(
     return result;
   }
 
-  multinomial_stub(
-      result.device().type(),
-      result,
-      self,
-      n_sample,
-      with_replacement,
-      gen);
+  multinomial_with_replacement_stub(
+      result.device().type(), result, self, n_sample, gen);
   return result;
 }
 
