@@ -613,6 +613,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.fractional_max_pool3d_with_indices: (
             lambda input, kernel_size, output_size=None, output_ratio=None, return_indices=False,
             _random_samples=None: -1),
+        torch.nn.functional.gaussian_nll_loss: (lambda input, target, var, full=False, eps=1e-06, reduction='mean': -1),
         torch.nn.functional.gelu: lambda input: -1,
         torch.nn.functional.glu: lambda input, dim=-1: -1,
         torch.nn.functional.grid_sample: lambda input, grid, mode='bilinear', padding_mode='zeros', align_corners=None: -1,
@@ -673,7 +674,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.pairwise_distance: lambda x1, x2, p=2.0, eps=1e-06, keepdim=False: -1,
         torch.nn.functional.poisson_nll_loss: (lambda input, target, log_input=True, full=False, size_average=None,
                                                eps=1e-08, reduce=None, reduction='mean': -1),
-        torch.nn.functional.gaussian_nll_loss: (lambda input, target, var, full=False, eps=1e-06, reduction='mean': -1),
         torch.nn.functional.prelu: lambda input, weight: -1,
         torch.nn.functional.relu: lambda input, inplace=False: -1,
         torch.nn.functional.relu6: lambda input, inplace=False: -1,

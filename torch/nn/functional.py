@@ -2335,6 +2335,12 @@ def gaussian_nll_loss(input, target, var, *, full=False, eps=1e-6, reduction='me
             ``'sum'``: the output is the sum of all batch member losses.
             Default: ``'mean'``.
     """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, target, var)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                gaussian_nll_loss, tens_ops, input, target, var, full=full, eps=eps, reduction=reduction)
+
     # Inputs and targets much have same shape
     input = input.view(input.size(0), -1)
     target = target.view(target.size(0), -1)
