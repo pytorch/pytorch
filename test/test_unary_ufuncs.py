@@ -3,7 +3,7 @@ import numpy as np
 
 import warnings
 import math
-from itertools import product, chain
+from itertools import product, chain, permutations
 from numbers import Number
 import random
 import unittest
@@ -471,6 +471,7 @@ class TestUnaryUfuncs(TestCase):
                 if dtype.is_complex and computation_dtype.is_floating_point:
                     # Pytorch doesn't raise an error for
                     # complex -> float casting
+                    # Raises a warning only once.
                     continue
 
                 with self.assertRaisesRegex(RuntimeError, "not implemented for"):
@@ -479,6 +480,42 @@ class TestUnaryUfuncs(TestCase):
                 # Verify the output.
                 actual = op(input, dtype=computation_dtype)
                 self.assertEqual(actual, expected)
+
+    @ops(list(filter(lambda op: op.supports_dtype_kwarg, unary_ufuncs)), dtypes=OpDTypes.supported)
+    def test_dtype_and_out_arg(self, device, dtype, op):
+        # TODO: See if the common code can be nicely merged with
+        #       `test_dtype_arg`
+        input = make_tensor((32, 32), dtype=dtype, device=device,
+                            low=op.domain[0], high=op.domain[1])
+
+        for computation_dtype, out_dtype in permutations(op.supported_dtypes(self.device_type), 2):
+            # As NumPy doesn't have a bfloat16 equivalent.
+            if torch.bfloat16 in [computation_dtype, out_dtype, input.dtype]:
+                continue
+
+            np_computation_dtype = torch_to_numpy_dtype_dict[computation_dtype]
+            out = torch.empty(input.shape, dtype=out_dtype, device=device)
+            out_np = out.cpu().numpy()
+
+            try:
+                expected = op.ref(input.cpu().numpy(), dtype=np_computation_dtype, out=out_np)
+            except TypeError:
+                expected = None
+
+            if expected is None:
+                # Verify that torch variant raises an error.
+                if dtype.is_complex and computation_dtype.is_floating_point:
+                    # Pytorch doesn't raise an error for
+                    # complex -> float casting
+                    # Raises a warning only once.
+                    continue
+
+                with self.assertRaises(RuntimeError):
+                    op(input, dtype=computation_dtype, out=out)
+            else:
+                # Verify the output.
+                actual = op(input, dtype=computation_dtype, out=out)
+                self.assertEqual(out, out_np)
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool] +
               torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
