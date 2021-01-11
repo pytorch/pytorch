@@ -44,6 +44,11 @@ namespace py = pybind11;
 
 PyObject *THPVariableClass = nullptr;
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+PyObject *ParameterClass = nullptr;
+
+// clang-tidy gets confused by static const
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
     "`with torch.no_grad():` instead.";
