@@ -50,7 +50,7 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  MixtureSameFamily, Multinomial, MultivariateNormal,
                                  NegativeBinomial, Normal,
                                  OneHotCategorical, OneHotCategoricalStraightThrough,
-                                 Pareto, Poisson, RelaxedBernoulli, RelaxedOneHotCategorical,
+                                 Pareto, PlackettLuce, Poisson, RelaxedBernoulli, RelaxedOneHotCategorical,
                                  StudentT, TransformedDistribution, Uniform,
                                  VonMises, Weibull, constraints, kl_divergence)
 from torch.distributions.constraint_registry import transform_to
@@ -486,7 +486,53 @@ EXAMPLES = [
         {'probs': torch.tensor([0.3], requires_grad=True)},
         {'probs': 0.3},
         {'logits': torch.tensor([0.], requires_grad=True)},
-    ])
+    ]),
+    Example(PlackettLuce, [
+        {'logits': torch.tensor([0.2, 0.3, 0.5], requires_grad=True)},
+        {'logits': torch.tensor([0.2, 10, 0.5, 0.6, 0.3], requires_grad=True)},
+        {'logits': torch.tensor([0.2, 0.3, 10, 0.6, 0.3, 0.3, -0.4, -0.7], requires_grad=True)},
+        {
+            'logits': torch.tensor([0.2, 0.3, 0.5, 0.6, 0.3], requires_grad=True),
+            'permutation_sizes': torch.tensor(4, dtype=torch.int64),
+        },
+        {
+            'logits': torch.tensor([0.2, 0.3, 10, 0.6, 0.3, 0.3, -0.4, -0.7], requires_grad=True),
+            'permutation_sizes': torch.tensor(5, dtype=torch.int64),
+        },
+        {
+            'logits': torch.tensor([[0.2, 0.3, 0.5], [-1, 2, -3]], requires_grad=True),
+            'permutation_sizes': torch.tensor([3, 2], dtype=torch.int64),
+        },
+        {
+            'logits': torch.tensor([[[0.2, 0.3, 0.5], [-1, 2, -3]],
+                                    [[-0.2, -0.3, -0.5], [-1, 2, -3]]], requires_grad=True),
+            'permutation_sizes': torch.tensor([[3, 2], [2, 3]], dtype=torch.int64),
+        },
+        {
+            'logits': torch.tensor([[0.2, 0.3, 0.5, 0.6, 0.3, 0.3, -0.4, -0.7],
+                                    [0.2, -0.1, 0.1, 0.6, 0.3, 0.3, -0.4, -0.7]], requires_grad=True),
+            'permutation_sizes': torch.tensor([6, 7], dtype=torch.int64),
+        },
+        # Degenerate cases
+        {'logits': torch.tensor([1.0], requires_grad=True)},
+        {
+            'logits': torch.tensor([1.0], requires_grad=True),
+            'permutation_sizes': torch.tensor(0, dtype=torch.int64),
+        },
+        {
+            'logits': torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
+            'permutation_sizes': torch.tensor(0, dtype=torch.int64),
+        },
+        {
+            'logits': torch.tensor([1.0, 2.0, 3.0], requires_grad=True),
+            'permutation_sizes': torch.tensor(1, dtype=torch.int64),
+        },
+        {
+            'logits': torch.tensor([[1.0, 2.0, 3.0],
+                                   [4.0, 5.0, 5.0]], requires_grad=True),
+            'permutation_sizes': torch.tensor([0, 1], dtype=torch.int64),
+        },
+    ]),
 ]
 
 BAD_EXAMPLES = [
@@ -781,9 +827,9 @@ class TestDistributions(TestCase):
     def _check_sampler_discrete(self, torch_dist, ref_dist, message,
                                 num_samples=10000, failure_rate=1e-3):
         """Runs a Chi2-test for the support, but ignores tail instead of combining"""
-        torch_samples = torch_dist.sample((num_samples,)).squeeze()
+        torch_samples = torch_dist.sample((num_samples,))
         torch_samples = torch_samples.cpu().numpy()
-        unique, counts = np.unique(torch_samples, return_counts=True)
+        unique, counts = np.unique(torch_samples, return_counts=True, axis=0)
         pmf = ref_dist.pmf(unique)
         msk = (counts > 5) & ((pmf * num_samples) > 5)
         self.assertGreater(pmf[msk].sum(), 0.9, "Distribution is too sparse for test; try increasing num_samples")
@@ -1306,7 +1352,7 @@ class TestDistributions(TestCase):
     def test_poisson_gpu_sample(self):
         set_rng_seed(1)
         for rate in [0.12, 0.9, 4.0]:
-            self._check_sampler_discrete(Poisson(torch.tensor([rate]).cuda()),
+            self._check_sampler_discrete(Poisson(torch.tensor(rate).cuda()),
                                          scipy.stats.poisson(rate),
                                          'Poisson(lambda={}, cuda)'.format(rate),
                                          failure_rate=1e-3)
@@ -2575,6 +2621,37 @@ class TestDistributions(TestCase):
                 self.assertTrue(all([x == torch.tensor(0.5).log() for x in log_probs]))
             self.assertEqual(log_probs[0], log_probs[1])
 
+    def test_plackett_luce_log_prob(self):
+        for Dist, params in EXAMPLES:
+            if Dist == PlackettLuce:
+                param_order = ["logits", "permutation_sizes"]
+                for param in params:
+                    max_permutation_size = param["permutation_sizes"].max() if "permutation_sizes" in param else \
+                        param["logits"].shape[-1]
+                    if max_permutation_size > 0:
+                        self._gradcheck_log_prob(PlackettLuce, [param[name] for name in param_order if name in param])
+
+    def test_plackett_luce_sample(self):
+        class PMFWrapper:
+            def __init__(self, dist):
+                self.dist = dist
+
+            def pmf(self, values):
+                return self.dist.log_prob(torch.from_numpy(values)).exp().detach().numpy()
+
+        for Dist, params in EXAMPLES:
+            if Dist == PlackettLuce:
+                for param in params:
+                    dist = PlackettLuce(**param)
+                    max_permutation_size = param["permutation_sizes"].max() if "permutation_sizes" in param else dist.event_shape[0]
+                    if len(dist.batch_shape) == 0 and 2 <= max_permutation_size <= 8:
+                        self._check_sampler_discrete(dist,
+                                                     PMFWrapper(dist),
+                                                     'PlackettLuce(logits={}, permutation_sizes={})'.format(dist.logits,
+                                                                                                            dist.permutation_sizes),
+                                                     num_samples=100000
+                                                     )
+
     def test_independent_shape(self):
         for Dist, params in EXAMPLES:
             for param in params:
@@ -3490,6 +3567,30 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(continuous_bernoulli.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, continuous_bernoulli.log_prob, self.tensor_sample_2)
         self.assertEqual(continuous_bernoulli.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
+
+    def test_plackett_luce_shape_scalar_params(self):
+        plackett_luce = PlackettLuce(torch.tensor([0.6, 0.3, 0.2, 0.1]))
+        self.assertEqual(plackett_luce._batch_shape, torch.Size(()))
+        self.assertEqual(plackett_luce._event_shape, torch.Size((4,)))
+        self.assertEqual(plackett_luce.sample().size(), torch.Size((4,)))
+        self.assertEqual(plackett_luce.sample((3, 2)).size(), torch.Size((3, 2, 4)))
+        valid_sample = torch.tensor([0, 1, 2, 3], dtype=torch.int64)
+        invalid_sample = torch.tensor([0, 1, 2], dtype=torch.int64)
+        self.assertEqual(plackett_luce.log_prob(valid_sample).size(), torch.Size(()))
+        self.assertRaises(ValueError, plackett_luce.log_prob, invalid_sample)
+        self.assertEqual(plackett_luce.log_prob(valid_sample.expand(3, 4)).size(), torch.Size((3, )))
+
+    def test_plackett_luce_shape_tensor_params(self):
+        plackett_luce = PlackettLuce(torch.tensor([[0.6, 0.3, 0.2, 0.1], [0.6, 0.3, 0.2, 0.1], [0.6, 0.3, 0.2, 0.1]]))
+        self.assertEqual(plackett_luce._batch_shape, torch.Size((3,)))
+        self.assertEqual(plackett_luce._event_shape, torch.Size((4,)))
+        self.assertEqual(plackett_luce.sample().size(), torch.Size((3, 4)))
+        self.assertEqual(plackett_luce.sample((3, 2)).size(), torch.Size((3, 2, 3, 4)))
+        valid_sample = torch.tensor([[0, 1, 2, 3], [0, 1, 2, 3], [0, 1, 2, 3]], dtype=torch.int64)
+        invalid_sample = torch.tensor([[0, 1, 2], [0, 1, 2], [0, 1, 2]], dtype=torch.int64)
+        self.assertEqual(plackett_luce.log_prob(valid_sample).size(), torch.Size((3,)))
+        self.assertRaises(ValueError, plackett_luce.log_prob, invalid_sample)
+        self.assertEqual(plackett_luce.log_prob(valid_sample.expand(3, 3, 4)).size(), torch.Size((3, 3)))
 
 
 class TestKL(TestCase):
