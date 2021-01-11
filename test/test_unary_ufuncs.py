@@ -450,21 +450,19 @@ class TestUnaryUfuncs(TestCase):
             else:
                 self._test_out_arg(op, input, out)
 
-    @ops(filter(lambda op: op.supports_dtype_kwarg, unary_ufuncs), dtypes=OpDTypes.supported)
+    @ops(list(filter(lambda op: op.supports_dtype_kwarg, unary_ufuncs)), dtypes=OpDTypes.supported)
     def test_dtype_arg(self, device, dtype, op):
         input = make_tensor((32, 32), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])
 
-        for computation_dtype in all_types_and_complex_and(torch.bool, torch.half):
-            if computation_dtype in [torch.float16]:
-                continue
+        for computation_dtype in op.supported_dtypes(self.device_type):
             # As NumPy doesn't have a bfloat16 equivalent.
             if torch.bfloat16 in [computation_dtype, input.dtype]:
                 continue
 
             np_computation_dtype = torch_to_numpy_dtype_dict[computation_dtype]
             try:
-                expected = op.ref(input.numpy(), dtype=np_computation_dtype)
+                expected = op.ref(input.cpu().numpy(), dtype=np_computation_dtype)
             except TypeError:
                 expected = None
 
