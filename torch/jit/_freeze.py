@@ -125,7 +125,7 @@ def optimize_frozen_module(mod):
     Note:
         In rare occassions, this can result in slower execution.
 
-    Example (Freezing a module with preserved attributes)
+    Example (Freezing a module with Conv->Batchnorm)
     .. code-block:: python
         import torch
         in_channels, out_channels = 3, 32
