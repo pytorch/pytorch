@@ -1,7 +1,6 @@
 import argparse
 import os
 import sys
-from typing import List, Tuple
 import torch
 
 # grab modules from test_jit_hooks.cpp
