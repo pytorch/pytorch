@@ -56,7 +56,7 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
   const bool use_cusolver_for_loop = (batch_size <= 8) || (/* batch_size > 8 && */ n >= 512);
 
   if (use_cusolver_for_loop) {
-    for(int64_t i = 0; i < batch_size; i++){
+    for (int64_t i = 0; i < batch_size; i++) {
       auto dataPtr = allocator.allocate(sizeof(int) * lda);
       int* pivot = reinterpret_cast<int*>(dataPtr.get());
 
