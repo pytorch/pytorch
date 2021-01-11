@@ -4682,109 +4682,109 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_default(self):
         self._test_device_maps_gpu(
-            x_from = 0,
-            y_from = 0,
-            z_to = 0,
-            device_map = {0 : 0}
+            x_from=0,
+            y_from=0,
+            z_to=0,
+            device_map={0 : 0}
         )
 
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_non_default(self):
         self._test_device_maps_gpu(
-            x_from = 1,
-            y_from = 1,
-            z_to = 1,
-            device_map = {1 : 1}
+            x_from=1,
+            y_from=1,
+            z_to=1,
+            device_map={1 : 1}
         )
 
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_default_to_non_default(self):
         self._test_device_maps_gpu(
-            x_from = 0,
-            y_from = 0,
-            z_to = 1,
-            device_map = {0 : 1}
+            x_from=0,
+            y_from=0,
+            z_to=1,
+            device_map={0 : 1}
         )
 
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_non_default_to_default(self):
         self._test_device_maps_gpu(
-            x_from = 1,
-            y_from = 1,
-            z_to = 0,
-            device_map = {1 : 0}
+            x_from=1,
+            y_from=1,
+            z_to=0,
+            device_map={1 : 0}
         )
 
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_mixed_1(self):
         self._test_device_maps_gpu(
-            x_from = 0,
-            y_from = 1,
-            z_to = 0,
-            device_map = {0 : 0, 1 : 1}
+            x_from=0,
+            y_from=1,
+            z_to=0,
+            device_map={0 : 0, 1 : 1}
         )
 
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_mixed_2(self):
         self._test_device_maps_gpu(
-            x_from = 0,
-            y_from = 1,
-            z_to = 1,
-            device_map = {0 : 0, 1 : 1}
+            x_from=0,
+            y_from=1,
+            z_to=1,
+            device_map={0 : 0, 1 : 1}
         )
 
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_mixed_3(self):
         self._test_device_maps_gpu(
-            x_from = 1,
-            y_from = 0,
-            z_to = 0,
-            device_map = {0 : 0, 1 : 1}
+            x_from=1,
+            y_from=0,
+            z_to=0,
+            device_map={0 : 0, 1 : 1}
         )
 
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_mixed_4(self):
         self._test_device_maps_gpu(
-            x_from = 1,
-            y_from = 0,
-            z_to = 1,
-            device_map = {0 : 0, 1 : 1}
+            x_from=1,
+            y_from=0,
+            z_to=1,
+            device_map={0 : 0, 1 : 1}
         )
 
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_mixed_5(self):
         self._test_device_maps_gpu(
-            x_from = 0,
-            y_from = 1,
-            z_to = 0,
-            device_map = {0 : 1, 1 : 0}
+            x_from=0,
+            y_from=1,
+            z_to=0,
+            device_map={0 : 1, 1 : 0}
         )
 
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_mixed_6(self):
         self._test_device_maps_gpu(
-            x_from = 0,
-            y_from = 1,
-            z_to = 1,
-            device_map = {0 : 1, 1 : 0}
+            x_from=0,
+            y_from=1,
+            z_to=1,
+            device_map={0 : 1, 1 : 0}
         )
 
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_mixed_7(self):
         self._test_device_maps_gpu(
-            x_from = 1,
-            y_from = 0,
-            z_to = 0,
-            device_map = {0 : 1, 1 : 0}
+            x_from=1,
+            y_from=0,
+            z_to=0,
+            device_map={0 : 1, 1 : 0}
         )
 
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_mixed_8(self):
         self._test_device_maps_gpu(
-            x_from = 1,
-            y_from = 0,
-            z_to = 1,
-            device_map = {0 : 1, 1 : 0}
+            x_from=1,
+            y_from=0,
+            z_to=1,
+            device_map={0 : 1, 1 : 0}
         )
 
     @staticmethod
