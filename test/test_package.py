@@ -483,6 +483,22 @@ def load():
 
         self.assertTrue(torch.allclose(*results))
 
+    @skipIfNoTorchVision
+    def test_script_resnet(self):
+        resnet = resnet18()
+
+        f1 = self.temp()
+        # Option 1: save by pickling the whole model
+        # + single-line, similar to torch.jit.save
+        # - more difficult to edit the code after the model is created
+        with PackageExporter(f1, verbose=False) as e:
+            e.save_pickle('model', 'pickled', resnet)
+
+        i = PackageImporter(f1)
+        loaded = i.load_pickle('model', 'pickled')
+        torch.jit.script(loaded)
+
+
     def test_module_glob(self):
         from torch.package.exporter import _GlobGroup
 

@@ -1,6 +1,7 @@
 from typing import List, Callable, Dict, Optional, Any, Union
 import builtins
 import importlib
+import linecache
 from torch.serialization import _load
 import pickle
 import torch
@@ -144,6 +145,8 @@ class PackageImporter:
         return self.zip_reader.get_record('extern_modules').decode('utf-8').splitlines(keepends=False)
 
     def _make_module(self, name: str, filename: Optional[str], is_package: bool, parent: str):
+        mangled_filename = self._mangler.mangle(filename) if filename else None
+
         spec = importlib.machinery.ModuleSpec(name, self, is_package=is_package)  # type: ignore
         module = importlib.util.module_from_spec(spec)
         self.modules[name] = module
@@ -151,16 +154,21 @@ class PackageImporter:
         ns = module.__dict__
         ns['__spec__'] = spec
         ns['__loader__'] = self
-        ns['__file__'] = filename
+        ns['__file__'] = mangled_filename
         ns['__cached__'] = None
         ns['__builtins__'] = self.patched_builtins
+
+        # pre-emptively install the source in `linecache` so that stack traces,
+        # `inspect`, etc. work.
+        assert mangled_filename not in linecache.cache
+        linecache.lazycache(mangled_filename, ns)
 
         # pre-emptively install on the parent to prevent IMPORT_FROM from trying to
         # access sys.modules
         self._install_on_parent(parent, name, module)
 
         if filename is not None:
-            code = self._compile_source(filename)
+            code = self._compile_source(unmangled_filename, filename)
             exec(code, ns)
 
         return module
@@ -178,16 +186,16 @@ class PackageImporter:
                 return module
         return self._make_module(name, cur.source_file, isinstance(cur, _PackageNode), parent)  # type: ignore
 
-    def _compile_source(self, fullpath):
+    def _compile_source(self, fullpath: str, mangled_filename: str):
         source = self.zip_reader.get_record(fullpath)
         source = _normalize_line_endings(source)
-        return compile(source, fullpath, 'exec', dont_inherit=True)
+        return compile(source, mangled_filename, 'exec', dont_inherit=True)
 
     # note: named `get_source` so that linecache can find the source
     # when this is the __loader__ of a module.
     def get_source(self, module_name) -> str:
         module = self.import_module(module_name)
-        return self.zip_reader.get_record(module.__file__).decode('utf-8')
+        return self.zip_reader.get_record(self._mangler.demangle(module.__file__)).decode('utf-8')
 
     def _install_on_parent(self, parent: str, name: str, module: types.ModuleType):
         if not parent:
