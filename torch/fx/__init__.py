@@ -85,3 +85,4 @@ from .symbolic_trace import symbolic_trace, Tracer, wrap
 from .graph import Graph
 from .node import Node, map_arg
 from .proxy import Proxy, len
+from .interpreter import Interpreter as Interpreter, Transformer as Transformer

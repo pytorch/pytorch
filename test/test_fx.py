@@ -8,7 +8,7 @@ import sys
 import functools
 import contextlib
 from pathlib import Path
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph, wrap
+from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap
 from torch.fx.experimental import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from copy import deepcopy
@@ -874,6 +874,119 @@ class TestFX(JitTestCase):
 
         # Test shape propogation and make sure results match actual
         self.assertEqual(output_shape, ref_out.shape)
+
+    def test_interpreter(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+                self.linear = torch.nn.Linear(4, 5)
+
+            def forward(self, x):
+                return self.linear(x + self.param).clamp(min=0.0, max=1.0)
+
+        m = MyModule()
+        gm = torch.fx.symbolic_trace(m)
+
+        interpreter = Interpreter(gm)
+        input = torch.randn(3, 4)
+        self.assertEqual(interpreter.run(input), gm(input))
+        self.assertEqual(interpreter.run(input), m(input))
+
+    def test_interpreter_run_node_override(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+                self.linear = torch.nn.Linear(4, 5)
+
+            def forward(self, x):
+                return self.linear(x + self.param).clamp(min=0.0, max=1.0)
+
+        m = MyModule()
+        gm = torch.fx.symbolic_trace(m)
+
+        class RunNodeInterpreter(Interpreter):
+            def __init__(self, module):
+                super().__init__(module)
+
+            def run_node(self, n : Node) -> Any:
+                result = super().run_node(n)
+                n.cached_value = result
+                return result
+
+        input = torch.randn(3, 4)
+        RunNodeInterpreter(gm).run(input)
+        for node in gm.graph.nodes:
+            assert hasattr(node, 'cached_value')
+
+    def test_interpreter_onthefly_swap(self):
+
+        def fn(x):
+            return torch.sigmoid(x).neg()
+
+        gm = torch.fx.symbolic_trace(fn)
+
+        class NegSigmSwapInterpreter(Interpreter):
+            def call_function(self, n : Node) -> Any:
+                if n.target == torch.sigmoid:
+                    n = copy.copy(n)
+                    n.target = torch.neg
+                return super().call_function(n)
+
+            def call_method(self, n : Node) -> Any:
+                if n.target == 'neg':
+                    n = copy.copy(n)
+                    n.target = 'sigmoid'
+                return super().call_method(n)
+
+        input = torch.randn(3, 4)
+        result = NegSigmSwapInterpreter(gm).run(input)
+        self.assertEqual(result, torch.neg(input).sigmoid())
+
+    def test_transformer_noop(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+                self.linear = torch.nn.Linear(4, 5)
+
+            def forward(self, x):
+                return self.linear(x + self.param).clamp(min=0.0, max=1.0)
+
+        m = MyModule()
+        gm = torch.fx.symbolic_trace(m)
+
+        new_gm = Transformer(gm).transform()
+
+        input = torch.randn(3, 4)
+        self.assertEqual(new_gm(input), gm(input))
+
+    def test_transformer_op_swap(self):
+
+        def fn(x):
+            return torch.sigmoid(x).neg()
+
+        gm = torch.fx.symbolic_trace(fn)
+
+        class NegSigmSwapXformer(Transformer):
+            def call_function(self, n : Node) -> Any:
+                if n.target == torch.sigmoid:
+                    n = copy.copy(n)
+                    n.target = torch.neg
+                return super().call_function(n)
+
+            def call_method(self, n : Node) -> Any:
+                if n.target == 'neg':
+                    n = copy.copy(n)
+                    n.target = 'sigmoid'
+                return super().call_method(n)
+
+        transformed = NegSigmSwapXformer(gm).transform()
+        print(gm.graph)
+        print(transformed.graph)
+        input = torch.randn(3, 4)
+        self.assertEqual(transformed(input), torch.neg(input).sigmoid())
 
     def test_fn_type_annotations(self):
         class Foo(torch.nn.Module):
