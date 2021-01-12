@@ -94,7 +94,6 @@ class PackageImporter:
         Returns:
             types.ModuleType: the (possibly already) loaded module.
         """
-        name = self._mangler.demangle(name)
         return self._gcd_import(name)
 
     def load_binary(self, package: str, resource: str) -> bytes:
@@ -194,7 +193,8 @@ class PackageImporter:
     # note: named `get_source` so that linecache can find the source
     # when this is the __loader__ of a module.
     def get_source(self, module_name) -> str:
-        module = self.import_module(module_name)
+        # linecache calls `get_source` with the `module.__name__` as the argument, so we must demangle it here.
+        module = self.import_module(self._mangler.demangle(module_name))
         return self.zip_reader.get_record(self._mangler.demangle(module.__file__)).decode('utf-8')
 
     def _install_on_parent(self, parent: str, name: str, module: types.ModuleType):
@@ -296,7 +296,7 @@ class PackageImporter:
         return module
 
     def __import__(self, name, globals=None, locals=None, fromlist=(), level=0):
-        name = self._mangler.demangle(name)
+        # name = self._mangler.demangle(name)
         if level == 0:
             module = self._gcd_import(name)
         else:

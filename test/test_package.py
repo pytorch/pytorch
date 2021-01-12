@@ -2,7 +2,7 @@ from unittest import main, skipIf
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS
 from tempfile import NamedTemporaryFile
 from torch.package import PackageExporter, PackageImporter
-from torch.package._mangling import PackageMangler, demangle, _is_mangled
+from torch.package._mangling import PackageMangler, demangle, is_mangled
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import torch
@@ -158,11 +158,9 @@ import module_a
         self.assertIsNot(package_a, package_a_im)
         self.assertIs(package_a.subpackage, package_a_im.subpackage)
 
-    @skipIf(version_info < (3, 7), 'mock uses __getattr__ a 3.7 feature')
-    def test_mock_from_imported_package(self):
+    def test_save_imported_module_fails(self):
         """
-        Test that mocking will mock out an imported module. In particular,
-        the pattern matching should ignore name mangling.
+        Directly saving/requiring an PackageImported module should raise a specific error message.
         """
         import package_a.subpackage
         obj = package_a.subpackage.PackageASubpackageObject()
@@ -175,18 +173,12 @@ import module_a
         loaded1 = importer1.load_pickle("obj", "obj.pkl")
 
         f2 = self.temp()
-        with PackageExporter(f2, verbose=False) as pe:
-            pe.importers.insert(0, importer1.import_module)
-            # These names are actually different, since loaded1's module should be mangled
-            self.assertNotEqual('package_a.subpackage', loaded1.__module__)
-            pe.mock('package_a.subpackage')
+        pe = PackageExporter(f2, verbose=False)
+        pe.importers.insert(0, importer1.import_module)
+        with self.assertRaisesRegex(ModuleNotFoundError, 'torch.package'):
             pe.require_module(loaded1.__module__)
-
-        importer2 = PackageImporter(f2)
-        m = importer2.import_module('package_a.subpackage')
-        r = m.result
-        with self.assertRaisesRegex(NotImplementedError, 'was mocked out'):
-            r()
+        with self.assertRaisesRegex(ModuleNotFoundError, 'torch.package'):
+            pe.save_module(loaded1.__module__)
 
     def test_exporting_mismatched_code(self):
         """
@@ -231,39 +223,6 @@ import module_a
         pe = make_exporter()
         pe.save_pickle("obj", "obj.pkl", loaded1)
 
-    def test_exporting_name_collision(self):
-        """
-        Implicitly overwriting an module already written in the exporter should fail.
-        """
-        import package_a.subpackage
-        obj = package_a.subpackage.PackageASubpackageObject()
-        obj2 = package_a.PackageAObject(obj)
-        f1 = self.temp()
-        with PackageExporter(f1, verbose=False) as pe:
-            pe.save_pickle("obj", "obj.pkl", obj2)
-
-        importer1 = PackageImporter(f1)
-        loaded1 = importer1.load_pickle("obj", "obj.pkl")
-        importer2 = PackageImporter(f1)
-        loaded2 = importer2.load_pickle("obj", "obj.pkl")
-
-        # Modules from loaded packages should not shadow the names of modules.
-        # See "Mangling Imports" for more info.
-        mod1 = type(obj2).__module__
-        mod2 = type(loaded1).__module__
-
-
-        f2 = self.temp()
-        pe = PackageExporter(f2, verbose=False)
-        pe.importers.insert(0, importer1.import_module)
-        pe.save_module(mod1)
-
-        # `mod1` and `mod2` will have a name collision on export, since they
-        # represent the same module. So saving `mod2` after saving `mod1`
-        # should raise an error.
-        with self.assertRaises(RuntimeError):
-            pe.save_module(mod2)
-
     def test_unique_module_names(self):
         import package_a.subpackage
         obj = package_a.subpackage.PackageASubpackageObject()
@@ -278,7 +237,7 @@ import module_a
         loaded2 = importer2.load_pickle("obj", "obj.pkl")
 
         # Modules from loaded packages should not shadow the names of modules.
-        # See "Mangling Imports" for more info.
+        # See mangling.md for more info.
         self.assertNotEqual(type(obj2).__module__, type(loaded1).__module__)
         self.assertNotEqual(type(loaded1).__module__, type(loaded2).__module__)
 
@@ -552,11 +511,11 @@ class ManglingTest(TestCase):
     def test_is_mangled(self):
         a = PackageMangler()
         b = PackageMangler()
-        self.assertTrue(_is_mangled(a.mangle("foo.bar")))
-        self.assertTrue(_is_mangled(b.mangle("foo.bar")))
+        self.assertTrue(is_mangled(a.mangle("foo.bar")))
+        self.assertTrue(is_mangled(b.mangle("foo.bar")))
 
-        self.assertFalse(_is_mangled("foo.bar"))
-        self.assertFalse(_is_mangled(a.demangle(a.mangle("foo.bar"))))
+        self.assertFalse(is_mangled("foo.bar"))
+        self.assertFalse(is_mangled(a.demangle(a.mangle("foo.bar"))))
 
     def test_demangler_multiple_manglers(self):
         """

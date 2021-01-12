@@ -5,7 +5,7 @@ import pickletools
 from .find_file_dependencies import find_files_source_depends_on
 from ._custom_import_pickler import create_custom_import_pickler, import_module_from_importers
 from ._importlib import _normalize_path
-from ._mangling import check_not_mangled, demangle, DemangledModuleName
+from ._mangling import is_mangled
 import types
 import importlib
 from typing import List, Any, Callable, Dict, Tuple, Union, Iterable
@@ -75,32 +75,6 @@ class PackageExporter:
         self.importers = [importlib.import_module]
         self.patterns : List[Tuple[Any, Callable[[str], None]]] = []  # 'any' is 're.Pattern' but breaks old mypy
         self.debug_deps : List[Tuple[str, str]] = []
-        # Map of demangled name => original name
-        # This is to detect name collisions when you are trying to save something like:
-        #    foo.bar => foo.bar
-        #    __torch0__.foo.bar => foo.bar   # collision!
-        #    __torch1__.foo.bar => foo.bar   # collision!
-        self._demangled_names: Dict[DemangledModuleName, str] = {}
-
-    def _demangle(self, name: str) -> DemangledModuleName:
-        if isinstance(name, DemangledModuleName):
-            return name
-
-        demangled = demangle(name)
-
-        # Check for whether this demangled name collides with a previously saved module.
-        existing_name = self._demangled_names.get(demangled)
-        if existing_name is None:
-            self._demangled_names[demangled] = name
-            return demangled
-
-        if name != existing_name:
-            raise RuntimeError(
-                "Name collision! Tried to save two different packaged modules:"
-                f"'{name}' and '{existing_name}' which resolve to the same name: '{demangled}'."
-            )
-
-        return demangled
 
     def save_source_file(self, module_name: str, file_or_directory: str, dependencies=True):
         """Adds the local file system `file_or_directory` to the source package to provide the code
@@ -113,11 +87,10 @@ class PackageExporter:
                 as a package.
             dependencies (bool, optional): If True, we scan the source for dependencies (see :ref:`Dependencies`).
         """
-        module_name = self._demangle(module_name)
         path = Path(file_or_directory)
         if path.is_dir():
             to_save = []  # list of tuples with arguments to save_source_string
-            module_path = str(module_name).replace('.', '/')
+            module_path = module_name.replace('.', '/')
             for filename in path.glob('**/*.py'):
                 relative_path = filename.relative_to(path).as_posix()
                 archivename = module_path + '/' + relative_path
@@ -157,7 +130,6 @@ class PackageExporter:
             dependencies (bool, optional): If True, we scan the source for dependencies (see :ref:`Dependencies`).
             orig_file_name (str, optional): If present, used in logging to identifying where the source came from. Defaults to None.
         """
-        module_name = self._demangle(module_name)
         self.provided[module_name] = True
         extension = '/__init__.py' if is_package else '.py'
         filename = module_name.replace('.', '/') + extension
@@ -193,7 +165,14 @@ class PackageExporter:
                 self.require_module_if_not_provided(dep)
 
     def _import_module(self, module_name: str):
-        return import_module_from_importers(str(module_name), self.importers)
+        try:
+            return import_module_from_importers(module_name, self.importers)
+        except ModuleNotFoundError as e:
+            if not is_mangled(module_name):
+                raise
+            msg = (f"Cannot export module '{module_name}'. Modules imported "
+                   "from a torch.package cannot be re-exported directly.")
+            raise ModuleNotFoundError(msg) from None
 
     def _module_exists(self, module_name: str) -> bool:
         try:
@@ -228,7 +207,6 @@ node [shape=box];
         return ''.join(result)
 
     def require_module_if_not_provided(self, module_name: str, dependencies=True):
-        module_name = self._demangle(module_name)
         if self._module_is_already_provided(module_name):
             return
         self.require_module(module_name, dependencies)
@@ -241,7 +219,6 @@ node [shape=box];
         and override this method to provide other behavior, such as automatically mocking out a whole class
         of modules"""
 
-        module_name = self._demangle(module_name)
         root_name = module_name.split('.', maxsplit=1)[0]
         if self._can_implicitly_extern(root_name):
             if self.verbose:
@@ -264,7 +241,6 @@ node [shape=box];
             module_name (str): e.g. `my_package.my_subpackage`, code will be saved to provide code for this package.
             dependencies (bool, optional): If True, we scan the source for dependencies (see :ref:`Dependencies`).
         """
-        module_name = self._demangle(module_name)
         module = self._import_module(module_name)
         source = self._get_source_of_module(module)
         self.save_source_string(module_name, source, hasattr(module, '__path__'), dependencies, module.__file__)
@@ -286,7 +262,6 @@ node [shape=box];
             obj (Any): The object to save, must be picklable.
             dependencies (bool, optional): If True, we scan the source for dependencies (see :ref:`Dependencies`).
         """
-        package = self._demangle(package)
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
         data_buf = io.BytesIO()
@@ -324,7 +299,6 @@ node [shape=box];
             resource (str): A unique name for the resource, used to indentify it to load.
             text (str): The contents to save
         """
-        package = self._demangle(package)
         return self.save_binary(package, resource, text.encode('utf-8'))
 
     def save_binary(self, package, resource, binary: bytes):
@@ -335,7 +309,6 @@ node [shape=box];
             resource (str): A unique name for the resource, used to indentify it to load.
             binary (str): The data to save.
         """
-        package = self._demangle(package)
         filename = self._filename(package, resource)
         self._write(filename, binary)
 
@@ -383,7 +356,6 @@ node [shape=box];
 
         Prefer using `extern` to only mark modules extern if they are actually required by the packaged code.
         """
-        module_name = self._demangle(module_name)
         if module_name not in self.external:
             self.external.append(module_name)
 
@@ -393,7 +365,6 @@ node [shape=box];
 
         Prefer using `mock` to only include this module if it is required by other modules.
         """
-        module_name = self._demangle(module_name)
         if '_mock' not in self.provided:
             self.save_source_file('_mock', str(Path(__file__).parent / '_mock.py'), dependencies=False)
         is_package = hasattr(self._import_module(module_name), '__path__')
@@ -431,7 +402,9 @@ node [shape=box];
         self.close()
 
     def _write(self, filename, str_or_bytes):
-        check_not_mangled(filename)
+        if is_mangled(filename):
+            raise RuntimeError(f"Tried to save a torch.package'd module as '{filename}'. "
+                               "Directly saving torch.package'd modules is not allowed.")
         if isinstance(str_or_bytes, str):
             str_or_bytes = str_or_bytes.encode('utf-8')
         self.zip_file.write_record(filename, str_or_bytes, len(str_or_bytes))
@@ -459,7 +432,6 @@ node [shape=box];
         contents = ('\n'.join(self.external) + '\n')
         self._write('extern_modules', contents)
         del self.zip_file
-
 
     def _filename(self, package, resource):
         package_path = package.replace('.', '/')
@@ -512,7 +484,7 @@ class _GlobGroup:
         return self._dbg
 
     def matches(self, candidate: str) -> bool:
-        candidate = '.' + demangle(candidate)
+        candidate = '.' + candidate
         return any(p.fullmatch(candidate) for p in self.include) and all(not p.fullmatch(candidate) for p in self.exclude)
 
     @staticmethod

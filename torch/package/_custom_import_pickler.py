@@ -2,7 +2,7 @@ from pickle import Pickler, whichmodule, _Pickler, _getattribute, _extension_reg
 from pickle import GLOBAL, STACK_GLOBAL, EXT1, EXT2, EXT4, PicklingError
 from types import FunctionType
 from struct import pack
-from ._mangling import demangle
+from ._mangling import demangle, is_mangled
 import importlib
 
 
@@ -39,9 +39,14 @@ class CustomImportPickler(_Pickler):
                 (obj, module_name, name)) from None
         else:
             if obj2 is not obj:
-                raise PicklingError(
-                    "Can't pickle %r: it's not the same object as %s.%s" %
-                    (obj, module_name, name))
+                # CHANGED: More specific error message in the case of mangling.
+                parent_module_name = getattr(obj2, "__module__", orig_module_name)
+                msg = f"Can't pickle {obj}: it's not the same object as {parent_module_name}.{name}."
+                if is_mangled(getattr(obj, "__module__", "")) or is_mangled(getattr(obj2, "__module__", "")):
+                    msg += ("\nThis is likely due to a dependency collision in torch.package; "
+                            "check the order of PackageExporter.imports.")
+
+                raise PicklingError(msg)
 
         if self.proto >= 2:
             code = _extension_registry.get((module_name, name))
@@ -57,7 +62,6 @@ class CustomImportPickler(_Pickler):
         lastname = name.rpartition('.')[2]
         if parent is module:
             name = lastname
-
         # Non-ASCII identifiers are supported only with protocols >= 3.
         if self.proto >= 4:
             self.save(module_name)
