@@ -165,8 +165,9 @@ Tensor polar(const Tensor& abs, const Tensor& angle) {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  return at::detail::empty_cpu(size, options_, optional_memory_format);
+Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
+                 c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
+  return at::detail::empty_cpu(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
 }
 
 Tensor empty(
@@ -186,9 +187,10 @@ Tensor empty(
   return result;
 }
 
-Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, const TensorOptions& options) {
+Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, c10::optional<ScalarType> dtype_opt,
+                         c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
   check_size_nonnegative(size);
-  auto t = at::native::empty_cpu({0}, options);
+  auto t = at::native::empty_cpu({0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
   at::native::resize_impl_cpu_(t.unsafeGetTensorImpl(), size, stride);
   return t;
 }
@@ -336,9 +338,16 @@ Tensor empty_like(
 Tensor new_empty(
     const Tensor& self,
     IntArrayRef size,
-    const TensorOptions& options
+    c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt,
+    c10::optional<Device> device_opt,
+    c10::optional<bool> pin_memory_opt
     ) {
-  return at::empty(size, self.options().merge_in(options));
+  auto dtype = dtype_opt.has_value() ? dtype_opt : optTypeMetaToScalarType(self.options().dtype_opt());
+  auto layout = layout_opt.has_value() ? layout_opt : self.options().layout_opt();
+  auto device = device_opt.has_value() ? device_opt : self.options().device_opt();
+  auto pin_memory = pin_memory_opt.has_value() ? pin_memory_opt : self.options().pinned_memory_opt();
+  return at::empty(size, dtype, layout, device, pin_memory, c10::nullopt);
 }
 
 Tensor new_empty_strided(
@@ -507,7 +516,7 @@ Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
     //   auto result = at::empty({}, options);
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    auto result = empty_cpu({}, options);
+    auto result = empty_cpu({}, optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), options.device_opt(), options.pinned_memory_opt());
     at::native::fill_(result, s);
     return result;
   }
@@ -735,13 +744,14 @@ Tensor range(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangle ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor tril_indices_cpu(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
-  check_args(row, col, options);
+    int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  check_args(row, col, layout_opt);
 
   auto tril_size = get_tril_size(row, col, offset);
 
   // create an empty Tensor with correct size
-  auto result = at::empty({2, tril_size}, options);
+  auto result = at::native::empty_cpu({2, tril_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
   // The following three approaches result in very little performance
   // differences. Hence, the 2nd option is taken for simpler code, and to return
@@ -780,13 +790,14 @@ Tensor tril_indices_cpu(
 }
 
 Tensor triu_indices_cpu(
-    int64_t row, int64_t col, int64_t offset, const TensorOptions& options) {
-  check_args(row, col, options);
+    int64_t row, int64_t col, int64_t offset, c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt) {
+  check_args(row, col, layout_opt);
 
   auto triu_size = row * col - get_tril_size(row, col, offset - 1);
 
   // create an empty Tensor with correct size
-  auto result = at::empty({2, triu_size}, options);
+  auto result = at::native::empty_cpu({2, triu_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
   AT_DISPATCH_ALL_TYPES(result.scalar_type(), "triu_indices", [&]() -> void {
     // fill the Tensor with correct values
@@ -1035,57 +1046,23 @@ Tensor vander(const Tensor& x, c10::optional<int64_t> N, bool increasing) {
 
 template <typename T>
 Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
-  auto result = at::empty(values.size(), options);
-  AT_ASSERT(result.is_contiguous());
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(result.scalar_type(), "tensor_cpu", [&] {
-    std::copy(values.begin(), values.end(), result.template data_ptr<scalar_t>());
-  });
-  return result;
+  return at::detail::tensor_cpu(values, options);
 }
 
 template <typename T>
 Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
-  auto cpu_tensor = tensor_cpu(values, options.device(DeviceType::CPU));
-  return cpu_tensor.to(options.device());
+  return at::detail::tensor_backend(values, options);
 }
 
 template <typename T>
 Tensor tensor_complex_cpu(ArrayRef<T> values, const TensorOptions& options) {
-  auto result = at::empty(values.size(), options);
-  AT_ASSERT(result.is_contiguous());
-  AT_DISPATCH_COMPLEX_TYPES(result.scalar_type(), "tensor_cpu", [&] {
-    std::copy(values.begin(), values.end(), result.template data_ptr<scalar_t>());
-  });
-  return result;
+  return at::detail::tensor_complex_cpu(values, options);
 }
 
 template <typename T>
 Tensor tensor_complex_backend(ArrayRef<T> values, const TensorOptions& options) {
-  auto cpu_tensor = tensor_complex_cpu(values, options.device(DeviceType::CPU));
-  return cpu_tensor.to(options.device());
+  return at::detail::tensor_complex_backend(values, options);
 }
-
-#define TENSOR(T, _1)                                               \
-  Tensor tensor(ArrayRef<T> values, const TensorOptions& options) { \
-    if (options.device().type() != c10::DeviceType::CPU) {          \
-      return tensor_backend(values, options);                       \
-    } else {                                                        \
-      return tensor_cpu(values, options);                           \
-    }                                                               \
-  }
-AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
-#undef TENSOR
-
-#define TENSOR(T, _1)                                               \
-  Tensor tensor(ArrayRef<T> values, const TensorOptions& options) { \
-    if (options.device().type() != c10::DeviceType::CPU) {          \
-      return tensor_complex_backend(values, options);               \
-    } else {                                                        \
-      return tensor_complex_cpu(values, options);                   \
-    }                                                               \
-  }
-AT_FORALL_COMPLEX_TYPES(TENSOR)
-#undef TENSOR
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {
     TORCH_CHECK(!options.pinned_memory(), "tensors constructed from a file cannot be pinned");

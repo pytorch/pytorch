@@ -14,6 +14,7 @@ from quantization.test_quantized_op import TestDynamicQuantizedLinear  # noqa: F
 from quantization.test_quantized_op import TestComparatorOps  # noqa: F401
 from quantization.test_quantized_op import TestPadding  # noqa: F401
 from quantization.test_quantized_op import TestQuantizedEmbeddingOps  # noqa: F401
+from quantization.test_quantized_op import TestDynamicQuantizedRNNOp  # noqa: F401
 
 # Quantized Functional
 from quantization.test_quantized_functional import TestQuantizedFunctional  # noqa: F401
@@ -73,6 +74,11 @@ except ImportError:
 
 # Tooling: numeric_suite
 from quantization.test_numeric_suite import TestEagerModeNumericSuite  # noqa: F401
+
+try:
+    from quantization.test_numeric_suite_fx import TestGraphModeNumericSuite  # noqa: F401
+except ImportError:
+    pass
 
 # Backward Compatibility
 from quantization.test_backward_compatibility import TestSerialization  # noqa: F401

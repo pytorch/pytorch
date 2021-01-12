@@ -67,8 +67,9 @@ bool containsTensorType(const TypePtr& t) {
 
 class ShapePropagator {
  public:
-  explicit ShapePropagator(std::shared_ptr<Graph> graph) : aliasDb_(graph) {
-    collectResizeSet(std::move(graph)->block());
+  explicit ShapePropagator(const std::shared_ptr<Graph>& graph)
+      : aliasDb_(graph) {
+    collectResizeSet(graph->block());
   }
 
   void PropagateShapeOnBlock(Block* block, bool insert_expands = true) {
@@ -1269,9 +1270,10 @@ class ShapePropagator {
                       type->withScalarType(maybe_dtype_option->toScalarType())};
                 }
                 if (type->scalarType()) {
-                  return {at::isFloatingType(*type->scalarType())
-                              ? type
-                              : type->withScalarType(at::kLong)};
+                  return {
+                      at::isFloatingType(*type->scalarType())
+                          ? type
+                          : type->withScalarType(at::kLong)};
                 } else {
                   return {type};
                 }

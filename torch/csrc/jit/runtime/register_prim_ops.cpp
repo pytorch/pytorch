@@ -112,7 +112,7 @@ RegisterOperators reg(
          // depends on the type hint and input. The implementation of this
          // operator below is intended to be as close to the Python
          // implementation in torch/csrc/utils/tensor_list.cpp as possible.
-         [](const Node * /*node*/) -> Operation {
+         [](const Node* /*node*/) -> Operation {
            return [](Stack* stack) {
              int elem_ty_val;
              int dim_val;
@@ -631,6 +631,14 @@ RegisterOperators reg(
          listEq<int64_t>,
          aliasAnalysisFromSchema()),
      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::eq.device(Device a, Device b) -> bool"),
+         [](Stack* stack) {
+           auto a = pop(stack).toDevice();
+           auto b = pop(stack).toDevice();
+           push(stack, a == b);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::Uninitialized() -> Any"),
          [](Stack* stack) { push(stack, IValue::uninitialized()); },
          aliasAnalysisSpecialCase()),
@@ -671,6 +679,12 @@ RegisterOperators reg(
            push(stack, x != y);
          },
          aliasAnalysisFromSchema()),
+     // We define aten::dequantize in both native_functions.yaml and here,
+     // however, aten::dequantize.any defined here overrides
+     // aten::dequantize.tensors in native_functions.yaml. The variants here
+     // are only for graph mode quantization, and they should be removed once
+     // we deprecate graph mode quantization, and use the variants in
+     // native_functions.yaml.
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
              "aten::dequantize.tensor(Tensor qtensor) -> Tensor"),
@@ -678,6 +692,14 @@ RegisterOperators reg(
            at::Tensor qtensor;
            pop(stack, qtensor);
            push(stack, at::dequantize(qtensor));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::dequantize.list(Tensor[] qtensors) -> Tensor[]"),
+         [](Stack* stack) {
+           auto qtensors = pop(stack).toTensorVector();
+           push(stack, at::dequantize(qtensors));
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -698,6 +720,7 @@ RegisterOperators reg(
      DEFINE_BOOL_OP(aten::__and__, a&& b),
      DEFINE_BOOL_OP(aten::__or__, a || b),
      DEFINE_BOOL_OP(aten::__xor__, a != b),
+     DEFINE_UNARY_OP(aten::round, round_to_even(a), float, float),
      DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
      DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
      DEFINE_UNARY_OP(aten::neg, -a, int, float),
@@ -815,6 +838,11 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
+             "aten::__contains__.int_list(int[] l, int item) -> bool"),
+         listContains<int64_t>,
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
              "aten::__contains__.str_list(str[] l, str item) -> bool"),
          listContains<std::string>,
          aliasAnalysisFromSchema()),
@@ -880,7 +908,7 @@ RegisterOperators reg(
          TORCH_SELECTIVE_SCHEMA(
              "aten::index.Tensor_hacked_twin(Tensor self, Tensor[] indices) -> Tensor"),
          [](Stack* stack) {
-           auto indices = pop(stack).toTensorVector();
+           auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
            auto self = pop(stack).toTensor();
            auto result = at::index(self, indices);
            push(stack, std::move(result));
@@ -893,7 +921,7 @@ RegisterOperators reg(
            auto unsafe = pop(stack).toBool();
            auto accumulate = pop(stack).toBool();
            auto values = pop(stack).toTensor();
-           auto indices = pop(stack).toTensorVector();
+           auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
            auto self = pop(stack).toTensor();
            auto result =
                at::_index_put_impl_(self, indices, values, accumulate, unsafe);
@@ -906,7 +934,7 @@ RegisterOperators reg(
          [](Stack* stack) {
            auto accumulate = pop(stack).toBool();
            auto values = pop(stack).toTensor();
-           auto indices = pop(stack).toTensorVector();
+           auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
            auto self = pop(stack).toTensor();
            auto result = at::index_put_(self, indices, values, accumulate);
            push(stack, std::move(result));
@@ -918,7 +946,7 @@ RegisterOperators reg(
          [](Stack* stack) {
            auto accumulate = pop(stack).toBool();
            auto values = pop(stack).toTensor();
-           auto indices = pop(stack).toTensorVector();
+           auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
            auto self = pop(stack).toTensor();
            auto result = at::index_put_(self, indices, values, accumulate);
            push(stack, std::move(result));
@@ -1338,7 +1366,7 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
 
 int64_t stringFindImpl(
     std::string string,
-    std::string substr,
+    const std::string& substr,
     int64_t start,
     int64_t end,
     bool reverse = false) {

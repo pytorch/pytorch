@@ -22,7 +22,7 @@
 
 namespace at {
 
-CAFFE2_API int _crash_if_asan(int);
+TORCH_API int _crash_if_asan(int);
 
 // TODO: This unwrapping code is ONLY used for TH bindings; once TH goes
 // away, we can delete this function
@@ -135,11 +135,26 @@ inline void check_size_nonnegative(IntArrayRef size) {
 }
 
 namespace detail {
-CAFFE2_API
-Tensor empty_cpu(
-    IntArrayRef size,
-    const TensorOptions& options = {},
-    c10::optional<MemoryFormat> memory_format = c10::nullopt);
+TORCH_API
+Tensor empty_cpu(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt,
+                 c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt);
+
+template <typename T>
+TORCH_API
+Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options);
+
+template <typename T>
+TORCH_API
+Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options);
+
+template <typename T>
+TORCH_API
+Tensor tensor_complex_cpu(ArrayRef<T> values, const TensorOptions& options);
+
+template <typename T>
+TORCH_API
+Tensor tensor_complex_backend(ArrayRef<T> values, const TensorOptions& options);
 } // namespace detail
+
 
 } // at

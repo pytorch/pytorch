@@ -215,6 +215,7 @@ void fp16_momentum_sgd_update<CUDAContext>(
           nesterov,
           weight_decay,
           reinterpret_cast<half2*>(param));
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
       // not setting N to N/2
     } else {
       FP16MomentumSGDFP32Kernel<<<
@@ -232,6 +233,7 @@ void fp16_momentum_sgd_update<CUDAContext>(
           nesterov,
           weight_decay,
           reinterpret_cast<half2*>(param));
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
       // not setting N to N/2
     }
 

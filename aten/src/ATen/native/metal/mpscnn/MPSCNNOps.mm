@@ -152,7 +152,9 @@ Tensor max_pool2d(
       strideInPixelsX:stride[0]
       strideInPixelsY:stride[1]];
   [pool setEdgeMode:MPSImageEdgeModeClamp];
-  [pool setOffset:{.x = kernel_size[0] / 2, .y = kernel_size[1] / 2, .z = 0}];
+  [pool setOffset:{.x = static_cast<NSInteger>(kernel_size[0] / 2),
+                   .y = static_cast<NSInteger>(kernel_size[1] / 2),
+                   .z = 0}];
 
   int64_t oN = iN;
   int64_t oC = iC;
@@ -354,7 +356,7 @@ Tensor binaryElementwiseKernel(
     const Tensor& input1,
     const Tensor& input2,
     NSString* arrayKernel,
-    NSString* nonarrayKernal) {
+    NSString* nonarrayKernel) {
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
   std::vector<int64_t> outputSize = input1.sizes().vec();
@@ -365,7 +367,7 @@ Tensor binaryElementwiseKernel(
   mt.texture()->allocateTemporaryTextureStorage(outputSize, cb1);
   MPSImage* Y = imageFromMetalTensor(mt);
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
-      pipelineState:kernelFor(X1, arrayKernel, nonarrayKernal)];
+      pipelineState:kernelFor(X1, arrayKernel, nonarrayKernel)];
   id<MTLComputeCommandEncoder> encoder = [cb1.buffer computeCommandEncoder];
   [encoder setComputePipelineState:state];
   [encoder setTexture:[X1 texture] atIndex:0];
@@ -386,7 +388,7 @@ Tensor& binaryElementwiseKernel_(
     Tensor& input1,
     const Tensor& input2,
     NSString* arrayKernel,
-    NSString* nonarrayKernal) {
+    NSString* nonarrayKernel) {
   MPSImage* X1 = imageFromTensor(input1);
   MPSImage* X2 = imageFromTensor(input2);
   std::vector<int64_t> outputSize = input1.sizes().vec();
@@ -395,7 +397,7 @@ Tensor& binaryElementwiseKernel_(
   TORCH_CHECK([cb1 isEqual:cb2], @"inputs have different command buffer");
   MPSImage* Y = [MPSImage temporaryImageFromSize:outputSize commandBuffer:cb1];
   id<MTLComputePipelineState> state = [[MPSCNNContext sharedInstance]
-      pipelineState:kernelFor(X1, arrayKernel, nonarrayKernal)];
+      pipelineState:kernelFor(X1, arrayKernel, nonarrayKernel)];
   id<MTLComputeCommandEncoder> encoder = [cb1.buffer computeCommandEncoder];
   [encoder setComputePipelineState:state];
   [encoder setTexture:[X1 texture] atIndex:0];
@@ -444,7 +446,7 @@ Tensor t(const Tensor& input) {
   MPSImage* X = imageFromTensor(input);
   TORCH_CHECK(X.numberOfImages == 1);
   TORCH_CHECK(X.featureChannels == 1);
-  MetalTensor mt({sizes[1], sizes[0]}, {strides[1], strides[0]});
+  MetalTensor mt({sizes[1], sizes[0]});
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
   mt.texture()->allocateTemporaryTextureStorage(
       {1, 1, sizes[1], sizes[0]}, commandBuffer);
@@ -454,7 +456,6 @@ Tensor t(const Tensor& input) {
   [transpose encodeToCommandBuffer:commandBuffer.buffer
                        sourceImage:X
                   destinationImage:Y];
-
   auto output = MetalTensor::toTensor(std::move(mt), input.options());
   return output;
 }

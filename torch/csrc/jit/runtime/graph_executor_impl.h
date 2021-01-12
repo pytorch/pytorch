@@ -31,7 +31,10 @@ namespace jit {
 
 void packGradient(const Gradient& gradient, Node* dnode);
 bool needsGradient(const std::shared_ptr<const Graph>& graph);
-void runOptimization(std::shared_ptr<Graph>& graph, bool unroll = true);
+void runOptimization(
+    std::shared_ptr<Graph>& graph,
+    bool unroll = true,
+    bool const_prop_user_classes = true);
 void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
     bool strict_fuser_check = false);

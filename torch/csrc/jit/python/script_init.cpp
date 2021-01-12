@@ -339,7 +339,7 @@ static StrongFunctionPtr script_compile_overloaded_function(
     const c10::QualifiedName& name,
     const Decl& overload_decl,
     const Def& implementation_def,
-    ResolutionCallback rcb,
+    const ResolutionCallback& rcb,
     const FunctionDefaults& implementation_defaults,
     const py::object& signature) {
   if (signature.is(py::none())) {
@@ -356,7 +356,7 @@ static StrongFunctionPtr script_compile_overloaded_function(
       /*properties=*/{},
       /*propResolvers=*/{},
       {new_def},
-      {pythonResolver(std::move(rcb))},
+      {pythonResolver(rcb)},
       nullptr,
       true);
   TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
@@ -377,14 +377,14 @@ static StrongFunctionPtr script_compile_function(
     const c10::QualifiedName& name,
     const Def& def,
     const FunctionDefaults& defaults,
-    ResolutionCallback rcb) {
+    const ResolutionCallback& rcb) {
   auto cu = get_python_cu();
   auto defined_functions = cu->define(
       QualifiedName(name.prefix()),
       /*properties=*/{},
       /*propResolvers=*/{},
       {def},
-      {pythonResolver(std::move(rcb))},
+      {pythonResolver(rcb)},
       nullptr,
       true);
   TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
@@ -782,6 +782,12 @@ void initJitScriptBindings(PyObject* module) {
                 });
               })
           .def("__copy__", &Object::copy)
+          .def(
+              "__hash__",
+              [](const Object& self) {
+                // Similar to Tensor's `__hash__`, which is `id()`.
+                return std::hash<c10::ivalue::Object*>{}(self._ivalue().get());
+              })
           .def(py::pickle(
               [](const Object& self)
                   -> std::tuple<py::object, std::string> { // __getstate__
@@ -1243,19 +1249,19 @@ void initJitScriptBindings(PyObject* module) {
       "_jit_script_compile",
       [](const std::string& qualname,
          const Def& def,
-         ResolutionCallback rcb,
+         const ResolutionCallback& rcb,
          const FunctionDefaults& defaults) {
         C10_LOG_API_USAGE_ONCE("torch.script.compile");
         const auto name = c10::QualifiedName(qualname);
         TORCH_INTERNAL_ASSERT(name.name() == def.name().name());
-        return script_compile_function(name, def, defaults, std::move(rcb));
+        return script_compile_function(name, def, defaults, rcb);
       });
   m.def(
       "_jit_script_compile_overload",
       [](const std::string& qualname,
          const Decl& overload_decl,
          const Def& implementation_def,
-         ResolutionCallback rcb,
+         const ResolutionCallback& rcb,
          const FunctionDefaults& implementation_defaults,
          const py::object& signature) {
         const auto name = c10::QualifiedName(qualname);
@@ -1263,7 +1269,7 @@ void initJitScriptBindings(PyObject* module) {
             name,
             overload_decl,
             implementation_def,
-            std::move(rcb),
+            rcb,
             implementation_defaults,
             signature);
       });
@@ -1368,12 +1374,12 @@ void initJitScriptBindings(PyObject* module) {
       "_jit_script_interface_compile",
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
-         ResolutionCallback rcb,
+         const ResolutionCallback& rcb,
          bool is_module) {
         get_python_cu()->define_interface(
             c10::QualifiedName(qualifiedName),
             classDef,
-            pythonResolver(std::move(rcb)),
+            pythonResolver(rcb),
             is_module);
       });
 
@@ -1475,7 +1481,7 @@ void initJitScriptBindings(PyObject* module) {
         // TODO this should go in the global Python CU
         auto cu = std::make_shared<CompilationUnit>();
         c10::QualifiedName name(qualname);
-        auto fn = cu->create_function(std::move(name), graph);
+        auto fn = cu->create_function(std::move(name), std::move(graph));
         return StrongFunctionPtr(std::move(cu), fn);
       });
   m.def("_ivalue_tags_match", ivalue_tags_match);

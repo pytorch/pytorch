@@ -4,8 +4,12 @@
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/type_hashing.h>
+#include <torch/csrc/jit/mobile/common_const.h>
+#include <torch/csrc/jit/mobile/function.h>
+#include <torch/csrc/jit/mobile/interpreter.h>
+#include <torch/csrc/jit/mobile/method.h>
+#include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/passes/reconstruct_scopes.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
@@ -27,8 +31,30 @@ namespace torch {
 namespace jit {
 
 char const* toString(OpCode op);
-
 namespace {
+
+struct tensor_value_hash {
+  std::size_t operator()(const at::Tensor& tensor) const {
+    std::stringstream tensor_stream;
+    tensor_stream << tensor;
+    std::string tensor_str = tensor_stream.str();
+    std::size_t h1 = std::hash<std::string>{}(tensor_str);
+    return h1;
+  }
+};
+
+struct tensor_value_equal {
+  bool operator()(const at::Tensor& a, const at::Tensor& b) const {
+    std::stringstream a_stream;
+    a_stream << a;
+    std::string a_str = a_stream.str();
+
+    std::stringstream b_stream;
+    b_stream << b;
+    std::string b_str = b_stream.str();
+    return a_str == b_str;
+  }
+};
 
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
@@ -47,39 +73,72 @@ static IValue Tup(std::vector<IValue> ivalues) {
 static IValue Table(
     const std::vector<std::pair<std::string, IValue>>& entries) {
   std::vector<IValue> ivalue_entries;
+  ivalue_entries.reserve(entries.size());
   for (const auto& e : entries) {
     ivalue_entries.push_back(Tup({e.first, e.second}));
   }
   return Tup(std::move(ivalue_entries));
 }
 
-std::string getModulePath(Node* node) {
-  std::string modulePath = node->scopeName();
-  size_t end = modulePath.size();
-  // Here we remove the source range information to make the
-  // module debugging information shorter and cleaner.
-  if (modulePath[end - 1] == '>') {
-    end = modulePath.rfind('<');
-    if (end > 0 && modulePath[end - 1] == '<') {
-      --end;
+std::string getModulePath(Node* node, const std::string& root_scope_string) {
+  constexpr size_t kFunction = 0;
+  constexpr size_t kModuleInstanceInfo = 2;
+
+  if (!node->callstack()) {
+    return root_scope_string + ".forward";
+  } else {
+    std::string module_info = root_scope_string;
+    auto callstack_ptr = *(node->callstack());
+    const auto& vec = callstack_ptr->vec();
+
+    for (const auto& element : vec) {
+      const auto& opt_module_instance_info =
+          std::get<kModuleInstanceInfo>(element);
+      if (opt_module_instance_info.has_value()) {
+        const auto& module_instance_info = opt_module_instance_info.value();
+        if (module_instance_info.class_type()) {
+          const auto& class_type = module_instance_info.class_type();
+          const auto& instance_name = module_instance_info.instance_name();
+          auto type_name = class_type->name()->qualifiedName();
+          type_name = type_name.substr(type_name.find_last_of('.') + 1);
+          module_info.append(".")
+              .append(instance_name)
+              .append("(")
+              .append(type_name)
+              .append(")")
+              .append(".")
+              .append(std::get<kFunction>(element)->name());
+        } else {
+          module_info += ".(UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
+        }
+      } else {
+        module_info += ".(UNKNOWN_INSTANCE(UNKNOWN_TYPE)";
+      }
     }
+
+    return module_info;
   }
-  // We only keep the last function in a callstack.
-  size_t start = modulePath.rfind('/', end);
-  start = (start != std::string::npos) ? start + 1 : 0;
-  return modulePath.substr(start, end - start);
+}
+
+std::string getModuleTypeName(const Module& module, const std::string& prefix) {
+  std::string moduleType = module.type()->str();
+  size_t lastDotIndex = moduleType.rfind('.');
+  if (lastDotIndex != std::string::npos) {
+    moduleType = moduleType.substr(lastDotIndex + 1);
+  }
+  return prefix + "(" + moduleType + ")";
 }
 
 std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
     const Module& module,
     const Function& func,
-    bool save_mobile_debug_info) {
+    const std::
+        unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
+            constants_from_jit,
+    bool save_mobile_debug_info = false) {
   auto graph = func.graph()->copy();
 
   Inline(*graph);
-  if (save_mobile_debug_info) {
-    ReconstructScopes(module, *graph, "top");
-  }
 
   torch::jit::Code code(graph, func.name());
   auto instructions_copy = code.instructions();
@@ -94,7 +153,8 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
       auto node = code.instructions_source()[i];
       opnames.emplace_back(node->schema().operator_name());
       if (save_mobile_debug_info) {
-        op_module_paths.emplace_back(getModulePath(node));
+        std::string root_scope_string = getModuleTypeName(module, "top");
+        op_module_paths.emplace_back(getModulePath(node, root_scope_string));
       }
     }
     // CALL nodes at this point represent built-in (i.e. non-Graph)
@@ -109,10 +169,11 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
         auto method_name_idx =
             code.constant_table().size() + method_names.size();
         method_names.emplace_back(node->s(attr::name));
-        Instruction new_instr{INTERFACE_CALL,
-                              static_cast<int32_t>(method_name_idx),
-                              static_cast<uint16_t>(node->inputs().size())};
-        instructions_copy[i] = std::move(new_instr);
+        Instruction new_instr{
+            INTERFACE_CALL,
+            static_cast<int32_t>(method_name_idx),
+            static_cast<uint16_t>(node->inputs().size())};
+        instructions_copy[i] = new_instr;
       } else {
         TORCH_INTERNAL_ASSERT(
             false, "Unsupported node kind on CALL opcode for mobile");
@@ -177,8 +238,27 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   // Make a copy of the constants and append the method names
   // that we emitted for the converted INTERFACE_CALL nodes above.
   auto constants = code.constant_table();
+  std::vector<IValue> deduplicated_constants;
+  for (const auto& constant : constants) {
+    if (constant.isTensor()) {
+      const auto& constant_tensor = constant.toTensor();
+      if (constants_from_jit.find(constant_tensor) ==
+          constants_from_jit.end()) {
+        deduplicated_constants.emplace_back(constant);
+      } else {
+        auto index = IValue(constants_from_jit.at(constant_tensor));
+        auto key_with_index =
+            Tup(std::vector<IValue>{IValue(mobile::kTensorJitIndex), index});
+
+        deduplicated_constants.emplace_back(key_with_index);
+      }
+    } else {
+      deduplicated_constants.emplace_back(constant);
+    }
+  }
+
   for (auto& method_name : method_names) {
-    constants.emplace_back(std::move(method_name));
+    deduplicated_constants.emplace_back(std::move(method_name));
   }
 
   // types
@@ -192,11 +272,12 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   // register size
   auto register_size = static_cast<int>(code.register_size());
 
-  auto table = Table({{"instructions", Tup(instructions)},
-                      {"operators", Tup(operators)},
-                      {"constants", Tup(constants)},
-                      {"types", Tup(types)},
-                      {"register_size", register_size}});
+  auto table = Table(
+      {{"instructions", Tup(instructions)},
+       {"operators", Tup(operators)},
+       {"constants", Tup(deduplicated_constants)},
+       {"types", Tup(types)},
+       {"register_size", register_size}});
   auto bytecode_vals = Tup({func.qualname().qualifiedName(), table});
 
   c10::optional<IValue> debug_info_vals;
@@ -226,8 +307,10 @@ void setstateTuple(
   if (checkHasValidSetGetState(type)) {
     Function& setstate = type->getMethod("__setstate__");
     if (setstate.isGraphFunction()) {
+      std::unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>
+          empty_map;
       auto func_tuple =
-          getFunctionTuple(module, setstate, save_mobile_debug_info);
+          getFunctionTuple(module, setstate, empty_map, save_mobile_debug_info);
       elements.push_back(func_tuple.first);
       if (save_mobile_debug_info) {
         debug_info_elements->push_back(func_tuple.second.value());
@@ -250,12 +333,15 @@ void moduleMethodsTuple(
     const Module& module,
     std::vector<c10::IValue>& elements,
     c10::optional<std::vector<c10::IValue>>& debug_info_elements,
+    const std::
+        unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
+            constants_from_jit,
     bool save_mobile_debug_info) {
   auto methods = module.get_methods();
   // top level methods
   for (const auto& method : methods) {
-    auto func_tuple =
-        getFunctionTuple(module, method.function(), save_mobile_debug_info);
+    auto func_tuple = getFunctionTuple(
+        module, method.function(), constants_from_jit, save_mobile_debug_info);
     elements.push_back(func_tuple.first);
     if (save_mobile_debug_info) {
       debug_info_elements->push_back(func_tuple.second.value());
@@ -272,12 +358,12 @@ void moduleMethodsTuple(
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
-  GetExtraFilesHook() = hook;
+  GetExtraFilesHook() = std::move(hook);
 }
 
 void SetExportModuleMobileInfoConverter(
     ExportModuleMobileInfoConverter converter) {
-  GetMobileInfoConverter() = converter;
+  GetMobileInfoConverter() = std::move(converter);
 }
 
 class ScriptModuleSerializer {
@@ -304,9 +390,21 @@ class ScriptModuleSerializer {
     // so loading the code does not depend on loading the data
     std::vector<IValue> ivalue_constants(
         constant_table_.begin(), constant_table_.end());
+
+    std::unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>
+        constants_from_jit;
+
+    for (size_t i = 0; i < ivalue_constants.size(); i++) {
+      if (ivalue_constants[i].isTensor() &&
+          constants_from_jit.find(ivalue_constants[i].toTensor()) ==
+              constants_from_jit.end()) {
+        constants_from_jit[ivalue_constants[i].toTensor()] = i;
+      }
+    }
+
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format) {
-      writeByteCode(module, save_mobile_debug_info);
+      writeByteCode(module, save_mobile_debug_info, constants_from_jit);
       writeMobileMetadata(module, extra_files);
     }
 
@@ -320,7 +418,7 @@ class ScriptModuleSerializer {
   void writeArchive(const std::string& archive_name, const IValue& value) {
     std::vector<char> data;
     // Vector to capture the run-time class types during pickling the IValues
-    std::vector<c10::ClassTypePtr> memorizedClassTypes;
+    std::vector<c10::ClassTypePtr> memoizedClassTypes;
     Pickler data_pickle(
         [&](const char* buf, size_t size) {
           data.insert(data.end(), buf, buf + size);
@@ -329,7 +427,7 @@ class ScriptModuleSerializer {
         [&](const c10::ClassTypePtr& t) {
           return type_name_uniquer_.getUniqueName(t);
         },
-        &memorizedClassTypes);
+        &memoizedClassTypes);
     data_pickle.protocol();
     data_pickle.pushIValue(value);
     data_pickle.stop();
@@ -344,7 +442,7 @@ class ScriptModuleSerializer {
     writer_.writeRecord(fname, data.data(), data.size());
 
     // serialize all the captured run-time class types
-    for (const c10::ClassTypePtr& wroteType : memorizedClassTypes) {
+    for (const c10::ClassTypePtr& wroteType : memoizedClassTypes) {
       convertNamedType(wroteType);
     }
   }
@@ -434,7 +532,12 @@ class ScriptModuleSerializer {
     }
   }
 
-  void writeByteCode(const Module& module, bool save_mobile_debug_info) {
+  void writeByteCode(
+      const Module& module,
+      bool save_mobile_debug_info,
+      const std::
+          unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
+              constants_from_jit) {
     std::vector<c10::IValue> elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
@@ -444,10 +547,15 @@ class ScriptModuleSerializer {
       debug_info_elements->emplace_back(
           static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
     }
-
     moduleMethodsTuple(
-        module, elements, debug_info_elements, save_mobile_debug_info);
+        module,
+        elements,
+        debug_info_elements,
+        constants_from_jit,
+        save_mobile_debug_info);
+
     auto telements = Tup(std::move(elements));
+
     writeArchive("bytecode", telements);
     if (save_mobile_debug_info) {
       auto debug_info_telements = Tup(std::move(debug_info_elements.value()));
@@ -474,7 +582,7 @@ class ScriptModuleSerializer {
     };
     if (!pp) {
       pp = &file_streams_.insert(
-          qualifier,
+          std::move(qualifier),
           PythonPrint(
               constant_table_,
               class_deps_,
@@ -536,8 +644,15 @@ namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
   c10::optional<std::vector<c10::IValue>> debug_info_elements;
+  std::unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>
+      empty_map;
+
   moduleMethodsTuple(
-      m, elements, debug_info_elements, false /* save_mobile_debug_info */);
+      m,
+      elements,
+      debug_info_elements,
+      empty_map,
+      false /* save_mobile_debug_info */);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =
@@ -566,5 +681,26 @@ std::vector<std::string> export_opnames(const script::Module& m) {
   return std::vector<std::string>(names.begin(), names.end());
 }
 
+namespace mobile {
+
+std::set<std::string> _export_operator_list(
+    torch::jit::mobile::Module& module) {
+  std::set<std::string> operator_list;
+  for (Method func : module.get_methods()) {
+    const Function& function = func.function();
+    const std::shared_ptr<Code> cptr = function.get_code();
+    // op_names below isn't a list of unique operator names. In fact
+    // it can contain the same operator name many many times, so we need
+    // to de-dup the list by adding all the operator names into
+    // an std::set<std::string>.
+    std::vector<c10::OperatorName> const& op_names = cptr->op_names_;
+    for (auto& op_name : op_names) {
+      operator_list.insert(toString(op_name));
+    }
+  }
+  return operator_list;
+}
+
+} // namespace mobile
 } // namespace jit
 } // namespace torch

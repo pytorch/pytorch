@@ -1,3 +1,0 @@
---config
-caffe2.strip_glog=0
-@fbsource//fbandroid/mode/ndk_libcxx
