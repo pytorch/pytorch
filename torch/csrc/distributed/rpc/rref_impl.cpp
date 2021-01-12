@@ -1,10 +1,10 @@
-#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <ATen/record_function.h>
 #include <fmt/format.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -65,9 +65,7 @@ RRefForkData RRef::fork() const {
       getTypeStr(type_));
 }
 
-void RRef::handleError(
-    RPCErrorType errorType,
-    const JitFuture& jitFuture) {
+void RRef::handleError(RPCErrorType errorType, const JitFuture& jitFuture) {
   static std::unordered_map<
       RPCErrorType,
       std::function<void(const JitFuture& jitFuture)>,
