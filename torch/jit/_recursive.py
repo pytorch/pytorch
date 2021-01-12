@@ -328,7 +328,7 @@ def get_module_concrete_type(nn_module, share_types=True):
     type is fetched from concrete_type_store. If it is False, a new concrete type
     is created without first searching concrete_type_store.
 
-    Arguments:
+    Args:
         nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
         share_types = Whether to share underlying JIT types between modules (if possible).
 
@@ -356,7 +356,7 @@ def create_script_module(nn_module, stubs_fn, share_types=True):
     """
     Creates a new ScriptModule from an nn.Module
 
-    Arguments:
+    Args:
         nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
         stubs_fn:  Lambda that takes an nn.Module and generates a list of ScriptMethodStubs to compile.
         share_types:  Whether to share underlying JIT types between modules (if possible).
@@ -373,7 +373,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     """
     Convert an nn.Module to a RecursiveScriptModule.
 
-    Arguments:
+    Args:
         nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
         concrete_type:  The fully initialized ConcreteType of the module.
         stubs_fn:  Lambda that takes an nn.Module and generates a list of ScriptMethodStubs to compile.
@@ -645,7 +645,7 @@ def interface_script(mod_interface, nn_module):
     Makes a ScriptModule from an nn.Module, using the interface methods rule for
     determining which methods to compile.
 
-    Arguments:
+    Args:
         mod_interface: the interface type that the module have
         nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
     """

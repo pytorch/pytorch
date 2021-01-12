@@ -41,8 +41,3 @@ def with_metaclass(meta: type, *bases) -> type:
             return meta.__prepare__(name, bases)
 
     return type.__new__(metaclass, 'temporary_class', (), {})
-
-
-# Gets a function from the name of a method on a type
-def get_function_from_type(cls, name):
-    return getattr(cls, name, None)

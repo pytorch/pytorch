@@ -23,7 +23,7 @@ class Optimizer(object):
         ordering that is consistent between runs. Examples of objects that don't
         satisfy those properties are sets and iterators over values of dictionaries.
 
-    Arguments:
+    Args:
         params (iterable): an iterable of :class:`torch.Tensor` s or
             :class:`dict` s. Specifies what Tensors should be optimized.
         defaults: (dict): a dict containing default values of optimization
@@ -126,7 +126,7 @@ class Optimizer(object):
     def load_state_dict(self, state_dict):
         r"""Loads the optimizer state.
 
-        Arguments:
+        Args:
             state_dict (dict): optimizer state. Should be an object returned
                 from a call to :meth:`state_dict`.
         """
@@ -188,7 +188,7 @@ class Optimizer(object):
     def zero_grad(self, set_to_none: bool = False):
         r"""Sets the gradients of all optimized :class:`torch.Tensor` s to zero.
 
-        Arguments:
+        Args:
             set_to_none (bool): instead of setting to zero, set the grads to None.
                 This is will in general have lower memory footprint, and can modestly improve performance.
                 However, it changes certain behaviors. For example:
@@ -218,7 +218,7 @@ class Optimizer(object):
     def step(self, closure):
         r"""Performs a single optimization step (parameter update).
 
-        Arguments:
+        Args:
             closure (callable): A closure that reevaluates the model and
                 returns the loss. Optional for most optimizers.
 
@@ -234,7 +234,7 @@ class Optimizer(object):
         This can be useful when fine tuning a pre-trained network as frozen layers can be made
         trainable and added to the :class:`Optimizer` as training progresses.
 
-        Arguments:
+        Args:
             param_group (dict): Specifies what Tensors should be optimized along with group
             specific optimization options.
         """
