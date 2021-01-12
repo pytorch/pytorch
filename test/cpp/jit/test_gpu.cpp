@@ -6719,7 +6719,7 @@ TEST(NVFuserTest, FusionSmemBlockGemm_CUDA) {
   testValidate(
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 0);
 }
 
 TEST(NVFuserTest, FusionSmemBlockGemmCache_CUDA) {
@@ -6808,7 +6808,7 @@ TEST(NVFuserTest, FusionSmemBlockGemmCache_CUDA) {
   testValidate(
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 
-  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
+  TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 0);
 }
 
 TEST(NVFuserTest, FusionSmemDynamicPersistentSoftmax2D_CUDA) {

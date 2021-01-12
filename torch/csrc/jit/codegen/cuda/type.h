@@ -208,6 +208,7 @@ std::string stringifyThreadSize(const ParallelType);
 std::string stringifyThread(const ParallelType);
 std::string typePrefix(const DataType);
 
+// TODO: ThreadDim should be BlockDim and BlockDim should be GridDim
 TORCH_CUDA_API bool isParallelTypeThreadDim(ParallelType);
 TORCH_CUDA_API bool isParallelTypeBlockDim(ParallelType);
 TORCH_CUDA_API bool isParallelTypeThread(ParallelType);

@@ -197,12 +197,6 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
               loop->iter_domain()->parallelType() == ParallelType::Unroll;
         });
 
-    if (loops_it == loops.end()) {
-      for (auto loop : loops) {
-        std::cout << kir::toString(loop->iter_domain()) << "  ";
-      }
-      std::cout << std::endl;
-    }
     TORCH_INTERNAL_ASSERT(
         loops_it != loops.end(),
         "Could not find all required axes for indexing when trying to index into ",

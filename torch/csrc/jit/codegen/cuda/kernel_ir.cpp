@@ -309,16 +309,26 @@ Sync::Sync(Passkey passkey, bool war_sync)
 
 void Scope::insert_before(Expr* ref, Expr* expr) {
   const auto it = std::find(exprs_.begin(), exprs_.end(), ref);
-  if (it != exprs_.end()) {
-    exprs_.insert(it, expr);
-  }
+  TORCH_INTERNAL_ASSERT(
+      it != exprs_.end(),
+      "Tried to insert ",
+      expr,
+      " before the reference: ",
+      ref,
+      " however the reference was not found in this scope.");
+  exprs_.insert(it, expr);
 }
 
 void Scope::insert_after(Expr* ref, Expr* expr) {
   const auto it = std::find(exprs_.begin(), exprs_.end(), ref);
-  if (it != exprs_.end()) {
-    exprs_.insert(it + 1, expr);
-  }
+  TORCH_INTERNAL_ASSERT(
+      it != exprs_.end(),
+      "Tried to insert ",
+      expr,
+      " after the reference: ",
+      ref,
+      " however the reference was not found in this scope.");
+  exprs_.insert(it + 1, expr);
 }
 
 void Scope::erase(Expr* ref) {
@@ -360,7 +370,7 @@ Val* TensorIndex::index(int i) const {
       nDims() > 0, "Tried to get an index of a 0-dim TensorIndex");
   if (i < 0)
     i += nDims();
-  assert(i >= 0 && i < nDims());
+  TORCH_INTERNAL_ASSERT(i >= 0 && i < int(nDims()));
   return indices_[i];
 }
 

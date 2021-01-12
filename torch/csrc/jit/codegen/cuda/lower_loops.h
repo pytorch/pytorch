@@ -41,28 +41,6 @@ class TORCH_CUDA_API LoopNestGenerator {
  private:
   LoopNestGenerator(Fusion* fusion, const std::vector<Expr*>& exprs);
 
-  // Create the allocation for tv, place it inside the loop associated with
-  // alloc_id, return the node
-  kir::Expr* pushAlloc(TensorView*);
-
-  // Fusion shared_memory values
-  // Tracks if shared memory is modified
-  std::unordered_map<Val*, bool> smem_;
-
-  // Track dynamic shared memory buffers
-  // Insert allocation at the beginning of the kernel
-  std::deque<kir::Allocate*> dynamic_smem_;
-
-  // Clear the modify status for all shared memory buffers
-  void cleanSharedMemory();
-
-  // Toggle modify status for this shared memory buffer
-  void modifySharedMemory(Val* key);
-
-  // Return the status of the shared memory buffer
-  // False if TensorView is not shared memory buffer
-  bool isModifiedSharedMemory(Val* key) const;
-
   // Open a new inner most for loop, track which TV it was constructed from
   // according to the computeAt chain.
   void openFor(IterDomain*);
@@ -73,24 +51,12 @@ class TORCH_CUDA_API LoopNestGenerator {
   // Appends an expression to the current scope
   void pushBack(kir::Expr* expr);
 
-  // Initialize a buffer to init_val. If this buffer is in smem or registers,
-  // pass in its allocation statement so we can make sure that we insert this
-  // initialization after the allocation.
-  void initReduction(TensorView* tv, Val* init_val, kir::Expr* alloc_expr);
-
   void handle(const Expr*);
 
   // Run the pass and accumulate output in lowered_exprs_
   void generate(const std::vector<Expr*>& exprs);
 
  private:
-  // Track number of allocations in each for loop. It is used to insert
-  // allocations in the correct order, which is necessary for memory aliasing
-  std::unordered_map<kir::ForLoop*, size_t> for_loop_allocations_;
-
-  // Track number of allocations outside any for loop.
-  size_t lowered_exprs_allocations_ = 0;
-
   // Lowered exprs to return
   std::vector<kir::Expr*> lowered_exprs_;
 
