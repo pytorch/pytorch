@@ -10,7 +10,7 @@
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
-#ifndef USE_CUDA_NOT_ROCM
+#ifdef USE_CUDA_NOT_ROCM
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
 #endif
 
