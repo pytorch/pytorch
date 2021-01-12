@@ -1663,9 +1663,9 @@ const Expr* polyGCD(const Polynomial* poly) {
   // We ony want to factorize if we're saving complete operations, i.e. no
   // value in factorizing 6x + 4y into 2 * (3x + 2y) since we don't save work.
   int opsSaved = 1; // default to saving the scalar.
-  long GCD = immediateAs<long>(scalar);
+  long GCD = std::abs(immediateAs<long>(scalar));
   for (auto* t : variables) {
-    long termScalar = immediateAs<long>(t->scalar());
+    long termScalar = std::abs(immediateAs<long>(t->scalar()));
     long newGCD = gcd(std::max(GCD, termScalar), std::min(GCD, termScalar));
     if (newGCD == 1) {
       return nullptr;
