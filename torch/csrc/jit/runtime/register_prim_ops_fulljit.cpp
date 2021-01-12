@@ -67,9 +67,9 @@ RegisterOperators reg(
      Operator(
          prim::RequiresGradCheck /* (...)  -> (..., bool) */,
          [](const Node* node) -> Operation {
-           std::vector<c10::optional<bool>> rg_props =
+           std::vector<bool> rg_props =
                fmap(node->tys(attr::types), [](const TypePtr& t) {
-                 return t->cast<TensorType>()->requiresGrad();
+                 return *t->cast<TensorType>()->requiresGrad();
                });
            return [rg_props](Stack* stack) {
              auto num_inputs = rg_props.size();
@@ -77,8 +77,7 @@ RegisterOperators reg(
              for (size_t i = 0; i < num_inputs; i++) {
                auto& input = peek(stack, i, num_inputs);
                const auto& t = input.toTensor();
-               if (rg_props[i].has_value() &&
-                   *rg_props[i] != t.requires_grad()) {
+               if (rg_props[i] != t.requires_grad()) {
                  push(stack, false);
                  return;
                }
