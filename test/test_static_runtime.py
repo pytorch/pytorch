@@ -105,6 +105,21 @@ def trivial_graph(a, b, c):
     s = torch.tensor([[3, 3], [3, 3]])
     return a + b * c + s
 
+def loop_graph(a, b, iters : int):
+    c = a + b * 2
+    for i in range(iters):
+        c = c + b
+        c *= 2
+        c -= a
+    return c
+
+def output_graph(a, b, c, iters : int):
+    s = torch.tensor([[3, 3], [3, 3]])
+    k = a + b * c + s
+    d : Dict[int, Tensor] = {}
+    for i in range(iters):
+        d[i] = k + i
+    return d
 
 class TestStaticRuntime(TestCase):
     def test_multihead_attention_layer(self):
@@ -202,6 +217,64 @@ class TestStaticRuntime(TestCase):
         tg_a = StaticRuntime(tg)
         o_test = tg_a(s)[0]
         torch.testing.assert_allclose(o_ref, o_test)
+
+    def test_fusion_trivial_graph(self):
+        s = torch.full((2, 2), 2)
+        tg = torch.jit.script(trivial_graph)
+        o_ref = tg(s, s, s)
+        torch._C._fuse_to_static_runtime(tg.graph)
+        assert "StaticSubgraph" in str(tg.graph)
+        o_test = tg(s, s, s)
+        torch.testing.assert_allclose(o_ref, o_test)
+
+    def test_fusion_multihead_attention_layer(self):
+        HID_DIM = 256
+        QUERY_LEN = 8
+        BATCH_SIZE = 128
+        LAYERS = 3
+        HEADS = 8
+        DROPOUT = 0.1
+        device = torch.device("cpu")
+        attention = MultiHeadAttentionLayer(HID_DIM, HEADS, DROPOUT, device).to(device)
+        with torch.no_grad():
+            src = torch.randn(BATCH_SIZE, QUERY_LEN, HID_DIM).to(device)
+        src_mask = (src > 0)[:, :, 0].unsqueeze(1).unsqueeze(2).to(device)
+
+        attention.eval()
+        attention = torch.jit.script(attention)
+        attention.eval()
+        o_ref = attention(src, src, src, src_mask)
+
+        torch._C._fuse_to_static_runtime(attention._c)
+        o_test = attention(src, src, src, src_mask)
+
+        for a, b in zip(o_ref, o_test):
+            torch.testing.assert_allclose(a, b)
+
+    def test_fusion_loop(self):
+        a = torch.randn(5, 5)
+        b = torch.randn(5, 5)
+        c = 4
+        lg = torch.jit.script(loop_graph)
+        o_ref = lg(a, b, c)
+        torch._C._fuse_to_static_runtime(lg.graph)
+        assert "StaticSubgraph" in str(lg.graph)
+        o_test = lg(a, b, c)
+        torch.testing.assert_allclose(o_ref, o_test)
+
+    def test_fusion_outputs(self):
+        a = torch.randn(2, 2)
+        b = torch.randn(2, 2)
+        c = 4
+        og = torch.jit.script(output_graph)
+        o_ref = og(a, b, b, c)
+        torch._C._fuse_to_static_runtime(og.graph)
+        assert "StaticSubgraph" in str(og.graph)
+        o_test = og(a, b, b, c)
+        for i in o_ref.keys():
+            torch.testing.assert_allclose(o_ref[i], o_test[i])
+
+
 
 if __name__ == "__main__":
     run_tests()

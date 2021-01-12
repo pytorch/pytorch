@@ -49,11 +49,11 @@ class TORCH_API LoopNest {
   Stmt* getLoopBodyFor(Tensor*) const;
   bool hasLoopBodyFor(Tensor*) const;
 
-  void vectorize(Stmt*);
+  static void vectorize(For*);
 
   bool computeInline(Stmt* s);
   bool computeInline(const Buf* b);
-  void inlineIntermediateBufs();
+  void inlineIntermediateBufs(bool allow_duplicated_work);
 
   static void splitWithTail(For* f, int factor);
   static void splitWithTail(
@@ -107,6 +107,7 @@ class TORCH_API LoopNest {
       For* f,
       const std::unordered_map<std::string, const Buf*>& map);
 
+  void eliminateDeadStores();
   void prepareForCodegen();
 
   // Find the inner-most loops and vectorize them. Currently, this only works
@@ -140,7 +141,7 @@ TORCH_API Stmt* FlattenIndexes(Stmt* s);
 // TODO: Revisit this once we decide on how dependencies analysis should look
 // like. Maybe we would choose to use a different API and BufUse would be
 // removed, or if we decide to keep it we need to properly document its API.
-struct BufUse {
+struct BufLoadOrStoreUse {
   Stmt* s;
   bool isStore;
 };
@@ -151,7 +152,8 @@ struct BufUse {
  * in the vectors reflects the order in which the uses appear in the given
  * statement.
  */
-std::unordered_map<const Buf*, std::vector<BufUse>> findUses(Stmt* s);
+std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>>
+findLoadOrStoreUses(Stmt* s);
 
 } // namespace tensorexpr
 } // namespace jit

@@ -292,6 +292,11 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
         stream << ", axis: " << tensor_.q_per_channel_axis();
       }
     }
+
+    auto& fw_grad = tensor.fw_grad(/* level */ 0);
+    if (fw_grad.defined()) {
+      stream << ", tangent:" << std::endl << fw_grad;
+    }
     stream << " ]";
   }
   return stream;

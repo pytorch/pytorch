@@ -4,6 +4,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <ATen/BatchedTensorImpl.h>
 
 #include <mutex>
 
@@ -147,6 +148,14 @@ struct TORCH_API AccumulateGrad : public Node {
         // TensorImpl type of a tensor requires changing the tensor itself, and
         // thus in this case we have to change the grad tensor.
         auto result = new_grad + variable_grad;
+        CHECK_RESULT(result, variable);
+        update_grad(std::move(result));
+      } else if (!at::inplaceIsVmapCompatible(variable_grad, new_grad)) {
+        // Ideally we'd perform an in-place operation to avoid changing
+        // the grad tensor. However, if that's impossible because the grads
+        // are vmap-incompatible (See NOTE: [vmap-incompatible in-place operations]),
+        // then we just add them out-of-place.
+        auto result = variable_grad + new_grad;
         CHECK_RESULT(result, variable);
         update_grad(std::move(result));
       } else {

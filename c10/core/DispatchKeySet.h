@@ -61,8 +61,8 @@ public:
     }
   }
   // Test if a DispatchKey is in the set
-  bool has(DispatchKey t) const {
-    TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
+  bool inline has(DispatchKey t) const {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(t != DispatchKey::Undefined);
     return static_cast<bool>(repr_ & DispatchKeySet(t).repr_);
   }
   // Test if DispatchKeySet is a superset of ks.
@@ -124,7 +124,7 @@ private:
 public:
   // STL iterator for DispatchKeySet. Iterates through all DispatchKeys in the
   // set. The iterator is only invalidated by the destruction of the underlying
-  // DispatchKeySet as the iterator stores a pointer to the raw represenation of
+  // DispatchKeySet as the iterator stores a pointer to the raw representation of
   // the DispatchKeySet.
   class iterator {
    public:
@@ -235,7 +235,7 @@ C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
 C10_API DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t);
 
 // This API exists because we have a use case for checking
-// getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefind)
+// getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefined)
 // in OperatorEntry.cpp but we disallow it in has() API.
 C10_API bool isIncludedInAlias(DispatchKey k, DispatchKey alias);
 
