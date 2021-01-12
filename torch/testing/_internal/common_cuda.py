@@ -15,9 +15,9 @@ CUDA_DEVICE = torch.device("cuda:0") if TEST_CUDA else None
 TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE))
 TEST_CUDNN_VERSION = torch.backends.cudnn.version() if TEST_CUDNN else 0
 
-CUDA11_OR_ROCM = TEST_WITH_ROCM or (torch.version.cuda is not None and float(torch.version.cuda) >= 11)
 CUDA11 = torch.version.cuda and float(torch.version.cuda) >= 11
 CUDA9 = torch.version.cuda and torch.version.cuda.startswith('9.')
+SM53 = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3)
 
 TEST_MAGMA = TEST_CUDA
 if TEST_CUDA:

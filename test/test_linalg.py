@@ -24,7 +24,7 @@ from torch.testing._internal.common_device_type import \
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
      onlyCUDA)
 from torch.testing import floating_and_complex_types, floating_types, all_types
-from torch.testing._internal.common_cuda import tf32_on_and_off, CUDA11_OR_ROCM, CUDA9
+from torch.testing._internal.common_cuda import SM53, tf32_on_and_off, CUDA11, CUDA9
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
 from torch.autograd import gradcheck, gradgradcheck
 
@@ -3957,7 +3957,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfRocm
     @dtypesIfCUDA(torch.cfloat, torch.cdouble,
-                  *torch.testing.get_all_fp_dtypes(include_half=not CUDA9, include_bfloat16=CUDA11_OR_ROCM))
+                  *torch.testing.get_all_fp_dtypes(include_half=not CUDA9, include_bfloat16=(CUDA11 and SM53)))
     @dtypes(*(set(torch.testing.get_all_dtypes()) - {torch.half, torch.bool}))
     def test_blas_alpha_beta_empty(self, device, dtype):
         # This test is disabled on CUDA 9 due to:
@@ -4498,7 +4498,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                         torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(),
                   *([torch.float32, torch.float64, torch.bfloat16]
-                    if TEST_WITH_ROCM else torch.testing.get_all_fp_dtypes(include_bfloat16=CUDA11_OR_ROCM)))
+                    if TEST_WITH_ROCM else torch.testing.get_all_fp_dtypes(include_bfloat16=(CUDA11 and SM53))))
     @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_addmv(self, device, dtype):
         # have to use torch.randn(...).to(bfloat16) instead of
@@ -4532,7 +4532,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for m, v in itertools.product(ms, vs):
             self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
 
-    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes(include_bfloat16=CUDA11_OR_ROCM))
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes(include_bfloat16=(TEST_WITH_ROCM or (CUDA11 and SM53))))
     @dtypes(torch.float, torch.double)
     def test_addmv_rowmajor_colmajor_incx_incy_lda(self, device, dtype):
         # tests (o, s)*(s).  o is output size, s is summed size.
@@ -4563,7 +4563,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
-    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes(include_bfloat16=CUDA11_OR_ROCM))
+    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(),
+                  *torch.testing.get_all_fp_dtypes(include_bfloat16=(TEST_WITH_ROCM or (CUDA11 and SM53))))
     @dtypes(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes())
     @tf32_on_and_off(0.05)
     def test_addmm(self, device, dtype):
@@ -4742,10 +4743,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         M, N, O = 23, 8, 12
         numpy_dtype = dtype if dtype != torch.bfloat16 else torch.float32
 
-        if self.device_type == 'cpu':
-            is_supported = True
-        elif self.device_type == 'cuda':
-            is_supported = True if dtype != torch.bfloat16 else CUDA11_OR_ROCM
+        is_supported = True
+        if dtype == torch.bfloat16 and self.device_type == 'cuda':
+            is_supported = TEST_WITH_ROCM or (CUDA11 and SM53)
 
         if not is_supported:
             b1 = torch.randn(num_batches, M, N, device=device).to(dtype)
@@ -4916,12 +4916,12 @@ else:
         num_batches = 2
         M, N, O = 2, 3, 4
 
-        if self.device_type == 'cpu':
-            is_supported = True
-            if dtype == torch.bfloat16:
+        is_supported = True
+        if dtype == torch.bfloat16:
+            if self.device_type == 'cpu':
                 self.precision = 1  # 43 vs 43.75
-        else:
-            is_supported = (dtype != torch.bfloat16 or CUDA11_OR_ROCM)
+            else:
+                is_supported = TEST_WITH_ROCM or (CUDA11 and SM53)
 
         if not is_supported:
             b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
@@ -4982,10 +4982,9 @@ else:
         num_batches = 10
         M, N, O = 12, 8, 5
 
-        if self.device_type == 'cpu':
-            is_supported = True
-        elif self.device_type == 'cuda':
-            is_supported = True if dtype != torch.bfloat16 else CUDA11_OR_ROCM
+        is_supported = True
+        if dtype == torch.bfloat16 and self.device_type == 'cuda':
+            is_supported = TEST_WITH_ROCM or (CUDA11 and SM53)
 
         if not is_supported:
             b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
