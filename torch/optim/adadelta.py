@@ -8,7 +8,7 @@ class Adadelta(Optimizer):
 
     It has been proposed in `ADADELTA: An Adaptive Learning Rate Method`__.
 
-    Arguments:
+    Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         rho (float, optional): coefficient used for computing a running average
@@ -39,7 +39,7 @@ class Adadelta(Optimizer):
     def step(self, closure=None):
         """Performs a single optimization step.
 
-        Arguments:
+        Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """

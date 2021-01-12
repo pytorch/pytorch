@@ -58,15 +58,15 @@ void processRemoteProfiledEvents(
 
 const std::string kRPCErrorPrefix = std::string("RPCErr");
 
-RPCErrorType getRPCErrorType(const FutureMessage& fm) {
+RPCErrorType getRPCErrorType(const JitFuture& jitFuture) {
   TORCH_INTERNAL_ASSERT(
-      fm.hasError(),
-      "FutureMessage passed to getRPCErrorType does not have an error.");
+      jitFuture.hasError(),
+      "JitFuture of Message passed to getRPCErrorType does not have an error.");
 
   // Attempt to parse for error string given by makeRPCError, otherwise return
   // unknown error.
   // Note that this function expects errors formatted with makeRPCError().
-  auto err = std::string(fm.error()->what());
+  auto err = jitFuture.tryRetrieveErrorMessage();
   size_t pos = err.find(kRPCErrorPrefix);
   if (pos != std::string::npos) {
     // Parse the RPCErrorType.
@@ -379,9 +379,10 @@ std::string wireSerialize(
       // converts CUDA tensor to cpu and data() might get destructed as we go
       // out of scope of this loop.
       auto writeableTensorData = jit::getWriteableTensorData(tensorData[i]);
-      entries.push_back({c10::to_string(i),
-                         writeableTensorData.data(),
-                         writeableTensorData.sizeInBytes()});
+      entries.push_back(
+          {c10::to_string(i),
+           writeableTensorData.data(),
+           writeableTensorData.sizeInBytes()});
     }
   }
 

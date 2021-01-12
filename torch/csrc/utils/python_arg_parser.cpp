@@ -24,6 +24,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"double", ParameterType::DOUBLE},
   {"complex", ParameterType::COMPLEX},
   {"TensorList", ParameterType::TENSOR_LIST},
+  {"c10::List<c10::optional<Tensor>>", ParameterType::TENSOR_LIST},
   {"IntArrayRef", ParameterType::INT_LIST},
   {"ArrayRef<double>", ParameterType::FLOAT_LIST},
   {"Generator", ParameterType::GENERATOR},
@@ -333,7 +334,7 @@ void append_overloaded_arg(std::vector<py::handle>* overloaded_args, PyObject* o
 
 bool is_tensor_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args) {
   if (THPVariable_CheckExact(obj)) {
-    // torch.Tensor instances (not subclasses)
+    // torch.Tensor instances (not subclasses, except for Parameter)
     return true;
   }
 
@@ -390,7 +391,7 @@ bool is_float_or_complex_list(PyObject* obj) {
   }
 
   auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
-  if (size > 0) { 
+  if (size > 0) {
     PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, 0) : PyList_GET_ITEM(obj, 0);
     if (!THPUtils_checkDouble(iobj) && !PyComplex_Check(iobj)) {
       return false;
@@ -861,7 +862,7 @@ bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, 
   }
 
   int i = 0;
-  if (self != nullptr && !THPVariable_CheckExact(self) && check_has_torch_function(self)) {
+  if (self != nullptr && check_has_torch_function(self)) {
     append_overloaded_arg(&this->overloaded_args, self);
   }
   for (auto& param : params) {
