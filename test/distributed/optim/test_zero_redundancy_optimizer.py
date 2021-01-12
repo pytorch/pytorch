@@ -290,8 +290,8 @@ class TestZeroRedundancyOptimizerFourRanks(TestZeroRedundancyOptimizer):
             o.add_param_group({"params": [torch.rand(3, 1)]})
 
             assert len(o.param_groups) == 2
-            # Verify that added group is added to the correct partition making all have 8 elements.
-            assert sum([x.numel() for g in o.optim.param_groups for x in g["params"]]) == 8
+            # Verify that added group is added to the correct partition making all have the same elements.
+            assert sum([x.numel() for g in o.optim.param_groups for x in g["params"]]) == sum(sizes)
             assert len(o.optim.param_groups) == 2
 
         # Test a pathological config with a first big non-trainable param

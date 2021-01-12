@@ -92,9 +92,8 @@ class ZeroRedundancyOptimizer(Optimizer):
         **default: Any,
     ):
         # Hold all the model params in the root .param_groups
-        self.in_super_constructor = True
+        self.initialized = False
         super().__init__(params, default)
-        self.in_super_constructor = False
 
         # Partition information. lazy evaluation, computed if requested
         self._per_device_params: OrderedDict[
@@ -133,6 +132,34 @@ class ZeroRedundancyOptimizer(Optimizer):
         self.should_bucket_param: List[bool] = []
         self.work_handles: Deque[Any] = deque()
         self._setup_bucket_strategy()
+        self.initialized = True
+
+    def add_param_group(self, param_group: dict) -> None:
+        """Add a param group to the :class:`Optimizer` s `param_groups`.
+
+        This can be useful when fine tuning a pre-trained network as frozen layers can be made
+        trainable and added to the :class:`Optimizer` as training progresses.
+
+        Arguments:
+            param_group (dict): Specifies what Tensors should be optimized along with group
+            specific optimization options
+
+        .. warning: This handles updating the shards on all partitions, but needs to be called on all ranks.
+        """
+
+        super().add_param_group(param_group)
+        if self.initialized:
+            # Force a re-partitioning
+            self._partition_parameters.clear()
+            self._per_device_params.clear()
+            self._param_rank.clear()
+
+            param_groups = self.partition_parameters()[self.rank]
+            if len(param_groups) == len(self.optim.param_groups) + 1:
+                self.optim.add_param_group(param_groups[-1])
+
+            # Update the bucketing strategy accordingly
+            self._setup_bucket_strategy()
 
     def consolidate_state_dict(self, recipient_rank: int = 0) -> None:
         """Update the consolidated state_dict list, one per rank.
@@ -153,7 +180,6 @@ class ZeroRedundancyOptimizer(Optimizer):
             self._all_states = []
             for rank in range(self.world_size):
                 if rank == self.rank:
-                    logging.debug("Saving self state")
                     self._all_states.append(local_cpu_state)
 
                     # Sync with other replicas, almost noop
@@ -268,6 +294,56 @@ class ZeroRedundancyOptimizer(Optimizer):
 
         return loss
 
+    def load_local_state_dict(self, state_dict: dict) -> None:
+        """Loads this rank's state_dict.
+
+        .. warning: This is not meant to load the global state dict.
+        """
+
+        self.optim.load_state_dict(state_dict)
+
+        # Workaround PyTorch bug that casts state (https://github.com/pytorch/pytorch/issues/43706)
+        # Copied from https://github.com/pytorch/fairseq/blob/v0.9.0/fairseq/optim/fp16_optimizer.py#L251-L268
+        groups = self.optim.param_groups
+        saved_groups = state_dict["param_groups"]
+        id_map = {
+            old_id: p
+            for old_id, p in zip(chain(*(g["params"] for g in saved_groups)), chain(*(g["params"] for g in groups)))
+        }
+        for k, v in state_dict["state"].items():
+            if k in id_map:
+                param = id_map[k]
+                self.optim.state[param] = _recursive_copy_to_device(v, non_blocking=True, device=param.device)
+
+        # Restore the global param_groups (the params themselves are already correct)
+        for global_group, local_group in zip(self.param_groups, groups):
+            for k, v in local_group.items():
+                if k != "params":
+                    global_group[k] = v
+
+        # Force a re-partitioning, in case the model changed with the new state
+        self._partition_parameters.clear()
+        self._per_device_params.clear()
+        self._param_rank.clear()
+
+        # Update the bucketing strategy accordingly
+        self._setup_bucket_strategy()
+
+    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
+        """Restore the global parameter groups as well as the shard.
+
+        Arguments:
+            state_dict (dict): optimizer state. Should be an object returned
+                from a call to :meth:`state_dict`
+        """
+
+        # Check whether we got a local or global dict
+        if "local_state_dict" in state_dict and state_dict["local_state_dict"]:
+            self.load_local_state_dict(state_dict)
+        else:
+            # Dispatch this rank's state dictionary to the wrapped shard optimizer
+            self.load_local_state_dict(ZeroRedundancyOptimizer.rank_local_state_dict(self.rank, state_dict))
+
     def local_state_dict(self) -> Dict:
         """Gets this rank's ``state_dict``.
 
@@ -319,83 +395,6 @@ class ZeroRedundancyOptimizer(Optimizer):
             "local_state_dict": False,
         }
 
-    def load_local_state_dict(self, state_dict: dict) -> None:
-        """Loads this rank's state_dict.
-
-        .. warning: This is not meant to load the global state dict.
-        """
-
-        self.optim.load_state_dict(state_dict)
-
-        # Workaround PyTorch bug that casts state (https://github.com/pytorch/pytorch/issues/43706)
-        # Copied from https://github.com/pytorch/fairseq/blob/v0.9.0/fairseq/optim/fp16_optimizer.py#L251-L268
-        groups = self.optim.param_groups
-        saved_groups = state_dict["param_groups"]
-        id_map = {
-            old_id: p
-            for old_id, p in zip(chain(*(g["params"] for g in saved_groups)), chain(*(g["params"] for g in groups)))
-        }
-        for k, v in state_dict["state"].items():
-            if k in id_map:
-                param = id_map[k]
-                self.optim.state[param] = _recursive_copy_to_device(v, non_blocking=True, device=param.device)
-
-        # Restore the global param_groups (the params themselves are already correct)
-        for global_group, local_group in zip(self.param_groups, groups):
-            for k, v in local_group.items():
-                if k != "params":
-                    global_group[k] = v
-
-        # Force a re-partitioning, in case the model changed with the new state
-        self._partition_parameters.clear()
-        self._per_device_params.clear()
-        self._param_rank.clear()
-
-        # Update the bucketing strategy accordingly
-        self._setup_bucket_strategy()
-
-    def load_state_dict(self, state_dict: Dict[str, Any]) -> None:
-        """Restore the global parameter groups as well as the shard.
-
-        Arguments:
-            state_dict (dict): optimizer state. Should be an object returned
-                from a call to :meth:`state_dict`
-        """
-
-        # Check whether we got a local or global dict
-        if "local_state_dict" in state_dict and state_dict["local_state_dict"]:
-            self.load_local_state_dict(state_dict)
-        else:
-            # Dispatch this rank's state dictionary to the wrapped shard optimizer
-            self.load_local_state_dict(ZeroRedundancyOptimizer.rank_local_state_dict(self.rank, state_dict))
-
-    def add_param_group(self, param_group: dict) -> None:
-        """Add a param group to the :class:`Optimizer` s `param_groups`.
-
-        This can be useful when fine tuning a pre-trained network as frozen layers can be made
-        trainable and added to the :class:`Optimizer` as training progresses.
-
-        Arguments:
-            param_group (dict): Specifies what Tensors should be optimized along with group
-            specific optimization options
-
-        .. warning: This handles updating the shards on all partitions, but needs to be called on all ranks.
-        """
-
-        super().add_param_group(param_group)
-        if not self.in_super_constructor:
-            # Force a re-partitioning
-            self._partition_parameters.clear()
-            self._per_device_params.clear()
-            self._param_rank.clear()
-
-            param_groups = self.partition_parameters()[self.rank]
-            if len(param_groups) == len(self.optim.param_groups) + 1:
-                self.optim.add_param_group(param_groups[-1])
-
-            # Update the bucketing strategy accordingly
-            self._setup_bucket_strategy()
-
     @staticmethod
     def rank_local_state_dict(rank: int, state_dict: dict) -> dict:
         """Returns the local_state_dict for a given rank.
@@ -406,10 +405,6 @@ class ZeroRedundancyOptimizer(Optimizer):
         """
         param_groups = state_dict["param_groups"][state_dict["partition"][rank][0] : state_dict["partition"][rank][1]]
         return {"state": state_dict["state"][rank], "param_groups": param_groups}
-
-    ##########################
-    # Private helper functions
-    ##########################
 
     def _broadcast_params(self) -> None:
         """Helper function to broadcast all the parameters from a given device"""
