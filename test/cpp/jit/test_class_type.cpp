@@ -94,9 +94,9 @@ TEST(ClassTypeTest, IdenticalTypesDifferentCus) {
     // Check that the exception contains the address of the compilation unit
     // in addition to the ClassType's name.
     testing::FileCheck()
-        .check("foo(0x")
+        .check("foo (of Python compilation unit at: 0x")
         ->check_same(")")
-        ->check("foo(0x")
+        ->check("foo (of Python compilation unit at: 0x")
         ->check_same(")")
         ->run(e.what());
 
