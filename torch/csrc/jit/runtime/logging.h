@@ -74,10 +74,11 @@ constexpr const char* EXECUTION_PLAN_CACHE_MISS =
     "pytorch_runtime.execution_plan_cache_miss";
 
 inline std::vector<const char*> allRuntimeCounters() {
-  return {GRAPH_EXECUTORS_CONSTRUCTED,
-          GRAPH_EXECUTOR_INVOCATIONS,
-          EXECUTION_PLAN_CACHE_HIT,
-          EXECUTION_PLAN_CACHE_MISS};
+  return {
+      GRAPH_EXECUTORS_CONSTRUCTED,
+      GRAPH_EXECUTOR_INVOCATIONS,
+      EXECUTION_PLAN_CACHE_HIT,
+      EXECUTION_PLAN_CACHE_MISS};
 }
 
 } // namespace runtime_counters

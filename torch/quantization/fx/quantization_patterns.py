@@ -34,16 +34,13 @@ from .utils import (
     get_linear_prepack_op_for_dtype,
 )
 
+from .quantization_types import QuantizerCls
+
 from abc import ABC, abstractmethod
 import operator
 import warnings
 
 from typing import Any, Callable, Dict
-
-# This is the Quantizer class instance from torch/quantization/fx/quantize.py.
-# Define separately to prevent circular imports.
-# TODO(future PR): improve this.
-QuantizerCls = Any
 
 # -------------------------
 # Pattern Registrations
@@ -540,6 +537,8 @@ ARGS_TO_SKIP = {
     torch._ops.ops.quantized.instance_norm:
     ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
 }
+@register_quant_pattern(torch.nn.ConvTranspose1d)
+@register_quant_pattern(torch.nn.ConvTranspose2d)
 @register_quant_pattern(torch.nn.ELU)
 @register_quant_pattern(torch.nn.LeakyReLU)
 @register_quant_pattern(torch.nn.Hardswish)
@@ -756,10 +755,10 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
         qconfig = quantizer.qconfig_map[node.name]
         convert = torch.quantization.quantize_fx._convert_standalone_module_fx  # type: ignore
         observed_standalone_module = quantizer.modules[node.target]
+        input_quantized_idxs = observed_standalone_module._standalone_module_input_quantized_idxs.tolist()
         quantized_standalone_module = convert(observed_standalone_module, debug=debug)
         parent_name, name = _parent_name(node.target)
         # update the modules dict
         setattr(quantizer.modules[parent_name], name, quantized_standalone_module)
         quantizer.modules[node.target] = quantized_standalone_module
-        # standalone module takes float input
-        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=input_quantized_idxs))
