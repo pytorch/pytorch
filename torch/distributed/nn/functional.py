@@ -12,7 +12,7 @@ def broadcast(tensor, src, group=dist.group.WORLD):
 
     Arguments:
         tensor (Tensor): Data to be sent if ``src`` is the rank of current
-            process, and tensor to be used to save received data otherwise.
+            process.
         src (int): Source rank.
         group (ProcessGroup, optional): The process group to work on.
 
@@ -46,8 +46,8 @@ def scatter(tensors, src=0, group=dist.group.WORLD):
     ``tensor`` argument.
 
     Arguments:
-        tensors (list[Tensor]): List of tensors to scatter (default is
-            ``None``, must be specified on the source rank).
+        tensors (list[Tensor]): List of tensors to scatter on the source rank.
+            Receivers must pass ``None`.
         src (int, optional): Source rank (default is 0).
         group (ProcessGroup, optional): The process group to work on.
 
@@ -65,8 +65,7 @@ def reduce(tensor, dst, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
     Only the process with rank ``dst`` is going to receive the final result.
 
     Arguments:
-        tensor (Tensor): Input of the collective. The function
-            operates in-place.
+        tensor (Tensor): Input of the collective.
         dst (int): Destination rank.
         op (optional): One of the values from
             ``torch.distributed.ReduceOp``
@@ -116,7 +115,8 @@ def all_reduce(tensor, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
     Reduces the tensor data across all machines in such a way that all get
     the final result.
 
-    After the call ``tensor`` is going to be bitwise identical in all processes.
+    After the call the returned tensor is going to be bitwise
+    identical in all processes.
 
     Arguments:
         tensor (Tensor): Input of the collective.
@@ -180,7 +180,7 @@ class _Scatter(Function):
     def forward(ctx, src, group, *tensors):
         ctx.src = src
         ctx.group = group
-        # TODO assert all the tensors have the same size
+        assert all(t.size() == tensors[0].size() for t in tensors)
         output = torch.zeros_like(tensors[0])
         if dist.get_rank(group=group) == src:
             dist.scatter(output, list(tensors), src, group=group)
