@@ -91,36 +91,38 @@ class MultiheadAttention(nn.MultiheadAttention):
         observed.qconfig = other.qconfig
 
         # Set the linear weights
-        observed.out_proj.weight = other.out_proj.weight
-        observed.out_proj.bias = other.out_proj.bias
+        observed.out_proj.weight = other.out_proj.weight  # type: ignore
+        observed.out_proj.bias = other.out_proj.bias  # type: ignore
         if other._qkv_same_embed_dim:
             # Use separate params
-            _b = other.in_proj_bias
+            bias = other.in_proj_bias
             _start = 0
-            _end = other.embed_dim
-            _w = other.in_proj_weight[_start:_end, :]
-            if _b is not None:
-                _b = torch.nn.Parameter(_b[_start:_end], _b.requires_grad)
-            observed.linear_Q.weight = torch.nn.Parameter(_w, _w.requires_grad)
-            observed.linear_Q.bias = _b
+            _end = _start + other.embed_dim
+            weight = other.in_proj_weight[_start:_end, :]
+            if bias is not None:
+                bias = torch.nn.Parameter(bias[_start:_end], bias.requires_grad)
+            observed.linear_Q.weight = torch.nn.Parameter(weight,
+                                                          weight.requires_grad)
+            observed.linear_Q.bias = bias
 
-            _b = other.in_proj_bias
-            _start = other.embed_dim
-            _end = other.embed_dim * 2
-            _w = other.in_proj_weight[_start:_end, :]
-            if _b is not None:
-                _b = torch.nn.Parameter(_b[_start:_end], _b.requires_grad)
-            observed.linear_K.weight = torch.nn.Parameter(_w, _w.requires_grad)
-            observed.linear_K.bias = _b
+            bias = other.in_proj_bias
+            _start = _end
+            _end = _start + other.embed_dim
+            weight = other.in_proj_weight[_start:_end, :]
+            if bias is not None:
+                bias = torch.nn.Parameter(bias[_start:_end], bias.requires_grad)
+            observed.linear_K.weight = torch.nn.Parameter(weight,
+                                                          weight.requires_grad)
+            observed.linear_K.bias = bias
 
-            _b = other.in_proj_bias
-            _start = other.embed_dim * 2
-            _end = None
-            _w = other.in_proj_weight[_start:, :]
-            if _b is not None:
-                _b = torch.nn.Parameter(_b[_start:], _b.requires_grad)
-            observed.linear_V.weight = torch.nn.Parameter(_w, _w.requires_grad)
-            observed.linear_V.bias = _b
+            bias = other.in_proj_bias
+            _start = _end
+            weight = other.in_proj_weight[_start:, :]
+            if bias is not None:
+                bias = torch.nn.Parameter(bias[_start:], bias.requires_grad)
+            observed.linear_V.weight = torch.nn.Parameter(weight,
+                                                          weight.requires_grad)
+            observed.linear_V.bias = bias
         else:
             observed.linear_Q = other.q_proj_weight
             observed.linear_K = other.k_proj_weight
@@ -165,9 +167,13 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         return converted
 
-    def forward(self, query, key, value, key_padding_mask=None,
-                need_weights=True, attn_mask=None):
-        # type: (Tensor, Tensor, Tensor, Optional[Tensor], bool, Optional[Tensor]) -> Tuple[Tensor, Optional[Tensor]]
+    def forward(self,
+                query: Tensor,
+                key: Tensor,
+                value: Tensor,
+                key_padding_mask: Optional[Tensor] = None,
+                need_weights: bool = True,
+                attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Note::
         Please, refer to :func:`~torch.nn.MultiheadAttention.forward` for more
@@ -214,12 +220,18 @@ class MultiheadAttention(nn.MultiheadAttention):
         return self._forward_impl(query, key, value, key_padding_mask,
                                   need_weights, attn_mask)
 
-    def _forward_impl(
-            self, query, key, value, key_padding_mask=None, need_weights=True,
-            attn_mask=None):
-        # type: (Tensor, Tensor, Tensor, Optional[Tensor], bool, Optional[Tensor]) -> Tuple[Tensor, Optional[Tensor]]
+    def _forward_impl(self,
+                      query: Tensor,
+                      key: Tensor,
+                      value: Tensor,
+                      key_padding_mask: Optional[Tensor] = None,
+                      need_weights: bool = True,
+                      attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
         # This version will not deal with the static key/value pairs.
         # Keeping it here for future changes.
+        #
+        # TODO: This method has some duplicate lines with the
+        # `torch.nn.functional.multi_head_attention`. Will need to refactor.
         static_k = None
         static_v = None
 
@@ -345,7 +357,7 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         # Reentering the quantized zone
         attn_output = self.quant_attn_output(attn_output)
-        attn_output = self.out_proj(attn_output)
+        attn_output = self.out_proj(attn_output)  # type: ignore
         attn_output_weights = self.quant_attn_output_weights(attn_output_weights)
 
         if need_weights:

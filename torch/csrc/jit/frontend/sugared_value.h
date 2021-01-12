@@ -539,8 +539,8 @@ struct TORCH_API TensorCastValue : public SugaredValue {
       size_t n_binders) override {
     TORCH_INTERNAL_ASSERT(args.size() == 0 && kwargs.size() == 0);
     Value* dtype_const = m.graph()->insertConstant(dtype_, loc);
-    std::vector<NamedValue> kwargs_{self_,
-                                    NamedValue(loc, "dtype", dtype_const)};
+    std::vector<NamedValue> kwargs_{
+        self_, NamedValue(loc, "dtype", dtype_const)};
     Value* casted_val = m.graph()->insert(
         /*opname=*/Symbol::fromQualString("aten::to"),
         /*args=*/args,

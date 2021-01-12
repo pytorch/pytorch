@@ -73,12 +73,14 @@ class GPUMetaVarRewriter : public IRMutator {
  public:
   explicit GPUMetaVarRewriter(const CudaAnalysis* cuda_analysis)
       : cuda_analysis_(cuda_analysis) {
-    gpu_block_vars_ = {new Var("blockIdx.x", kInt),
-                       new Var("blockIdx.y", kInt),
-                       new Var("blockIdx.z", kInt)};
-    gpu_thread_vars_ = {new Var("threadIdx.x", kInt),
-                        new Var("threadIdx.y", kInt),
-                        new Var("threadIdx.z", kInt)};
+    gpu_block_vars_ = {
+        new Var("blockIdx.x", kInt),
+        new Var("blockIdx.y", kInt),
+        new Var("blockIdx.z", kInt)};
+    gpu_thread_vars_ = {
+        new Var("threadIdx.x", kInt),
+        new Var("threadIdx.y", kInt),
+        new Var("threadIdx.z", kInt)};
 
     current_block_reach_ = {new IntImm(1), new IntImm(1), new IntImm(1)};
     current_thread_reach_ = {new IntImm(1), new IntImm(1), new IntImm(1)};
