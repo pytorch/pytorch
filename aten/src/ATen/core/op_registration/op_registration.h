@@ -19,7 +19,10 @@ namespace c10 {
 namespace detail {
 template<class KernelFunctor>
 std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor(
-          std::enable_if_t<!c10::guts::infer_function_traits_t<KernelFunctor>::first_arg_is_dispatchKeySet::value, std::nullptr_t> = nullptr) {
+          std::enable_if_t<!std::is_same<
+            DispatchKeySet,
+            guts::typelist::head_with_default_t<nullptr_t, typename c10::guts::infer_function_traits_t<KernelFunctor>::parameter_types>
+          >::value, std::nullptr_t> = nullptr) {
   using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type;
   return std::make_unique<FunctionSchema>(inferFunctionSchemaFlattenedReturns<func_type>("", ""));
 }
@@ -30,7 +33,10 @@ std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor(
 // See Note [Plumbing Keys Through The Dispatcher]
 template<class KernelFunctor>
 std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor(
-          std::enable_if_t<c10::guts::infer_function_traits_t<KernelFunctor>::first_arg_is_dispatchKeySet::value, std::nullptr_t> = nullptr) {
+          std::enable_if_t<std::is_same<
+            DispatchKeySet,
+            guts::typelist::head_with_default_t<nullptr_t, typename c10::guts::infer_function_traits_t<KernelFunctor>::parameter_types>
+          >::value, std::nullptr_t> = nullptr) {
   // Hide the first argument of the schema, which is expected to be of type DispatchKeySet.
   using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type_skip_first_arg;
   return std::make_unique<FunctionSchema>(inferFunctionSchemaFlattenedReturns<func_type>("", ""));

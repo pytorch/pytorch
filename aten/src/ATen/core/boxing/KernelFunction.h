@@ -74,7 +74,7 @@ public:
   using InternalBoxedKernelFunction = void(OperatorKernel*, const OperatorHandle&, DispatchKeySet, Stack*);
   // This is the public API for how boxed kernels are defined
   using BoxedKernelFunction = void(const OperatorHandle&, Stack*);
-  using BoxedKernelFunction_withKeys = void(const OperatorHandle&, DispatchKeySet, Stack*);
+  using BoxedKernelFunction_withDispatchKeys = void(const OperatorHandle&, DispatchKeySet, Stack*);
 
   KernelFunction();
 
@@ -138,7 +138,7 @@ public:
    * TODO: This will only be useful if we write a backend fallback that plumbs dispatch keys (currently there are none)
    * See Note [Plumbing Keys Through The Dispatcher] for details.
    */
-  template<BoxedKernelFunction_withKeys* func>
+  template<BoxedKernelFunction_withDispatchKeys* func>
   static KernelFunction makeFromBoxedFunction();
 
   /**
@@ -212,7 +212,7 @@ private:
   template<BoxedKernelFunction* func>
   static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
 
-  template<BoxedKernelFunction_withKeys* func>
+  template<BoxedKernelFunction_withDispatchKeys* func>
   static void make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet, Stack* stack);
 
   OperatorKernel* getFunctor_() const;

@@ -312,7 +312,10 @@ namespace impl {
   template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
   std::decay_t<typename guts::infer_function_traits_t<Functor>::return_type>
   call_functor_with_args_from_stack_(Functor* functor, Stack* stack, std::index_sequence<ivalue_arg_indices...>,
-          std::enable_if_t<!c10::guts::infer_function_traits_t<Functor>::first_arg_is_dispatchKeySet::value, std::nullptr_t> = nullptr) {
+                 std::enable_if_t<!std::is_same<
+                   DispatchKeySet,
+                   guts::typelist::head_with_default_t<nullptr_t, typename c10::guts::infer_function_traits_t<Functor>::parameter_types>
+                 >::value, std::nullptr_t> = nullptr) {
     (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
 
     /*
@@ -332,7 +335,10 @@ namespace impl {
   template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
   std::decay_t<typename guts::infer_function_traits_t<Functor>::return_type>
   call_functor_with_args_from_stack_(Functor* functor, DispatchKeySet dispatchKeySet, Stack* stack, std::index_sequence<ivalue_arg_indices...>,
-          std::enable_if_t<c10::guts::infer_function_traits_t<Functor>::first_arg_is_dispatchKeySet::value, std::nullptr_t> = nullptr) {
+                 std::enable_if_t<std::is_same<
+                   DispatchKeySet,
+                   guts::typelist::head_with_default_t<nullptr_t, typename c10::guts::infer_function_traits_t<Functor>::parameter_types>
+                 >::value, std::nullptr_t> = nullptr) {
     (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
 
     /*
@@ -356,7 +362,10 @@ namespace impl {
   template<class Functor, bool AllowDeprecatedTypes>
   std::decay_t<typename guts::infer_function_traits_t<Functor>::return_type>
   call_functor_with_args_from_stack(Functor* functor, DispatchKeySet, Stack* stack,
-          std::enable_if_t<!c10::guts::infer_function_traits_t<Functor>::first_arg_is_dispatchKeySet::value, std::nullptr_t> = nullptr) {
+                 std::enable_if_t<!std::is_same<
+                   DispatchKeySet,
+                   guts::typelist::head_with_default_t<nullptr_t, typename c10::guts::infer_function_traits_t<Functor>::parameter_types>
+                 >::value, std::nullptr_t> = nullptr) {
     // This functor is used by all kernels that do not expect to take in a DispatchKeySet,
     // i.e. pretty much all manually written kernels
     // We're explicitly taking in a dispatchKeySet and not forwarding it to the registered kernel.
@@ -367,7 +376,10 @@ namespace impl {
   template<class Functor, bool AllowDeprecatedTypes>
   std::decay_t<typename guts::infer_function_traits_t<Functor>::return_type>
   call_functor_with_args_from_stack(Functor* functor, DispatchKeySet dispatchKeySet, Stack* stack,
-          std::enable_if_t<c10::guts::infer_function_traits_t<Functor>::first_arg_is_dispatchKeySet::value, std::nullptr_t> = nullptr) {
+                 std::enable_if_t<std::is_same<
+                   DispatchKeySet,
+                   guts::typelist::head_with_default_t<nullptr_t, typename c10::guts::infer_function_traits_t<Functor>::parameter_types>
+                 >::value, std::nullptr_t> = nullptr) {
     // This functor is used by all kernels that take in a DispatchKeySet as their first argument.
     // We don't want to put the keyset on the stack, so [num arguments on the stack] = [num parameters] - 1
     constexpr size_t num_ivalue_args = guts::infer_function_traits_t<Functor>::number_of_parameters - 1;
@@ -402,12 +414,20 @@ namespace impl {
 
   struct drop_inputs final {
     template<class KernelFunctor>
-    static void call(Stack* stack, std::enable_if_t<!c10::guts::infer_function_traits_t<KernelFunctor>::first_arg_is_dispatchKeySet::value, std::nullptr_t> = nullptr) {
+    static void call(Stack* stack,
+                 std::enable_if_t<!std::is_same<
+                   DispatchKeySet,
+                   guts::typelist::head_with_default_t<nullptr_t, typename c10::guts::infer_function_traits_t<KernelFunctor>::parameter_types>
+                 >::value, std::nullptr_t> = nullptr) {
       constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters;
       torch::jit::drop(*stack, num_inputs);
     }
     template<class KernelFunctor>
-    static void call(Stack* stack, std::enable_if_t<c10::guts::infer_function_traits_t<KernelFunctor>::first_arg_is_dispatchKeySet::value, std::nullptr_t> = nullptr) {
+    static void call(Stack* stack,
+                 std::enable_if_t<std::is_same<
+                   DispatchKeySet,
+                   guts::typelist::head_with_default_t<nullptr_t, typename c10::guts::infer_function_traits_t<KernelFunctor>::parameter_types>
+                 >::value, std::nullptr_t> = nullptr) {
       constexpr size_t num_inputs = guts::infer_function_traits_t<KernelFunctor>::number_of_parameters-1;
       torch::jit::drop(*stack, num_inputs);
     }

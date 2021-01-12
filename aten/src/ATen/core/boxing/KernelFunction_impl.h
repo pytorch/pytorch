@@ -24,7 +24,7 @@ inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorH
     func(opHandle, stack);
 }
 
-template<KernelFunction::BoxedKernelFunction_withKeys* func>
+template<KernelFunction::BoxedKernelFunction_withDispatchKeys* func>
 inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet ks, Stack* stack) {
     // See Note [Plumbing Keys Through The Dispatcher 2] for details.
     func(opHandle, ks, stack);
@@ -87,7 +87,7 @@ inline KernelFunction KernelFunction::makeFromBoxedFunction() {
     );
 }
 
-template<KernelFunction::BoxedKernelFunction_withKeys* func>
+template<KernelFunction::BoxedKernelFunction_withDispatchKeys* func>
 inline KernelFunction KernelFunction::makeFromBoxedFunction() {
     return KernelFunction(
         nullptr,  // no functor_ object

@@ -24,7 +24,6 @@ struct function_traits<Result ()> {
   using return_type = Result;
   using parameter_types = typelist::typelist<>;
   static constexpr auto number_of_parameters = 0;
-  using first_arg_is_dispatchKeySet = std::false_type;
 };
 
 template<class Result, class FirstArg, class... Args>
@@ -34,8 +33,6 @@ struct function_traits<Result (FirstArg, Args...)> {
   using return_type = Result;
   using parameter_types = typelist::typelist<FirstArg, Args...>;
   static constexpr auto number_of_parameters = sizeof...(Args) + 1;
-  // See Note [Plumbing Keys Through The Dispatcher]
-  using first_arg_is_dispatchKeySet = typename std::is_same<DispatchKeySet, FirstArg>;
 };
 
 /**

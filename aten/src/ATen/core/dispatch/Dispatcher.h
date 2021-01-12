@@ -383,6 +383,11 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   // No alias dispatch key is allowed at runtime.
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKey));
+  auto dispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
+    .template getDispatchKeySetUnboxed<Args...>(
+      DispatchKeySet(DispatchKeySet::FULL_AFTER, dispatchKey),
+      args...
+    );
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
@@ -418,10 +423,10 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
       }
     }
     // keeping the guard alive while executing the kernel
-    return kernel.template call<Return, Args...>(op, DispatchKeySet(dispatchKey), std::forward<Args>(args)...);
+    return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
-  return kernel.template call<Return, Args...>(op, DispatchKeySet(dispatchKey), std::forward<Args>(args)...);
+  return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
 }
 
 template<class Return, class... Args>
@@ -476,7 +481,7 @@ template<class Return, class... Args>
 inline Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   auto dispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
-    .template getDispatchKeyUnboxed<Args...>(
+    .template getDispatchKeySetUnboxed<Args...>(
       DispatchKeySet::FULL,
       args...
     );
@@ -487,7 +492,7 @@ template<class Return, class... Args>
 inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey currentDispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   auto currentDispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
-    .template getDispatchKeyUnboxed<Args...>(
+    .template getDispatchKeySetUnboxed<Args...>(
       DispatchKeySet(DispatchKeySet::FULL_AFTER, currentDispatchKey),
       args...
     );
@@ -508,7 +513,7 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorIterator_->op;
-  auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
+  auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
   const auto& kernel = entry.lookup(dispatchKeySet.highestPriorityTypeId());
 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
@@ -541,7 +546,6 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, DispatchKeySet dispatchKeySet, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorIterator_->op;
-  //auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
   const auto& kernel = entry.lookup(dispatchKeySet.highestPriorityTypeId());
 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING

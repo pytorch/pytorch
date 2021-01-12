@@ -213,6 +213,21 @@ template<class TypeList> using head_t = typename head<TypeList>::type;
 
 
 /**
+ * Returns the first element of a type list, or the specified default if the type list is empty.
+ * Example:
+ *   int  ==  head_t<bool, typelist<int, string>>
+ *   bool  ==  head_t<bool, typelist<>>
+ */
+template<class Default, class TypeList> struct head_with_default final {
+  using type = Default;
+};
+template<class Default, class Head, class... Tail> struct head_with_default<Default, typelist<Head, Tail...>> final {
+  using type = Head;
+};
+template<class Default, class TypeList> using head_with_default_t = typename head_with_default<Default, TypeList>::type;
+
+
+/**
  * Returns the N-th element of a type list.
  * Example:
  * int == element_t<1, typelist<float, int, char>>
