@@ -108,6 +108,7 @@ class OpInfo(object):
                  promotes_integers_to_float=False,  # whether op promotes unary output to float or not
                  sample_inputs_func=None,  # function to generate sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
+                 variant_test_name='',  # additional string to include in the test name
                  supports_sparse=False  # supported for sparse
                  ):
 
@@ -117,6 +118,7 @@ class OpInfo(object):
 
         self.name = name
         self.aten_name = aten_name if aten_name is not None else name
+        self.variant_test_name = variant_test_name
 
         self.dtypes = set(dtypes)
         self.dtypesIfCPU = set(dtypesIfCPU) if dtypesIfCPU is not None else self.dtypes
@@ -523,6 +525,56 @@ class SpectralFuncInfo(OpInfo):
                 *(SampleInput(nd_tensor, kwargs=dict(dim=dim))
                   for dim in [-1, -2, -3]),
             ]
+
+
+class HermitianOpInfo(OpInfo):
+    """Operator information for Hermitian functions
+    These are functions that take Hermitian matrices as input.
+    They require a modified function to be tested for gradcheck, because the finite-difference algorithm
+    for calculating derivatives does not preserve the Hermitian property of the input and returning incorrect results.
+    """
+
+    def get_op(self):
+        """
+        Returns the function variant of the operator, torch.<op_name>,
+        compatible with gradcheck for Hermitian functions.
+        It works only for single input argument.
+        """
+        def hermitian_func(non_hermitian_input, **kwargs):
+            hermitian_input = non_hermitian_input + non_hermitian_input.conj().transpose(-2, -1)
+            return self.op(hermitian_input, **kwargs)
+
+        return hermitian_func
+
+
+def sample_inputs_linalg_pinv(op_info, device, dtype, requires_grad=False):
+    """
+    This function generates input for torch.linalg.pinv with distinct singular values so that autograd is always stable
+    Implementation of torch.linalg.pinv depends on torch.svd and torch.linalg.eigh, therefore it's sufficient to
+    check only square S x S matrix and the batched (3 x S x S) input.
+    """
+    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+    test_cases = (
+        random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),  # single matrix
+        random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device),  # batch of matrices
+    )
+
+    out = []
+    for a in test_cases:
+        a.requires_grad = requires_grad
+        out.append(SampleInput(a))
+    return out
+
+
+def sample_inputs_linalg_pinv_hermitian(op_info, device, dtype, requires_grad=False):
+    """
+    This function generates input for torch.linalg.pinv with hermitian=True keyword argument.
+    """
+    out = sample_inputs_linalg_pinv(op_info, device, dtype, requires_grad)
+    for o in out:
+        o.kwargs = {"hermitian": True}
+    return out
 
 
 def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False):
@@ -1226,6 +1278,27 @@ op_db: List[OpInfo] = [
            supports_tensor_out=True,
            sample_inputs_func=sample_inputs_linalg_solve,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+    OpInfo('linalg.pinv',
+           aten_name='linalg_pinv',
+           op=torch.linalg.pinv,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           supports_tensor_out=False,
+           sample_inputs_func=sample_inputs_linalg_pinv,
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+    HermitianOpInfo('linalg.pinv',
+                    variant_test_name='hermitian',
+                    aten_name='linalg_pinv',
+                    op=torch.linalg.pinv,
+                    dtypes=floating_and_complex_types(),
+                    test_inplace_grad=False,
+                    supports_tensor_out=False,
+                    sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
+                    decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+                    skips=(
+                        # These tests do not take into account custom op.get_op()
+                        SkipInfo('TestCommon', 'test_variant_consistency_jit'),)
+                    ),
     OpInfo('svd',
            op=torch.svd,
            dtypes=floating_and_complex_types(),
@@ -1258,7 +1331,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
            supports_tensor_out=False,
-           sample_inputs_func=sample_inputs_pinverse,
+           sample_inputs_func=sample_inputs_linalg_pinv,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     OpInfo('gather',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16),
