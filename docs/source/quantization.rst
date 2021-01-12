@@ -103,7 +103,7 @@ The following table compares the differences between Eager Mode Quantization and
 +------------+------------+-----------+
 | Support for Customization | Limited | Flexible |
 +------------+------------+-----------+
-| Input/Output Model Type | `torch.nn.Module` | `torch.nn.Module` (May need some refactors to make the model compatible with FX Graph Mode Quantization)|
+| Input/Output Model Type | ``torch.nn.Module`` | ``torch.nn.Module`` (May need some refactors to make the model compatible with FX Graph Mode Quantization) |
 +------------+------------+-----------+
 
 Eager Mode Quantization
