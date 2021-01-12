@@ -710,6 +710,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.pca_lowrank: lambda input, q=None, center=True, niter=2: -1,
         torch.pdist: lambda input, p=2: -1,
         torch.pinverse: lambda input, rcond=1e-15: -1,
+        torch.linalg.pinv: lambda input, rcond=1e-15, hermitian=False: -1,
         torch.pixel_shuffle: lambda input, upscale_factor: -1,
         torch.pixel_unshuffle: lambda input, downscale_factor: -1,
         torch.poisson: lambda input, generator=None: -1,
