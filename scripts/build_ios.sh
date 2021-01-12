@@ -28,6 +28,9 @@ if [ -z "${BUILD_CAFFE2_MOBILE:-}" ]; then
   fi
   # bitcode
   if [ "${ENABLE_BITCODE:-}" == '1' ]; then
+    # ARM assembly needs to be disabled
+    CMAKE_ARGS+=("-DXNNPACK_ENABLE_ASSEMBLY=0")
+    CMAKE_ARGS+=("-DPYTORCH_QNNPACK_ENABLE_ASSEMBLY=0")
     CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")
     CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fembed-bitcode")
   fi
