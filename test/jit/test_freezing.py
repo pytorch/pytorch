@@ -8,6 +8,7 @@ from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 
 from torch.jit._recursive import wrap_cpp_module
 from typing import Any
+from itertools import product
 
 import io
 
@@ -1332,7 +1333,6 @@ class TestFreezing(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Freezing modules containing prim::ModuleDictIndex is not supported"):
             mf = torch._C._freeze_module(m._c)
 
-
     def test_freeze_non_module_class_getattr(self):
         class BoxCoder(object):
             def __init__(self, bbox_xform_clip):
@@ -1361,3 +1361,58 @@ class TestFreezing(JitTestCase):
         output_eager = model(inp)
         self.assertEqual(model(inp), script_model(inp))
         FileCheck().check_not("GetAttr").run(script_model.graph)
+
+class TestFrozenOptimizations(JitTestCase):
+    def test_conv_bn_folding(self):
+        conv_bias = [True, False]
+        module_pairs = [(nn.Conv1d, nn.BatchNorm1d), (nn.Conv2d, nn.BatchNorm2d), (nn.Conv3d, nn.BatchNorm3d)]
+        use_tracing = [True, False]
+
+        for use_bias, modules, tracing in product(conv_bias, module_pairs, use_tracing):
+            class ConvBN(torch.nn.Module):
+                def __init__(self, in_channels, out_channels, **kwargs):
+                    super(ConvBN, self).__init__()
+                    self.conv = modules[0](in_channels, out_channels, bias=use_bias, **kwargs)
+                    self.bn = modules[1](out_channels, eps=0.001)
+
+                def forward(self, x):
+                    x = self.conv(x)
+                    return self.bn(x)
+
+            mod_eager = ConvBN(3, 32, kernel_size=3, stride=2).eval()
+            inps = [4, 3, 4]
+            if modules[0] == nn.Conv2d:
+                inps.append(inps[-1])
+            if modules[0] == nn.Conv3d:
+                inps.append(inps[-1])
+                inps.append(inps[-1])
+
+            inp = torch.rand(inps)
+
+            if tracing:
+                scripted_mod = torch.jit.trace(mod_eager, (inp))
+            else:
+                scripted_mod = torch.jit.script(mod_eager)
+
+            self.run_pass("inline", scripted_mod.graph)
+
+            # TODO: add optimization for conv size
+            # Currrently a size check in batch norm gives conv multiple uses
+            # and prevents fusion
+            exceptions = scripted_mod.graph.findAllNodes("prim::RaiseException")
+            for n in exceptions:
+                n.destroy()
+
+            self.run_pass("dce", scripted_mod.graph)
+
+            FileCheck().check("conv").check("batch").run(scripted_mod.graph)
+            # successfully no-ops with non-const inputs
+            self.run_pass("fold_frozen_conv_bn", scripted_mod.graph)
+            FileCheck().check("conv").check("aten::batch_norm").run(scripted_mod.graph)
+
+            scripted_mod = torch.jit.freeze(scripted_mod)
+            self.run_pass("fold_frozen_conv_bn", scripted_mod.graph)
+            FileCheck().check("conv").check_not("aten::batch_norm").run(scripted_mod.graph)
+
+            self.assertEqual(mod_eager(inp), scripted_mod(inp))
+            self.assertEqual(mod_eager(inp), scripted_mod(inp))
