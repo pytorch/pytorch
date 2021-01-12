@@ -238,6 +238,30 @@ class Tracer(TracerBase):
 
         return root_fn, args
 
+    def create_wrapped_func(self, orig_fn):
+        def wrapped(*args, **kwargs):
+            """
+            Given an closed-over ``orig_function`` to invoke, search the args and kwargs for
+            a Proxy object. If there is one, emit a ``call_function`` node to preserve the
+            call to this leaf function directly. Otherwise, just return the results of
+            this function call, as this function is not being traced.
+            """
+            proxy = None
+
+            def find_proxy(x):
+                nonlocal proxy
+                if isinstance(x, Proxy):
+                    proxy = x
+
+            map_aggregate(args, find_proxy)
+            map_aggregate(kwargs, find_proxy)
+
+            if proxy is not None:
+                return self.create_proxy('call_function', orig_fn, args, kwargs)
+            else:
+                return orig_fn(*args, **kwargs)
+        return wrapped
+
     def trace(self, root: Union[torch.nn.Module, Callable]) -> Graph:
         """
         Trace ``root`` and return the corresponding FX ``Graph`` representation. ``root``
@@ -308,7 +332,7 @@ class Tracer(TracerBase):
             torch.nn.Module.__getattr__ = module_getattr_wrapper  # type: ignore
             torch.nn.Module.__call__ = module_call_wrapper
 
-            orig_fns = _patch_wrapped_functions()
+            orig_fns = _patch_wrapped_functions(self)
 
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                              type_expr=fn.__annotations__.get('return', None))
@@ -322,40 +346,15 @@ class Tracer(TracerBase):
 # to patch for the purposes of the wrap() API.
 _wrapped_fns_to_patch : List[Tuple[dict, str]] = []
 
-def _create_wrapped_func(orig_fn):
-    def wrapped(*args, **kwargs):
-        """
-        Given an closed-over ``orig_function`` to invoke, search the args and kwargs for
-        a Proxy object. If there is one, emit a ``call_function`` node to preserve the
-        call to this leaf function directly. Otherwise, just return the results of
-        this function call, as this function is not being traced.
-        """
-        proxy = None
-
-        def find_proxy(x):
-            nonlocal proxy
-            if isinstance(x, Proxy):
-                proxy = x
-
-        map_aggregate(args, find_proxy)
-        map_aggregate(kwargs, find_proxy)
-
-        if proxy is not None:
-            return proxy.tracer.create_proxy('call_function', orig_fn, args, kwargs)
-        else:
-            return orig_fn(*args, **kwargs)
-
-    return wrapped
-
 class PatchedFn(NamedTuple):
     frame_dict : Dict[str, Any]
     fn_name : str
     orig_fn : Any
 
-def _patch_wrapped_functions() -> List[PatchedFn]:
+def _patch_wrapped_functions(tracer: Tracer) -> List[PatchedFn]:
     """
     Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
-    the listed global functions in the `_create_wrapped_func` wrapper. Returns
+    the listed global functions in the `create_wrapped_func` wrapper. Returns
     a list of PatchedFn, which is a record specifiying a single function
     entry that was patched and contains the original function for unpatching
     """
@@ -374,7 +373,7 @@ def _patch_wrapped_functions() -> List[PatchedFn]:
         orig_fn = frame_dict[name]
         orig_fns.append(PatchedFn(frame_dict, name, orig_fn))
 
-        frame_dict[name] = _create_wrapped_func(orig_fn)
+        frame_dict[name] = tracer.create_wrapped_func(orig_fn)
 
         processed_entries.add((id(frame_dict), name))
 
