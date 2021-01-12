@@ -25,7 +25,6 @@ class TestOpInfo(TestCase):
     # Verifies that ops have their unsupported dtypes
     #   registered correctly by testing that each claimed unsupported dtype
     #   throws a runtime error
-    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @ops(op_db, dtypes=OpDTypes.unsupported)
     def test_unsupported_dtypes(self, device, dtype, op):
@@ -43,7 +42,6 @@ class TestOpInfo(TestCase):
     # Verifies that ops have their supported dtypes
     #   registered correctly by testing that each claimed supported dtype
     #   does NOT throw a runtime error
-    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @ops(op_db, dtypes=OpDTypes.supported)
     def test_supported_dtypes(self, device, dtype, op):
