@@ -20,7 +20,6 @@ EPOCH_DEPRECATION_WARNING = (
 )
 
 class _LRScheduler(object):
-
     def __init__(self, optimizer, last_epoch=-1, verbose=False):
 
         # Attach optimizer
@@ -112,7 +111,6 @@ class _LRScheduler(object):
             else:
                 print('Epoch {:5d}: adjusting learning rate'
                       ' of group {} to {:.4e}.'.format(epoch, group, lr))
-
 
     def step(self, epoch=None):
         # Raise a warning if old pattern is detected
@@ -1317,3 +1315,77 @@ class OneCycleLR(_LRScheduler):
                     group['momentum'] = computed_momentum
 
         return lrs
+
+
+class MultiLRScheduler(_LRScheduler):
+    r""" This class can be used to schedule schedulers to run
+    at different moments on the same parameters of a network.
+    It will switch between the different schedulers depending on
+    the `epoch` count value.
+
+    Args:
+        schedulers (list): List of the schedulers to use during training.
+        epochs (list): List of values at which to switch to another scheduler.
+
+    Example:
+        >>> # The following scheduler will use a quadratic learning rate for the first 100 batches
+        >>> # and then switches to a step for the remainder of the training.
+        >>> # Assuming optimizer uses lr = 0.1 for all groups:
+        >>> # lr = 0.0001   [Sched1] if batch = 1
+        >>> # lr = 0.01     [Sched1] if batch = 10
+        >>> # lr = 0.1      [Sched1] if batch = 100
+        >>> # lr = 0.1      [Sched2] if batch < 1000
+        >>> # lr = 0.01     [Sched2] if 1000 <= batch < 2000
+        >>> # lr = 0.001    [Sched2] if 2000 <= batch < 3000
+        >>> # ...
+        >>> burn_in = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda b: (b / 100) ** 2)
+        >>> steps = torch.optim.lr_scheduler.StepLR(optimizer, 1000)
+        >>> scheduler = torch.optim.lr_scheduler.MultiLRScheduler([burn_in, steps], [100])
+        >>> for epoch in range(10):
+        >>>     for batch in data_loader:
+        >>>         train_batch(...)
+        >>>         scheduler.step()
+    """
+    def __init__(self, schedulers, epochs, last_epoch=0):
+        self.schedulers = schedulers
+        self.epochs = epochs
+        self.last_epoch = last_epoch
+
+        if len(self.schedulers) < len(self.epochs) - 1:
+            raise ValueError("Need at least {} schedulers according to 'epochs', but only {} are given".format(
+                len(self.epochs) + 1,
+                len(self.schedulers)
+            ))
+        if not all(e1 < e2 for e1, e2 in zip(self.epochs, self.epochs[1:])):
+            raise ValueError("'epoch' values need to be strictly increasing")
+
+    def step(self, *args, epoch=None, **kwargs):
+        if epoch is None:
+            # Schedulers automatically increase last_epoch in step, so pass in previous value
+            sched = self.scheduler
+            sched.last_epoch = self.last_epoch
+            sched.step(*args, **kwargs)
+            self.last_epoch += 1
+        else:
+            self.scheduler.step(*args, epoch, **kwargs)
+            self.last_epoch = epoch
+
+    def get_last_lr(self):
+        return self.scheduler.get_last_lr()
+
+    @property
+    def scheduler(self):
+        for i, e in enumerate(self.epochs):
+            if self.last_epoch < e:
+                break
+            else:
+                i += 1
+
+        return self.schedulers[i]
+
+    def state_dict(self):
+        state_dict = [s.state_dict() for s in self.schedulers]
+        return state_dict
+
+    def load_state_dict(self, state):
+        [self.schedulers[i].load_state_dict(s) for i, s in enumerate(state)]
