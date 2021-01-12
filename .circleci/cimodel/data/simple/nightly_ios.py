@@ -18,7 +18,7 @@ class IOSNightlyJob:
 
         common_name_pieces = [
             "ios",
-        ] + ios_definitions.IOS_VERSION.render_dots_or_parts(with_version_dots) + [
+        ] + ios_definitions.XCODE_VERSION.render_dots_or_parts(with_version_dots) + [
             "nightly",
             self.variant,
             "build",
@@ -60,7 +60,7 @@ BUILD_CONFIGS = [
 
 
 WORKFLOW_DATA = BUILD_CONFIGS + [
-    # IOSNightlyJob("binary", is_upload=True),
+    IOSNightlyJob("binary", is_upload=True),
 ]
 
 

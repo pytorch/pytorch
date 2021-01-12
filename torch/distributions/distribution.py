@@ -2,6 +2,7 @@ import torch
 import warnings
 from torch.distributions import constraints
 from torch.distributions.utils import lazy_property
+from typing import Dict, Optional, Any
 
 
 class Distribution(object):
@@ -11,12 +12,21 @@ class Distribution(object):
 
     has_rsample = False
     has_enumerate_support = False
-    _validate_args = False
-    support = None
-    arg_constraints = {}
+    _validate_args = __debug__
 
     @staticmethod
     def set_default_validate_args(value):
+        """
+        Sets whether validation is enabled or disabled.
+
+        The default behavior mimics Python's ``assert`` statement: validation
+        is on by default, but is disabled if Python is run in optimized mode
+        (via ``python -O``). Validation may be expensive, so you may want to
+        disable it once a model is working.
+
+        Args:
+            value (bool): Whether to enable validation.
+        """
         if value not in [True, False]:
             raise ValueError
         Distribution._validate_args = value
@@ -72,7 +82,7 @@ class Distribution(object):
         return self._event_shape
 
     @property
-    def arg_constraints(self):
+    def arg_constraints(self) -> Dict[str, constraints.Constraint]:
         """
         Returns a dictionary from argument names to
         :class:`~torch.distributions.constraints.Constraint` objects that
@@ -82,7 +92,7 @@ class Distribution(object):
         raise NotImplementedError
 
     @property
-    def support(self):
+    def support(self) -> Optional[Any]:
         """
         Returns a :class:`~torch.distributions.constraints.Constraint` object
         representing this distribution's support.
@@ -248,7 +258,7 @@ class Distribution(object):
             if i != 1 and j != 1 and i != j:
                 raise ValueError('Value is not broadcastable with batch_shape+event_shape: {} vs {}.'.
                                  format(actual_shape, expected_shape))
-
+        assert self.support is not None
         if not self.support.check(value).all():
             raise ValueError('The value argument must be within the support')
 

@@ -43,7 +43,7 @@ def _get_allgather_out_list(all_gather_in_list, world_size):
 
 
 def quantization_pertensor_hook(
-    process_group: object, bucket: dist._GradBucket
+    process_group: dist.ProcessGroup, bucket: dist._GradBucket
 ) -> torch.futures.Future:
     """
         Applies the ``torch.quantize_per_tensor`` logic to DDP using ``allgather``
@@ -59,13 +59,11 @@ def quantization_pertensor_hook(
             ``allreduce`` protocol. It works only with flattened grads.
 
         Example::
-            >>> ddp_model._register_comm_hook(process_group, quantization_pertensor_hook)
+            >>> ddp_model.register_comm_hook(process_group, quantization_pertensor_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     rank = process_group.rank() if process_group is not None else dist.get_rank()
-    world_size = (
-        process_group.size() if process_group is not None else dist.get_world_size()
-    )
+    world_size = group_to_use.size()
 
     tensor = bucket.get_tensors()[0]
 
@@ -118,7 +116,7 @@ def quantization_pertensor_hook(
 
 
 def quantization_perchannel_hook(
-    process_group: object, bucket: dist._GradBucket, bucket_size=512
+    process_group: dist.ProcessGroup, bucket: dist._GradBucket, bucket_size=512
 ) -> torch.futures.Future:
     """
         Applies the ``torch.quantize_per_channel`` logic to DDP using ``allgather``
@@ -140,13 +138,11 @@ def quantization_perchannel_hook(
             ``allreduce`` protocol. It works only with flattened grads.
 
         Example::
-            >>> ddp_model._register_comm_hook(process_group, quantization_perchannel_hook)
+            >>> ddp_model.register_comm_hook(process_group, quantization_perchannel_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     rank = process_group.rank() if process_group is not None else dist.get_rank()
-    world_size = (
-        process_group.size() if process_group is not None else dist.get_world_size()
-    )
+    world_size = group_to_use.size()
 
     tensor = bucket.get_tensors()[0]
 

@@ -29,7 +29,7 @@ class OneHotCategorical(Distribution):
     """
     arg_constraints = {'probs': constraints.simplex,
                        'logits': constraints.real}
-    support = constraints.simplex
+    support = constraints.one_hot
     has_enumerate_support = True
 
     def __init__(self, probs=None, logits=None, validate_args=None):
@@ -96,3 +96,18 @@ class OneHotCategorical(Distribution):
         if expand:
             values = values.expand((n,) + self.batch_shape + (n,))
         return values
+
+class OneHotCategoricalStraightThrough(OneHotCategorical):
+    r"""
+    Creates a reparameterizable :class:`OneHotCategorical` distribution based on the straight-
+    through gradient estimator from [1].
+
+    [1] Estimating or Propagating Gradients Through Stochastic Neurons for Conditional Computation
+    (Bengio et al, 2013)
+    """
+    has_rsample = True
+
+    def rsample(self, sample_shape=torch.Size()):
+        samples = self.sample(sample_shape)
+        probs = self._categorical.probs  # cached via @lazy_property
+        return samples + (probs - probs.detach())

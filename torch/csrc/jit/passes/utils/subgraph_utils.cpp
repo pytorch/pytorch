@@ -394,6 +394,38 @@ Node* createSingletonSubgraphAndUpdateAliasing(
       });
 }
 
+std::string truncateStrWithHash(const std::string& s, size_t maxlen) {
+  if (s.size() <= maxlen) {
+    return s;
+  }
+  std::string hash_str = c10::to_string(c10::hash<std::string>{}(s));
+  // If hash-string plus '_' can fit into maxlen, then truncate the original
+  // string correspondingly so that the final string with the hash included fits
+  // into maxlen. If that's not possible, at least truncate the original string
+  // to maxlen (and appen the hash to it).
+  size_t trunc_len =
+      (maxlen > hash_str.size() + 1) ? (maxlen - hash_str.size() - 1) : maxlen;
+  std::stringstream truncated;
+  truncated << s.substr(0, trunc_len);
+  truncated << "_" << hash_str;
+  return truncated.str();
+}
+
+std::string generateNameForGraph(
+    const std::shared_ptr<Graph>& graph,
+    size_t maxlen,
+    const std::string& prefix) {
+  std::stringstream graph_name;
+  graph_name << prefix;
+  for (Node* node : graph->nodes()) {
+    if (!node->kind().is_aten()) {
+      continue;
+    }
+    graph_name << "_" << node->kind().toUnqualString();
+  }
+  return truncateStrWithHash(graph_name.str(), maxlen);
+}
+
 } // namespace SubgraphUtils
 } // namespace jit
 } // namespace torch

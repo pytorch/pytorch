@@ -46,7 +46,7 @@ append_filelist("libtorch_python_core_sources" TORCH_PYTHON_SRCS)
 
 # NB: This has to match the condition under which the JIT test directory
 #     is included (at the time of writing that's in caffe2/CMakeLists.txt).
-if(BUILD_TEST AND NOT USE_ROCM)
+if(BUILD_TEST)
     add_definitions(-DBUILDING_TESTS)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_ROOT}/test/cpp/jit/torch_python_test.cpp
@@ -65,6 +65,8 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${CMAKE_BINARY_DIR}/caffe2/aten/src
     ${CMAKE_BINARY_DIR}/third_party
     ${CMAKE_BINARY_DIR}/third_party/onnx
+
+    ${TORCH_ROOT}/third_party/valgrind-headers
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
@@ -187,6 +189,10 @@ if(USE_NCCL AND NOT WIN32)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
 endif()
 
+if(USE_VALGRIND AND NOT WIN32)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_VALGRIND)
+endif()
+
 # In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists
 # of type stub files to be omitted.
 # For comptability with older CMake versions, we omit it for now, but leave it as a comment in case comptability with the older
@@ -228,9 +234,9 @@ add_custom_command(
     "${TORCH_SRC_DIR}/nn/functional.pyi"
     COMMAND
     "${PYTHON_EXECUTABLE}" -mtools.pyi.gen_pyi
-      --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
+      --native-functions-path "aten/src/ATen/native/native_functions.yaml"
+      --deprecated-functions-path "tools/autograd/deprecated.yaml"
     DEPENDS
-    "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TORCH_SRC_DIR}/_C/__init__.pyi.in"
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi.in"
     "${TORCH_SRC_DIR}/nn/functional.pyi.in"

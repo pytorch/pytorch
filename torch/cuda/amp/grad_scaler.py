@@ -94,7 +94,7 @@ class GradScaler(object):
     value calibrates.  ``scaler.step`` will skip the underlying ``optimizer.step()`` for these
     iterations.  After that, step skipping should occur rarely (once every few hundred or thousand iterations).
 
-    Arguments:
+    Args:
         init_scale (float, optional, default=2.**16):  Initial scale factor.
         growth_factor (float, optional, default=2.0):  Factor by which the scale is multiplied during
             :meth:`update` if no inf/NaN gradients occur for ``growth_interval`` consecutive iterations.
@@ -150,7 +150,7 @@ class GradScaler(object):
         Returns scaled outputs.  If this instance of :class:`GradScaler` is not enabled, outputs are returned
         unmodified.
 
-        Arguments:
+        Args:
             outputs (Tensor or iterable of Tensors):  Outputs to scale.
         """
         if not self._enabled:
@@ -191,13 +191,20 @@ class GradScaler(object):
         per_device_inv_scale = _MultiDeviceReplicator(inv_scale)
         per_device_found_inf = _MultiDeviceReplicator(found_inf)
 
-        for group in optimizer.param_groups:
-            for param in group["params"]:
-                if param.grad is None:
-                    continue
-                if (not allow_fp16) and param.grad.dtype == torch.float16:
-                    raise ValueError("Attempting to unscale FP16 gradients.")
-                with torch.no_grad():
+        # To set up _amp_foreach_non_finite_check_and_unscale_, split grads by device and dtype.
+        # There could be hundreds of grads, so we'd like to iterate through them just once.
+        # However, we don't know their devices or dtypes in advance.
+
+        # https://stackoverflow.com/questions/5029934/defaultdict-of-defaultdict
+        # Google says mypy struggles with defaultdicts type annotations.
+        per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))  # type: ignore[var-annotated]
+        with torch.no_grad():
+            for group in optimizer.param_groups:
+                for param in group["params"]:
+                    if param.grad is None:
+                        continue
+                    if (not allow_fp16) and param.grad.dtype == torch.float16:
+                        raise ValueError("Attempting to unscale FP16 gradients.")
                     if param.grad.is_sparse:
                         # is_coalesced() == False means the sparse grad has values with duplicate indices.
                         # coalesce() deduplicates indices and adds all values that have the same index.
@@ -209,9 +216,14 @@ class GradScaler(object):
                     else:
                         to_unscale = param.grad
 
-                    torch._amp_non_finite_check_and_unscale_(to_unscale,
-                                                             per_device_found_inf.get(param.grad.device),
-                                                             per_device_inv_scale.get(param.grad.device))
+                    # TODO: is there a way to split by device and dtype without appending in the inner loop?
+                    per_device_and_dtype_grads[to_unscale.device][to_unscale.dtype].append(to_unscale)
+
+            for device, per_dtype_grads in per_device_and_dtype_grads.items():
+                for grads in per_dtype_grads.values():
+                    torch._amp_foreach_non_finite_check_and_unscale_(grads,
+                                                                     per_device_found_inf.get(device),
+                                                                     per_device_inv_scale.get(device))
 
         return per_device_found_inf._per_device_tensors
 
@@ -233,7 +245,7 @@ class GradScaler(object):
             scaler.step(optimizer)
             scaler.update()
 
-        Arguments:
+        Args:
             optimizer (torch.optim.Optimizer):  Optimizer that owns the gradients to be unscaled.
 
         .. note::
@@ -280,7 +292,7 @@ class GradScaler(object):
 
         Returns the return value of ``optimizer.step(*args, **kwargs)``.
 
-        Arguments:
+        Args:
             optimizer (torch.optim.Optimizer):  Optimizer that applies the gradients.
             args:  Any arguments.
             kwargs:  Any keyword arguments.
@@ -334,7 +346,7 @@ class GradScaler(object):
 
         Passing ``new_scale`` sets the scale directly.
 
-        Arguments:
+        Args:
             new_scale (float or :class:`torch.cuda.FloatTensor`, optional, default=None):  New scale factor.
 
         .. warning::
@@ -403,7 +415,7 @@ class GradScaler(object):
 
     def set_growth_factor(self, new_factor):
         r"""
-        Arguments:
+        Args:
             new_scale (float):  Value to use as the new scale growth factor.
         """
         self._growth_factor = new_factor
@@ -416,7 +428,7 @@ class GradScaler(object):
 
     def set_backoff_factor(self, new_factor):
         r"""
-        Arguments:
+        Args:
             new_scale (float):  Value to use as the new scale backoff factor.
         """
         self._backoff_factor = new_factor
@@ -429,7 +441,7 @@ class GradScaler(object):
 
     def set_growth_interval(self, new_interval):
         r"""
-        Arguments:
+        Args:
             new_interval (int):  Value to use as the new growth interval.
         """
         self._growth_interval = new_interval
@@ -472,7 +484,7 @@ class GradScaler(object):
         r"""
         Loads the scaler state.  If this instance is disabled, :meth:`load_state_dict` is a no-op.
 
-        Arguments:
+        Args:
            state_dict(dict): scaler state.  Should be an object returned from a call to :meth:`state_dict`.
         """
         if not self._enabled:

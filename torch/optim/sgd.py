@@ -77,7 +77,7 @@ class SGD(Optimizer):
     def step(self, closure=None):
         """Performs a single optimization step.
 
-        Arguments:
+        Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
@@ -101,14 +101,7 @@ class SGD(Optimizer):
                     params_with_grad.append(p)
                     d_p = p.grad
                     d_p_list.append(d_p)
-                    if momentum != 0:
-                        param_state = self.state[p]
-                        if 'momentum_buffer' not in param_state:
-                            buf = param_state['momentum_buffer'] = torch.clone(d_p).detach()
-                        else:
-                            buf = param_state['momentum_buffer']
-
-                        momentum_buffer_list.append(buf)
+                    momentum_buffer_list.append(None)
 
             F.sgd(params_with_grad,
                   d_p_list,

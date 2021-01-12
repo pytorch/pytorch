@@ -33,7 +33,7 @@ __global__ void ChannelShuffleNCHWKernel(
 
 template <typename T, int kSharedSize>
 __global__ void
-ChannelShuffleNHWCKernel(const int G, const int K, const float* X, float* Y) {
+ChannelShuffleNHWCKernel(const int G, const int K, const T* X, T* Y) {
   __shared__ T sdata[kSharedSize];
   const int C = G * K;
   const int offset = blockIdx.x * C;

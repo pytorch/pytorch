@@ -237,6 +237,70 @@ def cuda_pointwise_context(loop_levels, block_count, block_size):
     if block_size:
         torch._C._jit_set_te_cuda_pointwise_block_size(old_block_size)
 
+# Auxiliary class to facilitate dynamic input shape
+class DynamicShape(object):
+    r'''
+    An Auxiliary class for dynamic shape benchmarks
+
+    Pre-computes input with random shapes and also 
+    modifies the compute method so in each call the
+    fuser sees a different input tensor shape
+    '''
+
+    # Number of random inputs in an instance
+    SAMPLE_SIZE = 100
+
+    def __init__(self, dynamic_range=1.2):
+        self._input_samples = []
+        self._input_sample_index = 0
+        self._dynamic_range = 1. / dynamic_range if dynamic_range > 1.0 else dynamic_range
+        self._enable_dynamic_shapes = True
+
+    # Returns the input test case that current index points to
+    @property
+    def inputs(self):
+        return self._input_samples[self._input_sample_index]
+
+    # An inputs assignment actually adds a test case in the class buffer
+    @inputs.setter
+    def inputs(self, val):
+        self._input_samples.append(val)
+
+    # Runs normal compute while increment test case index
+    def compute(self):
+        super().compute()
+        self._input_sample_index = (self._input_sample_index + 1) % self.SAMPLE_SIZE
+
+    # Defined by benchmark, the benchmark needs to specify the input
+    # tensor construction in this method, essentially the same way
+    # a benchmark creates the inputs list in the initializer
+    def instantiate_input(self):
+        raise NotImplementedError
+
+    # Instantiate random shaped inputs and start the benchmark run
+    def run(self, args):
+        # force disable dynamic shape from command line
+        if args.no_dynamic_shape:
+            self._enable_dynamic_shapes = False
+        self.load_inputs()
+        super().run(args)
+
+    # pre-compute inputs so the creations of random tensors
+    # do not add to the compute time
+    def load_inputs(self):
+        for i in range(self.SAMPLE_SIZE - 1):
+            self.instantiate_input()
+
+    # returns a randomized shape
+    def rand_shape(self, shape):
+        if not self._enable_dynamic_shapes:
+            return shape
+        ratios = np.random.uniform(self._dynamic_range, 1.0, len(shape))
+        dyn_shape = list(
+            np.multiply(shape, ratios).astype(int)
+        )
+        return dyn_shape
+
 
 benchmark_classes = []
 

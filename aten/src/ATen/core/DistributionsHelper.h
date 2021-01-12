@@ -197,7 +197,7 @@ template <typename T>
 struct normal_distribution {
 
   C10_HOST_DEVICE inline normal_distribution(T mean_in, T stdv_in) {
-    TORCH_CHECK_IF_NOT_ON_CUDA(stdv_in > 0);
+    TORCH_CHECK_IF_NOT_ON_CUDA(stdv_in >= 0, "stdv_in must be positive: ", stdv_in);
     mean = mean_in;
     stdv = stdv_in;
   }

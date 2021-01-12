@@ -112,8 +112,8 @@ void inBatchBroadcast(
     setShape(blob, new_blob);
     const auto rit = reversed.find(blob);
     if (rit != reversed.end()) {
-      const auto& orignal_input = rit->second;
-      setShape(orignal_input, "");
+      const auto& original_input = rit->second;
+      setShape(original_input, "");
     }
   }
 

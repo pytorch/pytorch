@@ -3,13 +3,17 @@ The following constraints are implemented:
 
 - ``constraints.boolean``
 - ``constraints.cat``
+- ``constraints.corr_cholesky``
 - ``constraints.dependent``
 - ``constraints.greater_than(lower_bound)``
+- ``constraints.greater_than_eq(lower_bound)``
 - ``constraints.integer_interval(lower_bound, upper_bound)``
 - ``constraints.interval(lower_bound, upper_bound)``
+- ``constraints.less_than(upper_bound)``
 - ``constraints.lower_cholesky``
 - ``constraints.lower_triangular``
 - ``constraints.nonnegative_integer``
+- ``constraints.one_hot``
 - ``constraints.positive``
 - ``constraints.positive_definite``
 - ``constraints.positive_integer``
@@ -26,6 +30,7 @@ __all__ = [
     'Constraint',
     'boolean',
     'cat',
+    'corr_cholesky',
     'dependent',
     'dependent_property',
     'greater_than',
@@ -56,6 +61,8 @@ class Constraint(object):
     A constraint object represents a region over which a variable is valid,
     e.g. within which a variable can be optimized.
     """
+    is_discrete = False
+
     def check(self, value):
         """
         Returns a byte tensor of `sample_shape + batch_shape` indicating
@@ -102,14 +109,30 @@ class _Boolean(Constraint):
     """
     Constrain to the two values `{0, 1}`.
     """
+    is_discrete = True
+
     def check(self, value):
         return (value == 0) | (value == 1)
+
+
+class _OneHot(Constraint):
+    """
+    Constrain to one-hot vectors.
+    """
+    is_discrete = True
+
+    def check(self, value):
+        is_boolean = (value == 0) | (value == 1)
+        is_normalized = value.sum(-1).eq(1)
+        return is_boolean.all(-1) & is_normalized
 
 
 class _IntegerInterval(Constraint):
     """
     Constrain to an integer interval `[lower_bound, upper_bound]`.
     """
+    is_discrete = True
+
     def __init__(self, lower_bound, upper_bound):
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
@@ -127,6 +150,8 @@ class _IntegerLessThan(Constraint):
     """
     Constrain to an integer interval `(-inf, upper_bound]`.
     """
+    is_discrete = True
+
     def __init__(self, upper_bound):
         self.upper_bound = upper_bound
 
@@ -143,6 +168,8 @@ class _IntegerGreaterThan(Constraint):
     """
     Constrain to an integer interval `[lower_bound, inf)`.
     """
+    is_discrete = True
+
     def __init__(self, lower_bound):
         self.lower_bound = lower_bound
 
@@ -275,6 +302,18 @@ class _LowerCholesky(Constraint):
         return lower_triangular & positive_diagonal
 
 
+class _CorrCholesky(Constraint):
+    """
+    Constrain to lower-triangular square matrices with positive diagonals and each
+    row vector being of unit length.
+    """
+    def check(self, value):
+        tol = torch.finfo(value.dtype).eps * value.size(-1) * 10  # 10 is an adjustable fudge factor
+        row_norm = torch.linalg.norm(value.detach(), dim=-1)
+        unit_row_norm = (row_norm - 1.).abs().le(tol).all(dim=-1)
+        return _LowerCholesky().check(value) & unit_row_norm
+
+
 class _PositiveDefinite(Constraint):
     """
     Constrain to positive-definite matrices.
@@ -345,6 +384,7 @@ class _Stack(Constraint):
 dependent = _Dependent()
 dependent_property = _DependentProperty
 boolean = _Boolean()
+one_hot = _OneHot()
 nonnegative_integer = _IntegerGreaterThan(0)
 positive_integer = _IntegerGreaterThan(1)
 integer_interval = _IntegerInterval
@@ -360,6 +400,7 @@ half_open_interval = _HalfOpenInterval
 simplex = _Simplex()
 lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()
+corr_cholesky = _CorrCholesky()
 positive_definite = _PositiveDefinite()
 cat = _Cat
 stack = _Stack

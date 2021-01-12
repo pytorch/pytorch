@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -6,6 +5,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 Statement* IrCloner::clone(const Statement* statement) {
   if (statement == nullptr) {
@@ -114,6 +114,7 @@ void IrCloner::handle(const Merge* merge) {
   clone_ = new Merge(merge, this);
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

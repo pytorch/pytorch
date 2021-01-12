@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
@@ -44,6 +45,25 @@ TEST(LiteInterpreterTest, UpsampleNearest2d) {
   auto resd = res.toTensor();
   auto refd = ref.toTensor();
   ASSERT_TRUE(resd.equal(refd));
+}
+
+TEST(LiteInterpreterTest, CheckAttrAccess) {
+  Module m("m");
+  m.register_attribute("mobile_optimized", BoolType::get(), true);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  bool mobile_optimized = bc.attr("mobile_optimized", false).toBool();
+
+  AT_ASSERT(mobile_optimized);
+  m.setattr("mobile_optimized", false);
+  ss = std::stringstream();
+  m._save_for_mobile(ss);
+  bc = _load_for_mobile(ss);
+  mobile_optimized = bc.attr("mobile_optimized", false).toBool();
+
+  AT_ASSERT(!mobile_optimized);
 }
 
 TEST(LiteInterpreterTest, Add) {
@@ -504,6 +524,29 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
     }
   }
 
+  // class A(nn.Module):
+  //   def __init__(self):
+  //     super(A, self).__init__()
+
+  //   def forward(self, x):
+  //     return x + 1
+
+  // class B(nn.Module):
+  //   def __init__(self):
+  //     super(B, self).__init__()
+
+  //   def forward(self, x):
+  //     return x + 2
+
+  // class C(nn.Module):
+  //   def __init__(self):
+  //     super(C, self).__init__()
+  //     self.A0 = A()
+  //     self.B0 = B()
+
+  //   def forward(self, x):
+  //     return self.A0.forward(self.B0.forward(x))
+
   std::unordered_set<std::string> expected_result(
       {"top(C).A0(A).forward", "top(C).B0(B).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
@@ -549,9 +592,11 @@ TEST(LiteInterpreterTest, HierarchyModuleInfo) {
   // There are 3 module information strings here.
   // "top(C).forward": for the add operator in top.
   // "top(C).B0(B).forward": for the add operator in B0.
-  // "top(C).B0(B).A0(A).forward": for the add operator in A0.
+  // "top(C).B0(B).forward.A0(A).forward": for the add operator in A0.
   std::unordered_set<std::string> expected_result(
-      {"top(C).forward", "top(C).B0(B).forward", "top(C).B0(B).A0(A).forward"});
+      {"top(C).forward",
+       "top(C).B0(B).forward",
+       "top(C).B0(B).forward.A0(A).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -587,11 +632,29 @@ TEST(LiteInterpreterTest, DuplicatedClassTypeModuleInfo) {
     }
   }
 
-  // The current approach is not able to distinguish between A0 and A1,
-  // which have the same class type. Hence, it only records module
-  // information for A1.
+  // class A(nn.Module):
+  //   def __init__(self):
+  //     super(A, self).__init__()
+
+  //   def forward(self, x):
+  //     return x + 5
+
+  // class B(nn.Module):
+  //   def __init__(self):
+  //     super(B, self).__init__()
+  //     self.A0 = A()
+  //     self.A1 = A()
+
+  //   def forward(self, x):
+  //     return self.A0.forward(x) + self.A1.forward(x)
+
+  // There are 3 module information strings here.
+  // "top(B).forward": for the add operator in top.
+  // "top(B).A0(A).forward": for the add operator in A0.
+  // "top(B).A1(A).forward": for the add operator in A1.
+
   std::unordered_set<std::string> expected_result(
-      {"top(B).forward", "top(B).A1(A).forward"});
+      {"top(B).forward", "top(B).A0(A).forward", "top(B).A1(A).forward"});
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
@@ -693,6 +756,60 @@ TEST(LiteInterpreterTest, RunMethodVariadic) {
   auto resd = res.toTensor().item<float>();
   auto refd = ref.toTensor().item<float>();
   AT_ASSERT(resd == refd);
+}
+
+TEST(LiteInterpreterTest, ExtraFiles) {
+  const auto script = R"JIT(
+    def forward(self):
+        x = torch.rand(5, 5)
+        x = x.mm(x)
+        return x
+  )JIT";
+
+  auto module =
+      std::make_shared<Module>("Module", std::make_shared<CompilationUnit>());
+  module->define(script);
+  std::ostringstream oss;
+  std::unordered_map<std::string, std::string> extra_files;
+  extra_files["metadata.json"] = "abc";
+  module->_save_for_mobile(oss, extra_files);
+
+  std::istringstream iss(oss.str());
+  caffe2::serialize::IStreamAdapter adapter{&iss};
+  std::unordered_map<std::string, std::string> loaded_extra_files;
+  loaded_extra_files["metadata.json"] = "";
+  auto loaded_module =
+      torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
+  ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
+}
+
+TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {
+  torch::jit::Module m("m");
+  m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
+  m.register_parameter("bias", torch::ones({20}), false);
+  m.define(R"(
+    def forward(self, input):
+      x1 = torch.zeros(2, 2)
+      x2 = torch.empty_like(torch.empty(2, 2))
+      x3 = torch._convolution(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1, False, False, True, True)
+      return (x1, x2, x3)
+  )");
+  m.eval();
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+
+  torch::jit::mobile::Module ptl_model = torch::jit::_load_for_mobile(ss);
+  std::set<std::string> operator_names =
+      torch::jit::mobile::_export_operator_list(ptl_model);
+  std::set<std::string> expected_operator_names = {
+      "aten::_convolution",
+      "aten::empty.memory_format",
+      "aten::empty_like",
+      "aten::zeros",
+  };
+  EXPECT_EQ(operator_names, expected_operator_names)
+      << "Expected the root operator lists to be the same";
 }
 
 namespace {

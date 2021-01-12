@@ -71,11 +71,8 @@ Tensor quantized_group_norm_impl(
 
   const int64_t batches = input_shape[0];
   const int64_t num_channels = input_shape[1];
-  const int64_t elements_per_batch = std::accumulate(
-      input_shape.cbegin() + 1,
-      input_shape.cend(),
-      1LL,
-      std::multiplies<int64_t>());
+  const int64_t elements_per_batch =
+      prod_intlist(input_shape.cbegin() + 1, input_shape.cend());
 
   const int64_t M = batches * num_groups;
   const int64_t N = elements_per_batch / num_groups;

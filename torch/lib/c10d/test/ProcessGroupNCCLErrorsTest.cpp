@@ -16,8 +16,10 @@ class WorkNCCLSimulateErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
  public:
   WorkNCCLSimulateErrors(
       const std::vector<at::Device>& devices,
-      bool simulate_error)
-      : WorkNCCL(devices), simulate_error_(simulate_error) {}
+      bool simulate_error,
+      int rank,
+      c10d::OpType opType)
+      : WorkNCCL(devices, rank, opType), simulate_error_(simulate_error) {}
 
   std::exception_ptr checkForNCCLErrors(
       const std::vector<std::shared_ptr<c10d::NCCLComm>>& ncclComms)
@@ -35,10 +37,10 @@ class WorkNCCLSimulateErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
 class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
  public:
   ProcessGroupNCCLSimulateErrors(
-      const std::shared_ptr<c10d::Store>& store,
+      const c10::intrusive_ptr<c10d::Store>& store,
       int rank,
       int size,
-      c10d::ProcessGroupNCCL::Options opts)
+      c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
       : ProcessGroupNCCL(store, rank, size, opts), simulate_error_(false) {}
 
   std::exception_ptr checkForNCCLErrors(
@@ -54,9 +56,13 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
         ProcessGroupNCCLSimulateErrors::kWatchdogThreadSleepMillis);
   }
 
-  std::shared_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
-      std::vector<at::Device> devices) override {
-    return std::make_shared<WorkNCCLSimulateErrors>(devices, simulate_error_);
+  c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
+      std::vector<at::Device> devices,
+      int rank,
+      c10d::OpType opType,
+      const char* profilingTitle) override {
+    return c10::make_intrusive<WorkNCCLSimulateErrors>(
+        devices, simulate_error_, rank, opType);
   }
 
   size_t getNCCLCommCacheSize() {
@@ -79,8 +85,11 @@ class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
  public:
   WorkNCCLTimedoutErrors(
       const std::vector<at::Device>& devices,
-      bool set_timedout_error)
-      : WorkNCCL(devices), set_timedout_error_(set_timedout_error) {}
+      bool set_timedout_error,
+      int rank,
+      c10d::OpType opType)
+      : WorkNCCL(devices, rank, opType),
+        set_timedout_error_(set_timedout_error) {}
 
  private:
   bool isCompleted() override {
@@ -97,17 +106,20 @@ class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
 class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
  public:
   ProcessGroupNCCLTimedOutErrors(
-      const std::shared_ptr<c10d::Store>& store,
+      const c10::intrusive_ptr<c10d::Store>& store,
       int rank,
       int size,
-      c10d::ProcessGroupNCCL::Options opts)
+      c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts)
       : ProcessGroupNCCLSimulateErrors(store, rank, size, opts),
         set_timedout_error_(false) {}
 
-  std::shared_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
-      std::vector<at::Device> devices) override {
-    return std::make_shared<WorkNCCLTimedoutErrors>(
-        devices, set_timedout_error_);
+  c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
+      std::vector<at::Device> devices,
+      int rank,
+      c10d::OpType opType,
+      const char* profilingTitle) override {
+    return c10::make_intrusive<WorkNCCLTimedoutErrors>(
+        devices, set_timedout_error_, rank, opType);
   }
 
   void set_timedout_error() {
@@ -141,7 +153,7 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
   void SetUp() override {
     size_t numDevices = cudaNumDevices();
     TemporaryFile file;
-    store_ = std::make_shared<::c10d::FileStore>(file.path, 1);
+    store_ = c10::make_intrusive<::c10d::FileStore>(file.path, 1);
 
     at::cuda::OptionalCUDAGuard deviceGuard;
     tensors_.resize(numDevices);
@@ -156,7 +168,7 @@ class ProcessGroupNCCLErrorsTest : public ::testing::Test {
   }
 
   std::vector<at::Tensor> tensors_;
-  std::shared_ptr<::c10d::FileStore> store_;
+  c10::intrusive_ptr<::c10d::FileStore> store_;
 };
 
 TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
@@ -165,8 +177,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsBlocking) {
   }
 
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
-  c10d::ProcessGroupNCCL::Options options;
-  options.opTimeout = std::chrono::milliseconds(1000);
+  auto options = c10d::ProcessGroupNCCL::Options::create();
+  options->opTimeout = std::chrono::milliseconds(1000);
   ProcessGroupNCCLSimulateErrors pg(
       store_, 0, 1, options);
 
@@ -194,8 +206,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLTimedoutErrorsBlocking) {
   }
 
   ASSERT_TRUE(setenv(c10d::NCCL_BLOCKING_WAIT, "1", 1) == 0);
-  c10d::ProcessGroupNCCL::Options options;
-  options.opTimeout = std::chrono::milliseconds(3000);
+  auto options = c10d::ProcessGroupNCCL::Options::create();
+  options->opTimeout = std::chrono::milliseconds(3000);
   ProcessGroupNCCLTimedOutErrors pg(
       store_, 0, 1, options);
 
@@ -217,8 +229,8 @@ TEST_F(ProcessGroupNCCLErrorsTest, testNCCLErrorsNonBlocking) {
     return;
   }
 
-  c10d::ProcessGroupNCCL::Options options;
-  options.opTimeout = std::chrono::milliseconds(3000);
+  auto options = c10d::ProcessGroupNCCL::Options::create();
+  options->opTimeout = std::chrono::milliseconds(3000);
   ProcessGroupNCCLSimulateErrors pg(
       store_, 0, 1, options);
 

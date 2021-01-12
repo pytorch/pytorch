@@ -74,6 +74,7 @@ header_template_rule(
         "#cmakedefine01 TENSORPIPE_HAS_SHM_TRANSPORT": "",
         "#cmakedefine01 TENSORPIPE_HAS_CMA_CHANNEL": "",
         "#cmakedefine01 TENSORPIPE_HAS_CUDA_IPC_CHANNEL": "",
+        "#cmakedefine01 TENSORPIPE_HAS_IBV_TRANSPORT": "",
         "#cmakedefine01 TENSORPIPE_SUPPORTS_CUDA": "",
     },
 )
@@ -92,7 +93,13 @@ TENSORPIPE_HEADERS = glob([
 TENSORPIPE_BASE_SRCS = glob([
     "tensorpipe/*.cc",
     "tensorpipe/channel/*.cc",
-    "tensorpipe/common/*.cc",
+    "tensorpipe/common/address.cc",
+    "tensorpipe/common/epoll_loop.cc",
+    "tensorpipe/common/error.cc",
+    "tensorpipe/common/fd.cc",
+    "tensorpipe/common/ibv.cc",
+    "tensorpipe/common/socket.cc",
+    "tensorpipe/common/system.cc",
     "tensorpipe/core/*.cc",
     "tensorpipe/transport/*.cc",
     "tensorpipe/util/*/*.cc",
@@ -106,7 +113,10 @@ TENSORPIPE_SRCS = TENSORPIPE_BASE_SRCS + glob([
 ])
 
 TENSORPIPE_SRCS_CUDA = TENSORPIPE_SRCS + glob([
+    "tensorpipe/common/cuda_loop.cc",
+    "tensorpipe/channel/cuda_basic/*.cc",
     "tensorpipe/channel/cuda_ipc/*.cc",
+    "tensorpipe/channel/cuda_xth/*.cc",
 ])
 
 cc_library(

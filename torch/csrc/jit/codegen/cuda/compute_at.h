@@ -10,6 +10,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 class TensorDomain;
 class TensorView;
@@ -158,6 +159,7 @@ class ComputeAt {
   ComputeAt& operator=(const ComputeAt& other) = delete;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

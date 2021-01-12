@@ -127,9 +127,11 @@ public class MainActivity extends AppCompatActivity {
       mInputTensorBuffer = Tensor.allocateFloatBuffer((int) numElements);
       mInputTensor = Tensor.fromBlob(mInputTensorBuffer, BuildConfig.INPUT_TENSOR_SHAPE);
       PyTorchAndroid.setNumThreads(1);
-      mModule = BuildConfig.USE_VULKAN_DEVICE
-        ? PyTorchAndroid.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME, Device.VULKAN)
-        : PyTorchAndroid.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME);
+      mModule =
+          BuildConfig.USE_VULKAN_DEVICE
+              ? PyTorchAndroid.loadModuleFromAsset(
+                  getAssets(), BuildConfig.MODULE_ASSET_NAME, Device.VULKAN)
+              : PyTorchAndroid.loadModuleFromAsset(getAssets(), BuildConfig.MODULE_ASSET_NAME);
     }
 
     final long startTime = SystemClock.elapsedRealtime();
