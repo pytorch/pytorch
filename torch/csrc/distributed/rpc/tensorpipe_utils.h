@@ -35,17 +35,24 @@ struct FullDeviceContext {
   FullDeviceContext& operator=(const FullDeviceContext& rhs) = delete;
   FullDeviceContext& operator=(FullDeviceContext&& rhs) & = delete;
 
-  explicit FullDeviceContext(bool noCuda) {}
-  virtual void recordDataPtrs(
-      const std::vector<c10::DataPtr>& dataPtrs) const {}
-  virtual void recordTensors(const std::vector<torch::Tensor>& tensors) const {}
-  virtual void blockCurrentStreams() const {}
-  virtual void waitForCurrentStreams() const {}
+  explicit FullDeviceContext() {}
+  virtual void recordDataPtrs(const std::vector<c10::DataPtr>& dataPtrs) {}
+  virtual void recordTensors(const std::vector<torch::Tensor>& tensors) {}
+  virtual void blockCurrentStreams() {}
+  virtual void waitForCurrentStreams(
+      const std::vector<torch::Tensor>&  = {}) {}
 
 #ifdef USE_CUDA_NOT_ROCM
-  virtual const std::vector<CUDAStream>& streams() const {
+  virtual std::vector<CUDAStream> getReservedStreams() const {
     throw std::runtime_error(
         "Attempting to access CUDA streams, but torch is not built with CUDA");
+  }
+
+  virtual CUDAStream getStream(c10::DeviceIndex index) {
+    throw std::runtime_error(c10::str(
+        "Attempting to access CUDA stream of device ",
+        index,
+        ", but torch is not built with CUDA"));
   }
 #endif
 
@@ -54,8 +61,8 @@ struct FullDeviceContext {
 #ifndef USE_CUDA_NOT_ROCM
 
 // CUDA is not available, use CPU device context.
-inline std::shared_ptr<FullDeviceContext> createFullDeviceContext(bool noCuda) {
-  return std::make_shared<FullDeviceContext>(noCuda);
+inline std::shared_ptr<FullDeviceContext> createFullDeviceContext() {
+  return std::make_shared<FullDeviceContext>();
 }
 
 #else
@@ -63,38 +70,29 @@ inline std::shared_ptr<FullDeviceContext> createFullDeviceContext(bool noCuda) {
 // CUDA is available. Implement CUDA-related operations.
 struct CudaFullDeviceContext : public FullDeviceContext {
 
-  // Use the noCuda arg to disable streams management when deviceMaps are not
-  // set.
-  explicit CudaFullDeviceContext(bool noCuda) : FullDeviceContext(noCuda) {
-    if (!noCuda) {
-      auto deviceNum = at::cuda::device_count();
-      streams_.reserve(deviceNum);
-      for (c10::DeviceIndex idx = 0; idx < deviceNum; ++idx) {
-        streams_.emplace_back(at::cuda::getStreamFromPool(
-          /* isHighPriority */ false, /* device */ idx));
-      }
-    }
-  }
+  using FullDeviceContext::FullDeviceContext;
 
   // call c10::cuda::CUDACachingAllocator::recordStream with given DataPtrs
-  void recordDataPtrs(const std::vector<c10::DataPtr>& dataPtrs) const override;
+  void recordDataPtrs(const std::vector<c10::DataPtr>& dataPtrs) override;
 
   // call c10::cuda::CUDACachingAllocator::recordStream with given Tensors
-  void recordTensors(const std::vector<torch::Tensor>& tensors) const override;
+  void recordTensors(const std::vector<torch::Tensor>& tensors) override;
 
   // let current streams wait for streams in this context.
-  void blockCurrentStreams() const override;
+  void blockCurrentStreams() override;
 
   // let streams in this context wiat for current streams.
-  void waitForCurrentStreams() const override;
-  const std::vector<CUDAStream>& streams() const override;
+  void waitForCurrentStreams(
+      const std::vector<torch::Tensor>&  = {}) override;
+  std::vector<CUDAStream> getReservedStreams() const override;
+  CUDAStream getStream(c10::DeviceIndex index) override;
 
  private:
-  std::vector<CUDAStream> streams_;
+  std::unordered_map<c10::DeviceIndex, CUDAStream> streams_;
 };
 
-inline std::shared_ptr<FullDeviceContext> createFullDeviceContext(bool noCuda) {
-  return std::make_shared<CudaFullDeviceContext>(noCuda);
+inline std::shared_ptr<FullDeviceContext> createFullDeviceContext() {
+  return std::make_shared<CudaFullDeviceContext>();
 }
 
 #endif
@@ -132,7 +130,7 @@ tensorpipeSerialize(
     Message&& rpcMessage,
     std::vector<c10::DeviceIndex> devices = {},
     const std::shared_ptr<FullDeviceContext>& =
-        std::make_shared<FullDeviceContext>(/* noCuda */ true));
+        std::make_shared<FullDeviceContext>());
 
 // Allocate the buffers that will hold the incoming data. They will be managed
 // by the returned holder, which must be kept alive until the asynchronous read
@@ -142,7 +140,7 @@ TORCH_API TensorpipeReadBuffers
 tensorpipeAllocate(
     tensorpipe::Message& tpMessage,
     const std::shared_ptr<FullDeviceContext>& ctx =
-        std::make_shared<FullDeviceContext>(/* noCuda */ true));
+        std::make_shared<FullDeviceContext>());
 
 // Convert a TensorPipe message back into an RPC message. This requires the data
 // to be available and can thus only be performed once the asynchronous read has

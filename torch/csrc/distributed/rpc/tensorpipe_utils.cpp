@@ -43,44 +43,73 @@ inline c10::Device indexToDevice(c10::DeviceIndex index) {
 #ifdef USE_CUDA_NOT_ROCM
 
 inline void CudaFullDeviceContext::recordDataPtrs(
-    const std::vector<c10::DataPtr>& dataPtrs) const {
+    const std::vector<c10::DataPtr>& dataPtrs) {
   for (const auto& dataPtr: dataPtrs) {
     if (dataPtr.device().is_cuda()) {
       c10::cuda::CUDACachingAllocator::recordStream(
-          dataPtr, streams_[dataPtr.device().index()]);
+          dataPtr, getStream(dataPtr.device().index()));
     }
   }
 }
 
 inline void CudaFullDeviceContext::recordTensors(
-    const std::vector<torch::Tensor>& tensors) const {
+    const std::vector<torch::Tensor>& tensors) {
   for (const auto& tensor: tensors) {
     const auto& dataPtr = tensor.storage().data_ptr();
     if (dataPtr.device().is_cuda()) {
       c10::cuda::CUDACachingAllocator::recordStream(
-          dataPtr, streams_[dataPtr.device().index()]);
+          dataPtr, getStream(dataPtr.device().index()));
     }
   }
 }
 
-inline void CudaFullDeviceContext::blockCurrentStreams() const {
-  for (const auto& stream: streams_) {
+inline void CudaFullDeviceContext::blockCurrentStreams() {
+  //reserveStreams(devices);
+
+  for (const auto& entry: streams_) {
     at::cuda::CUDAEvent event;
-    event.record(stream);
-    event.block(at::cuda::getCurrentCUDAStream(stream.device().index()));
+    event.record(entry.second);
+    event.block(at::cuda::getCurrentCUDAStream(entry.first));
   }
 }
 
-inline void CudaFullDeviceContext::waitForCurrentStreams() const {
-  for (const auto& stream: streams_) {
+inline void CudaFullDeviceContext::waitForCurrentStreams(
+    const std::vector<torch::Tensor>& tensors) {
+  //reserveStreams(devices);
+  for (const auto& tensor: tensors) {
+    if (tensor.is_cuda()) {
+      getStream(tensor.device().index());
+    }
+  }
+
+  for (const auto& entry: streams_) {
     at::cuda::CUDAEvent event;
-    event.record(at::cuda::getCurrentCUDAStream(stream.device().index()));
-    event.block(stream);
+    event.record(at::cuda::getCurrentCUDAStream(entry.first));
+    event.block(entry.second);
   }
 }
 
-inline const std::vector<CUDAStream>& CudaFullDeviceContext::streams() const {
-  return streams_;
+inline std::vector<CUDAStream>
+CudaFullDeviceContext::getReservedStreams() const {
+  std::vector<CUDAStream> reservedStreams;
+  reservedStreams.reserve(streams_.size());
+  for (const auto& entry: streams_) {
+    reservedStreams.push_back(entry.second);
+  }
+  return reservedStreams;
+}
+
+inline CUDAStream CudaFullDeviceContext::getStream(
+    c10::DeviceIndex index) {
+  auto iter = streams_.find(index);
+  if (iter == streams_.end()) {
+    auto cudaStream = at::cuda::getStreamFromPool(
+        /* isHighPriority */ false, /* device */ index);
+    streams_.emplace(index, cudaStream);
+    return cudaStream;
+  } else {
+    return iter->second;
+  }
 }
 
 #endif
@@ -162,7 +191,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
             tensorpipe::CudaBuffer{
                 tensorPtr,
                 tensorData.sizeInBytes(),
-                ctx->streams()[tensorDataVec[i].device().index()].stream()},
+                ctx->getStream(tensorDataVec[i].device().index()).stream()},
             std::move(metadata)});
 #endif
       } else {
@@ -228,7 +257,7 @@ TensorpipeReadBuffers tensorpipeAllocate(
           c10::cuda::CUDACachingAllocator::get()->allocate(
               tensor.buffer.cuda.length));
       tensor.buffer.cuda.ptr = buffers.tensors.back().get();
-      tensor.buffer.cuda.stream = ctx->streams()[deviceIndex].stream();
+      tensor.buffer.cuda.stream = ctx->getStream(deviceIndex).stream();
 #endif
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unrecognized TensorPipe buffer type.");

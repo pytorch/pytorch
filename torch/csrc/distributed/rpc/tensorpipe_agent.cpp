@@ -218,7 +218,7 @@ struct FullDeviceContextGuard {
       const std::shared_ptr<FullDeviceContext>&  /* unused */) {};
 #else
   FullDeviceContextGuard(const std::shared_ptr<FullDeviceContext>& ctx)
-      : guard(ctx->streams()) {}
+      : guard(ctx->getReservedStreams()) {}
 
  private:
   at::cuda::CUDAMultiStreamGuard guard;
@@ -445,14 +445,12 @@ void TensorPipeAgent::pipeRead(
   pipe->readDescriptor([fn{std::move(fn)}, pipe, this](
                            const tensorpipe::Error& error,
                            tensorpipe::Message tpMessage) mutable {
-    auto ctx = createFullDeviceContext(
-        reverseDeviceMaps_.empty() && opts_.deviceMaps.empty());
-
     if (error) {
       fn(error, Message(), nullptr);
       return;
     }
 
+    auto ctx = createFullDeviceContext();
     TensorpipeReadBuffers tpBuffers = tensorpipeAllocate(tpMessage, ctx);
 
     pipe->read(
@@ -740,8 +738,8 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is sending request #"
           << messageId << " to " << clientPipe.pipe_->getRemoteName();
 
-  auto ctx = createFullDeviceContext(devices.empty());
-  ctx->waitForCurrentStreams();
+  auto ctx = createFullDeviceContext();
+  ctx->waitForCurrentStreams(requestMessage.tensors());
   pipeWrite(
       clientPipe.pipe_,
       std::move(requestMessage),
@@ -777,7 +775,6 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
                 Message&& responseMessage,
                 // NOLINTNEXTLINE(performance-unnecessary-value-param)
                 std::shared_ptr<FullDeviceContext> ctx) {
-              ctx->blockCurrentStreams();
               if (error) {
                 if (error.isOfType<tensorpipe::PipeClosedError>() &&
                     !rpcAgentRunning_.load()) {
@@ -838,7 +835,8 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
               } else {
                 markFutureAsComplete(
                     std::move(futureResponseMessage),
-                    std::move(responseMessage));
+                    std::move(responseMessage),
+                    std::move(ctx));
               }
             });
       });
@@ -1090,14 +1088,17 @@ void TensorPipeAgent::decreaseCallCount(int32_t& count) {
 
 void TensorPipeAgent::markFutureAsComplete(
     std::shared_ptr<AtomicJitFuture> atomicFuture,
-    Message message) {
+    Message message,
+    std::shared_ptr<FullDeviceContext> ctx) {
   if (!atomicFuture->isComplete.test_and_set()) {
     // Completing the future will run its callbacks, which could execute
     // arbitrary user code. To prevent blocking or stalling the TensorPipe event
     // loops, we defer this to a worker thread.
     threadPool_.run([this,
                      atomicFuture{std::move(atomicFuture)},
-                     message{std::move(message)}]() mutable {
+                     message{std::move(message)},
+                     ctx{std::move(ctx)}]() mutable {
+      FullDeviceContextGuard guard(ctx);
       atomicFuture->jitFuture->markCompleted(
           IValue(c10::make_intrusive<Message>(std::move(message))));
       // The future's callbacks may schedule further RPCs, increasing the count.
