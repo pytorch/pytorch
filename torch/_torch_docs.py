@@ -1433,6 +1433,197 @@ Example::
             [13]]))
 """)
 
+add_docstr(torch.hsplit,
+           r"""
+hsplit(input, indices_or_sections) -> List of Tensors
+
+Splits a tensor into multiple sub-tensors horizontally (column-wise).
+
+This is equivalent to splitting a tensor along the first dimension for 1-D tensors,
+and along second dimension for all other tensors.
+
+Arguments:
+    input (Tensor): the tensor to split
+    indices_or_sections(int or list or tuple of ints):
+        If :attr:`indices_or_sections` is an integer ``n``, 
+        :attr:`input` is split into ``n`` sections along dimension :attr:`col_dim`
+        (col_dim is 0 for 1-D tensors, 1 for all other tensors).
+        If :attr:`input` is divisible by ``n`` along dimension :attr:`col_dim`, each
+        section will be of equal size, :code:`input.size(col_dim) / n`. If :attr:`input`
+        is not divisible by ``n``, the sizes of the first :code:`int(input.size(col_dim) % n)`
+        sections will have size :code:`int(input.size(col_dim) / n) + 1`, and the rest will
+        have size :code:`int(input.size(col_dim) / n)`.
+
+        If :attr:`indices_or_sections` is a list or tuple of ints,
+        then :attr:`input` is split along dimension :attr:`col_dim` at each of the indices
+        in the list, tuple. For instance, :code:`indices_or_sections=[2, 3]` 
+        would result in the tensors :code:`input[:2]`, :code:`input[2:3]`, and :code:`input[3:]`.
+Example:
+    
+    >>> x = torch.arange(16).reshape(4,4)
+    >>> x
+    tensor([[ 0,  1,  2,  3],
+            [ 4,  5,  6,  7],
+            [ 8,  9, 10, 11],
+            [12, 13, 14, 15]])
+    >>> torch.hsplit(x,2)
+    (tensor([[ 0,  1],
+            [ 4,  5],
+            [ 8,  9],
+            [12, 13]]), 
+    tensor([[ 2,  3],
+            [ 6,  7],
+            [10, 11],
+            [14, 15]]))
+    >>> torch.hsplit(x,[3, 6])
+    (tensor([[ 0,  1,  2],
+            [ 4,  5,  6],
+            [ 8,  9, 10],
+            [12, 13, 14]]), 
+    tensor([[ 3],
+            [ 7],
+            [11],
+            [15]]), 
+    tensor([], size=(4, 0)))
+
+
+    With a higher dimensional tensor the split is still along the second axis.
+
+    >>> x = torch.arange(8).reshape(2, 2, 2)
+    >>> x
+    tensor([[[0, 1],
+             [2, 3]],
+
+            [[4, 5],
+             [6, 7]]])
+    >>> torch.hsplit(x, 2)
+    (tensor([[[0, 1]],
+
+            [[4, 5]]]), 
+    tensor([[[2, 3]],
+
+            [[6, 7]]]))
+""")
+
+add_docstr(torch.vsplit,
+           r"""
+vsplit(input, indices_or_sections) -> List of Tensors
+
+Splits a tensor into multiple sub-tensors vertically (row-wise).
+
+This is equivalent to splitting a tensor along the first dimension regardless of the tensor dimension.
+
+Arguments:
+    input (Tensor): the tensor to split
+    indices_or_sections(int or list or tuple of ints):
+        If :attr:`indices_or_sections` is an integer ``n``, 
+        :attr:`input` is split into ``n`` sections along dimension :attr:`0`
+        If :attr:`input` is divisible by ``n`` along dimension :attr:`0`, each
+        section will be of equal size, :code:`input.size(0) / n`. If :attr:`input`
+        is not divisible by ``n``, the sizes of the first :code:`int(input.size(0) % n)`
+        sections will have size :code:`int(input.size(0) / n) + 1`, and the rest will
+        have size :code:`int(input.size(0) / n)`.
+
+        If :attr:`indices_or_sections` is a list or tuple of ints,
+        then :attr:`input` is split along dimension :attr:`0` at each of the indices
+        in the list, tuple. For instance, :code:`indices_or_sections=[2, 3]` 
+        would result in the tensors :code:`input[:2]`, :code:`input[2:3]`, and :code:`input[3:]`.
+Example:
+    
+    >>> x = torch.arange(16.0).reshape(4, 4)
+    >>> x
+    tensor([[ 0.,  1.,  2.,  3.],
+            [ 4.,  5.,  6.,  7.],
+            [ 8.,  9., 10., 11.],
+            [12., 13., 14., 15.]])
+    >>> torch.vsplit(x, 2)
+    (tensor([[0., 1., 2., 3.],
+            [4., 5., 6., 7.]]), 
+    tensor([[ 8.,  9., 10., 11.],
+            [12., 13., 14., 15.]]))
+    >>> torch.vsplit(x, [3, 6])
+    (tensor([[ 0.,  1.,  2.,  3.],
+            [ 4.,  5.,  6.,  7.],
+            [ 8.,  9., 10., 11.]]), 
+    tensor([[12., 13., 14., 15.]]), 
+    tensor([], size=(0, 4)))
+
+    With a higher dimensional tensor the split is still along the second axis.
+
+    >>> x = torch.arange(8).reshape(2, 2, 2)
+    >>> x
+    tensor([[[0, 1],
+             [2, 3]],
+
+            [[4, 5],
+             [6, 7]]])
+    >>> torch.vsplit(x, 2)
+    (tensor([[[0, 1],
+             [2, 3]]]), 
+     tensor([[[4, 5],
+             [6, 7]]]))
+
+""")
+
+add_docstr(torch.dsplit,
+           r"""
+hsplit(input, indices_or_sections) -> List of Tensors
+
+Splits a tensor into multiple sub-tensors along the third dimension (depth-wise).
+
+This is equivalent to splitting a tensor along the third dimension provided the tensor dimension
+is greater than or equal to 3.
+
+Arguments:
+    input (Tensor): the tensor to split
+    indices_or_sections(int or list or tuple of ints):
+        If :attr:`indices_or_sections` is an integer ``n``, 
+        :attr:`input` is split into ``n`` sections along dimension :attr:`2`
+        If :attr:`input` is divisible by ``n`` along dimension :attr:`2`, each
+        section will be of equal size, :code:`input.size(2) / n`. If :attr:`input`
+        is not divisible by ``n``, the sizes of the first :code:`int(input.size(2) % n)`
+        sections will have size :code:`int(input.size(2) / n) + 1`, and the rest will
+        have size :code:`int(input.size(2) / n)`.
+
+        If :attr:`indices_or_sections` is a list or tuple of ints,
+        then :attr:`input` is split along dimension :attr:`2` at each of the indices
+        in the list, tuple. For instance, :code:`indices_or_sections=[2, 3]` 
+        would result in the tensors :code:`input[:2]`, :code:`input[2:3]`, and :code:`input[3:]`.
+
+Example:
+    
+    >>> x = torch.arange(16.0).reshape(2, 2, 4)
+    >>> x
+    tensor([[[ 0.,  1.,  2.,  3.],
+             [ 4.,  5.,  6.,  7.]],
+
+            [[ 8.,  9., 10., 11.],
+             [12., 13., 14., 15.]]])
+    >>> torch.dsplit(x, 2)
+    (tensor([[[ 0.,  1.],
+             [ 4.,  5.]],
+
+            [[ 8.,  9.],
+             [12., 13.]]]), 
+     tensor([[[ 2.,  3.],
+             [ 6.,  7.]],
+
+            [[10., 11.],
+             [14., 15.]]]))
+    >>> torch.dsplit(x, [3, 6])
+    (tensor([[[ 0.,  1.,  2.],
+             [ 4.,  5.,  6.]],
+
+            [[ 8.,  9., 10.],
+             [12., 13., 14.]]]), 
+     tensor([[[ 3.],
+             [ 7.]],
+
+            [[11.],
+             [15.]]]), 
+     tensor([], size=(2, 2, 0)))
+""")
+
 add_docstr(torch.chunk,
            r"""
 chunk(input, chunks, dim=0) -> List of Tensors

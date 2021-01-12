@@ -107,6 +107,9 @@ Indexing, Slicing, Joining, Mutating Ops
     t
     take
     tensor_split
+    hsplit
+    vsplit
+    dsplit
     tile
     transpose
     unbind
