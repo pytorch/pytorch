@@ -1,6 +1,6 @@
 import torch
 from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA, _inline_everything
-
+from torch import nn
 from torch.testing import FileCheck
 
 import unittest
@@ -185,3 +185,35 @@ class TestPeephole(JitTestCase):
         self.assertEqual(redundant_expressions(0), (False, False))
         # and True / or False are removed from graph
         FileCheck().check("aten::eq").check_not("prim::If").run(redundant_expressions.graph)
+
+    def test_conv_dim_folding(self):
+        modules = [nn.Conv1d, nn.Conv2d, nn.Conv3d]
+        for mod in modules:
+            class ConvDim(torch.nn.Module):
+                def __init__(self):
+                    super(ConvDim, self).__init__()
+                    self.conv = mod(3, 32, kernel_size=3, stride=2, bias=False)
+
+                def forward(self, x):
+                    x = self.conv(x)
+                    return x.dim()
+
+            conv_dim = torch.jit.script(ConvDim())
+            self.run_pass("inline", conv_dim.graph)
+            self.run_pass("peephole", conv_dim.graph)
+            FileCheck().check_not("conv").check_not("dim").run(conv_dim.graph)
+
+            class ConvDimMutate(torch.nn.Module):
+                def __init__(self):
+                    super(ConvDimMutate, self).__init__()
+                    self.conv = mod(3, 32, kernel_size=3, stride=2, bias=False)
+
+                def forward(self, x):
+                    x = self.conv(x)
+                    x.resize_([4, 4])
+                    return x.dim()
+
+            conv_dim = torch.jit.script(ConvDimMutate())
+            self.run_pass("inline", conv_dim.graph)
+            self.run_pass("peephole", conv_dim.graph)
+            FileCheck().check("conv").check("dim").run(conv_dim.graph)
