@@ -8,7 +8,6 @@ import torch
 import torch.distributed as c10d
 import torch.multiprocessing as mp
 import torch.nn as nn
-import torch.distributed.nn
 
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_distributed import requires_gloo, \
@@ -16,6 +15,15 @@ from torch.testing._internal.common_distributed import requires_gloo, \
 from torch.testing._internal.common_utils import TestCase, load_tests, \
     run_tests, skipIfRocm
 from torch.testing._internal.common_utils import NO_MULTIPROCESSING_SPAWN, TEST_WITH_TSAN
+
+
+# Torch distributed.nn is not available in windows
+# check #42095, it errors on import.
+_torch_dist_nn_available = True
+try:
+    import torch.distributed.nn
+except ImportError:
+    _torch_dist_nn_available = False
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -320,6 +328,8 @@ class DistributedDataParallelSingleProcessTest(TestCase):
 
 class TestDistributedNNFunctions(MultiProcessTestCase):
     def setUp(self):
+        if not _torch_dist_nn_available:
+            raise unittest.SkipTest("torch.distributed.nn is not available")
         super(TestDistributedNNFunctions, self).setUp()
         self._spawn_processes()
 
