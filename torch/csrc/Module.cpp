@@ -859,6 +859,15 @@ Call this whenever a new thread is created in order to propagate values from
     }
   );
 
+  py_module.def("_can_cast", [](py::object from, py::object to) {
+      TORCH_CHECK(THPDtype_Check(from.ptr()));
+      TORCH_CHECK(THPDtype_Check(to.ptr()));
+      return c10::canCast(
+        reinterpret_cast<const THPDtype*>(from.ptr())->scalar_type,
+        reinterpret_cast<const THPDtype*>(to.ptr())->scalar_type);
+    }
+  );
+
 #ifdef USE_CUDA
   PyObject *has_cuda = Py_True;
 #else

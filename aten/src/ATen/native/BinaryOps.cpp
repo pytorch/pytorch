@@ -214,14 +214,14 @@ Tensor& div_out(const Tensor& self, const Tensor& other, std::string rounding_mo
     return div_floor_out(self, other, result);
   }
 
-  AT_ERROR("div expected rounding_mode to be one of 'true', 'trunc', or 'floor' "
-           "but found '", rounding_mode, "'");
+  TORCH_CHECK(false,
+      "div expected rounding_mode to be one of 'true', 'trunc', or 'floor' "
+      "but found '", rounding_mode, "'");
 }
 
 Tensor div(const Tensor& self, const Tensor& other, std::string rounding_mode) {
   Tensor result;
   native::div_out(self, other, std::move(rounding_mode), result);
-  TORCH_INTERNAL_ASSERT(result.defined());
   return result;
 }
 
@@ -317,7 +317,7 @@ Tensor& remainder_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  // FIXME: Not actually doing floor division
+  // FIXME: Not actually doing floor division (#43874)
   return div_trunc_out(self, other, result);
 }
 

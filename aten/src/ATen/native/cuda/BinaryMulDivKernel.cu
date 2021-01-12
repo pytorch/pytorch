@@ -101,9 +101,7 @@ void div_floor_kernel_cuda(TensorIterator& iter) {
     // dividend are always the same)
     return div_trunc_kernel_cuda(iter);
   } else if (isIntegralType(dtype, /*includeBool*/ false)) {
-    // There's no SIMD integer division, so don't try to vectorize it.
-    // TODO: if the divisor is a scalar, rewrite as multiplication by a constant.
-    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "div_floor_cuda", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_floor_cuda", [&]() {
       gpu_kernel_with_scalars(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
         if ((a < 0) != (b < 0)) {
           // Subtracts one from the results of truncation division if the
@@ -123,16 +121,47 @@ void div_floor_kernel_cuda(TensorIterator& iter) {
     // precision compared to computing the division.
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, dtype, "div_floor_cuda", [&]() {
       using accscalar_t = at::acc_type<scalar_t, true>;
-      auto inv_b = accscalar_t(1.0) / iter.scalar_value<accscalar_t>(2);
+      auto b = iter.scalar_value<accscalar_t>(2);
+      auto inv_b = accscalar_t(1.0) / b;
       iter.remove_operand(2);
-      gpu_kernel(iter, [inv_b] GPU_LAMBDA (scalar_t a) -> scalar_t {
-        return std::floor(a * inv_b);
+      gpu_kernel(iter, [b, inv_b] GPU_LAMBDA (scalar_t a) -> scalar_t {
+        auto mod = std::fmod(a, b);
+        auto div = (a - mod) * inv_b;
+        if ((mod != 0) && (b < 0) != (mod < 0)) {
+          div -= scalar_t(1);
+        }
+
+        scalar_t floordiv;
+        if (div != 0) {
+          floordiv = std::floor(div);
+          if (div - floordiv > scalar_t(0.5)) {
+            floordiv += scalar_t(1.0);
+          }
+        } else {
+          floordiv = std::copysign(scalar_t(0), a * inv_b);
+        }
+        return floordiv;
       });
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, dtype, "div_floor_cuda", [&]() {
       gpu_kernel_with_scalars(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
-        return std::floor(a / b);
+        auto mod = std::fmod(a, b);
+        auto div = (a - mod) / b;
+        if ((mod != 0) && (b < 0) != (mod < 0)) {
+          div -= scalar_t(1);
+        }
+
+        scalar_t floordiv;
+        if (div != 0) {
+          floordiv = std::floor(div);
+          if (div - floordiv > scalar_t(0.5)) {
+            floordiv += scalar_t(1.0);
+          }
+        } else {
+          floordiv = std::copysign(scalar_t(0), a / b);
+        }
+        return floordiv;
       });
     });
   }
