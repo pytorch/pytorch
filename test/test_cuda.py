@@ -16,6 +16,7 @@ import torch.cuda
 import torch.cuda.comm as comm
 from torch import multiprocessing as mp
 from torch.nn.parallel import scatter_gather
+from torch.utils.checkpoint import checkpoint_sequential
 from torch._six import inf, nan, container_abcs
 
 from test_torch import AbstractTestCases
@@ -2882,6 +2883,17 @@ t2.start()
                     out = linear(data)
                 self.assertTrue(first_iter_mem == torch.cuda.memory_allocated())
 
+    def test_autocast_checkpointing(self):
+        model = torch.nn.Sequential(torch.nn.Linear(8, 8),
+                                    torch.nn.Linear(8, 8),
+                                    torch.nn.Linear(8, 8)).cuda()
+        input = torch.rand((8, 8), device="cuda", dtype=torch.float16, requires_grad=True)
+        with torch.cuda.amp.autocast():
+            output = checkpoint_sequential(model, 2, input)
+        self.assertTrue(output.requires_grad)
+        self.assertTrue(output.dtype is torch.float16)
+        output.sum().backward()
+
     @slowTest
     @unittest.skipIf(not TEST_LARGE_TENSOR, "not enough memory")
     def test_max_large_axis(self):
@@ -3098,6 +3110,14 @@ t2.start()
             # Adds an empty dict for kwargs, which none of the Tensor methods use
             run("Tensor", *(meth_with_args + ({},)))
 
+    def test_batch_norm_gather_stats(self):
+        input = torch.randn(1, 3, 3, 3, device='cuda')
+        mean, invstd = torch.batch_norm_gather_stats(
+            input, mean=torch.ones(2, 3, device='cuda'), invstd=torch.ones(2, 3, device='cuda'),
+            running_mean=None, running_var=None  , momentum=.1, eps=1e-5, count=2
+        )
+        self.assertEqual(mean, torch.ones(3, device='cuda'))
+        self.assertEqual(invstd, torch.ones(3, device='cuda'))
 
 class TestCudaComm(TestCase):
     def _test_broadcast(self, input):

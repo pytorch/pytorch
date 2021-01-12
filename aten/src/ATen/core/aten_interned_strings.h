@@ -553,6 +553,7 @@ _(aten, permute) \
 _(aten, pin_memory) \
 _(aten, pinverse) \
 _(aten, pixel_shuffle) \
+_(aten, pixel_unshuffle) \
 _(aten, poisson) \
 _(aten, polygamma) \
 _(aten, pow) \
