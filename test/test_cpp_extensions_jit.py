@@ -181,7 +181,7 @@ class TestCppExtensionJIT(common.TestCase):
         #   - With/without '+PTX'
 
         n = torch.cuda.device_count()
-        capabilities = [torch.cuda.get_device_capability(i) for i in range(n)]
+        capabilities = {torch.cuda.get_device_capability(i) for i in range(n)}
         # expected values is length-2 tuple: (list of ELF, list of PTX)
         # note: there should not be more than one PTX value
         archflags = {
