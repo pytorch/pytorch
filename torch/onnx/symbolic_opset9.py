@@ -640,7 +640,7 @@ def squeeze(g, self, dim=None):
                       "is not 1, the ONNX model will return an error. Opset version 11 supports squeezing on " +
                       "non-singleton dimensions, it is recommended to export this model using opset " +
                       "version 11 or higher.")
-        return g.op("Squeeze", self, axes_i=[squeeze_dim])
+        return sym_help._squeeze_helper(g, self, axes_i=[squeeze_dim])
     if dim_size > 1:
         warnings.warn("This model contains a squeeze operation on dimension " + str(squeeze_dim) + ". The size of " +
                       "this dimension in the given input is " + str(dim_size) + ". The model will " +
@@ -651,7 +651,7 @@ def squeeze(g, self, dim=None):
 
     warnings.warn("This model contains a squeeze operation on dimension " + str(squeeze_dim) + ". If the model is " +
                   "intended to be used with dynamic input shapes, please use opset version 11 to export the model.")
-    return g.op("Squeeze", self, axes_i=[squeeze_dim])
+    return sym_help._squeeze_helper(g, self, axes_i=[squeeze_dim])
 
 def prelu(g, self, weight):
     self_rank = sym_help._get_tensor_rank(self)
@@ -1814,7 +1814,7 @@ def unsqueeze(g, self, dim):
         else:
             return _unimplemented('unsqueeze', 'negative axis with unknown input rank')
 
-    return g.op("Unsqueeze", self, axes_i=[dim])
+    return sym_help._unsqueeze_helper(g, self, axes_i=[dim])
 
 
 @parse_args('v', 'i', 'i', 'none')
