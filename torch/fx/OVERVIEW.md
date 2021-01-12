@@ -1,6 +1,6 @@
 # FX Technical Overview (WIP)
 
-FX is a toolkit for pass writers to facilitate Python-to-Python transformation of `nn.Module` instances. This toolkit aims to support a subset of Python language semantics—rather than the whole Python language—to facilitate ease of implementation of transforms. Currently, this feature is unstable, but our goal is to stabilize the toolkit by the end of this year for a prototype release through collaboration with first-party partners.
+FX is a toolkit for pass writers to facilitate Python-to-Python transformation of `nn.Module` instances. This toolkit aims to support a subset of Python language semantics—rather than the whole Python language—to facilitate ease of implementation of transforms. Currently, this feature is under a Beta release and its API may change.
 
 ## Table of Contents
 
@@ -9,6 +9,7 @@ FX is a toolkit for pass writers to facilitate Python-to-Python transformation o
 - [Introduction](#introduction)
   - [Motivation](#motivation)
   - [Use Cases](#use-cases)
+  - [Technical Details](#technical-details)
 - [Internal Structure](#internal-structure)
   - [Graph](#graph)
   - [Graph Module](#graph-module)
@@ -29,25 +30,15 @@ TODO
 
 FX should be used by pass writers to provide functionality for capturing and constructing nn.Module code in a structured way. We do not expect end users to utilize FX directly. A useful property of framing FX in this way is that passes can be seen as functions of the form `pass(in_mod : nn.Module) -> nn.Module`. This means we can create composable pipelines of transformations.
 
-![An image of a sample nn.Module transformation pipeline that starts with a Quantize transformation, which is then composed with a Split transformation, then a Lower to Accelerator transformation](https://imgur.com/a/o4c5zjJ "nn.Module transformation pipeline")
+![An image of a sample nn.Module transformation pipeline that starts with a Quantize transformation, which is then composed with a Split transformation, then a Lower to Accelerator transformation](https://i.imgur.com/TzFIYMi.png "nn.Module transformation pipeline")
 
 In this example pipeline, we have a Quantize transformation, which is then composed with a Split transformation, then a Lower to Accelerator transformation. Finally, the transformed Modules are compiled with TorchScript for deployment. This last point emphasizes that not only should FX transforms be composable with each other, but their products are composable with other systems like TorchScript compilation or tracing.
 
 By using `nn.Module` as the interface between passes, FX transforms are interoperable with each other, and the resulting model can be used anywhere an `nn.Module` can be used.
 
-# Internal Structure
+## Technical Details ##
 
-## [Graph](https://pytorch.org/docs/master/fx.html#torch.fx.Graph) ##
-TODO
-
-## [GraphModule](https://pytorch.org/docs/master/fx.html#torch.fx.GraphModule) ##
-TODO
-
-# Symbolic Tracing
-
-## About ##
-
-The following sections will walk us through the components that transform from original Module to FX IR and finally to generated Python code and a GraphModule instance:
+The following sections will walk us through the components that transform from original `torch.nn.Module` to FX IR and finally to generated Python code and a GraphModule instance:
 
 FX’s front-end makes use of the dynamic nature of Python to intercept call-sites for various entities (PyTorch operators, Module invocations, and Tensor method invocations). This functionality is exposed through an API called `torch.fx.symbolic_trace`.  We can see how this works by way of an example:
 
@@ -73,6 +64,16 @@ torch.testing.assert_allclose(symbolic_traced(input), module(input))
 ```
 
 Here, we set up a simple Module that exercises different language features: fetching a parameter, applying an arithmetic operator, applying a submodule (linear), and applying a Tensor method. `symbolic_trace` returns an instance of GraphModule, which is in itself a subclass of `nn.Module`. We can see that the `symbolic_traced` instance runs and returns the same result as the original module instance module.
+
+# Internal Structure
+
+## [Graph](https://pytorch.org/docs/master/fx.html#torch.fx.Graph) ##
+TODO
+
+## [GraphModule](https://pytorch.org/docs/master/fx.html#torch.fx.GraphModule) ##
+TODO
+
+# Symbolic Tracing
 
 ## [Tracer](https://pytorch.org/docs/master/fx.html#torch.fx.Tracer) ##
 
@@ -118,14 +119,14 @@ To facilitate easier analysis of data dependencies, Nodes have read-only propert
 
 An invocation of `symbolic_traced` above requires a valid `forward()` method to be defined on the Module instance. How does this work? GraphModule actually generates valid Python source code based on the IR it is instantiated with. This can be seen by accessing the code attribute on the GraphModule: `print(symbolic_traced.code)`.
 
-This outputs:
+After symbolic tracing, the code given under [Technical Details](#technical-details) is represented as follows:
 
 ```python
 def forward(self, x):
     param = self.param
-    add_1 = x + param
-    linear_1 = self.linear(add_1)
-    clamp_1 = linear_1.clamp(min = 0.0, max = 1.0)
+    add_1 = x + param;  x = param = None
+    linear_1 = self.linear(add_1);  add_1 = None
+    clamp_1 = linear_1.clamp(min = 0.0, max = 1.0);  linear_1 = None
     return clamp_1
 ```
 
