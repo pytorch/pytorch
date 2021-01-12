@@ -166,8 +166,8 @@ std::unique_ptr<CpuChannelRegistration> makeMultiplexedUvChannel() {
   }
   auto context = std::make_shared<tensorpipe::channel::mpt::Context>(
       std::move(contexts), std::move(listeners));
-  return std::make_unique<CpuChannelRegistration>(
-      CpuChannelRegistration{std::move(context), kMultiplexedUvChannelPriority});
+  return std::make_unique<CpuChannelRegistration>(CpuChannelRegistration{
+      std::move(context), kMultiplexedUvChannelPriority});
 }
 
 // The multiplexed UV channel encapsulates multiple UV transports (each with its
@@ -192,7 +192,10 @@ std::unique_ptr<CudaChannelRegistration> makeCudaIpcChannel() {
 
 // The cuda_ipc channels use cudaMemcpy to transmit CUDA tensor across processes
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-C10_REGISTER_CREATOR(TensorPipeCudaChannelRegistry, cuda_ipc, makeCudaIpcChannel);
+C10_REGISTER_CREATOR(
+    TensorPipeCudaChannelRegistry,
+    cuda_ipc,
+    makeCudaIpcChannel);
 
 #endif
 
@@ -324,9 +327,10 @@ void TensorPipeAgent::startImpl() {
         if (iter == opts_.channels->end()) {
           continue;
         }
-        // Assign priorities in reverse order of occurrence in the vector, so that
-        // a channel that comes before another receives a higher priority.
-        priority = opts_.channels->size() - 1 - (iter - opts_.channels->begin());
+        // Assign priorities in reverse order of occurrence in the vector, so
+        // that a channel that comes before another receives a higher priority.
+        priority =
+            opts_.channels->size() - 1 - (iter - opts_.channels->begin());
       }
 
       // The reg var is either a std::unique_ptr<CpuChannelRegistration> or a
@@ -337,7 +341,7 @@ void TensorPipeAgent::startImpl() {
         priority = reg->priority;
       }
       context_->registerChannel(
-        priority, std::move(key), std::move(reg->channel));
+          priority, std::move(key), std::move(reg->channel));
     }
   };
 
@@ -806,9 +810,8 @@ void TensorPipeAgent::pollTimeoutRpcs() {
 
     // Move all these futures to a separate vector so we can process them
     // outside the lock.
-    std::vector<std::pair<
-        std::shared_ptr<AtomicJitFuture>,
-        std::chrono::milliseconds>>
+    std::vector<
+        std::pair<std::shared_ptr<AtomicJitFuture>, std::chrono::milliseconds>>
         timedOutFutures = std::move(timeoutMap_.begin()->second);
     // We can safely remove this key from the timeoutMap_ since all these
     // futures will be processed.

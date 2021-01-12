@@ -23,12 +23,13 @@ using hardswish_backward_fn = void(*)(TensorIterator&);
 using shrink_fn = void (*)(TensorIterator&, Scalar);
 using shrink_backward_fn = void (*)(TensorIterator&, Scalar);
 using elu_fn = void (*)(TensorIterator&, Scalar, Scalar, Scalar);
+using elu_backward_fn = void (*)(TensorIterator&, Scalar, Scalar, Scalar, bool);
 using leaky_relu_fn = void (*)(TensorIterator&, Scalar);
 using leaky_relu_backward_fn = void (*)(TensorIterator&, Scalar);
 using log_sigmoid_cpu_fn = void (*)(Tensor& , Tensor&, const Tensor& );
 
 DECLARE_DISPATCH(elu_fn, elu_stub);
-DECLARE_DISPATCH(elu_fn, elu_backward_stub);
+DECLARE_DISPATCH(elu_backward_fn, elu_backward_stub);
 DECLARE_DISPATCH(softplus_fn, softplus_stub);
 DECLARE_DISPATCH(softplus_backward_fn, softplus_backward_stub);
 DECLARE_DISPATCH(log_sigmoid_cpu_fn, log_sigmoid_cpu_stub);
