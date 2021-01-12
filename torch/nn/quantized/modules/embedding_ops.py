@@ -98,8 +98,8 @@ class Embedding(torch.nn.Module):
             scales = torch.ones(num_embeddings, dtype=torch.float)
             zero_points = torch.zeros(num_embeddings, dtype=torch.float)
             qweight = torch._empty_per_channel_affine_quantized([num_embeddings, embedding_dim],
-                                                                 scales=scales, zero_points=zero_points,
-                                                                 axis=0, dtype=torch.quint8)
+                                                                scales=scales, zero_points=zero_points,
+                                                                axis=0, dtype=torch.quint8)
         else:
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \
                 'Shape of weight does not match num_embeddings and embedding_dim'
