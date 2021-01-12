@@ -269,13 +269,15 @@ class TestZeroRedundancyOptimizerFourRanks(TestZeroRedundancyOptimizer):
     def world_size(self):
         return 4
 
-    def off_test_add_param_group(self):
+    def test_add_param_group(self):
         self.dist_init(self.rank)
 
         # Test with all parameters trainable to begin with
         def all_trainable():
             params = []
-            for size in [4, 5, 2, 6, 4]:
+            sizes = [9, 7, 5, 3]
+            sizes_world = sizes * self.world_size
+            for size in sizes_world[:-1]:
                 params.append(torch.rand(size, 1))
 
             # Make sure that the params are trainable, enforces size-based partitioning
@@ -315,13 +317,14 @@ class TestZeroRedundancyOptimizerFourRanks(TestZeroRedundancyOptimizer):
 
         dist.destroy_process_group()
 
-    def off_test_sharding(self):
+    def test_sharding(self):
         self.dist_init(self.rank)
+        sizes = [9, 7, 5, 3]
         params = []
-        for size in [5, 4, 2, 6, 4, 3, 7, 1]:
+        for size in sizes * self.world_size:
             params.append(torch.rand(size, 1))
         o = ZeroRedundancyOptimizer(params, optim=SGD, lr=0.1)
-        self.assertEqual(sum([x.numel() for x in o.optim.param_groups[0]["params"]]), 6)
+        self.assertEqual(sum([x.numel() for x in o.optim.param_groups[0]["params"]]), sum(sizes))
 
     def test_collect_shards(self):
         self.dist_init(self.rank)
