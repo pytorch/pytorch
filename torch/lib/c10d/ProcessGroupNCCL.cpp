@@ -350,7 +350,15 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeStreams() {
   for (size_t i = 0; i < devices_.size(); ++i) {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
     // Block the current stream on the NCCL stream
-    (*cudaEvents_)[i].block(currentStream);
+    auto cudaEvent = (*cudaEvents_)[i];
+    // Check to ensure event is created. Otherwise, this block() call will be a
+    // no-op which can cause silent correctness issues as there will be no
+    // stream synchronization.
+    TORCH_CHECK(
+      cudaEvent.isCreated(),
+      c10::str("Invalid CUDA event on device ", devices_[i].index())
+    );
+    cudaEvent.block(currentStream);
   }
 }
 
