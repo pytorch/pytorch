@@ -452,12 +452,12 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
 } // namespace
 
 Tensor& quantile_out(
-    Tensor& out,
     const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
     bool keepdim,
-    const std::string interpolation) {
+    const std::string interpolation,
+    Tensor& out) {
   quantile_impl(
       out,
       self,
@@ -470,12 +470,12 @@ Tensor& quantile_out(
 }
 
 Tensor& quantile_out(
-    Tensor& out,
     const Tensor& self,
     double q,
     optional<int64_t> _dim,
     bool keepdim,
-    const std::string interpolation) {
+    const std::string interpolation,
+    Tensor& out) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::quantile_out(
@@ -518,12 +518,12 @@ Tensor quantile(
 }
 
 Tensor& nanquantile_out(
-    Tensor& out,
     const Tensor& self,
     const Tensor& q,
     optional<int64_t> _dim,
     bool keepdim,
-    const std::string interpolation) {
+    const std::string interpolation,
+    Tensor& out) {
   quantile_impl(
       out,
       self,
@@ -536,12 +536,12 @@ Tensor& nanquantile_out(
 }
 
 Tensor& nanquantile_out(
-    Tensor& out,
     const Tensor& self,
     double q,
     optional<int64_t> _dim,
     bool keepdim,
-    const std::string interpolation) {
+    const std::string interpolation,
+    Tensor& out) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::nanquantile_out(

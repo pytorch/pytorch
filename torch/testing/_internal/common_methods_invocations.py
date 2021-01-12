@@ -172,7 +172,11 @@ class OpInfo(object):
         return self.inplace_variant
 
     def sample_inputs(self, device, dtype, requires_grad=False):
-        """Returns an iterable of SampleInputs."""
+        """Returns an iterable of SampleInputs.
+
+        These samples should be sufficient to test the function works correctly
+        with autograd, TorchScript, etc.
+        """
         return self.sample_inputs_func(self, device, dtype, requires_grad)
 
     # Returns True if the test should be skipped and False otherwise
@@ -472,17 +476,10 @@ class SpectralFuncInfo(OpInfo):
                  *,
                  ref=None,  # Reference implementation (probably in np.fft namespace)
                  dtypes=floating_and_complex_types(),
-                 dtypesIfCPU=None,
-                 dtypesIfCUDA=None,
-                 dtypesIfROCM=None,
                  ndimensional: bool,  # Whether dim argument can be a tuple
                  skips=None,
                  decorators=None,
                  **kwargs):
-        dtypesIfCPU = dtypesIfCPU if dtypesIfCPU is not None else dtypes
-        dtypesIfCUDA = dtypesIfCUDA if dtypesIfCUDA is not None else dtypes
-        dtypesIfROCM = dtypesIfROCM if dtypesIfROCM is not None else dtypes
-
         # gradgrad is quite slow
         if not TEST_WITH_SLOW:
             skips = skips if skips is not None else []
@@ -493,9 +490,6 @@ class SpectralFuncInfo(OpInfo):
 
         super().__init__(name=name,
                          dtypes=dtypes,
-                         dtypesIfCPU=dtypesIfCPU,
-                         dtypesIfCUDA=dtypesIfCUDA,
-                         dtypesIfROCM=dtypesIfROCM,
                          skips=skips,
                          decorators=decorators,
                          **kwargs)
@@ -504,24 +498,30 @@ class SpectralFuncInfo(OpInfo):
 
 
     def sample_inputs(self, device, dtype, requires_grad=False):
-        tensor = make_tensor((L, M), device, dtype,
-                             low=None, high=None,
+        nd_tensor = make_tensor((S, S + 1, S + 2), device, dtype, low=None, high=None,
+                                requires_grad=requires_grad)
+        tensor = make_tensor((31,), device, dtype, low=None, high=None,
                              requires_grad=requires_grad)
+
         if self.ndimensional:
             return [
+                SampleInput(nd_tensor, kwargs=dict(s=(3, 10), dim=(1, 2), norm='ortho')),
+                SampleInput(nd_tensor, kwargs=dict(norm='ortho')),
+                SampleInput(nd_tensor, kwargs=dict(s=(8,))),
                 SampleInput(tensor),
-                SampleInput(tensor, kwargs=dict(dim=(-2,))),
-                SampleInput(tensor, kwargs=dict(norm='ortho')),
-                SampleInput(tensor, kwargs=dict(s=(10, 15))),
-                SampleInput(tensor, kwargs=dict(s=10, dim=1, norm='ortho')),
+
+                *(SampleInput(nd_tensor, kwargs=dict(dim=dim))
+                  for dim in [-1, -2, -3, (0, -1)]),
             ]
         else:
             return [
+                SampleInput(nd_tensor, kwargs=dict(n=10, dim=1, norm='ortho')),
+                SampleInput(nd_tensor, kwargs=dict(norm='ortho')),
+                SampleInput(nd_tensor, kwargs=dict(n=7)),
                 SampleInput(tensor),
-                SampleInput(tensor, kwargs=dict(dim=-2)),
-                SampleInput(tensor, kwargs=dict(norm='ortho')),
-                SampleInput(tensor, kwargs=dict(n=15)),
-                SampleInput(tensor, kwargs=dict(n=10, dim=1, norm='ortho')),
+
+                *(SampleInput(nd_tensor, kwargs=dict(dim=dim))
+                  for dim in [-1, -2, -3]),
             ]
 
 
@@ -670,12 +670,7 @@ def sample_inputs_flip(op_info, device, dtype, requires_grad):
         make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad)
     )
 
-    dims = ((0, 1, 2), (0,), (0, 2), (-1,))
-
-    # On CUDA, `dims=()` errors out with IndexError
-    # Reference: https://github.com/pytorch/pytorch/issues/49982
-    if device == 'cpu':
-        dims = dims + ((),)  # type: ignore
+    dims = ((0, 1, 2), (0,), (0, 2), (-1,), ())
 
     samples = [SampleInput(tensor, kwargs={'dims': dim}) for tensor, dim in product(tensors, dims)]
 
