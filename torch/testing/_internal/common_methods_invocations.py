@@ -350,6 +350,30 @@ def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad):
                                           requires_grad=requires_grad), shape))
                  for size, shape in test_cases)
 
+def sample_inputs_div(self, device, dtype, requires_grad):
+    a = make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad)
+    is_integral = not dtype.is_floating_point and not dtype.is_complex
+    b = make_tensor((S, S, S), device, dtype, low=1 if is_integral else 0.1, high=None,
+                    requires_grad=requires_grad)
+
+    samples = [
+        SampleInput((a, b)),
+        SampleInput((a, b), kwargs=dict(rounding_mode='true')),
+        SampleInput((a,), args=(2,)),
+        SampleInput((a,), args=(2,), kwargs=dict(rounding_mode='true')),
+    ]
+
+    if not dtype.is_complex and dtype != torch.bool:
+        # Trunc and floor aren't defined for all types
+        samples += [
+            SampleInput((a, b), kwargs=dict(rounding_mode='trunc')),
+            SampleInput((a, b), kwargs=dict(rounding_mode='floor')),
+            SampleInput((a,), args=(2,), kwargs=dict(rounding_mode='trunc')),
+            SampleInput((a,), args=(2,), kwargs=dict(rounding_mode='floor')),
+        ]
+
+    return samples
+
 def sample_inputs_stack(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S), device, dtype,
                                      low=None, high=None,
@@ -838,6 +862,10 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
+    OpInfo('div',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_div,
+           assert_autodiffed=True),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half),

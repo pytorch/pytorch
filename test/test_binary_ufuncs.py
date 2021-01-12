@@ -268,6 +268,68 @@ class TestBinaryUfuncs(TestCase):
         id_after = id(t)
         self.assertEqual(id_before, id_after)
 
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_complex=False))
+    def test_div_rounding_modes(self, device, dtype):
+        if dtype.is_floating_point:
+            a = 10 * torch.randn(100, device=device, dtype=dtype)
+            # Avoid division by zero so we can test (a / b) * b == a
+            b = 0.1 + 2 * torch.rand(100, device=device, dtype=dtype)
+        else:
+            info = torch.iinfo(dtype)
+            low, high = info.min, info.max
+            a = torch.randint(low, high, (100,), device=device, dtype=dtype)
+            b = torch.randint(1, high, (100,), device=device, dtype=dtype)
+
+        d_true = torch.divide(a, b, rounding_mode='true')
+        self.assertTrue(d_true.is_floating_point())
+        self.assertEqual(d_true * b, a.to(d_true.dtype))
+
+        d_floor = torch.divide(a, b, rounding_mode='floor')
+        if dtype != torch.bfloat16:
+            self.assertEqual(d_floor * b + torch.remainder(a, b), a)
+        else:
+            self.assertEqual(d_floor * b + torch.remainder(a.float(), b.float()).to(torch.bfloat16), a, exact_dtype=False)
+
+        d_trunc = torch.divide(a, b, rounding_mode='trunc')
+        rounding_unsupported = (
+            dtype == torch.half and device != 'cuda' or
+            dtype == torch.bfloat16 and device != 'cpu')
+        d_ref = d_true.float() if rounding_unsupported else d_true.float()
+        self.assertEqual(d_trunc, d_ref.trunc().to(dtype))
+
+        # Compare against NumPy
+        if dtype.is_floating_point:
+            x = torch.tensor([1.0, -1.0, 0, 0.1, -0.1, np.pi, -np.pi, np.inf, -np.inf, np.nan],
+                             dtype=dtype)
+        else:
+            x = a[:10]
+
+        # NumPy promotes int to float64, not float32
+        exact_dtype = dtype.is_floating_point and dtype != torch.bfloat16
+
+        a, b = x[None, :].clone(), x[:, None].clone()
+        if exact_dtype:
+            an, bn = a.cpu().numpy(), b.cpu().numpy()
+        else:
+            an, bn = a.float().cpu().numpy(), b.float().cpu().numpy()
+
+        for mode, np_ref in (("true", np.true_divide), ("floor", np.floor_divide)):
+            with np.errstate(all='ignore'):
+                expect = np_ref(an, bn)
+            actual = torch.divide(a, b, rounding_mode=mode)
+            self.assertEqual(actual, torch.from_numpy(expect),
+                             exact_device=False, exact_dtype=exact_dtype)
+
+        # Compare contiguous (likely vectorized) against non-contiguous (not vectorized)
+        storage = torch.empty((20, 20), dtype=dtype, device=device)
+        storage[::2, ::2] = a
+        storage[1::2, 1::2] = b
+
+        for rounding_mode in ("true", "trunc", "floor"):
+            expect = torch.divide(storage[::2, ::2], storage[1::2, 1::2], rounding_mode=rounding_mode)
+            actual = torch.divide(a, b, rounding_mode=rounding_mode)
+            self.assertEqual(actual, expect)
+
     # TODO: update to run on CUDA -- what is this test even testing?
     @onlyCPU
     def test_cast_binary_op(self, device):
