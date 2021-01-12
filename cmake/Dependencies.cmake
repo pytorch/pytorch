@@ -1566,7 +1566,12 @@ if(NOT INTERN_BUILD_MOBILE)
   find_package(MAGMA)
   if((USE_CUDA OR USE_ROCM) AND MAGMA_FOUND)
     include_directories(SYSTEM ${MAGMA_INCLUDE_DIR})
-    set(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR};${CUDA_INCLUDE_DIRS}")
+    if(USE_CUDA)
+      set(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR};${CUDA_INCLUDE_DIRS}")
+    endif()
+    if(USE_ROCM)
+      set(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR}")
+    endif()
     include(CheckPrototypeDefinition)
     check_prototype_definition(magma_get_sgeqrf_nb
      "magma_int_t magma_get_sgeqrf_nb( magma_int_t m, magma_int_t n );"
