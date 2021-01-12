@@ -27,7 +27,7 @@ These two model types have the same originating `__module__` name set.
 While this isn't facially incorrect, there are a number of places in
 `cpython` and elsewhere that assume you can take any module name, look it
 up `sys.modules`, and get the right module back, including:
-- [`import_from`](https://github.com/python/cpython/blob/5977a7989d49c3e095c7659a58267d87a17b12b1/Python/ceval.c)
+- [`import_from`](https://github.com/python/cpython/blob/5977a7989d49c3e095c7659a58267d87a17b12b1/Python/ceval.c#L5500)
 - `inspect`: used in TorchScript to retrieve source code to compile
 - …probably more that we don't know about.
 
