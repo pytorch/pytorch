@@ -69,6 +69,10 @@ void SparseTensorImpl::set_storage_offset(int64_t storage_offset) {
   AT_ERROR("sparse tensors do not have set_storage_offset");
 }
 
+int64_t SparseTensorImpl::dim() const {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(sparse_dim_ + dense_dim_ == TensorImpl::dim());
+  return sparse_dim_ + dense_dim_;
+}
 bool SparseTensorImpl::has_storage() const {
   return false;
 }
