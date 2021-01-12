@@ -670,12 +670,7 @@ def sample_inputs_flip(op_info, device, dtype, requires_grad):
         make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad)
     )
 
-    dims = ((0, 1, 2), (0,), (0, 2), (-1,))
-
-    # On CUDA, `dims=()` errors out with IndexError
-    # Reference: https://github.com/pytorch/pytorch/issues/49982
-    if device == 'cpu':
-        dims = dims + ((),)  # type: ignore
+    dims = ((0, 1, 2), (0,), (0, 2), (-1,), ())
 
     samples = [SampleInput(tensor, kwargs={'dims': dim}) for tensor, dim in product(tensors, dims)]
 
