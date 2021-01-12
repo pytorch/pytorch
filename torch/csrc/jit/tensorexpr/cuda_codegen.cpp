@@ -1176,7 +1176,10 @@ void CudaCodeGen::CompileToNVRTC(
   // calculations)
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int major, minor;
-  const bool supported_arch = getMajorMinor(prop, major, minor);
+#if CUDA_VERSION >= 11010
+  const bool supported_arch =
+#endif
+      getMajorMinor(prop, major, minor);
 
   // Creates the NVRTC program
   nvrtcProgram program;
@@ -1195,7 +1198,7 @@ void CudaCodeGen::CompileToNVRTC(
       // Meanwhile, for forward compatibility (future device with
       // `unsupported_arch==True`), since SASS are not necessarily compatible,
       // we fallback to PTX instead.
-      "sm_" if supported_arch else "compute_" +
+      supported_arch ? "sm_" : "compute_" +
 #else
       "compute_" +
 #endif

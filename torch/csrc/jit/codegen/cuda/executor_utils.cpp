@@ -262,7 +262,10 @@ NvrtcFunction nvrtcCompile(
   const auto prop = at::cuda::getCurrentDeviceProperties();
 
   int major = 0, minor = 0;
-  const bool supported_arch = getMajorMinor(prop, major, minor);
+#if CUDA_VERSION >= 11010
+  const bool supported_arch =
+#endif
+      getMajorMinor(prop, major, minor);
 
   nvrtcProgram program; // NOLINT(cppcoreguidelines-init-variables)
 
@@ -290,7 +293,7 @@ NvrtcFunction nvrtcCompile(
       // Meanwhile, for forward compatibility (future device with
       // `unsupported_arch==True`), since SASS are not necessarily compatible,
       // we fallback to PTX instead.
-      "sm_" if supported_arch else "compute_" +
+      supported_arch ? "sm_" : "compute_" +
 #else
       "compute_" +
 #endif
