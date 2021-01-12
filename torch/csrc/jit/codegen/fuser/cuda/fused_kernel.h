@@ -17,7 +17,9 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-TORCH_CUDA_API void getMajorMinor(
+// return false when device arch is supported
+// otherwise, clamp down to highest supported arch and returns true
+TORCH_CUDA_API bool getMajorMinor(
     const cudaDeviceProp* const prop,
     int& major,
     int& minor);

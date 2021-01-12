@@ -262,7 +262,7 @@ NvrtcFunction nvrtcCompile(
   const auto prop = at::cuda::getCurrentDeviceProperties();
 
   int major = 0, minor = 0;
-  getMajorMinor(prop, major, minor);
+  const bool supported_arch = getMajorMinor(prop, major, minor);
 
   nvrtcProgram program; // NOLINT(cppcoreguidelines-init-variables)
 
@@ -281,11 +281,18 @@ NvrtcFunction nvrtcCompile(
 #ifdef __HIP_PLATFORM_HCC__
   std::vector<const char*> args = {"--std=c++14"};
 #else
-#if CUDA_VERSION == 11020
-  // CUDA 11.2 bug where we have to go directly to SASS in nvrtc
-  const std::string compute = "--gpu-architecture=sm_" +
+  const std::string compute = std::string("--gpu-architecture=") +
+#if CUDA_VERSION >= 11010
+      // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
+      // which gives better backwards compatibility to work on older driver,
+      // (since older driver doesn't necessrily recognize PTX emitted by new
+      // toolkit);
+      // Meanwhile, for forward compatibility (future device with
+      // `unsupported_arch==True`), since SASS are not necessarily compatible,
+      // we fallback to PTX instead.
+      "sm_" if supported_arch else "compute_" +
 #else
-  const std::string compute = "--gpu-architecture=compute_" +
+      "compute_" +
 #endif
       std::to_string(major) + std::to_string(minor);
   std::vector<const char*> args = {
@@ -349,20 +356,22 @@ NvrtcFunction nvrtcCompile(
 
   {
     FUSER_PERF_SCOPE("get PTX");
-#if CUDA_VERSION == 11020
-    // CUDA 11.2 bug where we have to go directly to SASS in nvrtc
-    AT_CUDA_NVRTC_CHECK(
-        at::globalContext().getNVRTC().nvrtcGetCUBINSize(program, &ptx_size));
-    ptx.resize(ptx_size);
-    AT_CUDA_NVRTC_CHECK(
-        at::globalContext().getNVRTC().nvrtcGetCUBIN(program, ptx.data()));
+#if CUDA_VERSION >= 11010
+    // supported_arch determines whether we are generating SASS or PTX, hence
+    // the different API.
+    const auto getSize = supported_arch
+        ? at::globalContext().getNVRTC().nvrtcGetCUBINSize
+        : at::globalContext().getNVRTC().nvrtcGetPTXSize;
+    const auto getFunc = supported_arch
+        ? at::globalContext().getNVRTC().nvrtcGetCUBIN
+        : at::globalContext().getNVRTC().nvrtcGetPTX;
 #else
-    AT_CUDA_NVRTC_CHECK(
-        at::globalContext().getNVRTC().nvrtcGetPTXSize(program, &ptx_size));
-    ptx.resize(ptx_size);
-    AT_CUDA_NVRTC_CHECK(
-        at::globalContext().getNVRTC().nvrtcGetPTX(program, ptx.data()));
+    const auto getSize = at::globalContext().getNVRTC().nvrtcGetPTXSize;
+    const auto getFunc = at::globalContext().getNVRTC().nvrtcGetPTX;
 #endif
+    AT_CUDA_NVRTC_CHECK(getSize(program, &ptx_size));
+    ptx.resize(ptx_size);
+    AT_CUDA_NVRTC_CHECK(getFunc(program, ptx.data()));
   }
 
   NvrtcFunction compiled_kernel_;
@@ -372,9 +381,9 @@ NvrtcFunction nvrtcCompile(
   const char* prefix_env = getenv("PYTORCH_CUDA_FUSER_CUBIN");
 #ifndef __HIP_PLATFORM_HCC__
   if (prefix_env) {
-#if CUDA_VERSION == 11020
+#if CUDA_VERSION >= 11010
     TORCH_CHECK(
-        false,
+        !supported_arch,
         "PYTORCH_NVFUSER_CUBIN cannot be used when compile direct to SASS. Please set PYTORCH_NVFUSER_CUBIN to empty");
 #endif
     FUSER_PERF_SCOPE("load CUBIN");

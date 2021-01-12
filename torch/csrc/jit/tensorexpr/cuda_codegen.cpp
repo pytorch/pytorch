@@ -69,7 +69,8 @@ static const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
 }
 
-static void getMajorMinor(
+// returns true if arch is not recognized by CUDA toolkit
+static bool getMajorMinor(
     const cudaDeviceProp* const prop,
     int& major,
     int& minor) {
@@ -99,6 +100,8 @@ static void getMajorMinor(
   }
   major = dev_version.first;
   minor = dev_version.second;
+
+  return (major != nvrtc_version.first) || (minor != nvrtc_version.second);
 }
 
 std::string cudaDtypeCppString(const Dtype& dtype) {
@@ -1173,7 +1176,7 @@ void CudaCodeGen::CompileToNVRTC(
   // calculations)
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int major, minor;
-  getMajorMinor(prop, major, minor);
+  const bool supported_arch = getMajorMinor(prop, major, minor);
 
   // Creates the NVRTC program
   nvrtcProgram program;
@@ -1183,11 +1186,18 @@ void CudaCodeGen::CompileToNVRTC(
 #ifdef __HIP_PLATFORM_HCC__
   std::vector<const char*> args = {};
 #else
-#if CUDA_VERSION == 11020
-  // CUDA 11.2 bug where we have to go directly to SASS in nvrtc
-  const std::string compute = "--gpu-architecture=sm_" +
+  const std::string compute = std::string("--gpu-architecture=") +
+#if CUDA_VERSION >= 11010
+      // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
+      // which gives better backwards compatibility to work on older driver,
+      // (since older driver doesn't necessrily recognize PTX emitted by new
+      // toolkit);
+      // Meanwhile, for forward compatibility (future device with
+      // `unsupported_arch==True`), since SASS are not necessarily compatible,
+      // we fallback to PTX instead.
+      "sm_" if supported_arch else "compute_" +
 #else
-  const std::string compute = "--gpu-architecture=compute_" +
+      "compute_" +
 #endif
       std::to_string(major) + std::to_string(minor);
   const std::vector<const char*> args = {
@@ -1211,18 +1221,23 @@ void CudaCodeGen::CompileToNVRTC(
       [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
   AT_CUDA_NVRTC_CHECK(result);
   size_t ptx_size;
-#if CUDA_VERSION == 11020
-  // CUDA 11.2 bug where we have to go directly to SASS in nvrtc
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetCUBINSize(program, &ptx_size));
   std::vector<char> ptx;
-  ptx.resize(ptx_size);
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetCUBIN(program, ptx.data()));
+#if CUDA_VERSION >= 11010
+  // supported_arch determines whether we are generating SASS or PTX, hence
+  // the different API.
+  const auto getSize = supported_arch
+      ? at::globalContext().getNVRTC().nvrtcGetCUBINSize
+      : at::globalContext().getNVRTC().nvrtcGetPTXSize;
+  const auto getFunc = supported_arch
+      ? at::globalContext().getNVRTC().nvrtcGetCUBIN
+      : at::globalContext().getNVRTC().nvrtcGetPTX;
 #else
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTXSize(program, &ptx_size));
-  std::vector<char> ptx;
-  ptx.resize(ptx_size);
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTX(program, ptx.data()));
+  const auto getSize = at::globalContext().getNVRTC().nvrtcGetPTXSize;
+  const auto getFunc = at::globalContext().getNVRTC().nvrtcGetPTX;
 #endif
+  AT_CUDA_NVRTC_CHECK(getSize(program, &ptx_size));
+  ptx.resize(ptx_size);
+  AT_CUDA_NVRTC_CHECK(getFunc(program, ptx.data()));
 
   CUmodule module;
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&module, ptx.data()));
