@@ -150,6 +150,26 @@ class TestTracer(JitTestCase):
         traced = torch.jit.trace(f, (p,))
         self.assertEqual(f(p), traced(p))
 
+    def test_trace_topk(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x.topk(y, dim=1)[1]
+
+        mod = M()
+        inputs = (torch.randint(0, 10, (20, 20)), torch.tensor(17))
+        traced_func = torch.jit.trace(mod, inputs)
+
+        test_inputs = (torch.randint(0, 9, (9, 9)), torch.tensor(8))
+        eager_out = mod(*test_inputs)
+        traced_out = traced_func(*test_inputs)
+        self.assertTrue(torch.allclose(eager_out, traced_out))
+
+        test_inputs = (torch.randint(0, 50, (50, 50)), torch.tensor(12))
+        eager_out = mod(*test_inputs)
+        traced_out = traced_func(*test_inputs)
+        self.assertTrue(torch.allclose(eager_out, traced_out))
+
+
     def test_typeas_trace_check(self):
         a = torch.tensor([0.4], requires_grad=True)
         b = torch.tensor([0.7], requires_grad=True)
