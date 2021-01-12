@@ -97,8 +97,10 @@ class ScopeContextManager(object):
 
 
 class QuantizationTracer(Tracer):
-    def __init__(self, skipped_module_names: List[str],
-                 skipped_module_classes: List[Callable]):
+    def __init__(
+            self,
+            skipped_module_names: List[str],
+            skipped_module_classes: List[Callable]):
         super().__init__()
         self.skipped_module_names = skipped_module_names
         self.skipped_module_classes = skipped_module_classes
@@ -165,16 +167,22 @@ forward graph of the parent module,
         float_custom_module_classes = get_custom_module_class_keys(
             prepare_custom_config_dict, "float_to_observed_custom_module_class")
         skipped_module_classes += float_custom_module_classes
-    tracer = QuantizationTracer(skipped_module_names, skipped_module_classes)
+    tracer = QuantizationTracer(
+        skipped_module_names, skipped_module_classes)
     graph_module = GraphModule(model, tracer.trace(model))
     graph_module = _fuse_fx(graph_module, prepare_custom_config_dict)
     quantizer = Quantizer()
-    return quantizer.prepare(
+    prepared = quantizer.prepare(
         graph_module,
         qconfig_dict,
         tracer.node_name_to_scope,
         prepare_custom_config_dict=prepare_custom_config_dict,
         is_standalone_module=is_standalone_module)
+
+    preserved_attributes = prepare_custom_config_dict.get("preserved_attributes", [])
+    for attr_name in preserved_attributes:
+        setattr(prepared, attr_name, getattr(model, attr_name))
+    return prepared
 
 def _prepare_standalone_module_fx(
         model: torch.nn.Module,
@@ -332,6 +340,12 @@ def prepare_fx(
         # indices to be quantized.
         "input_quantized_idxs": [0],
         "output_quantized_idxs": [0],
+
+        # Attributes that are not used in forward function will
+        # be removed when constructing GraphModule, this is a list of attributes
+        # to preserve as an attribute of the GraphModule even when they are
+        # not used in the code
+        "preserved_attributes": ["preserved_attr"],
       }
 
 
@@ -407,9 +421,18 @@ def _convert_fx(
         is_standalone_module: bool = False) -> GraphModule:
     """ `is_standalone_module`: see docs in :func:`~torch.quantization.prepare_standalone_module_fx`
     """
+    if convert_custom_config_dict is None:
+        convert_custom_config_dict = {}
+
     _check_is_graph_module(graph_module)
+
     quantizer = Quantizer()
-    return quantizer.convert(graph_module, debug, convert_custom_config_dict, is_standalone_module)
+    quantized = quantizer.convert(graph_module, debug, convert_custom_config_dict, is_standalone_module)
+
+    preserved_attributes = convert_custom_config_dict.get("preserved_attributes", [])
+    for attr_name in preserved_attributes:
+        setattr(quantized, attr_name, getattr(graph_module, attr_name))
+    return quantized
 
 def convert_fx(
         graph_module: GraphModule, debug: bool = False,
@@ -432,7 +455,7 @@ def convert_fx(
                 FloatModule: DynamicallyQuantizedModule,
                 float_op: dynamically_quantized_op
              },
-          }
+          },
 
           # user will manually define the corresponding quantized
           # module class which has a from_observed class method that converts
@@ -447,7 +470,13 @@ def convert_fx(
              "weight_only": {
                  ObservedCustomModule: QuantizedCustomModule
              }
-          }
+          },
+
+          # Attributes that are not used in forward function will
+          # be removed when constructing GraphModule, this is a list of attributes
+          # to preserve as an attribute of the GraphModule even when they are
+          # not used in the code
+          "preserved_attributes": ["preserved_attr"],
         }
 
     Return:
