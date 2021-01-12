@@ -101,13 +101,23 @@ namespace detail {
     return std::move(element).template to<T>();
   }
   template<class T>
-  IValue list_element_from(const T& element) {
-    return element;
-  }
-  template<class T>
-  IValue list_element_from(T&& element) {
-    return std::move(element);
-  }
+  struct ListElementFrom {
+    static IValue from(const T& element) {
+      return element;
+    }
+    static IValue from(T&& element) {
+      return std::move(element);
+    }
+  };
+  template<>
+  struct ListElementFrom<IValue> {
+    static const IValue& from(const IValue& element) {
+      return element;
+    }
+    static IValue&& from(IValue&& element) {
+      return std::move(element);
+    }
+  };
 }
 
 namespace impl {
@@ -119,13 +129,13 @@ ListElementReference<T, Iterator>::operator T() const {
 
 template<class T, class Iterator>
 ListElementReference<T, Iterator>& ListElementReference<T, Iterator>::operator=(T&& new_value) && {
-  *iterator_ = c10::detail::list_element_from<T>(std::move(new_value));
+  *iterator_ = c10::detail::ListElementFrom<T>::from(std::move(new_value));
   return *this;
 }
 
 template<class T, class Iterator>
 ListElementReference<T, Iterator>& ListElementReference<T, Iterator>::operator=(const T& new_value) && {
-  *iterator_ = c10::detail::list_element_from<T>(std::move(new_value));
+  *iterator_ = c10::detail::ListElementFrom<T>::from(std::move(new_value));
   return *this;
 }
 
@@ -154,12 +164,12 @@ inline bool operator==(const T& lhs, const ListElementReference<T, Iterator>& rh
 
 template<class T>
 void List<T>::set(size_type pos, const value_type& value) const {
-  impl_->list.at(pos) = c10::detail::list_element_from<T>(value);
+  impl_->list.at(pos) = c10::detail::ListElementFrom<T>::from(value);
 }
 
 template<class T>
 void List<T>::set(size_type pos, value_type&& value) const {
-  impl_->list.at(pos) = c10::detail::list_element_from<T>(std::move(value));
+  impl_->list.at(pos) = c10::detail::ListElementFrom<T>::from(std::move(value));
 }
 
 template<class T>
@@ -178,7 +188,7 @@ typename List<T>::value_type List<T>::extract(size_type pos) const {
   auto& elem = impl_->list.at(pos);
   auto result = c10::detail::list_element_to<T>(std::move(elem));
   // Reset the list element to a T() instead of None to keep it correctly typed
-  elem = c10::detail::list_element_from<T>(T{});
+  elem = c10::detail::ListElementFrom<T>::from(T{});
   return result;
 }
 
@@ -214,12 +224,12 @@ void List<T>::clear() const {
 
 template<class T>
 typename List<T>::iterator List<T>::insert(iterator pos, const T& value) const {
-  return iterator { impl_->list.insert(pos.iterator_, c10::detail::list_element_from<T>(value)) };
+  return iterator { impl_->list.insert(pos.iterator_, c10::detail::ListElementFrom<T>::from(value)) };
 }
 
 template<class T>
 typename List<T>::iterator List<T>::insert(iterator pos, T&& value) const {
-  return iterator { impl_->list.insert(pos.iterator_, c10::detail::list_element_from<T>(std::move(value))) };
+  return iterator { impl_->list.insert(pos.iterator_, c10::detail::ListElementFrom<T>::from(std::move(value))) };
 }
 
 template<class T>
@@ -231,12 +241,12 @@ typename List<T>::iterator List<T>::emplace(iterator pos, Args&&... value) const
 
 template<class T>
 void List<T>::push_back(const T& value) const {
-  impl_->list.push_back(c10::detail::list_element_from<T>(value));
+  impl_->list.push_back(c10::detail::ListElementFrom<T>::from(value));
 }
 
 template<class T>
 void List<T>::push_back(T&& value) const {
-  impl_->list.push_back(c10::detail::list_element_from<T>(std::move(value)));
+  impl_->list.push_back(c10::detail::ListElementFrom<T>::from(std::move(value)));
 }
 
 template<class T>
