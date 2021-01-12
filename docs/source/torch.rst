@@ -97,6 +97,8 @@ Indexing, Slicing, Joining, Mutating Ops
     nonzero
     reshape
     row_stack
+    scatter
+    scatter_add
     split
     squeeze
     stack
@@ -350,6 +352,7 @@ Pointwise Ops
     tanh
     true_divide
     trunc
+    xlogy
 
 Reduction Ops
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -361,6 +364,8 @@ Reduction Ops
     argmin
     amax
     amin
+    all
+    any
     max
     min
     dist
@@ -446,6 +451,7 @@ Other Operations
     bincount
     block_diag
     broadcast_tensors
+    broadcast_to
     broadcast_shapes
     bucketize
     cartesian_prod

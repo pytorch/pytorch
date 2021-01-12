@@ -107,7 +107,7 @@ private:
   c10::optional<int32_t> N_;
 
   c10::optional<IValue> default_value_;
-  // is this only specifyable as a keyword argument?
+  // is this only specifiable as a keyword argument?
   bool kwarg_only_;
   c10::optional<AliasInfo> alias_info_;
 };
