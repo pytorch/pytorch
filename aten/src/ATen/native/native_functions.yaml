@@ -3481,37 +3481,37 @@
   dispatch:
     DefaultBackend: split_with_sizes
 
-- func: dsplit(Tensor self, int[] split_sizes) -> Tensor[]
+- func: dsplit(Tensor self, int[] indices) -> Tensor[]
   variants: function, method
   device_guard: False
   dispatch:
     DefaultBackend: dsplit
 
-- func: dsplit.int(Tensor self, int split_sizes) -> Tensor[]
+- func: dsplit.int(Tensor self, int sections) -> Tensor[]
   variants: function, method
   device_guard: False
   dispatch:
     DefaultBackend: dsplit
 
-- func: hsplit(Tensor self, int[] split_sizes) -> Tensor[]
+- func: hsplit(Tensor self, int[] indices) -> Tensor[]
   variants: function, method
   device_guard: False
   dispatch:
     DefaultBackend: hsplit
 
-- func: hsplit.int(Tensor self, int split_sizes) -> Tensor[]
+- func: hsplit.int(Tensor self, int sections) -> Tensor[]
   variants: function, method
   device_guard: False
   dispatch:
     DefaultBackend: hsplit
 
-- func: vsplit(Tensor self, int[] split_sizes) -> Tensor[]
+- func: vsplit(Tensor self, int[] indices) -> Tensor[]
   variants: function, method
   device_guard: False
   dispatch:
     DefaultBackend: vsplit
 
-- func: vsplit.int(Tensor self, int split_sizes) -> Tensor[]
+- func: vsplit.int(Tensor self, int sections) -> Tensor[]
   variants: function, method
   device_guard: False
   dispatch:

@@ -1211,63 +1211,57 @@ std::vector<Tensor> unsafe_split_with_sizes(const Tensor& self, IntArrayRef spli
   return result;
 }
 
-std::vector<Tensor> dsplit(const Tensor& self, int64_t split_sizes) {
+std::vector<Tensor> dsplit(const Tensor& self, int64_t sections) {
   TORCH_CHECK(self.dim() >= 3,
               "dsplit expects Tensor to have 3 or more dimensions. ",
               "Input Tensor has dimension ", self.dim());
-  return self.split(split_sizes, 2);
+  return self.tensor_split(sections, 2);
 }
 
 
-std::vector<Tensor> dsplit(const Tensor& self, IntArrayRef split_sizes) {
+std::vector<Tensor> dsplit(const Tensor& self, IntArrayRef indices) {
   TORCH_CHECK(self.dim() >= 3,
               "dsplit expects Tensor to have 3 or more dimensions. ",
               "Input Tensor has dimension ", self.dim());
-  return self.split_with_sizes(split_sizes, 2);
+  return self.tensor_split(indices, 2);
 }
 
-std::vector<Tensor> hsplit(const Tensor& self, int64_t split_sizes) {
+std::vector<Tensor> hsplit(const Tensor& self, int64_t sections) {
   TORCH_CHECK(self.dim() != 0,
               "hsplit only works on tensors of 1 or more dimensions. ",
               "Input Tensor has dimension ", self.dim());
-
-  return self.split(split_sizes, 0);
+  if(self.dim() > 1) {
+    return self.tensor_split(sections, 1);
+  }
+  else {
+    return self.tensor_split(sections, 0);
+  }
 }
 
-std::vector<Tensor> hsplit(const Tensor& self, IntArrayRef split_sizes) {
+std::vector<Tensor> hsplit(const Tensor& self, IntArrayRef indices) {
   TORCH_CHECK(self.dim() != 0,
               "hsplit only works on tensors of 1 or more dimensions. ",
               "Input Tensor has dimension ", self.dim());
-
-  return self.split_with_sizes(split_sizes, 0);
+  if(self.dim() > 1) {
+    return self.tensor_split(indices, 1);
+  }
+  else {
+    return self.tensor_split(indices, 0);
+  }
 }
 
-std::vector<Tensor> vsplit(const Tensor& self, int64_t split_sizes) {
+std::vector<Tensor> vsplit(const Tensor& self, int64_t sections) {
   TORCH_CHECK(self.dim() >= 2,
               "vsplit only works on tensors of 2 or more dimensions. "
               "Input Tensor has dimension ", self.dim());
-
-  if(self.dim() > 1) {
-    return self.split(split_sizes, 1);
-  }
-  else {
-    return self.split(split_sizes, 0);
-  }
-
+  return self.tensor_split(sections, 0);
 }
 
-std::vector<Tensor> vsplit(const Tensor& self, IntArrayRef split_sizes) {
+std::vector<Tensor> vsplit(const Tensor& self, IntArrayRef indices) {
   TORCH_CHECK(self.dim() >= 2,
               "vsplit only works on tensors of 2 or more dimensions. "
               "Input Tensor has dimension ", self.dim());
-
-  if(self.dim() > 1) {
-    return self.split_with_sizes(split_sizes, 1);
-  }
-  else {
-    return self.split_with_sizes(split_sizes, 0);
-  }
-
+  return self.tensor_split(indices, 0);
 }
 
 // Precondition: tensors is non-empty
