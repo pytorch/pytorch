@@ -1,9 +1,11 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
+
 #include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
@@ -12,6 +14,46 @@
 
 namespace torch {
 namespace jit {
+
+namespace {
+
+class ProfileRegistry {
+ public:
+  static ProfileRegistry* getRegistry() {
+    static ProfileRegistry profile_registry_;
+    return &profile_registry_;
+  }
+
+  void registerProfileNode(const std::function<bool(const Node*)>& func) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    registry_funcs_.push_back(func);
+  }
+
+  bool shouldProfileNode(const Node* node) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    // to guard differentiable graphs, we want profiling information
+    // (in particular requires_grad) for nodes handled by autodiff
+    if (isDifferentiable(node)) {
+      return true;
+    }
+    for (const auto& func : registry_funcs_) {
+      if (func(node)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+ private:
+  std::vector<std::function<bool(const Node*)>> registry_funcs_;
+  std::mutex mutex_;
+};
+
+} // namespace
+
+void RegisterProfilingNode(const std::function<bool(const Node*)>& func) {
+  ProfileRegistry::getRegistry()->registerProfileNode(func);
+}
 
 bool ShapeSymbolTable::bindSymbolicShapes(
     at::IntArrayRef new_sizes,
@@ -128,7 +170,7 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
     if (v.isTensor()) {
       std::lock_guard<std::mutex> lock(this->mutex_);
       auto& profiled_types = profiled_types_per_frame_[frame_id];
-      auto t = v.toTensor();
+      auto& t = v.toTensor();
       if (t.defined()) {
         auto pttp = tensorTypeInCurrentExecutionContext(t);
         GRAPH_DEBUG(

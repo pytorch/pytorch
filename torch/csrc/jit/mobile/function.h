@@ -31,6 +31,7 @@ class Function {
   void set_register_size(size_t size);
 
   std::string get_module_debug_info(size_t pc) const;
+  const std::shared_ptr<Code> get_code() const;
 
  private:
   c10::QualifiedName name_;

@@ -959,6 +959,26 @@ class TestClassType(JitTestCase):
             # Make sure class constant is accessible from module
             self.assertEqual(m.w, m_loaded.w)
 
+    def test_py_class_to_ivalue_missing_attribute(self):
+        global Foo  # see [local resolution in python]
+
+        class Foo(object):
+            i : int
+            f : float
+
+            def __init__(self, i : int, f : float):
+                self.i = i
+                self.f = f
+
+        @torch.jit.script
+        def test_fn(x : Foo) -> float:
+            return x.i + x.f
+
+        test_fn(Foo(3, 4.0))
+
+        with self.assertRaisesRegex(RuntimeError, 'missing attribute i'):
+            test_fn(torch.rand(3, 4))
+
     def test_unused_method(self):
         """
         Test unused methods on scripted classes.
@@ -1192,6 +1212,32 @@ class TestClassType(JitTestCase):
 
         self.checkScript(test_function, (1, 2))
 
+    def test_classmethod(self):
+        """
+        Test classmethods on class types.
+        """
+        global ClassWithClassMethod
+
+        @torch.jit.script
+        class ClassWithClassMethod:
+            def __init__(self, a: int):
+                self.a: int = a
+
+            def __eq__(self, other: 'ClassWithClassMethod'):
+                return self.a == other.a
+
+            @classmethod
+            def create(cls, a: int) -> 'ClassWithClassMethod':
+                return cls(a)
+
+        def test_function(a: int) -> 'ClassWithClassMethod':
+            x = ClassWithClassMethod(a)
+            # Support calling classmethod with an instance
+            # Calling with the class is not supported.
+            return x.create(a)
+
+        self.checkScript(test_function, (1,))
+
     def test_properties(self):
         """
         Test that a scripted class can make use of the @property decorator.
@@ -1378,3 +1424,29 @@ class TestClassType(JitTestCase):
 
         scripted = torch.jit.script(A())
         self.getExportImportCopy(scripted)
+
+    def test_class_attribute_wrong_type(self):
+        """
+        Test that the error message displayed when convering a class type
+        to an IValue that has an attribute of the wrong type.
+        """
+        @torch.jit.script
+        class ValHolder(object):  # noqa: B903
+            def __init__(self, val):
+                self.val = val
+
+        class Mod(nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.mod1 = ValHolder(1)
+                self.mod2 = ValHolder(2)
+
+            def forward(self, cond: bool):
+                if cond:
+                    mod = self.mod1
+                else:
+                    mod = self.mod2
+                return mod.val
+
+        with self.assertRaisesRegex(RuntimeError, "Could not cast attribute 'val' to type Tensor"):
+            torch.jit.script(Mod())

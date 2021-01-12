@@ -56,7 +56,7 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          prim::TypeCheck /* (...)  -> (..., bool) */,
-         [](const Node * /* node */) -> Operation {
+         [](const Node* /* node */) -> Operation {
            return [](Stack* /* stack */) {
              AT_ERROR("prim::TypeCheck not yet implemented"); // NOLINT
            };
@@ -709,10 +709,6 @@ RegisterOperators reg2({
 
     // `listContains<T>` is not implemented for non-primitive types
     // TODO: Add List[bool] once .to<c10::List<bool>> doesn't throw an error
-    Operator(
-        "aten::__contains__.int_list(int[] l, int item) -> bool",
-        listContains<int64_t>,
-        aliasAnalysisFromSchema()),
     Operator(
         "aten::__contains__.float_list(float[] l, float item) -> bool",
         listContains<double>,
