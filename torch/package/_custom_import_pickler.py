@@ -26,7 +26,9 @@ class CustomImportPickler(_Pickler):
             name = obj.__name__
 
         orig_module_name = whichmodule(obj, name)
-        # CHANGED: demangle the module name before importing.
+        # CHANGED: demangle the module name before importing. If this obj came
+        # out of a PackageImporter, `__module__` will be mangled. See
+        # mangling.md for details.
         module_name = demangle(orig_module_name)
         try:
             # CHANGED: self.import_module rather than
@@ -40,9 +42,10 @@ class CustomImportPickler(_Pickler):
         else:
             if obj2 is not obj:
                 # CHANGED: More specific error message in the case of mangling.
-                parent_module_name = getattr(obj2, "__module__", orig_module_name)
-                msg = f"Can't pickle {obj}: it's not the same object as {parent_module_name}.{name}."
-                if is_mangled(getattr(obj, "__module__", "")) or is_mangled(getattr(obj2, "__module__", "")):
+                obj2_parent_module_name = getattr(obj2, "__module__", orig_module_name)
+                msg = f"Can't pickle {obj}: it's not the same object as {obj2_parent_module_name}.{name}."
+
+                if is_mangled(getattr(obj, "__module__", "")) or is_mangled(obj2_parent_module_name):
                     msg += ("\nThis is likely due to a dependency collision in torch.package; "
                             "check the order of PackageExporter.imports.")
 

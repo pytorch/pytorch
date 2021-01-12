@@ -6,11 +6,9 @@ These are the core invariants; if you are changing mangling code please preserve
 1. For every module imported by `PackageImporter`, two attributes are mangled:
     - `__module__`
     - `__file__`
-2. No mangled names should be serialized by `PackageExporter`.
-3. Every entry point to `PackageImporter` and `PackageExporter` must
-   *demangle* module names before attempting to use them.
-4. Internally to `PackageImporter` and `PackageExporter`, you can assume that
-   all names are demangled, unless you got one by directly inspecting a module.
+2. Any `__module__` and `__file__` attribute accessed inside
+   `Package{Ex|Im}porter` should be demangled immediately.
+3. No mangled names should be serialized by `PackageExporter`.
 
 ## Why do we mangle imported names?
 To avoid accidental name collisions with modules in `sys.modules`. Consider the following:
@@ -64,38 +62,9 @@ Similarly, the use of angle brackets makes it very unlikely that such a name
 will exist in the user's file system.
 
 ## Don't serialize mangled names
-
 Mangling happens `on import`, and the results are never saved into a package.
 Assigning mangle parents on import means that we can enforce that mangle
-parents are unique within the environment doing the importing. It also allows
-us to avoid serializing (and maintaining backward compatibility for) this
-detail.
+parents are unique within the environment doing the importing.
 
-## Demangling in PackageExporter
-Occasionally `PackageExporter` may encounter mangled names during export. For
-example, the user may be re-packaging an object that was imported (and thus
-had its module name mangled).
-
-This means that all entry points to `PackageExporter` must properly
-demangle any module names passed to them before doing anything else. That
-way, internally `PackageExporter` only ever deals with unmangled names.
-
-There are two additional complications with demangling in PackageExporter.
-
-First, name collisions. Consider the following user code:
-
-    pe = PackageExporter('package.pt')
-    pe.save_module('foo.bar')
-    pe.save_module('__torch_package0__.foo.bar')
-    pe.save_module('__torch_package1__.foo.bar')
-
-All three packages demangle to the same `'foo.bar'` package, which leads to
-confusing behavior. To guard against this, `PackageExporter` keeps track of
-the demanglings it has performed and errors when a collision would have
-occurred.
-
-Second, pickled `GLOBAL` opcodes. When the pickler is writing out where to
-find a class to reconstruct its state, it typically looks at
-`obj.__module__` to record how to retrieve it. We need to ensure that any
-global references in the pickle bytecode are always demangled, which is taken
-care of in `CustomImportPickler`.
+It also allows us to avoid serializing (and maintaining backward
+compatibility for) this detail.

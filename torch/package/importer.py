@@ -296,7 +296,6 @@ class PackageImporter:
         return module
 
     def __import__(self, name, globals=None, locals=None, fromlist=(), level=0):
-        # name = self._mangler.demangle(name)
         if level == 0:
             module = self._gcd_import(name)
         else:
