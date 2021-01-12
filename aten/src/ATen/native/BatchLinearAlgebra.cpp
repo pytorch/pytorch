@@ -770,12 +770,44 @@ Tensor& linalg_cholesky_out(Tensor &result, const Tensor &self) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /*
+Copies the lower (or upper) triangle of the square matrix to the other half and conjugates it.
+This operation is performed in-place.
+*/
+template <typename scalar_t>
+static inline void apply_reflect_conj_tri_single(scalar_t* self, int64_t n, int64_t stride, bool upper) {
+  std::function<void(int64_t, int64_t)> loop = [](int64_t, int64_t){};
+  if (upper) {
+    loop = [&](int64_t start, int64_t end) {
+      for (int64_t i = start; i < end; i++) {
+        for (int64_t j = i + 1; j < n; j++) {
+          self[i * stride + j] = conj_impl(self[j * stride + i]);
+        }
+      }
+    };
+  } else {
+    loop = [&](int64_t start, int64_t end) {
+      for (int64_t i = start; i < end; i++) {
+        for (int64_t j = 0; j < i; j++) {
+          self[i * stride + j] = conj_impl(self[j * stride + i]);
+        }
+      }
+    };
+  }
+  // For small matrices OpenMP overhead is too large
+  if (n < 256) {
+    loop(0, n);
+  } else {
+    at::parallel_for(0, n, 0, loop);
+  }
+}
+
+/*
 Computes the inverse of a symmetric (Hermitian) positive-definite matrix n-by-n matrix 'input' using the Cholesky factorization
 This is an in-place routine, content of 'input' is overwritten.
 'infos' is an int Tensors containing error codes for each matrix in the batched input.
 For more information see LAPACK's documentation for POTRI routine.
 */
-template<typename scalar_t>
+template <typename scalar_t>
 static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
 #ifndef USE_LAPACK
   TORCH_CHECK(false, "cholesky_inverse: LAPACK library not found in compilation");
@@ -793,6 +825,8 @@ static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
     scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
     int* info_working_ptr = &infos_data[i];
     lapackCholeskyInverse<scalar_t>(uplo, n, input_working_ptr, lda, info_working_ptr);
+    // LAPACK writes to only upper/lower part of the matrix leaving the other side unchanged
+    apply_reflect_conj_tri_single<scalar_t>(input_working_ptr, n, lda, upper);
   }
 #endif
 }
@@ -832,16 +866,6 @@ Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& i
   infos.fill_(0);
 
   result = at::_cholesky_inverse_out_helper_(result, infos, upper);
-
-  // LAPACK/MAGMA writes to only upper/lower part of the matrix leaving the other side unchanged.
-  // TODO: implement efficient non-allocating copy of the upper part of the matrix to the lower part and lower -> upper
-  if (upper) {
-    result.triu_();
-    result += at::triu(result, 1).conj().transpose(-2, -1);
-  } else {
-    result.tril_();
-    result += at::tril(result, -1).conj().transpose(-2, -1);
-  }
   return result;
 }
 
