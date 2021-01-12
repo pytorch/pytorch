@@ -667,7 +667,7 @@ class TestWorkerInfoDataset(SynchronizedDataset):
 
 # Should be used as worker_init_fn with TestWorkerInfoDataset.
 # See _test_get_worker_info below for usage.
-def test_worker_info_init_fn(worker_id):
+def _test_worker_info_init_fn(worker_id):
     worker_info = torch.utils.data.get_worker_info()
     assert worker_id == worker_info.id, "worker_init_fn and worker_info should have consistent id"
     assert worker_id < worker_info.num_workers, "worker_init_fn and worker_info should have valid id"
@@ -697,7 +697,7 @@ def _test_get_worker_info():
     dataset = TestWorkerInfoDataset(6, batch_size, num_workers)
     dataloader = DataLoader(dataset, batch_size=batch_size,
                             num_workers=num_workers,
-                            worker_init_fn=test_worker_info_init_fn)
+                            worker_init_fn=_test_worker_info_init_fn)
     it = iter(dataloader)
     data = []
     for d in it:
@@ -706,7 +706,7 @@ def _test_get_worker_info():
     data = torch.cat(data, 0)
     for d in data:
         # each `d` is a [worker_id, worker_pid] pair, which is set in
-        # test_worker_info_init_fn
+        # _test_worker_info_init_fn
         assert d[1] == worker_pids[d[0]]
     # get_worker_info returns None in main proc after data loading
     assert torch.utils.data.get_worker_info() is None
