@@ -171,5 +171,28 @@ class TestRNGExtension(common.TestCase):
         del copy2
         self.assertEqual(rng_extension.getInstanceCount(), 0)
 
+
+@unittest.skipIf(not TEST_CUDA, "CUDA not found")
+@unittest.skipIf(IS_WINDOWS, "MSVC have bug compiling this")
+class TestTorchLibrary(common.TestCase):
+
+    def test_torch_library(self):
+        import torch_test_cpp_extension.torch_library  # noqa: F401
+
+        def f(a: bool, b: bool):
+            return torch.ops.torch_library.logical_and(a, b)
+
+        self.assertTrue(f(True, True))
+        self.assertFalse(f(True, False))
+        self.assertFalse(f(False, True))
+        self.assertFalse(f(False, False))
+        s = torch.jit.script(f)
+        self.assertTrue(s(True, True))
+        self.assertFalse(s(True, False))
+        self.assertFalse(s(False, True))
+        self.assertFalse(s(False, False))
+        self.assertIn('torch_library::logical_and', str(s.graph))
+
+
 if __name__ == "__main__":
     common.run_tests()

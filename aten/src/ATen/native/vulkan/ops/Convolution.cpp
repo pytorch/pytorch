@@ -2,12 +2,19 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
 #include <ATen/native/vulkan/ops/Persistent.h>
+#include <ATen/native/vulkan/api/Utils.h>
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace ops {
 namespace {
+
+using namespace api::utils;
+
+struct Experimentation final {
+  static constexpr bool kUseConv2dOldApi = false;
+};
 
 inline bool is_depthwise(
     const IntArrayRef filter,
@@ -22,6 +29,251 @@ inline bool is_pointwise(const IntArrayRef filter) {
          (1 == filter[Layout::Filter::width]);
 }
 
+vTensor pack_weights_dw(
+    api::Context* const context,
+    api::Command::Buffer& command_buffer,
+    api::Resource::Pool& pool,
+    const Tensor& weight) {
+  /* Source */
+  const IntArrayRef src_filter = weight.sizes();
+  const float* const src_weight_ptr = weight.data_ptr<float>();
+
+  const int64_t src_kw_sz = src_filter[Layout::Filter::width];
+  const int64_t src_kh_sz = src_filter[Layout::Filter::height];
+  const int64_t src_kernel_sz = src_kw_sz * src_kh_sz;
+  const int64_t src_block_sz = src_kernel_sz * src_filter[Layout::Filter::input];
+  const int64_t num_stacks = div_up(src_filter[Layout::Filter::output], INT64_C(4));
+
+  /* Destination */
+  const int64_t dst_kw_sz = src_kernel_sz;
+  const int64_t dst_kh_sz = num_stacks;
+  const int64_t dst_kernel_sz = dst_kw_sz * dst_kh_sz;
+
+  vTensor v_weight{
+      context,
+      &pool,
+      {
+          4,
+          dst_kh_sz,
+          dst_kw_sz,
+      },
+      weight.options(),
+  };
+
+  using Future = vTensor::Future<float, vTensor::Access::Write>;
+  Future v_weight_future = v_weight.host<float, vTensor::Access::Write>(command_buffer);
+  Future::Payload v_weight_payload = v_weight_future.wait();
+
+  float* const dst_weight_ptr = v_weight_payload.get();
+  memset(dst_weight_ptr, 0, v_weight.nbytes());
+
+  for (int64_t src_oc = 0; src_oc < src_filter[Layout::Filter::output]; ++src_oc) {
+    /* Source */
+    const float* const src_weight_oc_ptr = src_weight_ptr + src_oc * src_block_sz;
+
+    /* Destination */
+    const int64_t dst_oh = src_oc / 4;
+    const int64_t dst_c = src_oc % 4;
+
+    float* const dst_weight_c_ptr = dst_weight_ptr +
+                                    dst_c * dst_kernel_sz +
+                                    dst_oh * dst_kw_sz;
+
+    for (int64_t src_ih = 0; src_ih < src_filter[Layout::Filter::height]; ++src_ih) {
+      memcpy(
+          dst_weight_c_ptr + src_ih * src_kw_sz,
+          src_weight_oc_ptr + src_ih * src_kw_sz,
+          sizeof(float) * src_kw_sz);
+    }
+  }
+
+  return v_weight;
+}
+
+vTensor pack_weights_2d(
+    api::Context* const context,
+    api::Command::Buffer& command_buffer,
+    api::Resource::Pool& pool,
+    const Tensor& weight) {
+  /* Source */
+  const IntArrayRef src_filter = weight.sizes();
+  const float* const src_weight_ptr = weight.data_ptr<float>();
+
+  const int64_t src_kw_sz = src_filter[Layout::Filter::width];
+  const int64_t src_kh_sz = src_filter[Layout::Filter::height];
+  const int64_t src_kernel_sz = src_kw_sz * src_kh_sz;
+  const int64_t src_block_sz = src_kernel_sz * src_filter[Layout::Filter::input];
+
+  const int64_t num_stacks = div_up(src_filter[Layout::Filter::output], INT64_C(4));
+  const int64_t stack_depth = api::utils::align_up(src_filter[Layout::Filter::input], INT64_C(4));
+
+  /* Destination */
+  const int64_t dst_kw_sz = src_kw_sz * stack_depth;
+  const int64_t dst_kh_sz = src_kh_sz * num_stacks;
+  const int64_t dst_kernel_sz = dst_kw_sz * dst_kh_sz;
+
+  vTensor v_weight{
+      context,
+      &pool,
+      {
+          4,
+          dst_kh_sz,
+          dst_kw_sz,
+      },
+      weight.options(),
+  };
+
+  using Future = vTensor::Future<float, vTensor::Access::Write>;
+  Future v_weight_future = v_weight.host<float, vTensor::Access::Write>(command_buffer);
+  Future::Payload v_weight_payload = v_weight_future.wait();
+
+  float* const dst_weight_ptr = v_weight_payload.get();
+  memset(dst_weight_ptr, 0, v_weight.nbytes());
+
+  for (int64_t src_oc = 0; src_oc < src_filter[Layout::Filter::output]; ++src_oc) {
+    /* Source */
+    const float* const src_weight_oc_ptr = src_weight_ptr + src_oc * src_block_sz;
+
+    /* Destination */
+    const int64_t dst_oh = src_oc / 4;
+    const int64_t dst_c = src_oc % 4;
+
+    float* const dst_weight_c_ptr = dst_weight_ptr + dst_c * dst_kernel_sz;
+
+    for (int64_t src_ic = 0; src_ic < src_filter[Layout::Filter::input]; ++src_ic) {
+      const int64_t dst_ic4 = src_ic / 4;
+
+      for (int64_t src_ih = 0; src_ih < src_kh_sz; ++src_ih) {
+        for (int64_t src_iw = 0; src_iw < src_kw_sz; ++src_iw) {
+          memcpy(
+              dst_weight_c_ptr + (dst_oh * src_kh_sz + src_ih) * dst_kw_sz +
+                dst_ic4 * src_kw_sz * 4 + src_iw * 4 + src_ic % 4,
+              src_weight_oc_ptr + src_ic * src_kernel_sz + src_ih * src_kw_sz + src_iw,
+              sizeof(float));
+        }
+      }
+    }
+  }
+
+  return v_weight;
+}
+
+vTensor pack_weights_2d_old(
+    api::Context* const context,
+    api::Command::Buffer& command_buffer,
+    api::Resource::Pool& pool,
+    const Tensor& weight) {
+  const IntArrayRef src_filter = weight.sizes();
+  const float* const src_weight_ptr = weight.data_ptr<float>();
+
+  const uint32_t OC = src_filter[Layout::Filter::output];
+  const uint32_t OC_4 = at::native::vulkan::api::utils::div_up(OC, 4u);
+  const uint32_t C = src_filter[Layout::Filter::input];
+  const uint32_t C_4 = at::native::vulkan::api::utils::div_up(C, 4u);
+  const uint32_t KH = src_filter[Layout::Filter::height];
+  const uint32_t KW = src_filter[Layout::Filter::width];
+
+  vTensor v_weight{
+    context,
+    &pool,
+    {
+      1,
+      4 * KH * KW,
+      OC_4,
+      4 * C_4
+    },
+    weight.options(),
+  };
+
+  using Future = vTensor::Future<float, vTensor::Access::Write>;
+  Future v_weight_future = v_weight.host<float, vTensor::Access::Write>(command_buffer);
+  Future::Payload v_weight_payload = v_weight_future.wait();
+
+  float* const dst_weight_ptr = v_weight_payload.get();
+  memset(dst_weight_ptr, 0, v_weight.nbytes());
+
+  const float* const src = src_weight_ptr;
+  float* const dst = dst_weight_ptr;
+
+  {
+    uint32_t ridx = 0;
+    const uint32_t oc_4SizeNumel = KW * KH * C_4 * 16;
+    for (uint32_t oc = 0; oc < OC; ++oc) {
+      int oc_4 = oc / 4;
+      int oc_4_i = oc % 4;
+      float* dst_oc = dst + oc_4 * oc_4SizeNumel;
+      for (uint32_t ic = 0; ic < C; ++ic) {
+        int ic_4 = ic / 4;
+        int ic_4_i = ic % 4;
+        float* dst_ic = dst_oc + ic_4 * KW * KH * 16;
+        for (uint32_t ky = 0; ky < KH; ++ky) {
+          float* dst_ky = dst_ic + ky * KW * 16;
+          for (uint32_t kx = 0; kx < KW; ++kx) {
+            float* dst_kx = dst_ky + kx * 16;
+            dst_kx[4 * ic_4_i + oc_4_i] = src[ridx++];
+          }
+        }
+      }
+    }
+
+    // shader KO4C4HW_to_image
+    struct Image3D {
+      float* data_;
+      uint32_t dim0_, dim1_, dim2_;
+
+      Image3D(uint32_t dim0, uint32_t dim1, uint32_t dim2) {
+        dim0_ = dim0;
+        dim1_ = dim1;
+        dim2_ = dim2;
+        data_ = new float[dim0 * dim1 * dim2 * 4];  // TODO: memory leak
+        memset(data_, 0.f, dim0 * dim1 * dim2 * 4 * sizeof(float));
+      }
+
+      inline uint32_t idx(uint32_t i0, uint32_t i1, uint32_t i2, uint32_t i3) {
+        return i3 + i2 * 4 + i1 * 4 * dim2_ + i0 * 4 * dim2_ * dim1_;
+      }
+
+      void set(uint32_t i0, uint32_t i1, uint32_t i2, uint32_t i3, float value) {
+        data_[idx(i0, i1, i2, i3)] = value;
+      }
+
+      float get(uint32_t i0, uint32_t i1, uint32_t i2, uint32_t i3) {
+        return data_[idx(i0, i1, i2, i3)];
+      }
+    } image{4 * C_4, OC_4, KH * KW};
+
+    for (uint32_t sx = 0; sx < C_4; ++sx) {
+      for (uint32_t sy = 0; sy < OC_4; ++sy) {
+        for (uint32_t sz = 0; sz < (KH * KW); ++sz) {
+          for (uint32_t vi = 0; vi < 4; ++vi) {
+            int bufferVIdx = 4 * sx * KH * KW + 4 * sy * C_4 * KH * KW + 4 * sz;
+            image.set(4 * sx + 0, sy, sz, vi, dst[4 * (bufferVIdx + 0) + vi]);
+            image.set(4 * sx + 1, sy, sz, vi, dst[4 * (bufferVIdx + 1) + vi]);
+            image.set(4 * sx + 2, sy, sz, vi, dst[4 * (bufferVIdx + 2) + vi]);
+            image.set(4 * sx + 3, sy, sz, vi, dst[4 * (bufferVIdx + 3) + vi]);
+          }
+        }
+      }
+    }
+
+    // inverse function of nchw_to_image
+    const uint32_t W = 4 * C_4;
+    const uint32_t H = OC_4;
+    const uint32_t D = KH * KW;
+    for (uint32_t sx = 0; sx < W; ++sx) {
+      for (uint32_t sy = 0; sy < H; ++sy) {
+        for (uint32_t sz = 0; sz < D; ++sz) {
+          for (uint32_t szvi = 0; szvi < 4; ++szvi) {
+            dst_weight_ptr[W * sy + sx + (4 * sz + szvi) * W * H] = image.get(sx, sy, sz, szvi);
+          }
+        }
+      }
+    }
+  }
+
+  return v_weight;
+}
+
 vTensor pack_weights(
     api::Resource::Pool& pool,
     const Tensor& weight_arg,
@@ -30,95 +282,32 @@ vTensor pack_weights(
     return convert(weight_arg);
   }
 
-  /* Source */
+  api::Context* const context = api::context();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
 
   const Tensor weight = weight_arg.contiguous();
-  const IntArrayRef src_filter = weight.sizes();
-  const float* const src_weight_ptr = weight.data_ptr<float>();
 
-  //
-  // Depthwise
-  //
-
-  if (is_depthwise(src_filter, groups)) {
-    vTensor v_weight{
-      api::context(),
-      &pool,
-      src_filter,
-      weight.options(),
-    };
-
-    using Future = vTensor::Future<void, vTensor::Access::Write>;
-    Future v_weight_future = v_weight.host<void, vTensor::Access::Write>();
-    Future::Payload v_weight_payload = v_weight_future.wait();
-
-    memcpy(
-        v_weight_payload.get(),
-        src_weight_ptr,
-        std::min(weight.nbytes(), v_weight.nbytes()));
-
-    return v_weight;
+  if (is_depthwise(weight.sizes(), groups)) {
+    return pack_weights_dw(
+        context,
+        command_buffer,
+        pool,
+        weight);
   }
 
-  //
-  // General
-  //
-
-  using namespace api::utils;
-
-  vTensor v_weight{
-    api::context(),
-    &pool,
-    {
-      div_up(src_filter[Layout::Filter::output], 4),
-      4 * align_up(src_filter[Layout::Filter::input], 4),
-      src_filter[Layout::Filter::height],
-      src_filter[Layout::Filter::width],
-    },
-    weight.options(),
-  };
-
-  using Future = vTensor::Future<float, vTensor::Access::Write>;
-  Future v_weight_future = v_weight.host<float, vTensor::Access::Write>();
-  Future::Payload v_weight_payload = v_weight_future.wait();
-
-  /* Source */
-  const int64_t src_kernel = src_filter[Layout::Filter::height] * src_filter[Layout::Filter::width];
-  const int64_t src_block = src_kernel * src_filter[Layout::Filter::input];
-
-  /* Destination */
-  const IntArrayRef dst_filter = v_weight.sizes();
-  const int64_t dst_kernel = dst_filter[Layout::Filter::height] * dst_filter[Layout::Filter::width];
-  const int64_t dst_block = dst_kernel * dst_filter[Layout::Filter::input];
-  TORCH_INTERNAL_ASSERT(src_kernel == dst_kernel, "Internal error!");
-
-  float* const dst_weight_ptr = v_weight_payload.get();
-  memset(dst_weight_ptr, 0, v_weight.nbytes());
-
-  for (int64_t src_oc = 0; src_oc < src_filter[Layout::Filter::output]; ++src_oc) {
-    /* Source */
-    const float *const src_weight_oc_ptr = src_weight_ptr + src_oc * src_block;
-
-    /* Destination */
-    const int64_t dst_oc = src_oc / 4;
-    const int64_t dst_oc_offset = src_oc % 4;
-
-    float* const dst_weight_oc_ptr =
-        dst_weight_ptr +
-        dst_oc * dst_block +
-        dst_oc_offset * dst_kernel;
-
-    for (int64_t src_ic = 0; src_ic < src_filter[Layout::Filter::input]; ++src_ic) {
-      const int64_t dst_ic = 4 * src_ic;
-
-      memcpy(
-          dst_weight_oc_ptr + dst_ic * dst_kernel,
-          src_weight_oc_ptr + src_ic * src_kernel,
-          sizeof(float) * dst_kernel);
-    }
+  if (Experimentation::kUseConv2dOldApi) {
+    return pack_weights_2d_old(
+        context,
+        command_buffer,
+        pool,
+        weight);
   }
 
-  return v_weight;
+  return pack_weights_2d(
+      context,
+      command_buffer,
+      pool,
+      weight);
 }
 
 vTensor pack_biases(
@@ -129,8 +318,11 @@ vTensor pack_biases(
     return convert(*bias);
   }
 
+  api::Context* const context = api::context();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
+
   vTensor v_bias{
-    api::context(),
+    context,
     &pool,
     {
       // 1D
@@ -141,7 +333,7 @@ vTensor pack_biases(
 
   {
       using Future = vTensor::Future<void, vTensor::Access::Write>;
-      Future v_bias_future = v_bias.host<void, vTensor::Access::Write>();
+      Future v_bias_future = v_bias.host<void, vTensor::Access::Write>(command_buffer);
       Future::Payload v_bias_payload = v_bias_future.wait();
 
       if (bias) {
@@ -174,8 +366,8 @@ std::array<int64_t, 4> pack_filter(
   };
 
   return {
-    api::utils::align_up(filter[Layout::Filter::output], 4),
-    api::utils::align_up(filter[Layout::Filter::input], 4),
+    align_up(filter[Layout::Filter::output], INT64_C(4)),
+    align_up(filter[Layout::Filter::input], INT64_C(4)),
     effective(
         filter[Layout::Filter::height],
         dilation[Layout::Parameter::height]),
@@ -219,7 +411,8 @@ bool available(
                                         (c10::DeviceType::Vulkan == bias->device().type())) &&
                                        (kFloat == bias->scalar_type()) &&
                                        (transposed ? false /* to be addded in the future */
-                                                   : (weight.size(Layout::Filter::output) == bias->size(Layout::Filter::output))))
+                                                   : (weight.size(Layout::Filter::output) ==
+                                                          bias->size(Layout::Filter::output))))
                                     : true) &&
          // Stride
          (stride[Layout::Parameter::height] > 0) &&
@@ -257,7 +450,7 @@ bool usable(const Tensor& input) {
          true;
 }
 
-void conv2d_depthwise(
+void conv2d_dw(
     api::Context* const context,
     api::Command::Buffer& command_buffer,
     vTensor& v_output,
@@ -265,31 +458,46 @@ void conv2d_depthwise(
     const vTensor& v_weight,
     const vTensor& v_bias,
     const IntArrayRef filter,
+    const IntArrayRef src_filter,
     const IntArrayRef stride,
     const IntArrayRef padding,
     const IntArrayRef dilation,
     const float output_min,
     const float output_max) {
-  using namespace api::utils;
-
-  if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
-    const struct {
-      int32_t kernel_x, kernel_y;
-      int32_t stride_x, stride_y;
-      int32_t padding_x, padding_y;
-      int32_t dilate_x, dilate_y;
-      float clamp_x, clamp_y;
+  if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
+    const struct Block final {
+      uvec3 extents;
+      int32_t src_filter_width;
+      ivec4 kernel;
+      ivec2 stride;
+      ivec2 padding;
+      ivec2 dilate;
+      vec2 clamp;
     } block {
-      safe_downcast<int32_t>(filter[Layout::Filter::width]),
-      safe_downcast<int32_t>(filter[Layout::Filter::height]),
-      safe_downcast<int32_t>(stride[Layout::Parameter::width]),
-      safe_downcast<int32_t>(stride[Layout::Parameter::height]),
-      safe_downcast<int32_t>(padding[Layout::Parameter::width]),
-      safe_downcast<int32_t>(padding[Layout::Parameter::height]),
-      safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
-      safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
-      output_min,
-      output_max,
+      v_output.extents(),
+      safe_downcast<int32_t>(src_filter[Layout::Filter::width]),
+      {
+        safe_downcast<int32_t>(filter[Layout::Filter::width]),
+        safe_downcast<int32_t>(filter[Layout::Filter::height]),
+        safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::width]),
+        safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::height]),
+      },
+      {
+        safe_downcast<int32_t>(stride[Layout::Parameter::width]),
+        safe_downcast<int32_t>(stride[Layout::Parameter::height]),
+      },
+      {
+        safe_downcast<int32_t>(padding[Layout::Parameter::width]),
+        safe_downcast<int32_t>(padding[Layout::Parameter::height]),
+      },
+      {
+        safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
+        safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
+      },
+      {
+        output_min,
+        output_max,
+      },
     };
 
     context->dispatch(
@@ -305,16 +513,25 @@ void conv2d_depthwise(
         v_output.extents(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
-        v_output.image(command_buffer, vTensor::Access::Write),
+        v_output.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Write),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_input.image(command_buffer),
+        v_input.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_weight.image(command_buffer),
+        v_weight.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_bias.buffer(command_buffer),
+        v_bias.buffer(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Object lifetime is managed by the resource pool.
         // It is OK not to keep track of the handle.
         context->resource().pool.uniform(block).object);
@@ -324,7 +541,7 @@ void conv2d_depthwise(
   }
 }
 
-void conv2d_pointwise(
+void conv2d_pw(
     api::Context* const context,
     api::Command::Buffer& command_buffer,
     vTensor& v_output,
@@ -336,44 +553,28 @@ void conv2d_pointwise(
     const IntArrayRef padding,
     const float output_min,
     const float output_max) {
-  using namespace api::utils;
-
-  if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
-    
-    vTensor v_weight_reshaped{
-        context,
-        {1,1, v_weight.sizes()[0], v_weight.sizes()[1]},
-        v_input.options(),
-    };
-
-    api::Command::Buffer temp_command_buffer =
-        api::context()->command().pool.allocate();
-    temp_command_buffer.begin();
-
-    temp_command_buffer.copy(
-        v_weight.buffer(temp_command_buffer),
-        v_weight_reshaped.buffer(temp_command_buffer, vTensor::Access::Write)
-    );
-
-    temp_command_buffer.end();
-    temp_command_buffer.submit(api::context()->gpu().queue);
-
-    const struct {
-      int32_t kernel_ic, kernel_oc;
-      int32_t stride_x, stride_y;
-      int32_t padding_x, padding_y;
-      float clamp_x, clamp_y;
-      int32_t w;
+  if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
+    const struct Block final {
+      uvec3 extents;
+      int32_t ic;
+      ivec2 stride;
+      ivec2 padding;
+      vec2 clamp;
     } block {
+      v_output.extents(),
       safe_downcast<int32_t>(filter[Layout::Filter::input]),
-      safe_downcast<int32_t>(filter[Layout::Filter::output]),
-      safe_downcast<int32_t>(stride[Layout::Parameter::width]),
-      safe_downcast<int32_t>(stride[Layout::Parameter::height]),
-      safe_downcast<int32_t>(padding[Layout::Parameter::width]),
-      safe_downcast<int32_t>(padding[Layout::Parameter::height]),
-      output_min,
-      output_max,
-      v_weight.sizes()[1],
+      {
+        safe_downcast<int32_t>(stride[Layout::Parameter::width]),
+        safe_downcast<int32_t>(stride[Layout::Parameter::height]),
+      },
+      {
+        safe_downcast<int32_t>(padding[Layout::Parameter::width]),
+        safe_downcast<int32_t>(padding[Layout::Parameter::height]),
+      },
+      {
+        output_min,
+        output_max,
+      },
     };
 
     context->dispatch(
@@ -389,16 +590,25 @@ void conv2d_pointwise(
         v_output.extents(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
-        v_output.image(command_buffer, vTensor::Access::Write),
+        v_output.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Write),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_input.image(command_buffer),
+        v_input.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_weight_reshaped.image(command_buffer, vTensor::Access::Read),
+        v_weight.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_bias.buffer(command_buffer),
+        v_bias.buffer(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Object lifetime is managed by the resource pool.
         // It is OK not to keep track of the handle.
         context->resource().pool.uniform(block).object);
@@ -416,33 +626,52 @@ void conv2d(
     const vTensor& v_weight,
     const vTensor& v_bias,
     const IntArrayRef filter,
+    const IntArrayRef src_filter,
     const IntArrayRef stride,
     const IntArrayRef padding,
     const IntArrayRef dilation,
     const float output_min,
     const float output_max) {
-  using namespace api::utils;
-
-  if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
-    const struct {
-      int32_t kernel_x, kernel_y, kernel_ic, kernel_oc;
-      int32_t stride_x, stride_y;
-      int32_t padding_x, padding_y;
-      int32_t dilate_x, dilate_y;
-      float clamp_x, clamp_y;
+  if C10_LIKELY(v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
+    const struct Block final {
+      uvec3 extents;
+      int32_t ic4;
+      ivec4 kernel;
+      ivec2 ikernel;
+      ivec2 stride;
+      ivec2 padding;
+      ivec2 dilate;
+      vec2 clamp;
+      ivec4 src_filter;
     } block {
-      safe_downcast<int32_t>(filter[Layout::Filter::width]),
-      safe_downcast<int32_t>(filter[Layout::Filter::height]),
-      safe_downcast<int32_t>(filter[Layout::Filter::input]),
-      safe_downcast<int32_t>(filter[Layout::Filter::output]),
-      safe_downcast<int32_t>(stride[Layout::Parameter::width]),
-      safe_downcast<int32_t>(stride[Layout::Parameter::height]),
-      safe_downcast<int32_t>(padding[Layout::Parameter::width]),
-      safe_downcast<int32_t>(padding[Layout::Parameter::height]),
-      safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
-      safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
-      output_min,
-      output_max,
+      v_output.extents(),
+      safe_downcast<int32_t>(filter[Layout::Filter::input] / 4),
+      {
+        safe_downcast<int32_t>(filter[Layout::Filter::width]),
+        safe_downcast<int32_t>(filter[Layout::Filter::height]),
+        safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::width]),
+        safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::height]),
+      },
+      {
+        safe_downcast<int32_t>(src_filter[Layout::Filter::width] * 4),
+        safe_downcast<int32_t>(src_filter[Layout::Filter::height]),
+      },
+      {
+        safe_downcast<int32_t>(stride[Layout::Parameter::width]),
+        safe_downcast<int32_t>(stride[Layout::Parameter::height]),
+      },
+      {
+        safe_downcast<int32_t>(padding[Layout::Parameter::width]),
+        safe_downcast<int32_t>(padding[Layout::Parameter::height]),
+      },
+      {
+        safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
+        safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
+      },
+      {
+        output_min,
+        output_max,
+      },
     };
 
     context->dispatch(
@@ -458,16 +687,117 @@ void conv2d(
         v_output.extents(),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
-        v_output.image(command_buffer, vTensor::Access::Write),
+        v_output.image(
+            command_buffer,
+            vTensor::Stage::Compute,
+            vTensor::Access::Write),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_input.image(command_buffer),
+        v_input.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_weight.image(command_buffer),
+        v_weight.image(
+            command_buffer,
+            vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_bias.buffer(command_buffer),
+        v_bias.buffer(
+            command_buffer,
+            vTensor::Stage::Compute),
+        // Object lifetime is managed by the resource pool.
+        // It is OK not to keep track of the handle.
+        context->resource().pool.uniform(block).object);
+  }
+  else {
+    TORCH_CHECK(false, "Not implemented!");
+  }
+}
+
+void conv2d_old(
+    api::Context* const context,
+    api::Command::Buffer& command_buffer,
+    vTensor& v_output,
+    const vTensor& v_input,
+    const vTensor& v_weight,
+    const vTensor& v_bias,
+    const IntArrayRef filter,
+    const IntArrayRef stride,
+    const IntArrayRef padding,
+    const IntArrayRef dilation,
+    const float output_min,
+    const float output_max) {
+  using namespace api::utils;
+
+  if (v_output.has_image() && v_input.has_image() && v_weight.has_image()) {
+    const int32_t W = v_input.extents().data[0];
+    const int32_t H = v_input.extents().data[1];
+    const int32_t C_4 = v_input.extents().data[2];
+    const int32_t C = 4 * C_4;
+
+    const int32_t OW = v_output.extents().data[0];
+    const int32_t OH = v_output.extents().data[1];
+    const int32_t OC_4 = v_output.extents().data[2];
+    const int32_t OC = 4 * OC_4;
+
+    const struct Block final {
+      int32_t padding_x, padding_y;
+      int32_t kernel_x, kernel_y;
+      int32_t stride_x, stride_y;
+      int32_t dilate_x, dilate_y;
+      int32_t outputSize[4];
+      int32_t inputSize[4];
+      float outputMin;
+      float outputMax;
+    } block {
+      safe_downcast<int32_t>(padding[Layout::Parameter::width]),
+      safe_downcast<int32_t>(padding[Layout::Parameter::height]),
+      safe_downcast<int32_t>(filter[Layout::Filter::width]),
+      safe_downcast<int32_t>(filter[Layout::Filter::height]),
+      safe_downcast<int32_t>(stride[Layout::Parameter::width]),
+      safe_downcast<int32_t>(stride[Layout::Parameter::height]),
+      safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
+      safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
+      { OW, OH, OC_4, OC },
+      { W, H, C_4, C },
+      output_min,
+      output_max,
+    };
+
+    context->dispatch(
+        command_buffer,
+        {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+        VK_KERNEL(conv2d_nogroup_clamp),
+        //VK_KERNEL(conv2d_nogroup_clamp_1x),
+        v_output.extents(),
+        // Write-only access bypasses synchronization but inserts appropriate
+        // barriers if necessary.
+        v_output.image(
+          command_buffer,
+          vTensor::Stage::Compute,
+          vTensor::Access::Write),
+        // Read-only access is implied on const tensors and triggers an async
+        // synchronization if necessary.
+        v_input.image(
+          command_buffer,
+          vTensor::Stage::Compute),
+        // Read-only access is implied on const tensors and triggers an async
+        // synchronization if necessary.
+        v_weight.image(
+          command_buffer,
+          vTensor::Stage::Compute),
+        // Read-only access is implied on const tensors and triggers an async
+        // synchronization if necessary.
+        v_bias.buffer(
+          command_buffer,
+          vTensor::Stage::Compute),
         // Object lifetime is managed by the resource pool.
         // It is OK not to keep track of the handle.
         context->resource().pool.uniform(block).object);
@@ -503,7 +833,7 @@ Tensor convolution(
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl_UNBOXED("convolution_overrideable", convolution);
+  m.impl("convolution_overrideable", convolution);
 }
 
 #endif /* USE_VULKAN_API */
@@ -618,11 +948,11 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
     input.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
     if (is_depthwise(unpacked_.filter, unpacked_.groups)) {
-      conv2d_depthwise(
+      conv2d_dw(
           context,
           command_buffer,
           v_output,
@@ -630,44 +960,63 @@ Tensor Conv2dOpContext::run(const Tensor& input_arg) const {
           packed_.v_weight,
           packed_.v_bias,
           packed_.filter,
+          unpacked_.filter,
           packed_.stride,
           packed_.padding,
           packed_.dilation,
-          packed_.output_min,
-          packed_.output_max);
-    }
-    else if (is_pointwise(unpacked_.filter)) {
-      conv2d_pointwise(
-          context,
-          command_buffer,
-          v_output,
-          v_input,
-          packed_.v_weight,
-          packed_.v_bias,
-          packed_.filter,
-          packed_.stride,
-          packed_.padding,
           packed_.output_min,
           packed_.output_max);
     }
     else {
-      conv2d(
-          context,
-          command_buffer,
-          v_output,
-          v_input,
-          packed_.v_weight,
-          packed_.v_bias,
-          packed_.filter,
-          packed_.stride,
-          packed_.padding,
-          packed_.dilation,
-          packed_.output_min,
-          packed_.output_max);
+      if (Experimentation::kUseConv2dOldApi) {
+        conv2d_old(
+            context,
+            command_buffer,
+            v_output,
+            v_input,
+            packed_.v_weight,
+            packed_.v_bias,
+            packed_.filter,
+            packed_.stride,
+            packed_.padding,
+            packed_.dilation,
+            packed_.output_min,
+            packed_.output_max);
+      } else {
+        if (is_pointwise(unpacked_.filter)) {
+          conv2d_pw(
+              context,
+              command_buffer,
+              v_output,
+              v_input,
+              packed_.v_weight,
+              packed_.v_bias,
+              packed_.filter,
+              packed_.stride,
+              packed_.padding,
+              packed_.output_min,
+              packed_.output_max);
+        }
+        else {
+          conv2d(
+              context,
+              command_buffer,
+              v_output,
+              v_input,
+              packed_.v_weight,
+              packed_.v_bias,
+              packed_.filter,
+              unpacked_.filter,
+              packed_.stride,
+              packed_.padding,
+              packed_.dilation,
+              packed_.output_min,
+              packed_.output_max);
+        }
+      }
     }
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
   return convert(v_output);
 }
@@ -706,7 +1055,7 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
           /* output_padding = */ {},
           groups,
           output_min,
-          output_min));
+          output_max));
 }
 
 Tensor conv2d_clamp_run(

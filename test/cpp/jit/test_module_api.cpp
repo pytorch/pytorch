@@ -43,6 +43,44 @@ static void import_libs(
   si.loadType(QualifiedName(class_name));
 }
 
+TEST(ModuleAPITest, MethodRunAsync) {
+  // Module m("m");
+  // m.define(R"(
+  //   def forward(self):
+  //     r1 = torch.jit.fork(torch.mm, torch.rand(100,100),torch.rand(100,100))
+  //     r2 = torch.jit.fork(torch.mm, torch.rand(100,100),torch.rand(100,100))
+  //     return r1.wait() + r2.wait()
+  // )");
+  std::string filePath(__FILE__);
+  auto testModelFile = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  // borrow model file from TEST(GraphExecutorTest, runAsync_executor)
+  testModelFile.append("test_interpreter_async.pt");
+  auto m = load(testModelFile);
+
+  auto counter = 0;
+  std::mutex mtx;
+
+  auto launcher = [&](std::function<void()> f) {
+    mtx.lock();
+    ++counter;
+    mtx.unlock();
+    at::launch(move(f));
+  };
+
+  auto method = m.get_method("forward");
+
+  std::vector<IValue> stack;
+  auto kwargs = std::unordered_map<std::string, at::IValue>();
+  auto future = method.run_async(stack, kwargs, launcher);
+
+  future->wait();
+
+  // expect 2 forks and 2 wait callbacks being excuted on provided taskLauncher
+  // but ivalue::Future would be marked completed and release wait before
+  // finishing all callbacks
+  ASSERT_GE(counter, 2);
+}
+
 TEST(ModuleAPITest, Clone) {
   auto cu = std::make_shared<CompilationUnit>();
   // creating child module

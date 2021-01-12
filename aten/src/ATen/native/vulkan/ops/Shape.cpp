@@ -9,7 +9,7 @@ namespace {
 
 Tensor view(
     const Tensor& self_arg,
-    IntArrayRef shape) {
+    const IntArrayRef shape) {
   api::Context* const context = api::context();
 
   const Tensor self = self_arg.is_vulkan() ? self_arg : self_arg.vulkan();
@@ -21,19 +21,23 @@ Tensor view(
     self.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
     command_buffer.copy(
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_self.buffer(command_buffer),
+        v_self.buffer(
+            command_buffer,
+            vTensor::Stage::Transfer),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
-        v_output.buffer(command_buffer, vTensor::Access::Write));
+        v_output.buffer(
+            command_buffer,
+            vTensor::Stage::Transfer,
+            vTensor::Access::Write));
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
   return convert(v_output);
 }

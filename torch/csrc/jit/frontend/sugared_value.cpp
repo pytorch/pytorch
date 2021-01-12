@@ -560,7 +560,7 @@ SugaredValuePtr IterableTree::getitem(
 void IterableTree::addChild(
     const SourceRange& range,
     Function& m,
-    const SugaredValuePtr iter_value) {
+    const SugaredValuePtr& iter_value) {
   c10::optional<int64_t> child_len = iter_value->staticLen();
   if (children_.size() == 0) {
     unroll_length_ = child_len;

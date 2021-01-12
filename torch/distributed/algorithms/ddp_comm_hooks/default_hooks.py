@@ -3,7 +3,7 @@ import torch.distributed as dist
 
 
 def allreduce_hook(
-    process_group: object, bucket: dist._GradBucket
+    process_group: dist.ProcessGroup, bucket: dist._GradBucket
 ) -> torch.futures.Future:
     """
     This DDP communication hook just calls ``allreduce`` using ``GradBucket``
@@ -18,9 +18,7 @@ def allreduce_hook(
         >>> ddp_model.register_comm_hook(process_group, allreduce_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
-    world_size = (
-        process_group.size() if process_group is not None else dist.get_world_size()
-    )
+    world_size = group_to_use.size()
 
     tensor = bucket.get_tensors()[0]
     fut = dist.all_reduce(tensor, group=group_to_use, async_op=True).get_future()
@@ -32,7 +30,7 @@ def allreduce_hook(
 
 
 def fp16_compress_hook(
-    process_group: object, bucket: dist._GradBucket
+    process_group: dist.ProcessGroup, bucket: dist._GradBucket
 ) -> torch.futures.Future:
     """
     This DDP communication hook implements a simple gradient compression
@@ -46,9 +44,7 @@ def fp16_compress_hook(
         >>> ddp_model.register_comm_hook(process_group, fp16_compress_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
-    world_size = (
-        process_group.size() if process_group is not None else dist.get_world_size()
-    )
+    world_size = group_to_use.size()
 
     compressed_tensor = bucket.get_tensors()[0].to(torch.float16)
 
@@ -79,7 +75,7 @@ def _get_allgather_out_list(all_gather_in_list, world_size):
 
 
 def _allgather_then_aggregate_hook(
-    process_group: object, bucket: dist._GradBucket
+    process_group: dist.ProcessGroup, bucket: dist._GradBucket
 ) -> torch.futures.Future:
     """
     Similar to ``allreduce_hook``, this hook first gathers ``GradBucket`` tensors
@@ -100,9 +96,7 @@ def _allgather_then_aggregate_hook(
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     rank = process_group.rank() if process_group is not None else dist.get_rank()
-    world_size = (
-        process_group.size() if process_group is not None else dist.get_world_size()
-    )
+    world_size = group_to_use.size()
 
     tensor = bucket.get_tensors()[0]
     fut = dist.all_gather(

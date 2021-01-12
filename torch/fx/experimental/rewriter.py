@@ -47,10 +47,10 @@ class AST_Rewriter(ast.NodeTransformer):
     def visit_Assert(self, node):
         """
         Swap out the Assert node (Python's `assert`) with a callsite to the
-        symbolically-traceable torch.Assert function
+        symbolically-traceable torch._assert function
         """
         # Create the Call node
-        n = ast.parse('torch.Assert()', mode='eval')
+        n = ast.parse('torch._assert()', mode='eval')
         assert isinstance(n, ast.Expression)
         call_node = n.body
         assert isinstance(call_node, ast.Call)
@@ -61,7 +61,7 @@ class AST_Rewriter(ast.NodeTransformer):
         expr_wrapper = ast.Expr(value=call_node)
 
         # Return the new Call node to signify that we want to use it as
-        # a replacement for the original Assert node
+        # a replacement for the original _assert node
         return ast.copy_location(expr_wrapper, node)
 
 

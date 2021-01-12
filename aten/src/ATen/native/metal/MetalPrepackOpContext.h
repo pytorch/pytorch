@@ -70,7 +70,7 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
 
 // The MPSCNNConvolution class takes weights in the order
 // [outputChannels][kernelHeight][kernelWidth][inputChannels/groups].
-static std::vector<float> permuteWeights(
+static inline std::vector<float> permuteWeights(
     const float* src,
     const std::vector<int64_t>& sizes) {
   const int64_t M = sizes[0];

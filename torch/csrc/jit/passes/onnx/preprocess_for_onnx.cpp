@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
+
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
@@ -97,6 +98,7 @@ static void FuseWithListUnpack(Block* b) {
       case aten::unbind:
       case aten::unsafe_chunk:
       case aten::where:
+      case aten::nonzero_numpy:
         FuseWithListUnpack(*it);
         break;
       default:

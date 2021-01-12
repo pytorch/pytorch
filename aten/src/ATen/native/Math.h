@@ -277,15 +277,20 @@ static inline float trigamma(float x) {
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
 static inline double calc_digamma(double x) {
+  // [C++ Standard Reference: Gamma Function] https://en.cppreference.com/w/cpp/numeric/math/tgamma
   static double PSI_10 = 2.25175258906672110764;
   if (x == 0) {
-    return INFINITY;
+    // As per C++ standard for gamma related functions and SciPy,
+    // If the argument is ±0, ±∞ is returned
+    return std::copysign(INFINITY, -x);
   }
 
-  int x_is_integer = x == floor(x);
+  bool x_is_integer = x == trunc(x);
   if (x < 0) {
     if (x_is_integer) {
-      return INFINITY;
+      // As per C++ standard for gamma related functions and SciPy,
+      // If the argument is a negative integer, NaN is returned
+      return NAN;
     }
     return calc_digamma(1 - x) - M_PI / tan(M_PI * x);
   }
@@ -324,15 +329,20 @@ static inline double calc_digamma(double x) {
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
 static inline float calc_digamma(float x) {
+  // See [C++ Standard Reference: Gamma Function]
   static float PSI_10 = 2.25175258906672110764f;
   if (x == 0) {
-    return INFINITY;
+    // As per C++ standard for gamma related functions and SciPy,
+    // If the argument is ±0, ±∞ is returned
+    return std::copysign(INFINITY, -x);
   }
 
-  int x_is_integer = x == floorf(x);
+  bool x_is_integer = x == truncf(x);
   if (x < 0) {
     if (x_is_integer) {
-      return INFINITY;
+    // As per C++ standard for gamma related functions and SciPy,
+    // If the argument is a negative integer, NaN is returned
+      return NAN;
     }
     // Avoid rounding errors for `tan`'s input.
     // Those make a big difference at extreme values.
@@ -1089,6 +1099,16 @@ c10::BFloat16 calc_igamma<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
 template <>
 c10::Half calc_igamma<c10::Half>(c10::Half a, c10::Half x) {
   return calc_igamma<float>(float(a), float(x));
+}
+
+template <>
+c10::BFloat16 calc_igammac<c10::BFloat16>(c10::BFloat16 a, c10::BFloat16 x) {
+  return calc_igammac<float>(float(a), float(x));
+}
+
+template <>
+c10::Half calc_igammac<c10::Half>(c10::Half a, c10::Half x) {
+  return calc_igammac<float>(float(a), float(x));
 }
 
 inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }
