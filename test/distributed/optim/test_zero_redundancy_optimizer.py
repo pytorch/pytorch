@@ -30,7 +30,7 @@ class TestZeroRedundancyOptimizer(MultiProcessTestCase):
     def tearDown(self):
         try:
             torch.distributed.destroy_process_group()
-        except RuntimeError:
+        except AssertionError:
             pass
 
     def dist_init(self, rank):
