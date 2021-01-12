@@ -1194,6 +1194,111 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_channels_last_with_broadcast(self):
+        # setting this true forces a new graph to be generated with a new
+        # input a different broadcast shape
+        torch._C._jit_set_nvfuser_guard_mode(True)
+
+        def t(x: torch.Tensor, y: torch.Tensor):
+            o = torch.mul(x, y)
+            o = o + 2.0
+            return o
+        t_jit = torch.jit.script(t)
+
+        # Single Channel broadcasts
+        # Test 1
+        x = torch.randn(8, 4, 10, 16, dtype=torch.float, device="cuda")
+        x = x.to(memory_format=torch.channels_last)
+
+        y = torch.randn(8, 4, 10, 1, dtype=torch.float, device="cuda")
+        y = y.to(memory_format=torch.channels_last)
+
+        jit_o = t_jit(x, y)
+        jit_o = t_jit(x, y)
+        o = t(x, y)
+
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertEqual(o.is_contiguous(memory_format=torch.channels_last),
+                         jit_o.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(o, jit_o)
+
+        # Test 2
+        y = torch.randn(8, 4, 1, 16, dtype=torch.float, device="cuda")
+        y = y.to(memory_format=torch.channels_last)
+
+        jit_o = t_jit(x, y)
+        jit_o = t_jit(x, y)
+        o = t(x, y)
+
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertEqual(o.is_contiguous(memory_format=torch.channels_last),
+                         jit_o.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(o, jit_o)
+
+        # Test 3
+        y = torch.randn(8, 1, 10, 16, dtype=torch.float, device="cuda")
+        y = y.to(memory_format=torch.channels_last)
+
+        jit_o = t_jit(x, y)
+        jit_o = t_jit(x, y)
+        o = t(x, y)
+
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertEqual(o.is_contiguous(memory_format=torch.channels_last),
+                         jit_o.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(o, jit_o)
+
+        # Test 3
+        y = torch.randn(1, 4, 10, 16, dtype=torch.float, device="cuda")
+        y = y.to(memory_format=torch.channels_last)
+
+        jit_o = t_jit(x, y)
+        jit_o = t_jit(x, y)
+        o = t(x, y)
+
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertEqual(o.is_contiguous(memory_format=torch.channels_last),
+                         jit_o.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(o, jit_o)
+
+        '''
+        Currently, the JIT doesn't have tensor merge logic to handle adding
+        a broadcast tensor with more than one broadcast into a non-broadcast
+        tensor.  Therefore, either of these tests can fail depending on the
+        sort implementation.  The second test is known to fail.
+
+        # Two Channel broadcasts
+        # Test 1
+        y = torch.randn(8, 4, 1, 1, dtype=torch.float, device="cuda")
+        y = y.to(memory_format=torch.channels_last)
+
+        jit_o = t_jit(x, y)
+        jit_o = t_jit(x, y)
+        o = t(x, y)
+
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertEqual(o.is_contiguous(memory_format=torch.channels_last),
+                         jit_o.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(o, jit_o)
+
+        # Test 2
+        y = torch.randn(8, 4, 1, 1, dtype=torch.float, device="cuda")
+        y = y.to(memory_format=torch.channels_last).transpose(2,3)
+        x = x.transpose(2,3)
+
+        jit_o = t_jit(x, y)
+        jit_o = t_jit(x, y)
+        o = t(x, y)
+
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertEqual(o.is_contiguous(memory_format=torch.channels_last),
+                         jit_o.is_contiguous(memory_format=torch.channels_last))
+        self.assertEqual(o, jit_o)
+        '''
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_pw_single_reduction_partition(self):
         sizes = [8, 8, 8]
         dtype = torch.float
