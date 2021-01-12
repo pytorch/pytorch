@@ -1363,6 +1363,13 @@ class TestFreezing(JitTestCase):
         FileCheck().check_not("GetAttr").run(script_model.graph)
 
 class TestFrozenOptimizations(JitTestCase):
+    def setUp(self):
+        self.default_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(torch.double)
+
+    def tearDown(self):
+        torch.set_default_dtype(self.default_dtype)
+
     def test_conv_bn_folding(self):
         conv_bias = [True, False]
         module_pairs = [(nn.Conv1d, nn.BatchNorm1d), (nn.Conv2d, nn.BatchNorm2d), (nn.Conv3d, nn.BatchNorm3d)]
@@ -1416,3 +1423,88 @@ class TestFrozenOptimizations(JitTestCase):
 
             self.assertEqual(mod_eager(inp), scripted_mod(inp))
             self.assertEqual(mod_eager(inp), scripted_mod(inp))
+
+
+    def test_conv_add_folding(self):
+
+        @torch.no_grad()
+        def test_conv_fusion(use_bias, module, tracing, op, scalar, add_tensor, expect_success):
+
+            class ConvOp(torch.nn.Module):
+                __constants__ = ['use_scalar']
+
+                def __init__(self, in_channels, out_channels, tensor=None, **kwargs):
+                    super(ConvOp, self).__init__()
+                    self.conv = module(in_channels, out_channels, bias=use_bias, **kwargs)
+                    self.conv2 = module(in_channels, out_channels, bias=use_bias, **kwargs)
+                    self.use_scalar = scalar
+                    tensor_size = [1 for _ in range(self.conv.weight.ndim)]
+                    tensor_size[1] = self.conv.weight.size(0)
+                    self.tensor = add_tensor if add_tensor is not None else torch.rand(tensor_size)
+                    self.op = op
+
+                def forward(self, x):
+                    x = self.conv(x)
+                    if self.use_scalar:
+                        return self.op(x, 2.)
+                    else:
+                        return self.op(x, self.tensor)
+
+            mod_eager = ConvOp(3, 32, kernel_size=3, stride=2).eval()
+
+            inps = [4, 3, 4]
+            if module == nn.Conv2d:
+                inps.append(inps[-1])
+            if module == nn.Conv3d:
+                inps.append(inps[-1])
+                inps.append(inps[-1])
+
+
+            inp = torch.rand(inps)
+
+            if tracing:
+                scripted_mod = torch.jit.trace(mod_eager, (inp,))
+            else:
+                scripted_mod = torch.jit.script(mod_eager)
+
+            self.run_pass("inline", scripted_mod.graph)
+            op_str = "aten::" + op.__name__
+
+            FileCheck().check("conv").check(op_str).run(scripted_mod.graph)
+            # successively no-ops with non-const inputs
+            self.run_pass("fold_frozen_conv_mul_or_div", scripted_mod.graph)
+            self.run_pass("fold_frozen_conv_add_or_sub", scripted_mod.graph)
+            FileCheck().check("conv").check(op_str).run(scripted_mod.graph)
+            scripted_mod = torch.jit.freeze(scripted_mod)
+            self.run_pass("fold_frozen_conv_mul_or_div", scripted_mod.graph)
+            self.run_pass("fold_frozen_conv_add_or_sub", scripted_mod.graph)
+
+            if expect_success:
+                FileCheck().check("conv").check_not(op_str).run(scripted_mod.graph)
+            else:
+                FileCheck().check("conv").check(op_str).run(scripted_mod.graph)
+
+            self.assertEqual(mod_eager(inp), scripted_mod(inp))
+            self.assertEqual(mod_eager(inp), scripted_mod(inp))
+
+        conv_bias = [True, False]
+        modules = [nn.Conv1d, nn.Conv2d, nn.Conv3d]
+        use_tracing = [False, True]
+        use_scalar = [False, True]
+        ops = [torch.add, torch.sub, torch.mul, torch.div]
+
+        for use_bias, module, tracing, pytorch_op, scalar in product(conv_bias, modules, use_tracing, ops, use_scalar):
+            test_conv_fusion(use_bias, module, tracing, pytorch_op, scalar, add_tensor=None, expect_success=True)
+
+
+        for use_bias, pytorch_op in product(conv_bias, ops):
+            # broadcasting add
+            test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False,
+                             add_tensor=torch.rand(32, 1, 32), expect_success=False)
+
+            # broadcasting add
+            test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False, add_tensor=torch.rand(1, 1), expect_success=True)
+
+            # add with different dtype
+            test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False,
+                             add_tensor=torch.rand(1).to(torch.int), expect_success=False)
