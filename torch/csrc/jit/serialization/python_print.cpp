@@ -309,12 +309,12 @@ struct PythonPrintImpl {
     // because it doesn't hash any information about the tensors.
     // We will probably need to optimize this at some point using hashing.
     if (val.isTensor()) {
-      auto t = val.toTensor();
+      auto& t = val.toTensor();
       for (size_t i = 0; i < constant_table_.size(); ++i) {
         if (!constant_table_[i].isTensor()) {
           continue;
         }
-        auto t2 = constant_table_[i].toTensor();
+        auto& t2 = constant_table_[i].toTensor();
         if (t.options().type_equal(t2.options()) && t.equal(t2)) {
           return i;
         }
@@ -801,7 +801,7 @@ struct PythonPrintImpl {
         }
         level--;
       } break;
-      case prim::Function: {
+      case prim::Closure: {
         if (enforce_importable_) {
           throw ErrorReport(node->sourceRange())
               << "closures are not exportable";
@@ -821,6 +821,15 @@ struct PythonPrintImpl {
         }
         body_ << "):\n";
         printBody(graph->block());
+      } break;
+      case prim::ModuleDictIndex: {
+        const auto dict = node->inputs().at(0);
+        const auto key = node->inputs().at(1);
+        const auto out = node->outputs().at(0);
+        assignValuesToTheirUniqueNames(out);
+        indent();
+        body_ << useOf(out) << " : " << out->type()->annotation_str() << " = "
+              << useOf(dict) << "[" << useOf(key) << "]\n";
       } break;
       default:
         auto ss = std::make_shared<TaggedStringStream>(&source_range_stack_);
@@ -864,7 +873,8 @@ struct PythonPrintImpl {
 
   void printConstant(TaggedStringStream& stmt, const IValue& v) {
     const auto customFormatter = [&](std::ostream& ss, const IValue& v) {
-      if (v.isTensor() || containsNonASCIIString(v)) {
+      if (v.isTensor() || containsNonASCIIString(v) || v.isObject()) {
+        TORCH_INTERNAL_ASSERT(!v.type()->is_module());
         ss << "CONSTANTS.c" << getOrAddConstant(v);
         return true;
       }
@@ -1246,6 +1256,7 @@ struct PythonPrintImpl {
     body_ << "def " << func.name() << "(";
     auto param_it = graph.inputs().begin();
     for (const Argument& arg : schema.arguments()) {
+      registerClassDependencies(arg.type());
       std::string arg_name = genName(arg.name());
       if (param_it == graph.inputs().begin()) {
         // the first argument may omit its type when it is implied by context
@@ -1264,9 +1275,10 @@ struct PythonPrintImpl {
       assignValue(*param_it++, arg_name);
     }
 
-    body_ << ") -> "
-          << schema.returns().at(0).type()->annotation_str(type_printer_)
-          << ":\n";
+    const auto& returnType = schema.returns().at(0).type();
+    body_ << ") -> " << returnType->annotation_str(type_printer_) << ":\n";
+    registerClassDependencies(returnType);
+
     printBody(graph.block());
   }
 
@@ -1327,15 +1339,13 @@ struct PythonPrintImpl {
           body_ << "\"" << param << "\", ";
         }
         body_ << "]\n";
-#ifndef FBCODE_CAFFE2
-        // Note: Forward compat gated. TODO: @voznesenskym to remove when ready.
+
         indent();
         body_ << "__buffers__ = [";
         for (const auto& buffer : buffers) {
           body_ << "\"" << buffer << "\", ";
         }
         body_ << "]\n";
-#endif
       }
 
       for (size_t i = 0; i < numAttrs; i++) {
@@ -1454,7 +1464,7 @@ struct PythonPrintImpl {
     }
   }
 
-  ~PythonPrintImpl() {}
+  ~PythonPrintImpl() = default;
 
   TaggedStringStream body_;
   // When printing this node, is it safe to write it inline (i.e. without

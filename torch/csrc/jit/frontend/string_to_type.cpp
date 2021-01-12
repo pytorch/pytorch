@@ -11,6 +11,7 @@ const std::unordered_map<std::string, TypePtr>& string_to_type_lut() {
       {"bool", BoolType::get()},
       {"str", StringType::get()},
       {"Device", DeviceObjType::get()},
+      {"Stream", StreamObjType::get()},
       // technically this is not a python type but we need it when
       // parsing serialized methods that use implicit conversions to Scalar
       {"number", NumberType::get()},

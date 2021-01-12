@@ -331,6 +331,8 @@ are compatible with Windows while using multi-process data loading:
   ``__main__`` check. This ensures that they are available in worker processes.
   (this is needed since functions are pickled as references only, not ``bytecode``.)
 
+.. _data-loading-randomness:
+
 Randomness in multi-process data loading
 """"""""""""""""""""""""""""""""""""""""""
 

@@ -1,5 +1,6 @@
 """Display class to aggregate and print the results of many measurements."""
 import collections
+import enum
 import itertools as it
 from typing import DefaultDict, List, Optional, Tuple
 
@@ -15,6 +16,12 @@ BAD = "\033[2m\033[91m"
 VERY_BAD = "\033[31m"
 BOLD = "\033[1m"
 TERMINATE = "\033[0m"
+
+
+class Colorize(enum.Enum):
+    NONE = "none"
+    COLUMNWISE = "columnwise"
+    ROWWISE = "rowwise"
 
 
 # Classes to separate internal bookkeeping from what is rendered.
@@ -64,6 +71,11 @@ class _Column(object):
             f" (! {spread * 100:.0f}%)" if self._highlight_warnings and spread is not None else "")
 
 
+def optional_min(seq):
+    l = list(seq)
+    return None if len(l) == 0 else min(l)
+
+
 class _Row(object):
     def __init__(self, results, row_group, render_env, env_str_len,
                  row_name_str_len, time_scale, colorize, num_threads=None):
@@ -98,8 +110,7 @@ class _Row(object):
         return output
 
     @staticmethod
-    def color_segment(segment, value, group_values):
-        best_value = min([v for v in group_values if v is not None])
+    def color_segment(segment, value, best_value):
         if value <= best_value * 1.01 or value <= best_value + 100e-9:
             return BEST + BOLD + segment + TERMINATE * 2
         if value <= best_value * 1.1:
@@ -118,12 +129,21 @@ class _Row(object):
         )
 
     def finalize_column_strings(self, column_strings, col_widths):
+        best_values = [-1 for _ in column_strings]
+        if self._colorize == Colorize.ROWWISE:
+            row_min = min(r.median for r in self._results if r is not None)
+            best_values = [row_min for _ in column_strings]
+        elif self._colorize == Colorize.COLUMNWISE:
+            best_values = [
+                optional_min(r.median for r in column.get_results_for(self._row_group) if r is not None)
+                for column in (self._columns or ())
+            ]
+
         row_contents = [column_strings[0].ljust(col_widths[0])]
-        for col_str, width, result, column in zip(column_strings[1:], col_widths[1:], self._results, self._columns or ()):
+        for col_str, width, result, best_value in zip(column_strings[1:], col_widths[1:], self._results, best_values):
             col_str = col_str.center(width)
-            if self._colorize and result is not None:
-                group_medians = [None if r is None else r.median for r in column.get_results_for(self._row_group)]
-                col_str = self.color_segment(col_str, result.median, group_medians)
+            if self._colorize != Colorize.NONE and result is not None and best_value is not None:
+                col_str = self.color_segment(col_str, result.median, best_value)
             row_contents.append(col_str)
         return row_contents
 
@@ -132,7 +152,7 @@ class Table(object):
     def __init__(
             self,
             results: List[common.Measurement],
-            colorize: bool,
+            colorize: Colorize,
             trim_significant_figures: bool,
             highlight_warnings: bool
     ):
@@ -251,7 +271,7 @@ class Compare(object):
         self._results: List[common.Measurement] = []
         self.extend_results(results)
         self._trim_significant_figures = False
-        self._colorize = False
+        self._colorize = Colorize.NONE
         self._highlight_warnings = False
 
     def __str__(self):
@@ -268,8 +288,8 @@ class Compare(object):
     def trim_significant_figures(self):
         self._trim_significant_figures = True
 
-    def colorize(self):
-        self._colorize = True
+    def colorize(self, rowwise=False):
+        self._colorize = Colorize.ROWWISE if rowwise else Colorize.COLUMNWISE
 
     def highlight_warnings(self):
         self._highlight_warnings = True
@@ -279,9 +299,9 @@ class Compare(object):
 
     def _render(self):
         results = common.Measurement.merge(self._results)
-        results = self._group_by_label(results)
+        grouped_results = self._group_by_label(results)
         output = []
-        for group in results.values():
+        for group in grouped_results.values():
             output.append(self._layout(group))
         return output
 

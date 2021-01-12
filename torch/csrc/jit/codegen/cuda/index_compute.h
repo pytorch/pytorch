@@ -56,6 +56,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 class IndexCompute : public BackwardVisitor {
  private:
@@ -188,6 +189,7 @@ class Index {
       bool unroll = false);
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

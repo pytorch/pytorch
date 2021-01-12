@@ -87,8 +87,9 @@ struct PeepholeOptimizeImpl {
               "aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor",
               /*const_inputs=*/attr::size)) {
         // x.expand(x.size()) == x
-        if (auto input_type =
-                node->namedInput(attr::self)->type()->cast<TensorType>()) {
+        auto input_type =
+            node->namedInput(attr::self)->type()->cast<TensorType>();
+        if (input_type && shape_peepholes_) {
           auto expanded_sizes = node->get<c10::List<int64_t>>(attr::size);
           auto input_type_sizes = input_type->sizes().concrete_sizes();
           if (expanded_sizes.has_value() && input_type_sizes &&
@@ -110,8 +111,9 @@ struct PeepholeOptimizeImpl {
               input_node->input()->debugName());
           node->output()->replaceAllUsesWith(input_node->input());
         }
-      } else if (node->matches(
-                     "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
+      } else if (
+          node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor") &&
+          shape_peepholes_) {
         // x.type_as(y) == x iff x.type() == y.type()
         auto self_type = node->input(0)->type()->expect<TensorType>();
         auto other_type = node->input(1)->type()->expect<TensorType>();

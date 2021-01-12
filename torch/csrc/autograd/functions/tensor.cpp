@@ -75,7 +75,7 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
     throw std::runtime_error(ERR_BACKWARD_TWICE);
   }
 
-  auto result = at::empty_strided(base.sizes(), base.strides(), grad.options());
+  auto result = grad.new_empty_strided(base.sizes(), base.strides());
   result.copy_(grad);
 
   at::Tensor grad_slice;

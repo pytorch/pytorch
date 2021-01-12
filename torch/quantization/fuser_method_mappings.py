@@ -3,6 +3,8 @@ import torch.nn.intrinsic as nni
 
 from typing import Union, Callable, Tuple, Dict, Optional, Type
 
+from .utils import get_combined_dict
+
 def fuse_conv_bn(conv, bn):
     r"""Given the conv and bn modules, fuses them and returns the fused module
 
@@ -19,14 +21,21 @@ def fuse_conv_bn(conv, bn):
     assert(conv.training == bn.training),\
         "Conv and BN both must be in the same mode (train or eval)."
 
-    is_3d = isinstance(conv, nn.Conv3d)
+    fused_module_class_map = {
+        nn.Conv1d: nni.ConvBn1d,
+        nn.Conv2d: nni.ConvBn2d,
+        nn.Conv3d: nni.ConvBn3d,
+    }
 
     if conv.training:
         assert bn.num_features == conv.out_channels, 'Output channel of Conv2d must match num_features of BatchNorm2d'
         assert bn.affine, 'Only support fusing BatchNorm2d with affine set to True'
         assert bn.track_running_stats, 'Only support fusing BatchNorm2d with tracking_running_stats set to True'
-        return nni.ConvBn3d(conv, bn) if is_3d \
-            else nni.ConvBn2d(conv, bn)
+        fused_module_class = fused_module_class_map.get((type(conv)), None)
+        if fused_module_class is not None:
+            return fused_module_class(conv, bn)
+        else:
+            raise NotImplementedError("Cannot fuse train modules: {}".format((conv, bn)))
     else:
         return nn.utils.fuse_conv_bn_eval(conv, bn)
 
@@ -48,13 +57,14 @@ def fuse_conv_bn_relu(conv, bn, relu):
     fused_module : Optional[Type[nn.Sequential]] = None
     if conv.training:
         map_to_fused_module_train = {
+            nn.Conv1d: nni.ConvBnReLU1d,
             nn.Conv2d: nni.ConvBnReLU2d,
             nn.Conv3d: nni.ConvBnReLU3d,
         }
         assert bn.num_features == conv.out_channels, 'Output channel of Conv must match num_features of BatchNorm'
         assert bn.affine, 'Only support fusing BatchNorm with affine set to True'
         assert bn.track_running_stats, 'Only support fusing BatchNorm with tracking_running_stats set to True'
-        fused_module = map_to_fused_module_train.get(type(conv))
+        fused_module = map_to_fused_module_train.get(type(conv), None)
         if fused_module is not None:
             return fused_module(conv, bn, relu)
         else:
@@ -65,14 +75,14 @@ def fuse_conv_bn_relu(conv, bn, relu):
             nn.Conv2d: nni.ConvReLU2d,
             nn.Conv3d: nni.ConvReLU3d,
         }
-        fused_module = map_to_fused_module_eval[type(conv)]
+        fused_module = map_to_fused_module_eval.get(type(conv), None)
         if fused_module is not None:
             fused_conv = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
             return fused_module(fused_conv, relu)
         else:
             raise NotImplementedError("Cannot fuse eval modules: {}".format((conv, bn, relu)))
 
-OP_LIST_TO_FUSER_METHOD : Dict[Tuple, Union[nn.Sequential, Callable]] = {
+DEFAULT_OP_LIST_TO_FUSER_METHOD : Dict[Tuple, Union[nn.Sequential, Callable]] = {
     (nn.Conv1d, nn.BatchNorm1d): fuse_conv_bn,
     (nn.Conv1d, nn.BatchNorm1d, nn.ReLU): fuse_conv_bn_relu,
     (nn.Conv2d, nn.BatchNorm2d): fuse_conv_bn,
@@ -87,15 +97,13 @@ OP_LIST_TO_FUSER_METHOD : Dict[Tuple, Union[nn.Sequential, Callable]] = {
     (nn.BatchNorm3d, nn.ReLU): nni.BNReLU3d,
 }
 
-def register_fuser_method(op_list, fuser_method):
-    ''' Register a fuser method for a tuple of ops, will be called
-    during fusion step
-    '''
-    assert isinstance(op_list, tuple), 'op list must be a tuple'
-    OP_LIST_TO_FUSER_METHOD[op_list] = fuser_method
-
-def get_fuser_method(op_list):
+def get_fuser_method(op_list, additional_fuser_method_mapping=None):
     ''' Get fuser method for the given list of module types,
     return None if fuser method does not exist
     '''
-    return OP_LIST_TO_FUSER_METHOD.get(op_list, None)
+    if additional_fuser_method_mapping is None:
+        additional_fuser_method_mapping = {}
+    all_mappings = get_combined_dict(DEFAULT_OP_LIST_TO_FUSER_METHOD, additional_fuser_method_mapping)
+    fuser_method = all_mappings.get(op_list, None)
+    assert fuser_method is not None, "did not find fuser method for: {} ".format(op_list)
+    return fuser_method

@@ -154,6 +154,7 @@ if(HIP_FOUND)
   ### Remove setting of Flags when FindHIP.CMake PR #558 is accepted.###
 
   set(hip_DIR ${HIP_PATH}/lib/cmake/hip)
+  set(hsa-runtime64_DIR ${ROCM_PATH}/lib/cmake/hsa-runtime64)
   set(AMDDeviceLibs_DIR ${ROCM_PATH}/lib/cmake/AMDDeviceLibs)
   set(amd_comgr_DIR ${ROCM_PATH}/lib/cmake/amd_comgr)
   set(rocrand_DIR ${ROCRAND_PATH}/lib/cmake/rocrand)
@@ -168,6 +169,7 @@ if(HIP_FOUND)
   set(rocthrust_DIR ${ROCTHRUST_PATH}/lib/cmake/rocthrust)
 
   find_package_and_print_version(hip REQUIRED)
+  find_package_and_print_version(hsa-runtime64 REQUIRED)
   find_package_and_print_version(amd_comgr REQUIRED)
   find_package_and_print_version(rocrand REQUIRED)
   find_package_and_print_version(hiprand REQUIRED)
@@ -203,9 +205,4 @@ if(HIP_FOUND)
   # roctx is part of roctracer
   find_library(ROCM_ROCTX_LIB roctx64 HINTS ${ROCTRACER_PATH}/lib)
   set(roctracer_INCLUDE_DIRS ${ROCTRACER_PATH}/include)
-
-  # Necessary includes for building PyTorch since we include HIP headers that depend on hcc/hsa headers.
-  set(hcc_INCLUDE_DIRS ${HCC_PATH}/include)
-  set(hsa_INCLUDE_DIRS ${HSA_PATH}/include)
-
 endif()

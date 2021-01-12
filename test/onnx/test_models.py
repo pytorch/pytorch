@@ -105,7 +105,6 @@ class TestModels(TestCase):
         )
         self.exportTest(toC(alexnet()), toC(x))
 
-    @disableScriptTest()
     def test_mnist(self):
         x = Variable(torch.randn(BATCH_SIZE, 1, 28, 28).fill_(1.0))
         self.exportTest(toC(MNIST()), toC(x))
@@ -158,7 +157,6 @@ class TestModels(TestCase):
         sqnet_v1_1 = SqueezeNet(version=1.1)
         self.exportTest(toC(sqnet_v1_1), toC(x))
 
-    @disableScriptTest()
     def test_densenet(self):
         # Densenet-121 model
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))

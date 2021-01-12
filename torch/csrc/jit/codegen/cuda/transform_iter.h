@@ -11,6 +11,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 namespace {
 
@@ -196,6 +197,7 @@ class TORCH_CUDA_API BestEffortReplay {
       const TensorDomain* td2);
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

@@ -273,12 +273,12 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   auto outputs = T::backward(&ctx_, backward_inputs);
 
   int num_forward_inputs = is_variable_input_.size();
-  int num_outputs = outputs.size();
+  auto num_outputs = outputs.size();
   // Returning too many results is ok, but only as long as they're all undefined.
   // Truncate the result vector in that case.
   if (num_outputs > num_forward_inputs) {
     bool all_undef = true;
-    for (int i = num_forward_inputs; i < num_outputs; ++i) {
+    for (size_t i = num_forward_inputs; i < num_outputs; ++i) {
       all_undef &= (!outputs[i].defined());
     }
     if (all_undef) {

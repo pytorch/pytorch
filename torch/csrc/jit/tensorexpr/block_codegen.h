@@ -111,8 +111,9 @@ class TORCH_API BlockCodeGen : public CodeGen {
   BlockCodeGen(
       Stmt* stmt,
       const std::vector<BufferArg>& buffer_args,
-      at::Device device = at::Device(at::kCPU))
-      : CodeGen(stmt, buffer_args, device) {
+      at::Device device = at::Device(at::kCPU),
+      const std::string& kernel_func_name = "func")
+      : CodeGen(stmt, buffer_args, device, kernel_func_name) {
     Initialize();
   }
 

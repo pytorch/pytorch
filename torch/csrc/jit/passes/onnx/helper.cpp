@@ -50,16 +50,6 @@ void buildParamsMapFromValueToParamsMap(
   }
 }
 
-Node* addNodeToBlock(Block* block, Value* input, Symbol kind) {
-  auto new_node = block->appendNode(block->owningGraph()->create(kind));
-  auto new_input = new_node->addInput(input);
-  for (size_t i = 0; i < new_node->outputs().size(); i++) {
-    auto output = new_node->outputs()[i];
-    block->registerOutput(output);
-  }
-  return new_node;
-}
-
 c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
   switch (onnx_type) {
     case ::ONNX_NAMESPACE::TensorProto_DataType_UNDEFINED:
@@ -92,6 +82,18 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
       TORCH_CHECK("unexpected tensor scalar type");
   }
   return c10::optional<at::ScalarType>{};
+}
+
+Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs) {
+  auto new_node = block->appendNode(block->owningGraph()->create(kind));
+  for (auto input : inputs) {
+    auto new_input = new_node->addInput(input);
+  }
+  return new_node;
+}
+
+Value* addInputToBlock(Block* block) {
+  return block->addInput();
 }
 
 } // namespace jit

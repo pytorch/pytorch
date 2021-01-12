@@ -30,7 +30,7 @@ def floats_to_bytes(floats):
         if isinstance(as_bytes[0], int):
             byte_matrix[i] = list(as_bytes)
         else:
-            byte_matrix[i] = list(map(ord, as_bytes))
+            byte_matrix[i] = [ord(i) for i in as_bytes]
     return byte_matrix
 
 

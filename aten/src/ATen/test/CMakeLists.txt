@@ -29,7 +29,9 @@ list(APPEND ATen_CPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/tensor_iterator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/math_kernel_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/memory_overlapping_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/mobile_memory_cleanup.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_generator_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cpu_profiling_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/pow_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/variant_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/reduce_ops_test.cpp
@@ -75,15 +77,17 @@ list(APPEND ATen_HIP_TEST_SRCS
 #  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_stream_test.cpp
 
 list(APPEND ATen_VULKAN_TEST_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_api_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_test.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_api_test.cpp)
 
 list(APPEND ATen_MOBILE_TEST_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/cpu_caching_allocator_test.cpp)
+  ${CMAKE_CURRENT_SOURCE_DIR}/vec256_test_all_types.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cpu_profiling_allocator_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cpu_caching_allocator_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/quantized_test.cpp)
 
 list(APPEND ATen_VEC256_TEST_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/vec256_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/vec256_test_all_types.cpp  
+  ${CMAKE_CURRENT_SOURCE_DIR}/vec256_test_all_types.cpp
   )
 
 # Caffe2 specific tests

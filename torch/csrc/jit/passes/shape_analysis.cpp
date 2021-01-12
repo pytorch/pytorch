@@ -67,8 +67,9 @@ bool containsTensorType(const TypePtr& t) {
 
 class ShapePropagator {
  public:
-  explicit ShapePropagator(std::shared_ptr<Graph> graph) : aliasDb_(graph) {
-    collectResizeSet(std::move(graph)->block());
+  explicit ShapePropagator(const std::shared_ptr<Graph>& graph)
+      : aliasDb_(graph) {
+    collectResizeSet(graph->block());
   }
 
   void PropagateShapeOnBlock(Block* block, bool insert_expands = true) {
@@ -1208,6 +1209,7 @@ class ShapePropagator {
             "aten::max(Tensor self) -> Tensor",
             "aten::min(Tensor self) -> Tensor",
             "aten::median(Tensor self) -> Tensor",
+            "aten::nanmedian(Tensor self) -> Tensor",
             "aten::norm(Tensor self, Scalar p) -> Tensor",
             "aten::std(Tensor self, bool unbiased) -> Tensor",
             "aten::trace(Tensor self) -> Tensor",
@@ -1354,6 +1356,7 @@ class ShapePropagator {
             "aten::max(Tensor self, int dim, bool keepdim) -> (Tensor, Tensor)",
             "aten::min(Tensor self, int dim, bool keepdim) -> (Tensor, Tensor)",
             "aten::median(Tensor self, int dim, bool keepdim) -> (Tensor, Tensor)",
+            "aten::nanmedian(Tensor self, int dim, bool keepdim) -> (Tensor, Tensor)",
             "aten::mode(Tensor self, int dim, bool keepdim) -> (Tensor, Tensor)",
         },
         [](Node* node) -> type_vec_t {

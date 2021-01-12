@@ -118,7 +118,7 @@ static_assert(
     sizeof(int) == sizeof(int32_t),
     "We make an assumption that int is always int32 for numpy "
     "type mapping.");
-int CaffeToNumpyType(const TypeMeta& meta) {
+int CaffeToNumpyType(const TypeMeta meta) {
 #ifdef USE_NUMPY
   static std::map<TypeIdentifier, int> numpy_type_map{
       {TypeMeta::Id<bool>(), NPY_BOOL},
@@ -143,7 +143,7 @@ int CaffeToNumpyType(const TypeMeta& meta) {
 #endif // USE_NUMPY
 }
 
-const TypeMeta& NumpyTypeToCaffe(int numpy_type) {
+const TypeMeta NumpyTypeToCaffe(int numpy_type) {
 #ifdef USE_NUMPY
   static std::map<int, TypeMeta> caffe_type_map{
       {NPY_BOOL, TypeMeta::Make<bool>()},
