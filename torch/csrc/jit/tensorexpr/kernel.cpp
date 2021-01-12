@@ -43,6 +43,9 @@ bool fallbackAllowed() {
 
 bool fallbackEnforced() {
   static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
+  if (tensorexpr::getTEGenerateBlockCode()) {
+    return false;
+  }
   if (!enable_c_str) {
     return fallback_allowed;
   }
@@ -961,7 +964,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::masked_fill: {
       return computeThreeOperand(
-          "aten::masked_fill",
+          "aten_masked_fill",
           v,
           [](const ExprHandle& input,
              const ExprHandle& mask,
@@ -1078,8 +1081,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::exp: {
-      return computeOneOperand(
-          "aten_exp", v, [](const ExprHandle& a) { return exp(a); });
+      return computeOneOperand("aten_exp", v, [](const ExprHandle& a) {
+        return exp(promoteIntegerToDefaultType(a));
+      });
     } break;
 
     case aten::expm1: {
@@ -1279,8 +1283,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::rsqrt: {
-      return computeOneOperand(
-          "aten_rsqrt", v, [](const ExprHandle& a) { return rsqrt(a); });
+      return computeOneOperand("aten_rsqrt", v, [](const ExprHandle& a) {
+        return rsqrt(promoteIntegerToDefaultType(a));
+      });
     } break;
 
     case aten::abs: {
@@ -1518,11 +1523,22 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
 
-  // inlining output buffers duplicates computation. it slows down
-  // cpu code generation but is enabled on gpu because it avoids difficult
-  // synchronization logic across blocks.
-  bool inline_output_buffers = backendType == kCudaCodeGen;
-  l.inlineIntermediateBufs(inline_output_buffers);
+  // For Block codegen we create a map of tensor dims before
+  // inlining. Like GPU codegen we need to inline. But the order
+  // where this analysis is run matters.
+  auto block_analysis = std::make_unique<CreateBufferMap>();
+  if (backendType == kBlockCodeGen) {
+    // Run Block analysis to get multi dim buffer info
+    auto root_stmt = l.root_stmt();
+    root_stmt->accept(block_analysis.get());
+  }
+
+  // inlining output & intermediate buffers can duplicate computation.
+  // it slows down cpu code generation but is enabled on gpu because it avoids
+  // difficult synchronization logic across blocks.
+  bool allow_duplicated_work =
+      (backendType == kCudaCodeGen || backendType == kBlockCodeGen);
+  l.inlineIntermediateBufs(allow_duplicated_work);
 
   if (backendType == kCudaCodeGen) {
     for (auto tensor : tensorOutputs_) {
@@ -1570,20 +1586,14 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   }
 
   if (backendType == kBlockCodeGen) {
-    auto block_analysis = std::make_unique<CreateBufferMap>();
     for (auto tensor : tensorOutputs_) {
       const int default_fp16_blocksize = 16;
       const int default_uint8_blocksize = 32;
       int blockSize = default_fp16_blocksize;
       // We only handle looplevels == 2 for now
-      // Run Block analysis to get multi dim buffer info
-      auto root_stmt = l.root_stmt();
-      root_stmt->accept(block_analysis.get());
-
       if (tensor->buf()->dtype().scalar_type() == ScalarType::Byte) {
         blockSize = default_uint8_blocksize;
       }
-
       std::vector<For*> loops = l.getLoopStmtsFor(tensor);
       TORCH_INTERNAL_ASSERT(!loops.empty(), "loops should not be empty");
       For* flattened = nullptr;

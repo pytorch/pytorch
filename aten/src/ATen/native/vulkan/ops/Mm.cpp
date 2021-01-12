@@ -10,18 +10,21 @@ namespace {
 using namespace api::utils;
 
 vTensor pack_weights(
-  api::Resource::Pool& pool,
-  const Tensor& weight_arg) {
+    api::Resource::Pool& pool,
+    const Tensor& weight_arg) {
   if (weight_arg.is_vulkan()) {
     return convert(weight_arg);
   }
+
+  api::Context* const context = api::context();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
 
   const Tensor weight = weight_arg.contiguous();
   const IntArrayRef w_sizes = weight.sizes();
   const float* const src_weight_ptr = weight.data_ptr<float>();
 
   vTensor v_weight{
-      api::context(),
+      context,
       &pool,
       w_sizes,
       weight.options(),
@@ -29,7 +32,7 @@ vTensor pack_weights(
 
   {
     using Future = vTensor::Future<void, vTensor::Access::Write>;
-    Future v_weight_future = v_weight.host<void, vTensor::Access::Write>();
+    Future v_weight_future = v_weight.host<void, vTensor::Access::Write>(command_buffer);
     Future::Payload v_weight_payload = v_weight_future.wait();
 
     memcpy(
@@ -49,16 +52,21 @@ vTensor pack_biases(
     return convert(*bias_arg);
   }
 
+  api::Context* const context = api::context();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
+
   vTensor v_bias{
-      api::context(),
+      context,
       &pool,
-      {weight_arg.sizes()[Layout::Parameter::width]},
+      {
+          weight_arg.size(Layout::Parameter::width),
+      },
       weight_arg.options(),
   };
 
   {
     using Future = vTensor::Future<void, vTensor::Access::Write>;
-    Future v_bias_future = v_bias.host<void, vTensor::Access::Write>();
+    Future v_bias_future = v_bias.host<void, vTensor::Access::Write>(command_buffer);
     Future::Payload v_bias_payload = v_bias_future.wait();
 
     if (bias_arg) {
@@ -66,7 +74,8 @@ vTensor pack_biases(
           v_bias_payload.get(),
           bias_arg->contiguous().data_ptr<float>(),
           std::min(bias_arg->nbytes(), v_bias.nbytes()));
-    } else {
+    }
+    else {
       memset(
           v_bias_payload.get(),
           // 2's complement integers and IEEE-754 floating point numbers both
@@ -162,12 +171,12 @@ Tensor mm(
       mat1.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if (v_mat1.has_image() && v_mat2.has_image()) {
-      const struct {
-        uvec3 size;
+    if C10_LIKELY(v_mat1.has_image() && v_mat2.has_image()) {
+      const struct Block final {
+        uvec3 extents;
         int32_t K;
       } block {
         v_output.extents(),
@@ -203,12 +212,12 @@ Tensor mm(
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
-    } else {
+    }
+    else {
       TORCH_CHECK(false, "Not implemented!");
     }
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
   return convert(v_output);
 }
@@ -281,15 +290,16 @@ Tensor LinearOpContext::run(
       input.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if (v_output.has_image() &&
+    if C10_LIKELY(
+        v_output.has_image() &&
         v_input.has_image() &&
         packed_.v_weight.has_image() &&
         packed_.v_bias.has_image()) {
-      const struct {
-        uvec3 size;
+      const struct Block final {
+        uvec3 extents;
         int32_t K;
         vec2 multiplier;
       } block {
@@ -341,8 +351,7 @@ Tensor LinearOpContext::run(
       TORCH_CHECK(false, "Not implemented!");
     }
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
   return convert(v_output);
 }

@@ -1,6 +1,6 @@
 import argparse
 from common import run, topics
-from collections import namedtuple, defaultdict
+from collections import defaultdict
 import os
 import csv
 import pprint
@@ -97,7 +97,7 @@ class CommitList:
         if topic is not None:
             commits = [commit for commit in commits if commit.topic == topic]
         return commits
- 
+
     def update_to(self, new_version):
         last_hash = self.commits[-1].commit_hash
         new_commits = CommitList.get_commits_between(last_hash, new_version)
@@ -121,7 +121,7 @@ def update_existing(path, new_version):
 
 def to_markdown(commit_list, category):
     def cleanup_title(commit):
-        match = re.match('(.*) \(#\d+\)', commit.title)
+        match = re.match(r'(.*) \(#\d+\)', commit.title)
         if match is None:
             return commit.title
         return match.group(1)
