@@ -193,6 +193,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/passes/lower_tuples.cpp",
     "torch/csrc/jit/passes/normalize_ops.cpp",
     "torch/csrc/jit/passes/peephole_list_idioms.cpp",
+    "torch/csrc/jit/passes/peephole_alias_sensitive.cpp",
     "torch/csrc/jit/passes/pass_manager.cpp",
     "torch/csrc/jit/passes/peephole.cpp",
     "torch/csrc/jit/passes/create_functional_graphs.cpp",

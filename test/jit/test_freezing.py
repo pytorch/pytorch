@@ -1402,15 +1402,8 @@ class TestFrozenOptimizations(JitTestCase):
                 scripted_mod = torch.jit.script(mod_eager)
 
             self.run_pass("inline", scripted_mod.graph)
-
-            # TODO: add optimization for conv size
-            # Currrently a size check in batch norm gives conv multiple uses
-            # and prevents fusion
-            exceptions = scripted_mod.graph.findAllNodes("prim::RaiseException")
-            for n in exceptions:
-                n.destroy()
-
-            self.run_pass("dce", scripted_mod.graph)
+            self.run_pass("peephole", scripted_mod.graph)
+            self.run_pass("constant_propagation", scripted_mod.graph)
 
             FileCheck().check("conv").check("batch").run(scripted_mod.graph)
             # successfully no-ops with non-const inputs
