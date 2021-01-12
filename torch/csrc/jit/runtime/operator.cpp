@@ -7,7 +7,6 @@
 #include <queue>
 #include <utility>
 #include <vector>
-#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {

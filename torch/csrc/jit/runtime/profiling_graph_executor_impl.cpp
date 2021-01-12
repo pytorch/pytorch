@@ -32,7 +32,6 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
-#include "ATen/core/interned_strings.h"
 
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,

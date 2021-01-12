@@ -3,7 +3,6 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <memory>
-#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {

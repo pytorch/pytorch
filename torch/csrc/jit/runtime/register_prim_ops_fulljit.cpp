@@ -19,7 +19,6 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include "jit/jit_log.h"
 
 namespace torch {
 namespace jit {
