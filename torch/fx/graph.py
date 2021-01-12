@@ -577,7 +577,9 @@ class Graph:
         free_vars: List[str] = []
         modules_used : Set[str] = set()
         body: List[str] = []
-        maybe_return_annotation : str = ''
+
+        # Wrap string in list to pass by reference
+        maybe_return_annotation : List[str] = ['']
 
         def register_modules_used(qualified_name : str):
             if '.' in qualified_name:
@@ -619,6 +621,8 @@ class Graph:
             not used in the remainder of the code are freed and the memory usage
             of the code is optimal.
             """
+            if user.op == 'placeholder':
+                return
             if user.op == 'output':
                 body.append('\n')
                 return
@@ -637,7 +641,7 @@ class Graph:
                 free_vars.append(f'{node.target}{maybe_type_annotation}{maybe_default_arg}')
                 raw_name = node.target.replace('*', '')
                 if raw_name != node.name:
-                    body.append(f'{node.name} = {raw_name}')
+                    body.append(f'{node.name} = {raw_name}\n')
                 return
             elif node.op == 'call_method':
                 assert isinstance(node.target, str)
@@ -673,7 +677,7 @@ class Graph:
                 return
             elif node.op == 'output':
                 if node.type is not None:
-                    maybe_return_annotation = f" -> {type_repr(node.type)}"
+                    maybe_return_annotation[0] = f" -> {type_repr(node.type)}"
                 body.append(f'return {repr(node.args[0])}')
                 return
             raise NotImplementedError(f'node: {node.op} {node.target}')
@@ -689,13 +693,18 @@ class Graph:
         import_strs = [f'import {name}' for name in sorted(modules_used)]
         import_block = '\n'.join(import_strs)
 
+        if len(body) == 0:
+            # If the Graph has no non-placeholder nodes, no lines for the body
+            # have been emitted. To continue to have valid Python code, emit a
+            # single pass statement
+            body.append('pass\n')
+
         code = ''.join(body)
-        code = '\n'.join('    ' + line for line in code.split('\n')) + '\n'
+        code = '\n'.join('    ' + line for line in code.split('\n'))
         fn_code = f"""\
 {import_block}
-def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
-{code}
-"""
+def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
+{code}"""
 
         return fn_code
 
@@ -726,6 +735,28 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
             else:
                 return str(arg)
 
+        def pretty_print_target(target):
+            """
+            Make target printouts more user-friendly.
+            1) builtins will be printed as `builtins.xyz`
+            2) operators will be printed as `operator.xyz`
+            3) other callables will be printed with qualfied name, e.g. torch.add
+            """
+            if isinstance(target, str):
+                return target
+            if hasattr(target, '__module__'):
+                if not hasattr(target, '__name__'):
+                    # Just to be defensive, if we don't have `__name__`, get the
+                    # qualname. Not sure if this happens for any members of `operator`
+                    # or `builtins`. This fallback path is not as good, since e.g.
+                    # things in `operator` have `_operator` as their __module__.
+                    return get_qualified_name(target)
+                if target.__module__ == 'builtins':
+                    return f'builtins.{target.__name__}'
+                elif target.__module__ == '_operator':
+                    return f'operator.{target.__name__}'
+            return get_qualified_name(target)
+
         def format_node(n : Node) -> Optional[str]:
             if n.op == 'placeholder':
                 assert isinstance(n.target, str)
@@ -742,7 +773,7 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
                 return f'return {n.args[0]}'
             else:
                 maybe_typename = f'{_type_repr(n.type)} ' if n.type is not None else ''
-                return f'%{n.name} : {maybe_typename}[#users={len(n.users)}] = {n.op}[target={n.target}](' \
+                return f'%{n.name} : {maybe_typename}[#users={len(n.users)}] = {n.op}[target={pretty_print_target(n.target)}](' \
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
 
 
