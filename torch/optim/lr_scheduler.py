@@ -1333,7 +1333,7 @@ class MultiLRScheduler(_LRScheduler):
         >>> # Assuming optimizer uses lr = 0.1 for all groups:
         >>> # lr = 0.0001   [Sched1] if batch = 1
         >>> # lr = 0.01     [Sched1] if batch = 10
-        >>> # lr = 0.1      [Sched1] if batch = 100
+        >>> # lr = 0.1      [Sched2] if batch = 100
         >>> # lr = 0.1      [Sched2] if batch < 1000
         >>> # lr = 0.01     [Sched2] if 1000 <= batch < 2000
         >>> # lr = 0.001    [Sched2] if 2000 <= batch < 3000
@@ -1360,15 +1360,14 @@ class MultiLRScheduler(_LRScheduler):
             raise ValueError("'epoch' values need to be strictly increasing")
 
     def step(self, *args, epoch=None, **kwargs):
-        if epoch is None:
-            # Schedulers automatically increase last_epoch in step, so pass in previous value
-            sched = self.scheduler
-            sched.last_epoch = self.last_epoch
-            sched.step(*args, **kwargs)
-            self.last_epoch += 1
-        else:
-            self.scheduler.step(*args, epoch, **kwargs)
-            self.last_epoch = epoch
+        if epoch is not None:
+            raise ValueError("The MultiLRScheduler does not work with the deprecated epoch parameter")
+
+        # Schedulers automatically increase last_epoch in step, so pass in previous value
+        sched = self.scheduler
+        sched.last_epoch = self.last_epoch
+        sched.step(*args, **kwargs)
+        self.last_epoch += 1
 
     def get_last_lr(self):
         return self.scheduler.get_last_lr()
@@ -1387,5 +1386,5 @@ class MultiLRScheduler(_LRScheduler):
         state_dict = [s.state_dict() for s in self.schedulers]
         return state_dict
 
-    def load_state_dict(self, state):
-        [self.schedulers[i].load_state_dict(s) for i, s in enumerate(state)]
+    def load_state_dict(self, state_dict):
+        [self.schedulers[i].load_state_dict(s) for i, s in enumerate(state_dict)]
