@@ -94,9 +94,7 @@ CONFIG_TREE_DATA = [
         ]),
         ("rocm", [
             ("3.9", [
-                ("3.6", [
-                    ('build_only', [XImportant(True)]),
-                ]),
+                XImportant("3.6"),
             ]),
         ]),
     ]),
