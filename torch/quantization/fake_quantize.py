@@ -41,8 +41,7 @@ class FakeQuantizeBase(ABC, Module):
         pass
 
     @torch.jit.export
-    def enable_fake_quant(self, enabled=True):
-        # type: (bool) -> None
+    def enable_fake_quant(self, enabled: bool = True) -> None:
         self.fake_quant_enabled[0] = 1 if enabled else 0
 
     @torch.jit.export
@@ -50,8 +49,7 @@ class FakeQuantizeBase(ABC, Module):
         self.enable_fake_quant(False)
 
     @torch.jit.export
-    def enable_observer(self, enabled=True):
-        # type: (bool) -> None
+    def enable_observer(self, enabled: bool = True) -> None:
         self.observer_enabled[0] = 1 if enabled else 0
 
     @torch.jit.export

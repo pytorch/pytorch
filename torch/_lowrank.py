@@ -37,7 +37,7 @@ def get_approximate_basis(A,        # type: Tensor
     .. note:: To obtain repeatable results, reset the seed for the
               pseudorandom number generator
 
-    Arguments::
+    Args::
         A (Tensor): the input tensor of size :math:`(*, m, n)`
 
         q (int): the dimension of subspace spanned by :math:`Q`
@@ -103,7 +103,7 @@ def svd_lowrank(A, q=6, niter=2, M=None):
               will be useful for huge sparse matrices that
               ``torch.svd`` cannot handle.
 
-    Arguments::
+    Args::
         A (Tensor): the input tensor of size :math:`(*, m, n)`
 
         q (int, optional): a slightly overestimated rank of A.
@@ -211,7 +211,7 @@ def pca_lowrank(A, q=None, center=True, niter=2):
     .. note:: To obtain repeatable results, reset the seed for the
               pseudorandom number generator
 
-    Arguments:
+    Args:
 
         A (Tensor): the input tensor of size :math:`(*, m, n)`
 
