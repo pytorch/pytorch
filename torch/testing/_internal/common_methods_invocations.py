@@ -122,6 +122,7 @@ class OpInfo(object):
                  sample_inputs_func=None,  # function to generate sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
                  aliases=None,  # iterable of aliases, e.g. ("absolute",) for torch.abs
+                 variant_test_name='',  # additional string to include in the test name
                  supports_sparse=False  # supported for sparse
                  ):
 
@@ -131,6 +132,7 @@ class OpInfo(object):
 
         self.name = name
         self.aten_name = aten_name if aten_name is not None else name
+        self.variant_test_name = variant_test_name
 
         self.dtypes = set(dtypes)
         self.dtypesIfCPU = set(dtypesIfCPU) if dtypesIfCPU is not None else self.dtypes
@@ -188,7 +190,11 @@ class OpInfo(object):
         return self.inplace_variant
 
     def sample_inputs(self, device, dtype, requires_grad=False):
-        """Returns an iterable of SampleInputs."""
+        """Returns an iterable of SampleInputs.
+
+        These samples should be sufficient to test the function works correctly
+        with autograd, TorchScript, etc.
+        """
         return self.sample_inputs_func(self, device, dtype, requires_grad)
 
     # Returns True if the test should be skipped and False otherwise
@@ -488,17 +494,10 @@ class SpectralFuncInfo(OpInfo):
                  *,
                  ref=None,  # Reference implementation (probably in np.fft namespace)
                  dtypes=floating_and_complex_types(),
-                 dtypesIfCPU=None,
-                 dtypesIfCUDA=None,
-                 dtypesIfROCM=None,
                  ndimensional: bool,  # Whether dim argument can be a tuple
                  skips=None,
                  decorators=None,
                  **kwargs):
-        dtypesIfCPU = dtypesIfCPU if dtypesIfCPU is not None else dtypes
-        dtypesIfCUDA = dtypesIfCUDA if dtypesIfCUDA is not None else dtypes
-        dtypesIfROCM = dtypesIfROCM if dtypesIfROCM is not None else dtypes
-
         # gradgrad is quite slow
         if not TEST_WITH_SLOW:
             skips = skips if skips is not None else []
@@ -509,9 +508,6 @@ class SpectralFuncInfo(OpInfo):
 
         super().__init__(name=name,
                          dtypes=dtypes,
-                         dtypesIfCPU=dtypesIfCPU,
-                         dtypesIfCUDA=dtypesIfCUDA,
-                         dtypesIfROCM=dtypesIfROCM,
                          skips=skips,
                          decorators=decorators,
                          **kwargs)
@@ -520,25 +516,81 @@ class SpectralFuncInfo(OpInfo):
 
 
     def sample_inputs(self, device, dtype, requires_grad=False):
-        tensor = make_tensor((L, M), device, dtype,
-                             low=None, high=None,
+        nd_tensor = make_tensor((S, S + 1, S + 2), device, dtype, low=None, high=None,
+                                requires_grad=requires_grad)
+        tensor = make_tensor((31,), device, dtype, low=None, high=None,
                              requires_grad=requires_grad)
+
         if self.ndimensional:
             return [
+                SampleInput(nd_tensor, kwargs=dict(s=(3, 10), dim=(1, 2), norm='ortho')),
+                SampleInput(nd_tensor, kwargs=dict(norm='ortho')),
+                SampleInput(nd_tensor, kwargs=dict(s=(8,))),
                 SampleInput(tensor),
-                SampleInput(tensor, kwargs=dict(dim=(-2,))),
-                SampleInput(tensor, kwargs=dict(norm='ortho')),
-                SampleInput(tensor, kwargs=dict(s=(10, 15))),
-                SampleInput(tensor, kwargs=dict(s=10, dim=1, norm='ortho')),
+
+                *(SampleInput(nd_tensor, kwargs=dict(dim=dim))
+                  for dim in [-1, -2, -3, (0, -1)]),
             ]
         else:
             return [
+                SampleInput(nd_tensor, kwargs=dict(n=10, dim=1, norm='ortho')),
+                SampleInput(nd_tensor, kwargs=dict(norm='ortho')),
+                SampleInput(nd_tensor, kwargs=dict(n=7)),
                 SampleInput(tensor),
-                SampleInput(tensor, kwargs=dict(dim=-2)),
-                SampleInput(tensor, kwargs=dict(norm='ortho')),
-                SampleInput(tensor, kwargs=dict(n=15)),
-                SampleInput(tensor, kwargs=dict(n=10, dim=1, norm='ortho')),
+
+                *(SampleInput(nd_tensor, kwargs=dict(dim=dim))
+                  for dim in [-1, -2, -3]),
             ]
+
+
+class HermitianOpInfo(OpInfo):
+    """Operator information for Hermitian functions
+    These are functions that take Hermitian matrices as input.
+    They require a modified function to be tested for gradcheck, because the finite-difference algorithm
+    for calculating derivatives does not preserve the Hermitian property of the input and returning incorrect results.
+    """
+
+    def get_op(self):
+        """
+        Returns the function variant of the operator, torch.<op_name>,
+        compatible with gradcheck for Hermitian functions.
+        It works only for single input argument.
+        """
+        def hermitian_func(non_hermitian_input, **kwargs):
+            hermitian_input = non_hermitian_input + non_hermitian_input.conj().transpose(-2, -1)
+            return self.op(hermitian_input, **kwargs)
+
+        return hermitian_func
+
+
+def sample_inputs_linalg_pinv(op_info, device, dtype, requires_grad=False):
+    """
+    This function generates input for torch.linalg.pinv with distinct singular values so that autograd is always stable
+    Implementation of torch.linalg.pinv depends on torch.svd and torch.linalg.eigh, therefore it's sufficient to
+    check only square S x S matrix and the batched (3 x S x S) input.
+    """
+    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
+
+    test_cases = (
+        random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),  # single matrix
+        random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device),  # batch of matrices
+    )
+
+    out = []
+    for a in test_cases:
+        a.requires_grad = requires_grad
+        out.append(SampleInput(a))
+    return out
+
+
+def sample_inputs_linalg_pinv_hermitian(op_info, device, dtype, requires_grad=False):
+    """
+    This function generates input for torch.linalg.pinv with hermitian=True keyword argument.
+    """
+    out = sample_inputs_linalg_pinv(op_info, device, dtype, requires_grad)
+    for o in out:
+        o.kwargs = {"hermitian": True}
+    return out
 
 
 def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False):
@@ -686,12 +738,7 @@ def sample_inputs_flip(op_info, device, dtype, requires_grad):
         make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad)
     )
 
-    dims = ((0, 1, 2), (0,), (0, 2), (-1,))
-
-    # On CUDA, `dims=()` errors out with IndexError
-    # Reference: https://github.com/pytorch/pytorch/issues/49982
-    if device == 'cpu':
-        dims = dims + ((),)  # type: ignore
+    dims = ((0, 1, 2), (0,), (0, 2), (-1,), ())
 
     samples = [SampleInput(tensor, kwargs={'dims': dim}) for tensor, dim in product(tensors, dims)]
 
@@ -1247,6 +1294,27 @@ op_db: List[OpInfo] = [
            supports_tensor_out=True,
            sample_inputs_func=sample_inputs_linalg_solve,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+    OpInfo('linalg.pinv',
+           aten_name='linalg_pinv',
+           op=torch.linalg.pinv,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           supports_tensor_out=False,
+           sample_inputs_func=sample_inputs_linalg_pinv,
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+    HermitianOpInfo('linalg.pinv',
+                    variant_test_name='hermitian',
+                    aten_name='linalg_pinv',
+                    op=torch.linalg.pinv,
+                    dtypes=floating_and_complex_types(),
+                    test_inplace_grad=False,
+                    supports_tensor_out=False,
+                    sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
+                    decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+                    skips=(
+                        # These tests do not take into account custom op.get_op()
+                        SkipInfo('TestCommon', 'test_variant_consistency_jit'),)
+                    ),
     OpInfo('svd',
            op=torch.svd,
            dtypes=floating_and_complex_types(),
@@ -1279,7 +1347,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
            supports_tensor_out=False,
-           sample_inputs_func=sample_inputs_pinverse,
+           sample_inputs_func=sample_inputs_linalg_pinv,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     OpInfo('gather',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16),
