@@ -993,6 +993,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
             (torch.sigmoid, TensorFactory.randn),
             (torch.sign, TensorFactory.randn),
             (torch.sin, TensorFactory.rand),
+            (functools.partial(torch.sin, dtype=torch.double), TensorFactory.rand),
             (torch.sinh, TensorFactory.rand),
             (torch.sqrt, TensorFactory.rand),
             (torch.tan, TensorFactory.rand),
