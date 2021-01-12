@@ -608,9 +608,7 @@ Tensor copy_to_host(const Tensor& input) {
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
   auto&& sizes = [X sizes];
-  auto dummy = at::zeros(input.sizes()).contiguous();
-  auto strides = dummy.strides();
-  MetalTensor mt{sizes, strides.vec()};
+  MetalTensor mt{sizes};
   mt.texture()->setCommandBuffer(commandBuffer);
   mt.texture()->allocateTextureStorage(sizes);
   MPSImage* Y = imageFromMetalTensor(mt);
