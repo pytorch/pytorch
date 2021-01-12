@@ -945,7 +945,7 @@ class TestJit(JitTestCase):
             (Mod(nn.ReflectionPad2d(2)), torch.arange(9, dtype=torch.float).reshape(1, 1, 3, 3)),
             (Mod(nn.ReplicationPad1d(2)), torch.arange(8, dtype=torch.float).reshape(1, 2, 4)),
             (Mod(nn.ReplicationPad2d(2)), torch.arange(9, dtype=torch.float).reshape(1, 1, 3, 3)),
-            (Mod(nn.ReplicationPad3d(3)), torch.randn(16, 3, 8, 320, 480)),
+            (Mod(nn.ReplicationPad3d(3)), torch.randn(16, 3, 8, 32, 48)),
             (Mod(nn.ZeroPad2d(2)), torch.randn(1, 1, 3, 3))
         ]
 
