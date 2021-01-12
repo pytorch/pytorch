@@ -10,8 +10,8 @@ import unittest
 
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, torch_to_numpy_dtype_dict, suppress_warnings,
-    IS_MACOS, make_tensor, TEST_SCIPY, slowTest, skipIfNoSciPy)
+    TestCase, run_tests, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict,
+    suppress_warnings, IS_MACOS, make_tensor, TEST_SCIPY, slowTest, skipIfNoSciPy)
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs)
 from torch.testing._internal.common_device_type import (
@@ -214,7 +214,7 @@ class TestUnaryUfuncs(TestCase):
             if alt is None:
                 continue
 
-            if inplace and torch.testing.is_integral(dtype) and not torch.testing.is_integral(expected.dtype):
+            if inplace and not torch._C._can_cast(expected.dtype, dtype):
                 # Assert that RuntimeError is raised
                 # for inplace variant of Operators that
                 # promote integer input to floating dtype.
@@ -285,7 +285,7 @@ class TestUnaryUfuncs(TestCase):
                 msg = None
 
             exact_dtype = True
-            if torch.testing.is_integral(dtype) and expected.dtype.kind in 'fc':
+            if not torch._C._can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
                 exact_dtype = False
 
                 if dtype in [torch.uint8, torch.int8, torch.bool]:
@@ -404,11 +404,7 @@ class TestUnaryUfuncs(TestCase):
 
     def _test_out_arg(self, op, input, output, expected):
         if op.safe_casts_outputs:
-            expect_fail = (
-                # Can't cast complex to real
-                expected.dtype.is_complex and not output.dtype.is_complex or
-                # Can't cast float to integer
-                expected.dtype.is_floating_point and torch.testing.is_integral(output.dtype))
+            expect_fail = not torch._C._can_cast(expected.dtype, output.dtype)
         else:
             expect_fail = output.dtype != expected.dtype
 
@@ -1682,7 +1678,6 @@ _types_no_half = [
 
 # TODO: all these should be replaced with OpInfos
 torch_op_tests = [
-    _TorchMathTestMeta('exp'),
     _TorchMathTestMeta('floor'),
     _TorchMathTestMeta('ceil'),
     _TorchMathTestMeta('rad2deg'),

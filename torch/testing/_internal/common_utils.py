@@ -383,7 +383,7 @@ if TEST_NUMPY:
 
     # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
     numpy_to_torch_dtype_dict = {
-        np.bool       : torch.bool,
+        np.bool_      : torch.bool,
         np.uint8      : torch.uint8,
         np.int8       : torch.int8,
         np.int16      : torch.int16,
