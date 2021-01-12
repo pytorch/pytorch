@@ -8,6 +8,7 @@ from torch.utils.mobile_optimizer import *
 from torch.nn import functional as F
 from torch._C import MobileOptimizerType
 from torch.testing._internal.common_quantized import override_quantized_engine
+from torch.nn.modules.module import ModuleAttributeError
 
 FileCheck = torch._C.FileCheck
 
@@ -267,6 +268,69 @@ class TestOptimizer(unittest.TestCase):
             bi_module, [(torch.tensor([1]),)], [])
         bi_module_lint_list = generate_mobile_module_lints(bi_module)
         self.assertEqual(len(bi_module_lint_list), 0)
+
+    def test_preserve_bundled_inputs_methods(self):
+        class MyBundledInputModule(torch.nn.Module):
+            def __init__(self):
+                super(MyBundledInputModule, self).__init__()
+
+            def forward(self, inputs):
+                return inputs
+
+        class MyIncompleteBundledInputModule(torch.nn.Module):
+            def __init__(self):
+                super(MyIncompleteBundledInputModule, self).__init__()
+
+            def forward(self, inputs):
+                return inputs
+
+            @torch.jit.export
+            def get_all_bundled_inputs(self):
+                pass
+
+        bi_module = torch.jit.script(MyBundledInputModule())
+        module_optim_bi_not_preserved = optimize_for_mobile(bi_module)
+
+        # Expected to be False since no bundled inputs methods were added
+        self.assertFalse(
+            hasattr(module_optim_bi_not_preserved, 'get_all_bundled_inputs') or
+            hasattr(module_optim_bi_not_preserved, 'get_num_bundled_inputs') or
+            hasattr(module_optim_bi_not_preserved, 'run_on_bundled_input')
+        )
+
+        # We expect an exception here
+        with self.assertRaises(ModuleAttributeError):
+            module_optim_bi_not_preserved.run_on_bundled_input(0)
+
+        # Add bundled inputs methods to the module
+        torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
+            bi_module, [(torch.tensor([1]),)], [])
+        # Now they should be preserved
+        module_optim_bi_preserved = optimize_for_mobile(bi_module)
+
+        # All of the bundled inputs methods were preserved
+        self.assertTrue(
+            hasattr(module_optim_bi_preserved, 'get_all_bundled_inputs') and
+            hasattr(module_optim_bi_preserved, 'get_num_bundled_inputs') and
+            hasattr(module_optim_bi_preserved, 'run_on_bundled_input')
+        )
+
+        # We do not expect an exception here
+        module_optim_bi_preserved.run_on_bundled_input(0)
+
+        bundled_input = module_optim_bi_preserved.get_all_bundled_inputs()[0]
+        module_optim_bi_preserved(*bundled_input)
+
+        # If not all 3 bundled inputs methods are present in the module,
+        # we will not try to preserve them unless specified by the user.
+        incomplete_bi_module = torch.jit.script(MyIncompleteBundledInputModule())
+        incomplete_bi_module_optim = optimize_for_mobile(incomplete_bi_module)
+        self.assertFalse(hasattr(incomplete_bi_module_optim, 'get_all_bundled_inputs'))
+
+        # Specifically preserve get_all_bundled_inputs even if it's the only one
+        # bundled inputs method available.
+        incomplete_bi_module_optim = optimize_for_mobile(incomplete_bi_module, preserved_methods=['get_all_bundled_inputs'])
+        self.assertTrue(hasattr(incomplete_bi_module_optim, 'get_all_bundled_inputs'))
 
     @unittest.skipUnless(torch.backends.xnnpack.enabled,
                          " XNNPACK must be enabled for these tests."

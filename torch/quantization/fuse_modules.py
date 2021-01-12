@@ -93,7 +93,7 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
     with the fused module, replacing the rest of the modules
     with identity.
 
-    Arguments:
+    Args:
         model: Model containing the modules to be fused
         modules_to_fuse: list of list of module names to fuse. Can also be a list
                          of strings if there is only a single list of modules to fuse.

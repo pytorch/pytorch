@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMathReduce.cu"
 #else
 
+#include <c10/cuda/CUDAException.h>
+
 #if !defined(THC_REAL_IS_BOOL)
 
 void THCTensor_(prod)(THCState* state, THCTensor *self, THCTensor *src, int dimension, int keepdim) {
@@ -43,12 +45,7 @@ void THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, scalar
     THCTensor_kernel_renorm<scalar_t, accreal>
       <<<grid, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(THCTensor_(data)(state, data),
         scalar_cast<accreal>(value), size, scalar_cast<accreal>(maxnorm));
-
-    // Do not replace with C10_CUDA_KERNEL_LAUNCH_CHECK() yet as it exhibits different behaviour from THError().
-    // THError() calls the an error handler, or throws std::runtime_error if a custom handler hasn't been registered.
-    cudaError_t errcode = cudaGetLastError();
-    if(errcode != cudaSuccess)
-      THError(cudaGetErrorString(errcode));
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 
   THCTensor_(free)(state, src_);
