@@ -9026,6 +9026,34 @@
   dispatch:
     Math: linalg_cond_out
 
+- func: linalg_pinv(Tensor self, float rcond=1e-15, bool hermitian=False) -> Tensor
+  python_module: linalg
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    Math: linalg_pinv
+
+- func: linalg_pinv.rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False) -> Tensor
+  python_module: linalg
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    Math: linalg_pinv
+
+- func: linalg_pinv.out(Tensor self, float rcond=1e-15, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  variants: function
+  dispatch:
+    Math: linalg_pinv_out
+
+- func: linalg_pinv.out_rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
+  variants: function
+  dispatch:
+    Math: linalg_pinv_out
+
 - func: _linalg_solve_out_helper_(Tensor(a!) self, Tensor(b!) other, Tensor(c!) infos) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function
