@@ -835,7 +835,7 @@ class MultiheadAttention(Module):
 
     .. math::
         \text{MultiHead}(Q, K, V) = \text{Concat}(head_1,\dots,head_h)W^O
-    
+
     where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
     Args:
