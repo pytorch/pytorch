@@ -13,7 +13,8 @@ from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
     MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
-    _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
+    _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, \
+    MultiLRScheduler
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
     skipIfRocm
@@ -1579,6 +1580,26 @@ class TestLRScheduler(TestCase):
             swa_scheduler = SWALR(self.opt, anneal_epochs=1.7, swa_lr=1.)
         with self.assertRaisesRegex(ValueError, "swa_lr must"):
             swa_scheduler = SWALR(self.opt, swa_lr=[1., 0.1, 0.01])
+
+    def test_multilrscheduler(self):
+        epochs = 10
+        single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 2 + [0.005] * 2 + [0.05] * 2
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        sched1 = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5])
+        sched2 = MultiStepLR(self.opt, gamma=10, milestones=[7, 9])
+        scheduler = MultiLRScheduler([sched1, sched2], [6])
+        self._test(scheduler, targets, epochs)
+
+    def test_multilrscheduler_with_epoch_errors(self):
+        epochs = 10
+        single_targets = [0.05] * 2 + [0.005] * 3 + [0.0005] * 2 + [0.005] * 2 + [0.05] * 2
+        targets = [single_targets, [x * epochs for x in single_targets]]
+        sched1 = MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5])
+        sched2 = MultiStepLR(self.opt, gamma=10, milestones=[7, 9])
+        scheduler = MultiLRScheduler([sched1, sched2], [6])
+
+        with self.assertRaises(ValueError):
+            self._test_with_epoch(scheduler, targets, epochs)
 
     def test_step_lr_state_dict(self):
         self._check_scheduler_state_dict(
