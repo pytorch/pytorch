@@ -128,7 +128,7 @@ FusedKernelCUDA::FusedKernelCUDA(
       // Meanwhile, for forward compatibility (future device with
       // `unsupported_arch==True`), since SASS are not necessarily compatible,
       // we fallback to PTX instead.
-      supported_arch ? "sm_" : "compute_" +
+      (supported_arch ? "sm_" : "compute_") +
 #else
       "compute_" +
 #endif
