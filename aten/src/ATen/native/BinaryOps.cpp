@@ -461,7 +461,7 @@ Tensor& add_(Tensor& self, Scalar other, Scalar alpha) {
 }
 
 Tensor remainder(const Tensor& self, Scalar other) {
-  return native::remainder(self, wrapped_scalar_tensor(other)); 
+  return native::remainder(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_(Tensor& self, Scalar other) {
@@ -469,7 +469,7 @@ Tensor& remainder_(Tensor& self, Scalar other) {
 }
 
 Tensor& remainder_out(Tensor& result, const Tensor& self, Scalar other) {
-  return native::remainder_out(result, self, wrapped_scalar_tensor(other)); 
+  return native::remainder_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {

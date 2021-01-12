@@ -656,7 +656,7 @@ void fmod_kernel(TensorIterator& iter) {
         [](Vec256<scalar_t> x, Vec256<scalar_t> d) {
           return x.fmod(d);
         });
-      });
+    });
   }
 }
 
