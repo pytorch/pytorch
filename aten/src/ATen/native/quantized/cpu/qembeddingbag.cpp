@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/native/quantized/cpu/embedding_packed_params.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <ATen/native/quantized/cpu/qembeddingbag.h>
 #include <torch/library.h>
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
@@ -45,11 +46,12 @@ at::Tensor embedding_bag_4bit_impl(
     }
   }
 
-  const int64_t N = weight.size(0);
-  const int64_t weight_size = weight.size(1);
+  const auto weight_sizes = weight.sizes();
+  const int64_t N = weight_sizes[0];
+  const int64_t weight_size = weight_sizes[1];
   const int64_t D =
       (weight_size - 4) * 2; // NB: 2-byte fp16 scale and 2-byte zero_offset
-  const int64_t M = offsets.size(0);
+  const int64_t M = offsets.sizes()[0];
 
   int64_t output_size = M - 1;
   std::vector<OffsetType> offsets_include_last_val;
@@ -198,7 +200,8 @@ at::Tensor embedding_bag_4bit_impl(
 }
 
 template <typename IndexType, typename OffsetType>
-at::Tensor embedding_bag_byte_impl(
+at::Tensor& embedding_bag_byte_impl(
+    at::Tensor& output,
     const at::Tensor& weight,
     const at::Tensor& indices,
     const at::Tensor& offsets,
@@ -231,9 +234,10 @@ at::Tensor embedding_bag_byte_impl(
     }
   }
 
-  const int64_t N = weight.size(0);
-  const int64_t D = weight.size(1) - 8; // NB: -8 to account for scale and bias
-  const int64_t M = offsets.size(0);
+  const auto weight_sizes = weight.sizes();
+  const int64_t N = weight_sizes[0];
+  const int64_t D = weight_sizes[1] - 8; // NB: -8 to account for scale and bias
+  const int64_t M = offsets.sizes()[0];
 
   int64_t output_size = M - 1;
   std::vector<OffsetType> offsets_include_last_val;
@@ -254,11 +258,12 @@ at::Tensor embedding_bag_byte_impl(
   }
   std::vector<int64_t> shape;
   if (indices.dim() == 2 && is_embedding_op) {
-    shape = {indices.size(0), indices.size(1), D};
+    const auto indices_sizes = indices.sizes();
+    shape = {indices_sizes[0], indices_sizes[1], D};
   } else {
     shape = {output_size, D};
   }
-  auto output = at::empty(shape, weight.options().dtype(at::kFloat));
+  output.resize_(shape);
   auto* output_data = output.data_ptr<float>();
 
   const int index_size = indices.numel();
@@ -329,7 +334,8 @@ at::Tensor embedding_bag_byte_impl(
       "embedding_bag_byte expects FBGEMM support. This PyTorch installation was not built with FBGEMM operators");
 }
 
-at::Tensor embedding_bag_byte_helper(
+at::Tensor& embedding_bag_byte_helper(
+    at::Tensor& output,
     const at::Tensor& weight,
     const at::Tensor& indices,
     const c10::optional<at::Tensor>& offsets_in,
@@ -350,8 +356,8 @@ at::Tensor embedding_bag_byte_helper(
         !offsets_in.has_value(),
         "embedding_bag_byte operator: input is 2D, then offsets has to be None, as input is treated is a mini-batch of fixed length sequences.");
 
-    offsets =
-        at::arange(0, indices.numel(), indices.size(1), indices.scalar_type());
+    offsets = at::arange(
+        0, indices.numel(), indices.sizes()[1], indices.scalar_type());
   } else {
     TORCH_CHECK(
         offsets_in.has_value(),
@@ -369,12 +375,17 @@ at::Tensor embedding_bag_byte_helper(
       "Expect 32 or 64 bit offsets, but found ",
       offsets.scalar_type(),
       " instead.");
+  TORCH_CHECK(
+      weight.is_contiguous() && indices.is_contiguous() &&
+          offsets.is_contiguous(),
+      "Expect weight, indices, and offsets to be contiguous.");
 
   // Using helper function to support different type combination without the
   // need to cast, which can be additional performance overhead
   if (indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kInt) {
     return embedding_bag_byte_impl<int, int>(
-        weight.contiguous(),
+        output,
+        weight,
         indices,
         offsets,
         pruned_weights,
@@ -385,7 +396,8 @@ at::Tensor embedding_bag_byte_helper(
   } else if (
       indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kLong) {
     return embedding_bag_byte_impl<int, int64_t>(
-        weight.contiguous(),
+        output,
+        weight,
         indices,
         offsets,
         pruned_weights,
@@ -396,7 +408,8 @@ at::Tensor embedding_bag_byte_helper(
   } else if (
       indices.scalar_type() == at::kLong && offsets.scalar_type() == at::kInt) {
     return embedding_bag_byte_impl<int64_t, int>(
-        weight.contiguous(),
+        output,
+        weight,
         indices,
         offsets,
         pruned_weights,
@@ -408,7 +421,8 @@ at::Tensor embedding_bag_byte_helper(
 
   // default case given the TORCH_CHECK above
   return embedding_bag_byte_impl<int64_t, int64_t>(
-      weight.contiguous(),
+      output,
+      weight,
       indices,
       offsets,
       pruned_weights,
@@ -439,8 +453,8 @@ at::Tensor embedding_bag_4bit_helper(
         !offsets_in.has_value(),
         "embedding_bag_4bit operator: input is 2D, then offsets has to be None, as input is treated is a mini-batch of fixed length sequences.");
 
-    offsets =
-        at::arange(0, indices.numel(), indices.size(1), indices.scalar_type());
+    offsets = at::arange(
+        0, indices.numel(), indices.sizes()[1], indices.scalar_type());
   } else {
     TORCH_CHECK(
         offsets_in.has_value(),
@@ -458,12 +472,16 @@ at::Tensor embedding_bag_4bit_helper(
       "Expect 32 or 64 bit offsets, but found ",
       offsets.scalar_type(),
       " instead.");
+  TORCH_CHECK(
+      weight.is_contiguous() && indices.is_contiguous() &&
+          offsets.is_contiguous(),
+      "Expect weight, indices, and offsets to be contiguous.");
 
   // Using helper function to support different type combination without the
   // need to cast, which can be additional performance overhead
   if (indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kInt) {
     return embedding_bag_4bit_impl<int, int>(
-        weight.contiguous(),
+        weight,
         indices,
         offsets,
         pruned_weights,
@@ -473,7 +491,7 @@ at::Tensor embedding_bag_4bit_helper(
   } else if (
       indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kLong) {
     return embedding_bag_4bit_impl<int, int64_t>(
-        weight.contiguous(),
+        weight,
         indices,
         offsets,
         pruned_weights,
@@ -483,7 +501,7 @@ at::Tensor embedding_bag_4bit_helper(
   } else if (
       indices.scalar_type() == at::kLong && offsets.scalar_type() == at::kInt) {
     return embedding_bag_4bit_impl<int64_t, int>(
-        weight.contiguous(),
+        weight,
         indices,
         offsets,
         pruned_weights,
@@ -492,7 +510,7 @@ at::Tensor embedding_bag_4bit_helper(
         include_last_offset);
   }
   return embedding_bag_4bit_impl<int64_t, int64_t>(
-      weight.contiguous(),
+      weight,
       indices,
       offsets,
       pruned_weights,
@@ -510,8 +528,10 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_byte(
     const c10::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset,
     bool is_embedding_op) {
+  auto output = at::empty({0}, packed_w.options().dtype(at::kFloat));
   return embedding_bag_byte_helper(
-      packed_w.contiguous(),
+      output,
+      packed_w,
       indices,
       offsets_in,
       pruned_weights,
@@ -538,7 +558,7 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_4bit(
   }
 
   return embedding_bag_4bit_helper(
-      packed_w.contiguous(),
+      packed_w,
       indices,
       offsets_in,
       pruned_weights,
@@ -551,6 +571,30 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_4bit(
 
 namespace at {
 namespace native {
+
+Tensor& embedding_bag_byte_rowwise_offsets_out(
+    Tensor& output,
+    const Tensor& weight,
+    const Tensor& indices,
+    const c10::optional<Tensor>& offsets_in,
+    const bool /* scale_grad_by_freq */,
+    const int64_t /* mode */,
+    bool pruned_weights,
+    const c10::optional<Tensor>& per_sample_weights_,
+    const c10::optional<Tensor>& compressed_indices_mapping,
+    bool include_last_offset) {
+  return embedding_bag_byte_helper(
+      output,
+      weight,
+      indices,
+      offsets_in,
+      pruned_weights,
+      per_sample_weights_,
+      compressed_indices_mapping,
+      include_last_offset,
+      false /* is_embedding_op */);
+}
+
 namespace {
 
 Tensor embedding_bag_byte_rowwise_offsets(
@@ -563,15 +607,19 @@ Tensor embedding_bag_byte_rowwise_offsets(
     const c10::optional<Tensor>& per_sample_weights_,
     const c10::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
-  return embedding_bag_byte_helper(
-      weight.contiguous(),
+  auto output = at::empty({0}, weight.options().dtype(at::kFloat));
+  embedding_bag_byte_rowwise_offsets_out(
+      output,
+      weight,
       indices,
       offsets_in,
+      false /*unused scale_grad_by_freq*/,
+      0 /*unused mode*/,
       pruned_weights,
       per_sample_weights_,
       compressed_indices_mapping,
-      include_last_offset,
-      false /* is_embedding_op */);
+      include_last_offset);
+  return output;
 }
 
 Tensor embedding_bag_4bit_rowwise_offsets(
@@ -594,7 +642,7 @@ Tensor embedding_bag_4bit_rowwise_offsets(
   }
 
   return embedding_bag_4bit_helper(
-      weight.contiguous(),
+      weight,
       indices,
       offsets_in,
       pruned_weights,

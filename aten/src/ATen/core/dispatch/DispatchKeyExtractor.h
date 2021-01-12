@@ -102,7 +102,7 @@ namespace detail {
  *    varies from operator, as some operators may have overridden the
  *    fallthrough with custom behavior.
  */
-struct CAFFE2_API DispatchKeyExtractor final {
+struct TORCH_API DispatchKeyExtractor final {
 public:
   static DispatchKeyExtractor make(const FunctionSchema& schema) {
     return DispatchKeyExtractor(makeBitsetForDispatchArgs(schema));

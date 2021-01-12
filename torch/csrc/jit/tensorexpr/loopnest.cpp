@@ -9,6 +9,7 @@
 #include <c10/util/Logging.h>
 #include <c10/util/string_utils.h>
 
+#include <ATen/core/functional.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/bounds_inference.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
@@ -22,6 +23,28 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
+
+class FunctionCallUseCount : public IRVisitor {
+ public:
+  std::unordered_map<const Buf*, size_t> findUses(Stmt* s) {
+    s->accept(this);
+    return uses_;
+  }
+
+ private:
+  void visit(const FunctionCall* v) override {
+    if (function_calls_[v->tensor()->buf()].insert(v).second) {
+      uses_[v->tensor()->buf()] = uses_[v->tensor()->buf()] + 1;
+    }
+    IRVisitor::visit(v);
+  }
+
+  std::unordered_map<const Buf*, size_t> uses_;
+
+  // Sets of FunctionCalls in order to keep the results unique
+  std::unordered_map<const Buf*, std::unordered_set<const FunctionCall*>>
+      function_calls_;
+};
 
 class IndexFlattener : public IRMutator {
  public:
@@ -151,6 +174,14 @@ class Vectorizer : public IRMutator {
           ExprHandle(inputs[2]),
           ExprHandle(inputs[3]),
           v->compare_select_op());
+    });
+  }
+
+  const Expr* mutate(const BitCast* v) override {
+    std::vector<const Expr*> inputs = {v->src_value()};
+    return try_vectorize(v, inputs, [&]() {
+      return BitCast::make(
+          Dtype(v->dtype().scalar_type(), lanes_), ExprHandle(inputs[0]));
     });
   }
 
@@ -345,12 +376,7 @@ class Vectorizer : public IRMutator {
   const Expr* start_ = nullptr;
 };
 
-void LoopNest::vectorize(Stmt* stmt) {
-  For* f = dynamic_cast<For*>(stmt);
-  if (!f) {
-    return;
-  }
-
+void LoopNest::vectorize(For* f) {
   Block* b = dynamic_cast<Block*>(f->get_parent());
   if (!b) {
     return;
@@ -398,7 +424,11 @@ class DepTracker : public IRVisitor {
  public:
   std::vector<Tensor*> findUsedTensors(Tensor* tensor) {
     used_tensors.clear();
-    tensor->body()->accept(this);
+    if (tensor->body()) {
+      tensor->body()->accept(this);
+    } else {
+      tensor->ElementStmt()->accept(this);
+    }
     return used_tensors;
   }
 
@@ -505,6 +535,11 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
 Stmt* LoopNest::lowerToStmt(Tensor* t) {
   Stmt* body = t->ElementStmt();
 
+  // If this Tensor has no functional body, it already has its axes expanded.
+  if (nullptr == t->body()) {
+    return body;
+  }
+
   if (t->ndim() == 0 && t->reduce_ndim() == 0) {
     return body;
   }
@@ -542,8 +577,10 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
 
 class FunctionInliner : public IRMutator {
  public:
-  FunctionInliner(Store* producer)
-      : buf_(producer->buf()), producer_(producer) {
+  FunctionInliner(Store* producer, std::unordered_set<const Buf*> outputs)
+      : buf_(producer->buf()),
+        producer_(producer),
+        outputs_(std::move(outputs)) {
     for (auto* i : producer->indices()) {
       const Var* index_var = dynamic_cast<const Var*>(i);
       if (index_var == nullptr) {
@@ -631,7 +668,9 @@ class FunctionInliner : public IRMutator {
 
   // Remove the buffer write from the inlined function.
   Stmt* mutate(const Store* v) override {
-    if (v == producer_) {
+    // If the buf_ is in the outputs set, keep its statement intact. Otherwise,
+    // remove it.
+    if (v == producer_ && !outputs_.count(buf_)) {
       in_producer_ = true;
       producer_ = dynamic_cast<const Store*>(IRMutator::mutate(v));
       TORCH_INTERNAL_ASSERT(producer_ != nullptr);
@@ -696,6 +735,7 @@ class FunctionInliner : public IRMutator {
   // In the producer's scope - we need to bind any calls to rand().
   bool in_producer_ = false;
   std::unordered_map<Let*, std::unordered_set<const Var*>> random_bindings_;
+  std::unordered_set<const Buf*> outputs_;
 };
 
 bool LoopNest::computeInline(Stmt* s) {
@@ -707,11 +747,6 @@ bool LoopNest::computeInline(Stmt* s) {
 }
 
 bool LoopNest::computeInline(const Buf* b) {
-  if (output_bufs_.count(b)) {
-    // Cannot inline producers of output Tensors
-    return false;
-  }
-
   // Find producers.
   Store* relevant_store{nullptr};
   auto stores = NodeFinder<Store>::find(root_stmt_);
@@ -731,7 +766,7 @@ bool LoopNest::computeInline(const Buf* b) {
   }
   TORCH_INTERNAL_ASSERT(relevant_store);
 
-  FunctionInliner inliner(relevant_store);
+  FunctionInliner inliner(relevant_store, output_bufs_);
   root_stmt_ = root_stmt_->accept_mutator(&inliner);
 
   // No longer computing this intermediate tensor, so don't alloc it.
@@ -739,21 +774,67 @@ bool LoopNest::computeInline(const Buf* b) {
   return true;
 }
 
-void LoopNest::inlineIntermediateBufs() {
+// inlining buffers with multiple uses can create duplicated work, which can
+// slow down cpu code generation but is enabled on gpu because it avoids
+// difficult synchronization logic across blocks. Inlining trivial reads does
+// not duplicate work
+void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
   // We need to collect all intermediate buffers as the buffers to be inlined
   // before calling 'computeInline' since the buffers that are inlined are
   // erased from the set 'intermediate_bufs_' in that function.
-  std::unordered_set<const Buf*> bufs_to_inline(
-      intermediate_bufs_.begin(), intermediate_bufs_.end());
+  std::unordered_set<const Buf*> bufs_to_inline;
+
+  if (allow_duplicated_work) {
+    bufs_to_inline.insert(intermediate_bufs_.begin(), intermediate_bufs_.end());
+  } else {
+    FunctionCallUseCount fcu;
+    auto function_call_uses = fcu.findUses(root_stmt_);
+    auto buf_load_store_uses = findLoadOrStoreUses(root_stmt_);
+    auto input_bufs = getInputBufs();
+
+    for (auto buf : intermediate_bufs_) {
+      TORCH_INTERNAL_ASSERT(buf_load_store_uses.count(buf));
+      std::vector<BufLoadOrStoreUse>& uses = buf_load_store_uses[buf];
+      auto stores = c10::filter(
+          uses, [](const BufLoadOrStoreUse& use) { return use.isStore; });
+
+      // if the intermediate is the buffer formed from reading in the input
+      // tensors, always inline, bc we are not duplicating any work
+      // and avoiding an intermediary buffer
+      if (stores.size() == 1) {
+        auto store = dynamic_cast<Store*>(stores[0].s);
+        auto input_as_load = dynamic_cast<const Load*>(store->value());
+        if (input_as_load && input_bufs.count(input_as_load->buf())) {
+          bufs_to_inline.insert(buf);
+          continue;
+        }
+      }
+
+      // all bufs will have at least one store (if they have > 1 they cant be
+      // inlined anyway)
+      size_t reads = uses.size() - 1;
+      size_t function_call_reads = function_call_uses[buf];
+      // if only one read, we can inline it without duplicating work
+      if ((reads + function_call_reads) <= 1) {
+        bufs_to_inline.insert(buf);
+      }
+    }
+  }
+
+  if (allow_duplicated_work) {
+    bufs_to_inline.insert(output_bufs_.begin(), output_bufs_.end());
+  }
+
   for (auto b : bufs_to_inline) {
     computeInline(b);
   }
 }
 
 // TODO: Unify with DepTracker
-class UseFinder : public IRVisitor {
+class LoadOrStoreUseFinder : public IRVisitor {
  public:
-  std::unordered_map<const Buf*, std::vector<BufUse>> findUses(Stmt* s) {
+  std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>> findUses(
+      Stmt* s) {
     uses_.clear();
     s->accept(this);
     return uses_;
@@ -775,15 +856,16 @@ class UseFinder : public IRVisitor {
   }
 
   Stmt* last_stmt_ = nullptr;
-  std::unordered_map<const Buf*, std::vector<BufUse>> uses_;
+  std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>> uses_;
 
   // Sets of loads and stores in order to keep the results unique
   std::unordered_map<const Buf*, std::unordered_set<Stmt*>> loads_;
   std::unordered_map<const Buf*, std::unordered_set<Stmt*>> stores_;
 };
 
-std::unordered_map<const Buf*, std::vector<BufUse>> findUses(Stmt* s) {
-  UseFinder uf;
+std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>>
+findLoadOrStoreUses(Stmt* s) {
+  LoadOrStoreUseFinder uf;
   return uf.findUses(s);
 }
 
@@ -809,7 +891,7 @@ class ContainedStmtsFinder : public IRVisitor {
   std::unordered_set<Stmt*> contained_;
 };
 
-bool containsAll(const std::vector<BufUse>& uses, Block* b) {
+bool containsAll(const std::vector<BufLoadOrStoreUse>& uses, Block* b) {
   std::unordered_set<Stmt*> not_found;
   for (auto use : uses) {
     not_found.insert(use.s);
@@ -833,7 +915,7 @@ Block* findParentBlock(Stmt* s) {
   return nullptr;
 }
 
-Block* findLowestContainingBlock(const std::vector<BufUse>& uses) {
+Block* findLowestContainingBlock(const std::vector<BufLoadOrStoreUse>& uses) {
   // TODO: we're not using the most efficient algorithm here for simplicity.
   // Replace with something more performant in case it becomes a bottleneck.
   Block* b = findParentBlock(uses[0].s);
@@ -853,11 +935,17 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
     b = new Block({stmt});
   }
 
-  std::unordered_map<const Buf*, std::vector<BufUse>> uses = findUses(stmt);
+  std::unordered_map<const Buf*, std::vector<BufLoadOrStoreUse>> uses =
+      findLoadOrStoreUses(stmt);
   // Insert allocations and frees for temporary buffers in the innermost
   // possible scope.
   for (const Buf* buf : intermediate_bufs_) {
-    Stmt* alloc = new Allocate(buf->base_handle(), buf->dtype(), buf->dims());
+    const Expr* flat_size = new IntImm(1);
+    for (auto& d : buf->dims()) {
+      flat_size = new Mul(flat_size, d);
+    }
+    flat_size = IRSimplifier::simplify(flat_size);
+    Stmt* alloc = new Allocate(buf->base_handle(), buf->dtype(), {flat_size});
     Stmt* free = new Free(buf->base_handle());
     Block* alloc_block = findLowestContainingBlock(uses.at(buf));
     alloc_block->prepend_stmt(alloc);
@@ -865,6 +953,63 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
   }
 
   return b;
+}
+
+class StmtDeleter : public IRMutator {
+ public:
+  StmtDeleter(const std::unordered_set<const Stmt*>& targets)
+      : targets_(targets) {}
+
+ private:
+  Stmt* mutate(const Block* v) override {
+    std::vector<Stmt*> stmts;
+
+    for (auto* s : v->stmts()) {
+      if (targets_.count(s) == 0) {
+        Stmt* ns = s->accept_mutator(this);
+        if (ns) {
+          stmts.push_back(Stmt::clone(ns));
+        }
+      }
+    }
+
+    return Block::make(stmts);
+  }
+
+  const std::unordered_set<const Stmt*>& targets_;
+};
+
+void LoopNest::eliminateDeadStores() {
+  using namespace analysis;
+  MemDependencyChecker checker(getInputBufs(), getOutputBufs());
+  root_stmt_->accept(&checker);
+
+  std::unordered_set<const Stmt*> deadStores;
+  std::vector<std::shared_ptr<AccessInfo>> outputAccesses;
+  for (auto* o : getOutputBufs()) {
+    outputAccesses.push_back(checker.output(o));
+  }
+
+  for (auto& info : checker.getHistory()) {
+    if (!info->isWrite()) {
+      continue;
+    }
+    bool found = false;
+
+    for (auto& output : outputAccesses) {
+      if (checker.dependsIndirectly(output, info)) {
+        found = true;
+        break;
+      }
+    }
+
+    if (!found) {
+      deadStores.insert(info->stmt());
+    }
+  }
+
+  StmtDeleter deleter(deadStores);
+  root_stmt_ = root_stmt_->accept_mutator(&deleter);
 }
 
 void LoopNest::prepareForCodegen() {
@@ -2151,8 +2296,8 @@ void LoopNest::rfactor(
 
   For* root_for = nullptr;
   For* target_for = nullptr;
-  std::set<const Var*> reduce_args = {reduce_op->reduce_args().begin(),
-                                      reduce_op->reduce_args().end()};
+  std::set<const Var*> reduce_args = {
+      reduce_op->reduce_args().begin(), reduce_op->reduce_args().end()};
 
   // Store loops below the target point.
   std::vector<const For*> output_loops;

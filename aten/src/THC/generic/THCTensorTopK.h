@@ -4,7 +4,7 @@
 
 /* Returns the set of all kth smallest (or largest) elements, depending */
 /* on `dir` */
-THC_API void THCTensor_(topk)(THCState* state,
+TORCH_CUDA_API void THCTensor_(topk)(THCState* state,
                                THCTensor* topK,
                                THCudaLongTensor* indices,
                                THCTensor* input,

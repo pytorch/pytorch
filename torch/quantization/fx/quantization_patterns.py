@@ -11,6 +11,7 @@ from torch.quantization import (
 
 from ..quantization_mappings import (
     get_static_quant_module_class,
+    get_dynamic_quant_module_class,
     get_quantized_operator,
 )
 from ..utils import (
@@ -33,16 +34,13 @@ from .utils import (
     get_linear_prepack_op_for_dtype,
 )
 
+from .quantization_types import QuantizerCls
+
 from abc import ABC, abstractmethod
 import operator
 import warnings
 
 from typing import Any, Callable, Dict
-
-# This is the Quantizer class instance from torch/quantization/fx/quantize.py.
-# Define separately to prevent circular imports.
-# TODO(future PR): improve this.
-QuantizerCls = Any
 
 # -------------------------
 # Pattern Registrations
@@ -471,7 +469,6 @@ class Embedding(QuantizeHandler):
         ]
         assert node.op == 'call_module'
         emb_node = node
-        emb = quantizer.modules[emb_node.target]
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
         if dtypes not in supported_dtypes:
@@ -481,6 +478,7 @@ class Embedding(QuantizeHandler):
                 "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
             return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
+        emb = quantizer.modules[emb_node.target]
         qemb = get_static_quant_module_class(type(emb))
         quantized = qemb.from_float(emb)
         parent_name, name = _parent_name(emb_node.target)
@@ -491,12 +489,56 @@ class Embedding(QuantizeHandler):
             load_arg(quantized=False)(emb_node.args),
             load_arg(quantized=False)(emb_node.kwargs))
 
+# TODO (maybe): merge with embedding quantize handler
+@register_quant_pattern(torch.nn.GRUCell)
+@register_quant_pattern(torch.nn.LSTMCell)
+@register_quant_pattern(torch.nn.RNNCell)
+@register_quant_pattern(torch.nn.LSTM)
+@mark_input_output_not_observed()
+class RNNDynamic(QuantizeHandler):
+    def __init__(self, quantizer: QuantizerCls, node: Node):
+        super().__init__(quantizer, node)
+
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
+                debug: bool = False,
+                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+        # Supported combinations are:
+        # quant_type  | activation | weight | activation_compute_type
+        # dynamic |  float32   | qint8 | quint8
+        # dynamic |  float16   | float16 | None
+        # tuple (activation_dtype, weight_dtype, compute_dtype)
+        supported_dtypes = [
+            (torch.float32, torch.qint8, torch.quint8),
+            (torch.float16, torch.float16, None),
+        ]
+        assert node.op == 'call_module'
+        qconfig = quantizer.qconfig_map[node.name]
+        dtypes = get_qconfig_dtypes(qconfig)
+        if dtypes not in supported_dtypes:
+            warnings.warn(
+                "dtype combination: {} is not "
+                "supported by Embedding/EmbeddingBag, "
+                "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
+            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
+
+        module = quantizer.modules[node.target]
+        qmodule_cls = get_dynamic_quant_module_class(type(module))
+        qmodule = qmodule_cls.from_float(module)
+        parent_name, name = _parent_name(node.target)
+        setattr(quantizer.modules[parent_name], name, qmodule)
+        return quantizer.quantized_graph.create_node(
+            'call_module',
+            node.target,
+            load_arg(quantized=False)(node.args),
+            load_arg(quantized=False)(node.kwargs))
 
 ARGS_TO_SKIP = {
     torch._ops.ops.quantized.hardswish: ['inplace'],
     torch._ops.ops.quantized.instance_norm:
     ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
 }
+@register_quant_pattern(torch.nn.ConvTranspose1d)
+@register_quant_pattern(torch.nn.ConvTranspose2d)
 @register_quant_pattern(torch.nn.ELU)
 @register_quant_pattern(torch.nn.LeakyReLU)
 @register_quant_pattern(torch.nn.Hardswish)
@@ -536,21 +578,24 @@ class DefaultNode(QuantizeHandler):
                 load_arg(quantized=[0])(node.args),
                 load_arg(quantized=False)(node.kwargs))
         else:
+            assert node.op == "call_function"
             # call_function
             scale, zero_point = activation_post_process.calculate_qparams()
             scale = float(scale)
             zero_point = int(zero_point)
 
+            assert not isinstance(node.target, str), "Expecting node.target for "
+            "call_function to be a function instead of a string"
             quantized_op = get_quantized_operator(node.target)
             args = load_arg(quantized=[0])(node.args)
-            kwargs = {**load_arg(quantized=False)(node.kwargs), 'output_scale': scale, 'output_zero_point': zero_point}
+            kwargs = {**load_arg(quantized=False)(node.kwargs), "output_scale": scale, "output_zero_point": zero_point}
             if quantized_op in ARGS_TO_SKIP:
                 args_to_skip = ARGS_TO_SKIP[quantized_op]
                 for arg in args_to_skip:
                     if arg in kwargs:
                         kwargs.pop(arg)
             return quantizer.quantized_graph.create_node(
-                'call_function', quantized_op, args, kwargs)
+                "call_function", quantized_op, args, kwargs)
 
 # TODO: elu is using scale/zero_point instead of output_scale, output_zero_point
 @register_quant_pattern(torch.nn.functional.elu)
@@ -710,10 +755,10 @@ class StandaloneModuleQuantizeHandler(QuantizeHandler):
         qconfig = quantizer.qconfig_map[node.name]
         convert = torch.quantization.quantize_fx._convert_standalone_module_fx  # type: ignore
         observed_standalone_module = quantizer.modules[node.target]
+        input_quantized_idxs = observed_standalone_module._standalone_module_input_quantized_idxs.tolist()
         quantized_standalone_module = convert(observed_standalone_module, debug=debug)
         parent_name, name = _parent_name(node.target)
         # update the modules dict
         setattr(quantizer.modules[parent_name], name, quantized_standalone_module)
         quantizer.modules[node.target] = quantized_standalone_module
-        # standalone module takes float input
-        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+        return quantizer.quantized_graph.node_copy(node, load_arg(quantized=input_quantized_idxs))
