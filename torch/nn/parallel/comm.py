@@ -8,7 +8,7 @@ from typing import List
 def broadcast(tensor, devices=None, *, out=None):
     r"""Broadcasts a tensor to specified GPU devices.
 
-    Arguments:
+    Args:
         tensor (Tensor): tensor to broadcast. Can be on CPU or GPU.
         devices (Iterable[torch.device, str or int], optional): an iterable of
           GPU devices, among which to broadcast.
@@ -43,7 +43,7 @@ def broadcast_coalesced(tensors, devices, buffer_size=10485760):
     Small tensors are first coalesced into a buffer to reduce the number
     of synchronizations.
 
-    Arguments:
+    Args:
         tensors (sequence): tensors to broadcast. Must be on the same device,
           either CPU or GPU.
         devices (Iterable[torch.device, str or int]): an iterable of GPU
@@ -64,7 +64,7 @@ def reduce_add(inputs, destination=None):
     All inputs should have matching shapes, dtype, and layout. The output tensor
     will be of the same shape, dtype, and layout.
 
-    Arguments:
+    Args:
         inputs (Iterable[Tensor]): an iterable of tensors to add.
         destination (int, optional): a device on which the output will be
             placed (default: current device).
@@ -110,7 +110,7 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
     Small tensors are first coalesced into a buffer to reduce the number
     of synchronizations.
 
-    Arguments:
+    Args:
         inputs (Iterable[Iterable[Tensor]]): iterable of iterables that
             contain tensors from a single device.
         destination (int, optional): a device on which the output will be
@@ -152,7 +152,7 @@ def reduce_add_coalesced(inputs, destination=None, buffer_size=10485760):
 def scatter(tensor, devices=None, chunk_sizes=None, dim=0, streams=None, *, out=None):
     """Scatters tensor across multiple GPUs.
 
-    Arguments:
+    Args:
         tensor (Tensor): tensor to scatter. Can be on CPU or GPU.
         devices (Iterable[torch.device, str or int], optional): an iterable of
           GPU devices, among which to scatter.
@@ -202,7 +202,7 @@ def scatter(tensor, devices=None, chunk_sizes=None, dim=0, streams=None, *, out=
 def gather(tensors, dim=0, destination=None, *, out=None):
     r"""Gathers tensors from multiple GPU devices.
 
-    Arguments:
+    Args:
         tensors (Iterable[Tensor]): an iterable of tensors to gather.
           Tensor sizes in all dimensions other than :attr:`dim` have to match.
         dim (int, optional): a dimension along which the tensors will be

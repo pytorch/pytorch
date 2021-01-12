@@ -75,5 +75,20 @@ TORCH_API variable_list grad(
     bool create_graph = false,
     bool allow_unused = false);
 
+namespace forward_ad {
+
+/// Creates a new dual level and returns its index. This level index should then be used to call
+/// into the other functions below.
+/// This API supports entering a new level before the previous one is exited. We call them nested
+/// forward AD levels. These can be used to compute higher order derivatives.
+TORCH_API uint64_t enter_dual_level();
+
+/// Exits the given level. This will clear up all the gradients from this level and all dual Tensors
+/// that had gradients for this level will become regular Tensors again.
+/// This function can only be used to exit the innermost nesting level and so exiting must happen in
+/// reverse order compared to the entering that was done with the function above.
+TORCH_API void exit_dual_level(uint64_t level);
+
+} // namespace forward_ad
 } // namespace autograd
 } // namespace torch
