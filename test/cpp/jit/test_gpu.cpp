@@ -2606,6 +2606,11 @@ TEST(NVFuserTest, FusionUnaryOps_CUDA) {
   using OpTuple =
       std::tuple<at::Tensor (*)(const at::Tensor&), UnaryOpType, std::string>;
 
+  using OpWithDTypeTuple = std::tuple<
+      at::Tensor (*)(const at::Tensor&, c10::optional<c10::ScalarType>),
+      UnaryOpType,
+      std::string>;
+
   // [Note: explicit tuple type for uniform initialization list]
   // Tuple type must be explicitly specified for each uniform initialization
   // list within the vector to make this code compatible with some old env
@@ -2646,6 +2651,10 @@ TEST(NVFuserTest, FusionUnaryOps_CUDA) {
       OpTuple{at::tanh, UnaryOpType::Tanh, "tanh"},
       OpTuple{at::trunc, UnaryOpType::Trunc, "trunc"}};
 
+  std::vector<OpWithDTypeTuple> ops_with_dtype {
+    OpWithDTypeTuple{at::sin, UnaryOpType::Sin, "sin"}
+  };
+
   std::for_each(ops.begin(), ops.end(), [](OpTuple& op) {
     test_op(
         /*blocks*/ 640,
@@ -2661,6 +2670,25 @@ TEST(NVFuserTest, FusionUnaryOps_CUDA) {
         /*Inputs Tuple*/
         std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float)));
   });
+
+  std::for_each(
+      ops_with_dtype.begin(), ops_with_dtype.end(), [](OpWithDTypeTuple& op) {
+        test_op(
+            /*blocks*/ 640,
+            /*threads*/ 64,
+            /*name*/ std::get<2>(op),
+            /*Aten Func   */
+            [&op](std::array<IValue, 1>& vals) {
+              return std::get<0>(op)(vals[0].toTensor(), c10::nullopt);
+            },
+            /*JIT  Func   */
+            [&op](Val* in1) -> Val* { return unaryOp(std::get<1>(op), in1); },
+            /*Output      */
+            std::make_pair(ValType::TensorView, DataType::Float),
+            /*Inputs Tuple*/
+            std::make_tuple(
+                std::make_pair(ValType::TensorView, DataType::Float)));
+      });
 
   test_op(
       /*blocks*/ 128,
