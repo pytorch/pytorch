@@ -1,6 +1,7 @@
 #ifdef TORCH_ENABLE_LLVM
 
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
 
@@ -14,7 +15,13 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/Host.h>
 #include <llvm/Support/TargetSelect.h>
+
+#if LLVM_VERSION_MAJOR >= 10
+#include <llvm/Support/CodeGen.h>
+#else
 #include <llvm/Target/TargetMachine.h>
+#endif
+
 #include <llvm/Transforms/IPO/AlwaysInliner.h>
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
 #include <llvm/Transforms/Scalar.h>
@@ -31,7 +38,6 @@
 #include <torch/csrc/jit/tensorexpr/types.h>
 
 #include <torch/csrc/jit/jit_log.h>
-#define DEBUG_PRINT 0
 
 using namespace torch::jit::tensorexpr;
 
@@ -510,34 +516,39 @@ void LLVMCodeGenImpl::emitKernel(
 
   irb_.CreateRet(value_);
 
-#if DEBUG_PRINT
-  llvm::errs() << *module_;
-#endif
   if (llvm::verifyFunction(*fn_, &llvm::outs())) {
     throw std::runtime_error("Function verification failed");
   }
 
-  // print graph debug info.
-  std::string fnstr;
-  llvm::raw_string_ostream FS(fnstr);
-  fn_->print(FS);
-  GRAPH_DEBUG("LLVM Function:\n", FS.str(), "\n");
+  // print graph debug info before optimization
+  llvm::SmallVector<char, 0> asmBuffer;
+  llvm::raw_svector_ostream asmStream(asmBuffer);
+  if (GRAPH_DEBUG_ENABLED) {
+    module_->print(asmStream, nullptr);
+  }
+  GRAPH_DEBUG(
+      "\nLLVM module before optimizations\n\n", asmStream.str().str(), "\n");
 
   optimize(*module_);
 
-#if DEBUG_PRINT
-  llvm::errs() << *module_;
-  llvm::SmallVector<char, 0> asmBuffer;
-  llvm::raw_svector_ostream asmStream(asmBuffer);
-  llvm::legacy::PassManager PM;
-  TM_->addPassesToEmitFile(
-      PM,
-      asmStream,
-      nullptr,
-      llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
-  PM.run(*module_);
-  llvm::errs() << asmStream.str();
+  // print graph debug info after optimization
+  asmBuffer.set_size(0);
+  if (GRAPH_DEBUG_ENABLED) {
+    module_->print(asmStream, nullptr);
+    llvm::legacy::PassManager PM;
+    TM_->addPassesToEmitFile(
+        PM,
+        asmStream,
+        nullptr,
+#if LLVM_VERSION_MAJOR >= 10
+        llvm::CodeGenFileType::CGFT_AssemblyFile);
+#else
+        llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
 #endif
+    PM.run(*module_);
+  }
+  GRAPH_DEBUG(
+      "\nLLVM module after optimizations\n\n", asmStream.str().str(), "\n");
 }
 
 // TODO: The binary ops are copypasta.

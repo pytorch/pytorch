@@ -100,7 +100,7 @@ class _RemoteModule(nn.Module):
         ``def forward(input: Tensor) -> Tensor:`` and
         ``def forward_async(input: Tensor) -> Future[Tensor]:``.
 
-        Arguments:
+        Args:
             remote_device (str): Device on the destination worker where we‘d like to place this module.
                 The format should be "<workername>/<device>", where the device field can be parsed as torch.device type.
                 E.g., "trainer0/cpu", "trainer0", "ps0/cuda:0".
@@ -279,7 +279,7 @@ class _RemoteModule(nn.Module):
 
     def named_parameters(  # type: ignore[return]
         self, prefix: str = "", recurse: bool = True
-    ) -> Iterator[Tuple[str, Tensor]]:
+    ) -> Iterator[Tuple[str, Parameter]]:
         _raise_not_supported(self.named_parameters.__name__)
 
     def buffers(self, recurse: bool = True) -> Iterator[Tensor]:  # type: ignore[return]
@@ -339,7 +339,7 @@ class RemoteModule(_RemoteModule):
         ``def forward(input: Tensor) -> Tensor:`` and
         ``def forward_async(input: Tensor) -> Future[Tensor]:``.
 
-    Arguments:
+    Args:
         remote_device (str): Device on the destination worker where we‘d like to place this module.
             The format should be "<workername>/<device>", where the device field can be parsed as torch.device type.
             E.g., "trainer0/cpu", "trainer0", "ps0/cuda:0".

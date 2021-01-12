@@ -54,7 +54,7 @@ pool2d_shape_check(
   int kH, int kW, int dH, int dW, int padH, int padW, int dilationH, int dilationW,
   int64_t nInputPlane,
   int64_t inputHeight, int64_t inputWidth,
-  int64_t outputHeight, int64_t outputWidth)
+  int64_t outputHeight, int64_t outputWidth, MemoryFormat memory_format)
 {
   const int64_t ndim = input.ndimension();
   const int64_t nOutputPlane = nInputPlane;
@@ -68,11 +68,22 @@ pool2d_shape_check(
   TORCH_CHECK(dilationH > 0 && dilationW > 0,
               "dilation should be greater than zero, but got ",
               "dilationH: ", dilationH, " dilationW: ", dilationW);
-
-  TORCH_CHECK(input.numel() > 0 && (ndim == 3 || ndim == 4),
-              "non-empty 3D or 4D input tensor expected but got ndim: ", ndim);
+  
+  bool valid_dims = input.size(1) != 0 && input.size(2) != 0;
+  if (memory_format == at::MemoryFormat::ChannelsLast){
+    // Expect tensor in NHWC format and allow 0-dim only for N.
+    TORCH_CHECK((ndim == 4 && valid_dims && input.size(3) != 0),
+      "Expected 4D (batch mode) tensor expected for input with channels_last layout"
+      " with optional 0 dim batch size for input, but got: ", input.sizes());
+  } else {
+    TORCH_CHECK((ndim == 3 && input.size(0) != 0 && valid_dims) ||
+      (ndim == 4 && valid_dims && input.size(3) != 0),
+      "Expected 3D or 4D (batch mode) tensor with optional 0 dim batch size for input, but got:",
+      input.sizes());
+  }
+  
   TORCH_CHECK(kW/2 >= padW && kH/2 >= padH,
-              "pad should be smaller than half of kernel size, but got ",
+              "pad should be smaller than or equal to half of kernel size, but got ",
               "padW = ", padW, ", padH = ", padH, ", kW = ", kW, ", kH = ", kH);
 
   TORCH_CHECK(outputWidth >= 1 && outputHeight >= 1,
@@ -93,13 +104,13 @@ max_pool2d_backward_shape_check(
   int kH, int kW, int dH, int dW, int padH, int padW, int dilationH, int dilationW,
   int64_t nInputPlane,
   int64_t inputHeight, int64_t inputWidth,
-  int64_t outputHeight, int64_t outputWidth,
+  int64_t outputHeight, int64_t outputWidth, MemoryFormat memory_format,
   bool cuda=false)
 {
   pool2d_shape_check(
     input,
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-    nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth);
+    nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth, memory_format);
 
   const int64_t ndim = input.ndimension();
   const int64_t nOutputPlane = nInputPlane;
@@ -122,12 +133,14 @@ avg_pool2d_backward_shape_check(
   int kH, int kW, int dH, int dW, int padH, int padW,
   int64_t nInputPlane,
   int64_t inputHeight, int64_t inputWidth,
-  int64_t outputHeight, int64_t outputWidth)
+  int64_t outputHeight, int64_t outputWidth,
+  MemoryFormat memory_format)
 {
   pool2d_shape_check(
     input,
     kH, kW, dH, dW, padH, padW, 1, 1,
-    nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth);
+    nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
+    memory_format);
 
   const int64_t ndim = input.ndimension();
   const int64_t nOutputPlane = nInputPlane;
@@ -172,7 +185,7 @@ pool3d_shape_check(
   }
 
   TORCH_CHECK(kT/2 >= pT && kW/2 >= pW && kH/2 >= pH,
-              "pad should be smaller than half of kernel size, but got "
+              "pad should be smaller than or equal to half of kernel size, but got "
               "kT: ", kT, " kW: ", kW, " kH: ", kH, " padT: ", pT, " padW: ", pW, " padH: ", pH);
 
   TORCH_CHECK(otime >= 1 && owidth >= 1 && oheight >= 1,
