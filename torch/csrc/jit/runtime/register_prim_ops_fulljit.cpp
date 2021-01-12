@@ -69,6 +69,10 @@ RegisterOperators reg(
          [](const Node* node) -> Operation {
            std::vector<bool> rg_props =
                fmap(node->tys(attr::types), [](const TypePtr& t) {
+                 // if an rg property changes we assume a tensor does require
+                 // gradients which is set in `guardDifferentiableGraph`
+                 TORCH_INTERNAL_ASSERT(
+                     t->cast<TensorType>()->requiresGrad().has_value());
                  return *t->cast<TensorType>()->requiresGrad();
                });
            return [rg_props](Stack* stack) {
