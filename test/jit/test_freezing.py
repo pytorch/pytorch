@@ -1501,3 +1501,19 @@ class TestFrozenOptimizations(JitTestCase):
             # add with different dtype
             test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False,
                              add_tensor=torch.rand(1).to(torch.int), expect_success=False)
+
+    def test_optimize_freeze_module(self):
+        in_channels, out_channels = 3, 32
+        conv = torch.nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2, bias=True)
+        bn = torch.nn.BatchNorm2d(out_channels, eps=.001)
+        mod = torch.nn.Sequential(conv, bn)
+        # set optimize to False here, by default freezing runs optimize_frozen_module
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()), optimize=False)
+        # inspect frozen mod
+        FileCheck().check("batch_norm").run(frozen_mod.graph)
+        torch.jit.optimize_frozen_module(frozen_mod)
+        FileCheck().check_not("batch_norm").run(frozen_mod.graph)
+
+        # optimize_frozen_module should be run
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()))
+        FileCheck().check_not("batch_norm").run(frozen_mod.graph)
