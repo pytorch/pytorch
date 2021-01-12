@@ -45,14 +45,30 @@ def _addindent(s_, numSpaces):
     s = first + '\n' + s
     return s
 
+class SharedBool(object):
+    def __init__(self, val):
+        self.value = val
+
+
+class CachedOrderedDict(OrderedDict):
+    def __init__(self, shared_bool: SharedBool):
+        super().__init__()
+        self.is_updated = shared_bool
+
+    def __setitem__(self, key, value):
+        self.is_updated.value = True
+        super().__setitem__(key, value)
+
 
 r"""This tracks hooks common to all modules that are executed before/after
 calling forward and backward. This is global state used for debugging/profiling
 purposes"""
-_global_backward_hooks: Dict[int, Callable] = OrderedDict()
+
+global_hooks_updated = SharedBool(False)
+_global_backward_hooks: Dict[int, Callable] = CachedOrderedDict(global_hooks_updated)
 _global_is_full_backward_hook: Optional[bool] = None
-_global_forward_pre_hooks: Dict[int, Callable] = OrderedDict()
-_global_forward_hooks: Dict[int, Callable] = OrderedDict()
+_global_forward_pre_hooks: Dict[int, Callable] = CachedOrderedDict(global_hooks_updated)
+_global_forward_hooks: Dict[int, Callable] = CachedOrderedDict(global_hooks_updated)
 
 
 def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
@@ -262,13 +278,15 @@ class Module:
         torch._C._log_api_usage_once("python.nn_module")
 
         self.training = True
-        self._parameters = OrderedDict()
+        self._parameters_updated = SharedBool(False)
+        self._parameters = CachedOrderedDict(self._parameters_updated)
         self._buffers = OrderedDict()
         self._non_persistent_buffers_set = set()
-        self._backward_hooks = OrderedDict()
+        self._module_hooks_updated = SharedBool(False)
+        self._backward_hooks = CachedOrderedDict(self._module_hooks_updated)
         self._is_full_backward_hook = None
-        self._forward_hooks = OrderedDict()
-        self._forward_pre_hooks = OrderedDict()
+        self._forward_hooks = CachedOrderedDict(self._module_hooks_updated)
+        self._forward_pre_hooks = CachedOrderedDict(self._module_hooks_updated)
         self._state_dict_hooks = OrderedDict()
         self._load_state_dict_pre_hooks = OrderedDict()
         self._modules = OrderedDict()
@@ -842,7 +860,7 @@ class Module:
         recording_scopes = torch.jit._trace._trace_module_map is not None
         if recording_scopes:
             # type ignore was added because at this point one knows that
-            # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any] 
+            # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any]
             name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None  # type: ignore
             if name:
                 tracing_state.push_scope(name)
@@ -855,7 +873,14 @@ class Module:
                 tracing_state.pop_scope()
         return result
 
+    has_hooks = None
+
     def _call_impl(self, *input, **kwargs):
+        if global_hooks_updated.value or self._module_hooks_updated.value:
+            self.has_hooks = max(len(self._backward_hooks), len(_global_backward_hooks), len(_global_forward_hooks), len(self._forward_hooks), len(_global_forward_pre_hooks), len(self._forward_pre_hooks), len(_global_forward_pre_hooks)) == 0
+
+        if not self.has_hooks and not torch._C._get_tracing_state():
+            return self.forward(*input, **kwargs)
         # Do not call functions when jit is used
         full_backward_hooks, non_full_backward_hooks = [], []
         if len(self._backward_hooks) > 0 or len(_global_backward_hooks) > 0:
@@ -927,6 +952,7 @@ class Module:
         if '_parameters' in self.__dict__:
             _parameters = self.__dict__['_parameters']
             if name in _parameters:
+                self.__dict__[name] = _parameters[name]
                 return _parameters[name]
         if '_buffers' in self.__dict__:
             _buffers = self.__dict__['_buffers']
