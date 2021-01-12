@@ -105,11 +105,11 @@ void div_true_kernel(TensorIterator& iter) {
 }
 
 void div_trunc_kernel(TensorIterator& iter) {
-  auto dtype = iter.common_dtype();
+  const auto dtype = iter.common_dtype();
   if (isIntegralType(dtype, /*includeBool*/ false)) {
     // There's no SIMD integer division, so don't try to vectorize it.
     // TODO: if the divisor is a scalar, rewrite as multiplication by a constant.
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "div_trunc_cpu", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_trunc_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
         TORCH_CHECK(b != 0, "ZeroDivisionError");
         return a / b;
@@ -137,10 +137,8 @@ void div_floor_kernel(TensorIterator& iter) {
     return div_trunc_kernel(iter);
   } else if (isIntegralType(dtype, /*includeBool*/ false)) {
     // There's no SIMD integer division, so don't try to vectorize it.
-    // TODO: if the divisor is a scalar, rewrite as multiplication by a constant.
-    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "div_floor_cpu", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES(dtype, "div_floor_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
-
         TORCH_CHECK(b != 0, "ZeroDivisionError");
         if ((a < 0) != (b < 0)) {
           // Subtracts one from the results of truncation division if the
@@ -155,14 +153,41 @@ void div_floor_kernel(TensorIterator& iter) {
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "div_floor_cpu", [&]() {
+    // NOTE: This round-about way of calculating floor(a / b) is needed for exact python compatibility
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, dtype, "div_floor_cpu", [&]() {
+      using vec_t = Vec256<scalar_t>;
       cpu_kernel_vec(iter,
-        [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-          return std::floor(a / b);
-        },
-        [](Vec256<scalar_t> a, Vec256<scalar_t> b) {
-          return (a / b).floor();
-        });
+          [](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+            auto mod = std::fmod(a, b);
+            auto div = (a - mod) / b;
+            if ((mod != 0) && (b < 0) != (mod < 0)) {
+              div -= scalar_t(1);
+            }
+
+            scalar_t floordiv;
+            if (div != 0) {
+              floordiv = std::floor(div);
+              if (div - floordiv > scalar_t(0.5)) {
+                floordiv += scalar_t(1.0);
+              }
+            } else {
+              floordiv = std::copysign(scalar_t(0), a / b);
+            }
+            return floordiv;
+          },
+          [](Vec256<scalar_t> a, Vec256<scalar_t> b) -> Vec256<scalar_t>{
+            using vec_t = Vec256<scalar_t>;
+            auto mod = a.fmod(b);
+            auto div = (a - mod) / b;
+            const auto zero = vec_t(0);
+            auto mask = (mod != zero) & ((b < zero) ^ (mod < zero));
+            const auto one = vec_t(1);
+            div = vec_t::blendv(div, div - one, mask);
+            auto floordiv = div.floor();
+            mask = (div - floordiv) > vec_t(0.5);
+            floordiv = vec_t::blendv(floordiv, floordiv + one, mask);
+            return vec_t::blendv(floordiv, zero.copysign(a / b), div == zero);
+          });
     });
   }
 }

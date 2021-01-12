@@ -5,7 +5,6 @@ import sys
 import random
 import torch
 from itertools import product as product
-from torch import Tensor
 from torch.testing._internal.common_utils import TemporaryFileName
 from typing import NamedTuple, Optional
 
