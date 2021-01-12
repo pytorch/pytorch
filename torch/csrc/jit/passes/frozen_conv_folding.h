@@ -10,5 +10,15 @@ namespace jit {
 // This pass only works on Frozen Graphs; otherwise it is a No-Op.
 TORCH_API void FoldFrozenConvBatchnorm(std::shared_ptr<Graph>& graph);
 
+// Fuses Convolution -> Add/Sub into a single Convolution by
+// folding add constant tensor into conv weights.
+// This pass only works on Frozen Graphs; otherwise it is a No-Op.
+TORCH_API void FoldFrozenConvAddOrSub(std::shared_ptr<Graph>& graph);
+
+// Fuses Convolution -> Mul/Div into a single Convolution by
+// folding add constant tensor into conv weights.
+// This pass only works on Frozen Graphs; otherwise it is a No-Op.
+TORCH_API void FoldFrozenConvMulOrDiv(std::shared_ptr<Graph>& graph);
+
 } // namespace jit
 } // namespace torch
