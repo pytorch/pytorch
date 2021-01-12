@@ -84,7 +84,27 @@ PyTorch provides two different modes of quantization: Eager Mode Quantization an
 
 Eager Mode Quantization is a beta feature. User needs to do fusion and specify where quantization and dequantization happens manually, also it only supports modules and not functionals.
 
-FX Graph Mode Quantization is a new automated quantization framework in PyTorch, and currently it's a prototype feature. It improves upon Eager Mode Quantization by adding support for functionals and automating the quantization process. Although people might need to refactor the model a bit to make the model compatible with FX Graph Mode Quantization (symbolically traceable with torch.fx).
+FX Graph Mode Quantization is a new automated quantization framework in PyTorch, and currently it's a prototype feature. It improves upon Eager Mode Quantization by adding support for functionals and automating the quantization process, although people might need to refactor the model to make the model compatible with FX Graph Mode Quantization (symbolically traceable with ``torch.fx``).
+
+The following table compares the differences between Eager Mode Quantization and FX Graph Mode Quantization:
+
++------------+------------+-----------+
+|    | Eager Mode Quantization   | FX Graph Mode Quantization  |
++============+============+===========+
+| Release Status | beta   | prototype  |
++------------+------------+-----------+
+| Operator Fusion | Manual  | Automatic |
++------------+------------+-----------+
+| Quant/Dequant Placement | Manual | Automatic |
++------------+------------+-----------+
+| Quantizing Modules | Supported | Supported |
++------------+------------+-----------+
+| Quantizing functionals/torch ops | Needs Refactor (FloatFunctionals)  | Automatic |
++------------+------------+-----------+
+| Support for Customization | Limited | Flexible |
++------------+------------+-----------+
+| Input/Output Model Type | `torch.nn.Module` | `torch.nn.Module` (May need some refactors to make the model compatible with FX Graph Mode Quantization)|
++------------+------------+-----------+
 
 Eager Mode Quantization
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -357,6 +377,7 @@ Quantization types supported by FX Graph Mode can be classified in two ways:
 These two ways of classification are independent, so theoretically we can have 6 different types of quantization.
 
 The supported quantization types in FX Graph Mode Quantization are:
+
 - Post Training Quantization
 
   - Weight Only Quantization
@@ -424,8 +445,8 @@ API Example::
   model_fused = quantize_fx.fuse_fx(model_to_quantize)
 
 Please see the following tutorials for more information about FX Graph Mode Quantization:
-- FX Graph Mode Post Training Static Quantization (TODO: link)
-- FX Graph Mode Post Training Dynamic Quantization (TODO: link)
+- `FX Graph Mode Post Training Static Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_ptq_static_tutorial.html>`_
+- `FX Graph Mode Post Training Dynamic Quantization <https://pytorch.org/tutorials/prototype/fx_graph_mode_ptq_dynamic_tutorial.html>`_
 
 Quantized Tensors
 ---------------------------------------
