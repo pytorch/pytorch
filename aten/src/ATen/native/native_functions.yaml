@@ -1396,17 +1396,20 @@
   variants: function, method
   dispatch:
     CPU, CUDA: div
+    SparseCPU, SparseCUDA: div_sparse
 
 - func: div_.Tensor_mode(Tensor(a!) self, Tensor other, *, str rounding_mode) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: div_
+    SparseCPU, SparseCUDA: div_sparse_
 
 - func: div.out_mode(Tensor self, Tensor other, *, str rounding_mode, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: full
   dispatch:
     CPU, CUDA: div_out
+    SparseCPU, SparseCUDA: div_out_sparse_zerodim
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: div.Scalar(Tensor self, Scalar other) -> Tensor
