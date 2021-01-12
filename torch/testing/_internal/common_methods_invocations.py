@@ -1268,7 +1268,8 @@ if TEST_SCIPY:
         # https://en.cppreference.com/w/c/numeric/math/lgamma
 
         # To handle the above discrepancy,
-        # we never pass `-inf` to scipy.special.gammaln.
+        # we replace -inf with inf so values
+        # that were originally -inf map to inf as expected
         if x.dtype.kind == 'f':
             x = np.where(x == float('-inf'), np.array(float('inf'), dtype=x.dtype), x)
 
