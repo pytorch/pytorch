@@ -74,12 +74,10 @@ RegisterOperators reg(
                });
            return [rg_props](Stack* stack) {
              auto num_inputs = rg_props.size();
-             TORCH_INTERNAL_ASSERT(
-                 stack->size() >= num_inputs && num_inputs > 0);
              // Check every input's shape against profiled (expected) shape.
              for (size_t i = 0; i < num_inputs; i++) {
                auto& input = peek(stack, i, num_inputs);
-               auto t = input.toTensor();
+               const auto& t = input.toTensor();
                if (rg_props[i].has_value() &&
                    *rg_props[i] != t.requires_grad()) {
                  push(stack, false);
