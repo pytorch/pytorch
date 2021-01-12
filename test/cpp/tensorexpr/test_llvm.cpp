@@ -294,15 +294,15 @@ TEST(LLVM, LetTestMultitype) {
   std::vector<void*> args({v.data()});
   VarHandle x("x", kByte);
   VarHandle y("y", kHalf);
-  auto block =
-      Block::make({Let::make(x, 3),
-                   Let::make(y, 6.f),
-                   a.store(
-                       {0},
-                       Cast::make(
-                           kDouble,
-                           ExprHandle(2.f) +
-                               (x * ExprHandle(3.f) + y * ExprHandle(4.f))))});
+  auto block = Block::make(
+      {Let::make(x, 3),
+       Let::make(y, 6.f),
+       a.store(
+           {0},
+           Cast::make(
+               kDouble,
+               ExprHandle(2.f) +
+                   (x * ExprHandle(3.f) + y * ExprHandle(4.f))))});
 
   LLVMCodeGen cg(block, {a});
   ASSERT_EQ(cg.value<int>(args), 0);
@@ -590,7 +590,7 @@ TEST(LLVM, VectorizerLoadStoreTest) {
   Placeholder c_buf(BufHandle(c->buf()));
   LoopNest l({c});
   Stmt* s = l.root_stmt();
-  l.vectorize(dynamic_cast<Block*>(s)->front());
+  l.vectorize(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()));
 
   ASSERT_TRUE(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()) == nullptr);
 
@@ -614,7 +614,7 @@ TEST(LLVM, VectorizeBitCast) {
   Placeholder c_buf(BufHandle(c->buf()));
   LoopNest l({c});
   Stmt* s = l.root_stmt();
-  l.vectorize(dynamic_cast<Block*>(s)->front());
+  l.vectorize(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()));
   ASSERT_TRUE(dynamic_cast<For*>(dynamic_cast<Block*>(s)->front()) == nullptr);
 
   LLVMCodeGen cg(s, {a, c_buf});
