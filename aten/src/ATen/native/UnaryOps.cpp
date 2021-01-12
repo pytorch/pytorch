@@ -256,8 +256,8 @@ Tensor& ceil_out(Tensor& result, const Tensor& self) {
 Tensor ceil(const Tensor& self) { return unary_op_impl(self, at::ceil_out); }
 Tensor& ceil_(Tensor& self) { return unary_op_impl_(self, at::ceil_out); }
 
-Tensor& exp_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, exp_stub); }
-Tensor exp(const Tensor& self) { return unary_op_impl(self, at::exp_out); }
+Tensor& exp_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, exp_stub); }
+Tensor exp(const Tensor& self) { return unary_op_impl_float(self, exp_stub); }
 Tensor& exp_(Tensor& self) { return unary_op_impl_(self, at::exp_out); }
 
 Tensor& exp2_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, exp2_stub); }

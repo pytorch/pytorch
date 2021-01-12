@@ -1702,7 +1702,6 @@ _types_no_half = [
 
 # TODO: all these should be replaced with OpInfos
 torch_op_tests = [
-    _TorchMathTestMeta('exp'),
     _TorchMathTestMeta('floor'),
     _TorchMathTestMeta('ceil'),
     _TorchMathTestMeta('rad2deg'),
