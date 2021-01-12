@@ -538,6 +538,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         self.assertTrue('QuantizedLinear' in str(model))
         self.checkQuantizedLinear(model.fc)
 
+    @skipIfNoFBGEMM
     def test_embedding_linear_dynamic(self):
         class EmbeddingWithLinearDynamic(torch.nn.Module):
             def __init__(self):
