@@ -98,7 +98,7 @@ Value* addInputToBlock(Block* block) {
 }
 
 Node* createONNXUnsqueeze(
-    std::shared_ptr<Graph> graph,
+    Graph* graph,
     Node* n_to_insert_before,
     Value* input,
     int axis,
