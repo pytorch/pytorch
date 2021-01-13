@@ -13,7 +13,6 @@ def _local_invoke_async_execution(rref, func_name, args, kwargs):
     return getattr(rref.local_value(), func_name)(*args, **kwargs)
 
 def _invoke_rpc(rref, rpc_api, func_name, timeout, *args, **kwargs):
-    print("call _invoke_rpc")
     # Since rref._get_type can potentially issue an RPC, it should respect the
     # passed in timeout here.
     rref_type = rref._get_type(timeout=timeout)
