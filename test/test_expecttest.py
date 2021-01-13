@@ -1,3 +1,4 @@
+from torch.testing._internal import expecttest
 from torch.testing._internal.common_utils import TestCase, run_tests
 
 import string
