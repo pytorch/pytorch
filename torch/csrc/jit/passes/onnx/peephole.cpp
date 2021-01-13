@@ -590,15 +590,7 @@ static void eraseListConstruct(Node* n, int opset_version) {
             i, std::vector<Value*>({concat_node->output()}));
 
       } else {
-        if (opset_version < OPSET_VERSION_11) {
-          // Tensor lists are used mostly for inputs to cat/stack. They are
-          // already handled in those symbolics, and should become dead
-          // afterwards.
-          replacements.emplace_back(
-              i,
-              std::vector<Value*>(
-                  lc_node->inputs().begin(), lc_node->inputs().end()));
-        } else {
+        if (opset_version >= OPSET_VERSION_11) {
           c10::Symbol seq_node_kind = lc_node->inputs().size() > 0
               ? onnx::SequenceConstruct
               : onnx::SequenceEmpty;
