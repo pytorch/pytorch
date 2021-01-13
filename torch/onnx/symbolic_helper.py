@@ -88,10 +88,10 @@ def _parse_arg(value, desc, arg_name=None, node_name=None):
             raise RuntimeError("ONNX symbolic doesn't know to interpret ListConstruct node")
 
     if arg_name is None or node_name is None:
-        raise RuntimeError("Expected node type: 'onnx::Constant', got: '{}'.".format(value.node().kind()))
+        raise RuntimeError("Expected node type 'onnx::Constant', got '{}'.".format(value.node().kind()))
     else:
-        raise RuntimeError("Expected node type: 'onnx::Constant' "
-                           "for argument '{}' of node '{}', got: '{}'.".format(arg_name, node_name, value.node().kind()))
+        raise RuntimeError("Expected node type 'onnx::Constant' "
+                           "for argument '{}' of node '{}', got '{}'.".format(arg_name, node_name, value.node().kind()))
 
 
 def _maybe_get_const(value, desc):
