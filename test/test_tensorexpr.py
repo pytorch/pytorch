@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch import nn
 import unittest
 
-from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs
+from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs, run_tests
 
 from torch.testing._internal.te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
     LLVMCodeGenExecuted, SimpleIREvalExecuted
@@ -1647,4 +1647,4 @@ class TestTensorExprFuser(BaseTestClass):
             self.assertEqual(ref, exp)
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()
