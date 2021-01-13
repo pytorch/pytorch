@@ -390,12 +390,8 @@ Tensor& mse_loss_backward_out(Tensor& grad_input, const Tensor& grad_output,
 }
 
 Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
-  if (input.is_complex()) {
-    const auto float_type = c10::toValueType(input.scalar_type());
-    Tensor result = at::empty({0}, input.options().dtype(float_type));
-    return at::l1_loss_out(result, input, target, reduction);
-  }
-  Tensor result = at::empty({0}, input.options());
+  const auto float_type = c10::toValueType(input.scalar_type());
+  Tensor result = at::empty({0}, input.options().dtype(float_type));
   return at::l1_loss_out(result, input, target, reduction);
 }
 
