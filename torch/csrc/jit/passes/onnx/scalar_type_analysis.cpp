@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
+
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch {
@@ -50,17 +51,15 @@ static const std::unordered_set<NodeKind> standardOps = {
     onnx::Mod,
 };
 
-static bool IsStandardOp(const NodeKind& nkind) {
-  return standardOps.find(nkind) != standardOps.end();
-}
-
 // For these operators, all inputs share the same scalar type.
 // The output scalar type is always Bool.
-static const std::unordered_set<NodeKind> comparisonOps = {onnx::Greater,
-                                                           onnx::Less,
-                                                           onnx::Equal,
-                                                           onnx::GreaterOrEqual,
-                                                           onnx::LessOrEqual};
+static const std::unordered_set<NodeKind> comparisonOps = {
+    onnx::Greater,
+    onnx::Less,
+    onnx::Equal,
+    onnx::GreaterOrEqual,
+    onnx::LessOrEqual,
+};
 
 static bool IsComparisonOp(const NodeKind& nkind) {
   return comparisonOps.find(nkind) != comparisonOps.end();
@@ -69,6 +68,7 @@ static bool IsComparisonOp(const NodeKind& nkind) {
 static TensorTypePtr CreateProfiledTensorTypeWithScalarType(
     const TensorTypePtr& typePtr,
     const c10::ScalarType& scalar_type) {
+  AT_ASSERT(typePtr != nullptr);
   return typePtr->withScalarType({scalar_type});
 }
 
@@ -103,7 +103,7 @@ static c10::optional<c10::ScalarType> PromoteScalarTypesWithCategory(
     if (c10::kBool == t) {
       return 1;
     }
-    if (c10::isIntegralType(t)) {
+    if (c10::isIntegralType(t, /*includeBool=*/false)) {
       return 2;
     }
     if (c10::isFloatingType(t)) {
@@ -130,6 +130,15 @@ static c10::optional<c10::ScalarType> PromoteScalarTypesWithCategory(
 static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
   std::vector<c10::ScalarType> typesFromTensors;
   std::vector<c10::ScalarType> typesFromScalars;
+
+  auto get_scalar_type =
+      [](const Value* input) -> c10::optional<at::ScalarType> {
+    if (auto tensor_type = input->type()->cast<TensorType>()) {
+      return tensor_type->scalarType();
+    }
+    return c10::nullopt;
+  };
+
   std::for_each(
       n->inputs().begin(), n->inputs().end(), [&](const Value* input) {
         auto nkind = input->node()->kind();
@@ -178,16 +187,13 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
           } else {
             typesFromTensors.emplace_back(scalar_type);
           }
-        } else if (
-            auto scalar_type =
-                input->type()->cast<TensorType>()->scalarType()) {
+        } else if (auto scalar_type = get_scalar_type(input)) {
           typesFromTensors.emplace_back(*scalar_type);
         }
       });
 
   c10::optional<c10::ScalarType> st = c10::nullopt;
-  const c10::optional<c10::ScalarType> output_st =
-      n->output()->type()->cast<TensorType>()->scalarType();
+  const auto output_st = get_scalar_type(n->output());
 
   if (IsComparisonOp(n->kind())) {
     // For comparison ops, always promote scalar type to highest among inputs,
@@ -201,12 +207,6 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
     if (output_st) {
       // If output scalar type is available, use that.
       st = output_st;
-    } else if (n->kind() == onnx::Mod && !typesFromTensors.empty()) {
-      // Most of the operators like Mul are switched to allow implicit type
-      // promotion. But fmod and remainder still only support implicit casting
-      // between scalars. i.e. for torch.remainder(a, b), if a is LongTensor and
-      // b is float, b will be cast to Long.
-      st = PromoteScalarTypes(typesFromTensors);
     } else {
       // PyTorch now does implicit type promotion regardless whether the inputs
       // are tensors or scalars. (Previously only scalars support implicit
@@ -234,7 +234,8 @@ static void UpdateScalarTypeForInputs(
 
   for (auto input : n->inputs()) {
     auto input_tensor_type = input->type()->cast<TensorType>();
-    auto input_scalar_type = input_tensor_type->scalarType();
+    auto input_scalar_type =
+        input_tensor_type ? input_tensor_type->scalarType() : c10::nullopt;
 
     if ((input->node()->kind() == onnx::Constant) ||
         (input_scalar_type && (*input_scalar_type != scalar_type))) {
@@ -275,7 +276,6 @@ static void ImplicitCastForONNX(Block* block) {
     for (auto sub : it->blocks()) {
       ImplicitCastForONNX(sub);
     }
-    auto* subgraph = it->owningGraph();
 
     if (IsImplicitCastSupported(it->kind())) {
       auto expected_scalar_type = InferExpectedScalarType(*it);
@@ -289,17 +289,6 @@ static void ImplicitCastForONNX(Block* block) {
   }
   EliminateDeadCode(
       block, true, DCESideEffectPolicy::ALLOW_DELETING_NODES_WITH_SIDE_EFFECTS);
-}
-
-// This pass tries to resolve scalar type mismatch issues between input tensors
-// introduced by the implicit type conversions on scalars.
-// TODO: Note that currently this pass handles traced graph only.
-// More specifically, graphs that have scalar type information recorded.
-// For scripted graphs we need something like scalar type propagation,
-// otherwise we do not have enough information to perform the check, let alone
-// fixes.
-void ImplicitCastForONNX(const std::shared_ptr<Graph>& graph) {
-  ImplicitCastForONNX(graph->block());
 }
 } // anonymous namespace
 
