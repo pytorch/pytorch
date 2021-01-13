@@ -1,5 +1,4 @@
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
-
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch {

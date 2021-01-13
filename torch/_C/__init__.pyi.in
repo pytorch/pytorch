@@ -4,10 +4,9 @@ import torch
 from torch import Tensor
 from enum import Enum
 from pathlib import Path
-from typing import (
-    Any, BinaryIO, Callable, ContextManager, Dict, Iterable, Iterator, List,
-    NamedTuple, Optional, overload, Sequence, Tuple, TypeVar, Type, Union,
-    Generic, Set, AnyStr)
+from typing import (Any, BinaryIO, Callable, ContextManager, Dict, Iterator, List, NamedTuple,
+                    Optional, overload, Sequence, Tuple, TypeVar, Type, Union, Generic,
+                    Set, AnyStr)
 from torch._six import inf
 
 from torch.types import _int, _float, _bool, _dtype, _device, _qscheme, _size, _layout, Device, Number, Storage
@@ -170,7 +169,6 @@ def _freeze_module(module: ScriptModule,
                    preserved_attrs: List[str] = [],
                    freeze_interfaces: _bool = True,
                    preserveParameters: _bool = True) -> ScriptModule: ...
-def _jit_pass_optimize_frozen_graph(Graph) -> None: ...
 def _is_tracing() -> _bool: ...
 def _jit_init() -> _bool: ...
 def _jit_flatten(arg: Any) -> Tuple[List[Tensor], IODescriptor]: ...
@@ -500,9 +498,6 @@ def _get_qengine() -> _int: ...  # THPModule_qEngine
 def _set_qengine(qegine: _int) -> None: ...  # THPModule_setQEngine
 def _supported_qengines() -> List[_int]: ...  # THPModule_supportedQEngines
 def _is_xnnpack_enabled() -> _bool: ...  # THPModule_isEnabledXNNPACK
-def _has_torch_function(args: Iterable[Any]) -> _bool: ...  # THPModule_has_torch_function
-def _has_torch_function_unary(Any) -> _bool: ...  # THPModule_has_torch_function_unary
-def _has_torch_function_variadic(*args: Any) -> _bool: ...  # THPModule_has_torch_function_variadic
 def _vmapmode_increment_nesting() -> _int: ...  # THPModule_vmapmode_increment_nesting
 def _vmapmode_decrement_nesting() -> _int: ...  # THPModule_vmapmode_decrement_nesting
 def _log_api_usage_once(str) -> None: ...  # LogAPIUsageOnceFromPython
@@ -641,8 +636,6 @@ class _TensorBase(object):
     _version: _int
     _base: Optional[Tensor]
     grad_fn: Any
-    _grad: Optional[Tensor]
-    _backward_hooks: Optional[Dict[_int, Callable[[Tensor], Optional[Tensor]]]]
     ${tensor_method_hints}
 
 # Defined in torch/csrc/multiprocessing/init.cpp
@@ -763,13 +756,7 @@ def _remove_worker_pids(loader_id: _int) -> None: ...  # THPModule_removeWorkerP
 def _error_if_any_worker_fails() -> None: ...  # THPModule_errorIfAnyWorkerFails
 
 # Defined in torch/csrc/jit/python/python_tracer.cpp
-class TracingState:
-    def push_scope(self, scope_name: str) -> None: ...
-    def pop_scope(self) -> None: ...
-    def current_scope(self) -> str: ...
-    def set_graph(self, graph: Graph) -> None: ...
-    def graph(self) -> Graph: ...
-    ...
+class TracingState: ...
 
 def _create_graph_by_tracing(
     func: Callable[..., Any],

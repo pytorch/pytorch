@@ -46,18 +46,18 @@ Tensor adaptive_avg_pool2d(
       };
 
       const struct Block final {
-        uvec3 extents;
+        uvec3 size;
         uint32_t _;
-        vec2 kernel;
         vec2 stride;
+        vec2 kernel;
       } block {
         v_output.extents(),
         0u,
+        stride,
         {
           v_self_size.data[0u] - (v_output_size.data[0u] - 1u) * stride.data[0u],
           v_self_size.data[1u] - (v_output_size.data[1u] - 1u) * stride.data[1u],
         },
-        stride,
       };
 
       context->dispatch(
@@ -152,8 +152,7 @@ Tensor avg_pool2d(
       input_size[Layout::Activation4D::height],
       input_size[Layout::Activation4D::width],
       output_height,
-      output_width,
-      self_arg.suggest_memory_format());
+      output_width);
 
   api::Context* const context = api::context();
 
@@ -178,17 +177,16 @@ Tensor avg_pool2d(
       const struct Block final {
         uvec3 extents;
         int32_t range;
-        ivec4 kernel;
+        ivec2 iextents;
         ivec2 stride;
         ivec2 padding;
+        ivec2 kernel;
       } block {
         v_output.extents(),
         safe_downcast<int32_t>(
             kernel[Layout::Parameter::width] *
             kernel[Layout::Parameter::height]),
         {
-          safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
-          safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
           safe_downcast<int32_t>(self.size(Layout::Activation4D::width)),
           safe_downcast<int32_t>(self.size(Layout::Activation4D::height)),
         },
@@ -199,6 +197,10 @@ Tensor avg_pool2d(
         {
           safe_downcast<int32_t>(padding[Layout::Parameter::width]),
           safe_downcast<int32_t>(padding[Layout::Parameter::height]),
+        },
+        {
+          safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
+          safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
         },
       };
 

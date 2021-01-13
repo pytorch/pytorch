@@ -12,7 +12,7 @@ layout(set = 0, binding = 3)          buffer  PRECISION restrict readonly  Bias 
   vec4 data[];
 } uBias;
 layout(set = 0, binding = 4)          uniform PRECISION restrict           Block {
-  ivec4 size;
+  ivec2 kernel;
   ivec2 stride;
   ivec2 padding;
   vec2 clamp;
@@ -23,19 +23,22 @@ layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 void main() {
   const ivec3 pos = ivec3(gl_GlobalInvocationID);
 
-  if (all(lessThan(pos, uBlock.size.xyz))) {
+  /* Dynamically Uniform */
+  const ivec3 size = imageSize(uOutput);
+  const ivec3 isize = textureSize(uInput, 0);
+
+  if (all(lessThan(pos, size))) {
     const ivec2 ipos = pos.xy * uBlock.stride - uBlock.padding;
 
     vec4 sum = uBias.data[pos.z];
 
-    for (int z = 0, z4 = 0; z < uBlock.size.w; z += 4, ++z4) {
-      const vec4 In = texelFetch(uInput, ivec3(ipos, z4), 0);
-      const ivec4 kxs = z + ivec4(0, 1, 2, 3);
+    for (int z = 0; z < uBlock.kernel.x; z+=4) {
+      const vec4 In = texelFetch(uInput, ivec3(ipos.x, ipos.y, z/4), 0);
 
-      sum = fma(In.xxxx, texelFetch(uKernel, ivec3(kxs.x, pos.z, 0), 0), sum);
-      sum = fma(In.yyyy, texelFetch(uKernel, ivec3(kxs.y, pos.z, 0), 0), sum);
-      sum = fma(In.zzzz, texelFetch(uKernel, ivec3(kxs.z, pos.z, 0), 0), sum);
-      sum = fma(In.wwww, texelFetch(uKernel, ivec3(kxs.w, pos.z, 0), 0), sum);
+      sum = fma(In.xxxx, texelFetch(uKernel, ivec3(z+0, pos.z, 0), 0), sum);
+      sum = fma(In.yyyy, texelFetch(uKernel, ivec3(z+1, pos.z, 0), 0), sum);
+      sum = fma(In.zzzz, texelFetch(uKernel, ivec3(z+2, pos.z, 0), 0), sum);
+      sum = fma(In.wwww, texelFetch(uKernel, ivec3(z+3, pos.z, 0), 0), sum);
     }
 
     imageStore(

@@ -52,7 +52,6 @@ allow_list = [
     ("aten::set_", datetime.date(2021, 1, 31)),
     ("aten::native_layer_norm", datetime.date(2021, 1, 31)),
     ("aten::native_layer_norm_backward", datetime.date(2021, 1, 31)),
-    ("aten::elu_backward", datetime.date(2021, 1, 31)),
     ("prim::profile_optional", datetime.date(2021, 1, 31)),
 ]
 

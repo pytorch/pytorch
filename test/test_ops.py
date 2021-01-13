@@ -8,7 +8,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
+    (instantiate_device_type_tests, ops, dtypes, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.autograd.gradcheck import gradcheck, gradgradcheck
 
@@ -54,11 +54,6 @@ class TestOpInfo(TestCase):
         # NOTE: only tests on first sample
         sample = samples[0]
         op(*sample.input, *sample.args, **sample.kwargs)
-
-
-# gradcheck requires double precision
-_gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,
-                         allowed_dtypes=[torch.double, torch.cdouble])
 
 
 class TestGradients(TestCase):
@@ -113,19 +108,22 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! complex grad tests marked to skip.")
 
     # Tests that gradients are computed correctly
-    @_gradcheck_ops(op_db)
+    @dtypes(torch.double, torch.cdouble)
+    @ops(op_db)
     def test_fn_grad(self, device, dtype, op):
         self._skip_helper(op, dtype)
         self._grad_test_helper(device, dtype, op, op.get_op())
 
     # Method grad (and gradgrad, see below) tests are disabled since they're
     #   costly and redundant with function grad (and gradgad) tests
-    # @_gradcheck_ops(op_db)
+    # @dtypes(torch.double, torch.cdouble)
+    # @ops(op_db)
     # def test_method_grad(self, device, dtype, op):
     #     self._skip_helper(op, dtype)
     #     self._grad_test_helper(device, dtype, op, op.get_method())
 
-    @_gradcheck_ops(op_db)
+    @dtypes(torch.double, torch.cdouble)
+    @ops(op_db)
     def test_inplace_grad(self, device, dtype, op):
         self._skip_helper(op, dtype)
         if not op.test_inplace_grad:
@@ -133,19 +131,22 @@ class TestGradients(TestCase):
         self._grad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
     # Test that gradients of gradients are computed correctly
-    @_gradcheck_ops(op_db)
+    @dtypes(torch.double, torch.cdouble)
+    @ops(op_db)
     def test_fn_gradgrad(self, device, dtype, op):
         self._skip_helper(op, dtype)
         self._gradgrad_test_helper(device, dtype, op, op.get_op())
 
     # Method gradgrad (and grad, see above) tests are disabled since they're
     #   costly and redundant with function gradgrad (and grad) tests
-    # @_gradcheck_ops(op_db)
+    # @dtypes(torch.double, torch.cdouble)
+    # @ops(op_db)
     # def test_method_gradgrad(self, device, dtype, op):
     #     self._skip_helper(op, dtype)
     #     self._gradgrad_test_helper(device, dtype, op, op.get_method())
 
-    @_gradcheck_ops(op_db)
+    @dtypes(torch.double, torch.cdouble)
+    @ops(op_db)
     def test_inplace_gradgrad(self, device, dtype, op):
         self._skip_helper(op, dtype)
         if not op.test_inplace_grad:
