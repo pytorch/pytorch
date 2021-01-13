@@ -1,5 +1,5 @@
-#include <torch/csrc/distributed/rpc/testing/faulty_process_group_agent.h>
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
+#include <torch/csrc/distributed/rpc/testing/faulty_process_group_agent.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
@@ -79,10 +79,9 @@ std::shared_ptr<JitFuture> FaultyProcessGroupAgent::send(
     failMessageCountMap_[key]++;
     lock.unlock();
     auto jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
-    jitFuture->setError(
-        std::make_exception_ptr(std::runtime_error(makeRPCError(
-            c10::str("Send attempt failed intentionally for ", key),
-            RPCErrorType::INTENTIONAL_FAILURE))));
+    jitFuture->setError(std::make_exception_ptr(std::runtime_error(makeRPCError(
+        c10::str("Send attempt failed intentionally for ", key),
+        RPCErrorType::INTENTIONAL_FAILURE))));
     return jitFuture;
   } else {
     lock.unlock();
