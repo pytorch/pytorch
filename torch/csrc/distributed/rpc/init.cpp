@@ -373,6 +373,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               // Intentionally not releasing GIL, as most accesses just
               // retrieve cached type py::object
               &PyRRef::getRRefType,
+              py::arg("timeout") = kUnsetRpcTimeout,
               R"(
                   Returns the type of the data object referenced by this
                   ``RRef``. On the owner, this is same as
@@ -380,6 +381,14 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   RPC to fetch the ``type`` object from the owner. After this
                   function is run once, the ``type`` object is cached by the
                   ``RRef``, and subsequent invocations no longer trigger RPC.
+
+                  Args:
+                    rref (torch.distributed.rpc.RRef): The RRef to get type of.
+                    timeout (float, optional): Timeout for ``_get_type``. If
+                          the call does not complete within this timeframe, an
+                          exception indicating so will be raised. If this
+                          argument is not provided, the default RPC timeout will
+                           be used.
               )")
           .def(
               "_get_future",

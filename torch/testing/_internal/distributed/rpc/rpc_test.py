@@ -149,8 +149,11 @@ class SlowPickleClass:
 
 
 class MyClass:
-    def __init__(self, a):
+    def __init__(self, a, delay=False):
         self.a = a
+        # delay initialization to simulate errors if specified
+        if delay:
+            time.sleep(2)
 
     def my_instance_method(self, b):
         return self.a + b
@@ -4872,6 +4875,18 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         self.assertEqual(rref.to_here(), torch.ones(2).to(1))
 
         rpc.shutdown()
+
+    @dist_init
+    def test_rref_get_type_timeout(self):
+        # Test where we try to get the type of a RRef from an owner, but RRef
+        # creation is slower than timeout passed into _get_type.
+        dst_rank = (self.rank + 1) % self.world_size
+        dst = worker_name(dst_rank)
+        slow_rref = rpc.remote(dst, MyClass, args=(torch.ones(2, 2), True))
+        timeout = 0.5
+        expected_err = self.get_timeout_error_regex()
+        with self.assertRaisesRegex(RuntimeError, expected_err):
+            slow_rref._get_type(timeout=timeout)
 
     @dist_init
     def test_op_with_invalid_args(self):
