@@ -1157,6 +1157,9 @@ Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, T
   TORCH_INTERNAL_ASSERT(input.size(-2) >= input.size(-1));
   TORCH_INTERNAL_ASSERT(input.size(-1) >= tau.size(-1));
 
+  TORCH_INTERNAL_ASSERT(input.scalar_type() == tau.scalar_type());
+  TORCH_INTERNAL_ASSERT(input.device() == tau.device());
+
   TORCH_INTERNAL_ASSERT(result.scalar_type() == input.scalar_type());
   TORCH_INTERNAL_ASSERT(result.device() == input.device());
 
@@ -1190,25 +1193,35 @@ Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
   TORCH_CHECK(input.size(-2) >= input.size(-1), "orgqr: input.shape[-2] must be greater than or equal to input.shape[-1]");
   TORCH_CHECK(input.size(-1) >= tau.size(-1), "orgqr: input.shape[-1] must be greater than or equal to tau.shape[-1]");
 
+  TORCH_CHECK(tau.scalar_type() == input.scalar_type(),
+    "orgqr: tau dtype ", tau.scalar_type(), " does not match input dtype ", input.scalar_type());
+  TORCH_CHECK(input.device() == input.device(),
+              "orgqr: Expected input and tau to be on the same device, but found input on ",
+              input.device(), " and tau on ", tau.device(), " instead.");
+
   TORCH_CHECK(result.scalar_type() == input.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
+    "orgqr: result dtype ", result.scalar_type(), " does not match the expected dtype ", input.scalar_type());
   TORCH_CHECK(result.device() == input.device(),
-    "result device ", result.device(), " does not match input device ", input.device());
-  if (result.numel() != 0) {
-    // Resize messes up the strides, so let's not use at::native::resize_output
-    TORCH_CHECK(result.sizes().equals(input.sizes()),
-    "result shape ", result.sizes(), " does not match input shape ", input.sizes());
-  }
+              "orgqr: Expected result and input to be on the same device, but found result on ",
+              result.device(), " and input on ", input.device(), " instead.");
+
+  // TODO: uncomment the following when passing incorrectly sized 'result' is not allowed
+  // if (result.numel() != 0) {
+  //   // Resize messes up the strides, so let's not use at::native::resize_output
+  //   TORCH_CHECK(result.sizes().equals(input.sizes()),
+  //   "result shape ", result.sizes(), " does not match input shape ", input.sizes());
+  // }
 
   // Single matrix MAGMA routine requires 'infos' to reside in CPU memory,
   // therefore we create 'infos' only on CPU for now.
   // This should be changed if cuSOLVER would be used
   auto infos = at::empty({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt).device(kCPU));
 
-  // if result is empty and not in batched column major format we have to allocate a temporary tensor
+  // if result is not empty and not in batched column major format we have to allocate a temporary tensor
   if (result.numel() != 0 && !result.transpose(-2, -1).is_contiguous()) {
     Tensor result_tmp = at::empty({0}, input.options());
     result_tmp = orgqr_out_info(input, tau, result_tmp, infos);
+    at::native::resize_output(result, result_tmp.sizes());
     result.copy_(result_tmp);
   } else {
     // use result's storage directly
