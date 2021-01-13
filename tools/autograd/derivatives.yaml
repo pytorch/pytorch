@@ -596,6 +596,9 @@
 - name: inverse(Tensor self) -> Tensor
   self: -at::matmul(result.conj().transpose(-2, -1), at::matmul(grad, result.conj().transpose(-2, -1)))
 
+- name: linalg_inv(Tensor self) -> Tensor
+  self: -at::matmul(result.conj().transpose(-2, -1), at::matmul(grad, result.conj().transpose(-2, -1)))
+
 - name: isnan(Tensor self) -> Tensor
   self: non_differentiable
 
@@ -1309,10 +1312,16 @@
   self: "GradMode::is_enabled() ? infinitely_differentiable_silu_backward(grad, self) : silu_backward(grad, self)"
 
 - name: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
-  self: elu_backward(grad, alpha, scale, input_scale, result)
+  self: elu_backward(grad, alpha, scale, input_scale, /* is_result */ false, self)
+
+- name: elu_(Tensor(a!) self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor(a!)
+  self: elu_backward(grad, alpha, scale, input_scale, /* is_result */ true, result)
 
 - name: celu(Tensor self, Scalar alpha=1.0) -> Tensor
-  self: elu_backward(grad, alpha, 1, 1.0/alpha.toFloat(), result)
+  self: elu_backward(grad, alpha, 1, 1.0/alpha.toFloat(), /* is_result */ false, self)
+
+- name: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
+  self: elu_backward(grad, alpha, 1, 1.0/alpha.toFloat(), /* is_result */ true, result)
 
 - name: gelu(Tensor self) -> Tensor
   self: "GradMode::is_enabled() ? infinitely_differentiable_gelu_backward(grad, self) : gelu_backward(grad, self)"
@@ -1565,9 +1574,9 @@
   grad_output: avg_pool3d(grad, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override)
   self: zeros_like(self)
 
-- name: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, Tensor output) -> Tensor
-  grad_output: elu_backward(grad, alpha, scale, input_scale, output)
-  output: grad * grad_output * input_scale * (output < 0).type_as(grad)
+- name: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result, Tensor self_or_result) -> Tensor
+  grad_output: elu_backward(grad, alpha, scale, input_scale, is_result, self_or_result)
+  self_or_result: elu_double_backward(grad, grad_output, alpha, scale, input_scale, is_result, self_or_result)
 
 - name: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, int[2] kernel_size, int[2] output_size, Tensor indices) -> Tensor
   grad_output: max_pool_double_backward(grad, indices, 2)
