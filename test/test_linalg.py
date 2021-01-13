@@ -787,7 +787,7 @@ class TestLinalg(TestCase):
             run_test_case(a_shape, b_shape)
 
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @tf32_on_and_off(1e-4)
+    @tf32_on_and_off(1e-3)
     def test_kron_non_contiguous(self, device, dtype):
 
         def run_test_transposed(a_shape, b_shape):
@@ -1548,7 +1548,7 @@ class TestLinalg(TestCase):
         e = torch.zeros(4, 2, dtype=dtype, device=device)
         v = torch.zeros(4, 4, dtype=dtype, device=device)
         torch.eig(X, True, out=(e, v))
-        Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
+        Xhat = np.matmul(np.matmul(v.cpu(), torch.diag(e.select(1, 0)).cpu()), v.t().cpu())
         if dtype is torch.float:
             atol = 1e-7
             rtol = 1e-5
@@ -1559,7 +1559,7 @@ class TestLinalg(TestCase):
         self.assertTrue(v.is_contiguous(), 'V is not contiguous')
 
         torch.eig(X, True, out=(e, v))
-        Xhat = torch.mm(v, torch.mm(e.select(1, 0).diag(), v.t()))
+        Xhat = np.matmul(v.cpu(), np.matmul(e.select(1, 0).diag().cpu(), v.t().cpu()))
         self.assertEqual(X, Xhat, atol=atol, rtol=rtol, msg='VeV\' wrong')
         self.assertTrue(v.is_contiguous(), 'V is not contiguous')
 
