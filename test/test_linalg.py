@@ -4094,7 +4094,7 @@ class TestLinalg(TestCase):
 
     @onlyCPU
     @skipCPUIfNoLapack
-    def test_orgqr_errors(self, device):
+    def test_orgqr_errors_and_warnings(self, device):
         test_cases = [
             # input1 size, input2 size, error regex
             ((10,), (2,), r"input must have at least 2 dimensions"),
@@ -4106,6 +4106,40 @@ class TestLinalg(TestCase):
             tau = torch.rand(*tau_size, device=device)
             with self.assertRaisesRegex(RuntimeError, error_regex):
                 torch.orgqr(a, tau)
+
+        # if out tensor with wrong shape is passed a warning is given
+        reflectors = torch.randn(3, 3, device=device)
+        tau = torch.randn(3, device=device)
+        out = torch.empty(2, 3, device=device)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.orgqr(reflectors, tau, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should match
+        out = torch.empty_like(reflectors).to(torch.int)
+        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match the expected dtype"):
+            torch.orgqr(reflectors, tau, out=out)
+
+        with self.assertRaisesRegex(RuntimeError, "tau dtype Int does not match input dtype"):
+            torch.orgqr(reflectors, tau.to(torch.int))
+
+        # TODO: enable the following tests when orgqr is implemented for CUDA
+        if torch.cuda.is_available():
+            with self.assertRaisesRegex(RuntimeError, "the operator doesn't exist for this backend"):
+                # device of out and input should match
+                wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+                out = torch.empty_like(reflectors).to(wrong_device)
+                # with self.assertRaisesRegex(RuntimeError, "Expected result and input to be on the same device"):
+                torch.orgqr(reflectors, tau, out=out)
+
+                # device of tau and input should match
+                wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+                tau = tau.to(wrong_device)
+                # with self.assertRaisesRegex(RuntimeError, "Expected input and tau to be on the same device"):
+                torch.orgqr(reflectors, tau)
 
     @precisionOverride({torch.complex64: 5e-6})
     @skipCUDAIfNoMagma
