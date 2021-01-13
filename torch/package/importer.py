@@ -12,7 +12,7 @@ import os.path
 from ._importlib import _normalize_line_endings, _resolve_name, _sanity_check, _calc___package__, \
     _normalize_path
 from ._mock_zipreader import MockZipReader
-from ._mangling import PackageMangler
+from ._mangling import PackageMangler, demangle
 
 class PackageImporter:
     """Importers allow you to load code written to packages by PackageExporter.
@@ -140,6 +140,14 @@ class PackageImporter:
         pickle_file = self._zipfile_path(package, resource)
         return _load(self.zip_reader, map_location, self, pickle_file=pickle_file)
 
+    def id(self):
+        """
+        Returns internal identifier that torch.package uses to distinguish PackageImporter instances.
+        Looks like:
+            <torch_package_0>
+        """
+        return self._mangler.parent_name()
+
     def _read_extern(self):
         return self.zip_reader.get_record('extern_modules').decode('utf-8').splitlines(keepends=False)
 
@@ -194,8 +202,8 @@ class PackageImporter:
     # when this is the __loader__ of a module.
     def get_source(self, module_name) -> str:
         # linecache calls `get_source` with the `module.__name__` as the argument, so we must demangle it here.
-        module = self.import_module(self._mangler.demangle(module_name))
-        return self.zip_reader.get_record(self._mangler.demangle(module.__file__)).decode('utf-8')
+        module = self.import_module(demangle(module_name))
+        return self.zip_reader.get_record(demangle(module.__file__)).decode('utf-8')
 
     def _install_on_parent(self, parent: str, name: str, module: types.ModuleType):
         if not parent:
@@ -342,7 +350,7 @@ class PackageImporter:
         package = self._get_package(package)
         resource = _normalize_path(resource)
         assert package.__loader__ is self
-        name = self._mangler.demangle(package.__name__)
+        name = demangle(package.__name__)
         return f"{name.replace('.', '/')}/{resource}"
 
     def _get_or_create_package(self, atoms: List[str]) -> 'Union[_PackageNode, _ExternNode]':

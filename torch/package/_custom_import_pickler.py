@@ -2,7 +2,7 @@ from pickle import Pickler, whichmodule, _Pickler, _getattribute, _extension_reg
 from pickle import GLOBAL, STACK_GLOBAL, EXT1, EXT2, EXT4, PicklingError
 from types import FunctionType
 from struct import pack
-from ._mangling import demangle, is_mangled
+from ._mangling import demangle, is_mangled, get_mangle_prefix
 import importlib
 
 
@@ -42,13 +42,24 @@ class CustomImportPickler(_Pickler):
         else:
             if obj2 is not obj:
                 # CHANGED: More specific error message in the case of mangling.
-                obj2_parent_module_name = getattr(obj2, "__module__", orig_module_name)
-                msg = f"Can't pickle {obj}: it's not the same object as {obj2_parent_module_name}.{name}."
+                obj_module_name = getattr(obj, "__module__", orig_module_name)
+                obj2_module_name = getattr(obj2, "__module__", orig_module_name)
 
-                if is_mangled(getattr(obj, "__module__", "")) or is_mangled(obj2_parent_module_name):
-                    msg += ("\nThis is likely due to a dependency collision in torch.package; "
-                            "check the order of PackageExporter.imports.")
+                msg = f"Can't pickle {obj}: it's not the same object as {obj2_module_name}.{name}."
 
+                is_obj_mangled = is_mangled(obj_module_name)
+                is_obj2_mangled = is_mangled(obj2_module_name)
+
+                if is_obj_mangled or is_obj2_mangled:
+                    obj_location = get_mangle_prefix(obj_module_name) if is_obj_mangled else "the current Python environment"
+                    obj2_location = get_mangle_prefix(obj2_module_name) if is_obj2_mangled else "the current Python environment"
+
+                    obj_importer_name = f"the importer for {get_mangle_prefix(obj_module_name)}" if is_obj_mangled else "'importlib.import_module'"
+                    obj2_importer_name = f"the importer for {get_mangle_prefix(obj2_module_name)}" if is_obj2_mangled else "'importlib.import_module'"
+
+                    msg += (f"\n\nThe object being pickled is from '{orig_module_name}', which is coming from {obj_location}."
+                            f"\nHowever, when we import '{orig_module_name}', it's coming from {obj2_location}."
+                            f"\nTo fix this, make sure 'PackageExporter.importers' lists {obj_importer_name} before {obj2_importer_name}")
                 raise PicklingError(msg)
 
         if self.proto >= 2:

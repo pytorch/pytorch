@@ -2,7 +2,7 @@ from unittest import main, skipIf
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS
 from tempfile import NamedTemporaryFile
 from torch.package import PackageExporter, PackageImporter
-from torch.package._mangling import PackageMangler, demangle, is_mangled
+from torch.package._mangling import PackageMangler, demangle, is_mangled, get_mangle_prefix
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import torch
@@ -510,18 +510,7 @@ class ManglingTest(TestCase):
 
     def test_roundtrip_mangling(self):
         a = PackageMangler()
-        self.assertEqual("foo", a.demangle(a.mangle("foo")))
-
-    def test_unique_demangling(self):
-        """
-        A given PackageMangler should only be able to demangle names that it
-        created. It should pass through names created by a different
-        PackageMangler instance.
-        """
-        a = PackageMangler()
-        b = PackageMangler()
-        a_mangled = a.mangle("foo.bar.baz")
-        self.assertEqual(a_mangled, b.demangle(a_mangled))
+        self.assertEqual("foo", demangle(a.mangle("foo")))
 
     def test_is_mangled(self):
         a = PackageMangler()
@@ -530,7 +519,7 @@ class ManglingTest(TestCase):
         self.assertTrue(is_mangled(b.mangle("foo.bar")))
 
         self.assertFalse(is_mangled("foo.bar"))
-        self.assertFalse(is_mangled(a.demangle(a.mangle("foo.bar"))))
+        self.assertFalse(is_mangled(demangle(a.mangle("foo.bar"))))
 
     def test_demangler_multiple_manglers(self):
         """
@@ -541,6 +530,26 @@ class ManglingTest(TestCase):
 
         self.assertEqual("foo.bar", demangle(a.mangle("foo.bar")))
         self.assertEqual("bar.foo", demangle(b.mangle("bar.foo")))
+
+    def test_mangle_empty_errors(self):
+        a = PackageMangler()
+        with self.assertRaises(AssertionError):
+            a.mangle("")
+
+    def test_demangle_base(self):
+        """
+        Demangling a mangle parent directly should currently return an empty string.
+        """
+        a = PackageMangler()
+        mangled = a.mangle("foo")
+        mangle_parent = mangled.partition(".")[0]
+        self.assertEqual("", demangle(mangle_parent))
+
+    def test_mangle_prefix(self):
+        a = PackageMangler()
+        mangled = a.mangle("foo.bar")
+        mangle_prefix = get_mangle_prefix(mangled)
+        self.assertEqual(mangle_prefix + "." + "foo.bar", mangled)
 
 
 if __name__ == '__main__':

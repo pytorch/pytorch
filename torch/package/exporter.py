@@ -170,7 +170,7 @@ class PackageExporter:
         except ModuleNotFoundError as e:
             if not is_mangled(module_name):
                 raise
-            msg = (f"Cannot export module '{module_name}'. Modules imported "
+            msg = (f"Module not found: '{module_name}'. Modules imported "
                    "from a torch.package cannot be re-exported directly.")
             raise ModuleNotFoundError(msg) from None
 

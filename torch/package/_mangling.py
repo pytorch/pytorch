@@ -22,19 +22,8 @@ class PackageMangler:
         self._mangle_parent = f"<torch_package_{self._mangle_index}>"
 
     def mangle(self, name) -> str:
+        assert len(name) != 0
         return self._mangle_parent + "." + name
-
-    def demangle(self, mangled) -> str:
-        """
-        Note: This only demangles names that were mangled by this specific
-        PackageMangler. It will pass through names created by a different
-        PackageMangler instance.
-        """
-        if mangled.startswith(self._mangle_parent + "."):
-            return mangled.partition(".")[2]
-
-        # wasn't a mangled name
-        return mangled
 
     def parent_name(self):
         return self._mangle_parent
@@ -49,4 +38,13 @@ def demangle(name: str) -> str:
     Note: Unlike PackageMangler.demangle, this version works on any
     mangled name, irrespective of which PackageMangler created it.
     """
-    return name.partition(".")[2] if is_mangled(name) else name
+    if is_mangled(name):
+        first, sep, last = name.partition(".")
+        # If there is only a base mangle prefix, e.g. '<torch_package_0>',
+        # then return an empty string.
+        return last if len(sep) != 0 else ""
+    return name
+
+
+def get_mangle_prefix(name: str) -> str:
+    return name.partition(".")[0] if is_mangled(name) else name
