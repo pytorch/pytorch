@@ -1912,7 +1912,7 @@ class TestReductions(TestCase):
         check([1.], 0.5, [], {'out': torch.empty([], dtype=torch.float64, device=device)},
               r'out tensor must be same dtype as the input tensor')
         check([1.], [1.], [], {'interpolation': 'random_mode'},
-              r"interpolation must be one of linear, lower, higher, midpoint and nearest, but got random_mode")
+              r"interpolation must be one of linear, lower, higher, midpoint or nearest, but got random_mode")
 
         if self.device_type == "cpu":
             check([1.], [0.5, 1.1, -1], [], {}, r'q values must be in the range \[0, 1\]')

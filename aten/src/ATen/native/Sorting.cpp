@@ -107,7 +107,7 @@ QUANTILE_INTERPOLATION_MODE get_quantile_interpolation_mode(
   } else {
     TORCH_CHECK(
         false,
-        "quantile() interpolation must be one of linear, lower, higher, midpoint and nearest, but got ",
+        "quantile() interpolation must be one of linear, lower, higher, midpoint or nearest, but got ",
         interpolation);
   }
 }
