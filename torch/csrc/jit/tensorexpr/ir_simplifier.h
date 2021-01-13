@@ -563,7 +563,6 @@ class TORCH_API TermExpander : public IRSimplifierBase {
 
   // Eliminate zero length allocations.
   Stmt* mutate(const Allocate* v) override;
-  Expr* mutate(const Buf* v) override;
   Stmt* mutate(const Free* v) override;
 
   // Override to enable condition fusing.
