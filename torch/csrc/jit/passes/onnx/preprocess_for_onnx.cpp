@@ -200,7 +200,7 @@ static void fuseListAndListUnpack(Block* b) {
             it->input()
                 ->type()
                 ->castRaw<ListType>()
-                .getElementType()
+                ->getElementType()
                 ->cast<IntType>()) {
           Node* gather_indices = b->owningGraph()->create(onnx::Constant, 1);
           gather_indices->insertBefore(*it);
