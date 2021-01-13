@@ -675,7 +675,6 @@ class TestScriptPy3(JitTestCase):
         mod = ModuleWithProperties(3)
         scripted_mod = torch.jit.script(mod)
 
-        # raises wrong AttributeError
         with self.assertRaisesRegex(AttributeError, "has no attribute"):
             scripted_mod.ignored_attr
 

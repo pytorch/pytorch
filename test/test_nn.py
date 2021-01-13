@@ -1211,6 +1211,7 @@ class TestNN(NNTestCase):
         with self.assertRaises(KeyError):
             m.add_module('attribute_name', nn.Module())
 
+    @unittest.expectedFailure
     def test_getattr_with_property(self):
         class Model(nn.Module):
             @property
@@ -1219,8 +1220,9 @@ class TestNN(NNTestCase):
 
         model = Model()
 
-        # raises wrong AttributeError 
-        with self.assertRaisesRegex(AttributeError, "has no attribute"):
+        with self.assertRaisesRegex(
+                AttributeError,
+                r"'Model' object has no attribute 'something_that_doesnt_exist'"):
             model.some_property
 
     def test_Sequential_getitem(self):
