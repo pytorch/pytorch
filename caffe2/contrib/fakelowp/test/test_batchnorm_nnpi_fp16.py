@@ -1,5 +1,4 @@
 import numpy as np
-import unittest
 
 import caffe2.python.fakelowp.init_shared_libs  # noqa
 from hypothesis import given, settings
