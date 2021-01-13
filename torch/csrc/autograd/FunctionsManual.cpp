@@ -1877,6 +1877,22 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
   }
 }
 
+Tensor elu_double_backward(
+    const Tensor& grad,
+    const Tensor& grad_output,
+    Scalar alpha,
+    Scalar scale,
+    Scalar input_scale,
+    bool is_result,
+    const Tensor& self_or_result) {
+
+    if (is_result) {
+      return grad * grad_output * input_scale * (self_or_result < 0).type_as(grad);
+    } else {
+      return at::elu_backward(grad * grad_output * input_scale, alpha, scale, input_scale, is_result, self_or_result) * (self_or_result < 0).type_as(grad);
+    }
+}
+
 // https://j-towns.github.io/papers/svd-derivative.pdf
 //
 // This makes no assumption on the signs of sigma.
@@ -1931,10 +1947,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   }
 
   auto uh = u.conj().transpose(-2, -1);
-  auto im = at::eye(m, self.options());
-  auto in = at::eye(n, self.options());
-  auto sigma_mat = sigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).to(self.dtype());
-  auto sigma_mat_inv = sigma.pow(-1).diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).to(self.dtype());
+  auto sigma_inv = sigma.pow(-1);
   auto sigma_sq = sigma.pow(2);
   auto F = sigma_sq.unsqueeze(-2) - sigma_sq.unsqueeze(-1);
   // The following two lines invert values of F, and fills the diagonal with 0s.
@@ -1947,9 +1960,12 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 
   if (gu.defined()) {
     auto guh = gu.conj().transpose(-2, -1);
-    u_term = at::matmul(u, at::matmul(F.mul(at::matmul(uh, gu) - at::matmul(guh, u)), sigma_mat));
+    u_term = at::matmul(u, F.mul(at::matmul(uh, gu) - at::matmul(guh, u)) * sigma.unsqueeze(-2));
     if (m > k) {
-      u_term = u_term + at::matmul(im - at::matmul(u, uh), at::matmul(gu, sigma_mat_inv));
+      // projection operator onto subspace orthogonal to span(U) defined as I - UU^H
+      auto proj_on_ortho_u = -at::matmul(u, uh);
+      proj_on_ortho_u.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).add_(1);
+      u_term = u_term + proj_on_ortho_u.matmul(gu * sigma_inv.unsqueeze(-2));
     }
     u_term = at::matmul(u_term, vh);
   } else {
@@ -1958,9 +1974,12 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 
   if (gv.defined()) {
     auto gvh = gv.conj().transpose(-2, -1);
-    v_term = at::matmul(sigma_mat, at::matmul(F.mul(at::matmul(vh, gv) - at::matmul(gvh, v)), vh));
+    v_term = sigma.unsqueeze(-1) * at::matmul(F.mul(at::matmul(vh, gv) - at::matmul(gvh, v)), vh);
     if (n > k) {
-      v_term = v_term + at::matmul(sigma_mat_inv, at::matmul(gvh, in - at::matmul(v, vh)));
+      // projection operator onto subspace orthogonal to span(V) defined as I - VV^H
+      auto proj_on_v_ortho = -at::matmul(v, vh);
+      proj_on_v_ortho.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).add_(1);
+      v_term = v_term + sigma_inv.unsqueeze(-1) * at::matmul(gvh, proj_on_v_ortho);
     }
     v_term = at::matmul(u, v_term);
   } else {
@@ -1971,10 +1990,10 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   // https://giggleliu.github.io/2019/04/02/einsumbp.html
   // https://arxiv.org/abs/1909.02659
   if (self.is_complex() && gu.defined()) {
-    // computes L = Identity.mul(uh @ gu)
-    Tensor L = at::matmul(uh, gu).diagonal(0, -2, -1).diag_embed(0, -2, -1);
-    L = L - L.conj().transpose(-2, -1);
-    Tensor imag_term = 0.5 * at::matmul(at::matmul(at::matmul(u, L), sigma_mat_inv), vh);
+    Tensor L = at::matmul(uh, gu).diagonal(0, -2, -1);
+    at::real(L).zero_();
+    at::imag(L).mul_(sigma_inv);
+    Tensor imag_term = at::matmul(u * L.unsqueeze(-2), vh);
     return u_term + sigma_term + v_term + imag_term;
   }
 

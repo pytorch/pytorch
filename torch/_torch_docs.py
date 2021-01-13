@@ -7105,10 +7105,10 @@ Keyword args:
 """.format(**factory_like_common_args))
 
 add_docstr(torch.randperm,
-           r"""
-randperm(n, \*, generator=None, out=None, dtype=torch.int64, layout=torch.strided, device=None, requires_grad=False,
-    pin_memory=False) -> LongTensor
-
+           """
+randperm(n, *, generator=None, out=None, dtype=torch.int64,layout=torch.strided, \
+device=None, requires_grad=False, pin_memory=False) -> Tensor
+""" + r"""
 Returns a random permutation of integers from ``0`` to ``n - 1``.
 
 Args:
@@ -10049,8 +10049,7 @@ Args:
         array.
 
 Returns:
-    Tensor: Repeated tensor which has the same shape as input, except along the
-     given axis.
+    Tensor: Repeated tensor which has the same shape as input, except along the given axis.
 
 Example::
 

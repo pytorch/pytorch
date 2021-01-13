@@ -379,9 +379,10 @@ std::string wireSerialize(
       // converts CUDA tensor to cpu and data() might get destructed as we go
       // out of scope of this loop.
       auto writeableTensorData = jit::getWriteableTensorData(tensorData[i]);
-      entries.push_back({c10::to_string(i),
-                         writeableTensorData.data(),
-                         writeableTensorData.sizeInBytes()});
+      entries.push_back(
+          {c10::to_string(i),
+           writeableTensorData.data(),
+           writeableTensorData.sizeInBytes()});
     }
   }
 
