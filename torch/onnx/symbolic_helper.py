@@ -134,7 +134,8 @@ def parse_args(*arg_descriptors):
             assert len(arg_descriptors) >= len(args)
             sig = inspect.signature(fn)
             arg_names = list(sig.parameters.keys())[1:]
-            args = [_parse_arg(arg, arg_desc, arg_name, fn.__name__) for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)]  # type: ignore
+            args = [_parse_arg(arg, arg_desc, arg_name, fn.__name__)
+                    for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)]  # type: ignore
             # only support _outputs in kwargs
             assert len(kwargs) <= 1
             if len(kwargs) == 1:
