@@ -320,10 +320,7 @@ static inline int64_t count_specified_dimensions(const ArrayRef<TensorIndex>& in
 // The rest of the functions are in `at::indexing::impl` namespace, signifying
 // that they shouldn't be used from Python indexing implementation.
 static inline Tensor scalarToTensor(Scalar v, const TensorOptions& options, const at::Device& self_device) {
-  if (self_device == at::kCPU && !v.isComplex() &&
-      options.dtype_opt()->toScalarType() != ScalarType::ComplexDouble &&
-      options.dtype_opt()->toScalarType() != ScalarType::ComplexFloat &&
-      options.dtype_opt()->toScalarType() != ScalarType::ComplexHalf) {
+  if (self_device == at::kCPU) {
     return at::detail::scalar_tensor_static(v, options.dtype_opt()->toScalarType(), self_device);
   } else {
     return impl::scalarToTensorNonNativeDeviceType(v, options);
