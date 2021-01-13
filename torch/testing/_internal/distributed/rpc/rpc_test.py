@@ -5068,6 +5068,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         s1 = torch.cuda.Stream(device=x.device)
         with torch.cuda.stream(s1):
             torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+            s1.wait_stream(s0)
             z = x + y
             event = torch.cuda.Event()
             event.record(s1)
