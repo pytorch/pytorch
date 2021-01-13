@@ -8477,6 +8477,11 @@ flip(input, dims) -> Tensor
 
 Reverse the order of a n-D tensor along given axis in dims.
 
+.. note::
+    `torch.flip` makes a copy of :attr:`input`'s data. This is different from NumPy's `np.flip`,
+    which returns a view in constant time. Since copying a tensor's data is more work than viewing that data,
+    `torch.flip` is expected to be slower than `np.flip`.
+
 Args:
     {input}
     dims (a list or tuple): axis to flip on
@@ -8502,13 +8507,18 @@ add_docstr(torch.fliplr,
            r"""
 fliplr(input) -> Tensor
 
-Flip array in the left/right direction, returning a new tensor.
+Flip tensor in the left/right direction, returning a new tensor.
 
 Flip the entries in each row in the left/right direction.
 Columns are preserved, but appear in a different order than before.
 
 Note:
-    Equivalent to input[:,::-1]. Requires the array to be at least 2-D.
+    Requires the tensor to be at least 2-D.
+
+.. note::
+    `torch.fliplr` makes a copy of :attr:`input`'s data. This is different from NumPy's `np.fliplr`,
+    which returns a view in constant time. Since copying a tensor's data is more work than viewing that data,
+    `torch.fliplr` is expected to be slower than `np.fliplr`.
 
 Args:
     input (Tensor): Must be at least 2-dimensional.
@@ -8528,13 +8538,18 @@ add_docstr(torch.flipud,
            r"""
 flipud(input) -> Tensor
 
-Flip array in the up/down direction, returning a new tensor.
+Flip tensor in the up/down direction, returning a new tensor.
 
 Flip the entries in each column in the up/down direction.
 Rows are preserved, but appear in a different order than before.
 
 Note:
-    Equivalent to input[::-1,...]. Requires the array to be at least 1-D.
+    Requires the tensor to be at least 1-D.
+
+.. note::
+    `torch.flipud` makes a copy of :attr:`input`'s data. This is different from NumPy's `np.flipud`,
+    which returns a view in constant time. Since copying a tensor's data is more work than viewing that data,
+    `torch.flipud` is expected to be slower than `np.flipud`.
 
 Args:
     input (Tensor): Must be at least 1-dimensional.
