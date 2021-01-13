@@ -2685,7 +2685,7 @@ class TestONNXRuntime(unittest.TestCase):
 
             x = torch.randint(10, (4, 4), dtype=torch.int64)
             self.run_test(ReducedOpModule(), x)
-
+            
         # torch.mean only supports float types
         # ORT does not support double ReduceProd for double
         if op != torch.prod and op != torch.mean:
@@ -4274,7 +4274,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     @disableScriptTest()  # scripting prim::Uninitialized, prim::dtype, prim::unchecked_cast
     @skipIfUnsupportedMinOpsetVersion(10)
-    @skipIfUnsupportedOpsetVersion([12, 13])  # Due to ONNX Loop shape inference issue
     def test_embedding_bag_1d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
             def forward(self, embedding_matrix, input, offset, weights):
@@ -4290,7 +4289,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     @disableScriptTest()  # scripting prim::Uninitialized, prim::dtype, prim::unchecked_cast
     @skipIfUnsupportedMinOpsetVersion(10)
-    @skipIfUnsupportedOpsetVersion([12, 13])  # Due to ONNX Loop shape inference issue
     def test_embedding_bag_2d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
             def forward(self, embedding_matrix, input, weights):
