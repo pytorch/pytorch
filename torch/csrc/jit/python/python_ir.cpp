@@ -504,6 +504,17 @@ void initPythonIRBindings(PyObject* module_) {
             return py::make_iterator(n.inputs().begin(), n.inputs().end());
           })
       .def(
+          "schema",
+          [](Node& n) {
+            std::stringstream ss;
+            if (auto sch = n.maybeSchema()) {
+              ss << n.schema();
+            } else {
+              ss << "(no schema)";
+            }
+            return ss.str();
+          })
+      .def(
           "outputs",
           [](Node& n) {
             return py::make_iterator(n.outputs().begin(), n.outputs().end());
@@ -568,14 +579,12 @@ void initPythonIRBindings(PyObject* module_) {
       .AS(removeAttribute)
       .AS(attributeNames)
 #undef AS
-#define CREATE_ACCESSOR(Kind, method)                          \
-  def(#method "_",                                             \
-      [](Node& n, const char* name, Kind##Attr::ValueType v) { \
-        return n.method##_(Symbol::attr(name), std::move(v));  \
-      })                                                       \
-      .def(#method, [](Node& n, const char* name) {            \
-        return n.method(Symbol::attr(name));                   \
-      })
+#define CREATE_ACCESSOR(Kind, method)                                       \
+  def(#method "_", [](Node& n, const char* name, Kind##Attr::ValueType v) { \
+    return n.method##_(Symbol::attr(name), std::move(v));                   \
+  }).def(#method, [](Node& n, const char* name) {                           \
+    return n.method(Symbol::attr(name));                                    \
+  })
       .CREATE_ACCESSOR(Float, f)
       .CREATE_ACCESSOR(Floats, fs)
       .CREATE_ACCESSOR(String, s)
@@ -625,7 +634,8 @@ void initPythonIRBindings(PyObject* module_) {
           [](Node& n, const char* name, const at::Tensor& v) {
             return n.t_(
                 Symbol::attr(name),
-                autograd::Variable(v.view({})).set_requires_grad(false));
+                autograd::Variable(v.view(std::vector<int64_t>{}))
+                    .set_requires_grad(false));
           })
       .def(
           "z",
@@ -634,7 +644,8 @@ void initPythonIRBindings(PyObject* module_) {
           "zs_",
           [](Node& n, const char* name, TensorsAttr::ValueType v) {
             for (auto& i : v) {
-              i = autograd::Variable(i.view({})).set_requires_grad(false);
+              i = autograd::Variable(i.view(std::vector<int64_t>{}))
+                      .set_requires_grad(false);
             }
             return n.ts_(Symbol::attr(name), std::move(v));
           })
