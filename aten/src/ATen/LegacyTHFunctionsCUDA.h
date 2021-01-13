@@ -44,8 +44,6 @@ Tensor & _th_potri_out(Tensor & output, const Tensor & self, bool upper);
 Tensor _th_potri(const Tensor & self, bool upper);
 std::tuple<Tensor &,Tensor &> _th_geqrf_out(Tensor & res1, Tensor & res2, const Tensor & self);
 std::tuple<Tensor,Tensor> _th_geqrf(const Tensor & self);
-std::tuple<Tensor &,Tensor &> _th_multinomial_alias_setup_out(Tensor & J, Tensor & q, const Tensor & probs);
-std::tuple<Tensor,Tensor> _th_multinomial_alias_setup(const Tensor & probs);
 Tensor & _th_multinomial_alias_draw_out(Tensor & result, const Tensor & q, const Tensor & J, int64_t num_samples, c10::optional<Generator> generator);
 Tensor _th_multinomial_alias_draw(const Tensor & q, const Tensor & J, int64_t num_samples, c10::optional<Generator> generator);
 Tensor & _th_copy_ignoring_overlaps_(Tensor & self, const Tensor & src);
