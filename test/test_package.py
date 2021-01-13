@@ -1,5 +1,5 @@
-from unittest import main, skipIf
-from torch.testing._internal.common_utils import TestCase, IS_WINDOWS
+from unittest import skipIf
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from tempfile import NamedTemporaryFile
 from torch.package import PackageExporter, PackageImporter
 from pathlib import Path
@@ -392,4 +392,4 @@ def load():
 
 
 if __name__ == '__main__':
-    main()
+    run_tests()
