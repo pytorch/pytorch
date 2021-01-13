@@ -11,10 +11,6 @@ struct Call {
   SourceRange caller_range;
 };
 
-struct Hint {
-  std::string hint;
-};
-
 struct TORCH_API ErrorReport : public std::exception {
   ErrorReport(const ErrorReport& e);
 
@@ -36,13 +32,6 @@ struct TORCH_API ErrorReport : public std::exception {
     static void update_pending_range(const SourceRange& range);
   };
 
-  struct TORCH_API HintStack {
-    // These hints are used to report extra information that is relevant to the
-    // end user if an error appears during compilation
-    HintStack(const std::string& hint);
-    ~HintStack();
-  };
-
   static std::string current_call_stack();
 
  private:
@@ -53,7 +42,6 @@ struct TORCH_API ErrorReport : public std::exception {
   SourceRange context;
   mutable std::string the_message;
   std::vector<Call> error_stack;
-  std::vector<Hint> hint_stack;
 };
 
 template <typename T>

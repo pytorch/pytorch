@@ -636,16 +636,6 @@ struct to_ir {
     }
     method.setSchema(emitDef(def, self, graph->block()));
 
-    // check schemas for hooks and prehooks
-    if (self) {
-      const auto class_self = self->getClassType();
-      if (class_self->findForwardHook(method.name())) {
-        class_self->checkForwardHookSchema(class_self->getForwardHooks().size() - 1);
-      } else if (class_self->findForwardPreHook(method.name())) {
-        class_self->checkForwardPreHookSchema(class_self->getForwardPreHooks().size() - 1);
-      }
-    }
-
     // NB ORDERING: SSA conversion has to occur before
     // lifting of closures and forks, this way closures are converted
     // to SSA while part of their original graph, and closures are ready to
@@ -4279,6 +4269,20 @@ void CompilationUnit::define_hooks(
     return existing_hook;
   };
 
+  // build_schema for checking
+  auto build_schema = [&](const Def& hook_def, const ResolverPtr& hook_res) -> FunctionSchema {
+    ScriptTypeParser typeParser(hook_res);
+    FunctionSchema schema =
+        typeParser.parseSchemaFromDef(hook_def, true /* skip_self*/);
+    // need to add self as the first because we skipped it
+    std::vector<Argument> arguments;
+    arguments.emplace_back(
+        Argument(hook_def.decl().params()[0].ident().name(), self->getClassType()));
+    arguments.insert(
+        arguments.end(), schema.arguments().begin(), schema.arguments().end());
+    return schema.cloneWithArguments(arguments);
+  }; 
+
   // define hooks
   for (size_t i = 0; i < hookDefs.size(); i++) {
     // check to see if already defined this hook
@@ -4301,8 +4305,7 @@ void CompilationUnit::define_hooks(
     function_table[fn->name()] = fn.get();
     functions.emplace_back(fn.get());
     this->register_function(std::move(fn));
-    ErrorReport::HintStack hint(
-        self->getClassType()->getForwardHookErrorMessage(i));
+    self->getClassType()->checkForwardHookSchema(i, build_schema(hookDefs[i], hookResolvers[i]));
     functions.back()->ensure_defined();
   }
 
@@ -4328,8 +4331,7 @@ void CompilationUnit::define_hooks(
     function_table[fn->name()] = fn.get();
     functions.emplace_back(fn.get());
     this->register_function(std::move(fn));
-    ErrorReport::HintStack hint(
-        self->getClassType()->getForwardPreHookErrorMessage(i));
+    self->getClassType()->checkForwardPreHookSchema(i, build_schema(preHookDefs[i], preHookResolvers[i]));
     functions.back()->ensure_defined();
   }
 }

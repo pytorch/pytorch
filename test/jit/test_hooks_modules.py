@@ -105,10 +105,10 @@ def test_module_no_forward_input_model():
     # Test module level hooks with no forward input
     m = ModuleNoForwardInputs("outer_mod_name", "inner_mod_name")
 
-    def pre_hook(self, input: Tuple[None]):
+    def pre_hook(self, input: Tuple[()]) -> None:
         assert self.name == "outer_mod_name"
 
-    def forward_hook(self, input: Tuple[None], output: None):
+    def forward_hook(self, input: Tuple[()], output: None):
         assert self.name == "outer_mod_name"
 
     m.register_forward_pre_hook(pre_hook)
@@ -121,10 +121,10 @@ def test_submodule_no_forward_input_model():
     # Test submodule level hooks with no forward input
     m = ModuleNoForwardInputs("outer_mod_name", "inner_mod_name")
 
-    def pre_hook(self, input: Tuple[None]):
+    def pre_hook(self, input: Tuple[()]) -> None:
         assert self.name == "inner_mod_name"
 
-    def forward_hook(self, input: Tuple[None], output: None):
+    def forward_hook(self, input: Tuple[()], output: None):
         assert self.name == "inner_mod_name"
 
     m.submodule.register_forward_pre_hook(pre_hook)
@@ -138,7 +138,7 @@ def test_module_forward_multiple_inputs_model():
     # inputs and returns
     m = ModuleForwardMultipleInputs("outer_mod_name", "inner_mod_name")
 
-    def pre_hook(self, input: Tuple[List[str], str]):
+    def pre_hook(self, input: Tuple[List[str], str]) -> Tuple[List[str], str]:
         assert self.name == "outer_mod_name"
         assert input[0][0] == "a"
         return ["pre_hook_override_name"], "pre_hook_override"
@@ -160,12 +160,12 @@ def test_module_multiple_hooks_multiple_inputs_model():
     # in correct order and pass correct information between each other
     m = ModuleForwardMultipleInputs("outer_mod_name", "inner_mod_name")
 
-    def pre_hook1(self, input: Tuple[List[str], str]):
+    def pre_hook1(self, input: Tuple[List[str], str]) -> Tuple[List[str], str]:
         assert self.name == "outer_mod_name"
         assert input[0][0] == "a"
         return ["pre_hook_override_name"], "pre_hook_override"
 
-    def pre_hook2(self, input: Tuple[List[str], str]):
+    def pre_hook2(self, input: Tuple[List[str], str]) -> Tuple[List[str], str]:
         assert self.name == "outer_mod_name"
         assert input[0][0] == "pre_hook_override_name"
         return ["pre_hook_override_name2"], "pre_hook_override"
@@ -199,7 +199,7 @@ def test_module_forward_single_input_model():
     # Test module level hooks work for forward with single input
     m = ModuleForwardSingleInput("outer_mod_name", "inner_mod_name")
 
-    def pre_hook(self, input: Tuple[str]):
+    def pre_hook(self, input: Tuple[str]) -> Tuple[str]:
         assert self.name == "outer_mod_name"
         assert input[0] == "a"
         return ("pre_hook_override_name",)
@@ -220,7 +220,7 @@ def test_module_same_hook_repeated_model():
     # Test modules can run same hook multiple times
     m = ModuleForwardSingleInput("outer_mod_name", "inner_mod_name")
 
-    def pre_hook(self, input: Tuple[str]):
+    def pre_hook(self, input: Tuple[str]) -> Tuple[str]:
         assert self.name == "outer_mod_name"
         input_change = input[0] + "_ph"
         return (input_change,)
@@ -243,7 +243,7 @@ def test_module_hook_return_nothing_model():
     # Test module level hooks that reutrn nothing
     m = ModuleForwardSingleInput("outer_mod_name", "inner_mod_name")
 
-    def pre_hook(self, input: Tuple[str]):
+    def pre_hook(self, input: Tuple[str]) -> None:
         assert self.name == "outer_mod_name"
         assert input[0] == "a"
 
@@ -261,12 +261,12 @@ def test_module_multiple_hooks_single_input_model():
     # Test modules can run multiple hooks with single input
     m = ModuleForwardSingleInput("outer_mod_name", "inner_mod_name")
 
-    def pre_hook1(self, input: Tuple[str]):
+    def pre_hook1(self, input: Tuple[str]) -> Tuple[str]:
         assert self.name == "outer_mod_name"
         assert input[0] == "a"
         return ("pre_hook_override_name1",)
 
-    def pre_hook2(self, input: Tuple[str]):
+    def pre_hook2(self, input: Tuple[str]) -> Tuple[str]:
         assert self.name == "outer_mod_name"
         assert input[0] == "pre_hook_override_name1"
         return ("pre_hook_override_name2",)
@@ -297,7 +297,7 @@ def test_submodule_forward_multiple_inputs_model():
     # Test submodules can run hooks that have multiple forward inputs
     m = ModuleForwardMultipleInputs("outer_mod_name", "inner_mod_name")
 
-    def pre_hook(self, input: Tuple[List[str], str]):
+    def pre_hook(self, input: Tuple[List[str], str]) -> Tuple[List[str], str]:
         assert self.name == "inner_mod_name"
         assert input[0][1] == "outer_mod_name"
         return ["pre_hook_override_name"], "pre_hook_override"
@@ -319,12 +319,12 @@ def test_submodule_multiple_hooks_multiple_inputs_model():
     # forward inputs
     m = ModuleForwardMultipleInputs("outer_mod_name", "inner_mod_name")
 
-    def pre_hook1(self, input: Tuple[List[str], str]):
+    def pre_hook1(self, input: Tuple[List[str], str]) -> Tuple[List[str], str]:
         assert self.name == "inner_mod_name"
         assert input[1] == "no_pre_hook"
         return ["pre_hook_override_name"], "pre_hook_override1"
 
-    def pre_hook2(self, input: Tuple[List[str], str]):
+    def pre_hook2(self, input: Tuple[List[str], str]) -> Tuple[List[str], str]:
         assert self.name == "inner_mod_name"
         assert input[1] == "pre_hook_override1"
         return ["pre_hook_override_name"], "pre_hook_override2"
@@ -360,7 +360,7 @@ def test_submodule_forward_single_input_model():
     # passed to forward
     m = ModuleForwardSingleInput("outer_mod_name", "inner_mod_name")
 
-    def pre_hook(self, input: Tuple[str]):
+    def pre_hook(self, input: Tuple[str]) -> Tuple[str]:
         assert self.name == "inner_mod_name"
         assert input[0] == "a_outermod"
         return ("pre_hook_override_name",)
@@ -380,7 +380,7 @@ def test_submodule_same_hook_repeated_model():
     # Test submodules can run same hooks multiple times
     m = ModuleForwardSingleInput("outer_mod_name", "inner_mod_name")
 
-    def pre_hook(self, input: Tuple[str]):
+    def pre_hook(self, input: Tuple[str]) -> Tuple[str]:
         assert self.name == "inner_mod_name"
         changed = input[0] + "_ph"
         return (changed,)
@@ -402,7 +402,7 @@ def test_submodule_hook_return_nothing_model():
     # Test submodules can run hooks that return nothing
     m = ModuleForwardSingleInput("outer_mod_name", "inner_mod_name")
 
-    def pre_hook(self, input: Tuple[str]):
+    def pre_hook(self, input: Tuple[str]) -> None:
         assert self.name == "inner_mod_name"
         assert input[0] == "a_outermod"
 
@@ -420,12 +420,12 @@ def test_submodule_multiple_hooks_single_input_model():
     # Test submodules can run multiple hooks that have a single input
     m = ModuleForwardSingleInput("outer_mod_name", "inner_mod_name")
 
-    def pre_hook1(self, input: Tuple[str]):
+    def pre_hook1(self, input: Tuple[str]) -> Tuple[str]:
         assert self.name == "inner_mod_name"
         assert input[0] == "a_outermod"
         return ("pre_hook_override_name",)
 
-    def pre_hook2(self, input: Tuple[str]):
+    def pre_hook2(self, input: Tuple[str]) -> Tuple[str]:
         assert self.name == "inner_mod_name"
         assert input[0] == "pre_hook_override_name"
         return ("pre_hook_override_name2",)
@@ -462,11 +462,11 @@ def test_forward_tuple_input_model():
     # enforced by the schema checker.
     m = ModuleForwardTupleInput("outer_mod_name", "inner_mod_name")
 
-    def pre_hook_outermod(self, input: Tuple[Tuple[int]]):
+    def pre_hook_outermod(self, input: Tuple[Tuple[int]]) -> Tuple[Tuple[int]]:
         # 'return (11,)' doesn't work with eager, inner tuple lost
         return ((11,),)
 
-    def pre_hook_innermod(self, input: Tuple[Tuple[int]]):
+    def pre_hook_innermod(self, input: Tuple[Tuple[int]]) -> Tuple[Tuple[int]]:
         # 'return (22,)' doesn't work with eager, inner tuple lost
         return ((22,),)
 
@@ -490,7 +490,7 @@ def test_submodule_direct_forward_invocation_model():
     )
     m_submod_call = ModuleForwardSingleInput("outer_mod_name", "inner_mod_name")
 
-    def pre_hook(self, input: Tuple[str]):
+    def pre_hook(self, input: Tuple[str]) -> Tuple[str]:
         return ("pre_hook_override_name",)
 
     def forward_hook(self, input: Tuple[str], output: str):
@@ -513,7 +513,7 @@ def test_submodule_forward_single_input_return_not_tupled_model():
     # that aren't wrapped in a tuple (to match eager behavior)
     m = ModuleForwardSingleInput("outer_mod_name", "inner_mod_name")
 
-    def pre_hook(self, input: Tuple[str]):
+    def pre_hook(self, input: Tuple[str]) -> str:
         assert self.name == "inner_mod_name"
         assert input[0] == "a_outermod"
         # return is wrapped in tuple in other test cases

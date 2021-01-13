@@ -51,15 +51,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       size_t tuple_size = tuple.size();
       auto tuple_type = type->cast<TupleType>();
       const auto& elem_types = tuple_type->elements();
-      // empty_none_tuple used for static forward hooks. Need a way to
-      // match a type to eager's empty 'tuple' input for python calls
-      // to scripted pre_hook/hook when forward has no inputs.
-      // Tuple[] and 'tuple' aren't valid types and providing no type
-      // results in the inferred type of 'Tensor' for the hooks' input.
-      // Using type 'None' also fails to match the python input of '()'
-      bool empty_none_tuple = tuple_size == 0 && elem_types.size() == 1 &&
-          *tuple_type == *TupleType::create({NoneType::get()});
-      if (elem_types.size() != tuple_size && !empty_none_tuple) {
+      if (elem_types.size() != tuple_size) {
         throw py::cast_error(c10::str(
             "Object ",
             py::str(obj),
@@ -67,14 +59,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
             type->repr_str()));
       }
       std::vector<IValue> values;
-      if (empty_none_tuple) {
-        values.reserve(1);
-        values.push_back(toIValue(py::none(), NoneType::get()));
-      } else {
-        values.reserve(tuple_size);
-        for (size_t i = 0; i < tuple_size; ++i) {
-          values.push_back(toIValue(tuple[i], elem_types[i]));
-        }
+      values.reserve(tuple_size);
+      for (size_t i = 0; i < tuple_size; ++i) {
+        values.push_back(toIValue(tuple[i], elem_types[i]));
       }
       return tuple_type->name()
           ? c10::ivalue::Tuple::createNamed(std::move(values), tuple_type)
