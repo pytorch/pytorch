@@ -1,5 +1,10 @@
 import torch
+<<<<<<< HEAD
 from typing import Any
+=======
+from typing import Union, Any
+from torch.types import Device
+>>>>>>> 22927bb351c99282a9cec9024b94bce96535f30a
 # The _get_device_index has been moved to torch.utils._get_device_index
 from torch._utils import _get_device_index as _torch_get_device_index
 
