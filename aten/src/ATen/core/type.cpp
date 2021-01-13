@@ -1090,7 +1090,7 @@ std::string ClassType::getForwardPreHookErrorMessage(int pre_hook_idx) const {
     }
   }
   if (forward_args.size() == 1) {
-    input_types << "None";
+    input_types << "()";
   }
   std::string single_output = "";
   if (forward_args.size() == 2 &&
@@ -1125,7 +1125,7 @@ std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
     }
   }
   if (forward_args.size() == 1) {
-    input_types << "None";
+    input_types << "()";
   }
 
   // create expected output types string
@@ -1151,9 +1151,10 @@ std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
   return return_string;
 }
 
-void ClassType::checkForwardPreHookSchema(int pre_hook_idx) const {
+void ClassType::checkForwardPreHookSchema(
+    int pre_hook_idx, 
+    const FunctionSchema& pre_hook_schema) const {
   const torch::jit::Function* pre_hook = forward_pre_hooks_[pre_hook_idx];
-  const FunctionSchema& pre_hook_schema = pre_hook->getSchema();
   std::string hook_id =
       "Pre-hook '" + pre_hook->name() + "' on module '" + name()->name() + "' ";
   std::string pre_hook_err_msg = getForwardPreHookErrorMessage(pre_hook_idx) + "\n";
@@ -1185,9 +1186,9 @@ void ClassType::checkForwardPreHookSchema(int pre_hook_idx) const {
   if (forward_args.size() == 1) {
     // check for empty forward case
     TORCH_CHECK(
-        input_tuple_types.size() == 1 && input_tuple_types[0]->kind() == NoneType::get()->kind(),
+        input_tuple_types.size() == 0,
         hook_id,
-        "was expecting Tuple[None] as the input type. Received type: '",
+        "was expecting Tuple[()] as the input type. Received type: '",
         input_arg.type()->annotation_str(),
         "'.\n",
         pre_hook_err_msg
@@ -1221,6 +1222,12 @@ void ClassType::checkForwardPreHookSchema(int pre_hook_idx) const {
   // check return type, expected to be either None, the same type as the input,
   // or the contained single type if the input was a tuple containing a single
   // type.
+  TORCH_CHECK(
+            pre_hook_schema.returns().size() != 0,
+            hook_id,
+            "is missing a return annotation. Return annotations are required, please add one.\n",
+            pre_hook_err_msg
+  );
   const Argument return_arg = pre_hook_schema.returns()[0];
   std::string wrong_type_returned_err_msg = hook_id + 
       "returned the wrong type of: '" +
@@ -1254,13 +1261,12 @@ void ClassType::checkForwardPreHookSchema(int pre_hook_idx) const {
   );
   const at::ArrayRef<TypePtr> return_tuple_types =
       return_arg.type()->cast<TupleType>()->elements();
-  // check for edge case of Tuple[None] for when forward has no arguments
+  // check for edge case of Tuple[()] for when forward has no arguments
   if (forward_args.size() == 1) {
     TORCH_CHECK(
-        return_tuple_types.size() == 1 &&
-          return_tuple_types[0]->kind() == NoneType::get()->kind(),
+        return_tuple_types.size() == 0,
         wrong_type_returned_err_msg,
-        " Was expecting either 'None' or 'Tuple[None]' since forward had ",
+        " Was expecting either 'None' or 'Tuple[()]' since forward had ",
         "no arguments.\n",
         pre_hook_err_msg
     );
@@ -1286,9 +1292,10 @@ void ClassType::checkForwardPreHookSchema(int pre_hook_idx) const {
   }
 }
 
-void ClassType::checkForwardHookSchema(int hook_idx) const {
+void ClassType::checkForwardHookSchema(
+      int hook_idx, 
+      const FunctionSchema& hook_schema) const {
   const torch::jit::Function* hook = forward_hooks_[hook_idx];
-  const FunctionSchema& hook_schema = hook->getSchema();
   std::string hook_id =
       "Hook '" + hook->name() + "' on module '" + name()->name() + "' ";
   std::string hook_err_msg = getForwardHookErrorMessage(hook_idx) + "\n";
@@ -1322,10 +1329,9 @@ void ClassType::checkForwardHookSchema(int hook_idx) const {
   if (forward_args.size() == 1) {
     // check for empty forward case
     TORCH_CHECK(
-        input_tuple_types.size() == 1 &&
-          input_tuple_types[0]->kind() == NoneType::get()->kind(),
+        input_tuple_types.size() == 0,
         hook_id,
-        "was expecting Tuple[None] as the input type. Received type: '",
+        "was expecting Tuple[()] as the input type. Received type: '",
         input_arg.type()->annotation_str(), 
         "'.\n",
         hook_err_msg
@@ -1358,9 +1364,9 @@ void ClassType::checkForwardHookSchema(int hook_idx) const {
   }
 
   // check output tuple
-  const Argument& prev_output = (forward_hooks_.size() == 1)
+  const Argument& prev_output = (hook_idx == 0)
             ? forwardSchema.returns()[0]
-            : forward_hooks_[forward_hooks_.size() - 2]->getSchema().returns()[0];
+            : forward_hooks_[hook_idx - 1]->getSchema().returns()[0];
   const Argument return_arg = hook_schema.arguments()[2];
 
   // output tuple needs to match prev_output's return exactly
