@@ -7,7 +7,7 @@ class Adam(Optimizer):
     r"""Implements Adam algorithm.
 
     It has been proposed in `Adam: A Method for Stochastic Optimization`_.
-    The implementation of the L2 penalty is based on the original alogirthm.
+    The implementation of the L2 penalty is based on the original algorithm.
 
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
