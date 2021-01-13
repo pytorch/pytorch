@@ -461,27 +461,15 @@ Tensor& add_(Tensor& self, Scalar other, Scalar alpha) {
 }
 
 Tensor remainder(const Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  return native::remainder(self, other_tensor.toType(self.scalar_type()));
+  return native::remainder(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_(Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  return native::remainder_(self, other_tensor.toType(self.scalar_type()));
+  return native::remainder_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_out(Tensor& result, const Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  return native::remainder_out(result, self, other_tensor.toType(self.scalar_type()));
+  return native::remainder_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {

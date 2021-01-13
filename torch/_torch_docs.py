@@ -7296,17 +7296,17 @@ Computes the element-wise remainder of division.
 The dividend and divisor may contain both for integer and floating point
 numbers. The remainder has the same sign as the divisor :attr:`other`.
 
-When :attr:`other` is a tensor, the shapes of :attr:`input` and
-:attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
 
-Note:
+.. note::
     Complex inputs are not supported. In some cases, it is not mathematically
     possible to satisfy the definition of a modulo operation with complex numbers.
+    See :func:`torch.fmod` for how division by zero is handled.
 
 Args:
     input (Tensor): the dividend
-    other (Tensor or float): the divisor that may be either a number or a
-                               Tensor of the same shape as the dividend
+    other (Tensor or Scalar): the divisor
 
 Keyword args:
     {out}
@@ -7315,7 +7315,7 @@ Example::
 
     >>> torch.remainder(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
     tensor([ 1.,  0.,  1.,  1.,  0.,  1.])
-    >>> torch.remainder(torch.tensor([1., 2, 3, 4, 5]), 1.5)
+    >>> torch.remainder(torch.tensor([1, 2, 3, 4, 5]), 1.5)
     tensor([ 1.0000,  0.5000,  0.0000,  1.0000,  0.5000])
 
 .. seealso::
