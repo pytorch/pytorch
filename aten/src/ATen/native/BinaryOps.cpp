@@ -904,13 +904,7 @@ Tensor& fmod_out(Tensor & result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor& fmod_out(Tensor & result, const Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  // Issue #47779: https://github.com/pytorch/pytorch/issues/47779
-  at::fmod_out(result, self, other_tensor.to(self.dtype()));
-  return result;
+  return native::fmod_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor fmod(const Tensor& self, const Tensor & other) {
@@ -921,12 +915,7 @@ Tensor fmod(const Tensor& self, const Tensor & other) {
 }
 
 Tensor fmod(const Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  // Issue #47779: https://github.com/pytorch/pytorch/issues/47779
-  return native::fmod(self, other_tensor.to(self.dtype()));
+  return native::fmod(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& fmod_(Tensor& self, const Tensor& other) {
@@ -934,7 +923,7 @@ Tensor& fmod_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& fmod_(Tensor& self, Scalar other) {
-  return native::fmod_out(self, self, other);
+  return native::fmod_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& logaddexp_out(Tensor& result, const Tensor& self, const Tensor& other) {
