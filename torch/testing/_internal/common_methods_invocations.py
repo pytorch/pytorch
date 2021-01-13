@@ -482,9 +482,10 @@ class SpectralFuncInfo(OpInfo):
                  skips=None,
                  decorators=None,
                  **kwargs):
+        skips = skips if skips is not None else []
+
         # gradgrad is quite slow
         if not TEST_WITH_SLOW:
-            skips = skips if skips is not None else []
             skips.append(SkipInfo('TestGradients', 'test_fn_gradgrad'))
 
         decorators = decorators if decorators is not None else []
