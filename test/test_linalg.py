@@ -2628,7 +2628,7 @@ class TestLinalg(TestCase):
         for (k, n) in zip([2, 3, 5], [3, 5, 7]):
             b, A = self.solve_test_helper((n,), (n, k), device, dtype)
             x = torch.solve(b, A)[0]
-            self.assertEqual(b, A.mm(x))
+            self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -2642,7 +2642,7 @@ class TestLinalg(TestCase):
             x_exp = torch.stack(x_exp_list)  # Stacked output
             x_act = torch.solve(b, A)[0]  # Actual output
             self.assertEqual(x_exp, x_act)  # Equality check
-            Ax = torch.matmul(A, x_act)
+            Ax = np.matmul(A.cpu(), x_act.cpu())
             self.assertEqual(b, Ax)
 
         for batchsize in [1, 3, 4]:
@@ -5887,7 +5887,7 @@ else:
             for k, n in zip([2, 3, 5], [3, 5, 7]):
                 b, A, LU_data, LU_pivots = self.lu_solve_test_helper((n,), (n, k), pivot, device, dtype)
                 x = torch.lu_solve(b, LU_data, LU_pivots)
-                self.assertEqual(b, A.mm(x))
+                self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
 
         sub_test(True)
         if self.device_type == 'cuda':
@@ -5908,7 +5908,7 @@ else:
                 x_exp = torch.stack(x_exp_list)  # Stacked output
                 x_act = torch.lu_solve(b, LU_data, LU_pivots)  # Actual output
                 self.assertEqual(x_exp, x_act)  # Equality check
-                Ax = torch.matmul(A, x_act)
+                Ax = np.matmul(A.cpu(), x_act.cpu())
                 self.assertEqual(b, Ax)
 
             for batchsize in [1, 3, 4]:
