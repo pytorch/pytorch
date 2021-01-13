@@ -12,7 +12,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
     :class:`~torch.distributed.rpc.TensorPipeAgent`, derived from
     :class:`~torch.distributed.rpc.RpcBackendOptions`.
 
-    Arguments:
+    Args:
         num_worker_threads (int, optional): The number of threads in the
             thread-pool used by
             :class:`~torch.distributed.rpc.TensorPipeAgent` to execute
@@ -58,7 +58,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         function can be called multiple times to incrementally add
         device placement configurations.
 
-        Arguments:
+        Args:
             worker_name (str): Callee name.
             device_map (Dict of int, str, or torch.device): Device placement
                 mappings from this worker to the callee. This map must be

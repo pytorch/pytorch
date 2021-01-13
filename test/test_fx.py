@@ -8,7 +8,7 @@ import sys
 import functools
 import contextlib
 from pathlib import Path
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph
+from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph, wrap
 from torch.fx.experimental import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from copy import deepcopy
@@ -16,10 +16,13 @@ from copy import deepcopy
 from torch.fx.proxy import TraceError
 
 from fx.quantization import Quantizer
+from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 
 from typing import Any, Callable, Dict, NamedTuple, List, Optional, Tuple, Union
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, IS_WINDOWS, IS_SANDCASTLE, IS_MACOS
 from torch.testing._internal.jit_utils import JitTestCase
+
+from fx.named_tup import MyNamedTup
 
 try:
     from torchvision.models import resnet18
@@ -34,6 +37,20 @@ class SimpleTest(torch.nn.Module):
 
 def a_non_torch_leaf(a, b):
     return a + b
+
+# Test wrap() passing both a function name as well as a function
+# directly
+def a_lifted_leaf(a, b):
+    return a[0] + a[1] + b
+
+wrap('a_lifted_leaf')
+# Test wrapping twice doesn't break anything
+wrap('a_lifted_leaf')
+
+def a_lifted_leaf2(a, b):
+    return a[0] + a[1] + b
+
+wrap(a_lifted_leaf2)
 
 class Pair(NamedTuple):
     x : torch.Tensor
@@ -204,6 +221,26 @@ class TestFX(JitTestCase):
         for node in sym.nodes:
             self.assertNotEqual(node.op, 'call_module')
         sym.lint(sym)
+
+    def test_wrap(self):
+        self.assertEqual(3 + 4 + 5, a_lifted_leaf((3, 4), 5))
+
+        def to_trace(y):
+            return a_lifted_leaf((4, y), 3) + a_lifted_leaf((3, 4), 5) + a_lifted_leaf((y, y), y)
+
+        m = symbolic_trace(to_trace)
+        self.assertIn('a_lifted_leaf', m.code)
+        self.assertEqual(27, m(2))
+
+    def test_wrap_fn_directly(self):
+        self.assertEqual(3 + 4 + 5, a_lifted_leaf2((3, 4), 5))
+
+        def to_trace(y):
+            return a_lifted_leaf2((4, y), 3) + a_lifted_leaf2((3, 4), 5) + a_lifted_leaf2((y, y), y)
+
+        m = symbolic_trace(to_trace)
+        self.assertIn('a_lifted_leaf2', m.code)
+        self.assertEqual(27, m(2))
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
@@ -644,6 +681,20 @@ class TestFX(JitTestCase):
         with self.assertRaisesRegex(TraceError, 'Proxy object cannot be iterated.'):
             symbolic_trace(ud)
 
+    def test_pretty_print_targets(self):
+        # Test that Graph pretty-print prints friendly name for targets
+        # in `operator` and `builtins`
+
+        class SomeMod(torch.nn.Module):
+            def forward(self, x):
+                return torch.add(x.foo + x.bar, 3.0)
+
+        traced = symbolic_trace(SomeMod())
+        graph_str = str(traced.graph)
+        self.assertIn('builtins.getattr', graph_str)
+        self.assertIn('operator.add', graph_str)
+        self.assertIn('torch.add', graph_str)
+
     def test_script_tensor_constant(self):
         # TorchScript seems to ignore attributes that start with `__`.
         # We used to call anonymous Tensor values `__tensor_constant*`, but
@@ -655,6 +706,22 @@ class TestFX(JitTestCase):
 
         traced = torch.fx.symbolic_trace(IHaveATensorConstant())
         torch.jit.script(traced)
+
+    def test_len(self):
+        class LenTest(torch.nn.Module):
+            def forward(self, x):
+                return len(x)
+
+        lt = LenTest()
+        with self.assertRaisesRegex(RuntimeError, "'len' is not supported. Replace it with 'torch.fx.len'."):
+            symbolic_trace(lt)
+
+    def test_torch_fx_len(self):
+        class FXLenTest(torch.nn.Module):
+            def forward(self, x):
+                return torch.fx.len(x)
+
+        traced = symbolic_trace(FXLenTest())
 
     def test_torch_custom_ops(self):
         class M(torch.nn.Module):
@@ -842,6 +909,11 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(f)
         x, w = torch.rand(3, 4), torch.rand(4, 4)
         self.assertTrue(any(n.target == torch.relu for n in traced.graph.nodes))
+
+    def test_empty_graph_codegen(self):
+        graph = torch.fx.Graph()
+        gm = torch.fx.GraphModule(torch.nn.Module(), graph)
+        self.assertEqual(gm(), None)
 
     def test_sequential(self):
         m = torch.nn.Sequential(torch.nn.Conv2d(1, 1, 1))
@@ -1139,6 +1211,21 @@ class TestFX(JitTestCase):
         m = M()
         self.checkGraphModule(m, ())
 
+    def test_namedtuple_return_qualname(self):
+        class NamedTupReturn(torch.nn.Module):
+            def forward(self, x):
+                return MyNamedTup(x, x)
+
+        traced = symbolic_trace(NamedTupReturn())
+        input = torch.rand(3, 4)
+        self.assertEqual(traced(input), MyNamedTup(input, input))
+
+    def test_update_args_kwargs_yells_at_you(self):
+        symtraced = symbolic_trace(SimpleTest())
+        node = next(iter(symtraced.graph.nodes))
+        with self.assertRaisesRegex(AttributeError, '__update_args_kwargs'):
+            node.__update_args_kwargs((), {})
+
     def test_torchbind_class_attribute_in_fx(self):
         if TEST_WITH_ROCM or IS_SANDCASTLE or IS_WINDOWS or IS_MACOS:
             self.skipTest("torch.classes._TorchScriptTesting._StackString is registered, skipping")
@@ -1160,6 +1247,21 @@ class TestFX(JitTestCase):
                 return Pair(x, x)
 
         traced = symbolic_trace(NamedTupReturn())
+        input = torch.rand(3, 4)
+        self.assertEqual(traced(input), Pair(input, input))
+
+    def test_return_type_exists(self):
+        class ReturnTypeModule(torch.nn.Module):
+            def other(self, x: List[str]) -> List[str]:
+                return x
+
+            def forward(self, x: List[str]) -> List[str]:
+                return self.other(x)
+
+        traced = symbolic_trace(ReturnTypeModule())
+        self.assertIn("-> typing.List[str]", traced._code)
+        scripted = torch.jit.script(traced)
+        self.assertIn("-> List[str]", scripted.code)
 
 if __name__ == '__main__':
     run_tests()

@@ -6,6 +6,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
+#include <ATen/MemoryOverlap.h>
 
 #include <utility>
 
@@ -223,6 +224,8 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
   TORCH_CHECK(
       k > 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
       "selected index k out of range");
+
+  at::assert_no_overlap(self, values);
 
   _reduction_with_indices_allocate_or_resize_output(
       values, indices, self, dim_, keepdim);

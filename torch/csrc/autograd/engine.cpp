@@ -853,7 +853,7 @@ auto Engine::execute(const edge_list& roots,
   // A frech first time Engine::execute call should start on the CPU device, initialize
   // a new thread local ready queue on CPU or reuse the existing one (if there is one
   // allocated already, i.e. consecutive backward calls, re-entrant backward calls),
-  // then memorize the local_ready_queue in GraphTask
+  // then memoize the local_ready_queue in GraphTask
   init_local_ready_queue();
   bool not_reentrant_backward_call = worker_device == NO_DEVICE;
 
@@ -916,7 +916,6 @@ std::shared_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
   std::unique_lock<std::mutex> lock(graph_task->mutex_);
 
   auto queue = ready_queue(graph_task->cpu_ready_queue_, input_buffer.device());
-  queue->push(NodeTask(graph_task, std::move(graph_root), std::move(input_buffer)));
 
   // worker_device == NO_DEVICE it's a CPU thread and it's trying to drive the
   // autograd engine with corresponding GraphTask, and its NOT a re-entrant call
@@ -929,8 +928,12 @@ std::shared_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     // set the graph_task owner to the current device
     graph_task->owner_ = worker_device;
 
-    // The owning thread start to drive the engine execution with the GraphTask
-    // that has already been pushed to the current CPU thread's ready_queue
+    // Now that all the non-thread safe fields of the graph_task have been populated,
+    // we can enqueue it.
+    queue->push(NodeTask(graph_task, std::move(graph_root), std::move(input_buffer)));
+
+    // The owning thread start to drive the engine execution for any CPU task that
+    // was just pushed or will be added later from other worker threads
     lock.unlock();
     thread_main(graph_task);
     TORCH_INTERNAL_ASSERT(graph_task->future_result_->completed());
@@ -943,6 +946,11 @@ std::shared_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     // If worker_device is any devices (i.e. CPU, CUDA): this is a re-entrant
     //    backward call from that device.
     graph_task->owner_ = worker_device;
+
+    // Now that all the non-thread safe fields of the graph_task have been populated,
+    // we can enqueue it.
+    queue->push(NodeTask(graph_task, std::move(graph_root), std::move(input_buffer)));
+
     if (current_depth >= max_recursion_depth_) {
       // See Note [Reentrant backwards]
       // If reached the max depth, switch to a different thread
@@ -1043,6 +1051,8 @@ auto Engine::ready_queue_by_index(std::shared_ptr<ReadyQueue> cpu_ready_queue, i
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
   } else {
+    // Static cast is ok here as the number of device should never overflow an int.
+    TORCH_INTERNAL_ASSERT(0 <= device_index && device_index < static_cast<int>(device_ready_queues_.size()));
     // See Note [Allocating GPUs to autograd threads]
     // NB: This function would become obsolete if we truly allocated a CPU thread
     // per device, rather than colocate.

@@ -20,6 +20,7 @@ Tensor mkldnn_linear(
 #else // AT_MKLDNN_EBABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/Utils.h>
 
 namespace at {
 namespace native {
@@ -35,7 +36,10 @@ Tensor mkldnn_linear(
   TORCH_CHECK(
       weight.is_mkldnn() && (!bias.defined() || bias.is_mkldnn()),
       "mkldnn_linear: weight and bias need to be mkldnn layout");
-
+  if (self.scalar_type() == ScalarType::BFloat16) {
+    TORCH_CHECK(mkldnn_bf16_device_check(),
+        "mkldnn_linear: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
+  }
   // reshape first if input dim is greater than 2 and the reshape will cost a memory copy.
   auto self_reshaped = self.dim() > 2 ? self.reshape({-1, self.size(self.dim() - 1)}) : self;
   const ideep::tensor x = itensor_from_mkldnn(self_reshaped);
