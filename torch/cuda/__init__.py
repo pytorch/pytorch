@@ -216,7 +216,7 @@ class device(object):
     def __enter__(self):
         if self.idx == -1:
             return
-        self.prev_idx = torch._C._cuda_getDevice()
+        self.prev_idx = torch.cuda.current_device()
         if self.prev_idx != self.idx:
             torch._C._cuda_setDevice(self.idx)
         if not torch.jit.is_scripting():

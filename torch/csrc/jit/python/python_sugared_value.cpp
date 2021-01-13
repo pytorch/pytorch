@@ -226,7 +226,6 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
   const std::unordered_set<std::string> cuda_ops = {
       "current_stream",
       "default_stream",
-      "_cuda_getDevice",
       "_cuda_setDevice",
       "_cuda_setStream",
       "device_index",
