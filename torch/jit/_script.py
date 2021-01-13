@@ -32,6 +32,8 @@ from torch.jit._state import (
     _set_jit_function_cache,
     _set_jit_overload_cache,
 )
+from torch.overrides import (
+    has_torch_function, has_torch_function_unary, has_torch_function_variadic)
 
 torch._C.ScriptMethod.graph_for = _graph_for  # type: ignore
 torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore
@@ -1119,3 +1121,6 @@ def _unwrap_optional(x):
 
 _register_builtin(_unwrap_optional, "aten::_unwrap_optional")
 _register_builtin(_jit_internal.is_scripting, "aten::is_scripting")
+_register_builtin(has_torch_function, "aten::has_torch_function")
+_register_builtin(has_torch_function_unary, "aten::has_torch_function")
+_register_builtin(has_torch_function_variadic, "aten::has_torch_function")
