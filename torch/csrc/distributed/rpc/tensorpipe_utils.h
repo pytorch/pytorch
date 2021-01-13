@@ -31,14 +31,12 @@ struct LazyStreamContext {
 
   LazyStreamContext(const LazyStreamContext& other) = delete;
   LazyStreamContext(LazyStreamContext&& other) = delete;
-
   LazyStreamContext& operator=(const LazyStreamContext& rhs) = delete;
   LazyStreamContext& operator=(LazyStreamContext&& rhs) & = delete;
 
-  explicit LazyStreamContext() {}
+  LazyStreamContext() {}
   virtual void blockCurrentStreams() {}
-  virtual void waitForCurrentStreams(
-      const std::vector<torch::Tensor>&  = {}) {}
+  virtual void waitForCurrentStreams(const std::vector<torch::Tensor>&  = {}) {}
 
 #ifdef USE_CUDA_NOT_ROCM
   virtual std::vector<CUDAStream> getReservedStreams() const {
