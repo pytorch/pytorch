@@ -43,13 +43,6 @@ RegisterOperators const reg({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "cuda::_cuda_getDevice() -> int",
-        [](Stack* stack) {
-          auto v = c10::cuda::current_device();
-          push(stack, static_cast<int>(v));
-        },
-        aliasAnalysisFromSchema()),
-    Operator(
         "cuda::_cuda_setDevice(int64_t val) -> ()",
         [](Stack* stack) {
           int64_t idx = -1;
