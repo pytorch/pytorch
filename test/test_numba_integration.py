@@ -1,16 +1,13 @@
 import unittest
 
 import torch.testing._internal.common_utils as common
-from torch.testing._internal.common_utils import TEST_NUMBA, TEST_NUMPY
+from torch.testing._internal.common_utils import TEST_NUMPY
 from torch.testing._internal.common_cuda import TEST_NUMBA_CUDA, TEST_CUDA, TEST_MULTIGPU
 
 import torch
 
 if TEST_NUMPY:
     import numpy
-
-if TEST_NUMBA:
-    import numba
 
 if TEST_NUMBA_CUDA:
     import numba.cuda

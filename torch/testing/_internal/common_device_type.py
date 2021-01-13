@@ -172,6 +172,8 @@ except ImportError:
 def _construct_test_name(test_name, op, device_type, dtype):
     if op is not None:
         test_name += "_" + op.name.replace('.', '_')
+        if op.variant_test_name:
+            test_name += "_" + op.variant_test_name
 
     test_name += "_" + device_type
 
