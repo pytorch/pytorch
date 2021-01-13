@@ -2537,10 +2537,10 @@ class TestLinalg(TestCase):
             # Correctness test
             x = torch.linalg.solve(A, b)
             if rhs == ():
-                Ax = torch.matmul(A, x.unsqueeze(-1))
+                Ax = np.matmul(A.cpu(), x.unsqueeze(-1).cpu())
                 Ax.squeeze_(-1)
             else:
-                Ax = torch.matmul(A, x)
+                Ax = np.matmul(A.cpu(), x.cpu())
             self.assertEqual(b.expand_as(Ax), Ax)
 
             # Check against NumPy
@@ -3540,9 +3540,9 @@ class TestLinalg(TestCase):
                                                      unitriangular, device, dtype)
             x = torch.triangular_solve(b, A, upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
             if transpose:
-                self.assertEqual(b, A.t().mm(x))
+                self.assertEqual(b, np.matmul(A.t().cpu(), x.cpu()))
             else:
-                self.assertEqual(b, A.mm(x))
+                self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
@@ -3566,7 +3566,7 @@ class TestLinalg(TestCase):
             if transpose:
                 A = A.transpose(-2, -1)
 
-            Ax = torch.matmul(A, x_act)
+            Ax = np.matmul(A.cpu(), x_act.cpu())
             self.assertEqual(b, Ax)
 
         for (upper, unitriangular, transpose), batchsize in itertools.product(itertools.product(
