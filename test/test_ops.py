@@ -339,6 +339,91 @@ class TestCommon(JitCommonTestCase):
         op(*sample.input, *sample.args, **out_kwargs)
         self.assertEqual(expected, out)
 
+    @ops([op for op in op_db if op.aliases])
+    def test_aliases_consistency_eager(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
+
+        for sample in samples:
+            expected_forward = op(*sample.input, *sample.args, **sample.kwargs)
+            for a_op in op.aliases:
+                alias_forward = a_op(*sample.input, *sample.args, **sample.kwargs)
+                self.assertEqual(alias_forward, expected_forward, atol=0, rtol=0)
+
+                if a_op.method_variant is not None:
+                    alias_forward = a_op.method_variant(*sample.input, *sample.args, **sample.kwargs)
+                    self.assertEqual(alias_forward, expected_forward, atol=0, rtol=0)
+
+                if a_op.inplace_variant is not None:
+                    if (op.promotes_integers_to_float and
+                            dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)):
+                        try:
+                            alias_forward = a_op.inplace_variant(
+                                *(clone_input_helper(input) for input in sample.input),
+                                *sample.args,
+                                **sample.kwargs
+                            )
+                            self.fail("Inplace operation on integer tensor that should be promoted to float didn't fail!")
+                        except Exception as e:
+                            pass
+                    else:
+                        alias_forward = a_op.inplace_variant(
+                            *(clone_input_helper(input) for input in sample.input), 
+                            *sample.args, **sample.kwargs
+                        )
+                        self.assertEqual(alias_forward, expected_forward, atol=0, rtol=0)
+
+    @ops([op for op in op_db if op.aliases])
+    def test_aliases_consistency_jit(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
+
+        for sample in samples:
+            func = op.get_op()
+            for a_op in op.aliases:
+
+                variants = {
+                    'function': a_op.op, 'method': a_op.method_variant,
+                }
+
+                # Test traced and scripted consistency
+                for func_type, variant in variants.items():
+                    if variant is None:
+                        continue
+
+                    # run with disable_autodiff_subgraph_inlining(True) to test
+                    #   autodiff support. Context manager forces the graph to contain
+                    #   DifferentiableGraph nodes if they are present
+                    with disable_autodiff_subgraph_inlining():
+                        def fn(*inputs, **kwargs):
+                            output = func(*inputs, **kwargs)
+                            return op.output_func(output)
+
+                            # bfloat16 grad doesn't work for some operators
+                            dtypes_to_grad_check = floating_and_complex_types_and(torch.half) \
+                                if op.skip_bfloat16_grad else floating_and_complex_types_and(torch.half, torch.bfloat16)
+
+                            # Check scripted forward, grad, and grad grad
+                            script_fn = create_script_fn(self, name, func_type, op.output_func)
+
+                            check_against_reference(self,
+                                                    script_fn,
+                                                    fn,
+                                                    (*sample.input,) + sample.args,
+                                                    sample.kwargs,
+                                                    no_grad=(dtype not in dtypes_to_grad_check))
+
+                            # Check traced forward, grad, and grad grad
+                            traced_fn = create_traced_fn(self, variant)
+                            check_against_reference(self,
+                                                    traced_fn,
+                                                    fn,
+                                                    (*sample.input,) + sample.args,
+                                                    sample.kwargs,
+                                                    no_grad=(dtype not in dtypes_to_grad_check))
+
 
 instantiate_device_type_tests(TestOpInfo, globals())
 instantiate_device_type_tests(TestGradients, globals())

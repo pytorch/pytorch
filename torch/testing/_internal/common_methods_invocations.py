@@ -58,6 +58,19 @@ class SampleInput(object):
         self.kwargs = kwargs if kwargs is not None else {}
         self.output_process_fn_grad = output_process_fn_grad
 
+class AliasInfo(object):
+    """Class holds alias information. For example, torch.abs ->
+    torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
+    """
+
+    def __init__(self, alias_name):
+        self.op = _getattr_qual(torch, alias_name)
+        self.method_variant = getattr(torch.Tensor, alias_name, None)
+        self.inplace_variant = getattr(torch.Tensor, alias_name + "_", None)
+
+    def __call__(self, *args, **kwargs):
+        return self.op(*args, **kwargs)
+
 
 _NOTHING = object()  # Unique value to distinguish default from anything else
 
@@ -79,19 +92,6 @@ def _getattr_qual(obj, name, default=_NOTHING):
 # Classes and methods for the operator database
 class OpInfo(object):
     """Operator information and helper functions for acquiring it."""
-
-    class AliasInfo(object):
-        """Class holds alias information. For example, torch.abs ->
-        torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
-        """
-
-        def __init__(self, alias_name):
-            self.op = _getattr_qual(torch, alias_name)
-            self.method_variant = getattr(torch.Tensor, alias_name, None)
-            self.inplace_variant = getattr(torch.Tensor, alias_name + "_", None)
-
-        def __call__(self, *args, **kwargs):
-            return self.op(*args, **kwargs)
 
     def __init__(self,
                  name,  # the string name of the function
@@ -167,7 +167,7 @@ class OpInfo(object):
 
         self.aliases = []
         if aliases is not None:
-            self.aliases = [OpInfo.AliasInfo(a) for a in aliases]
+            self.aliases = [AliasInfo(a) for a in aliases]
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -761,24 +761,28 @@ op_db: List[OpInfo] = [
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble]),
-                        # Reference: https://github.com/pytorch/pytorch/issues/49224
-                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                 dtypes=[torch.int8], active_if=TEST_WITH_ASAN),
-                        SkipInfo('TestUnaryUfuncs', 'test_variant_consistency',
-                                 dtypes=[torch.cfloat, torch.cdouble]),
-                        # TODO: Fix test_out_arg_all_dtypes as torch.empty_like(expected_output) where expected_output=op(input)
-                        # We can break the logic of the loop over all possible types but it is OK.
-                        # https://github.com/pytorch/pytorch/blob/master/test/test_unary_ufuncs.py#L440-L449
-                        SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes',
-                                 dtypes=[torch.cfloat, torch.cdouble]),
-                        SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                                 dtypes=[torch.cfloat, torch.cdouble]),
-                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                 dtypes=[torch.cfloat, torch.cdouble, torch.bfloat16]),
-                    ),
-                    test_inplace_grad=False,
-                    assert_autodiffed=True,
-                    aliases=['absolute', ]),
+                       # Reference: https://github.com/pytorch/pytorch/issues/49224
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.int8], active_if=TEST_WITH_ASAN),
+                       SkipInfo('TestUnaryUfuncs', 'test_variant_consistency',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       # TODO: Fix test_out_arg_all_dtypes as torch.empty_like(expected_output) where expected_output=op(input)
+                       # We can break the logic of the loop over all possible types but it is OK.
+                       # https://github.com/pytorch/pytorch/blob/master/test/test_unary_ufuncs.py#L440-L449
+                       SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                dtypes=[torch.cfloat, torch.cdouble, torch.bfloat16]),
+                       SkipInfo('TestCommon', 'test_aliases_consistency_eager',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestCommon', 'test_aliases_variant_consistency_jit',
+                                dtypes=[torch.cfloat, torch.cdouble, torch.bfloat16]),
+                   ),
+                   test_inplace_grad=False,
+                   assert_autodiffed=True,
+                   aliases=['absolute', ]),
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
     UnaryUfuncInfo('acos',
                    ref=np.arccos,
@@ -808,7 +812,8 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestGradients', 'test_inplace_grad',
                                 dtypes=[torch.cdouble], active_if=IS_WINDOWS),
-                   )),
+                   ),
+                   aliases=['arccos', ]),
     # NOTE: the derivative for inplace acosh is not implemented
     UnaryUfuncInfo('acosh',
                    ref=np.arccosh,
