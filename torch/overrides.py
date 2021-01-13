@@ -28,7 +28,9 @@ import types
 from typing import Dict, Set, List, Any, Callable, Iterable
 
 import torch
-from torch._C import _is_torch_function_enabled, _disabled_torch_function_impl
+from torch._C import (
+    _has_torch_function, _has_torch_function_unary,
+    _has_torch_function_variadic, _add_docstr)
 
 __all__ = [
     "get_ignored_functions",
@@ -167,6 +169,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.nn.functional.upsample_bilinear,
         torch.nn.functional.upsample_nearest,
         torch.nn.functional.has_torch_function,
+        torch.nn.functional.has_torch_function_unary,
+        torch.nn.functional.has_torch_function_variadic,
         torch.nn.functional.handle_torch_function,
         torch.nn.functional.sigmoid,
         torch.nn.functional.hardsigmoid,
@@ -465,6 +469,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
                               cudnn_enabled: -1),
         torch.int_repr: lambda input: -1,
         torch.inverse: lambda input, out=None: -1,
+        torch.linalg.inv: lambda input, out=None: -1,
         torch.is_complex: lambda input: -1,
         torch.is_distributed: lambda input: -1,
         torch.is_floating_point: lambda input: -1,
@@ -552,6 +557,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.mv: lambda input, vec, out=None: -1,
         torch.mvlgamma: lambda input, p: -1,
         torch.narrow: lambda input, dim, start, length: -1,
+        torch.narrow_copy: lambda input, dim, start, length: -1,
         torch.nan_to_num: lambda input, nan=0.0, posinf=None, neginf=None, out=None: -1,
         torch.native_batch_norm: lambda input, weight, bias, running_mean, running_var, training, momentum, eps: -1,
         torch.native_layer_norm: lambda input, normalized_shape, weight=None, bias=None, eps=1e-05: -1,
@@ -705,6 +711,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.pca_lowrank: lambda input, q=None, center=True, niter=2: -1,
         torch.pdist: lambda input, p=2: -1,
         torch.pinverse: lambda input, rcond=1e-15: -1,
+        torch.linalg.pinv: lambda input, rcond=1e-15, hermitian=False: -1,
         torch.pixel_shuffle: lambda input, upscale_factor: -1,
         torch.pixel_unshuffle: lambda input, downscale_factor: -1,
         torch.poisson: lambda input, generator=None: -1,
@@ -1192,33 +1199,52 @@ def handle_torch_function(
                     '__torch_function__: {}'
                     .format(func_name, [type(arg) for arg in overloaded_args]))
 
-def has_torch_function(relevant_args: Iterable[Any]) -> bool:
-    """Check for __torch_function__ implementations in the elements of an iterable.
-
-    Considers exact ``Tensor`` s non-dispatchable.
-
+has_torch_function = _add_docstr(
+    _has_torch_function,
+    r"""Check for __torch_function__ implementations in the elements of an iterable.
+    Considers exact ``Tensor`` s and ``Parameter`` s non-dispatchable.
     Arguments
     ---------
     relevant_args : iterable
         Iterable or aguments to check for __torch_function__ methods.
-
     Returns
     -------
     bool
         True if any of the elements of relevant_args have __torch_function__
         implementations, False otherwise.
-
     See Also
     ________
     torch.is_tensor_like
         Checks if something is a Tensor-like, including an exact ``Tensor``.
     """
-    return _is_torch_function_enabled() and any(
-        type(a) is not torch.Tensor and
-        getattr(a, '__torch_function__', _disabled_torch_function_impl)
-        is not _disabled_torch_function_impl
-        for a in relevant_args
-    )
+)
+
+has_torch_function_unary = _add_docstr(
+    _has_torch_function_unary,
+    r"""Special case of `has_torch_function` for single inputs.
+    Instead of:
+      `has_torch_function((t,))`
+    call:
+      `has_torch_function_unary(t)`
+    which skips unnecessary packing and unpacking work.
+    """
+)
+
+has_torch_function_variadic = _add_docstr(
+    _has_torch_function_variadic,
+    r"""Special case of `has_torch_function` that skips tuple creation.
+
+    This uses the METH_FASTCALL protocol introduced in Python 3.7; for 3.6
+    and before it has roughly equivilent performance compared to
+    `has_torch_function`.
+
+    Instead of:
+      `has_torch_function((a, b))`
+    call:
+      `has_torch_function_variadic(a, b)`
+    which skips unnecessary packing and unpacking work.
+    """
+)
 
 @functools.lru_cache(None)
 def get_overridable_functions() -> Dict[Any, List[Callable]]:

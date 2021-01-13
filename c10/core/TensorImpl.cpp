@@ -92,9 +92,11 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
   // Storages with default devices.
 }
 
+#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 IntArrayRef TensorImpl::sizes() const {
   return sizes_and_strides_.sizes_arrayref();
 }
+#endif
 
 IntArrayRef TensorImpl::strides() const {
   return sizes_and_strides_.strides_arrayref();
