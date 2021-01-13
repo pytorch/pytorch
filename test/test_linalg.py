@@ -4755,7 +4755,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 # So we skip asserting "not supported"
                 b1 = torch.randn(num_batches, M, N, device=device).to(dtype)
                 b2 = torch.randn(num_batches, N, O, device=device).to(dtype)
-                self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED", lambda: torch.bmm(b1, b2))
+                self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
+                                       lambda: torch.bmm(b1, b2))
             return
 
         def invert_perm(p):
@@ -4937,7 +4938,8 @@ else:
                 b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
                 b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
                 t = make_tensor((M, O), device, dtype, low=-1, high=1)
-                self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED", lambda: torch.addbmm(t, b1, b2))
+                self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
+                                       lambda: torch.addbmm(t, b1, b2))
             return
 
         def invert_perm(p):
@@ -5005,7 +5007,8 @@ else:
                 b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
                 b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
                 t = make_tensor((num_batches, M, O), device, dtype, low=-1, high=1)
-                self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED", lambda: torch.baddbmm(t, b1, b2))
+                self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
+                                       lambda: torch.baddbmm(t, b1, b2))
             return
 
         def invert_perm(p):
