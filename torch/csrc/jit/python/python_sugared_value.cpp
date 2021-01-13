@@ -223,13 +223,14 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
     Function& m,
     const std::string& field) {
   // List of all the cuda operators which are supported in JIT
-  const std::unordered_set<std::string> cuda_ops = {"current_stream",
-                                                    "default_stream",
-                                                    "_current_device",
-                                                    "_set_device",
-                                                    "device_index",
-                                                    "device_count",
-                                                    "set_stream"};
+  const std::unordered_set<std::string> cuda_ops = {
+      "current_stream",
+      "default_stream",
+      "_current_device",
+      "_set_device",
+      "device_index",
+      "device_count",
+      "set_stream"};
 
   if (cuda_ops.find(field) != cuda_ops.end()) {
     return std::make_shared<BuiltinFunction>(Symbol::cuda(field), c10::nullopt);
