@@ -985,7 +985,7 @@ static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
 
 /*
   The orgqr function allows reconstruction of an orthogonal (or unitary) matrix Q,
-  from a sequence of elementary reflectors, such as is produced by the geqrf function.
+  from a sequence of elementary reflectors, such as produced by the geqrf function.
 
   Args:
   * `input` - Tensor with the directions of the elementary reflectors below the diagonal,
@@ -1154,10 +1154,14 @@ Tensor& _orgqr_out_helper_cpu(Tensor &result, const Tensor& tau, Tensor& infos, 
 */
 Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, Tensor& infos) {
   TORCH_INTERNAL_ASSERT(input.dim() >= 2);
-  TORCH_INTERNAL_ASSERT(input.size(-1) == input.size(-2));
+  TORCH_INTERNAL_ASSERT(input.size(-2) >= input.size(-1));
+  TORCH_INTERNAL_ASSERT(input.size(-1) >= tau.size(-1));
+
   TORCH_INTERNAL_ASSERT(result.scalar_type() == input.scalar_type());
   TORCH_INTERNAL_ASSERT(result.device() == input.device());
+
   TORCH_INTERNAL_ASSERT(infos.scalar_type() == at::kInt);
+  TORCH_INTERNAL_ASSERT(infos.numel() == std::max<int64_t>(1, batchCount(input)));
 
   // if result has no elements we can modify it
   if (result.numel() == 0) {
@@ -1172,7 +1176,8 @@ Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, T
   TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
   result.copy_(input);
 
-  at::native::resize_output(infos, {std::max<int64_t>(1, batchCount(input))});
+  // infos must be contiguous
+  TORCH_INTERNAL_ASSERT(infos.is_contiguous());
   infos.fill_(0);
 
   auto n = input.size(-1);
@@ -1182,8 +1187,8 @@ Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, T
 
 Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
   TORCH_CHECK(input.dim() >= 2, "orgqr: input must have at least 2 dimensions.");
-  TORCH_CHECK(input.size(-2) >= input.size(-1), 1, "orgqr: input.shape[-2] must be greater than or equal to input.shape[-1]");
-  TORCH_CHECK(input.size(-1) >= tau.size(-1), 1, "orgqr: input.shape[-1] must be greater than or equal to tau.shape[-1]");
+  TORCH_CHECK(input.size(-2) >= input.size(-1), "orgqr: input.shape[-2] must be greater than or equal to input.shape[-1]");
+  TORCH_CHECK(input.size(-1) >= tau.size(-1), "orgqr: input.shape[-1] must be greater than or equal to tau.shape[-1]");
 
   TORCH_CHECK(result.scalar_type() == input.scalar_type(),
     "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
@@ -1198,7 +1203,7 @@ Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
   // Single matrix MAGMA routine requires 'infos' to reside in CPU memory,
   // therefore we create 'infos' only on CPU for now.
   // This should be changed if cuSOLVER would be used
-  auto infos = at::empty({0}, input.options().dtype(kInt).device(kCPU));
+  auto infos = at::empty({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt).device(kCPU));
 
   // if result is empty and not in batched column major format we have to allocate a temporary tensor
   if (result.numel() != 0 && !result.transpose(-2, -1).is_contiguous()) {
