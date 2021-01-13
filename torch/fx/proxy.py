@@ -112,17 +112,21 @@ class GraphAppendingTracer(TracerBase):
 class TraceError(ValueError):
     pass
 
-# Proxy objects are stand-in values for normal values in a PyTorch computation.
-# Instead of performing compute they record computation into Graph.
-# Each proxy wraps the Node instance that represents the expression that define the
-# value.
 
 class Proxy:
+    """
+    ``Proxy`` objects are ``Node`` wrappers that flow through the
+    program during symbolic tracing and record all the operations
+    (``torch`` function calls, method calls, operators) that they touch
+    into the growing FX Graph.
+
+    If you're doing graph transforms, you can wrap your own ``Proxy``
+    method around a raw ``Node`` so that you can use the overloaded
+    operators to add additional things to a ``Graph``.
+    """
     def __init__(self, node: Node, tracer: 'Optional[TracerBase]' = None):
         if tracer is None:
-            # this allows you to create a proxy object around a raw node
-            # so that if you are doing graph transforms you can use the overloaded operators
-            # to add additional things to a graph.
+            # This allows you to create a Proxy object around a raw Node
             tracer = GraphAppendingTracer(node.graph)
         self.tracer = tracer
         self.node = node
