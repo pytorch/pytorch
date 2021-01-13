@@ -1200,6 +1200,21 @@ if(USE_ROCM)
       caffe2_update_option(USE_SYSTEM_NCCL ON)
     endif()
 
+    execute_process(
+      COMMAND /opt/rocm/hip/bin/hipcc -c ${CMAKE_CURRENT_LIST_DIR}/public/test_atomic.hip
+      RESULT_VARIABLE _exitcode
+      OUTPUT_VARIABLE HIP_ATOMIC_OUTPUT
+      ERROR_VARIABLE HIP_ATOMIC_OUTPUT)
+    message("Exit code of clang atomic test: ${_exitcode}")
+    message("Output of clang atomic test: \t${HIP_ATOMIC_OUTPUT}")
+    if(NOT _exitcode EQUAL 0)
+      list(APPEND HIP_CXX_FLAGS -DHIP_ATOMIC_RETURN_FLOAT=1)
+      message("Failed to compile atomicAdd void return type")
+      message("Adding -DHIP_ATOMIC_RETURN_FLOAT")
+    else()
+      message("Successfully compiled atomicAdd void return type")
+    endif()
+
     list(APPEND HIP_CXX_FLAGS -fPIC)
     list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_HCC__=1)
     list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
