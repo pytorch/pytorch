@@ -135,11 +135,7 @@ IValue Module::operator()(std::vector<IValue> inputs) {
 
   // call forward pre_hooks
   for (const auto& pre_hook : pre_forward_hooks) {
-    std::vector<IValue> pre_hook_input_vals = inputs;
-    if (pre_hook_input_vals.size() == 0) {
-      pre_hook_input_vals.emplace_back(IValue());
-    }
-    auto tuple_input = c10::ivalue::Tuple::create(pre_hook_input_vals);
+    auto tuple_input = c10::ivalue::Tuple::create(inputs);
     IValue result = Method(_ivalue(), pre_hook)({tuple_input});
     if (!result.isNone()) {
       if (result.isTuple()) {
@@ -155,11 +151,7 @@ IValue Module::operator()(std::vector<IValue> inputs) {
 
   // call forward hooks
   for (const auto& hook : forward_hooks) {
-    std::vector<IValue> hook_input_vals = inputs;
-    if (hook_input_vals.size() == 0) {
-      hook_input_vals.emplace_back(IValue());
-    }
-    auto tuple_input = c10::ivalue::Tuple::create(hook_input_vals);
+    auto tuple_input = c10::ivalue::Tuple::create(inputs);
     auto hook_result = Method(_ivalue(), hook)({tuple_input, outputs});
     if (!hook_result.isNone()) {
       outputs = hook_result;
