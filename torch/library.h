@@ -544,8 +544,13 @@ public:
 
 #if defined C10_MOBILE
   // Note: This overload is needed only for C10_MOBILE, since the automatically
-  // defined copy constructor doesn't have the additional NoInferSchemaTag
-  // argument.
+  // defined copy constructor for the CppFunction doesn't have the additional
+  // NoInferSchemaTag argument. We define the overload for the impl() function
+  // to accept a CppFunction&& argument. The already constructed CppFunction
+  // object may or may not have the inferred schema, but it doesn't matter
+  // for our purposes since if it already has the inferred schema, then we
+  // might as well just pass it through directly.
+  //
   template <typename Name>
   Library& impl(Name name, CppFunction&& raw_f) & {
     // TODO: need to raise an error when you impl a function that has a
