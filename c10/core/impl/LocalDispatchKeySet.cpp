@@ -18,11 +18,11 @@ PODLocalDispatchKeySet raw_local_dispatch_key_set;
 
 #endif
 
-#ifdef _MSC_VER
+#if defined(_MSC_VER) || defined(C10_ANDROID)
 LocalDispatchKeySet tls_local_dispatch_key_set() {
   return raw_local_dispatch_key_set;
 }
-#endif // _MSC_VER
+#endif // defined(_MSC_VER) || defined(C10_ANDROID)
 
 void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set) {
   raw_local_dispatch_key_set = PODLocalDispatchKeySet {
