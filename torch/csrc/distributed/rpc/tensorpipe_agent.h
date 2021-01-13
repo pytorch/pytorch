@@ -59,7 +59,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-class FullDeviceContext;
+class LazyStreamContext;
 
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
@@ -234,7 +234,7 @@ class TensorPipeAgent : public RpcAgent {
       std::function<void(
           const tensorpipe::Error&,
           Message&&,
-          std::shared_ptr<FullDeviceContext>)>) noexcept;
+          std::shared_ptr<LazyStreamContext>)>) noexcept;
 
   // TensorPipe write function that could be used to write response
   // messages by server, and write request messages by client.
@@ -242,7 +242,7 @@ class TensorPipeAgent : public RpcAgent {
       const std::shared_ptr<tensorpipe::Pipe>&,
       Message&& message,
       std::vector<c10::DeviceIndex>&& devices,
-      std::shared_ptr<FullDeviceContext> ctx,
+      std::shared_ptr<LazyStreamContext> ctx,
       std::function<void(const tensorpipe::Error&)>) noexcept;
 
   // Callback of listener accept()
@@ -257,7 +257,7 @@ class TensorPipeAgent : public RpcAgent {
       std::shared_ptr<tensorpipe::Pipe>& pipe,
       std::shared_ptr<JitFuture>& futureResponseMessage,
       uint64_t messageId,
-      std::shared_ptr<FullDeviceContext> ctx);
+      std::shared_ptr<LazyStreamContext> ctx);
 
   // Collects metrics from successful RPC calls
   void trackNetworkData(
@@ -438,7 +438,7 @@ class TensorPipeAgent : public RpcAgent {
   void markFutureAsComplete(
       std::shared_ptr<AtomicJitFuture> atomicFuture,
       Message message,
-      std::shared_ptr<FullDeviceContext> ctx);
+      std::shared_ptr<LazyStreamContext> ctx);
   void markFutureWithError(
       std::shared_ptr<AtomicJitFuture> atomicFuture,
       std::string errorMsg);

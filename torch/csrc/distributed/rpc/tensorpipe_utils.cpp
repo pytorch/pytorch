@@ -3,7 +3,7 @@
 #ifdef USE_TENSORPIPE
 
 #ifdef USE_CUDA_NOT_ROCM
-#include <tensorpipe/common/cuda_buffer.h>
+#include <tensorpipe/tensorpipe.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #endif
@@ -42,30 +42,7 @@ inline c10::Device indexToDevice(c10::DeviceIndex index) {
 
 #ifdef USE_CUDA_NOT_ROCM
 
-inline void CudaFullDeviceContext::recordDataPtrs(
-    const std::vector<c10::DataPtr>& dataPtrs) {
-  for (const auto& dataPtr: dataPtrs) {
-    if (dataPtr.device().is_cuda()) {
-      c10::cuda::CUDACachingAllocator::recordStream(
-          dataPtr, getStream(dataPtr.device().index()));
-    }
-  }
-}
-
-inline void CudaFullDeviceContext::recordTensors(
-    const std::vector<torch::Tensor>& tensors) {
-  for (const auto& tensor: tensors) {
-    const auto& dataPtr = tensor.storage().data_ptr();
-    if (dataPtr.device().is_cuda()) {
-      c10::cuda::CUDACachingAllocator::recordStream(
-          dataPtr, getStream(dataPtr.device().index()));
-    }
-  }
-}
-
-inline void CudaFullDeviceContext::blockCurrentStreams() {
-  //reserveStreams(devices);
-
+inline void CudaLazyStreamContext::blockCurrentStreams() {
   for (const auto& entry: streams_) {
     at::cuda::CUDAEvent event;
     event.record(entry.second);
@@ -73,9 +50,8 @@ inline void CudaFullDeviceContext::blockCurrentStreams() {
   }
 }
 
-inline void CudaFullDeviceContext::waitForCurrentStreams(
+inline void CudaLazyStreamContext::waitForCurrentStreams(
     const std::vector<torch::Tensor>& tensors) {
-  //reserveStreams(devices);
   for (const auto& tensor: tensors) {
     if (tensor.is_cuda()) {
       getStream(tensor.device().index());
@@ -90,7 +66,7 @@ inline void CudaFullDeviceContext::waitForCurrentStreams(
 }
 
 inline std::vector<CUDAStream>
-CudaFullDeviceContext::getReservedStreams() const {
+CudaLazyStreamContext::getReservedStreams() const {
   std::vector<CUDAStream> reservedStreams;
   reservedStreams.reserve(streams_.size());
   for (const auto& entry: streams_) {
@@ -99,7 +75,7 @@ CudaFullDeviceContext::getReservedStreams() const {
   return reservedStreams;
 }
 
-inline CUDAStream CudaFullDeviceContext::getStream(
+inline CUDAStream CudaLazyStreamContext::getStream(
     c10::DeviceIndex index) {
   auto iter = streams_.find(index);
   if (iter == streams_.end()) {
@@ -118,7 +94,7 @@ inline CUDAStream CudaFullDeviceContext::getStream(
 std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     Message&& rpcMessage,
     std::vector<c10::DeviceIndex> deviceIndices,
-    const std::shared_ptr<FullDeviceContext>& ctx) {
+    const std::shared_ptr<LazyStreamContext>& ctx) {
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers buffers;
 
@@ -187,12 +163,15 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
             std::move(metadata)});
 #ifdef USE_CUDA_NOT_ROCM
       } else if (tensorDataVec[i].device().is_cuda()) {
+        auto stream = ctx->getStream(tensorDataVec[i].device().index());
         tpMessage.tensors.push_back(tensorpipe::Message::Tensor{
             tensorpipe::CudaBuffer{
-                tensorPtr,
-                tensorData.sizeInBytes(),
-                ctx->getStream(tensorDataVec[i].device().index()).stream()},
+                tensorPtr, tensorData.sizeInBytes(), stream.stream()},
             std::move(metadata)});
+        // record tensor data ptrs on TensorPipe streams, so that the tensors
+        // won't be destructed before TensorPipe finishing sending them.
+        c10::cuda::CUDACachingAllocator::recordStream(
+            tensorDataVec[i].storage().data_ptr(), stream);
 #endif
       } else {
         TORCH_CHECK(
@@ -208,7 +187,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
 
 TensorpipeReadBuffers tensorpipeAllocate(
     tensorpipe::Message& tpMessage,
-    const std::shared_ptr<FullDeviceContext>& ctx) {
+    const std::shared_ptr<LazyStreamContext>& ctx) {
   TensorpipeReadBuffers buffers;
 
   TORCH_INTERNAL_ASSERT(
@@ -252,12 +231,18 @@ TensorpipeReadBuffers tensorpipeAllocate(
 #ifdef USE_CUDA_NOT_ROCM
     } else if (tensor.buffer.type == tensorpipe::DeviceType::kCuda) {
       auto deviceIndex = std::stoi(tensor.metadata);
+      auto stream = ctx->getStream(deviceIndex);
       DeviceGuard guard(indexToDevice(deviceIndex));
       buffers.tensors.emplace_back(
           c10::cuda::CUDACachingAllocator::get()->allocate(
               tensor.buffer.cuda.length));
       tensor.buffer.cuda.ptr = buffers.tensors.back().get();
-      tensor.buffer.cuda.stream = ctx->getStream(deviceIndex).stream();
+      tensor.buffer.cuda.stream = stream.stream();
+
+      // record tensor data ptrs on TensorPipe streams, so that the tensors
+      // won't be destructed before TensorPipe finishing receiving them.
+      c10::cuda::CUDACachingAllocator::recordStream(
+          buffers.tensors.back(), stream);
 #endif
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unrecognized TensorPipe buffer type.");

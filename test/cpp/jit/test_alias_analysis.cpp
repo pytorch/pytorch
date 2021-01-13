@@ -906,14 +906,15 @@ graph():
 }
 
 TEST(WildcardsTest, Basic) {
-  RegisterOperators reg({Operator(
-                             "prim::returns_wildcard(Tensor a) -> Tensor(*)",
-                             [](Stack* stack) {},
-                             aliasAnalysisFromSchema()),
-                         Operator(
-                             "prim::writes(Tensor(z!) a) -> Tensor(a)",
-                             [](Stack* stack) {},
-                             aliasAnalysisFromSchema())});
+  RegisterOperators reg(
+      {Operator(
+           "prim::returns_wildcard(Tensor a) -> Tensor(*)",
+           [](Stack* stack) {},
+           aliasAnalysisFromSchema()),
+       Operator(
+           "prim::writes(Tensor(z!) a) -> Tensor(a)",
+           [](Stack* stack) {},
+           aliasAnalysisFromSchema())});
   const auto returns_wildcard =
       Symbol::fromQualString("prim::returns_wildcard");
   const auto writes = Symbol::fromQualString("prim::writes");

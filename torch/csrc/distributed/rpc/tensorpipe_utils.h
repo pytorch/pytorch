@@ -27,17 +27,15 @@ using at::cuda::CUDAStream;
 
 // A general device context class for both CPU and CUDA. If CUDA is not
 // available, all CUDA-related methods will be no-ops.
-struct FullDeviceContext {
+struct LazyStreamContext {
 
-  FullDeviceContext(const FullDeviceContext& other) = delete;
-  FullDeviceContext(FullDeviceContext&& other) = delete;
+  LazyStreamContext(const LazyStreamContext& other) = delete;
+  LazyStreamContext(LazyStreamContext&& other) = delete;
 
-  FullDeviceContext& operator=(const FullDeviceContext& rhs) = delete;
-  FullDeviceContext& operator=(FullDeviceContext&& rhs) & = delete;
+  LazyStreamContext& operator=(const LazyStreamContext& rhs) = delete;
+  LazyStreamContext& operator=(LazyStreamContext&& rhs) & = delete;
 
-  explicit FullDeviceContext() {}
-  virtual void recordDataPtrs(const std::vector<c10::DataPtr>& dataPtrs) {}
-  virtual void recordTensors(const std::vector<torch::Tensor>& tensors) {}
+  explicit LazyStreamContext() {}
   virtual void blockCurrentStreams() {}
   virtual void waitForCurrentStreams(
       const std::vector<torch::Tensor>&  = {}) {}
@@ -61,29 +59,22 @@ struct FullDeviceContext {
 #ifndef USE_CUDA_NOT_ROCM
 
 // CUDA is not available, use CPU device context.
-inline std::shared_ptr<FullDeviceContext> createFullDeviceContext() {
-  return std::make_shared<FullDeviceContext>();
+inline std::shared_ptr<LazyStreamContext> createLazyStreamContext() {
+  return std::make_shared<LazyStreamContext>();
 }
 
 #else
 
 // CUDA is available. Implement CUDA-related operations.
-struct CudaFullDeviceContext : public FullDeviceContext {
+struct CudaLazyStreamContext : public LazyStreamContext {
 
-  using FullDeviceContext::FullDeviceContext;
-
-  // call c10::cuda::CUDACachingAllocator::recordStream with given DataPtrs
-  void recordDataPtrs(const std::vector<c10::DataPtr>& dataPtrs) override;
-
-  // call c10::cuda::CUDACachingAllocator::recordStream with given Tensors
-  void recordTensors(const std::vector<torch::Tensor>& tensors) override;
+  using LazyStreamContext::LazyStreamContext;
 
   // let current streams wait for streams in this context.
   void blockCurrentStreams() override;
 
   // let streams in this context wiat for current streams.
-  void waitForCurrentStreams(
-      const std::vector<torch::Tensor>&  = {}) override;
+  void waitForCurrentStreams(const std::vector<torch::Tensor>&  = {}) override;
   std::vector<CUDAStream> getReservedStreams() const override;
   CUDAStream getStream(c10::DeviceIndex index) override;
 
@@ -91,8 +82,8 @@ struct CudaFullDeviceContext : public FullDeviceContext {
   std::unordered_map<c10::DeviceIndex, CUDAStream> streams_;
 };
 
-inline std::shared_ptr<FullDeviceContext> createFullDeviceContext() {
-  return std::make_shared<CudaFullDeviceContext>();
+inline std::shared_ptr<LazyStreamContext> createLazyStreamContext() {
+  return std::make_shared<CudaLazyStreamContext>();
 }
 
 #endif
@@ -129,8 +120,8 @@ TORCH_API std::tuple<tensorpipe::Message, TensorpipeWriteBuffers>
 tensorpipeSerialize(
     Message&& rpcMessage,
     std::vector<c10::DeviceIndex> devices = {},
-    const std::shared_ptr<FullDeviceContext>& =
-        std::make_shared<FullDeviceContext>());
+    const std::shared_ptr<LazyStreamContext>& =
+        std::make_shared<LazyStreamContext>());
 
 // Allocate the buffers that will hold the incoming data. They will be managed
 // by the returned holder, which must be kept alive until the asynchronous read
@@ -139,8 +130,8 @@ tensorpipeSerialize(
 TORCH_API TensorpipeReadBuffers
 tensorpipeAllocate(
     tensorpipe::Message& tpMessage,
-    const std::shared_ptr<FullDeviceContext>& ctx =
-        std::make_shared<FullDeviceContext>());
+    const std::shared_ptr<LazyStreamContext>& ctx =
+        std::make_shared<LazyStreamContext>());
 
 // Convert a TensorPipe message back into an RPC message. This requires the data
 // to be available and can thus only be performed once the asynchronous read has

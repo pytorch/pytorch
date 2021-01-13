@@ -5126,23 +5126,28 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         )
 
     def _test_stream_nested_multi_async(self, dst):
-        futs = []
-        n = 15
-        for i in range(n):
-            x = torch.ones(2, 2).to(0) * (i - 1)
-            y = torch.ones(2, 2).to(0) * i
-            z = torch.ones(2, 2).to(0) * (i + 1)
-            nested_dst = worker_name((self.rank + 2) % self.world_size)
-            futs.append(
-                rpc.rpc_async(
-                    dst,
-                    TensorPipeAgentRpcTest._nested_slow_add_on_user_stream,
-                    args=(nested_dst, x, y, z)
+        if self.rank == 0:
+            futs = []
+            n = 5
+            xs, ys, zs = [], [], []
+            for i in range(n):
+                x = torch.ones(2, 2).to(0) * (i - 1)
+                y = torch.ones(2, 2).to(0) * i
+                z = torch.ones(2, 2).to(0) * (i + 1)
+                xs.append(x)
+                ys.append(y)
+                zs.append(z)
+                nested_dst = worker_name((self.rank + 2) % self.world_size)
+                futs.append(
+                    rpc.rpc_async(
+                        dst,
+                        TensorPipeAgentRpcTest._nested_slow_add_on_user_stream,
+                        args=(nested_dst, x, y, z)
+                    )
                 )
-            )
 
-        for i in range(n):
-            self.assertEqual(futs[i].wait(), 3 * torch.ones(2, 2).to(0) * i)
+            for i in range(n):
+                self.assertEqual(futs[i].wait(), xs[i] + ys[i] + zs[i])
 
     @skip_if_lt_x_gpu(2)
     def test_custom_stream_nested_multi(self):

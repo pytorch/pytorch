@@ -207,17 +207,17 @@ C10_REGISTER_CREATOR(
 
 namespace {
 
-struct FullDeviceContextGuard {
-  FullDeviceContextGuard(const FullDeviceContextGuard& other) = delete;
-  FullDeviceContextGuard(FullDeviceContextGuard&& other) = delete;
-  FullDeviceContextGuard& operator=(const FullDeviceContextGuard& rhs) = delete;
-  FullDeviceContextGuard& operator=(FullDeviceContextGuard&& rhs) = delete;
+struct MultiStreamGuard {
+  MultiStreamGuard(const MultiStreamGuard& other) = delete;
+  MultiStreamGuard(MultiStreamGuard&& other) = delete;
+  MultiStreamGuard& operator=(const MultiStreamGuard& rhs) = delete;
+  MultiStreamGuard& operator=(MultiStreamGuard&& rhs) = delete;
 
 #ifndef USE_CUDA_NOT_ROCM
-  FullDeviceContextGuard(
-      const std::shared_ptr<FullDeviceContext>&  /* unused */) {};
+  MultiStreamGuard(
+      const std::shared_ptr<LazyStreamContext>&  /* unused */) {};
 #else
-  FullDeviceContextGuard(const std::shared_ptr<FullDeviceContext>& ctx)
+  MultiStreamGuard(const std::shared_ptr<LazyStreamContext>& ctx)
       : guard(ctx->getReservedStreams()) {}
 
  private:
@@ -441,8 +441,8 @@ void TensorPipeAgent::pipeRead(
     std::function<void(
         const tensorpipe::Error&,
         Message&&,
-        std::shared_ptr<FullDeviceContext>)> fn) noexcept {
-  pipe->readDescriptor([fn{std::move(fn)}, pipe, this](
+        std::shared_ptr<LazyStreamContext>)> fn) noexcept {
+  pipe->readDescriptor([fn{std::move(fn)}, pipe](
                            const tensorpipe::Error& error,
                            tensorpipe::Message tpMessage) mutable {
     if (error) {
@@ -450,7 +450,7 @@ void TensorPipeAgent::pipeRead(
       return;
     }
 
-    auto ctx = createFullDeviceContext();
+    auto ctx = createLazyStreamContext();
     TensorpipeReadBuffers tpBuffers = tensorpipeAllocate(tpMessage, ctx);
 
     pipe->read(
@@ -467,7 +467,7 @@ void TensorPipeAgent::pipeRead(
           }
 
           ctx->blockCurrentStreams();
-          ctx->recordDataPtrs(tpBuffers->tensors);
+          // ctx->recordDataPtrs(tpBuffers->tensors);
           // FIXME This does some unpickling, which could be a bit expensive:
           // perhaps it would be best to perform it inside the worker threads?
           Message rpcMessage = tensorpipeDeserialize(
@@ -482,7 +482,7 @@ void TensorPipeAgent::pipeWrite(
     const std::shared_ptr<tensorpipe::Pipe>& pipe,
     Message&& rpcMessage,
     std::vector<c10::DeviceIndex>&& devices,
-    std::shared_ptr<FullDeviceContext> ctx,
+    std::shared_ptr<LazyStreamContext> ctx,
     std::function<void(const tensorpipe::Error&)> fn) noexcept {
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers tpBuffers;
@@ -498,7 +498,6 @@ void TensorPipeAgent::pipeWrite(
        fn{std::move(fn)},
        ctx{std::move(ctx)}](
           const tensorpipe::Error& error, tensorpipe::Message /* unused */) {
-        ctx->recordTensors(tpBuffers->tensors);
         fn(error);
       });
 }
@@ -507,7 +506,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     std::shared_ptr<tensorpipe::Pipe>& pipe,
     std::shared_ptr<JitFuture>& futureResponseMessage,
     uint64_t messageId,
-    std::shared_ptr<FullDeviceContext> ctx) {
+    std::shared_ptr<LazyStreamContext> ctx) {
   if (!rpcAgentRunning_.load()) {
     LOG(WARNING) << "RPC agent for " << workerInfo_.name_
                  << " won't send response to request #" << messageId << " to "
@@ -580,7 +579,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
       [this, pipe](
           const tensorpipe::Error& error,
           Message&& requestMessage,
-          std::shared_ptr<FullDeviceContext> ctx) mutable {
+          std::shared_ptr<LazyStreamContext> ctx) mutable {
         if (error) {
           // FIXME This is not a correct way to check whether this error was
           // "intentionally" caused by the remote end shutting down. We should
@@ -616,7 +615,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
                          requestMessage{std::move(requestMessage)},
                          ctx{std::move(ctx)}]() mutable {
           // create guards again as this function runs on a different thread
-          FullDeviceContextGuard guard(ctx);
+          MultiStreamGuard guard(ctx);
           VLOG(1) << "RPC agent for " << workerInfo_.name_
                   << " is running request #" << messageId << " from "
                   << pipe->getRemoteName() << " in thread pool";
@@ -646,7 +645,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
                  ctx{std::move(ctx)}]() mutable {
                   decreaseCallCount(serverActiveCalls_);
                   decreaseCallCount(serverActiveAsyncCalls_);
-                  FullDeviceContextGuard guard(ctx);
+                  //MultiStreamGuard guard(ctx);
                   sendCompletedResponseMessage(
                       pipe, futureResponseMessage, messageId, std::move(ctx));
                 });
@@ -738,7 +737,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is sending request #"
           << messageId << " to " << clientPipe.pipe_->getRemoteName();
 
-  auto ctx = createFullDeviceContext();
+  auto ctx = createLazyStreamContext();
   ctx->waitForCurrentStreams(requestMessage.tensors());
   pipeWrite(
       clientPipe.pipe_,
@@ -774,7 +773,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
                 const tensorpipe::Error& error,
                 Message&& responseMessage,
                 // NOLINTNEXTLINE(performance-unnecessary-value-param)
-                std::shared_ptr<FullDeviceContext> ctx) {
+                std::shared_ptr<LazyStreamContext> ctx) {
               if (error) {
                 if (error.isOfType<tensorpipe::PipeClosedError>() &&
                     !rpcAgentRunning_.load()) {
@@ -1089,7 +1088,7 @@ void TensorPipeAgent::decreaseCallCount(int32_t& count) {
 void TensorPipeAgent::markFutureAsComplete(
     std::shared_ptr<AtomicJitFuture> atomicFuture,
     Message message,
-    std::shared_ptr<FullDeviceContext> ctx) {
+    std::shared_ptr<LazyStreamContext> ctx) {
   if (!atomicFuture->isComplete.test_and_set()) {
     // Completing the future will run its callbacks, which could execute
     // arbitrary user code. To prevent blocking or stalling the TensorPipe event
@@ -1098,7 +1097,7 @@ void TensorPipeAgent::markFutureAsComplete(
                      atomicFuture{std::move(atomicFuture)},
                      message{std::move(message)},
                      ctx{std::move(ctx)}]() mutable {
-      FullDeviceContextGuard guard(ctx);
+      MultiStreamGuard guard(ctx);
       atomicFuture->jitFuture->markCompleted(
           IValue(c10::make_intrusive<Message>(std::move(message))));
       // The future's callbacks may schedule further RPCs, increasing the count.

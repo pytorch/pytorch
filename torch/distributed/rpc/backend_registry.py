@@ -265,6 +265,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
         torch.cuda.init()
         # FIXME: this is needed for now because TensorPipe calls
         # cudaPointerGetAttributes() on the default device.
+        # This error was also reported in https://github.com/pytorch/pytorch/issues/36594
         torch.zeros(1).to(0)
 
     # The agent's join method is required to behave like a barrier and perform
