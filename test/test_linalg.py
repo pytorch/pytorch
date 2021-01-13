@@ -44,6 +44,7 @@ class TestLinalg(TestCase):
 
     @dtypes(torch.float, torch.cfloat)
     @precisionOverride({torch.float: 1e-06, torch.cfloat: 1e-06})
+    @tf32_on_and_off(5e-3)
     def test_inner(self, device, dtype):
         def check(a_sizes_, b_sizes_):
             for a_sizes, b_sizes in ((a_sizes_, b_sizes_), (b_sizes_, a_sizes_)):
@@ -1571,7 +1572,7 @@ class TestLinalg(TestCase):
         self.assertFalse(v.is_contiguous(), 'V is contiguous')
         self.assertFalse(e.is_contiguous(), 'E is contiguous')
         torch.eig(X, True, out=(e, v))
-        Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
+        Xhat = np.matmul(np.matmul(v.cpu(), torch.diag(e.cpu().select(1, 0))), v.t().cpu())
         if dtype is torch.float:
             atol = 1e-7
             rtol = 1e-5
@@ -2153,7 +2154,7 @@ class TestLinalg(TestCase):
         for (k, n), upper in itertools.product(zip([2, 3, 5], [3, 5, 7]), [True, False]):
             b, A, L = self.cholesky_solve_test_helper((n,), (n, k), upper, device, dtype)
             x = torch.cholesky_solve(b, L, upper=upper)
-            self.assertEqual(b, A.mm(x))
+            self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -2169,7 +2170,7 @@ class TestLinalg(TestCase):
             x_exp = torch.stack(x_exp_list)  # Stacked output
             x_act = torch.cholesky_solve(b, L, upper=upper)  # Actual output
             self.assertEqual(x_act, x_exp)  # Equality check
-            Ax = torch.matmul(A, x_act)
+            Ax = np.matmul(A.cpu(), x_act.cpu())
             self.assertEqual(b, Ax)  # Correctness check
 
         for upper, batchsize in itertools.product([True, False], [1, 3, 4]):
@@ -2281,8 +2282,8 @@ class TestLinalg(TestCase):
 
             # Additional correctness tests, check matrix*matrix_inverse == identity
             identity = torch.eye(n, dtype=dtype, device=device)
-            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix, matrix_inverse))
-            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix_inverse, matrix))
+            self.assertEqual(identity.expand_as(matrix), np.matmul(matrix.cpu(), matrix_inverse.cpu()))
+            self.assertEqual(identity.expand_as(matrix), np.matmul(matrix_inverse.cpu(), matrix.cpu()))
 
             # check the out= variant
             # prepare the expected out tensor
