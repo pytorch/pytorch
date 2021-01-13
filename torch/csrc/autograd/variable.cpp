@@ -53,8 +53,10 @@ ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
   if (view_func) {
     // both current_view and it's parent have a view_func
     if (view_fn_) {
+      // Copy parent view function to gain ownership
+      auto prev_fn = view_fn_;
       view_func = [=](const at::Tensor& root_base) {
-        auto temp = view_fn_(root_base);
+        auto temp = prev_fn(root_base);
         return view_func(temp);
       };
     } else {
@@ -85,7 +87,7 @@ ViewInfo ViewInfo::chain(const Variable & base, const Variable & tensor,
     }
   } else if(view_fn_) {
     // if current_view doesn't have a view_func but it's parent has one
-    // Copy parent in case parent becomes empty later
+    // Copy parent view function to gain ownership
     auto prev_view_fn = view_fn_;
     auto size = tensor.sizes().vec();
     auto stride = tensor.strides().vec();
