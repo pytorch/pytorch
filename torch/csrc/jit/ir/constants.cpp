@@ -136,7 +136,8 @@ c10::optional<Value*> tryInsertConstant(
 }
 
 c10::optional<IValue> toIValue(const Value* v) {
-  if (v->node()->kind() != prim::Constant || v->type()->castRaw<FunctionType>()) {
+  if (v->node()->kind() != prim::Constant ||
+      v->type()->castRaw<FunctionType>()) {
     return c10::nullopt;
   }
   const Node* node = v->node();

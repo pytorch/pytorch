@@ -129,12 +129,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               py::call_guard<py::gil_scoped_release>())
           .def(
               "get_worker_info",
-              (const WorkerInfo& (RpcAgent::*)(void)const) &
+              (const WorkerInfo& (RpcAgent::*)(void) const) &
                   RpcAgent::getWorkerInfo,
               py::call_guard<py::gil_scoped_release>())
           .def(
               "get_worker_info",
-              (const WorkerInfo& (RpcAgent::*)(const std::string&)const) &
+              (const WorkerInfo& (RpcAgent::*)(const std::string&) const) &
                   RpcAgent::getWorkerInfo,
               py::call_guard<py::gil_scoped_release>())
           .def(
@@ -507,12 +507,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       }))
       .def(
           "get_worker_info",
-          (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &
+          (const WorkerInfo& (ProcessGroupAgent::*)(void) const) &
               RpcAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          (const WorkerInfo& (ProcessGroupAgent::*)(const std::string&)const) &
+          (const WorkerInfo& (ProcessGroupAgent::*)(const std::string&) const) &
               ProcessGroupAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
@@ -608,12 +608,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          (const WorkerInfo& (TensorPipeAgent::*)(void)const) &
+          (const WorkerInfo& (TensorPipeAgent::*)(void) const) &
               RpcAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          (const WorkerInfo& (TensorPipeAgent::*)(const std::string&)const) &
+          (const WorkerInfo& (TensorPipeAgent::*)(const std::string&) const) &
               TensorPipeAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
