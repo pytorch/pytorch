@@ -329,7 +329,7 @@ class GaussianNLLLoss(_Loss):
             losses. Default: ``'mean'``.
 
     Shape:
-        - Input: :math:`(N, *)` where :math:`*` means, any number of additional
+        - Input: :math:`(N, *)` where :math:`*` means any number of additional
           dimensions
         - Target: :math:`(N, *)`, same shape as the input
         - Var: :math:`(N, 1)` or :math:`(N, *)`, same shape as the input
@@ -355,7 +355,7 @@ class GaussianNLLLoss(_Loss):
 
     Note:
         The clamping of ``var`` is ignored with respect to autograd, and so the
-        gradients are unaffected by this. 
+        gradients are unaffected by it. 
 
     Reference:
         Nix, D. A. and Weigend, A. S., "Estimating the mean and variance of the
