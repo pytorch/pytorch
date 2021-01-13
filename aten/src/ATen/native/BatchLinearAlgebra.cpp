@@ -999,7 +999,7 @@ static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
 template<typename scalar_t>
 static void apply_orgqr(Tensor& self, const Tensor& tau, Tensor& infos, int64_t n_columns) {
 #ifndef USE_LAPACK
-  AT_ERROR("orgqr: LAPACK library not found in compilation");
+  TORCH_CHECK(false, "orgqr: LAPACK library not found in compilation");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
