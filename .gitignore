@@ -10,6 +10,7 @@
 
 .coverage
 coverage.xml
+.dmypy.json
 .gradle
 .hypothesis
 .mypy_cache
