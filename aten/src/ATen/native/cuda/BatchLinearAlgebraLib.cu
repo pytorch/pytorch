@@ -150,6 +150,7 @@ Tensor _inverse_helper_cuda_lib(const Tensor& self) {
   return self_inv_working_copy;
 }
 
+// call cusolver gesvdj function to calculate svd
 template<typename scalar_t>
 inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv) {
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -167,6 +168,7 @@ inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& 
   int n = cuda_int_cast(self.size(-1), "n");   
 
   for(int i = 0; i < batchsize; i++){
+    // gesvdj_params controls the numerical accuracy of cusolver gesvdj iterations on GPU
     gesvdjInfo_t gesvdj_params;
     TORCH_CUSOLVER_CHECK(cusolverDnCreateGesvdjInfo(&gesvdj_params));
     // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetTolerance(gesvdj_params, 1.0e-7));
@@ -191,6 +193,8 @@ inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& 
   }
 }
 
+// wrapper around _apply_svd_lib_gesvdj that handles dtype dispatch,
+// creates a working copy of the input, and creates V^H from the V returned by gesvdj
 inline static void apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv) {
   const int64_t m = self.size(-2);
   const int64_t n = self.size(-1);
@@ -204,6 +208,7 @@ inline static void apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& S
   VT = VT.conj();
 }
 
+// call cusolver gesvdj batched function to calculate svd
 template<typename scalar_t>
 inline static void _apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv) {
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
@@ -223,6 +228,7 @@ inline static void _apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, T
   TORCH_INTERNAL_ASSERT(m <= 32 && n <= 32, "gesvdjBatched requires both matrix dimensions not greater than 32, but got "
                         "m = ", m, " n = ", n);
 
+  // gesvdj_params controls the numerical accuracy of cusolver gesvdj iterations on GPU
   gesvdjInfo_t gesvdj_params;
   TORCH_CUSOLVER_CHECK(cusolverDnCreateGesvdjInfo(&gesvdj_params));
   // TORCH_CUSOLVER_CHECK(cusolverDnXgesvdjSetTolerance(gesvdj_params, 1.0e-7));
@@ -239,6 +245,8 @@ inline static void _apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, T
   TORCH_CUSOLVER_CHECK(cusolverDnDestroyGesvdjInfo(gesvdj_params));
 }
 
+// wrapper around _apply_svd_lib_gesvdjBatched that handles dtype dispatch,
+// creates a working copy of the input, and creates V^H from the V returned by gesvdj
 inline static void apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv) {
   const int64_t m = self.size(-2);
   const int64_t n = self.size(-1);
