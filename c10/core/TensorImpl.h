@@ -393,14 +393,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Return a reference to the sizes of this tensor.  This reference remains
    * valid as long as the tensor is live and not resized.
    */
-  TENSORIMPL_MAYBE_VIRTUAL IntArrayRef sizes() const
-#ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-  {
-    return sizes_and_strides_.sizes_arrayref();
-  }
-#else
-  ;
-#endif
+  virtual IntArrayRef sizes() const;
 
   /**
    * Return a reference to the strides of this tensor.  This reference remains

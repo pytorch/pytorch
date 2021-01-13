@@ -3939,25 +3939,24 @@ TEST(Simplify, SimplifyFuseConditions) {
     // Can't fuse, CompareSelect results are different.
     // Actually we totally could if we normalized CompareSelect results, but
     // TODO for later.
-    auto body = Block::make(
-        {Cond::make(
-             CompareSelect::make(
-                 i,
-                 10,
-                 new IntImm(1),
-                 new IntImm(0),
-                 CompareSelectOperation::kLT),
-             Store::make(a, {0}, i, mask),
-             nullptr),
-         Cond::make(
-             CompareSelect::make(
-                 j,
-                 10,
-                 new IntImm(2),
-                 new IntImm(0),
-                 CompareSelectOperation::kLT),
-             Store::make(a, {1}, i, mask),
-             nullptr)});
+    auto body = Block::make({Cond::make(
+                                 CompareSelect::make(
+                                     i,
+                                     10,
+                                     new IntImm(1),
+                                     new IntImm(0),
+                                     CompareSelectOperation::kLT),
+                                 Store::make(a, {0}, i, mask),
+                                 nullptr),
+                             Cond::make(
+                                 CompareSelect::make(
+                                     j,
+                                     10,
+                                     new IntImm(2),
+                                     new IntImm(0),
+                                     CompareSelectOperation::kLT),
+                                 Store::make(a, {1}, i, mask),
+                                 nullptr)});
 
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
@@ -4156,21 +4155,20 @@ TEST(Simplify, SimplifyFuseConditions) {
 
   {
     // Can fuse if the conditions simplify to the same thing.
-    auto body = Block::make(
-        {Cond::make(
-             CompareSelect::make(
-                 i * 2,
-                 ExprHandle(87) % ExprHandle(11),
-                 CompareSelectOperation::kLT),
-             Store::make(a, {0}, i, mask),
-             nullptr),
-         Cond::make(
-             CompareSelect::make(
-                 i * 2,
-                 ExprHandle(300) / ExprHandle(30),
-                 CompareSelectOperation::kLT),
-             Store::make(a, {1}, i, mask),
-             nullptr)});
+    auto body = Block::make({Cond::make(
+                                 CompareSelect::make(
+                                     i * 2,
+                                     ExprHandle(87) % ExprHandle(11),
+                                     CompareSelectOperation::kLT),
+                                 Store::make(a, {0}, i, mask),
+                                 nullptr),
+                             Cond::make(
+                                 CompareSelect::make(
+                                     i * 2,
+                                     ExprHandle(300) / ExprHandle(30),
+                                     CompareSelectOperation::kLT),
+                                 Store::make(a, {1}, i, mask),
+                                 nullptr)});
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 1);
@@ -4183,9 +4181,9 @@ TEST(Simplify, SimplifyFuseConditions) {
   {
     // Can fuse non-CompareSelects.
     // if (i) { X } if (i) { Y } => if (i) { X; Y }
-    auto body = Block::make(
-        {Cond::make(i, Store::make(a, {0}, i, mask), nullptr),
-         Cond::make(i, Store::make(a, {1}, i, mask), nullptr)});
+    auto body =
+        Block::make({Cond::make(i, Store::make(a, {0}, i, mask), nullptr),
+                     Cond::make(i, Store::make(a, {1}, i, mask), nullptr)});
 
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
@@ -4198,9 +4196,9 @@ TEST(Simplify, SimplifyFuseConditions) {
 
   {
     // Sanity check wont fuse different non-CompareSelects.
-    auto body = Block::make(
-        {Cond::make(i, Store::make(a, {0}, i, mask), nullptr),
-         Cond::make(j, Store::make(a, {1}, i, mask), nullptr)});
+    auto body =
+        Block::make({Cond::make(i, Store::make(a, {0}, i, mask), nullptr),
+                     Cond::make(j, Store::make(a, {1}, i, mask), nullptr)});
 
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
@@ -4212,9 +4210,9 @@ TEST(Simplify, SimplifyFuseConditions) {
   {
     // Sanity check constant condition elimination still occurs when merging is
     // possible.
-    auto body = Block::make(
-        {Cond::make(1, Store::make(a, {0}, i, mask), nullptr),
-         Cond::make(1, Store::make(a, {1}, i, mask), nullptr)});
+    auto body =
+        Block::make({Cond::make(1, Store::make(a, {0}, i, mask), nullptr),
+                     Cond::make(1, Store::make(a, {1}, i, mask), nullptr)});
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 2);
@@ -4253,11 +4251,10 @@ TEST(Simplify, SimplifySyncThreads) {
 
   {
     // Merge two inner SyncThreads.
-    auto body = Block::make(
-        {Store::make(a, {0}, 1, 1),
-         new SyncThreads(),
-         new SyncThreads(),
-         Store::make(a, {1}, 0, 1)});
+    auto body = Block::make({Store::make(a, {0}, 1, 1),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             Store::make(a, {1}, 0, 1)});
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
     ASSERT_EQ(block->nstmts(), 3);
@@ -4281,14 +4278,13 @@ TEST(Simplify, SimplifySyncThreads) {
 
   {
     // Merge many inner SyncThreads.
-    auto body = Block::make(
-        {Store::make(a, {0}, 1, 1),
-         new SyncThreads(),
-         new SyncThreads(),
-         new SyncThreads(),
-         new SyncThreads(),
-         new SyncThreads(),
-         Store::make(a, {1}, 0, 1)});
+    auto body = Block::make({Store::make(a, {0}, 1, 1),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             Store::make(a, {1}, 0, 1)});
 
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
@@ -4301,14 +4297,13 @@ TEST(Simplify, SimplifySyncThreads) {
 
   {
     // Merge multiple outer SyncThreads.
-    auto body = Block::make(
-        {new SyncThreads(),
-         new SyncThreads(),
-         Store::make(a, {1}, 0, 1),
-         new SyncThreads(),
-         new SyncThreads(),
-         new SyncThreads(),
-         new SyncThreads()});
+    auto body = Block::make({new SyncThreads(),
+                             new SyncThreads(),
+                             Store::make(a, {1}, 0, 1),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             new SyncThreads()});
 
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);
@@ -4319,16 +4314,15 @@ TEST(Simplify, SimplifySyncThreads) {
 
   {
     // Merge multiple sections;
-    auto body = Block::make(
-        {Store::make(a, {0}, 1, 1),
-         new SyncThreads(),
-         new SyncThreads(),
-         Store::make(a, {1}, 0, 1),
-         Store::make(a, {2}, 0, 1),
-         new SyncThreads(),
-         new SyncThreads(),
-         new SyncThreads(),
-         Store::make(a, {3}, 0, 1)});
+    auto body = Block::make({Store::make(a, {0}, 1, 1),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             Store::make(a, {1}, 0, 1),
+                             Store::make(a, {2}, 0, 1),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             new SyncThreads(),
+                             Store::make(a, {3}, 0, 1)});
 
     Stmt* simplified = IRSimplifier::simplify(body);
     IS_NODE_WITH_NAME(Block, simplified, block);

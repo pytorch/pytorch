@@ -160,32 +160,7 @@ template<class T, class Iterator>
 inline bool operator==(const T& lhs, const ListElementReference<T, Iterator>& rhs) {
   return rhs == lhs;
 }
-
-template<class T>
-inline typename ListElementConstReferenceTraits<T>::const_reference
-list_element_to_const_ref(const IValue& element) {
-  return element.template to<T>();
 }
-
-template<>
-inline typename ListElementConstReferenceTraits<std::string>::const_reference
-list_element_to_const_ref<std::string>(const IValue& element) {
-  return element.toStringRef();
-}
-
-template<>
-inline typename ListElementConstReferenceTraits<c10::optional<std::string>>::const_reference
-list_element_to_const_ref<c10::optional<std::string>>(const IValue& element) {
-  return element.toOptionalStringRef();
-}
-
-template<>
-inline typename ListElementConstReferenceTraits<at::Tensor>::const_reference
-list_element_to_const_ref<at::Tensor>(const IValue& element) {
-  return element.toTensor();
-}
-
-} // namespace impl
 
 template<class T>
 void List<T>::set(size_type pos, const value_type& value) const {
@@ -203,12 +178,7 @@ typename List<T>::value_type List<T>::get(size_type pos) const {
 }
 
 template<class T>
-typename List<T>::internal_const_reference_type List<T>::operator[](size_type pos) const {
-  return c10::impl::list_element_to_const_ref<T>(impl_->list.at(pos));
-}
-
-template<class T>
-typename List<T>::internal_reference_type List<T>::operator[](size_type pos) {
+typename List<T>::internal_reference_type List<T>::operator[](size_type pos) const {
   static_cast<void>(impl_->list.at(pos)); // Throw the exception if it is out of range.
   return {impl_->list.begin() + pos};
 }

@@ -1,5 +1,4 @@
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
-
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>

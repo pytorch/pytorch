@@ -279,7 +279,7 @@ class _RemoteModule(nn.Module):
 
     def named_parameters(  # type: ignore[return]
         self, prefix: str = "", recurse: bool = True
-    ) -> Iterator[Tuple[str, Parameter]]:
+    ) -> Iterator[Tuple[str, Tensor]]:
         _raise_not_supported(self.named_parameters.__name__)
 
     def buffers(self, recurse: bool = True) -> Iterator[Tensor]:  # type: ignore[return]
