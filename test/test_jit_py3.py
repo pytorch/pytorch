@@ -2,20 +2,24 @@ from collections import namedtuple
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing import FileCheck
-from typing import NamedTuple, List, Optional, Any, Dict, Tuple
+from torch import jit
+from textwrap import dedent
+from typing import NamedTuple, List, Optional, Dict, Tuple, Any
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
+import inspect
 import unittest
 import sys
 import torch
 import torch.testing._internal.jit_utils
 import torch.nn as nn
+import types
 
 class TestScriptPy3(JitTestCase):
     def test_joined_str(self):
         def func(x):
             hello, test = "Hello", "test"
             print(f"{hello + ' ' + test}, I'm a {test}") # noqa E999
-            print(f"format blank")
+            print(f"format blank") # noqa F541
             hi = 'hi'
             print(f"stuff before {hi}")
             print(f"{hi} stuff after")
@@ -32,8 +36,25 @@ class TestScriptPy3(JitTestCase):
         with self.capture_stdout() as captured_script:
             out_script = func(x)
 
-        self.assertAlmostEqual(out, out_script)
+        self.assertEqual(out, out_script)
         self.assertEqual(captured, captured_script)
+
+    @unittest.skipIf(sys.version_info[:2] < (3, 7), "`dataclasses` module not present on < 3.7")
+    def test_dataclass_error(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class NormalizationInfo(object):
+            mean: float = 0.0
+
+            def compute(self, total_rows):
+                return self.mean
+
+        def fn():
+            return NormalizationInfo(1, 2, 3, 4, 5)
+
+        with self.assertRaisesRegex(OSError, "could not get source code"):
+            torch.jit.script(fn)
 
     def test_optional_dict_construct(self):
         class M(torch.nn.Module):
@@ -99,7 +120,6 @@ class TestScriptPy3(JitTestCase):
 
         self.assertEqual(foo(), Tup(1, 2))
 
-    @unittest.skipIf(sys.version_info[0] < 3 and sys.version_info[1] < 6, "dict not ordered")
     def test_dict_preserves_order(self):
         def dict_ordering():
             a : Dict[int, int] = {}
@@ -137,6 +157,24 @@ class TestScriptPy3(JitTestCase):
         self.assertEqual(out.float_features, 3.0)
         self.assertEqual(out.sequence_features, [3.0])
         self.assertEqual(out.time_since_first, 3.0)
+
+    def test_named_tuple_as_attr(self):
+        class Config(NamedTuple):
+            size: int
+
+        class MyMod(nn.Module):
+            configs: Dict[int, Config]
+
+            def __init__(self, configs):
+                super().__init__()
+                self.configs = configs
+
+            def forward(self, x):
+                for _id, config in self.configs.items():
+                    x += config.size
+                return x
+
+        s = torch.jit.script(MyMod({0: Config(size=16)}))
 
     def test_types_as_values(self):
         def fn(m: torch.Tensor) -> torch.device:
@@ -176,6 +214,24 @@ class TestScriptPy3(JitTestCase):
         y = foo(torch.randn(2, 2), torch.randn(2, 2))
 
 
+    def test_named_tuple_resolution(self):
+        class TheType(NamedTuple):
+            t: int
+
+        class MyModule(types.ModuleType):
+            def __init__(self):
+                super(MyModule, self).__init__('MyModule')
+
+            def __getattr__(self, attr):
+                return TheType
+
+        some_module = MyModule()
+
+        def fn() -> some_module.Type:
+            return some_module.Type(1)
+
+        self.checkScript(fn, [])
+
     def test_ignore_with_types(self):
         @torch.jit.ignore
         def fn(x: Dict[str, Optional[torch.Tensor]]):
@@ -204,6 +260,7 @@ class TestScriptPy3(JitTestCase):
                 return str(type(args[0]))
 
         the_class = MyPythonClass()
+
         @torch.jit.script
         def fn(x):
             return the_class(x)
@@ -351,6 +408,137 @@ class TestScriptPy3(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
             torch.jit.script(wrong_type)
 
+    def test_optional_no_element_type_annotation(self):
+        """
+        Test that using an optional with no contained types produces an error.
+        """
+        def fn_with_comment(x):
+            # type: (torch.Tensor) -> Optional
+            return (x, x)
+
+        def annotated_fn(x: torch.Tensor) -> Optional:
+            return (x, x)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn_with_comment)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(annotated_fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            torch.jit.script(fn_with_comment)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            torch.jit.script(annotated_fn)
+
+    def test_tuple_no_element_type_annotation(self):
+        """
+        Test that using a tuple with no contained types produces an error.
+        """
+        def fn_with_comment(x):
+            # type: (torch.Tensor) -> Tuple
+            return (x, x)
+
+        def annotated_fn(x: torch.Tensor) -> Tuple:
+            return (x, x)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn_with_comment)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(annotated_fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+            torch.jit.script(fn_with_comment)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+            torch.jit.script(annotated_fn)
+
+    def test_tuple_subscripted_assign(self):
+        with self.assertRaisesRegex(RuntimeError, "subscripted assignment"):
+            @torch.jit.script
+            def foo(a: Tuple[int, int]) -> None:
+                a[0] = a[1]
+
+        with self.assertRaisesRegex(RuntimeError, "augmented assignment"):
+            @torch.jit.script
+            def bar(a: Tuple[int, int]) -> None:
+                a[0] += a[1]
+
+    def test_subexpression_List_Future(self):
+
+        @torch.jit.script
+        def fn(x: List[torch.jit.Future[int]]) -> torch.jit.Future[int]:
+            return x[0]
+
+        FileCheck().check('Future[int]').check('Future[int]').run(fn.graph)
+
+    def test_subexpression_Future_annotate(self):
+        @torch.jit.script
+        def fn() -> torch.jit.Future[int]:
+            x: List[torch.jit.Future[int]] = []
+            return x[0]
+
+        FileCheck().check("Future[int][]").run(fn.graph)
+
+    def test_future_isinstance(self):
+        @torch.jit.script
+        def fn(x: Any) -> torch.jit.Future[int]:
+            assert isinstance(x, jit.Future[int])
+            return x
+
+        FileCheck().check("Future[int]").run(fn.graph)
+
+    def test_str_refine_any(self):
+        def forward(x: Any) -> str:
+            if isinstance(x, str):
+                return x
+            return "foo"
+        forward = torch.jit.script(forward)
+        self.assertEqual(forward(1), "foo")
+        self.assertEqual(forward("bar"), "bar")
+
+    def test_subexpression_Tuple_int_int_Future(self):
+
+        @torch.jit.script
+        def fn(x: Tuple[int, int, torch.jit.Future[int]]) -> Tuple[int, torch.jit.Future[int]]:
+            return x[0], x[2]
+
+        FileCheck().check('(int, int, Future[int])').check('(int, Future[int])').run(fn.graph)
+
+    def test_subexpression_Dict_int_Future(self):
+
+        @torch.jit.script
+        def fn(x: Dict[int, torch.jit.Future[int]], y: int) -> torch.jit.Future[int]:
+            return x[y]
+
+        FileCheck().check('Dict(int, Future(int))').check('Future[int]').run(fn.graph)
+
+    def test_subexpression_Optional(self):
+
+        @torch.jit.script
+        def fn(x: Optional[Dict[int, torch.jit.Future[int]]]) -> Optional[torch.jit.Future[int]]:
+            if x is not None:
+                return x[0]
+            else:
+                return None
+
+        FileCheck().check('Dict(int, Future(int))?').run(fn.graph)
+
+    def test_unimported_type_resolution(self):
+        # verify fallback from the python resolver to the c++ resolver
+
+        @ torch.jit.script
+        def fn(x):
+            # type: (number) -> number
+            return x + 1
+
+        FileCheck().check('Scalar').run(fn.graph)
+
     def test_parser_bug(self):
         def parser_bug(o: Optional[torch.Tensor]):
             pass
@@ -367,22 +555,182 @@ class TestScriptPy3(JitTestCase):
             @torch.jit.script
             def foo():
                 x = 5
-                if True:
+                if 1 == 1:
                     x : Optional[int] = 7
 
-    def test_any_in_class_fails(self):
-        class MyCoolNamedTuple(NamedTuple):
-            a : Any
-            b : float
-            c : List[int]
-        with self.assertRaisesRegex(RuntimeError, "contains an Any"):
-            @torch.jit.script
-            def foo():
-                return MyCoolNamedTuple(4, 5.5, [3])
-            print(foo.graph)
+    def test_module_inplace_construct(self):
+        class M(nn.Module):
+            def __init__(self, start: int):
+                super().__init__()
+                self.linear = nn.Linear(3, 3)
+                self.attribute = start
+                self.parameter = nn.Parameter(torch.tensor(3, dtype=torch.float))
+
+            def method(self) -> int:
+                return self.attribute
+
+            @torch.jit.unused
+            def unused_method(self):
+                return self.attribute + self.attribute
+
+            def forward(self, x):
+                return self.linear(self.linear(x))
+
+
+        class N(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(4, 4)
+
+            @torch.jit.ignore
+            def ignored_method(self, x):
+                return x
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = torch.jit.script(M(3))
+        n = torch.jit.script(N())
+
+        n._reconstruct(m._c)
+
+        inp = torch.rand((3))
+
+        # Check that both modules produce the same output.
+        with torch.no_grad():
+            m_out = m(inp)
+            n_out = n(inp)
+            self.assertEqual(m_out, n_out)
+
+        # Check that ignored method is still intact.
+        self.assertEqual(inp, n.ignored_method(inp))
+
+    def test_if_returning_any(self):
+        """
+        Check that an if statement can return different
+        types early from each branch when the return
+        type of the function is Any.
+        """
+        def if_function(inp: torch.Tensor) -> Any:
+            if inp.shape[0] == 1:
+                return inp * inp
+            else:
+                return "str"
+
+        self.checkScript(if_function, (torch.randn(5),))
+
+    def test_module_properties(self):
+        class ModuleWithProperties(torch.nn.Module):
+            __jit_unused_properties__ = ["ignored_attr"]
+
+            def __init__(self, a: int):
+                super().__init__()
+                self.a = a
+
+            def forward(self, a: int, b: int):
+                self.attr = a + b
+                return self.attr
+
+            @property
+            def attr(self):
+                return self.a
+
+            @property
+            def ignored_attr(self):
+                return sum([self.a])
+
+            @torch.jit.unused
+            @property
+            def ignored_attr_2(self):
+                return sum([self.a])
+
+            @ignored_attr_2.setter
+            def ignored_attr_2(self, value):
+                self.a = sum([self.a])
+
+            @attr.setter
+            def attr(self, a: int):
+                if a > 0:
+                    self.a = a
+                else:
+                    self.a = 0
+
+        class ModuleWithNoSetter(torch.nn.Module):
+            def __init__(self, a: int):
+                super().__init__()
+                self.a = a
+
+            def forward(self, a: int, b: int):
+                self.attr + a + b
+
+            @property
+            def attr(self):
+                return self.a + 1
+
+        self.checkModule(ModuleWithProperties(5), (5, 6,))
+        self.checkModule(ModuleWithProperties(5), (-5, -6,))
+        self.checkModule(ModuleWithNoSetter(5), (5, 6,))
+        self.checkModule(ModuleWithNoSetter(5), (-5, -6,))
+
+        mod = ModuleWithProperties(3)
+        scripted_mod = torch.jit.script(mod)
+
+        with self.assertRaisesRegex(torch.nn.modules.module.ModuleAttributeError, "has no attribute"):
+            scripted_mod.ignored_attr
+
+    def test_ignoring_module_attributes(self):
+        """
+        Test that module attributes can be ignored.
+        """
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a: int) -> int:
+                return sum([a])
+
+        class ModuleWithIgnoredAttr(torch.nn.Module):
+            __jit_ignored_attributes__ = ["a", "sub"]
+
+            def __init__(self, a: int, b: int):
+                super().__init__()
+                self.a = a
+                self.b = b
+                self.sub = Sub()
+
+            def forward(self) -> int:
+                return self.b
+
+            @torch.jit.ignore
+            def ignored_fn(self) -> int:
+                return self.sub.forward(self.a)
+
+        mod = ModuleWithIgnoredAttr(1, 4)
+        scripted_mod = torch.jit.script(mod)
+        self.assertEqual(scripted_mod(), 4)
+        self.assertEqual(scripted_mod.ignored_fn(), 1)
+
+        # Test the error message for ignored attributes.
+        class ModuleUsesIgnoredAttr(torch.nn.Module):
+            __jit_ignored_attributes__ = ["a", "sub"]
+
+            def __init__(self, a: int):
+                super().__init__()
+                self.a = a
+                self.sub = Sub()
+
+            def forward(self) -> int:
+                return self.sub(self.b)
+
+        mod = ModuleUsesIgnoredAttr(1)
+
+        with self.assertRaisesRegexWithHighlight(RuntimeError, r"attribute was ignored during compilation", "self.sub"):
+            scripted_mod = torch.jit.script(mod)
+
 
     def test_export_opnames_interface(self):
         global OneTwoModule
+
         @torch.jit.interface
         class OneTwoModule(nn.Module):
             def one(self, x, y):
@@ -438,12 +786,32 @@ class TestScriptPy3(JitTestCase):
             return mod_list[0].forward(x) + mod_list[1].forward(x)
 
         scripted_M_mod = torch.jit.script(M())
-        self.assertEqual(torch.jit.export_opnames(scripted_M_mod),
-                         ['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal'])
+        # Temporarily test empty output because lite interpreter does not support interface call
+        # Replace it with the issubset call when interface call is supported.
+        self.assertTrue(len(torch.jit.export_opnames(scripted_M_mod)) == 0)
+        # self.assertTrue(set(['aten::mul.Scalar', 'aten::mul.Tensor', 'aten::reciprocal']).issubset(
+        #     set(torch.jit.export_opnames(scripted_M_mod))))
 
         scripted_M_mod.sub = torch.jit.script(FooMod())
-        self.assertEqual(torch.jit.export_opnames(scripted_M_mod),
-                         ['aten::add.Tensor', 'aten::mul.Scalar'])
+        self.assertTrue(len(torch.jit.export_opnames(scripted_M_mod)) == 0)
+        # self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
+        #     set(torch.jit.export_opnames(scripted_M_mod))))
+
+    def test_broadcasting_list(self):
+        """
+        Test BroadcastingList and torch.nn._size_N_t alias
+        """
+        from torch._jit_internal import BroadcastingList2
+        from torch.nn.common_types import _size_2_t
+
+        def sum_i(x: _size_2_t) -> int:
+            return x[0] + x[1]
+
+        def sum_f(x: BroadcastingList2[float]) -> float:
+            return x[0] + x[1]
+
+        self.assertTrue(torch.jit.script(sum_i)(4) == 8)
+        self.assertTrue(torch.jit.script(sum_f)(4.5) == 9.)
 
 
 if __name__ == '__main__':

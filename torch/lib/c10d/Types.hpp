@@ -57,7 +57,12 @@ struct ReduceScatterOptions {
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 
+struct AllToAllOptions {
+  std::chrono::milliseconds timeout = kUnsetTimeout;
+};
+
 struct BarrierOptions {
+  std::vector<int> device_ids;
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 

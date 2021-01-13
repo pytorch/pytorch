@@ -4,8 +4,10 @@
 #include <istream>
 #include <ostream>
 #include <fstream>
+#include <algorithm>
 
 #include <c10/core/Allocator.h>
+#include <c10/core/CPUAllocator.h>
 #include <c10/core/Backend.h>
 
 #include "caffe2/core/common.h"
@@ -63,7 +65,7 @@ PyTorchStreamReader::PyTorchStreamReader(std::istream* in)
 }
 
 PyTorchStreamReader::PyTorchStreamReader(
-    std::unique_ptr<ReadAdapterInterface> in)
+    std::shared_ptr<ReadAdapterInterface> in)
     : ar_(std::make_unique<mz_zip_archive>()), in_(std::move(in)) {
   init();
 }
@@ -148,7 +150,8 @@ constexpr int MZ_ZIP_LOCAL_DIR_HEADER_SIZE = 30;
 constexpr int MZ_ZIP_LDH_FILENAME_LEN_OFS = 26;
 constexpr int MZ_ZIP_LDH_EXTRA_LEN_OFS = 28;
 
-static size_t getPadding(
+namespace detail {
+size_t getPadding(
     size_t cursor,
     size_t filename_size,
     size_t size,
@@ -178,6 +181,7 @@ static size_t getPadding(
   padding_buf[3] = (uint8_t)(padding_size >> 8);
   return padding_size_plus_fbxx;
 }
+}
 
 bool PyTorchStreamReader::hasRecord(const std::string& name) {
   std::string ss = archive_name_plus_slash_ + name;
@@ -196,7 +200,17 @@ std::vector<std::string> PyTorchStreamReader::getAllRecords() {
   char buf[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
   for (size_t i = 0; i < num_files; i++) {
     mz_zip_reader_get_filename(ar_.get(), i, buf, MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE);
-    out.push_back(buf);
+    if (strncmp(
+            buf,
+            archive_name_plus_slash_.data(),
+            archive_name_plus_slash_.size()) != 0) {
+      CAFFE_THROW(
+          "file in archive is not in a subdirectory ",
+          archive_name_plus_slash_,
+          ": ",
+          buf);
+    }
+    out.push_back(buf + archive_name_plus_slash_.size());
   }
   return out;
 }
@@ -217,11 +231,10 @@ std::tuple<at::DataPtr, size_t> PyTorchStreamReader::getRecord(const std::string
   mz_zip_archive_file_stat stat;
   mz_zip_reader_file_stat(ar_.get(), key, &stat);
   valid("retrieving file meta-data for ", name.c_str());
-  void * ptr = malloc(stat.m_uncomp_size);
-  mz_zip_reader_extract_to_mem(ar_.get(), key, ptr, stat.m_uncomp_size, 0);
+  at::DataPtr retval = c10::GetCPUAllocator()->allocate(stat.m_uncomp_size);
+  mz_zip_reader_extract_to_mem(ar_.get(), key, retval.get(), stat.m_uncomp_size, 0);
   valid("reading file ", name.c_str());
 
-  at::DataPtr retval(ptr, ptr, free, at::kCPU);
   return std::make_tuple(std::move(retval), stat.m_uncomp_size);
 }
 
@@ -275,7 +288,8 @@ PyTorchStreamWriter::PyTorchStreamWriter(std::string file_name)
 
 PyTorchStreamWriter::PyTorchStreamWriter(
     const std::function<size_t(const void*, size_t)>& writer_func)
-    : archive_name_("archive"), writer_func_(writer_func) {
+    : archive_name_("archive"),
+      writer_func_(writer_func) {
   setup(archive_name_);
 }
 
@@ -292,6 +306,7 @@ void PyTorchStreamWriter::setup(const string& file_name) {
         file_name,
         std::ofstream::out | std::ofstream::trunc | std::ofstream::binary);
     valid("opening archive ", file_name.c_str());
+    TORCH_CHECK(file_stream_, "File ", file_name, " cannot be opened.");
     writer_func_ = [this](const void* buf, size_t nbytes) -> size_t {
       file_stream_.write(static_cast<const char*>(buf), nbytes);
       return !file_stream_ ? 0 : nbytes;
@@ -303,10 +318,10 @@ void PyTorchStreamWriter::setup(const string& file_name) {
 
   mz_zip_writer_init_v2(ar_.get(), 0, MZ_ZIP_FLAG_WRITE_ZIP64);
   valid("initializing archive ", file_name.c_str());
+}
 
-  std::string version = c10::to_string(kProducedFileFormatVersion);
-  version.push_back('\n');
-  writeRecord("version", version.c_str(), version.size());
+void PyTorchStreamWriter::setMinVersion(const uint64_t version) {
+  version_ = std::max(version, version_);
 }
 
 void PyTorchStreamWriter::writeRecord(
@@ -318,7 +333,7 @@ void PyTorchStreamWriter::writeRecord(
   AT_ASSERT(!archive_name_plus_slash_.empty());
   std::string full_name = archive_name_plus_slash_ + name;
   size_t padding_size =
-      getPadding(ar_->m_archive_size, full_name.size(), size, padding_);
+      detail::getPadding(ar_->m_archive_size, full_name.size(), size, padding_);
   uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
   mz_zip_writer_add_mem_ex_v2(
       ar_.get(),
@@ -339,8 +354,14 @@ void PyTorchStreamWriter::writeRecord(
 }
 
 void PyTorchStreamWriter::writeEndOfFile() {
+  // Rewrites version info
+  std::string version = c10::to_string(version_);
+  version.push_back('\n');
+  writeRecord("version", version.c_str(), version.size());
+
   AT_ASSERT(!finalized_);
   finalized_ = true;
+
   mz_zip_writer_finalize_archive(ar_.get());
   mz_zip_writer_end(ar_.get());
   valid("writing central directory for archive ", archive_name_.c_str());

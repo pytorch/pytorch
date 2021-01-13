@@ -7,8 +7,9 @@
 #include <string>
 #include <vector>
 
-namespace caffe2 { namespace onnx {
-class CAFFE2_API Caffe2BackendRep {
+namespace caffe2 {
+namespace onnx {
+class TORCH_API Caffe2BackendRep {
  public:
   void Run(
       const caffe2::Predictor::TensorList& inputs,
@@ -45,4 +46,5 @@ class CAFFE2_API Caffe2BackendRep {
   std::vector<std::string> uninitialized_inputs_;
   std::unique_ptr<caffe2::Predictor> predictor_{nullptr};
 };
-}}
+} // namespace onnx
+} // namespace caffe2

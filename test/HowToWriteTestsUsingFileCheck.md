@@ -61,7 +61,7 @@ CHECK` pragmas and essentially it sees the input string like this:
 ```
 
 It then checks that the optimized IR satisfies the specified annotations. It
-first finds string `%x : Tensor = aten::mul(%a, %b)` matching the annotion (1),
+first finds string `%x : Tensor = aten::mul(%a, %b)` matching the annotation (1),
 then it finds string `return (%x, %x)` matching the annotation (3), and since
 there were no lines matching `aten::mul` after the match (1) and before the
 match (3), the annotation (2) is also satisfied.

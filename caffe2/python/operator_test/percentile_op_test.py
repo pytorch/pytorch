@@ -1,9 +1,9 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-from caffe2.python import core, workspace, dyndep
+
+
+
+
+from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import numpy as np
 

@@ -7,7 +7,7 @@ from torch.distributions.utils import broadcast_all
 
 class Laplace(Distribution):
     r"""
-    Creates a Laplace distribution parameterized by :attr:`loc` and :attr:'scale'.
+    Creates a Laplace distribution parameterized by :attr:`loc` and :attr:`scale`.
 
     Example::
 
@@ -75,8 +75,6 @@ class Laplace(Distribution):
         return 0.5 - 0.5 * (value - self.loc).sign() * torch.expm1(-(value - self.loc).abs() / self.scale)
 
     def icdf(self, value):
-        if self._validate_args:
-            self._validate_sample(value)
         term = value - 0.5
         return self.loc - self.scale * (term).sign() * torch.log1p(-2 * term.abs())
 

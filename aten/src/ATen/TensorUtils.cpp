@@ -19,6 +19,25 @@ std::ostream& operator<<(std::ostream & out, TensorGeometryArg t) {
   return out;
 }
 
+void checkDim(
+    CheckedFrom c,
+    const Tensor& tensor,
+    const char* name,
+    int pos, // 1-indexed
+    int64_t dim) {
+  TORCH_CHECK(
+      tensor.dim() == dim,
+      "Expected ",
+      dim,
+      "-dimensional tensor, but got ",
+      tensor.dim(),
+      "-dimensional tensor for ",
+      TensorGeometryArg(TensorArg({tensor, name, pos})),
+      " (while checking arguments for ",
+      c,
+      ")");
+}
+
 void checkDim(CheckedFrom c, const TensorGeometryArg& t, int64_t dim) {
   TORCH_CHECK(t->dim() == dim,
     "Expected ", dim, "-dimensional tensor, but got ", t->dim(),
@@ -298,17 +317,20 @@ std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
   return strides;
 }
 
-int64_t computeStorageSize(IntArrayRef sizes, IntArrayRef strides) {
+size_t computeStorageNbytes(
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    size_t itemsize_bytes) {
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
-  int64_t size = 1;
+  size_t size = 1;
   for(size_t i = 0; i < sizes.size(); i++) {
     if(sizes[i] == 0) {
       return 0;
     }
     size += strides[i]*(sizes[i]-1);
   }
-  return size;
+  return size * itemsize_bytes;
 }
 
 // On a high level,
@@ -332,8 +354,7 @@ c10::optional<std::vector<int64_t>> computeStride(
   // we use the stride as if it were computed via resize.
   // This could perhaps be combined with the below code, but the complexity
   // didn't seem worth it.
-  int64_t numel = std::accumulate(oldshape.begin(), oldshape.end(), 1,
-                                  std::multiplies<int64_t>());
+  const int64_t numel = prod_intlist(oldshape);
   if (numel == 0 && oldshape.equals(newshape)) {
     return oldstride.vec();
   }

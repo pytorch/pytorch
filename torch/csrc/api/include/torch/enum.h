@@ -64,7 +64,7 @@ std::string operator()(const enumtype::k##name& v) const { \
 // However, it throws the following error instead:
 //
 // ```
-// error: could not convert ‘torch::kNone’ from ‘const torch::enumtype::kNone’ to ‘torch::nn::SomeOptions’
+// error: could not convert `torch::kNone` from `const torch::enumtype::kNone` to `torch::nn::SomeOptions`
 // ```
 //
 // To get around this problem, we explicitly provide the following constructors for `SomeOptions`:
@@ -102,6 +102,8 @@ TORCH_ENUM_DECLARE(ConvTranspose3D)
 TORCH_ENUM_DECLARE(Sigmoid)
 TORCH_ENUM_DECLARE(Tanh)
 TORCH_ENUM_DECLARE(ReLU)
+TORCH_ENUM_DECLARE(GELU)
+TORCH_ENUM_DECLARE(SiLU)
 TORCH_ENUM_DECLARE(LeakyReLU)
 TORCH_ENUM_DECLARE(FanIn)
 TORCH_ENUM_DECLARE(FanOut)
@@ -122,6 +124,10 @@ TORCH_ENUM_DECLARE(BatchMean)
 TORCH_ENUM_DECLARE(Zeros)
 TORCH_ENUM_DECLARE(Border)
 TORCH_ENUM_DECLARE(Reflection)
+TORCH_ENUM_DECLARE(RNN_TANH)
+TORCH_ENUM_DECLARE(RNN_RELU)
+TORCH_ENUM_DECLARE(LSTM)
+TORCH_ENUM_DECLARE(GRU)
 
 namespace torch {
 namespace enumtype {
@@ -137,6 +143,8 @@ struct _compute_enum_name {
   TORCH_ENUM_PRETTY_PRINT(Sigmoid)
   TORCH_ENUM_PRETTY_PRINT(Tanh)
   TORCH_ENUM_PRETTY_PRINT(ReLU)
+  TORCH_ENUM_PRETTY_PRINT(GELU)
+  TORCH_ENUM_PRETTY_PRINT(SiLU)
   TORCH_ENUM_PRETTY_PRINT(LeakyReLU)
   TORCH_ENUM_PRETTY_PRINT(FanIn)
   TORCH_ENUM_PRETTY_PRINT(FanOut)
@@ -157,6 +165,10 @@ struct _compute_enum_name {
   TORCH_ENUM_PRETTY_PRINT(Zeros)
   TORCH_ENUM_PRETTY_PRINT(Border)
   TORCH_ENUM_PRETTY_PRINT(Reflection)
+  TORCH_ENUM_PRETTY_PRINT(RNN_TANH)
+  TORCH_ENUM_PRETTY_PRINT(RNN_RELU)
+  TORCH_ENUM_PRETTY_PRINT(LSTM)
+  TORCH_ENUM_PRETTY_PRINT(GRU)
 };
 
 template <typename V>

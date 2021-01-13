@@ -41,15 +41,15 @@ void test_overflow() {
   ASSERT_EQ(s1.toFloat(), 100000.0);
   ASSERT_EQ(s1.toInt(), 100000);
 
-  ASSERT_THROW(s1.toHalf(), std::domain_error);
+  ASSERT_THROW(s1.toHalf(), std::runtime_error);
 
   s1 = Scalar(NAN);
   ASSERT_TRUE(std::isnan(s1.toFloat()));
-  ASSERT_THROW(s1.toInt(), std::domain_error);
+  ASSERT_THROW(s1.toInt(), std::runtime_error);
 
   s1 = Scalar(INFINITY);
   ASSERT_TRUE(std::isinf(s1.toFloat()));
-  ASSERT_THROW(s1.toInt(), std::domain_error);
+  ASSERT_THROW(s1.toInt(), std::runtime_error);
 }
 
 TEST(TestScalar, TestScalar) {
@@ -64,8 +64,8 @@ TEST(TestScalar, TestScalar) {
   auto gen = at::detail::getDefaultCPUGenerator();
   {
     // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(gen->mutex_);
-    ASSERT_NO_THROW(gen->set_current_seed(std::random_device()()));
+    std::lock_guard<std::mutex> lock(gen.mutex());
+    ASSERT_NO_THROW(gen.set_current_seed(std::random_device()()));
   }
   auto&& C = at::globalContext();
   if (at::hasCUDA()) {
@@ -127,4 +127,34 @@ TEST(TestScalar, TestScalar) {
   ASSERT_EQ(float_one.item<float>(), 1);
   ASSERT_EQ(float_one.item<int32_t>(), 1);
   ASSERT_EQ(float_one.item<at::Half>(), 1);
+}
+
+TEST(TestScalar, TestConj) {
+  Scalar int_scalar = 257;
+  Scalar float_scalar = 3.0;
+  Scalar complex_scalar = c10::complex<double>(2.3, 3.5);
+
+  ASSERT_EQ(int_scalar.conj().toInt(), 257);
+  ASSERT_EQ(float_scalar.conj().toDouble(), 3.0);
+  ASSERT_EQ(complex_scalar.conj().toComplexDouble(), c10::complex<double>(2.3, -3.5));
+}
+
+TEST(TestScalar, TestEqual) {
+  ASSERT_FALSE(Scalar(1.0).equal(false));
+  ASSERT_FALSE(Scalar(1.0).equal(true));
+  ASSERT_FALSE(Scalar(true).equal(1.0));
+  ASSERT_TRUE(Scalar(true).equal(true));
+
+  ASSERT_TRUE(Scalar(c10::complex<double>{2.0, 5.0}).equal(c10::complex<double>{2.0, 5.0}));
+  ASSERT_TRUE(Scalar(c10::complex<double>{2.0, 0}).equal(2.0));
+  ASSERT_TRUE(Scalar(c10::complex<double>{2.0, 0}).equal(2));
+
+  ASSERT_TRUE(Scalar(2.0).equal(c10::complex<double>{2.0, 0.0}));
+  ASSERT_FALSE(Scalar(2.0).equal(c10::complex<double>{2.0, 4.0}));
+  ASSERT_FALSE(Scalar(2.0).equal(3.0));
+  ASSERT_TRUE(Scalar(2.0).equal(2));
+
+  ASSERT_TRUE(Scalar(2).equal(c10::complex<double>{2.0, 0}));
+  ASSERT_TRUE(Scalar(2).equal(2));
+  ASSERT_TRUE(Scalar(2).equal(2.0));
 }

@@ -1,7 +1,7 @@
 import os
 import sys
 import unittest
-from torch.testing._internal.common_utils import enable_profiling_mode, GRAPH_EXECUTOR, ProfilingMode
+from torch.testing._internal.common_utils import enable_profiling_mode_for_profiling_tests, GRAPH_EXECUTOR, ProfilingMode
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,6 +11,7 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
 from torch.testing._internal.common_utils import slowTest, suppress_warnings
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -21,6 +22,8 @@ try:
     import torchvision
     HAS_TORCHVISION = True
 except ImportError:
+    HAS_TORCHVISION = False
+except RuntimeError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
@@ -230,7 +233,7 @@ class TestModels(JitTestCase):
     @staticmethod
     def _test_mnist(self, device, check_export_import=True):
         # eval() is present because dropout makes this nondeterministic
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             self.checkTrace(MnistNet().to(device).eval(), (torch.rand(5, 1, 28, 28, device=device),),
                             export_import=check_export_import)
 
@@ -280,7 +283,7 @@ class TestModels(JitTestCase):
                 action_scores = self.affine2(x)
                 return F.softmax(action_scores, dim=1)
 
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             self.checkTrace(Policy().to(device), (torch.rand(1, 4, device=device),),
                             export_import=test_export_import)
 
@@ -395,11 +398,11 @@ class TestModels(JitTestCase):
     def test_snli(self):
         self._test_snli(self, device='cpu')
 
-    if 'fbgemm' in torch.backends.quantized.supported_engines:
-        # Suppression: this exercises a deprecated API
-        @suppress_warnings
-        def test_snli_quantized(self):
-            self._test_snli(self, device='cpu', quantized=True)
+    @skipIfNoFBGEMM
+    # Suppression: this exercises a deprecated API
+    @suppress_warnings
+    def test_snli_quantized(self):
+        self._test_snli(self, device='cpu', quantized=True)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_snli_cuda(self):
@@ -486,7 +489,7 @@ class TestModels(JitTestCase):
                 return self.seq.forward(input)
 
         # disabled due to a jitter issues that will be fixed by using load/store in the compiler
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             # TODO: toggle export_import once above issues are fixed
             self.checkTrace(Traced(), (torch.rand(3, 4),),
                             export_import=False)
@@ -533,7 +536,7 @@ class TestModels(JitTestCase):
                             export_import=False, allow_unused=True,
                             inputs_require_grads=False)
         else:
-            with enable_profiling_mode():
+            with enable_profiling_mode_for_profiling_tests():
                 # eval() is present because randn_like makes this nondeterministic
                 self.checkTrace(VAE().to(device).eval(), (torch.rand(128, 1, 28, 28, device=device),),
                                 export_import=check_export_import)
@@ -541,11 +544,11 @@ class TestModels(JitTestCase):
     def test_vae(self):
         self._test_vae(self, device='cpu')
 
-    if 'fbgemm' in torch.backends.quantized.supported_engines:
-        # Suppression: this exercises a deprecated API
-        @suppress_warnings
-        def test_vae_quantized(self):
-            self._test_vae(self, device='cpu', quantized=True)
+    @skipIfNoFBGEMM
+    # Suppression: this exercises a deprecated API
+    @suppress_warnings
+    def test_vae_quantized(self):
+        self._test_vae(self, device='cpu', quantized=True)
 
     @unittest.skipIf(not RUN_CUDA, "no CUDA")
     def test_vae_cuda(self):

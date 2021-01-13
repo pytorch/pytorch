@@ -31,6 +31,7 @@ namespace at { namespace cuda {
 
 #define AT_FORALL_NVRTC(_)                       \
   _(nvrtcVersion)                                \
+  _(nvrtcAddNameExpression)                      \
   _(nvrtcCreateProgram)                          \
   _(nvrtcDestroyProgram)                         \
   _(nvrtcGetPTXSize)                             \
@@ -39,14 +40,19 @@ namespace at { namespace cuda {
   _(nvrtcGetErrorString)                         \
   _(nvrtcGetProgramLogSize)                      \
   _(nvrtcGetProgramLog)                          \
+  _(nvrtcGetLoweredName)                         \
   _(cuModuleLoadData)                            \
+  _(cuModuleLoadDataEx)                          \
   _(cuModuleGetFunction)                         \
   _(cuOccupancyMaxActiveBlocksPerMultiprocessor) \
   _(cuGetErrorString)                            \
   _(cuLaunchKernel)                              \
   _(cuCtxGetCurrent)                             \
   _(cuModuleUnload)                              \
-  _(cuDevicePrimaryCtxGetState)
+  _(cuDevicePrimaryCtxGetState)                  \
+  _(cuLinkCreate)                                \
+  _(cuLinkAddData)                               \
+  _(cuLinkComplete)
 
 #else
 
@@ -62,23 +68,33 @@ namespace at { namespace cuda {
 //
 // HIP doesn't have
 //   cuGetErrorString  (maps to non-functional hipGetErrorString___)
+//
+// HIP from ROCm 3.5 on renamed hipOccupancyMaxActiveBlocksPerMultiprocessor
+// to hipModuleOccupancyMaxActiveBlocksPerMultiprocessor.
+#if HIP_VERSION < 305
+#define HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR hipOccupancyMaxActiveBlocksPerMultiprocessor
+#else
+#define HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR cuOccupancyMaxActiveBlocksPerMultiprocessor
+#endif
 
-#define AT_FORALL_NVRTC(_)                       \
-  _(nvrtcVersion)                                \
-  _(nvrtcCreateProgram)                          \
-  _(nvrtcDestroyProgram)                         \
-  _(nvrtcGetPTXSize)                             \
-  _(nvrtcGetPTX)                                 \
-  _(cuModuleLoadData)                            \
-  _(cuModuleGetFunction)                         \
-  _(cuOccupancyMaxActiveBlocksPerMultiprocessor) \
-  _(nvrtcGetErrorString)                         \
-  _(nvrtcGetProgramLogSize)                      \
-  _(nvrtcGetProgramLog)                          \
-  _(cuLaunchKernel)                              \
-  _(nvrtcCompileProgram)                         \
-  _(cuCtxGetCurrent)                             \
-  _(cuModuleUnload)                              \
+#define AT_FORALL_NVRTC(_)                        \
+  _(nvrtcVersion)                                 \
+  _(nvrtcCreateProgram)                           \
+  _(nvrtcAddNameExpression)                       \
+  _(nvrtcDestroyProgram)                          \
+  _(nvrtcGetPTXSize)                              \
+  _(nvrtcGetPTX)                                  \
+  _(cuModuleLoadData)                             \
+  _(cuModuleGetFunction)                          \
+  _(HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR) \
+  _(nvrtcGetErrorString)                          \
+  _(nvrtcGetProgramLogSize)                       \
+  _(nvrtcGetProgramLog)                           \
+  _(cuLaunchKernel)                               \
+  _(nvrtcCompileProgram)                          \
+  _(cuCtxGetCurrent)                              \
+  _(nvrtcGetLoweredName)                          \
+  _(cuModuleUnload)                               \
   _(cuDevicePrimaryCtxGetState)
 
 #endif

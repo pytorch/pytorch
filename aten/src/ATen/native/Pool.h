@@ -28,11 +28,12 @@ static inline T pooling_output_shape_pad_lr(
     T outputSize = div_rtn<T>(
         inputSize + pad_l + pad_r - dilation * (kernelSize - 1) - 1 +
         (ceil_mode ? stride - 1 : 0), stride) + 1;
-    if (pad_l) {
+    if (ceil_mode) {
         // ensure that the last pooling starts inside the image
         // needed to avoid problems in ceil mode
-        if ((outputSize - 1) * stride >= inputSize + pad_l)
+        if ((outputSize - 1) * stride >= inputSize + pad_l) {
           --outputSize;
+        }
     }
     return outputSize;
 }
@@ -40,6 +41,7 @@ static inline T pooling_output_shape_pad_lr(
 template<typename T>
 static inline T pooling_output_shape(
       T inputSize, T kernelSize, T pad, T stride, T dilation, bool ceil_mode) {
+    TORCH_CHECK(stride != 0, "stride should not be zero");
     return pooling_output_shape_pad_lr(
         inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode);
 }
@@ -70,7 +72,7 @@ pool2d_shape_check(
   TORCH_CHECK(input.numel() > 0 && (ndim == 3 || ndim == 4),
               "non-empty 3D or 4D input tensor expected but got ndim: ", ndim);
   TORCH_CHECK(kW/2 >= padW && kH/2 >= padH,
-              "pad should be smaller than half of kernel size, but got ",
+              "pad should be smaller than or equal to half of kernel size, but got ",
               "padW = ", padW, ", padH = ", padH, ", kW = ", kW, ", kH = ", kH);
 
   TORCH_CHECK(outputWidth >= 1 && outputHeight >= 1,
@@ -106,18 +108,9 @@ max_pool2d_backward_shape_check(
   check_dim_size(gradOutput, ndim, ndim-2, outputHeight);
   check_dim_size(gradOutput, ndim, ndim-1, outputWidth);
 
-  // different CUDA/CPU behavior from TH
-  if (cuda) {
-    check_dim_size(indices, 4, 0, nbatch);
-    check_dim_size(indices, 4, 1, nOutputPlane);
-    check_dim_size(indices, 4, 2, outputHeight);
-    check_dim_size(indices, 4, 3, outputWidth);
-  }
-  else {
-    check_dim_size(indices, ndim, ndim-3, nOutputPlane);
-    check_dim_size(indices, ndim, ndim-2, outputHeight);
-    check_dim_size(indices, ndim, ndim-1, outputWidth);
-  }
+  check_dim_size(indices, ndim, ndim-3, nOutputPlane);
+  check_dim_size(indices, ndim, ndim-2, outputHeight);
+  check_dim_size(indices, ndim, ndim-1, outputWidth);
 }
 
 // AveragePool2d (backward)
@@ -179,7 +172,7 @@ pool3d_shape_check(
   }
 
   TORCH_CHECK(kT/2 >= pT && kW/2 >= pW && kH/2 >= pH,
-              "pad should be smaller than half of kernel size, but got "
+              "pad should be smaller than or equal to half of kernel size, but got "
               "kT: ", kT, " kW: ", kW, " kH: ", kH, " padT: ", pT, " padW: ", pW, " padH: ", pH);
 
   TORCH_CHECK(otime >= 1 && owidth >= 1 && oheight >= 1,

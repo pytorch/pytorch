@@ -5,6 +5,7 @@
 
 #include "caffe2/core/common_omp.h"
 #include "caffe2/core/context.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/types.h"
@@ -14,6 +15,8 @@
 #include <cstring>
 #include <map>
 #include <utility>
+
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(GatherRangesToDense);
 
 namespace caffe2 {
 template <class Context>
@@ -85,11 +88,11 @@ class GatherRangesToDenseOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(
         ranges.size(1),
         lengths_.size(),
-        "Nummber of ranges should match number of lengths");
+        "Number of ranges should match number of lengths");
     CAFFE_ENFORCE_EQ(
         ranges.size(1),
         OutputSize(),
-        "Nummber of ranges should match number of outputs");
+        "Number of ranges should match number of outputs");
     CAFFE_ENFORCE_EQ(
         ranges.size(2), 2, "Ranges last dimension should be of size 2");
 
@@ -166,37 +169,41 @@ class GatherRangesToDenseOp final : public Operator<Context> {
     // Check whether the empty and mismatch ratio exceeded the threshold.
     totalRanges_ += batchSize;
     for (int j = 0; j < OutputSize(); ++j) {
-      CAFFE_ENFORCE_GT(
-          std::max(totalRanges_, minObservation_) * maxMismatchedRatio_,
-          mismatchedRanges_[j],
-          "Ratio of range length mismatch for feature at index ",
-          j,
-          " is ",
-          (static_cast<double>(mismatchedRanges_[j]) /
-           static_cast<double>(totalRanges_)),
-          " (",
-          mismatchedRanges_[j],
-          "/",
-          totalRanges_,
-          ") which exceeds ",
-          maxMismatchedRatio_);
+      // Only check when the ratio is not set to allow all mismatches.
+      if (maxMismatchedRatio_ < 1.0) {
+        CAFFE_ENFORCE_GE(
+            std::max(totalRanges_, minObservation_) * maxMismatchedRatio_,
+            mismatchedRanges_[j],
+            "Ratio of range length mismatch for feature at index ",
+            j,
+            " is ",
+            (static_cast<double>(mismatchedRanges_[j]) /
+             static_cast<double>(totalRanges_)),
+            " (",
+            mismatchedRanges_[j],
+            "/",
+            totalRanges_,
+            ") which exceeds ",
+            maxMismatchedRatio_);
+      }
 
-      // +0.5 to make sure when maxEmptyRatio_ is 1, this enforce will always be
-      // satisfied.
-      CAFFE_ENFORCE_GT(
-          std::max(totalRanges_, minObservation_) * maxEmptyRatio_ + 0.5,
-          emptyRanges_[j],
-          "Ratio of empty ranges for feature at index ",
-          j,
-          " is ",
-          (static_cast<double>(emptyRanges_[j]) /
-           static_cast<double>(totalRanges_)),
-          " (",
-          emptyRanges_[j],
-          "/",
-          totalRanges_,
-          ") which exceeds ",
-          maxEmptyRatio_);
+      // Only check when the ratio is not set to allow all examples to be empty.
+      if (maxEmptyRatio_ < 1.0) {
+        CAFFE_ENFORCE_GE(
+            std::max(totalRanges_, minObservation_) * maxEmptyRatio_,
+            emptyRanges_[j],
+            "Ratio of empty ranges for feature at index ",
+            j,
+            " is ",
+            (static_cast<double>(emptyRanges_[j]) /
+             static_cast<double>(totalRanges_)),
+            " (",
+            emptyRanges_[j],
+            "/",
+            totalRanges_,
+            ") which exceeds ",
+            maxEmptyRatio_);
+      }
     }
 
     return true;

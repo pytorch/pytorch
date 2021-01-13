@@ -1,9 +1,9 @@
 #include <torch/csrc/jit/codegen/fuser/cpu/fused_kernel.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
-#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 #include <torch/csrc/jit/codegen/fuser/cpu/temp_file.h>
+#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/utils/memory.h>
 
 #include <cstdlib>
@@ -32,7 +32,8 @@ static const std::string getTempPath() {
 static const std::string temp_dir = getTempPath();
 static const std::string so_template = temp_dir + "pytorch_fuserXXXXXX.dll";
 static const std::string cpp_template = temp_dir + "pytorch_fuserXXXXXX.cpp";
-static const std::string check_exists_string = "where \"${program}\" > nul 2> nul";
+static const std::string check_exists_string =
+    "where \"${program}\" > nul 2> nul";
 static std::vector<std::string> env_list;
 constexpr int so_suffix_len = 4;
 constexpr int cpp_suffix_len = 4;
@@ -44,11 +45,17 @@ constexpr int so_suffix_len = 3;
 constexpr int cpp_suffix_len = 4;
 #endif
 
+intptr_t run(const std::string& cmd);
+
 static bool programExists(const std::string& program) {
   TemplateEnv env;
   env.s("program", program);
   std::string cmd = format(check_exists_string, env);
+#ifdef _MSC_VER
+  return (run(cmd.c_str()) == 0);
+#else
   return (system(cmd.c_str()) == 0);
+#endif
 }
 
 #ifdef _MSC_VER
@@ -60,7 +67,8 @@ c10::optional<std::string> exec(const std::string& cmd) {
   if (!pipe) {
     return c10::nullopt;
   }
-  while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get()) != nullptr) {
+  while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get()) !=
+         nullptr) {
     result += buffer.data();
   }
   return result;
@@ -183,13 +191,13 @@ struct CompilerConfig {
 
   ~CompilerConfig() = default;
 
-  #ifdef _MSC_VER
-    std::string cxx = "cl";
-    const std::string openmp_flags = "/openmp";
-  #else
-    std::string cxx = "g++";
-    const std::string openmp_flags = "-fopenmp";
-  #endif
+#ifdef _MSC_VER
+  std::string cxx = "cl";
+  const std::string openmp_flags = "/openmp";
+#else
+  std::string cxx = "g++";
+  const std::string openmp_flags = "-fopenmp";
+#endif
   bool openmp = true;
 };
 
@@ -229,9 +237,11 @@ static std::string getArchFlags() {
   }
 }
 static const std::string arch_flags = getArchFlags();
-static const std::string compile_string =
-    "cd /D \"" + temp_dir + "\" && "
-    "${cxx} /nologo /MD /O2 " + arch_flags + " /LD /EHsc "
+static const std::string compile_string = "cd /D \"" + temp_dir +
+    "\" && "
+    "${cxx} /nologo /MD /O2 " +
+    arch_flags +
+    " /LD /EHsc "
     "${fopenmp} \"${cpp_file}\" /link /out:\"${so_file}\"";
 #else
 static const std::string compile_string =
@@ -266,7 +276,8 @@ static void runCompiler(
 }
 
 #ifdef _MSC_VER
-static const std::string disas_string = "dumpbin /DISASM:NOBYTES \"${so_file}\"";
+static const std::string disas_string =
+    "dumpbin /DISASM:NOBYTES \"${so_file}\"";
 #else
 static const std::string disas_string = "objdump -M  intel -d \"${so_file}\"";
 #endif
@@ -331,7 +342,7 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
       has_random);
 }
 
-RegisterFusionBackend reg(at::DeviceType::CPU, createFusionKernel);
+RegisterFusionBackend reg(DeviceType::CPU, createFusionKernel);
 } // namespace cpu
 } // namespace fuser
 } // namespace jit

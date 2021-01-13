@@ -21,6 +21,82 @@
 #include <pytorch_qnnpack.h>
 #include <qnnpack_func.h>
 
+#include "test_utils.h"
+using namespace qnnpack::testing;
+
+pytorch_qnnp_operator_t create_convolution_op(const qnnpack::conv_param_t& conv_p,
+    const uint8_t input_zero_point) {
+  pytorch_qnnp_operator_t convolution = nullptr;
+  convolution =
+      static_cast<pytorch_qnnp_operator_t>(calloc(1, sizeof(struct pytorch_qnnp_operator)));
+  if (convolution == nullptr) {
+    pytorch_qnnp_log_error(
+        "failed to allocate %zu bytes for pytorch_qnnp_operator structure",
+        sizeof(struct pytorch_qnnp_operator));
+  }
+
+  convolution->ukernel_type = conv_p.ukernel_type;
+  convolution->groups = conv_p.groups;
+  convolution->group_input_channels = conv_p.group_input_channels;
+  convolution->kernel_height = conv_p.kernel_dims[1];
+  convolution->kernel_width = conv_p.kernel_dims[0];
+  convolution->stride_height = conv_p.stride_dims[1];
+  convolution->stride_width = conv_p.stride_dims[0];
+  convolution->dilation_height = conv_p.dilation[1];
+  convolution->dilation_width = conv_p.dilation[0];
+  convolution->input_padding_top = conv_p.padding[0];
+  convolution->input_padding_left = conv_p.padding[1];
+  convolution->input_padding_bottom = conv_p.padding[2];
+  convolution->input_padding_right = conv_p.padding[3];
+
+  const bool any_padding = (conv_p.padding[0]| conv_p.padding[1]
+      |conv_p.padding[2] | conv_p.padding[3]) != 0;
+
+  if (any_padding) {
+    size_t zero_size = 0, zero_offset = 0;
+    if (conv_p.ukernel_type == pytorch_qnnp_ukernel_type_dwconv) {
+      const uint32_t cr = pytorch_qnnp_params.q8dw9.cr;
+      const size_t group_stride = (conv_p.groups + (cr - 1)) & -cr;
+      if (conv_p.groups >= 8) {
+        zero_size = sizeof(uint8_t) * group_stride;
+        zero_offset = 0;
+      } else {
+        zero_size = sizeof(uint8_t) * group_stride + 8;
+        zero_offset = sizeof(uint8_t) * 8;
+      }
+    } else if (conv_p.ukernel_type == pytorch_qnnp_ukernel_type_conv ||
+        conv_p.ukernel_type == pytorch_qnnp_ukernel_type_gemm) {
+      const size_t group_input_channels = conv_p.group_input_channels;
+      const uint32_t kr = pytorch_qnnp_params.q8conv.kr;
+      const size_t k_stride = (group_input_channels + (kr - 1)) & -kr;
+      if (conv_p.group_input_channels >= 8) {
+        zero_size = sizeof(uint8_t) * k_stride;
+        zero_offset = 0;
+      } else {
+        zero_size = sizeof(uint8_t) * k_stride + 8;
+        zero_offset = 8;
+      }
+    }
+
+    void* zero_buffer = malloc(zero_size);
+    if (zero_buffer == nullptr) {
+      pytorch_qnnp_log_error(
+          "failed to allocate bytes for zero padding:");
+    }
+    // Need to set to input zero point
+    memset(zero_buffer, input_zero_point, zero_size);
+    convolution->zero_buffer = zero_buffer;
+    convolution->zero_pointer =
+        (void*)((uintptr_t)zero_buffer + zero_offset);
+  }
+
+  if (conv_p.per_channel && conv_p.ukernel_type == pytorch_qnnp_ukernel_type_xzp_gemm) {
+    pytorch_qnnp_log_error(
+        "Per channel quantized weights are not supported for XZP kernels");
+  }
+  return convolution;
+}
+
 class ConvolutionOperatorTester {
  public:
   inline ConvolutionOperatorTester& padding(uint32_t padding) {
@@ -138,6 +214,15 @@ class ConvolutionOperatorTester {
 
   inline size_t groupInputChannels() const {
     return this->groupInputChannels_;
+  }
+
+  inline ConvolutionOperatorTester& per_channel(bool per_channel) {
+    this->per_channel_ = per_channel;
+    return *this;
+  }
+
+  inline bool per_channel() const {
+    return this->per_channel_;
   }
 
   inline ConvolutionOperatorTester& groupOutputChannels(
@@ -360,17 +445,14 @@ class ConvolutionOperatorTester {
     return this->iterations_;
   }
 
-  enum class Mode {
-    Static,
-    Runtime,
-  };
-
   void testQ8(const Mode mode = Mode::Static) const {
     std::random_device randomDevice;
     auto rng = std::mt19937(randomDevice());
     auto s32rng =
         std::bind(std::uniform_int_distribution<int32_t>(-10000, 10000), rng);
     auto u8rng = std::bind(std::uniform_int_distribution<uint8_t>(), rng);
+    auto f32rng =
+        std::bind(std::uniform_real_distribution<float>(1, 5), rng);
 
     std::vector<uint8_t> input(
         batchSize() *
@@ -391,12 +473,19 @@ class ConvolutionOperatorTester {
 
     const uint8_t* inputPtr = input.data() + 8;
     const uint8_t inputZeroPoint = 127;
-    const uint8_t kernelZeroPoint = 127;
+    // Make num zero points multiple of 8.
+    // This is the least common denominator for SSE/ARM kernels we have.
+    size_t num_zero_points_padded =
+      (groups() * groupOutputChannels() + 8);
+    std::vector<uint8_t> kernelZeroPoints(num_zero_points_padded, 127);
 
     for (size_t iteration = 0; iteration < iterations(); iteration++) {
       std::generate(input.begin(), input.end(), std::ref(u8rng));
       std::generate(kernel.begin(), kernel.end(), std::ref(u8rng));
       std::generate(bias.begin(), bias.end(), std::ref(s32rng));
+      if (per_channel()) {
+        std::generate(kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
+      }
       std::fill(output.begin(), output.end(), 0xA5);
       std::fill(accumulators.begin(), accumulators.end(), 0);
 
@@ -452,7 +541,7 @@ class ConvolutionOperatorTester {
                                              kx) *
                                                 groupInputChannels() +
                                             ic]) -
-                               int32_t(kernelZeroPoint));
+                               int32_t(kernelZeroPoints[g* groupOutputChannels() + oc]));
                         }
                       }
                     }
@@ -485,6 +574,14 @@ class ConvolutionOperatorTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
+      std::vector<float> requantization_scales(num_zero_points_padded, 1.0 * 1.0 / outputScale);
+      if (per_channel()) {
+        auto scale_generator = [&]() -> float {return (f32rng()/outputScale);};
+        std::generate(
+            requantization_scales.begin(),
+            requantization_scales.end(),
+            std::ref(scale_generator));
+      }
 
       switch(mode) {
         case Mode::Static:
@@ -508,16 +605,15 @@ class ConvolutionOperatorTester {
                   groupInputChannels(),
                   groupOutputChannels(),
                   inputZeroPoint,
-                  1.0f /* input scale */,
-                  kernelZeroPoint,
-                  1.0f /* kernel scale */,
+                  kernelZeroPoints.data(),
                   kernel.data(),
                   bias.data(),
                   outputZeroPoint,
-                  outputScale,
                   qmin(),
                   qmax(),
                   0,
+                  requantization_scales.data(),
+                  per_channel(),
                   &convolution));
 
           ASSERT_EQ(
@@ -551,32 +647,39 @@ class ConvolutionOperatorTester {
             {subsamplingWidth(), subsamplingHeight()},
             {dilationWidth(), dilationHeight()},
             {paddingTop(), paddingLeft(), paddingBottom(), paddingRight()},
+            /*adjustment_dims=*/{0, 0},
             groups(),
             groupInputChannels() * groups(),
             groupOutputChannels() * groups(),
-            kernelZeroPoint,
-            1.0,
-            qmin(),
-            qmax());
+            /*transpose=*/false,
+            per_channel());
+          auto conv_op = create_convolution_op(conv_p, inputZeroPoint);
           auto packW = std::unique_ptr<qnnpack::PrePackConvWeights>(
               new qnnpack::PrePackConvWeights(
                   conv_p,
+                  kernelZeroPoints.data(),
                   kernel.data(),
                   bias.data()));
           const pytorch_qnnp_status runStatus = qnnpack::qnnpackConv(
               conv_p,
+              conv_op,
               packW->getPackedWeights(),
               batchSize(),
               inputHeight(),
               inputWidth(),
-              1.0,
               inputZeroPoint,
               inputPtr,
-              outputScale,
+              kernelZeroPoints.data(),
+              requantization_scales.data(),
               outputZeroPoint,
+              qmin(),
+              qmax(),
               output.data(),
               nullptr);
           ASSERT_EQ(pytorch_qnnp_status_success, runStatus);
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_delete_operator(conv_op));
         }
         break;
 
@@ -596,8 +699,8 @@ class ConvolutionOperatorTester {
                               groups() +
                           g) *
                              groupOutputChannels() +
-                         c] /
-                    outputScale;
+                         c] *
+                    requantization_scales[g * groupOutputChannels() + c];
                 const double clampedAccumulator = std::max(
                     std::min(
                         scaledAccumulator,
@@ -644,4 +747,5 @@ class ConvolutionOperatorTester {
   uint8_t qmin_{0};
   uint8_t qmax_{255};
   size_t iterations_{1};
+  bool per_channel_{false};
 };

@@ -1,17 +1,27 @@
 ir_version: 6
 producer_name: "pytorch"
-producer_version: "1.4"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
-    input: "0"
     output: "1"
-    name: "Flatten_0"
-    op_type: "Flatten"
+    name: "Constant_0"
+    op_type: "Constant"
     attribute {
-      name: "axis"
-      i: 1
-      type: INT
+      name: "value"
+      t {
+        dims: 2
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000\001\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
     }
+  }
+  node {
+    input: "0"
+    input: "1"
+    output: "2"
+    name: "Reshape_1"
+    op_type: "Reshape"
   }
   name: "torch-jit-export"
   input {
@@ -28,7 +38,7 @@ graph {
     }
   }
   output {
-    name: "1"
+    name: "2"
     type {
       tensor_type {
         elem_type: 1

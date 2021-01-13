@@ -1,3 +1,5 @@
+#pragma once
+
 #include <c10/core/ScalarType.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
@@ -5,6 +7,7 @@
 #include <limits>
 #include <sstream>
 #include <cstring>
+#include <cctype>
 
 namespace at { namespace native {
 
@@ -74,8 +77,9 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, c
               " but each b matrix is ", self.size(-2), " by ", self.size(-1));
 }
 
-// Validates input shapes for operations on batches of square matrices (inverse, cholesky, symeig)
+// Validates input shapes for operations on batches of square matrices (inverse, cholesky, symeig, eig)
 static inline void squareCheckInputs(const Tensor& self) {
+  TORCH_CHECK(self.dim() >= 2, "Tensor of matrices must have at least 2 dimensions. ");
   TORCH_CHECK(self.size(-1) == self.size(-2),
               "A must be batches of square matrices, "
               "but they are ", self.size(-1), " by ", self.size(-2), " matrices");
@@ -94,7 +98,7 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
     } else if (info > 0) {
       if (strstr(name, "svd")) {
         AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
-      } else if (strstr(name, "symeig")) {
+      } else if (strstr(name, "symeig") || strstr(name, "syevd")) {
         AT_ERROR(name, ": For batch ", i, ": the algorithm failed to converge; ", info,
                  " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
       } else if (!allow_singular) {
@@ -107,16 +111,16 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
 /*
  * This is an overloaded case of the previous function for a tensor of infos.
  */
-static inline void batchCheckErrors(const Tensor& infos, const char* name, bool allow_singular=false) {
+static inline void batchCheckErrors(const Tensor& infos, const char* name, bool allow_singular=false, int info_per_batch=1) {
   auto batch_size = infos.numel();
   auto infos_cpu = infos.to(at::kCPU);
   auto infos_data = infos_cpu.data_ptr<int>();
   for (int64_t i = 0; i < batch_size; i++) {
     auto info = infos_data[i];
     if (info < 0) {
-      AT_ERROR(name, ": For batch ", i, ": Argument ", -info, " has illegal value");
+      AT_ERROR(name, ": For batch ", i/info_per_batch, ": Argument ", -info, " has illegal value");
     } else if (!allow_singular && info > 0) {
-      AT_ERROR(name, ": For batch ", i, ": U(", info, ",", info, ") is zero, singular U.");
+      AT_ERROR(name, ": For batch ", i/info_per_batch, ": U(", info, ",", info, ") is zero, singular U.");
     }
   }
 }
@@ -131,7 +135,7 @@ static inline void singleCheckErrors(int64_t info, const char* name, bool allow_
   } else if (info > 0) {
     if (strstr(name, "svd")) {
       AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
-    } else if (strstr(name, "symeig")) {
+    } else if (strstr(name, "eig")) { // this catches both "eig" and "symeig"
       AT_ERROR(name, ": the algorithm failed to converge; ", info,
                " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
     } else if (!allow_singular) {
@@ -188,16 +192,36 @@ static inline Tensor _move_to_end(const Tensor& self, IntArrayRef axes) {
   return self.permute(perm);
 }
 
+// parse the "mode" param in linalg_qr: return a tuple of bools (compute_q, reduced)
+static inline std::tuple<bool, bool> _parse_qr_mode(std::string mode) {
+  bool compute_q;
+  bool reduced;
+  if (mode == "reduced") {
+    compute_q = true;
+    reduced = true;
+  } else if (mode == "complete") {
+    compute_q = true;
+    reduced = false;
+  } else if (mode == "r") {
+    compute_q = false;
+    reduced = true; // this is actually irrelevant in this mode
+  } else {
+      TORCH_CHECK(false, "qr received unrecognized mode '", mode,
+                  "' but expected one of 'reduced' (default), 'r', or 'complete'");
+  }
+  return std::make_tuple(compute_q, reduced);
+}
+
 // Function to compute sizes, strides and the extra columns for the Q matrix in the QR Decomposition
 static inline std::tuple<std::vector<int64_t>,
                          std::vector<int64_t>,
-                         int64_t> _compute_geometry_for_Q(const Tensor& input, bool some) {
+                         int64_t> _compute_geometry_for_Q(const Tensor& input, bool reduced) {
   int64_t m = input.size(-2), n = input.size(-1);
   int64_t n_columns_q;
 
-  // We need to compute the required size of Q based on the `some` option
+  // We need to compute the required size of Q based on the `reduced` option
   auto q_sizes = input.sizes().vec();
-  if (!some && m > n) {
+  if (!reduced && m > n) {
     q_sizes[input.dim() - 1] = m;
     n_columns_q = m;
   } else {
@@ -238,18 +262,21 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
     U_empty = at::empty_strided(sizes, strides, input.options().device(at::kCPU));
   }
 
+  // VT should be a column-major or a batch of column-major matrices
   sizes[input.dim() - 2] = n;
   sizes[input.dim() - 1] = n;
-  // VT should be a row-major or a batch of row-major matrices
+  strides = at::detail::defaultStrides(sizes);
+  strides[input.dim() - 1] = n;
+  strides[input.dim() - 2] = 1;
   Tensor VT_empty;
   if (!input.is_cuda()) {
-    VT_empty = at::empty(sizes, input.options());
+    VT_empty = at::empty_strided(sizes, strides, input.options());
   } else {
     // NB: VT_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
     // (which is the driver routine for the divide and conquer SVD operation)
     // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
     // moves the inputs between devices internally.
-    VT_empty = at::empty(sizes, input.options().device(at::kCPU));
+    VT_empty = at::empty_strided(sizes, strides, input.options().device(at::kCPU));
   }
 
   sizes.pop_back();
@@ -276,6 +303,67 @@ static inline Tensor same_stride_to(const Tensor& original_tensor, const at::Ten
                                       options);
   strided_to.copy_(original_tensor);
   return strided_to;
+}
+
+// Creates a dimension permutation array that can be given to `at::permute()`, which will shift
+// the two specified dimensions to the end of a tensor, without changing the order of
+// the other dimensions. `dim1` will be placed at the very end, and `dim0` will be
+// placed just to the left of it.
+//
+// For instance, given a 4-D tensor, dimensions 1 and 3 can be shifted to the end by
+// calling `create_dim_backshift_permutation(1, 3, 4)`. The resulting vector will
+// be `vec(0, 2, 1, 3)`.
+static inline std::vector<int64_t> create_dim_backshift_permutation(int64_t dim0, int64_t dim1, int64_t ndim) {
+  TORCH_CHECK(
+    (dim0 != dim1) && (dim0 < ndim) && (dim0 >= 0) && (dim1 < ndim) && (dim1 >= 0),
+    "duplicate or invalid dimensions");
+  std::vector<int64_t> permutation(ndim);
+  int64_t cur_permuted_dim = 0;
+  for (int64_t dim_ind = 0; dim_ind < ndim; dim_ind++) {
+    if ((dim_ind != dim0) && (dim_ind != dim1)) {
+      permutation[cur_permuted_dim++] = dim_ind;
+    }
+  }
+  permutation[cur_permuted_dim++] = dim0;
+  permutation[cur_permuted_dim] = dim1;
+  return permutation;
+}
+
+// Creates a dimension permutation array that can be given to `at::permute()`, which
+// will reverse a given permutation.
+// The reverse permutation array is created by swapping the indices and their
+// associated values from the given permutation array.
+static inline std::vector<int64_t> create_reverse_permutation(std::vector<int64_t> permutation) {
+  int64_t ndim = permutation.size();
+  std::vector<int64_t> reverse_permutation(ndim);
+  for (int64_t dim_ind = 0; dim_ind < ndim; dim_ind++) {
+    reverse_permutation[permutation[dim_ind]] = dim_ind;
+  }
+  return reverse_permutation;
+}
+
+// Compute R-work array size for MAGMA/LAPACK cgesdd/zgesdd
+// See https://github.com/Reference-LAPACK/lapack/blob/122506cd8b6ce050a200920c3d4c0b153b150fd8/SRC/cgesdd.f#L186
+static inline int64_t computeLRWorkDim(const char jobz, int64_t m, int64_t n) {
+  auto mn = std::min(m, n);
+  auto mx = std::max(m, n);
+  // These settings are valid for on LAPACK 3.6+
+  if (jobz == 'N') {
+    return 5 * mn;
+  }
+  if (mx > 10 * mn) {
+    return 5 * mn * mn + 5 * mn;
+  }
+  return std::max(5 * mn * mn + 5 * mn, 2 * mx * mn + 2 * mn * mn + mn);
+}
+
+// This function checks whether the uplo argument input is valid
+// Allowed strings are "u", "U", "l", "L"
+static inline void checkUplo(const std::string& uplo) {
+  // To use std::toupper safely with plain chars (or signed chars), the argument should first be converted to unsigned char
+  char uplo_uppercase = static_cast<char>(std::toupper(static_cast<unsigned char>(uplo[0])));
+  TORCH_CHECK(uplo.size() == 1 && (uplo_uppercase == 'U' || uplo_uppercase == 'L'),
+    "Expected UPLO argument to be 'L' or 'U', but got ", uplo);
 }
 
 }}  // namespace at::native

@@ -1,8 +1,8 @@
 # Torch
-from torch._six import PY2
 from torch.autograd import Variable
 from torch.autograd.function import _nested_map
 from torch.jit.annotations import BroadcastingList2, BroadcastingList3  # noqa: F401
+
 from torch.onnx import OperatorExportTypes
 import torch
 import torch.cuda
@@ -14,14 +14,17 @@ import zipfile
 import functools
 
 # Testing utils
-from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
-    freeze_rng_state, TemporaryFileName, enable_profiling_mode, ProfilingMode, TEST_BAILOUTS
+from torch.testing import FileCheck
+from torch.testing._internal.common_utils import IS_WINDOWS, \
+    freeze_rng_state, enable_profiling_mode_for_profiling_tests, ProfilingMode, TEST_BAILOUTS
+from torch.testing._internal.common_jit import JitCommonTestCase
+from torch.testing._internal.common_utils import enable_profiling_mode  # noqa: F401
 
 # Standard library
 from contextlib import contextmanager
 from functools import reduce
-from itertools import chain
 from torch._six import StringIO
+from collections import defaultdict
 
 import inspect
 import io
@@ -31,15 +34,21 @@ import pickle
 import sys
 import tempfile
 import textwrap
+from typing import Any, Dict, List
 
 RUN_CUDA = torch.cuda.is_available()
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
+RUN_CUDA_HALF = RUN_CUDA
+# HIP supports half, no version check necessary
+if torch.cuda.is_available() and not torch.version.hip:
+    CUDA_VERSION = torch._C._cuda_getCompiledVersion()
+    for d in range(torch.cuda.device_count()):
+        major = torch.cuda.get_device_capability(d)[0]
+        if (major < 6):
+            RUN_CUDA_HALF = False
 
 def execWrapper(code, glob, loc):
-    if PY2:
-        exec(code) in glob, loc
-    else:
-        exec(code, glob, loc)
+    exec(code, glob, loc)
 
 def do_input_map(fn, input):
     return _nested_map(lambda t: isinstance(t, torch.Tensor), fn)(input)
@@ -47,6 +56,7 @@ def do_input_map(fn, input):
 def clear_class_registry():
     torch._C._jit_clear_class_registry()
     torch.jit._recursive.concrete_type_store = torch.jit._recursive.ConcreteTypeStore()
+    torch.jit._state._script_classes.clear()
 
 def get_execution_plan(graph_executor_state):
     execution_plans = list(graph_executor_state.execution_plans.values())
@@ -56,8 +66,34 @@ def get_execution_plan(graph_executor_state):
                            'only have one execution plan, got: {}'.format(num_plans))
     return execution_plans[0]
 
+class _AssertRaisesRegexWithHighlightContext(object):
+    """
+    A context manager that is useful for checking that error messages highlight
+    the correct part of the source code.
+    """
 
-class JitTestCase(TestCase):
+    def __init__(self, test_case, exception, regex, highlight):
+        self.test_case = test_case
+        self.exception_type = exception
+        self.regex = regex
+        self.highlight = highlight
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        with self.test_case.assertRaisesRegex(self.exception_type, self.regex):
+            if type:
+                raise value
+
+        if self.highlight:
+            FileCheck().check_source_highlighted(self.highlight).run(str(value))
+
+        return True
+
+FUSION_GROUP = "prim::TensorExprGroup"
+
+class JitTestCase(JitCommonTestCase):
     _do_cuda_memory_leak_check = True
     _restored_warnings = False
 
@@ -83,7 +119,7 @@ class JitTestCase(TestCase):
         torch._C._jit_set_emit_hooks(None, None)
 
     def setUp(self):
-        super(JitTestCase, self).setUp()
+        super().setUp()
         # unittest overrides all warning filters and forces all of them to show up
         # after we install our own to silence those coming from inside PyTorch.
         # This will ensure that our filter still takes precedence.
@@ -93,11 +129,40 @@ class JitTestCase(TestCase):
         self.setHooks()
 
     def tearDown(self):
-        super(JitTestCase, self).tearDown()
+        super().tearDown()
         # needs to be cleared because python might be unloaded before
         # the callback gets destucted
         self.clearHooks()
         clear_class_registry()
+
+    def assertAllFused(self, graph, except_for=()):
+
+        # note this helper collects nodes on 'fast path' only
+        # i.e. the true blocks of specialized checks
+        def get_nodes_and_parents_recursively(block, kind, acc):
+            for node in block.nodes():
+                if node.kind() == kind:
+                    acc[block].append(node)
+                elif node.kind() == 'prim::DifferentiableGraph':
+                    get_nodes_and_parents_recursively(node.g('Subgraph'), kind, acc)
+                elif node.kind() == 'prim::If' and (node.inputs().__next__().node().kind() == 'aten::all' or
+                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck'):
+                    get_nodes_and_parents_recursively(node.blocks().__next__(), kind, acc)
+                else:
+                    for inner_block in node.blocks():
+                        get_nodes_and_parents_recursively(inner_block, kind, acc)
+
+        allowed_nodes = {'prim::Constant', FUSION_GROUP, 'prim::BailoutTemplate',
+                         'prim::TupleConstruct', 'prim::If', 'prim::TypeCheck'} | set(except_for)
+
+        fusion_groups : Dict[torch._C.Block, List[torch._C.Node]] = defaultdict(list)
+        get_nodes_and_parents_recursively(graph, FUSION_GROUP, fusion_groups)
+        self.assertTrue(len(fusion_groups) == 1, 'got {}'.format(graph))
+        (graph, fusion_nodes) = list(fusion_groups.items())[0]
+        # the block contains one FUSION_GROUP and the rest of nodes are `allowed_nodes`
+        self.assertTrue(len(fusion_nodes) == 1, 'got {}'.format(graph))
+        self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
+                        'got {}'.format(graph))
 
     def _isHookExceptionOk(self, e):
         se = str(e)
@@ -109,12 +174,6 @@ class JitTestCase(TestCase):
         return False
 
     def _compared_saved_loaded(self, m):
-        if PY2:
-            # Disable for Python 2, which does not allow manipulation of multiple objects
-            # returned by zipfile.open().
-            # See: https://docs.python.org/2.7/library/zipfile.html#zipfile.ZipFile.open
-            return
-
         def extract_files(buffer):
             # crack open the zip format to get at the main module code
             archive = zipfile.ZipFile(buffer)
@@ -122,18 +181,18 @@ class JitTestCase(TestCase):
             self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
             files = list(filter(lambda x: x.startswith('archive/code/'), archive.namelist()))
             # unwrap all the code files into strings
-            code_files = filter(lambda x: x.endswith('.py'), files)
-            code_files = map(lambda f: archive.open(f), code_files)
-            code_files = map(lambda file: "".join([line.decode() for line in file]), code_files)
+            code_files_str = filter(lambda x: x.endswith('.py'), files)
+            code_files_stream = (archive.open(f) for f in code_files_str)
+            code_files = ("".join([line.decode() for line in file]) for file in code_files_stream)
 
             # unpickled all the debug files
-            debug_files = filter(lambda f: f.endswith('.debug_pkl'), files)
-            debug_files = map(lambda f: archive.open(f), debug_files)
-            debug_files = map(lambda f: pickle.load(f), debug_files)
+            debug_files_str = filter(lambda f: f.endswith('.debug_pkl'), files)
+            debug_files_stream = (archive.open(f) for f in debug_files_str)
+            debug_files = (pickle.load(f) for f in debug_files_stream)
             return code_files, debug_files
 
         # disable the hook while we parse code, otherwise we will re-enter the hook
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             try:
                 # short-circuit if this is an empty function or module
                 if len(m.code) == 0:
@@ -186,19 +245,6 @@ class JitTestCase(TestCase):
         self._compared_saved_loaded(module)
 
 
-    def getExportImportCopy(self, m, also_test_file=True, map_location=None):
-        buffer = io.BytesIO()
-        torch.jit.save(m, buffer)
-        buffer.seek(0)
-        imported = torch.jit.load(buffer, map_location=map_location)
-
-        if not also_test_file:
-            return imported
-
-        with TemporaryFileName() as fname:
-            torch.jit.save(imported, fname)
-            return torch.jit.load(fname, map_location=map_location)
-
     def getExportImportCopyWithPacking(self, m, also_test_file=True, map_location=None):
         buffer = io.BytesIO()
         m.apply(lambda s: s._pack() if s._c._has_method('_pack') else None)
@@ -244,9 +290,17 @@ class JitTestCase(TestCase):
                            consider_subgraphs)
             return
 
-        nodes = [node for node in graph.nodes()
-                 if node.kind() == kind]
-        perform_assert(graph, kind, len(nodes), num_kind_nodes,
+        def nodes(block):
+            out = []
+            for node in block.nodes():
+                if node.kind() == kind:
+                    out.append(node)
+                for block in node.blocks():
+                    out += nodes(block)
+            return out
+
+        out_nodes = nodes(graph)
+        perform_assert(graph, kind, len(out_nodes), num_kind_nodes,
                        consider_subgraphs)
 
     def assertExpectedONNXGraph(self, g, *args, **kwargs):
@@ -265,22 +319,6 @@ class JitTestCase(TestCase):
         graph = torch._C._jit_pass_canonicalize(graph)
         torch._C._jit_pass_lint(graph)
         self.assertExpected(str(graph), *args, **kwargs)
-
-    def assertAutodiffNode(self, graph, should_autodiff_node, nonfusible_nodes, fusible_nodes):
-        diff_nodes = graph.findAllNodes('prim::DifferentiableGraph')
-        diff_subgraphs = [node.g('Subgraph') for node in diff_nodes]
-
-        # For any non-fusible node, it must show up in one of the DifferentiableGraph.
-        found_all_nonfusible_nodes = (len(diff_subgraphs) == 0 and len(nonfusible_nodes) == 0)\
-            or all([any(g.findNode(n) is not None for g in diff_subgraphs) for n in nonfusible_nodes])
-
-        # For any fusible node, it must show up in one of the FusionGroup in the DifferentiableGraph.
-        fusion_nodes = list(chain.from_iterable([g.findAllNodes('prim::FusionGroup') for g in diff_subgraphs]))
-        fusion_subgraphs = [node.g('Subgraph') for node in fusion_nodes]
-        found_all_fusible_nodes = (len(fusion_nodes) == 0 and len(fusible_nodes) == 0)\
-            or all([any(g.findNode(n) is not None for g in fusion_subgraphs) for n in fusible_nodes])
-
-        self.assertEqual(should_autodiff_node, found_all_nonfusible_nodes and found_all_fusible_nodes)
 
     def run_pass(self, name, trace):
         if isinstance(trace, torch._C.Graph):
@@ -302,14 +340,21 @@ class JitTestCase(TestCase):
 
     def get_frame_vars(self, frames_up):
         frame = inspect.currentframe()
+        if not frame:
+            raise RuntimeError("failed to inspect frame")
         i = 0
         while i < frames_up + 1:
             frame = frame.f_back
+            if not frame:
+                raise RuntimeError("failed to get frame")
             i += 1
-        defined_vars = {}
+        defined_vars: Dict[str, Any] = {}
         defined_vars.update(frame.f_locals)
         defined_vars.update(frame.f_globals)
         return defined_vars
+
+    def assertRaisesRegexWithHighlight(self, exception, regex, highlight):
+        return _AssertRaisesRegexWithHighlightContext(self, exception, regex, highlight)
 
     def checkScriptRaisesRegex(self, script, inputs, exception, regex,
                                outputs=None, capture_output=False, profiling=ProfilingMode.PROFILING):
@@ -318,7 +363,7 @@ class JitTestCase(TestCase):
         when executed with normal python, the string frontend, and the AST frontend
         """
 
-        with enable_profiling_mode():
+        with enable_profiling_mode_for_profiling_tests():
             # normal python
             with self.assertRaisesRegex(exception, regex):
                 script(*inputs)
@@ -361,7 +406,7 @@ class JitTestCase(TestCase):
                     frames_up=1,
                     profiling=ProfilingMode.PROFILING):
         with torch.jit.optimized_execution(optimize):
-            with enable_profiling_mode():
+            with enable_profiling_mode_for_profiling_tests():
                 if isinstance(script, str):
                     # Compile the string to a Script function
                     # with enable_profiling_mode():
@@ -371,7 +416,7 @@ class JitTestCase(TestCase):
                     # outputs
 
                     frame = self.get_frame_vars(frames_up)
-                    the_locals = {}
+                    the_locals: Dict[str, Any] = {}
                     execWrapper(script, glob=frame, loc=the_locals)
                     frame.update(the_locals)
 
@@ -526,26 +571,6 @@ class JitTestCase(TestCase):
 
         return ge
 
-    def createFunctionFromGraph(self, trace):
-        graph = trace if isinstance(trace, torch._C.Graph) else trace.graph()
-        return torch._C._create_function_from_graph("forward", graph)
-
-    def assertExportImport(self, trace, inputs):
-        m = self.createFunctionFromGraph(trace)
-        self.assertExportImportModule(m, inputs)
-
-    def assertExportImportModule(self, m, inputs):
-        m_import = self.getExportImportCopy(m)
-        a = self.runAndSaveRNG(m, inputs)
-        b = self.runAndSaveRNG(m_import, inputs)
-        self.assertEqual(a, b)
-
-    def runAndSaveRNG(self, func, inputs, kwargs=None):
-        kwargs = kwargs if kwargs else {}
-        with freeze_rng_state():
-            results = func(*inputs, **kwargs)
-        return results
-
     def checkModule(self, nn_module, args):
         """
         Check that a nn.Module's results in Script mode match eager and that it
@@ -573,6 +598,14 @@ def inline_everything_mode(should_inline):
     finally:
         torch._C._jit_set_inline_everything_mode(old)
 
+@contextmanager
+def set_fusion_group_inlining(inlining):
+    old = torch._C._debug_get_fusion_group_inlining()
+    torch._C._debug_set_fusion_group_inlining(inlining)
+    try:
+        yield
+    finally:
+        torch._C._debug_set_fusion_group_inlining(old)
 
 # note: not re-entrant, use unnested only
 @contextmanager
@@ -638,3 +671,15 @@ def get_module_method(m, module, method):
 def attrs_with_prefix(module, prefix):
     return [x for x, _ in module._modules._c.items()
             if x.startswith(prefix)]
+
+def warmup_backward(f, *args):
+    profiling_count = 2
+    results = []
+    for i in range(profiling_count):
+        if len(args) > 0:
+            r = torch.autograd.grad(f, *args)
+            results.append(r)
+        else:
+            f.backward(retain_graph=True)
+
+    return results

@@ -6,15 +6,21 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 struct Resolver;
 using ResolverPtr = std::shared_ptr<Resolver>;
 
 using ObjectPtr = c10::intrusive_ptr<c10::ivalue::Object>;
 
+// Throw this in C++ land if `attr` fails. This will be converted to a Python
+// AttributeError by the Python binding code
+class ObjectAttributeError : public std::runtime_error {
+ public:
+  ObjectAttributeError(const std::string& what) : std::runtime_error(what) {}
+};
+
 struct TORCH_API Object {
-  Object() {}
+  Object() = default;
   Object(ObjectPtr _ivalue) : _ivalue_(std::move(_ivalue)) {}
   Object(std::shared_ptr<CompilationUnit> cu, const c10::ClassTypePtr& type);
   Object(
@@ -41,17 +47,15 @@ struct TORCH_API Object {
       TORCH_CHECK(
           v.type()->isSubtypeOf(expected),
           "Expected a value of type '",
-          expected->python_str(),
+          expected->repr_str(),
           "' for field '",
           name,
           "', but found '",
-          v.type()->python_str(),
+          v.type()->repr_str(),
           "'");
       _ivalue()->setSlot(*slot, std::move(v));
     } else {
-      TORCH_CHECK(
-          false,
-          "Module has no attribute '", name, "'");
+      TORCH_CHECK(false, "Module has no attribute '", name, "'");
     }
   }
 
@@ -62,12 +66,10 @@ struct TORCH_API Object {
     if (auto r = _ivalue()->type()->findConstantSlot(name)) {
       return _ivalue()->type()->getConstant(*r);
     }
-    TORCH_CHECK(
-        false,
-        _ivalue()->type()->python_str(),
-        " does not have a field with name '",
-        name,
-        "'");
+    std::stringstream err;
+    err << _ivalue()->type()->repr_str() << " does not have a field with name '"
+        << name.c_str() << "'";
+    throw ObjectAttributeError(err.str());
   }
 
   c10::IValue attr(const std::string& name, c10::IValue or_else) const {
@@ -81,8 +83,8 @@ struct TORCH_API Object {
   }
 
   bool hasattr(const std::string& name) const {
-    return _ivalue()->type()->hasAttribute(name)
-      || _ivalue()->type()->hasConstant(name);
+    return _ivalue()->type()->hasAttribute(name) ||
+        _ivalue()->type()->hasConstant(name);
   }
 
   // each object owns its methods. The reference returned here
@@ -127,11 +129,22 @@ struct TORCH_API Object {
     return _ivalue()->slots().size();
   }
 
+  // shallow copy the object
+  Object copy() const;
+
+  // Copies all the attributes of the object recursively without creating new
+  // `ClassType`, including deepcopy of Tensors
+  Object deepcopy() const;
+
  private:
   // mutable be we lazily initialize in module_object.
   mutable ObjectPtr _ivalue_;
 };
 
+namespace script {
+// We once had a `script::` namespace that was deleted. This is for backcompat
+// of the public API; new code should not use this type alias.
+using Object = ::torch::jit::Object;
 } // namespace script
 } // namespace jit
 } // namespace torch

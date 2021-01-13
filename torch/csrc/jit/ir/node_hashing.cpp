@@ -6,9 +6,9 @@
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
+#include <c10/util/hash.h>
 #include <torch/csrc/jit/ir/node_hashing.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
-#include <torch/csrc/utils/hash.h>
 
 namespace torch {
 namespace jit {
@@ -100,6 +100,35 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
     at::ArrayRef<IValue> a2_elem = a2.toTuple()->elements();
     return attributesEqual(a1_elem, a2_elem);
   }
+  if (a1.isGenericDict()) {
+    auto a1_dict = a1.toGenericDict();
+    auto a2_dict = a2.toGenericDict();
+    if (a1_dict.size() != a2_dict.size()) {
+      return false;
+    }
+
+    auto it_a1 = a1_dict.begin();
+    auto it_a2 = a2_dict.begin();
+
+    while (it_a1 != a1_dict.end()) {
+      const auto& e_a1 = *it_a1;
+      const auto& e_a2 = *it_a2;
+
+      if (!ivaluesEqual(e_a1.key(), e_a2.key()) ||
+          !ivaluesEqual(e_a1.value(), e_a2.value())) {
+        return false;
+      }
+      it_a1++;
+      it_a2++;
+    }
+    return true;
+  }
+  if (a1.isEnum()) {
+    return a1.toEnumHolder() == a2.toEnumHolder();
+  }
+  if (a1.isObject()) {
+    return &a1.toObjectRef() == &a2.toObjectRef();
+  }
   TORCH_INTERNAL_ASSERT(false);
 }
 
@@ -171,10 +200,13 @@ size_t HashNode::operator()(const Node* k) const {
   size_t constant_hash = 0;
   if (k->kind() == prim::Constant) {
     TypePtr type = k->output()->type();
-    if (type->isSubtypeOf(NumberType::get()) && k->kindOf(attr::value) == AttributeKind::i) {
+    if (type->isSubtypeOf(NumberType::get()) &&
+        k->kindOf(attr::value) == AttributeKind::i) {
       constant_hash = std::hash<int64_t>{}(k->i(attr::value));
-    } else if (type->isSubtypeOf(NumberType::get()) && k->kindOf(attr::value) == AttributeKind::f) {
-      constant_hash = std::hash<float>{}(k->f(attr::value));
+    } else if (
+        type->isSubtypeOf(NumberType::get()) &&
+        k->kindOf(attr::value) == AttributeKind::f) {
+      constant_hash = std::hash<double>{}(k->f(attr::value));
     } else if (type->isSubtypeOf(BoolType::get())) {
       constant_hash = std::hash<bool>{}(k->i(attr::value));
     }

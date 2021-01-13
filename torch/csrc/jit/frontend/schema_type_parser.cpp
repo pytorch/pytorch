@@ -1,10 +1,10 @@
+#include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <ATen/core/alias_info.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
-#include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <torch/custom_class.h>
 #include <string>
 
@@ -21,17 +21,19 @@ using c10::ListType;
 using c10::NoneType;
 using c10::NumberType;
 using c10::OptionalType;
+using c10::QSchemeType;
+using c10::QuantizerType;
 using c10::RRefType;
+using c10::StorageType;
+using c10::StreamObjType;
 using c10::StringType;
 using c10::Symbol;
-using c10::QSchemeType;
 using c10::TensorType;
 using c10::TupleType;
 using c10::VarType;
 
 namespace torch {
 namespace jit {
-namespace script {
 
 TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
@@ -40,13 +42,15 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"ScalarType", IntType::get()},
       {"Layout", IntType::get()},
       {"MemoryFormat", IntType::get()},
-      {"Storage", IntType::get()},
+      {"Storage", StorageType::get()},
       {"QScheme", QSchemeType::get()},
+      {"Quantizer", QuantizerType::get()},
       {"ConstQuantizerPtr",
        IntType::get()}, // TODO This type should be removed from the schema
                         // parser, it should use the custom class mechanism
                         // instead. @jerryzh
       {"Device", DeviceObjType::get()},
+      {"Stream", StreamObjType::get()},
       {"Scalar", NumberType::get()},
       {"str", StringType::get()},
       {"float", FloatType::get()},
@@ -55,6 +59,8 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"None", NoneType::get()},
       {"Capsule", CapsuleType::get()},
       {"Any", at::AnyType::get()},
+      {"AnyClassType", at::AnyClassType::get()},
+      {"AnyEnumType", at::AnyEnumType::get()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE)) {
@@ -144,6 +150,35 @@ c10::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
   return c10::nullopt;
 }
 
+c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
+  L.expect('=');
+  const std::string& dev = L.expect(TK_IDENT).text();
+
+  if (dev == "cpu") {
+    return c10::Device(at::kCPU);
+  }
+
+  if (dev == "cuda") {
+    c10::DeviceIndex device_idx = -1;
+    if (L.cur().kind == ':') {
+      L.expect(':');
+      const std::string& num = L.expect(TK_NUMBER).text();
+      std::string::size_type num_len;
+      device_idx = c10::stoi(num, &num_len);
+    }
+    return c10::Device(at::kCUDA, device_idx);
+  }
+
+  throw ErrorReport(L.cur()) << "cannot parse device type '" << dev << "'\n";
+}
+
+c10::optional<bool> SchemaTypeParser::tryToParseRequiresGrad() {
+  L.expect('=');
+  const std::string& num = L.expect(TK_NUMBER).text();
+  std::string::size_type num_len;
+  return (bool)c10::stoi(num, &num_len);
+}
+
 TypePtr SchemaTypeParser::parseRefinedTensor() {
   auto maybe_dtype = parseTensorDType(L.expect(TK_IDENT).text());
   AT_ASSERT(maybe_dtype);
@@ -151,32 +186,96 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
   TypePtr ptr;
   L.expect('(');
   TypePtr tensor_type;
-  if (L.cur().kind == '*') {
-    size_t num_dims = 0;
-    parseList(TK_NOTHING, ',', ')', [&] {
-      L.expect('*');
-      num_dims++;
-    });
+  c10::optional<c10::Device> device;
+  c10::optional<bool> requires_grad;
+  // Parse a type with either no ranks, known ranks with sizes, ranks with
+  // unknown sizes, a mix of ranks with known and unknown sizes, or ranks with
+  // known sizes and strides. The type might also have requires_grad and/or
+  // device option. Examples of types we're handling here:
+  //   Long(10, 8, 6, strides=[48, 6, 1], requires_grad=0, device=cuda:1)
+  //   Float(10, *, 20, device=cuda:1)
+  //   Float(requires_grad=1)
+  std::vector<c10::optional<int64_t>> dims;
+  bool seen_strides = false;
+  std::vector<int64_t> strides;
+  parseList(TK_NOTHING, ',', ')', [&] {
+    // Extra handling for options like 'device' and 'requires_grad'
+    if (L.cur().kind == TK_IDENT) {
+      const std::string& field = L.expect(TK_IDENT).text();
+      if (field == "device") {
+        auto parsed_device = tryToParseDeviceType();
+        if (parsed_device.has_value()) {
+          if (device.has_value()) {
+            throw ErrorReport(L.cur()) << "'device' is specified twice";
+          }
+          device = parsed_device;
+        }
+        return;
+      }
+      if (field == "requires_grad") {
+        auto parsed_requires_grad = tryToParseRequiresGrad();
+        if (parsed_requires_grad.has_value()) {
+          if (requires_grad.has_value()) {
+            throw ErrorReport(L.cur()) << "'requires_grad' is specified twice";
+          }
+          requires_grad = parsed_requires_grad;
+        }
+        return;
+      }
+      if (field == "strides") {
+        seen_strides = true;
+        L.expect('=');
+        parseList('[', ',', ']', [&] {
+          const std::string& num = L.expect(TK_NUMBER).text();
+          std::string::size_type num_len;
+          size_t stride = c10::stoi(num, &num_len);
+          strides.push_back(stride);
+        });
+        return;
+      }
+      throw ErrorReport(L.cur()) << "Unexpected specifier '" << field << "'";
+    }
+    if (device.has_value() || requires_grad.has_value()) {
+      throw ErrorReport(L.cur())
+          << "'device' and 'requires_grad' should come after dimensions in the type specification";
+    }
+
+    // Parsing ranks, supports mix of sized and unsized ranks, or, just strided
+    // ranks
+    if (L.cur().kind == '*') {
+      dims.emplace_back(c10::nullopt);
+      L.next();
+      if (L.cur().kind == ':') {
+        throw ErrorReport(L.cur()) << "Strides for unsized ranks not supported";
+      }
+      return;
+    }
+    const std::string& num = L.expect(TK_NUMBER).text();
+    std::string::size_type num_len;
+    size_t dim = c10::stoi(num, &num_len);
+    dims.emplace_back(dim);
+  });
+  if (seen_strides) {
+    at::IntArrayRef strides_ref(strides);
+    if (strides.size() != dims.size()) {
+      // note: mixing unsized ranks and ranks with strides will always trigger
+      // this
+      throw ErrorReport(L.cur())
+          << "Strides info is specified for some but not for all dimensions";
+    }
     ptr = at::TensorType::create(
         dtype,
-        at::DeviceType::CPU,
-        c10::VaryingShape(num_dims),
-        c10::VaryingShape(num_dims),
-        c10::nullopt);
+        device,
+        c10::VaryingShape<int64_t>(dims),
+        c10::VaryingShape<int64_t>(strides),
+        requires_grad);
   } else {
-    std::vector<int64_t> dims;
-    parseList(TK_NOTHING, ',', ')', [&] {
-      const std::string& num = L.expect(TK_NUMBER).text();
-      std::string::size_type num_len;
-      size_t dim = c10::stoi(num, &num_len);
-      AT_ASSERTM(
-          num_len == num.size(),
-          "Bad tensor dimension size. Strides not yet supported in parsing",
-          num);
-      dims.push_back(dim);
-    });
-    at::IntArrayRef dims_ref(dims);
-    ptr = at::TensorType::create(dtype, at::DeviceType::CPU, dims_ref, false);
+    ptr = at::TensorType::create(
+        dtype,
+        device,
+        c10::VaryingShape<int64_t>(dims),
+        c10::VaryingShape<int64_t>(dims.size()),
+        requires_grad);
   }
   return ptr;
 }
@@ -244,12 +343,16 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
           << "Expected classes namespace but got " << classes_tok.text();
     }
     L.expect('.');
+    auto ns_tok = L.expect(TK_IDENT);
+    L.expect('.');
     auto class_tok = L.expect(TK_IDENT);
     value = getCustomClass(
-        std::string("__torch__.torch.classes.") + class_tok.text());
+        std::string("__torch__.torch.classes.") + ns_tok.text() + "." +
+        class_tok.text());
     if (!value) {
       throw ErrorReport(class_tok.range)
-          << "Unknown custom class type " << class_tok.text()
+          << "Unknown custom class type "
+          << ns_tok.text() + "." + class_tok.text()
           << ". Please ensure it is registered.";
     }
   } else {
@@ -292,6 +395,5 @@ void SchemaTypeParser::parseList(
     L.expect(end);
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

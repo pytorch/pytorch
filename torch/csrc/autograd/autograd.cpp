@@ -48,6 +48,13 @@ variable_list _make_grads(
           new_grads.emplace_back(at::ones_like(output, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
         }
       } else {
+        TORCH_CHECK(
+          grad_output.is_complex() == output.is_complex(),
+          "For complex Tensors, both grad_output and output are required ",
+          "to have the same dtype. Mismatch in dtype: grad_output[",
+          grad_output, "] has a dtype of ", grad_output.scalar_type(),
+          " and output[", output, "] has a dtype of ", output.scalar_type(),
+          ".");
         // grad output is defined, just append to the new_grads
         new_grads.emplace_back(grad_output);
       }
@@ -61,7 +68,8 @@ variable_list run_backward(
     bool keep_graph,
     bool create_graph,
     const variable_list& inputs,
-    bool allow_unused) {
+    bool allow_unused,
+    bool accumulate_grad) {
   size_t num_tensors = outputs.size();
   edge_list roots;
   roots.reserve(num_tensors);
@@ -70,8 +78,7 @@ variable_list run_backward(
     auto gradient_edge = impl::gradient_edge(output);
     TORCH_CHECK(
         gradient_edge.function,
-        "element ", i, " of tensors does not require grad and does not have a grad_fn",
-        i);
+        "element ", i, " of tensors does not require grad and does not have a grad_fn");
     roots.push_back(std::move(gradient_edge));
   }
 
@@ -86,6 +93,12 @@ variable_list run_backward(
       if (!grad_fn) {
         grad_fn = impl::try_get_grad_accumulator(input);
       }
+      if (accumulate_grad) {
+        TORCH_CHECK(
+          input.is_leaf(),
+          "One of the differentiated Tensors given as 'inputs' to backward is not a leaf Tensor"
+        )
+      }
       TORCH_CHECK(
           input.requires_grad(),
           "One of the differentiated Tensors does not require grad");
@@ -98,7 +111,7 @@ variable_list run_backward(
   }
 
   variable_list grad_inputs = Engine::get_default_engine().execute(
-      roots, grad_outputs, keep_graph, create_graph, output_edges);
+      roots, grad_outputs, keep_graph, create_graph, accumulate_grad, output_edges);
   // check if grad_inputs contains None or not base on the allow_unused flag
   if (!inputs.empty() && !allow_unused) {
     size_t num_inputs = inputs.size();
@@ -118,12 +131,13 @@ void backward(
     const variable_list& tensors,
     const variable_list& grad_tensors,
     c10::optional<bool> retain_graph,
-    bool create_graph) {
+    bool create_graph,
+    const variable_list& inputs) {
   variable_list gradients = _make_grads(tensors, grad_tensors);
   if (!retain_graph) {
     retain_graph = create_graph;
   }
-  run_backward(tensors, gradients, retain_graph.value(), create_graph, {}, /*allow_unused=*/true);
+  run_backward(tensors, gradients, retain_graph.value(), create_graph, inputs, /*allow_unused=*/true, /*accumulate_grad=*/true);
 }
 
 variable_list grad(
@@ -138,8 +152,21 @@ variable_list grad(
     retain_graph = create_graph;
   }
   return run_backward(
-    outputs, gradients, retain_graph.value(), create_graph, inputs, allow_unused);
+    outputs, gradients, retain_graph.value(), create_graph, inputs, allow_unused, /*accumulate_grad=*/false);
 }
+
+
+namespace forward_ad {
+
+uint64_t enter_dual_level() {
+  return ForwardADLevel::get_next_idx();
+}
+
+void exit_dual_level(uint64_t level) {
+  ForwardADLevel::release_idx(level);
+}
+
+} // namespace forward_ad
 
 } // namespace autograd
 } // namespace torch

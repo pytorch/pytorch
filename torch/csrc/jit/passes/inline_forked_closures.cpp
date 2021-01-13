@@ -3,7 +3,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 // Closure nodes are emitted as a tuple of (function %, context tuple %)
 // Inside the closure the closure is then unpacked so that all closed over
@@ -20,7 +19,7 @@ void inlineForkedClosure(Node* fork_closure) {
   Node* function_context_node = fork_closure->input()->node();
 
   if (function_context_node->inputs().size() != 2 ||
-      function_context_node->inputs().at(0)->node()->kind() != prim::Function ||
+      function_context_node->inputs().at(0)->node()->kind() != prim::Closure ||
       function_context_node->inputs().at(1)->node()->kind() !=
           prim::TupleConstruct) {
     throw ErrorReport(fork_closure->sourceRange()) << "Cannot fork this value";
@@ -79,6 +78,5 @@ void inlineForkedClosures(std::shared_ptr<Graph>& to_clean) {
   inlineForkedClosures(to_clean->block());
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

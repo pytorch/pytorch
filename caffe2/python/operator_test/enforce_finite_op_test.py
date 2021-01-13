@@ -1,14 +1,13 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-from hypothesis import given
+
+
+
+
+from hypothesis import given, settings
 import numpy as np
 
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
-import hypothesis.strategies as st
 
 
 class TestEnforceFinite(hu.HypothesisTestCase):
@@ -16,10 +15,11 @@ class TestEnforceFinite(hu.HypothesisTestCase):
         X=hu.tensor(
             # allow empty
             min_value=0,
-            elements=st.floats(allow_nan=True, allow_infinity=True),
+            elements=hu.floats(allow_nan=True, allow_infinity=True),
         ),
         **hu.gcs
     )
+    @settings(deadline=10000)
     def test_enforce_finite(self, X, gc, dc):
 
         def all_finite_value(X):
@@ -40,7 +40,7 @@ class TestEnforceFinite(hu.HypothesisTestCase):
 
     @given(
         X=hu.tensor(
-            elements=st.floats(min_value=0, max_value=10, allow_nan=False, allow_infinity=False),
+            elements=hu.floats(min_value=0, max_value=10, allow_nan=False, allow_infinity=False),
         ),
         **hu.gcs
     )

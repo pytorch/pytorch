@@ -1,8 +1,6 @@
-#define __STDC_FORMAT_MACROS
-
 #include <torch/csrc/python_headers.h>
 #ifdef _MSC_VER
-#include <Windows.h>
+#include <c10/util/win32-headers.h>
 #endif
 #include <structmember.h>
 
@@ -20,8 +18,13 @@
 #include <torch/csrc/Device.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 
+#include <fmt/format.h>
+
 #include <torch/csrc/generic/Storage.cpp>
 #include <TH/THGenerateAllTypes.h>
+
+#include <torch/csrc/generic/Storage.cpp>
+#include <TH/THGenerateComplexTypes.h>
 
 #include <torch/csrc/generic/Storage.cpp>
 #include <TH/THGenerateHalfType.h>

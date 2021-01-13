@@ -12,6 +12,8 @@
 
 #include <caffe2/core/common.h>
 
+#include <ATen/native/DispatchStub.h>
+
 #include <sstream>
 
 namespace at {
@@ -88,9 +90,40 @@ std::string get_openmp_version() {
   return ss.str();
 }
 
+std::string used_cpu_capability() {
+  // It is possible that we override the cpu_capability with
+  // environment variable
+  std::ostringstream ss;
+  ss << "CPU capability usage: ";
+  auto capability = native::get_cpu_capability();
+  switch (capability) {
+#ifdef HAVE_VSX_CPU_DEFINITION
+    case native::CPUCapability::DEFAULT:
+      ss << "DEFAULT";
+      break;
+    case native::CPUCapability::VSX:
+      ss << "VSX";
+      break;
+#else
+    case native::CPUCapability::DEFAULT:
+      ss << "NO AVX";
+      break;
+    case native::CPUCapability::AVX:
+      ss << "AVX";
+      break;
+    case native::CPUCapability::AVX2:
+      ss << "AVX2";
+      break;
+#endif      
+    default:
+      break;
+  }
+  return ss.str();
+}
+
 std::string show_config() {
   std::ostringstream ss;
-  ss << "PyTorch built with:\n"; // TODO add the version of PyTorch
+  ss << "PyTorch built with:\n";
 
   // Reference:
   // https://blog.kowalczyk.info/article/j/guide-to-predefined-macros-in-c-compilers-gcc-clang-msvc-etc..html
@@ -141,12 +174,18 @@ std::string show_config() {
   ss << "  - NNPACK is enabled\n";
 #endif
 
+#ifdef CROSS_COMPILING_MACOSX
+  ss << "  - Cross compiling on MacOSX\n";
+#endif
+
+  ss << "  - "<< used_cpu_capability() << "\n";
+
   if (hasCUDA()) {
     ss << detail::getCUDAHooks().showConfig();
   }
 
   ss << "  - Build settings: ";
-  for (const std::pair<std::string, std::string>& pair : caffe2::GetBuildOptions()) {
+  for (const auto& pair : caffe2::GetBuildOptions()) {
     if (!pair.second.empty()) {
       ss << pair.first << "=" << pair.second << ", ";
     }
@@ -157,6 +196,17 @@ std::string show_config() {
   // TODO: do XLA
 
   return ss.str();
+}
+
+std::string get_cxx_flags() {
+  #if defined(FBCODE_CAFFE2)
+  TORCH_CHECK(
+    false,
+    "Buck does not populate the `CXX_FLAGS` field of Caffe2 build options. "
+    "As a result, `get_cxx_flags` is OSS only."
+  );
+  #endif
+  return caffe2::GetBuildOptions().at("CXX_FLAGS");
 }
 
 }

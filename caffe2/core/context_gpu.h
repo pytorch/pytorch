@@ -169,18 +169,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
   explicit CUDAContext(Device device)
       : CUDAContext(DeviceToOption(device)) {}
 
-  ~CUDAContext() override {
-    if (curand_generator_) {
-      CURAND_CHECK(curandDestroyGenerator(curand_generator_));
-    }
-    // CUDAContext is used in 2 cases now:
-    // - long-lived instance inside OperatorBase in which case what happens in
-    //   destructor doesn't really matter
-    // - short-lived on-the-fly instances that are utilized as CUDAGuard - in
-    //   this case there's only one stream id (passed to SwitchToDevice) and
-    //   it's preferrable to synchronize in the destructor
-    FinishDeviceComputation();
-  }
+  ~CUDAContext() override;
 
   inline void SwitchToDevice(StreamId stream_id) override {
     getCudaObjects().SetCurrentStreamId(gpu_id_, stream_id);
@@ -290,7 +279,7 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
 
   template <class SrcContext, class DstContext>
   inline void
-  CopyItems(const TypeMeta& meta, size_t n, const void* src, void* dst) {
+  CopyItems(const TypeMeta meta, size_t n, const void* src, void* dst) {
     CAFFE_ENFORCE(!meta.copy(), "CUDAContext requires fundamental types.");
     CopyBytes<SrcContext, DstContext>(n * meta.itemsize(), src, dst);
   }

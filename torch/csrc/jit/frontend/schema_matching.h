@@ -7,7 +7,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 // try to match a list if inputs and keyword 'attributes' to this schema,
 // if it works return the flat list of positional inputs to the call
@@ -24,7 +23,7 @@ TORCH_API MatchedSchema matchSchema(
     const SourceRange& loc,
     Graph& graph,
     at::ArrayRef<NamedValue> args,
-    at::ArrayRef<NamedValue> kwarg,
+    at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self = c10::nullopt);
 
 TORCH_API std::pair<size_t, MatchedSchema> matchSchemas(
@@ -32,7 +31,7 @@ TORCH_API std::pair<size_t, MatchedSchema> matchSchemas(
     const SourceRange& loc,
     Graph& graph,
     at::ArrayRef<NamedValue> args,
-    at::ArrayRef<NamedValue> kwarg,
+    at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self = c10::nullopt,
     bool render_errors = false);
 
@@ -44,8 +43,8 @@ TORCH_API Value* emitBuiltinCall(
     const SourceRange& loc,
     Graph& graph,
     Symbol name,
-    at::ArrayRef<NamedValue> inputs,
-    at::ArrayRef<NamedValue> attributes,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
     const c10::optional<NamedValue>& self = c10::nullopt);
 
 TORCH_API c10::optional<size_t> findInputWithName(
@@ -60,6 +59,5 @@ TORCH_API Value* tryConvertToType(
     const TypePtr& concrete_type,
     Value* value,
     bool allow_conversions);
-} // namespace script
 } // namespace jit
 } // namespace torch

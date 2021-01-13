@@ -12,31 +12,43 @@
 
 #include "pytorch_jni_common.h"
 
-using namespace pytorch_jni;
-
 namespace pytorch_jni {
+
+namespace {
+
+struct LiteJITCallGuard {
+  // VariableType dispatch is not included in default mobile build. We need set
+  // this guard globally to avoid dispatch error (only for dynamic dispatch).
+  // Thanks to the unification of Variable class and Tensor class it's no longer
+  // required to toggle the NonVariableTypeMode per op - so it doesn't hurt to
+  // always set NonVariableTypeMode for inference only use case.
+  // TODO: avoid having to set this guard for custom mobile build with mobile
+  // interpreter.
+  torch::AutoNonVariableTypeMode non_var_guard{true};
+};
+
+} // namespace
 
 class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
  private:
   friend HybridBase;
   torch::jit::mobile::Module module_;
+  c10::DeviceType deviceType_;
 
  public:
   constexpr static auto kJavaDescriptor = "Lorg/pytorch/LiteNativePeer;";
 
   static facebook::jni::local_ref<jhybriddata> initHybrid(
       facebook::jni::alias_ref<jclass>,
-      facebook::jni::alias_ref<jstring> modelPath) {
-    return makeCxxInstance(modelPath);
+      facebook::jni::alias_ref<jstring> modelPath,
+      jint device) {
+    return makeCxxInstance(modelPath, device);
   }
 
-  PytorchJni(facebook::jni::alias_ref<jstring> modelPath) {
-    auto qengines = at::globalContext().supportedQEngines();
-    if (std::find(qengines.begin(), qengines.end(), at::QEngine::QNNPACK) !=
-        qengines.end()) {
-      at::globalContext().setQEngine(at::QEngine::QNNPACK);
-    }
+  PytorchJni(facebook::jni::alias_ref<jstring> modelPath, jint device) {
+    LiteJITCallGuard guard;
     module_ = torch::jit::_load_for_mobile(std::move(modelPath->toStdString()));
+    deviceType_ = deviceJniCodeToDeviceType(device);
   }
 
   static void registerNatives() {
@@ -56,12 +68,18 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     inputs.reserve(n);
     for (size_t i = 0; i < n; i++) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
-      inputs.push_back(std::move(atIValue));
+      if (at::kVulkan == deviceType_) {
+        inputs.push_back(
+            atIValue.isTensor() ? at::IValue{atIValue.toTensor().vulkan()}
+                                : std::move(atIValue));
+      } else {
+        TORCH_CHECK(at::kCPU == deviceType_);
+        inputs.push_back(std::move(atIValue));
+      }
     }
 
     auto output = [&]() {
-      torch::autograd::AutoGradMode guard(false);
-      at::AutoNonVariableTypeMode non_var_type_mode(true);
+      LiteJITCallGuard guard;
       return module_.forward(inputs);
     }();
     return JIValue::newJIValueFromAtIValue(output);
@@ -79,12 +97,19 @@ class PytorchJni : public facebook::jni::HybridClass<PytorchJni> {
     inputs.reserve(n);
     for (size_t i = 0; i < n; i++) {
       at::IValue atIValue = JIValue::JIValueToAtIValue(jinputs->getElement(i));
-      inputs.push_back(std::move(atIValue));
+      if (at::kVulkan == deviceType_) {
+        inputs.push_back(
+            atIValue.isTensor() ? at::IValue{atIValue.toTensor().vulkan()}
+                                : std::move(atIValue));
+      } else {
+        TORCH_CHECK(at::kCPU == deviceType_);
+        inputs.push_back(std::move(atIValue));
+      }
     }
     if (auto method = module_.find_method(methodName)) {
       auto output = [&]() {
-        at::AutoNonVariableTypeMode non_var_type_mode(true);
-        return module_.run_method(methodName, inputs);
+        LiteJITCallGuard guard;
+        return module_.get_method(methodName)(inputs);
       }();
       return JIValue::newJIValueFromAtIValue(output);
     }

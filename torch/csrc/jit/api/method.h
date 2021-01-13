@@ -1,12 +1,11 @@
 
+#include <ATen/core/function.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
-#include <ATen/core/function.h>
 #include <torch/csrc/jit/api/function_impl.h>
 
 namespace torch {
 namespace jit {
-namespace script {
 
 using ObjectPtr = c10::intrusive_ptr<c10::ivalue::Object>;
 
@@ -31,6 +30,15 @@ struct TORCH_API Method {
   c10::IValue operator()(
       std::vector<c10::IValue> stack,
       const Kwargs& kwargs = Kwargs());
+
+  // Run method async. Invocation on this function would invokes a JIT
+  // interpreter that executes ops inline, one by one, on caller's thread. A
+  // model can utilize async op, i.e. `fork`, to launch an asynchronous task
+  // which will be launched on provided `taskLauncher`.
+  c10::intrusive_ptr<c10::ivalue::Future> run_async(
+      std::vector<c10::IValue> stack,
+      const Kwargs& kwargs = Kwargs(),
+      TaskLauncher taskLauncher = at::launch);
 
   std::shared_ptr<Graph> graph() const {
     return function_->graph();
@@ -61,6 +69,11 @@ struct TORCH_API Method {
   Function* function_;
 };
 
+namespace script {
+// We once had a `script::` namespace that was deleted. This is for backcompat
+// of the public API; new code should not use this type alias.
+using Method = ::torch::jit::Method;
 } // namespace script
+
 } // namespace jit
 } // namespace torch

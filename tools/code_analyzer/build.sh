@@ -11,11 +11,18 @@
 #
 # 2. Analyze test project and compare with expected result:
 # LLVM_DIR=${HOME}/src/llvm8/build/install \
-# ANALYZE_TEST=1 CHECK_RESULT=1 tools/code_analyzer/build.sh
+# ANALYZE_TEST=1 tools/code_analyzer/build.sh
 #
 # 3. Analyze torch and generate yaml file of op dependency with debug path:
 # LLVM_DIR=${HOME}/src/llvm8/build/install \
-# ANALYZE_TORCH=1 tools/code_analyzer/build.sh -closure=false -debug_path=true
+# ANALYZE_TORCH=1 tools/code_analyzer/build.sh -debug_path=true
+#
+# If you're a Facebook employee, chances are you're running on CentOS 8.
+# If that's the case, you can install all the dependencies you need with:
+#
+#   sudo dnf install llvm-devel llvm-static clang ncurses-devel
+#
+# and then set LLVM_DIR=/usr
 
 set -ex
 
@@ -31,6 +38,7 @@ EXTRA_ANALYZER_FLAGS=$@
 BUILD_ROOT="${BUILD_ROOT:-${SRC_ROOT}/build_code_analyzer}"
 WORK_DIR="${BUILD_ROOT}/work"
 
+rm -rf "${BUILD_ROOT}"
 mkdir -p "${BUILD_ROOT}"
 mkdir -p "${WORK_DIR}"
 cd "${BUILD_ROOT}"
@@ -53,11 +61,9 @@ build_torch_mobile() {
   TORCH_BUILD_ROOT="${BUILD_ROOT}/build_mobile"
   TORCH_INSTALL_PREFIX="${TORCH_BUILD_ROOT}/install"
 
-  if [ ! -d "${TORCH_INSTALL_PREFIX}" ]; then
-    BUILD_ROOT="${TORCH_BUILD_ROOT}" "${SRC_ROOT}/scripts/build_mobile.sh" \
-      -DCMAKE_CXX_FLAGS="-S -emit-llvm -DSTRIP_ERROR_MESSAGES" \
-      -DUSE_STATIC_DISPATCH=OFF
-  fi
+  BUILD_ROOT="${TORCH_BUILD_ROOT}" "${SRC_ROOT}/scripts/build_mobile.sh" \
+    -DCMAKE_CXX_FLAGS="-S -emit-llvm -DSTRIP_ERROR_MESSAGES" \
+    ${MOBILE_BUILD_FLAGS}
 }
 
 build_test_project() {
@@ -73,15 +79,14 @@ build_test_project() {
 
 call_analyzer() {
   ANALYZER_BIN="${BUILD_ROOT}/analyzer" \
-    INPUT="${INPUT}" OUTPUT="${OUTPUT}" FORMAT="${FORMAT}" \
+    INPUT="${INPUT}" OUTPUT="${OUTPUT}" \
     EXTRA_ANALYZER_FLAGS="${EXTRA_ANALYZER_FLAGS}" \
     "${ANALYZER_SRC_HOME}/run_analyzer.sh"
 }
 
 analyze_torch_mobile() {
   INPUT="${WORK_DIR}/torch.ll"
-  FORMAT="${FORMAT:=yaml}"
-  OUTPUT="${WORK_DIR}/torch_result.${FORMAT}"
+  OUTPUT="${WORK_DIR}/torch_result.yaml"
 
   if [ ! -f "${INPUT}" ]; then
     # Link libtorch into a single module
@@ -94,24 +99,15 @@ analyze_torch_mobile() {
 
   # Analyze dependency
   call_analyzer
+}
 
-  if [ -n "${DEPLOY}" ]; then
-    DEST="${BUILD_ROOT}/pt_deps.bzl"
-    cat > ${DEST} <<- EOM
-# Generated for selective build without using static dispatch.
-# Manually run the script to update:
-# ANALYZE_TORCH=1 FORMAT=py DEPLOY=1 tools/code_analyzer/build.sh -closure=false
-EOM
-    printf "TORCH_DEPS = " >> ${DEST}
-    cat "${OUTPUT}" >> ${DEST}
-    echo "Deployed file at: ${DEST}"
-  fi
+print_output_file_path() {
+  echo "Deployed file at: ${OUTPUT}"
 }
 
 analyze_test_project() {
   INPUT="${WORK_DIR}/test.ll"
-  FORMAT="${FORMAT:=yaml}"
-  OUTPUT="${WORK_DIR}/test_result.${FORMAT}"
+  OUTPUT="${WORK_DIR}/test_result.yaml"
 
   # Link into a single module (only need c10 and OpLib srcs)
   # TODO: invoke llvm-link from cmake directly to avoid this hack.
@@ -122,10 +118,6 @@ analyze_test_project() {
 
   # Analyze dependency
   call_analyzer
-
-  if [ -n "${CHECK_RESULT}" ]; then
-    check_test_result
-  fi
 }
 
 check_test_result() {
@@ -133,7 +125,7 @@ check_test_result() {
     echo "Test result is the same as expected."
   else
     echo "Test result is DIFFERENT from expected!"
-    diff "${OUTPUT}" "${TEST_SRC_ROOT}/expected_deps.yaml"
+    diff -u "${TEST_SRC_ROOT}/expected_deps.yaml" "${OUTPUT}"
     exit 1
   fi
 }
@@ -143,10 +135,14 @@ build_analyzer
 if [ -n "${ANALYZE_TORCH}" ]; then
   build_torch_mobile
   analyze_torch_mobile
+  if [ -n "${DEPLOY}" ]; then
+    print_output_file_path
+  fi
 fi
 
 if [ -n "${ANALYZE_TEST}" ]; then
   build_torch_mobile
   build_test_project
   analyze_test_project
+  check_test_result
 fi

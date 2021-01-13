@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import torch
 
 import operator_benchmark as op_bench
@@ -10,12 +5,12 @@ import operator_benchmark as op_bench
 # 2D pooling will have input matrix of rank 3 or 4
 qpool2d_long_configs = op_bench.config_list(
     attrs=(
-       #  C    H    W   k       s       p
-       (  1,   3,   3, (3, 3), (1, 1), (0, 0)),  # dummy        # noqa
-       (  3,  64,  64, (3, 3), (2, 2), (1, 1)),  # dummy        # noqa
-       # VGG16 pools with original input shape: (-1, 3, 224, 224)
-       ( 64, 224, 224, (2, 2), (2, 2), (0, 0)),  # MaxPool2d-4  # noqa
-       (256,  56,  56, (2, 2), (2, 2), (0, 0)),  # MaxPool2d-16 # noqa
+        #  C    H    W   k       s       p
+        (  1,   3,   3, (3, 3), (1, 1), (0, 0)),  # dummy        # noqa
+        (  3,  64,  64, (3, 3), (2, 2), (1, 1)),  # dummy        # noqa
+        # VGG16 pools with original input shape: (-1, 3, 224, 224)
+        ( 64, 224, 224, (2, 2), (2, 2), (0, 0)),  # MaxPool2d-4  # noqa
+        (256,  56,  56, (2, 2), (2, 2), (0, 0)),  # MaxPool2d-16 # noqa
     ),
     attr_names=('C', 'H', 'W',   # Input layout
                 'k', 's', 'p'),  # Pooling parameters
@@ -93,8 +88,12 @@ class _QPool2dBenchmarkBase(op_bench.TorchBenchmarkBase):
                 self.q_input = self.q_input.permute(0, 2, 3, 1).contiguous()
                 self.q_input = self.q_input.permute(0, 3, 1, 2)
 
-    def forward(self):
-        return self.pool_op(self.q_input)
+        self.inputs = {
+            "q_input": self.q_input
+        }
+
+    def forward(self, q_input):
+        return self.pool_op(q_input)
 
 
 class QMaxPool2dBenchmark(_QPool2dBenchmarkBase):

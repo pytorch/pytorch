@@ -14,7 +14,7 @@ clang --version
 
 # detect_leaks=0: Python is very leaky, so we need suppress it
 # symbolize=1: Gives us much better errors when things go wrong
-export ASAN_OPTIONS=detect_leaks=0:symbolize=1
+export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_odr_violation=0
 
 # FIXME: Remove the hardcoded "-pthread" option.
 # With asan build, the cmake thread CMAKE_HAVE_LIBC_CREATE[1] checking will

@@ -2,9 +2,9 @@
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 
 #include <ATen/ATen.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
-#include <ATen/CUDAGenerator.h>
 #include <THC/THC.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/jit/resource_guard.h>
@@ -28,11 +28,8 @@ const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
 }
 
-static void getMajorMinor(
-    const cudaDeviceProp* const prop,
-    int& major,
-    int& minor) {
-  int nvrtc_major, nvrtc_minor;
+void getMajorMinor(const cudaDeviceProp* const prop, int& major, int& minor) {
+  int nvrtc_major = 0, nvrtc_minor = 0;
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
 
   // Short-circuits if NVRTC version too low
@@ -51,22 +48,27 @@ static void getMajorMinor(
     minor = 0;
   } else if (nvrtc_major <= 9 && prop->major >= 7) { // 9 supports 3-7.2
     major = 7;
-    if (prop->major == 7 && prop->minor <= 2)
-      minor = prop->minor;
-    else
-      minor = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    minor = (prop->major == 7 && prop->minor <= 2) ? prop->minor : 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (nvrtc_major <= 10 && prop->major >= 7) { // 10 supports 3-7.5
     major = 7;
-    if (prop->major == 7 && prop->minor <= 5)
-      minor = prop->minor;
-    else
-      minor = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    minor = (prop->major == 7 && prop->minor <= 5) ? prop->minor : 0;
+  } else if (
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      nvrtc_major == 11 && nvrtc_minor == 0 &&
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      prop->major >= 8) { // 11.0 supports 3.5-8.0
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    major = 8;
+    minor = 0;
   }
 }
 
 // Compiles the specified kernel and stores the metadata required to run it
 FusedKernelCUDA::FusedKernelCUDA(
-    int16_t device,
+    at::DeviceIndex device,
     std::string name,
     std::string code,
     std::vector<TensorDesc> input_desc,
@@ -140,17 +142,17 @@ FusedKernelCUDA::FusedKernelCUDA(
       nvrtc().cuModuleGetFunction(&function_, module_, name_.c_str()));
 
   // Computes max blocks
-#ifdef __HIP_PLATFORM_HCC__
-  // XXX HIP function signature is not compatible yet
+#if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION < 305
+  // HIP function signature is not compatible yet
   uint32_t max_blocks;
-  AT_CUDA_DRIVER_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
+  AT_CUDA_DRIVER_CHECK(nvrtc().hipOccupancyMaxActiveBlocksPerMultiprocessor(
       &max_blocks, function_, 128, 0));
   maxBlocks_ = max_blocks;
 #else
   AT_CUDA_DRIVER_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
       &maxBlocks_, function_, 128, 0));
 #endif
-maxBlocks_ *= prop_->multiProcessorCount;
+  maxBlocks_ *= prop_->multiProcessorCount;
 
   // Resets device (end of hacked at::DeviceGuard)
   at::cuda::set_device(prior_device);
@@ -171,7 +173,8 @@ void FusedKernelCUDA::launch_raw(
   const auto nBlocks = std::min(maxBlocks_, ceilDiv(numel, kBlockSize));
 
   // Adds random state to arguments if necessary
-  // Note: philox_engine_inputs defined here so its lifetime extends to the launch
+  // Note: philox_engine_inputs defined here so its lifetime extends to the
+  // launch
   std::pair<uint64_t, uint64_t> philox_engine_inputs;
   if (has_random_) {
     const auto rand_offset =
@@ -179,8 +182,10 @@ void FusedKernelCUDA::launch_raw(
     auto gen = at::cuda::detail::getDefaultCUDAGenerator();
     {
       // See Note [Acquire lock when using random generators]
-      std::lock_guard<std::mutex> lock(gen->mutex_);
-      philox_engine_inputs = gen->philox_engine_inputs(rand_offset);
+      std::lock_guard<std::mutex> lock(gen.mutex());
+      philox_engine_inputs =
+          at::check_generator<at::CUDAGeneratorImpl>(gen)->philox_engine_inputs(
+              rand_offset);
     }
     arguments.push_back(&philox_engine_inputs.first);
     arguments.push_back(&philox_engine_inputs.second);
@@ -219,7 +224,7 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
     std::vector<PartitionDesc> concat_desc,
     bool has_random) {
   return std::make_shared<FusedKernelCUDA>(
-      device,
+      static_cast<at::DeviceIndex>(device),
       std::move(name),
       std::move(code),
       std::move(input_desc),
@@ -229,7 +234,7 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
       has_random);
 }
 
-RegisterFusionBackend reg(at::DeviceType::CUDA, createFusionKernel);
+RegisterFusionBackend reg(DeviceType::CUDA, createFusionKernel);
 
 } // namespace cuda
 } // namespace fuser

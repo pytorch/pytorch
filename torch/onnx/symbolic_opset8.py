@@ -1,11 +1,10 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import torch
 import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.symbolic_opset9 as sym_opset9
 
-from torch.onnx.symbolic_helper import parse_args, _unimplemented, _black_list_in_opset, _try_get_scalar_type
-from torch.onnx.symbolic_opset9 import _cast_Float
+from torch.onnx.symbolic_helper import parse_args, _unimplemented, _block_list_in_opset, _try_get_scalar_type
+from torch.onnx.symbolic_opset9 import _cast_Float  # type: ignore
 
 import warnings
 
@@ -39,14 +38,14 @@ import warnings
 #   Upsample: moved scales from attribute to input.
 #   Scan
 
-black_listed_operators = [
+block_listed_operators = [
     "nonzero", "where", "scatter", "scatter_add", "erf", "sign", "isnan", "gather",
     "arange", "masked_fill",
     "index_fill", "index_copy"
 ]
 
-for black_listed_op in black_listed_operators:
-    vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
+for block_listed_op in block_listed_operators:
+    vars()[block_listed_op] = _block_list_in_opset(block_listed_op)
 
 
 def _interpolate(name, dim, interpolate_mode):
@@ -149,10 +148,9 @@ def matmul(g, self, other):
 
 
 def prelu(g, self, weight):
-    if self.isCompleteTensor():
-        self_sizes = self.type().sizes()
-        if self_sizes and len(self_sizes) > 2:
-            weight = g.op("Unsqueeze", weight, axes_i=list(range(1, len(self_sizes) - 1)))
+    self_rank = sym_help._get_tensor_rank(self)
+    if self_rank is not None and self_rank > 2:
+        weight = g.op("Unsqueeze", weight, axes_i=list(range(1, self_rank - 1)))
     if _try_get_scalar_type(self):
         old_type, self, weight = _try_cast_integer_to_float(g, self, weight)
         return _cast_to_type(g, g.op("PRelu", self, weight), old_type)
@@ -181,20 +179,6 @@ def addmm(g, self, mat1, mat2, beta, alpha):
                     beta_f=sym_help._scalar(beta), alpha_f=sym_help._scalar(alpha)), old_type)
     else:
         return g.op("Gemm", mat1, mat2, self, beta_f=sym_help._scalar(beta), alpha_f=sym_help._scalar(alpha))
-
-
-def view(g, self, size):
-    size = sym_help._maybe_get_const(size, 'is')
-    if sym_help._is_value(size):
-        shape = size
-    else:
-        if self.isCompleteTensor():
-            self_sizes = self.type().sizes()
-            if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
-                old_type, self = _try_cast_integer_to_float(g, self)
-                return _cast_to_type(g, g.op("Flatten", self, axis_i=1), old_type)
-        shape = g.op("Constant", value_t=torch.LongTensor(size))
-    return g.op("Reshape", self, shape)
 
 
 def flatten(g, input, start_dim, end_dim):
@@ -277,3 +261,19 @@ def full(g, sizes, value, dtype, layout, device, pin_memory=False):
 def full_like(g, input, fill_value, dtype, layout, device, pin_memory=False, memory_format=None):
     shape = g.op("Shape", input)
     return _constant_fill(g, shape, dtype, fill_value)
+
+
+def repeat(g, self, repeats):
+    if not sym_help._is_value(repeats):
+        repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
+    if sym_help._is_packed_list(repeats):
+        repeat_size_len = len(sym_help._unpack_list(repeats))
+    else:
+        const_repeats = sym_help._maybe_get_const(repeats, 'is')
+        repeat_size_len = len(const_repeats)
+    if self.isCompleteTensor():
+        sizes = self.type().sizes()
+        diff_dims = repeat_size_len - len(sizes)
+        if diff_dims > 0:
+            self = sym_opset9.view(g, self, g.op("Constant", value_t=torch.tensor([1] * diff_dims + sizes)))
+    return g.op("Tile", self, repeats)

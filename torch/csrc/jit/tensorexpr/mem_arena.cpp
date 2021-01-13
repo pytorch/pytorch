@@ -1,4 +1,4 @@
-#include "torch/csrc/jit/tensorexpr/mem_arena.h"
+#include <torch/csrc/jit/tensorexpr/mem_arena.h>
 
 namespace torch {
 namespace jit {
@@ -8,7 +8,7 @@ namespace {
 // Define in an anonymous namespace to hide this symbol from other compilation
 // units
 thread_local KernelArena* current_arena = nullptr;
-}
+} // namespace
 
 KernelArena::~KernelArena() {
   for (KernelScopedObject* p : kernel_objects_) {
@@ -21,12 +21,7 @@ KernelScopedObject::KernelScopedObject() {
   kernel->kernel_objects_.push_back(this);
 }
 
-static std::vector<KernelArena*>& GetKernelArenaStack() {
-  thread_local std::vector<KernelArena*> kernel_arena_stack;
-  return kernel_arena_stack;
-}
-
-void KernelArena::SetCurrentKernelArena(KernelArena *new_kernel_arena) {
+void KernelArena::SetCurrentKernelArena(KernelArena* new_kernel_arena) {
   current_arena = new_kernel_arena;
 }
 

@@ -270,6 +270,8 @@ bool AsyncSchedulingNet::RunAsync() {
 
 void AsyncSchedulingNet::Cancel() {
   success_ = false;
+  NetBase::Cancel();
+
   CancelAndFinishAsyncTasks();
 }
 
@@ -280,7 +282,13 @@ void AsyncSchedulingNet::CancelAndFinishAsyncTasks() {
       // event, and in some other cases (CUDA)
       try {
         lastTaskOp(tid)->CancelAsyncCallback();
-        event(tid).SetFinished("Cancelled");
+
+        // throw and catch exception to preserve stack trace
+        try {
+          throw AsyncNetCancelled();
+        } catch (const AsyncNetCancelled& e) {
+          event(tid).SetFinishedWithException(e.what());
+        }
       } catch (const EnforceNotMet&) {
         // ignore
       }
@@ -288,10 +296,10 @@ void AsyncSchedulingNet::CancelAndFinishAsyncTasks() {
   }
 }
 
-AsyncSchedulingNet::~AsyncSchedulingNet() {
-  Wait();
-}
+  AsyncSchedulingNet::~AsyncSchedulingNet() {
+    Wait();
+  }
 
-REGISTER_NET(async_scheduling, AsyncSchedulingNet);
+  REGISTER_NET(async_scheduling, AsyncSchedulingNet);
 
 } // namespace caffe2

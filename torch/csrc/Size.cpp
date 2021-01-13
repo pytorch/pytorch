@@ -2,6 +2,7 @@
 
 #include <string>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_tuples.h>
 
@@ -84,7 +85,7 @@ static PyObject * THPSize_repr(THPSize *self)
     if (i != 0) {
       repr += ", ";
     }
-    repr += std::to_string(PyLong_AsLong(PyTuple_GET_ITEM(self, i)));
+    repr += std::to_string(THPUtils_unpackLong(PyTuple_GET_ITEM(self, i)));
   }
   repr += "])";
   return THPUtils_packString(repr);
@@ -109,9 +110,6 @@ static PyObject* wrap_tuple_fn(Args ... args)
 namespace {
   auto sq_concat = PyTuple_Type.tp_as_sequence->sq_concat;
   auto sq_repeat = PyTuple_Type.tp_as_sequence->sq_repeat;
-  #if PY_MAJOR_VERSION == 2
-  auto sq_slice = PyTuple_Type.tp_as_sequence->sq_slice;
-  #endif
   binaryfunc mp_subscript = PyTuple_Type.tp_as_mapping->mp_subscript;
 }
 
@@ -121,11 +119,7 @@ static PySequenceMethods THPSize_as_sequence = {
   wrap_tuple_fn<decltype(&sq_concat), &sq_concat>,
   wrap_tuple_fn<decltype(&sq_repeat), &sq_repeat>,
   nullptr,                                          /* sq_item */
-#if PY_MAJOR_VERSION == 2
-  wrap_tuple_fn<decltype(&sq_slice), &sq_slice>,
-#else
   nullptr,                                          /* sq_slice */
-#endif
   nullptr,                                          /* sq_ass_item */
   nullptr,                                          /* sq_ass_slice */
   nullptr                                           /* sq_contains */
@@ -137,20 +131,22 @@ static PyMappingMethods THPSize_as_mapping = {
     nullptr
 };
 
-static PyObject *THPSize_numel(THPSize *self, PyObject *noargs)
+static PyObject *THPSize_numel(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPSize*)_self;
   int64_t numel = 1;
   for (Py_ssize_t i = 0; i < PyTuple_Size((PyObject*)self); ++i) {
-    numel *= PyLong_AsLong(PyTuple_GET_ITEM(self, i));
+    numel *= THPUtils_unpackLong(PyTuple_GET_ITEM(self, i));
   }
   return THPUtils_packInt64(numel);
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject *THPSize_reduce(THPSize *self, PyObject *noargs)
+static PyObject *THPSize_reduce(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
+  auto self = (THPSize*)_self;
   auto ret = THPObjectPtr{PyTuple_New(2)};
   if (!ret) throw python_error();
 
@@ -175,8 +171,8 @@ static PyObject *THPSize_reduce(THPSize *self, PyObject *noargs)
 }
 
 static PyMethodDef THPSize_methods[] = {
-  {"numel",       (PyCFunction)THPSize_numel,       METH_NOARGS,  nullptr},
-  {"__reduce__",  (PyCFunction)THPSize_reduce,      METH_NOARGS,  nullptr},
+  {"numel",       THPSize_numel,       METH_NOARGS,  nullptr},
+  {"__reduce__",  THPSize_reduce,      METH_NOARGS,  nullptr},
   {nullptr}
 };
 

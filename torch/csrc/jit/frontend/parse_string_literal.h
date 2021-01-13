@@ -5,16 +5,11 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 inline bool isCharCount(char c, const std::string& str, size_t start, int len) {
   // count checks from [start, start + len)
   return start + len <= str.size() &&
       std::count(str.begin() + start, str.begin() + start + len, c) == len;
-}
-
-inline static bool isOctal(char c) {
-  return c >= '0' && c < '8';
 }
 
 inline c10::optional<char> parseOctal(const std::string& str, size_t pos) {
@@ -87,6 +82,5 @@ inline std::string parseStringLiteral(
   return ret_str;
 }
 
-} // namespace script
 } // namespace jit
 } // namespace torch

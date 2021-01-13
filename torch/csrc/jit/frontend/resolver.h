@@ -6,7 +6,6 @@
 
 namespace torch {
 namespace jit {
-namespace script {
 
 struct Resolver;
 using ResolverPtr = std::shared_ptr<Resolver>;
@@ -26,7 +25,7 @@ using ResolverPtr = std::shared_ptr<Resolver>;
  * handle the method.
  */
 struct Resolver {
-  virtual ~Resolver() {}
+  virtual ~Resolver() = default;
 
   // Resolve a given name to a SugaredValue. This takes the method `m` that the
   // caller is currently constructing, since we may need to insert nodes into
@@ -65,6 +64,5 @@ struct NativeResolver : public Resolver {
 inline std::shared_ptr<NativeResolver> nativeResolver() {
   return std::make_shared<NativeResolver>();
 }
-} // namespace script
 } // namespace jit
 } // namespace torch

@@ -4,6 +4,7 @@
 #include <torch/nn/cloneable.h>
 #include <torch/nn/module.h>
 #include <torch/nn/modules/container/any.h>
+#include <torch/nn/modules/container/named_any.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
 
@@ -33,7 +34,7 @@ namespace nn {
 ///
 ///   torch::nn::Sequential seq(
 ///     torch::nn::Linear(3, 4),
-///     torch::nn::BatchNorm(4),
+///     torch::nn::BatchNorm1d(4),
 ///     torch::nn::Dropout(0.5)
 ///   );
 ///
@@ -68,7 +69,7 @@ namespace nn {
 ///
 ///   torch::nn::Sequential seq(
 ///     torch::nn::Linear(3, 4),
-///     torch::nn::BatchNorm(4),
+///     torch::nn::BatchNorm1d(4),
 ///     torch::nn::Dropout(0.5)
 ///   );
 ///
@@ -106,7 +107,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   explicit SequentialImpl(torch::OrderedDict<std::string, AnyModule>&& ordered_dict) {
     modules_.reserve(ordered_dict.size());
     for (auto& item : ordered_dict) {
-      push_back(std::move(item.key()), std::move(item.value()));
+      push_back(item.key(), std::move(item.value()));
     }
   }
 

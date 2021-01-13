@@ -1,19 +1,19 @@
 #include <google/protobuf/util/json_util.h>
 #include <google/protobuf/util/type_resolver_util.h>
 
+#include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/import_legacy.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/pickle.h>
-#include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/source_range_serialization_impl.h>
 
-#include "caffe2/core/common.h"
-#include "caffe2/core/types.h"
-#include "caffe2/proto/caffe2_pb.h"
-#include "caffe2/proto/torch_pb.h"
-#include "caffe2/serialize/inline_container.h"
+#include <caffe2/core/common.h>
+#include <caffe2/core/types.h>
+#include <caffe2/proto/caffe2_pb.h>
+#include <caffe2/proto/torch_pb.h>
+#include <caffe2/serialize/inline_container.h>
 
 #include <ATen/ATen.h>
 
@@ -24,61 +24,68 @@ using caffe2::serialize::PyTorchStreamReader;
 void postSetStateValidate(const IValue& v);
 namespace {
 
-struct ClassResolver : public script::Resolver {
-  explicit ClassResolver(script::SourceImporter source_importer)
-      : source_importer_(std::move(source_importer)) {}
+struct ClassResolver : public Resolver {
+  explicit ClassResolver(const SourceImporter& source_importer)
+      : source_importer_(source_importer) {}
   TypePtr resolveType(const std::string& name, const SourceRange& loc)
       override {
-    return source_importer_.loadNamedType(c10::QualifiedName(name));
+    return source_importer_.loadType(c10::QualifiedName(name));
   }
 
  private:
-  script::SourceImporter source_importer_;
+  SourceImporter source_importer_;
 };
 
 class ScriptModuleDeserializer final {
  public:
   ScriptModuleDeserializer(
-      std::shared_ptr<script::CompilationUnit> cu,
-      std::unique_ptr<PyTorchStreamReader> reader,
+      std::shared_ptr<CompilationUnit> cu,
+      std::shared_ptr<PyTorchStreamReader> reader,
       const c10::optional<at::Device>& device)
-      : compilation_unit_(cu),
+      : compilation_unit_(std::move(cu)),
         reader_(std::move(reader)),
         device_(device),
         source_importer_(
             compilation_unit_,
-            &constants_table_,
+            &constant_table_,
             [this](const std::string& qualifier) {
               return findSourceInArchiveFromQualifier(
                   *reader_, export_prefix_, qualifier);
             },
-            reader_->version()) {}
+            reader_->version()) {
+    for (auto& constant : constant_table_) {
+      TORCH_INTERNAL_ASSERT(constant.isTensor(), " expected a tensor");
+      tensor_table_.emplace_back(std::move(constant).toTensor());
+    }
+  }
 
-  script::Module LEGACY_deserialize();
+  Module LEGACY_deserialize();
 
  private:
   at::Tensor LEGACY_loadTensor(
       const torch::TensorDef& tensor_proto,
       std::unordered_map<std::string, at::Storage>& storageMap);
   void LEGACY_loadTensorTable(torch::ModelDef* model_def);
-  void LEGACY_moduleSetState(const script::Module& module, IValue state);
+  void LEGACY_moduleSetState(const Module& module, IValue state);
   IValue LEGACY_loadPickleArchive(const std::string& name);
-  script::Module LEGACY_convertModule(const torch::ModuleDef& module_def);
+  Module LEGACY_convertModule(const torch::ModuleDef& module_def);
 
   std::vector<IValue> LEGACY_pickled_ivalues_;
   std::vector<std::string> LEGACY_moduleStack_;
 
   std::shared_ptr<Source> sourceLoader(const std::string& qualifier);
 
-  std::shared_ptr<script::CompilationUnit> compilation_unit_;
-  std::unique_ptr<PyTorchStreamReader> reader_;
+  std::shared_ptr<CompilationUnit> compilation_unit_;
+  std::shared_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
-  std::vector<at::Tensor> constants_table_;
-  script::SourceImporter source_importer_;
+  // Legacy only tensor can be a constant.
+  std::vector<at::IValue> constant_table_;
+  std::vector<at::Tensor> tensor_table_;
+  SourceImporter source_importer_;
   std::string export_prefix_ = "code/";
 };
 
-script::Module ScriptModuleDeserializer::LEGACY_deserialize() {
+Module ScriptModuleDeserializer::LEGACY_deserialize() {
   torch::ModelDef model_def;
 
   at::DataPtr data_ptr;
@@ -116,16 +123,20 @@ script::Module ScriptModuleDeserializer::LEGACY_deserialize() {
   LEGACY_loadTensorTable(&model_def);
   AT_ASSERT(proto_version < 6);
   if (proto_version == 2) {
-    const auto& list =
-        LEGACY_loadPickleArchive("attributes.pkl").toList();
+    const auto& list = LEGACY_loadPickleArchive("attributes.pkl").toList();
     LEGACY_pickled_ivalues_.insert(
         LEGACY_pickled_ivalues_.end(), list.begin(), list.end());
   } else if (proto_version >= 3) {
     LEGACY_pickled_ivalues_ =
         LEGACY_loadPickleArchive("attributes.pkl").toTuple()->elements();
   }
-  LEGACY_moduleStack_.push_back("__torch__");
+  LEGACY_moduleStack_.emplace_back("__torch__");
   const auto& module_def = model_def.main_module();
+
+  // Move tensors in constant table.
+  for (auto& tensor : tensor_table_) {
+    constant_table_.emplace_back(IValue(std::move(tensor)));
+  }
   return LEGACY_convertModule(module_def);
 }
 
@@ -138,10 +149,10 @@ IValue ScriptModuleDeserializer::LEGACY_loadPickleArchive(
       reinterpret_cast<const char*>(attributes_ptr.get()),
       attributes_size,
       [&](const c10::QualifiedName& qn) {
-        auto cls = source_importer_.loadNamedType(qn)->expect<ClassType>();
+        auto cls = source_importer_.loadType(qn)->expect<ClassType>();
         return c10::StrongTypePtr(compilation_unit_, std::move(cls));
       },
-      &constants_table_);
+      &tensor_table_);
   return ivalue;
 }
 
@@ -149,7 +160,7 @@ void ScriptModuleDeserializer::LEGACY_loadTensorTable(
     torch::ModelDef* model_def) {
   std::unordered_map<std::string, at::Storage> storageMap;
   for (const torch::TensorDef& tensor : model_def->tensors()) {
-    constants_table_.emplace_back(LEGACY_loadTensor(tensor, storageMap));
+    tensor_table_.emplace_back(LEGACY_loadTensor(tensor, storageMap));
   }
 }
 
@@ -179,15 +190,15 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
     uint64_t record_size;
     std::tie(storage_ptr, record_size) = reader_->getRecord(record_key);
     auto cpu_storage = at::Storage(
-        at::CPU(type).typeMeta(),
-        record_size / at::CPU(type).typeMeta().itemsize(),
+        c10::Storage::use_byte_size_t(),
+        record_size,
         std::move(storage_ptr),
         /*allocator=*/nullptr,
         /*resizable=*/false); // NB: we didn't set any allocator for the tensor
-    if (device.type() == at::DeviceType::CPU) {
+    if (device.type() == DeviceType::CPU) {
       storage_it =
           storageMap.insert(std::make_pair(record_key, cpu_storage)).first;
-    } else if (device.type() == at::DeviceType::CUDA) {
+    } else if (device.type() == DeviceType::CUDA) {
       at::Tensor cpu_tensor =
           at::empty({0}, at::CPU(type).options()).set_(cpu_storage);
       at::Storage cuda_storage =
@@ -197,7 +208,7 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
     } else {
       AT_ERROR(
           "supported devices include CPU and CUDA, however got ",
-          at::DeviceTypeName(device.type(), false));
+          DeviceTypeName(device.type(), false));
     }
   }
   if (storage_it->second.device().type() != device.type() ||
@@ -212,21 +223,18 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
 
   at::Tensor result;
 
-  if (device.type() == at::DeviceType::CPU) {
+  if (device.type() == DeviceType::CPU) {
     if (tensor_proto.is_quantized()) {
-      result = at::_empty_affine_quantized(
-          {0},
-          type,
-          tensor_proto.scale(),
-          tensor_proto.zero_point())
-          .set_(storage_it->second, tensor_proto.offset(), dims, strides);
-    }
-    else {
+      result =
+          at::_empty_affine_quantized(
+              {0}, type, tensor_proto.scale(), tensor_proto.zero_point())
+              .set_(storage_it->second, tensor_proto.offset(), dims, strides);
+    } else {
       result =
           at::empty({0}, at::CPU(type).options())
               .set_(storage_it->second, tensor_proto.offset(), dims, strides);
     }
-  } else if (device.type() == at::DeviceType::CUDA) {
+  } else if (device.type() == DeviceType::CUDA) {
     result =
         at::empty(
             {0}, c10::TensorOptions(type).device(storage_it->second.device()))
@@ -240,7 +248,7 @@ at::Tensor ScriptModuleDeserializer::LEGACY_loadTensor(
 }
 
 void ScriptModuleDeserializer::LEGACY_moduleSetState(
-    const script::Module& module,
+    const Module& module,
     IValue state) {
   auto setstate = module.find_method("__setstate__");
 
@@ -259,13 +267,13 @@ void ScriptModuleDeserializer::LEGACY_moduleSetState(
   if (setstate->num_inputs() == 1) {
     setstate->run({module._ivalue()});
   } else if (setstate->num_inputs() == 2) {
-    setstate->run({module._ivalue(), state});
+    setstate->run({module._ivalue(), std::move(state)});
   } else {
     AT_ERROR("Unexpected schema on '__setstate__'");
   }
 }
 
-script::Module ScriptModuleDeserializer::LEGACY_convertModule(
+Module ScriptModuleDeserializer::LEGACY_convertModule(
     const torch::ModuleDef& module_def) {
   // HACK: The current model exporter can create module_defs with invalid Python
   // identifiers as names (they contain `.`)
@@ -278,8 +286,8 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
     auto sanitized = is_digits(atom) ? std::string("_") + atom : atom;
     LEGACY_moduleStack_.emplace_back(sanitized);
   }
-  auto module = script::Module(
-      c10::QualifiedName(LEGACY_moduleStack_), compilation_unit_);
+  auto module =
+      Module(c10::QualifiedName(LEGACY_moduleStack_), compilation_unit_);
   for (int i = 0; i < module_def.submodules_size(); ++i) {
     const torch::ModuleDef& sub_def = module_def.submodules(i);
     auto submodule = LEGACY_convertModule(sub_def);
@@ -287,14 +295,14 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
   }
   for (int i = 0; i < module_def.parameters_size(); ++i) {
     const torch::ParameterDef& param_def = module_def.parameters(i);
-    at::Tensor tensor = constants_table_.at(param_def.tensor_id());
+    at::Tensor tensor = constant_table_.at(param_def.tensor_id()).toTensor();
     if (param_def.is_buffer()) {
       module.register_buffer(param_def.name(), tensor);
     } else {
       module.register_parameter(param_def.name(), tensor, /*is_buffer=*/false);
     }
   }
-  script::ScriptTypeParser typeParser(
+  ScriptTypeParser typeParser(
       std::make_shared<ClassResolver>(source_importer_));
   for (int i = 0; i < module_def.attributes_size(); ++i) {
     const torch::AttributeDef& attr_def = module_def.attributes(i);
@@ -360,7 +368,7 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
           module_type->getAttributeName(i),
           "' was left unitialized after __setstate__, but expected a ",
           "value of type '",
-          v.type()->python_str(),
+          v.type()->repr_str(),
           "'");
     }
   }
@@ -373,11 +381,12 @@ script::Module ScriptModuleDeserializer::LEGACY_convertModule(
 
 } // namespace
 
-script::Module LEGACY_deserialize(
-    std::shared_ptr<script::CompilationUnit> cu,
-    std::unique_ptr<caffe2::serialize::PyTorchStreamReader> reader,
+Module LEGACY_deserialize(
+    std::shared_ptr<CompilationUnit> cu,
+    std::shared_ptr<caffe2::serialize::PyTorchStreamReader> reader,
     const c10::optional<c10::Device>& device) {
-  ScriptModuleDeserializer deserializer(cu, std::move(reader), device);
+  ScriptModuleDeserializer deserializer(
+      std::move(cu), std::move(reader), device);
   return deserializer.LEGACY_deserialize();
 }
 

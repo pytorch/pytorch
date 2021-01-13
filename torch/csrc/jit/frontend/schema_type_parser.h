@@ -1,17 +1,16 @@
 #pragma once
 
-#include <ATen/core/jit_type.h>
-#include <ATen/core/alias_info.h>
-#include <torch/csrc/jit/frontend/lexer.h>
 #include <ATen/core/Macros.h>
+#include <ATen/core/alias_info.h>
+#include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/frontend/lexer.h>
 
 namespace torch {
 namespace jit {
-namespace script {
 
 using TypePtr = c10::TypePtr;
 
-struct CAFFE2_API SchemaTypeParser {
+struct TORCH_API SchemaTypeParser {
   TypePtr parseBaseType();
   c10::optional<c10::AliasInfo> parseAliasAnnotation();
   std::pair<TypePtr, c10::optional<c10::AliasInfo>> parseType();
@@ -23,6 +22,8 @@ struct CAFFE2_API SchemaTypeParser {
   }
 
  private:
+  c10::optional<bool> tryToParseRequiresGrad();
+  c10::optional<c10::Device> tryToParseDeviceType();
   void parseList(
       int begin,
       int sep,
@@ -33,6 +34,5 @@ struct CAFFE2_API SchemaTypeParser {
   Lexer& L;
   size_t next_id = 0;
 };
-} // namespace script
 } // namespace jit
 } // namespace torch

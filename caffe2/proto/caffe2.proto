@@ -186,12 +186,21 @@ message TensorBoundShape {
   }
   repeated DimType dim_type = 2;  // dim_type.size() == shape.dims.size()
   optional string name = 3;
+  // a flag to indicate whether the shape is final and cannot be changed
+  // eg: input/output of in-place ops
+  optional bool shape_is_final = 4;
 }
 
 message TensorBoundShapes {
   repeated TensorBoundShape shapes = 1;
   optional int64 max_batch_size = 2;
   optional int64 max_feature_len = 3;
+}
+
+message AOTConfig{
+  required int64 max_batch_size = 1;
+  required int64 max_seq_size = 2;
+  required bool in_batch_broadcast = 3;
 }
 
 // A named argument containing either singular float, integer and string
@@ -230,7 +239,6 @@ enum DeviceTypeProto {
   PROTO_XLA = 9;                    // XLA / TPU
   // Change the following number if you add more devices in the code.
   PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 10;
-  PROTO_ONLY_FOR_TEST = 20901;   // This device type is only for test.
 }
 
 // Device-specific options. We do not distinguish DeviceOption protos for
@@ -316,18 +324,36 @@ message OperatorDef {
   optional int64 op_version = 12;
 }
 
+// MapFieldEntry follows the pattern for cross-proto-version maps.
+// See https://developers.google.com/protocol-buffers/docs/proto3#maps
+message MapFieldEntry {
+  required string key = 1;
+  required string val = 2;
+};
+
+// Used to hold backend-specific options.
+message BackendOptions {
+  // Name of the backend that the specified options apply to.
+  required string backend_name = 1;
+  // Flexible map for passing in the options.
+  repeated MapFieldEntry option = 2;
+};
+
 // Partition definition.
 message PartitionInfo {
   // Name of the partition.
   required string name = 1;
 
-  // A list of logic device ID, indicating which devices this partition 
-  // can be executed on. If empty, it means the partition won't run on 
+  // A list of logic device ID, indicating which devices this partition
+  // can be executed on. If empty, it means the partition won't run on
   // device but on host CPU instead.
   repeated int32 device_id = 2;
 
   // Extra debug info.
   optional string extra_info = 3;
+
+  // Flexible map for passing options specific to a backend.
+  repeated BackendOptions backend_options = 4;
 }
 
 // Network definition.
@@ -347,7 +373,8 @@ message NetDef {
   // in parallel.
   // Note: This is to be deprecated. Using the arg field with "num_workers" as
   // key.
-  optional int32 num_workers = 4 [deprecated=true];
+  // Note 2: The old uses of this were never actually cleaned up
+  optional int32 num_workers = 4;
 
   // The device option for the network. If a network has a specific device
   // option and one of its operators does not have it set, we will copy over the

@@ -11,7 +11,7 @@ namespace at {
 namespace native {
 
 Tensor& mkldnn_zero_(Tensor& self) {
-  AT_ERROR("mkldnn_zero_: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_zero_: ATen not compiled with MKLDNN support");
 }
 
 } // namespace native

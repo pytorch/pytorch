@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import unittest
 import numpy as np
@@ -10,7 +10,6 @@ import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.ideep_test_util as mu
 
 from hypothesis import given, settings
-from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 
 
@@ -21,6 +20,7 @@ class OrderSwitchTest(hu.HypothesisTestCase):
            h=st.integers(1, 128),
            w=st.integers(1, 128),
            **mu.gcs)
+    @settings(max_examples=10, deadline=None)
     def test_nchw2nhwc(self, n, c, h, w, gc, dc):
         op = core.CreateOperator(
             "NCHW2NHWC",
@@ -36,6 +36,7 @@ class OrderSwitchTest(hu.HypothesisTestCase):
            h=st.integers(1, 128),
            w=st.integers(1, 128),
            **mu.gcs)
+    @settings(deadline=None, max_examples=50)
     def test_nhwc2nchw(self, n, c, h, w, gc, dc):
         op0 = core.CreateOperator(
             "NCHW2NHWC",

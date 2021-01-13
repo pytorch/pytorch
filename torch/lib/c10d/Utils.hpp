@@ -1,6 +1,5 @@
 #pragma once
 
-#include <sys/socket.h>
 #include <sys/types.h>
 
 #include <chrono>
@@ -16,6 +15,19 @@
 #include <ATen/ATen.h>
 
 #include <c10d/Types.hpp>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+typedef SSIZE_T ssize_t;
+#pragma comment(lib, "Ws2_32.lib")
+#else
+#include <sys/socket.h>
+#include <sys/poll.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <fcntl.h>
+#endif
 
 namespace c10d {
 
@@ -50,6 +62,30 @@ inline void assertSameType(
           "mixed types (" + expected + " and " + actual + ")");
     }
   }
+}
+
+inline bool parseEnvVarFlag(const char* envVarName) {
+  char* stringValue = std::getenv(envVarName);
+  if (stringValue != nullptr) {
+    int val;
+    try {
+      val = std::stoi(stringValue);
+    } catch (std::exception& e) {
+      throw std::runtime_error(
+          "Invalid value for environment variable: " +
+          std::string(envVarName));
+    }
+    if (val == 1) {
+      return true;
+    } else if (val == 0) {
+      return false;
+    } else {
+      throw std::runtime_error(
+          "Invalid value for environment variable: " +
+          std::string(envVarName));
+    }
+  }
+  return false;
 }
 
 inline void assertSameSizes(
@@ -300,8 +336,10 @@ inline at::Tensor newLikeFlat(
   }
   at::DeviceGuard gpuGuard(device);
   std::vector<int64_t> sizes{static_cast<int64_t>(tensors[deviceIdx].size())};
+  std::vector<int64_t> strides{static_cast<int64_t>(t.numel())};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
-  return at::empty(sizes, t.options());
+  strides.insert(strides.end(), t.strides().begin(), t.strides().end());
+  return at::empty_strided(sizes, strides, t.options().memory_format(c10::nullopt));
 }
 
 inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
@@ -354,6 +392,76 @@ std::vector<T*> getDataPointers(const std::vector<at::Tensor>& tensors) {
   return ptrs;
 }
 
+// For alltoall split size sanity check
+inline void checkSplitSizes(
+    const std::vector<int64_t>& split_sizes,
+    const at::Tensor& tensor,
+    int group_size) {
+  if (split_sizes.size() == 0) {
+    TORCH_CHECK(
+        tensor.size(0) % group_size == 0,
+        "Tensor's dim 0 does not divide equally across group size");
+  } else {
+    TORCH_CHECK(
+        split_sizes.size() == group_size,
+        "Number of tensor splits not equal to group size");
+    int sum = std::accumulate(split_sizes.begin(), split_sizes.end(), 0);
+    TORCH_CHECK(
+        sum == tensor.size(0), "Split sizes doesn't match total dim 0 size");
+  }
+}
+
+// Compute alltoall lengths and offsets, handling multi-dimension tensors
+template <typename T>
+size_t computeLengthsAndOffsets(
+    const std::vector<int64_t>& split_sizes,
+    const at::Tensor& tensor,
+    std::vector<T>* lengths,
+    std::vector<T>* offsets) {
+  size_t group_size = lengths->size();
+  bool equal_splits = false;
+  size_t dim0_size = tensor.size(0);
+  size_t row_size = (dim0_size ? tensor.numel() / dim0_size : 1);
+  size_t split_size = 0;
+  size_t offset = 0;
+
+  if (split_sizes.size() == 0) {
+    equal_splits = true;
+    split_size = tensor.size(0) / group_size;
+  }
+  for (int i = 0; i < group_size; i++) {
+    size_t length = row_size * (equal_splits ? split_size : split_sizes[i]);
+    TORCH_INTERNAL_ASSERT(
+        length <= std::numeric_limits<int>::max() &&
+            offset <= std::numeric_limits<int>::max(),
+        "Length or offset larger than INT_MAX not supported");
+    (*lengths)[i] = length;
+    (*offsets)[i] = offset;
+    offset += length;
+  }
+  return offset;
+}
+
+template <typename T>
+size_t computeLengthsAndOffsets(
+    const std::vector<at::Tensor>& tensors,
+    std::vector<T>* lengths,
+    std::vector<T>* offsets) {
+  size_t group_size = lengths->size();
+  size_t offset = 0;
+  for (int i = 0; i < group_size; i++) {
+    size_t length = tensors[i].numel();
+    TORCH_INTERNAL_ASSERT(
+        length <= std::numeric_limits<int>::max() &&
+            offset <= std::numeric_limits<int>::max(),
+        "Length or offset larger than INT_MAX not supported");
+    (*lengths)[i] = length;
+    (*offsets)[i] = offset;
+    offset += length;
+  }
+  return offset;
+}
+
 using RankType = uint32_t;
 using PortType = uint16_t;
 using SizeType = uint64_t;
@@ -366,6 +474,25 @@ using SizeType = uint64_t;
 // `success_cond` is an expression used to check if an error has happend. So for
 // `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function output
 // is stored in variable `__output` and may be used in `success_cond`.
+#ifdef _WIN32
+#define SYSCHECK(expr, success_cond)                                               \
+  while (true) {                                                                   \
+    auto __output = (expr);                                                        \
+    auto errno_local = WSAGetLastError();                                          \
+    (void)__output;                                                                \
+    if (!(success_cond)) {                                                         \
+      if (errno == EINTR) {                                                        \
+        continue;                                                                  \
+      } else if (errno_local == WSAETIMEDOUT || errno_local == WSAEWOULDBLOCK ) {  \
+        throw std::runtime_error("Socket Timeout");                                \
+      } else {                                                                     \
+        throw std::system_error(errno_local, std::system_category());              \
+      }                                                                            \
+    } else {                                                                       \
+      break;                                                                       \
+    }                                                                              \
+  }
+#else
 #define SYSCHECK(expr, success_cond)                            \
   while (true) {                                                \
     auto __output = (expr);                                     \
@@ -382,9 +509,11 @@ using SizeType = uint64_t;
       break;                                                    \
     }                                                           \
   }
+#endif
 
 // Most functions indicate error by returning `-1`. This is a helper macro for
 // this common case with `SYSCHECK`.
+// Since SOCKET_ERROR = -1 in MSVC, so also leverage SYSCHECK_ERR_RETURN_NEG1
 #define SYSCHECK_ERR_RETURN_NEG1(expr) SYSCHECK(expr, __output != -1)
 
 // Helper resource guard class
@@ -411,6 +540,7 @@ class ResourceGuard {
 namespace tcputil {
 
 constexpr std::chrono::milliseconds kNoTimeout = std::chrono::milliseconds(-1);
+const std::string kConnectTimeoutMsg = "connect() timed out.";
 
 // Send and receive
 template <typename T>
@@ -438,7 +568,7 @@ void sendBytes(
   while (bytesToSend > 0) {
     ssize_t bytesSent;
     SYSCHECK_ERR_RETURN_NEG1(
-        bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
+        bytesSent = ::send(socket, (const char*)currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
       throw std::system_error(ECONNRESET, std::system_category());
     }
@@ -461,7 +591,7 @@ void recvBytes(int socket, T* buffer, size_t length) {
   while (bytesToReceive > 0) {
     ssize_t bytesReceived;
     SYSCHECK_ERR_RETURN_NEG1(
-        bytesReceived = ::recv(socket, currentBytes, bytesToReceive, 0))
+        bytesReceived = recv(socket, (char*)currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
       throw std::system_error(ECONNRESET, std::system_category());
     }

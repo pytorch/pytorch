@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 from hypothesis import given
@@ -19,7 +19,7 @@ class TestLengthsTopKOps(serial.SerializedTestCase):
         lens = np.random.randint(low=1, high=2 * K + 1, size=N).astype(np.int32)
         X = []
         for i in lens:
-            X.extend(map(lambda x: x / 100.0, range(0, 6 * i, 6)))
+            X.extend(x / 100.0 for x in range(0, 6 * i, 6))
         X = np.array(X, dtype=np.float32)
         op = core.CreateOperator("LengthsTopK", ["X", "Y"], ["values", "indices"], k=K)
 

@@ -4,14 +4,14 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/jit/frontend/tracer.h>
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
-#include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/frontend/tracer.h>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
@@ -31,12 +31,18 @@ namespace jit {
 
 void packGradient(const Gradient& gradient, Node* dnode);
 bool needsGradient(const std::shared_ptr<const Graph>& graph);
-void runOptimization(std::shared_ptr<Graph>& graph, bool unroll = true);
+void runOptimization(
+    std::shared_ptr<Graph>& graph,
+    bool unroll = true,
+    bool const_prop_user_classes = true);
 void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
     bool strict_fuser_check = false);
 void debugSetAutodiffSubgraphInlining(bool state);
 bool getAutodiffSubgraphInlining();
+
+void debugSetFusionGroupInlining(bool state);
+bool getFusionGroupInlining();
 
 // Tunable parameters for deciding when to create/keep subgraphs of
 // differentiable code
@@ -56,7 +62,9 @@ struct GraphExecutorImplBase {
     return copy;
   }
 
-  GraphExecutorImplBase(const std::shared_ptr<Graph>& graph, std::string function_name)
+  GraphExecutorImplBase(
+      const std::shared_ptr<Graph>& graph,
+      std::string function_name)
       : graph(prepareGraph(graph)),
         function_name_(std::move(function_name)),
         num_inputs(this->graph->inputs().size()),
@@ -64,8 +72,11 @@ struct GraphExecutorImplBase {
 
   // entry point where execution begins
   void run(Stack& stack);
+  c10::intrusive_ptr<Future> runAsync(
+      Stack& stack,
+      TaskLauncher taskLauncher = at::launch);
 
-  virtual ExecutionPlan getPlanFor(
+  virtual const ExecutionPlan& getPlanFor(
       Stack& stack,
       size_t remaining_bailout_depth) = 0;
   virtual GraphExecutorState getDebugState() = 0;

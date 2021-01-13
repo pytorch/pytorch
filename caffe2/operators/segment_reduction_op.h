@@ -1553,7 +1553,7 @@ class AbstractLengthsGradientOp : public Operator<Context> {
     }
 
     typename ReducerGradient::Meta ctx(segmentGradsInput, 1);
-    for (int i = 0; i < ReducerGradient::originalInputs().size(); ++i) {
+    for (auto i = 0U; i < ReducerGradient::originalInputs().size(); ++i) {
       auto& aux_in = Input(i);
       CAFFE_ENFORCE_EQ(
           reducedDataSize,
@@ -2006,13 +2006,13 @@ i.e. `len(LENGTHS)`. Other dimensions are inherited from the input tensor.
         "OUTPUT",
         "Aggregated output tensor. Has the first dimension of K "
         "(the number of segments).");
-    schema.TensorInferenceFunction(
+    schema.TensorInferenceFunction(OpSchema::NeedsAllInputShapes(
         [](const OperatorDef&, const std::vector<TensorShape>& input_types) {
           std::vector<TensorShape> out(1);
           out[0] = input_types[0];
           out[0].set_dims(0, input_types[Reducer::kInputCount + 1].dims(0));
           return out;
-        });
+        }));
     ReducerDef::PopulateSchema(schema);
 
     schema.CostInferenceFunction(

@@ -5,10 +5,71 @@
 #ifdef USE_XNNPACK
 
 #include <xnnpack.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 namespace at {
 namespace native {
 namespace xnnpack {
+
+struct Deleter final {
+  void operator()(const xnn_operator_t op) const {
+    xnn_delete_operator(op);
+  }
+};
+
+using Operator = std::unique_ptr<xnn_operator, Deleter>;
+
+struct ContextLinear final {
+  Operator op;
+  int64_t output_channels;
+
+  ContextLinear() = delete;
+
+  ContextLinear(Operator&& o, int64_t o_channels) {
+    op = std::move(o);
+    output_channels = o_channels;
+  }
+  static constexpr float kMin = -std::numeric_limits<float>::infinity();
+  static constexpr float kMax = std::numeric_limits<float>::infinity();
+};
+
+// This contains information for both the transpose and non-transpose cases.
+struct ContextConv2D final {
+  Operator op;
+  std::array<int64_t, 4> weight_size_;
+  std::array<int64_t, 2> padding_;
+  std::array<int64_t, 2> output_padding_;
+  std::array<int64_t, 2> stride_;
+  std::array<int64_t, 2> dilation_;
+  const float* cached_input_ptr{nullptr};
+  const float* cached_output_ptr{nullptr};
+  size_t input_height{0}, input_width{0}, batch_size{0}, input_channels{0};
+  bool transposed_;
+  int64_t groups_;
+
+  ContextConv2D() = delete;
+
+  ContextConv2D(
+      Operator&& o,
+      std::array<int64_t, 4> weight_size,
+      std::array<int64_t, 2> padding,
+      std::array<int64_t, 2> output_padding,
+      std::array<int64_t, 2> stride,
+      std::array<int64_t, 2> dilation,
+      bool transposed,
+      int64_t groups)
+      :  op(std::move(o)),
+         weight_size_(weight_size),
+         padding_(padding),
+         output_padding_(output_padding),
+         stride_(stride),
+         dilation_(dilation),
+         transposed_(transposed),
+         groups_(groups) {}
+  static constexpr float kMin = -std::numeric_limits<float>::infinity();
+  static constexpr float kMax = std::numeric_limits<float>::infinity();
+};
+
 namespace internal {
 
 struct Layout final {
@@ -31,7 +92,7 @@ struct Layout final {
       }
 
       // Handle the case where batch size is zero.
-      int64_t batch = std::max<int64_t>(1, tensor[0]);
+      int64_t batch = tensor[0];
 
       for (size_t index = 1u; index < (tensor.size() - 1u); ++index) {
         batch *= tensor[index];
@@ -63,14 +124,6 @@ struct Layout final {
     static constexpr size_t width = 1u;
   };
 };
-
-struct Deleter final {
-  void operator()(const xnn_operator_t op) const {
-    xnn_delete_operator(op);
-  }
-};
-
-using Operator = std::unique_ptr<xnn_operator, Deleter>;
 
 bool available();
 

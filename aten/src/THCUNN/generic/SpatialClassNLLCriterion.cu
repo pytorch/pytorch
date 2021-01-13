@@ -55,6 +55,9 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
            THCTensor *total_weight,
            int64_t ignore_index)
 {
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic because of atomicAdd usage
+  at::globalContext().alertNotDeterministic("SpatialClassNLLCriterion_updateOutput");
   THNN_(SpatialClassNLLCriterion_shapeCheck)(state, input, target, weights);
   THCTensor_(resize0d)(state, output);
   THCTensor_(resize0d)(state, total_weight);

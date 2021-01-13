@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 
 import operator_benchmark as op_bench
 import torch
@@ -50,20 +45,25 @@ class LSTMBenchmark(op_bench.TorchBenchmarkBase):
                                                         {nn.LSTM, nn.Linear},
                                                         dtype=dtype)[0]
 
-        self.x = torch.randn(sequence_len,  # sequence length
-                             batch_size,    # batch size
-                             I)             # Number of features in X
-        self.h = torch.randn(NL * (D + 1),  # layer_num * dir_num
-                             batch_size,    # batch size
-                             H)             # hidden size
-        self.c = torch.randn(NL * (D + 1),  # layer_num * dir_num
-                             batch_size,    # batch size
-                             H)             # hidden size
+        x = torch.randn(sequence_len,  # sequence length
+                        batch_size,    # batch size
+                        I)             # Number of features in X
+        h = torch.randn(NL * (D + 1),  # layer_num * dir_num
+                        batch_size,    # batch size
+                        H)             # hidden size
+        c = torch.randn(NL * (D + 1),  # layer_num * dir_num
+                        batch_size,    # batch size
+                        H)             # hidden size
 
+        self.inputs = {
+            "x": x,
+            "h": h,
+            "c": c
+        }
         self.set_module_name("QLSTM")
 
-    def forward(self):
-        return self.cell(self.x, (self.h, self.c))
+    def forward(self, x, h, c):
+        return self.cell(x, (h, c))[0]
 
 op_bench.generate_pt_test(qrnn_configs, LSTMBenchmark)
 

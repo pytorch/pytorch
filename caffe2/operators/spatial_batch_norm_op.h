@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <functional>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -57,6 +58,7 @@ class SpatialBNOp : public Operator<Context> {
     const int C =
         (order_ == StorageOrder::NCHW ? X.dim32(1) : X.dim32(ndim - 1));
     const std::vector<int> X_dims(X.sizes().cbegin(), X.sizes().cend());
+    CAFFE_ENFORCE_NE(C, 0);
     const int HxW =
         std::accumulate(
             X_dims.cbegin() + 1, X_dims.cend(), 1, std::multiplies<int>()) /
@@ -175,6 +177,7 @@ class SpatialBNOp : public Operator<Context> {
       }
       ComputeRunningMomentsAndFusedParam<T>(
           C,
+          num_batches_ * N * HxW,
           scale_data,
           bias_data,
           saved_mean_data,
@@ -235,6 +238,7 @@ class SpatialBNOp : public Operator<Context> {
   template <typename T>
   void ComputeRunningMomentsAndFusedParam(
       const int C,
+      const int reduce_size,
       const T* scale,
       const T* bias,
       const T* mean,
@@ -246,8 +250,12 @@ class SpatialBNOp : public Operator<Context> {
       T* beta) {
     const T a = T(1) - static_cast<T>(momentum_);
     const T b = static_cast<T>(momentum_);
+    const T unbias_scale = reduce_size == 1
+        ? std::numeric_limits<T>::infinity()
+        : static_cast<T>(reduce_size) / static_cast<T>(reduce_size - 1);
     math::Axpby<T, T, Context>(C, a, mean, b, running_mean, &context_);
-    math::Axpby<T, T, Context>(C, a, var, b, running_var, &context_);
+    math::Axpby<T, T, Context>(
+        C, a * unbias_scale, var, b, running_var, &context_);
     math::InvStd<T, Context>(C, static_cast<T>(epsilon_), var, rstd, &context_);
     EigenVectorArrayMap<T> alpha_arr(alpha, C);
     EigenVectorArrayMap<T> beta_arr(beta, C);

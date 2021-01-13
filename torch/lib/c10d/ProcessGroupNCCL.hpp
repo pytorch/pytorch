@@ -1,5 +1,8 @@
 #pragma once
 
+#include <chrono>
+#include <iostream>
+#include <list>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -10,12 +13,24 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/CUDAFuture.h>
+#include <ATen/cuda/CUDAMultiStreamGuard.h>
+#include <c10/core/Stream.h>
+#include <c10/core/StreamGuard.h>
+#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAStream.h>
+
+#include <torch/custom_class.h>
 
 namespace c10d {
 
 // Environment variable which controls whether or not wait() is blocking or
 // non-blocking.
 constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
+
+// Environment variable which controls whether or not we perform Async Error
+// Handling with NCCL.
+constexpr const char* NCCL_ASYNC_ERROR_HANDLING = "NCCL_ASYNC_ERROR_HANDLING";
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
@@ -54,10 +69,16 @@ constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
 //   // Now continue on other work in the current stream.
 class ProcessGroupNCCL : public ProcessGroup {
  public:
-  class WorkNCCL : public ProcessGroup::Work {
+  class WorkNCCL : public ProcessGroup::Work,
+    public std::enable_shared_from_this<WorkNCCL> {
    public:
     // Constructor takes a list of CUDA devices
-    WorkNCCL(const std::vector<at::Device>& devices);
+    WorkNCCL(const std::vector<at::Device>& devices, int rank, OpType opType, const char* profilingTitle = nullptr);
+    // Copy constructor doing partial copy without outputs_. Cleanup thread
+    // monitors and removes finished works. However it will deadlock when
+    // destructs outputs_ tensors who are view tensors in autograd graph.
+    WorkNCCL(const WorkNCCL& w);
+
     virtual ~WorkNCCL();
 
     // Checks if request has completed. In this specific case of NCCL, it checks
@@ -68,7 +89,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     bool isSuccess() const override;
 
     // Same as calling synchronize() for NCCL work.
-    bool wait() override;
+    bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 
     void abort() override;
 
@@ -77,16 +98,36 @@ class ProcessGroupNCCL : public ProcessGroup {
     // completion.
     void synchronize() override;
 
+    // Synchronize streams by blocking each on the NCCL stream
+    void synchronizeStreams();
+
+    // Helper function used in CUDA Stream callbacks to complete WorkNCCL
+    // objects and throw exceptions when neeeded.
+    void handleNCCLGuard();
+
     // Helper function that checks if the NCCL kernels have finished
     // execution on the GPUs
     bool finishedGPUExecution();
+
+    // Get a Future object that will be marked as completed internally.
+    // It actually returns a CUDAFuture object which is a sub class of Future.
+    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
+
+    // Helper function that sets an exception_ptr on the WorkNCCL object.
+    void setException(std::exception_ptr exception_ptr);
+
+    // Helper function that returns True if the WorkNCCL object has timed out
+    // and False otherwise.
+    bool timedOut();
+
+    std::vector<at::Tensor> result() override;
 
    protected:
     // The cached list of CUDA devices to operate on
     std::vector<at::Device> devices_;
 
     // The CUDA events tracking this work item on multiple CUDA devices
-    std::vector<at::cuda::CUDAEvent> cudaEvents_;
+    std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
 
     // The NCCL communicators used for this work item.
     std::vector<std::shared_ptr<NCCLComm>> ncclComms_;
@@ -97,7 +138,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Clone of blockingWait_ from ProcessGroupNCCL.
     bool blockingWait_ = false;
 
-    // Clonge of opTimeout_ from ProcessGroupNCCL.
+    // Clone of opTimeout_ from ProcessGroupNCCL.
     std::chrono::milliseconds opTimeout_;
 
     // Time point representing when the work started.
@@ -108,7 +149,13 @@ class ProcessGroupNCCL : public ProcessGroup {
     virtual std::exception_ptr checkForNCCLErrors(
         const std::vector<std::shared_ptr<NCCLComm>>& ncclComms) const;
 
+    friend std::ostream& operator<<(
+        std::ostream& output,
+        const WorkNCCL& workNCCL);
+
    private:
+    // Helper function for synchronize
+    void synchronizeInternal(std::chrono::milliseconds timeout);
     // Checks for NCCL errors and sets an appropriate exception_ptr.
     void checkAndSetException();
 
@@ -121,9 +168,30 @@ class ProcessGroupNCCL : public ProcessGroup {
 
     // Reference to the store so that we can write aborted communicators
     // to the store.
-    std::shared_ptr<Store> store_;
+    c10::intrusive_ptr<Store> store_;
+
+    // Store a reference to NCCL collective's outputs, used by result and to
+    // give a more descriptive message when representing the Work as a string.
+    std::shared_ptr<std::vector<at::Tensor>> outputs_;
+
+    // The future returned by getFuture.
+    c10::intrusive_ptr<at::cuda::CUDAFuture> future_;
 
     friend class ProcessGroupNCCL;
+  };
+
+  struct Options : torch::CustomClassHolder {
+    explicit Options();
+
+    // return intrusive_ptr of the object
+    static c10::intrusive_ptr<Options> create(
+        std::chrono::milliseconds timeout = kNoTimeout,
+        bool isHighStream = false) {
+      return c10::make_intrusive<Options>();
+    }
+
+    std::chrono::milliseconds opTimeout;
+    bool isHighPriorityStream;
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -141,88 +209,102 @@ class ProcessGroupNCCL : public ProcessGroup {
   // communicator. These NCCL communicators are cached and reused if possible.
   //
   ProcessGroupNCCL(
-      const std::shared_ptr<Store>& store,
+      const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
-      const std::chrono::milliseconds& opTimeout =
-          std::chrono::milliseconds(kProcessGroupNCCLOpTimeoutMillis));
+      c10::intrusive_ptr<Options> options = Options::create());
 
   // This constructor includes the deprecated `groupName` argument.
   // If you have existing code that uses the `groupName`, you can replace
   // it by specifying a `c10d::PrefixStore(groupName, store)` for store.
   C10_DEPRECATED ProcessGroupNCCL(
-      const std::shared_ptr<Store>& store,
+      const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
       const std::string& groupName,
-      const std::chrono::milliseconds& opTimeout =
-          std::chrono::milliseconds(kProcessGroupNCCLOpTimeoutMillis))
-      : ProcessGroupNCCL(store, rank, size, opTimeout) {}
+      c10::intrusive_ptr<Options> options = Options::create())
+      : ProcessGroupNCCL(store, rank, size, options) {}
 
   virtual ~ProcessGroupNCCL();
 
-  std::shared_ptr<ProcessGroup::Work> broadcast(
+  c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const BroadcastOptions& opts = BroadcastOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allreduce(
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce(
       std::vector<at::Tensor>& tensors,
       const AllreduceOptions& opts = AllreduceOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allreduce_coalesced(
+  c10::intrusive_ptr<ProcessGroup::Work> allreduce_coalesced(
       std::vector<at::Tensor>& tensors,
       const AllreduceCoalescedOptions& opts =
           AllreduceCoalescedOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> reduce(
+  c10::intrusive_ptr<ProcessGroup::Work> reduce(
       std::vector<at::Tensor>& tensors,
       const ReduceOptions& opts = ReduceOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allgather(
+  c10::intrusive_ptr<ProcessGroup::Work> allgather(
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allgather_base(
+  c10::intrusive_ptr<ProcessGroup::Work> allgather_base(
       at::Tensor& outputbuffer,
       at::Tensor& inputbuffer,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> allgather_coalesced(
+  c10::intrusive_ptr<ProcessGroup::Work> allgather_coalesced(
       std::vector<std::vector<at::Tensor>>& outputTensorLists,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& opts = AllgatherOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> reduce_scatter(
+  c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
       const ReduceScatterOptions& opts = ReduceScatterOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> barrier(
+  c10::intrusive_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
 
-  // Unsupported Ops
-  std::shared_ptr<ProcessGroup::Work> gather(
-      std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
-      const GatherOptions& opts = GatherOptions()) override;
+  c10::intrusive_ptr<ProcessGroup::Work> alltoall_base(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      std::vector<int64_t>& outputSplitSizes,
+      std::vector<int64_t>& inputSplitSizes,
+      const AllToAllOptions& opts = AllToAllOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> scatter(
+  c10::intrusive_ptr<ProcessGroup::Work> alltoall(
       std::vector<at::Tensor>& outputTensors,
-      std::vector<std::vector<at::Tensor>>& inputTensors,
-      const ScatterOptions& opts = ScatterOptions()) override;
+      std::vector<at::Tensor>& inputTensors,
+      const AllToAllOptions& opts = AllToAllOptions()) override;
 
-  std::shared_ptr<ProcessGroup::Work> send(
+  c10::intrusive_ptr<ProcessGroup::Work> send(
       std::vector<at::Tensor>& tensors,
       int dstRank,
       int tag) override;
 
-  std::shared_ptr<ProcessGroup::Work> recv(
+  c10::intrusive_ptr<ProcessGroup::Work> recv(
       std::vector<at::Tensor>& tensors,
       int srcRank,
       int tag) override;
 
-  std::shared_ptr<ProcessGroup::Work> recvAnysource(
+  static void groupStart();
+
+  static void groupEnd();
+
+  // Unsupported Ops
+  c10::intrusive_ptr<ProcessGroup::Work> gather(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const GatherOptions& opts = GatherOptions()) override;
+
+  c10::intrusive_ptr<ProcessGroup::Work> scatter(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ScatterOptions& opts = ScatterOptions()) override;
+
+  c10::intrusive_ptr<ProcessGroup::Work> recvAnysource(
       std::vector<at::Tensor>& tensors,
       int tag) override;
 
@@ -230,20 +312,30 @@ class ProcessGroupNCCL : public ProcessGroup {
 
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
-  void broadcastUniqueNCCLID(ncclUniqueId* ncclID);
+  void broadcastUniqueNCCLID(
+      ncclUniqueId* ncclID,
+      OpType opType,
+      const std::string& devicesKey,
+      int p2pRank);
 
   // Helper that either looks up the cached NCCL communicators or creates
   // a new set of NCCL communicators as a cache entry
   std::vector<std::shared_ptr<NCCLComm>>& getNCCLComm(
       const std::string& devicesKey,
-      const std::vector<at::Device>& devices);
+      const std::vector<at::Device>& devices,
+      OpType opType,
+      int p2pRank = 0,
+      bool isSendRecvSelf = false);
 
   // Wrapper method which can be overridden for tests.
   virtual std::exception_ptr checkForNCCLErrors(
       const std::vector<std::shared_ptr<NCCLComm>>& ncclComms);
 
-  virtual std::shared_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
-      std::vector<at::Device> devices);
+  virtual c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> initWork(
+      std::vector<at::Device> devices,
+      int rank,
+      OpType opType,
+      const char* profilingTitle=nullptr);
 
  private:
   // Helper that encapsulates work shared across all collective communication
@@ -253,15 +345,37 @@ class ProcessGroupNCCL : public ProcessGroup {
   //                    ncclComm_t, at::cuda::CUDAStream&);
   //    void {pre,post}(std::vector<at::cuda::CUDAStream&>);
   template <typename Fn>
-  std::shared_ptr<ProcessGroup::Work> collective(
-      std::vector<at::Tensor>& input,
-      std::vector<at::Tensor>& output,
-      Fn fn);
-  template <typename Fn, typename PreProcess, typename PostProcess>
-  std::shared_ptr<ProcessGroup::Work> collective(
+  c10::intrusive_ptr<ProcessGroup::Work> collective(
       std::vector<at::Tensor>& input,
       std::vector<at::Tensor>& output,
       Fn fn,
+      OpType opType,
+      const char* profilingTitle = nullptr);
+  template <typename Fn, typename PreProcess, typename PostProcess>
+  c10::intrusive_ptr<ProcessGroup::Work> collective(
+      std::vector<at::Tensor>& input,
+      std::vector<at::Tensor>& output,
+      Fn fn,
+      PreProcess pre,
+      PostProcess post,
+      OpType opType,
+      const char* profilingTitle = nullptr);
+
+  // Helper that encapsulates work shared across point-to-point communication
+  // primitives. It is the same structure as the helper used for collective
+  // communicaiton primitives.
+  template <typename Fn>
+  c10::intrusive_ptr<ProcessGroup::Work> pointToPoint(
+      std::vector<at::Tensor>& tensor,
+      Fn fn,
+      int peer,
+      OpType opType);
+  template <typename Fn, typename PreProcess, typename PostProcess>
+  c10::intrusive_ptr<ProcessGroup::Work> pointToPoint(
+      std::vector<at::Tensor>& tensor,
+      Fn fn,
+      int peer,
+      OpType opType,
       PreProcess pre,
       PostProcess post);
 
@@ -283,11 +397,20 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   void ncclCommWatchdogInternal();
 
+  // This function iterates through the list of WorkNCCL objects in the
+  // workList_ corresponding to incomplete collectives and then aborts NCCL
+  // communicators associated with timed out collectives.
+  void abortTimedOutCollectives(
+      std::unordered_set<std::string>& abortedCommIds);
+
+  void workCleanupLoop();
+
  protected:
   static const int64_t kWatchdogThreadSleepMillis;
+  static const int64_t kWorkCleanupThreadSleepMillis;
 
   // The store is used to broadcast the NCCL unique ID of rank 0.
-  std::shared_ptr<Store> store_;
+  c10::intrusive_ptr<Store> store_;
 
   // The number of NCCL communicators that have been created during
   // the lifetime of this process group. This sequence number is
@@ -295,6 +418,8 @@ class ProcessGroupNCCL : public ProcessGroup {
   uint64_t ncclCommCounter_{0};
 
   // The NCCL communicator that the process group has cached.
+  //
+  // For collective operations:
   // The key is a list of GPU devices that an operation is operating on
   // The GPU devices are stored in a device sequence and the cache NCCL
   // communicator is associated with this GPU device sequence
@@ -313,6 +438,13 @@ class ProcessGroupNCCL : public ProcessGroup {
   //      "0,4,5,6,7,1,2,3"
   //
   //      Note that the order of the device for the tensor list matters.
+  //
+  // For point-to-point operations:
+  // The key is a string of my current rank and the peer process rank.
+  // e.g. If process 1 and process 2 are involved in a point-to-point
+  // communication, the key will be "1:2" on both processes. Note: this is for
+  // the scenario where there is only 1 GPU per process. When it comes to
+  // multiple GPUs per process, this part may need to redesigned.
   std::unordered_map<std::string, std::vector<std::shared_ptr<NCCLComm>>>
       devNCCLCommMap_;
 
@@ -326,14 +458,29 @@ class ProcessGroupNCCL : public ProcessGroup {
   // Watchdog thread which looks for errors on the cached NCCL communicators.
   std::thread ncclCommWatchdogThread_;
 
-  // Whether or not we should terminate the watchdog thread.
-  std::atomic<bool> terminateWatchdog_;
+  // Whether or not we should terminate the watchdog and workCleanup threads.
+  std::atomic<bool> terminateProcessGroup_;
 
   // Condition variable to control how long the watchdog thread waits.
   std::condition_variable watchdogCV_;
 
   // Mutex for watchdog.
   std::mutex watchdogCVMutex_;
+
+  // Thread that removes NCCL Work upon timeout
+  std::thread workCleanupThread_;
+
+  // Mutex to Guard workMetaList_
+  std::mutex workMetaListMutex_;
+
+  // Condition Variable for timeout thread sleep
+  std::condition_variable workMetaListCV_;
+
+  // Vector to Store WorkNCCL pointers
+  std::list<ProcessGroupNCCL::WorkNCCL> workMetaList_;
+
+  // Add Work Pointer to workVector
+  void workEnqueue(c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>);
 
   // The CUDA steams used by NCCL kernels
   std::unordered_map<std::string, std::vector<at::cuda::CUDAStream>>
@@ -369,6 +516,10 @@ class ProcessGroupNCCL : public ProcessGroup {
   // for the operation to complete.
   bool blockingWait_ = false;
 
+  // Whether ot not the workCleanupThread is used to perform async error
+  // handling.
+  bool asyncErrorHandling_ = false;
+
   // Timeout for operations. This is only used when blockingWait_ is enabled.
   std::chrono::milliseconds opTimeout_;
 
@@ -377,6 +528,14 @@ class ProcessGroupNCCL : public ProcessGroup {
   // for this map since only the watchdog thread accesses this set. The
   // set contains the string representation of ncclUniqueId.
   std::unordered_set<std::string> abortedComms_;
+
+  // Schedule NCCL operations on high priority CUDA streams.
+  bool isHighPriorityStream_ = false;
+
+  // The number of active ncclGroupStart() calls. This counter will be increased
+  // by 1 when ncclGroupStart() is called and decreased by 1 when ncclGroupEnd()
+  // is called.
+  static thread_local uint64_t ncclActiveGroupCounter_;
 };
 
 } // namespace c10d

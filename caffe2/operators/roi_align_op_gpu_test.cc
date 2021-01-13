@@ -1,12 +1,12 @@
-#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/operators/roi_align_op.h"
+#include "caffe2/utils/eigen_utils.h"
 
+#include <c10/test/util/Macros.h>
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/flags.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 #include "gtest/gtest.h"
-
 namespace caffe2 {
 namespace {
 

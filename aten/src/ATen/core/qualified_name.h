@@ -45,7 +45,7 @@ struct QualifiedName {
     atoms_ = atoms;
     cacheAccessors();
   }
-  // Unnecessary copy. Ideally we'd use somoething like std::string_view.
+  // Unnecessary copy. Ideally we'd use something like std::string_view.
   /* implicit */ QualifiedName(const char* name)
       : QualifiedName(std::string(name)) {}
 
