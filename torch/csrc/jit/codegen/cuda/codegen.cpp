@@ -293,9 +293,9 @@ class CudaKernelGenerator : private OptInConstDispatch {
       code_ << *op << gen(node->in());
     } else {
       if (node->getUnaryOpType() == UnaryOpType::Cast) {
-        const auto cast_str =
-            cast_func_str({node->in()->getDataType().value(),
-                           node->out()->getDataType().value()});
+        const auto cast_str = cast_func_str(
+            {node->in()->getDataType().value(),
+             node->out()->getDataType().value()});
         code_ << cast_str.value();
       } else {
         code_ << node->getUnaryOpType();
