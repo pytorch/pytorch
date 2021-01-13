@@ -157,8 +157,18 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
               attrName));
         }
 
-        const auto& contained = py::getattr(obj, attrName.c_str());
-        userObj->setSlot(slot, toIValue(contained, attrType));
+        try {
+          const auto& contained = py::getattr(obj, attrName.c_str());
+          userObj->setSlot(slot, toIValue(contained, attrType));
+        } catch (std::exception& e) {
+          throw py::cast_error(c10::str(
+              "Could not cast attribute '",
+              attrName,
+              "' to type ",
+              attrType->repr_str(),
+              ": ",
+              e.what()));
+        }
       }
       return userObj;
     }
