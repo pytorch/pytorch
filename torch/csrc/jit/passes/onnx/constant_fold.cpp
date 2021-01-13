@@ -318,10 +318,11 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     if (q > 1) {
       return c10::nullopt;
     }
-    // If rank of indices is 0, rank of output tensor should be rank_of_input
-    // - 1.
-    if (q < 1)
+    // If rank of indices is 0, rank of output tensor should be
+    // rank_of_input - 1.
+    if (q < 1) {
       updated_val = updated_val.squeeze();
+    }
     return c10::optional<at::Tensor>(updated_val);
   } else {
     return c10::nullopt;
