@@ -33,6 +33,7 @@ struct LazyStreamContext {
   LazyStreamContext& operator=(LazyStreamContext&& rhs) & = delete;
 
   LazyStreamContext() = default;
+  virtual ~LazyStreamContext() = default;
   virtual void blockCurrentStreams() {}
   virtual void waitForCurrentStreams(const std::vector<torch::Tensor>& = {}) {}
 
