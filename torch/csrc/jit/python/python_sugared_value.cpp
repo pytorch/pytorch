@@ -626,8 +626,7 @@ std::shared_ptr<SugaredValue> ModuleValue::call(
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
-  c10::ClassTypePtr class_type =
-      concreteType_->getJitType()->cast<ClassType>();
+  c10::ClassTypePtr class_type = concreteType_->getJitType()->cast<ClassType>();
   bool have_pre_hooks =
       class_type && class_type->getForwardPreHooks().size() != 0;
   bool have_hooks = class_type && class_type->getForwardHooks().size() != 0;
@@ -685,23 +684,22 @@ std::shared_ptr<SugaredValue> ModuleValue::call(
 
   // call forward
   std::shared_ptr<SugaredValue> forwardSV =
-      attr(loc, caller, "forward")
-          ->call(loc, caller, args, kwargs, n_binders);
+      attr(loc, caller, "forward")->call(loc, caller, args, kwargs, n_binders);
   Value* forward_output = forwardSV->asValue(loc, caller);
 
   // call hooks
   if (have_hooks) {
     for (const auto& hook : class_type->getForwardHooks()) {
       Value* forward_hook_output = FunctionValue(hook)
-                                        .call(
-                                            loc,
-                                            caller,
-                                            {NamedValue(self_),
+                                       .call(
+                                           loc,
+                                           caller,
+                                           {NamedValue(self_),
                                             NamedValue(forward_input),
                                             NamedValue(forward_output)},
-                                            kwargs,
-                                            n_binders)
-                                        ->asValue(loc, caller);
+                                           kwargs,
+                                           n_binders)
+                                       ->asValue(loc, caller);
       if (forward_hook_output->type() != NoneType::get()) {
         forward_output = forward_hook_output;
       }
