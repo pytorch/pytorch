@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/schema_matching.h>
+
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/error_report.h>
@@ -454,9 +455,10 @@ static c10::optional<MatchedSchema> tryMatchSchema(
     return_field_names =
         fmap(returns, [&](const Argument& r) { return r.name(); });
   }
-  return MatchedSchema{std::move(positional_inputs),
-                       std::move(return_types),
-                       std::move(return_field_names)};
+  return MatchedSchema{
+      std::move(positional_inputs),
+      std::move(return_types),
+      std::move(return_field_names)};
 }
 
 MatchedSchema matchSchema(
