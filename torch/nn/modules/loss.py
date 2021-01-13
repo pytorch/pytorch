@@ -357,7 +357,7 @@ class GaussianNLLLoss(_Loss):
     full: bool
     eps: float
 
-    def __init__(self, full: bool = False, eps: float = 1e-6, reduction: str = 'mean') -> None:
+    def __init__(self, *, full: bool = False, eps: float = 1e-6, reduction: str = 'mean') -> None:
         super(GaussianNLLLoss, self).__init__(None, None, reduction)
         self.full = full
         self.eps = eps
