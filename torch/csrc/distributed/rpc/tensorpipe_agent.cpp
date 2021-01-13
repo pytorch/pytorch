@@ -645,7 +645,6 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
                  ctx{std::move(ctx)}]() mutable {
                   decreaseCallCount(serverActiveCalls_);
                   decreaseCallCount(serverActiveAsyncCalls_);
-                  //MultiStreamGuard guard(ctx);
                   sendCompletedResponseMessage(
                       pipe, futureResponseMessage, messageId, std::move(ctx));
                 });
