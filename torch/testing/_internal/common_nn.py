@@ -924,7 +924,7 @@ def huberloss_beta_test():
         constructor=wrap_functional(
             lambda i: F.huber_loss(i, t.type_as(i), reduction='none', beta=0.5)),
         cpp_function_call='''F::huber_loss(
-            i, t.to(i.options()), F::HuberLossFuncOptions().reduction(torch::kNone), 0.5, true)''',
+            i, t.to(i.options()), F::HuberLossFuncOptions().reduction(torch::kNone).beta(0.5))''',
         input_fn=lambda: torch.randn(2, 3, 4),
         cpp_var_map={'i': '_get_input()', 't': t},
         reference_fn=lambda i, *_:

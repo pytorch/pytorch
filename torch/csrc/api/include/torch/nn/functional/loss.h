@@ -385,9 +385,8 @@ inline Tensor huber_loss(
 inline Tensor huber_loss(
     const Tensor& input,
     const Tensor& target,
-    const HuberLossFuncOptions& options = {},
-    double beta = 1.) {
-  return detail::huber_loss(input, target, options.reduction(), beta);
+    const HuberLossFuncOptions& options = {}) {
+  return detail::huber_loss(input, target, options.reduction(), options.beta());
 }
 
 // ============================================================================
