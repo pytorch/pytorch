@@ -89,7 +89,7 @@ FX Graph Mode Quantization is a new automated quantization framework in PyTorch,
 The following table compares the differences between Eager Mode Quantization and FX Graph Mode Quantization:
 
 +-----------------+-------------------+-------------------+
-|/                |Eager Mode         |FX Graph           |
+|                 |Eager Mode         |FX Graph           |
 |                 |Quantization       |Mode               |
 |                 |                   |Quantization       |
 +-----------------+-------------------+-------------------+
