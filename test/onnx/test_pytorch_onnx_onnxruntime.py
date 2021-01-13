@@ -681,7 +681,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         # Without empty optional arguments dictionary
         x = torch.randn(2, 3)
-        self.run_test(NoOptionalModel(), (x,), input_names=['input_x'])      
+        self.run_test(NoOptionalModel(), (x,), input_names=['input_x'])
         # With empty optional arguments dictionary
         y = torch.randn(2, 3)
         self.run_test(NoOptionalModel(), (y, {}))
@@ -4327,6 +4327,15 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.nn.functional.gelu(x)
 
         x = torch.randn(2, 4, 5, 6, requires_grad=True)
+        self.run_test(GeluModel(), x)
+
+    @unittest.skip("ONNX CI does not build with CUDA")
+    def test_gelu_fp16(self):
+        class GeluModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.gelu(x)
+
+        x = torch.randn(2, 4, 5, 6, requires_grad=True, dtype=torch.float16, device=torch.device('cuda'))
         self.run_test(GeluModel(), x)
 
     def test_add_inplace(self):
