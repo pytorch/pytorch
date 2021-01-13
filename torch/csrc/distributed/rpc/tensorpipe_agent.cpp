@@ -468,9 +468,6 @@ void TensorPipeAgent::pipeRead(
             return;
           }
 
-          // make sure ops on current streams won't access the tensors before
-          // communication is done.
-          ctx->blockCurrentStreams();
           // FIXME This does some unpickling, which could be a bit expensive:
           // perhaps it would be best to perform it inside the worker threads?
           Message rpcMessage = tensorpipeDeserialize(
@@ -771,7 +768,6 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
             [this, &clientPipe](
                 const tensorpipe::Error& error,
                 Message&& responseMessage,
-                // NOLINTNEXTLINE(performance-unnecessary-value-param)
                 std::shared_ptr<LazyStreamContext> ctx) {
               if (error) {
                 if (error.isOfType<tensorpipe::PipeClosedError>() &&

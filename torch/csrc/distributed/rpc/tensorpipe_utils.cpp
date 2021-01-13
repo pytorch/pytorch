@@ -41,14 +41,6 @@ inline c10::Device indexToDevice(c10::DeviceIndex index) {
 
 #ifdef USE_CUDA_NOT_ROCM
 
-inline void CudaLazyStreamContext::blockCurrentStreams() {
-  for (const auto& entry : streams_) {
-    at::cuda::CUDAEvent event;
-    event.record(entry.second);
-    event.block(at::cuda::getCurrentCUDAStream(entry.first));
-  }
-}
-
 inline void CudaLazyStreamContext::waitForCurrentStreams(
     const std::vector<torch::Tensor>& tensors) {
   for (const auto& tensor : tensors) {
@@ -229,17 +221,14 @@ TensorpipeReadBuffers tensorpipeAllocate(
     } else if (tensor.buffer.type == tensorpipe::DeviceType::kCuda) {
       auto deviceIndex = std::stoi(tensor.metadata);
       auto stream = ctx->getStream(deviceIndex);
-      DeviceGuard guard(indexToDevice(deviceIndex));
+      // CUDACachingAllocator will call recordStream accordingly on the current
+      // stream.
+      at::cuda::CUDAStreamGuard guard(stream);
       buffers.tensors.emplace_back(
           c10::cuda::CUDACachingAllocator::get()->allocate(
               tensor.buffer.cuda.length));
       tensor.buffer.cuda.ptr = buffers.tensors.back().get();
       tensor.buffer.cuda.stream = stream.stream();
-
-      // record tensor data ptrs on TensorPipe streams, so that the tensors
-      // won't be destructed before TensorPipe finishing receiving them.
-      c10::cuda::CUDACachingAllocator::recordStream(
-          buffers.tensors.back(), stream);
 #endif
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unrecognized TensorPipe buffer type.");

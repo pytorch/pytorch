@@ -26,7 +26,7 @@ using at::cuda::CUDAStream;
 
 // A general device context class for both CPU and CUDA. If CUDA is not
 // available, all CUDA-related methods will be no-ops.
-struct LazyStreamContext {
+struct TORCH_API LazyStreamContext {
   LazyStreamContext(const LazyStreamContext& other) = delete;
   LazyStreamContext(LazyStreamContext&& other) = delete;
   LazyStreamContext& operator=(const LazyStreamContext& rhs) = delete;
@@ -34,7 +34,6 @@ struct LazyStreamContext {
 
   LazyStreamContext() = default;
   virtual ~LazyStreamContext() = default;
-  virtual void blockCurrentStreams() {}
   virtual void waitForCurrentStreams(const std::vector<torch::Tensor>& = {}) {}
 
 #ifdef USE_CUDA_NOT_ROCM
@@ -62,11 +61,8 @@ inline std::shared_ptr<LazyStreamContext> createLazyStreamContext() {
 #else
 
 // CUDA is available. Implement CUDA-related operations.
-struct CudaLazyStreamContext : public LazyStreamContext {
+struct TORCH_CUDA_API CudaLazyStreamContext : public LazyStreamContext {
   using LazyStreamContext::LazyStreamContext;
-
-  // let current streams wait for streams in this context.
-  void blockCurrentStreams() override;
 
   // let streams in this context wiat for current streams.
   void waitForCurrentStreams(const std::vector<torch::Tensor>& = {}) override;
