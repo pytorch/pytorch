@@ -2747,7 +2747,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return x.clamp(min=m)
 
         x = torch.randn(1)
-        self.run_test(GatherModule(), (x,), rtol=1e-3, atol=1e-5)
+        self.run_test(GatherModule(), (x,))
 
         class GatherModule(torch.nn.Module):
             def __init__(self):
@@ -2761,7 +2761,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return zero_pad(x)
 
         x = torch.randn(1, 3, 2)
-        self.run_test(GatherModule(), (x,), rtol=1e-3, atol=1e-5)
+        self.run_test(GatherModule(), (x,))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_expand(self):
