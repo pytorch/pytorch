@@ -389,7 +389,7 @@ void initJITBindings(PyObject* module) {
             ArgumentSpecCreator arg_spec_creator(*graph);
             Stack stack;
             stack.reserve(inputs.size()); // captures?
-            for (auto& obj : inputs) {
+            for (const auto& obj : inputs) {
               stack.push_back(toTypeInferredIValue(obj));
             }
             ArgumentSpec spec = arg_spec_creator.create(with_grad, stack);
