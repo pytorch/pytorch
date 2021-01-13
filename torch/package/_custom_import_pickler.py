@@ -51,15 +51,33 @@ class CustomImportPickler(_Pickler):
                 is_obj2_mangled = is_mangled(obj2_module_name)
 
                 if is_obj_mangled or is_obj2_mangled:
-                    obj_location = get_mangle_prefix(obj_module_name) if is_obj_mangled else "the current Python environment"
-                    obj2_location = get_mangle_prefix(obj2_module_name) if is_obj2_mangled else "the current Python environment"
+                    obj_location = (
+                        get_mangle_prefix(obj_module_name)
+                        if is_obj_mangled
+                        else "the current Python environment"
+                    )
+                    obj2_location = (
+                        get_mangle_prefix(obj2_module_name)
+                        if is_obj2_mangled
+                        else "the current Python environment"
+                    )
 
-                    obj_importer_name = f"the importer for {get_mangle_prefix(obj_module_name)}" if is_obj_mangled else "'importlib.import_module'"
-                    obj2_importer_name = f"the importer for {get_mangle_prefix(obj2_module_name)}" if is_obj2_mangled else "'importlib.import_module'"
+                    obj_importer_name = (
+                        f"the importer for {get_mangle_prefix(obj_module_name)}"
+                        if is_obj_mangled
+                        else "'importlib.import_module'"
+                    )
+                    obj2_importer_name = (
+                        f"the importer for {get_mangle_prefix(obj2_module_name)}"
+                        if is_obj2_mangled
+                        else "'importlib.import_module'"
+                    )
 
-                    msg += (f"\n\nThe object being pickled is from '{orig_module_name}', which is coming from {obj_location}."
+                    msg += (f"\n\nThe object being pickled is from '{orig_module_name}', "
+                            f"which is coming from {obj_location}."
                             f"\nHowever, when we import '{orig_module_name}', it's coming from {obj2_location}."
-                            f"\nTo fix this, make sure 'PackageExporter.importers' lists {obj_importer_name} before {obj2_importer_name}")
+                            "\nTo fix this, make sure 'PackageExporter.importers' lists "
+                            f"{obj_importer_name} before {obj2_importer_name}")
                 raise PicklingError(msg)
 
         if self.proto >= 2:
