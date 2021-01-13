@@ -39,6 +39,13 @@ if(DEFINED GLIBCXX_USE_CXX11_ABI)
   endif()
 endif()
 
+string(FIND ${CMAKE_CXX_FLAGS} "-std=c++" contains_manual_std_cpp)
+if(${contains_manual_std_cpp} GREATER -1)
+  message(
+      WARNING "C++ standard version definition detected in environment variable."
+      "PyTorch requires -std=c++14. Please remove -std=c++ settings in your environment.")
+endif()
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # One variable that determines whether the current cmake process is being run
