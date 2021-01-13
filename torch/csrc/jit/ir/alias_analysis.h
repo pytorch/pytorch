@@ -122,7 +122,8 @@ class AliasDb {
   //  for example you can't use "~/temp/aliasdb.dot"
   //  (instead, use "/home/user/temp/aliasdb.dot")
   //
-  TORCH_API bool dumpToDot(const char* filename) const;
+  TORCH_API bool dumpToGraphvizFile(const char* filename) const;
+  TORCH_API std::string toGraphviz() const;
 
   static bool isMutableType(const Value* v);
   static bool isMutableType(const TypePtr& type);

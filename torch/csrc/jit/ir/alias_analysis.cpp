@@ -392,12 +392,18 @@ std::string AliasDb::toString() const {
   return ss.str();
 }
 
-bool AliasDb::dumpToDot(const char* filename) const {
-  std::ofstream dot(filename);
-  if (!dot.good()) {
-    std::cout << "Failed to open the IR graph file: '" << filename << "'\n";
+bool AliasDb::dumpToGraphvizFile(const char* filename) const {
+  std::ofstream dot_file(filename);
+  if (!dot_file.good()) {
+    std::cout << "Failed to create Graphviz file: '" << filename << "'\n";
     return false;
   }
+  dot_file << toGraphviz();
+  return true;
+}
+
+std::string AliasDb::toGraphviz() const {
+  std::stringstream dot;
 
   // Local helper to generate a graphviz-friendly name encoding
   // See also AliasDb::getElementName()
@@ -452,7 +458,7 @@ bool AliasDb::dumpToDot(const char* filename) const {
   }
 
   dot << "}\n";
-  return true;
+  return dot.str();
 }
 
 void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
