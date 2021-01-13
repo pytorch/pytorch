@@ -46,7 +46,9 @@ class PYBIND11_EXPORT PyRRef {
 
   // create a proxy on this RRef, which can be used to launch RPC on the owner
   // of this RRef to run functions on the object referenced by this RRef.
-  py::object createRRefProxy(const RRefProxyType& mode) const;
+  py::object createRRefProxy(
+      const RRefProxyType& mode,
+      float timeoutSeconds = rpc::kUnsetRpcTimeout) const;
 
   // get the type of the data object referenced by this RRef. Timeout argumen
   // is only used in the first invocation of this function as an argument to the

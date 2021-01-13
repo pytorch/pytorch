@@ -263,9 +263,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               )")
           .def(
               "rpc_sync",
-              [](const PyRRef& self) {
-                return self.createRRefProxy(RRefProxyType::RPC_SYNC);
+              [](const PyRRef& self, float timeoutSeconds) {
+                return self.createRRefProxy(
+                    RRefProxyType::RPC_SYNC, timeoutSeconds);
               },
+              py::arg("timeout") = kUnsetRpcTimeout,
               py::call_guard<py::gil_scoped_release>(),
               R"(
                   Create a helper proxy to easily launch an ``rpc_sync`` using
@@ -287,9 +289,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               )")
           .def(
               "rpc_async",
-              [](const PyRRef& self) {
-                return self.createRRefProxy(RRefProxyType::RPC_ASYNC);
+              [](const PyRRef& self, float timeoutSeconds) {
+                return self.createRRefProxy(
+                    RRefProxyType::RPC_ASYNC, timeoutSeconds);
               },
+              py::arg("timeout") = kUnsetRpcTimeout,
               py::call_guard<py::gil_scoped_release>(),
               R"(
                   Create a helper proxy to easily launch an ``rpc_async`` using
@@ -311,9 +315,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               )")
           .def(
               "remote",
-              [](const PyRRef& self) {
-                return self.createRRefProxy(RRefProxyType::REMOTE);
+              [](const PyRRef& self, float timeoutSeconds) {
+                return self.createRRefProxy(
+                    RRefProxyType::REMOTE, timeoutSeconds);
               },
+              py::arg("timeout") = kUnsetRpcTimeout,
               py::call_guard<py::gil_scoped_release>(),
               R"(
                   Create a helper proxy to easily launch a ``remote`` using
