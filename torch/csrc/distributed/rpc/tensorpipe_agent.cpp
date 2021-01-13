@@ -207,6 +207,8 @@ C10_REGISTER_CREATOR(
 
 namespace {
 
+// This is a wrapper of CUDAMultiStreamGuard to run in both CUDA-enabled and
+// CPU-only environments. When CUDA is not available, all methods are no-ops.
 struct MultiStreamGuard {
   MultiStreamGuard(const MultiStreamGuard& other) = delete;
   MultiStreamGuard(MultiStreamGuard&& other) = delete;
@@ -466,8 +468,9 @@ void TensorPipeAgent::pipeRead(
             return;
           }
 
+          // make sure ops on current streams won't access the tensors before
+          // communication is done.
           ctx->blockCurrentStreams();
-          // ctx->recordDataPtrs(tpBuffers->tensors);
           // FIXME This does some unpickling, which could be a bit expensive:
           // perhaps it would be best to perform it inside the worker threads?
           Message rpcMessage = tensorpipeDeserialize(
