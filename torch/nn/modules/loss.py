@@ -303,8 +303,8 @@ class GaussianNLLLoss(_Loss):
     The targets are treated as samples from Gaussian distributions with
     expectations and variances predicted by the neural network. For a 
     D-dimensional ``target`` tensor modelled as having heteroscedastic Gaussian
-    distributions with  D-dimensional expectation ``input`` and variance ``var``
-    the loss is:
+    distributions with a D-dimensional tensor of expectations ``input`` and a
+    D-dimensional tensor of positive variances ``var`` the loss is:
 
     .. math::
         \text{loss} = \frac{1}{2}\sum_{i=1}^D \left(\log\left(\text{max}\left(\text{var}[i],
@@ -320,13 +320,21 @@ class GaussianNLLLoss(_Loss):
     Args:
         full (bool, optional): include the constant term in the loss
             calculation. Default: ``False``.
-        eps (float, optional): value used to clamp (a copy of) ``var``, for
+        eps (float, optional): value used to clamp ``var`` (see note below), for
             stability. Default: 1e-6.
         reduction (string, optional): specifies the reduction to apply to the
             output:``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction
             will be applied, ``'mean'``: the output is the average of all batch
             member losses, ``'sum'``: the output is the sum of all batch member
             losses. Default: ``'mean'``.
+
+    Shape:
+        - Input: :math:`(N, *)` where :math:`*` means, any number of additional
+          dimensions
+        - Target: :math:`(N, *)`, same shape as the input
+        - Var: :math:`(N, 1)` or :math:`(N, *)`, same shape as the input
+        - Output: scalar if :attr:`reduction` is ``'mean'`` (default) or
+          ``'sum'``. If :attr:`reduction` is ``'none'``, then :math:`(N)`
 
     Examples::
 
@@ -345,13 +353,15 @@ class GaussianNLLLoss(_Loss):
         >>> output = loss(input, target, var)
         >>> output.backward()
 
-    Shape:
-        - Input: :math:`(N, *)` where :math:`*` means, any number of additional
-          dimensions
-        - Target: :math:`(N, *)`, same shape as the input
-        - Var: :math:`(N, 1)` or :math:`(N, *)`, same shape as the input
-        - Output: scalar by default. If :attr:`reduction` is ``'none'``, then :math:`(N, *)`,
-          the same shape as the input
+    Note:
+        The clamping of ``var`` is ignored with respect to autograd, and so the
+        gradients are unaffected by this. 
+
+    Reference:
+        Nix, D. A. and Weigend, A. S., "Estimating the mean and variance of the
+        target probability distribution", Proceedings of 1994 IEEE International
+        Conference on Neural Networks (ICNN'94), Orlando, FL, USA, 1994, pp. 55-60
+        vol.1, doi: 10.1109/ICNN.1994.374138.
     """
     __constants__ = ['full', 'eps', 'reduction']
     full: bool
