@@ -1347,7 +1347,6 @@ struct PythonPrintImpl {
           body_ << "\"" << buffer << "\", ";
         }
         body_ << "]\n";
-#ifndef FBCODE_CAFFE2
         auto forwardPreHooks = classType->getForwardPreHooks();
         if (forwardPreHooks.size() > 0) {
           indent();
@@ -1367,7 +1366,6 @@ struct PythonPrintImpl {
           }
           body_ << "]\n";
         }
-#endif
       }
 
       for (size_t i = 0; i < numAttrs; i++) {
@@ -1414,7 +1412,6 @@ struct PythonPrintImpl {
       for (auto& method : classType->methods()) {
         printFunction(*method);
       }
-#ifndef FBCODE_CAFFE2
       std::set<std::string> already_printed;
       for (auto& hook : classType->getForwardHooks()) {
         if (already_printed.count(hook->name()) == 0) {
@@ -1428,7 +1425,6 @@ struct PythonPrintImpl {
           printFunction(*pre_hook);
         }
       }
-#endif
     }
   }
 
