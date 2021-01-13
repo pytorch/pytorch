@@ -467,7 +467,7 @@ def gradcheck(
                                'not reentrant. Please file us a bug report.')
             # NB: test_batched_grad compares two autograd.grad invocations with a single
             # vmap(autograd.grad) invocation. It's not exactly a "gradcheck" in the
-            # sense that we're not comparing an analytical jacobian with a numeric one, 
+            # sense that we're not comparing an analytical jacobian with a numeric one,
             # but it is morally similar (we could have computed a full analytic jac
             # via vmap, but that is potentially slow)
             test_batched_grad(fail_test, tupled_inputs, o, j)
