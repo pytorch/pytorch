@@ -28,3 +28,5 @@ API Reference
 
 .. autoclass:: torch.fx.Tracer
   :members:
+
+.. autoclass:: torch.fx.Proxy

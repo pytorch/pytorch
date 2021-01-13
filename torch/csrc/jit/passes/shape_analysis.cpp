@@ -1272,9 +1272,10 @@ class ShapePropagator {
                       type->withScalarType(maybe_dtype_option->toScalarType())};
                 }
                 if (type->scalarType()) {
-                  return {at::isFloatingType(*type->scalarType())
-                              ? type
-                              : type->withScalarType(at::kLong)};
+                  return {
+                      at::isFloatingType(*type->scalarType())
+                          ? type
+                          : type->withScalarType(at::kLong)};
                 } else {
                   return {type};
                 }
