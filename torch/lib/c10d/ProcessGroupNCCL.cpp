@@ -355,7 +355,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeStreams() {
     // stream synchronization.
     TORCH_CHECK(
       (*cudaEvents_)[i].isCreated(),
-      c10::str("Invalid CUDA event on device ", devices_[i].index())
+      c10::str("Invalid CUDA event on device ", i)
     );
     (*cudaEvents_)[i].block(currentStream);
   }
