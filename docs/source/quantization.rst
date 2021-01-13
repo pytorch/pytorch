@@ -88,23 +88,38 @@ FX Graph Mode Quantization is a new automated quantization framework in PyTorch,
 
 The following table compares the differences between Eager Mode Quantization and FX Graph Mode Quantization:
 
-+------------+------------+-----------+
-|    | Eager Mode Quantization   | FX Graph Mode Quantization  |
-+============+============+===========+
-| Release Status | beta   | prototype  |
-+------------+------------+-----------+
-| Operator Fusion | Manual  | Automatic |
-+------------+------------+-----------+
-| Quant/Dequant Placement | Manual | Automatic |
-+------------+------------+-----------+
-| Quantizing Modules | Supported | Supported |
-+------------+------------+-----------+
-| Quantizing functionals/torch ops | Needs Refactor (FloatFunctionals)  | Automatic |
-+------------+------------+-----------+
-| Support for Customization | Limited | Flexible |
-+------------+------------+-----------+
-| Input/Output Model Type | ``torch.nn.Module`` | ``torch.nn.Module`` (May need some refactors to make the model compatible with FX Graph Mode Quantization) |
-+------------+------------+-----------+
++-----------------+-------------------+-------------------+
+|/                |Eager Mode         |FX Graph           |
+|                 |Quantization       |Mode               |
+|                 |                   |Quantization       |
++-----------------+-------------------+-------------------+
+|Release          |beta               |prototype          |
+|Status           |                   |                   |
++-----------------+-------------------+-------------------+
+|Operator         |Manual             |Automatic          |
+|Fusion           |                   |                   |
++-----------------+-------------------+-------------------+
+|Quant/DeQuant    |Manual             |Automatic          |
+|Placement        |                   |                   |
++-----------------+-------------------+-------------------+
+|Quantizing       |Supported          |Supported          |
+|Modules          |                   |                   |
++-----------------+-------------------+-------------------+
+|Quantizing       |Need Refactor      |Automatic          |
+|Functionals/Torch|(FloatFunctional)  |                   |
+|Ops              |                   |                   |
++-----------------+-------------------+-------------------+
+|Support for      |Limited Support    |Fully              |
+|Customization    |                   |Supported          |
++-----------------+-------------------+-------------------+
+|Input/Output     |``torch.nn.Module``|``torch.nn.Module``|
+|Model Type       |                   |(May need some     |
+|                 |                   |refactors to make  |
+|                 |                   |the model          |
+|                 |                   |compatible with FX |
+|                 |                   |Graph Mode         |
+|                 |                   |Quantization)      |
++-----------------+-------------------+-------------------+
 
 Eager Mode Quantization
 ^^^^^^^^^^^^^^^^^^^^^^^
