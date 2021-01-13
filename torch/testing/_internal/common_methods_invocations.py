@@ -765,8 +765,8 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool),
                    dtypesIfCPU=all_types_and(torch.bool),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    safe_casts_outputs=True,
+                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    test_inplace_grad=False,
                    skips=(
                        # RuntimeError: "rsqrt_cuda" not implemented for 'BFloat16'
