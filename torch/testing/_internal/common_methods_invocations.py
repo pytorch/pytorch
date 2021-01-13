@@ -1,4 +1,4 @@
-from functools import reduce, wraps
+from functools import reduce, wraps, partial
 from itertools import product
 from operator import mul, itemgetter
 import collections
@@ -118,7 +118,8 @@ class OpInfo(object):
                  safe_casts_outputs=False,  # whether op allows safe casting when writing to out arguments
                  sample_inputs_func=None,  # function to generate sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
-                 supports_sparse=False  # supported for sparse
+                 supports_sparse=False,  # supported for sparse
+                 variant_name=None,  # Unique string to disambiguate OpInfo variants with the same name
                  ):
 
         # Validates the dtypes are generated from the dispatch-related functions
@@ -158,6 +159,7 @@ class OpInfo(object):
         else:
             self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes
         self.supports_sparse = supports_sparse
+        self.variant_name = variant_name
 
 
 
@@ -221,6 +223,13 @@ class OpInfo(object):
         supported = self.supported_dtypes(device_type)
         return (supported if self._default_test_dtypes is None
                 else supported.intersection(self._default_test_dtypes))
+
+    def get_opinfo_name(self):
+        base_name = self.name.replace('.', '_')
+        if self.variant_name is not None:
+            return base_name + '_' + self.variant_name
+        else:
+            return base_name
 
 
 L = 20
@@ -350,27 +359,20 @@ def sample_inputs_broadcast_to(op_info, device, dtype, requires_grad):
                                           requires_grad=requires_grad), shape))
                  for size, shape in test_cases)
 
-def sample_inputs_div(self, device, dtype, requires_grad):
+def sample_inputs_div(self, device, dtype, requires_grad, rounding_mode=None):
     a = make_tensor((S, S, S), device, dtype, low=None, high=None, requires_grad=requires_grad)
     is_integral = not dtype.is_floating_point and not dtype.is_complex
     b = make_tensor((S, S, S), device, dtype, low=1 if is_integral else 0.1, high=None,
                     requires_grad=requires_grad)
 
-    samples = [
-        SampleInput((a, b)),
-        SampleInput((a, b), kwargs=dict(rounding_mode='true')),
-        SampleInput((a,), args=(2,)),
-        SampleInput((a,), args=(2,), kwargs=dict(rounding_mode='true')),
-    ]
+    kwargs = None
+    if rounding_mode is not None:
+        kwargs = dict(rounding_mode=rounding_mode)
 
-    if not dtype.is_complex and dtype != torch.bool:
-        # Trunc and floor aren't defined for all types
-        samples += [
-            SampleInput((a, b), kwargs=dict(rounding_mode='trunc')),
-            SampleInput((a, b), kwargs=dict(rounding_mode='floor')),
-            SampleInput((a,), args=(2,), kwargs=dict(rounding_mode='trunc')),
-            SampleInput((a,), args=(2,), kwargs=dict(rounding_mode='floor')),
-        ]
+    samples = [
+        SampleInput((a, b), kwargs=kwargs),
+        SampleInput((a,), args=(2,)),
+    ]
 
     return samples
 
@@ -789,8 +791,8 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool),
                    dtypesIfCPU=all_types_and(torch.bool),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    safe_casts_outputs=True,
+                   decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    test_inplace_grad=False,
                    skips=(
                        # RuntimeError: "rsqrt_cuda" not implemented for 'BFloat16'
@@ -863,8 +865,24 @@ op_db: List[OpInfo] = [
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
     OpInfo('div',
+           variant_name='no_rounding_mode',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_div,
+           assert_autodiffed=True),
+    OpInfo('div',
+           variant_name='true_rounding',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=partial(sample_inputs_div, rounding_mode='true'),
+           assert_autodiffed=True),
+    OpInfo('div',
+           variant_name='trunc_rounding',
+           dtypes=all_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=partial(sample_inputs_div, rounding_mode='trunc'),
+           assert_autodiffed=True),
+    OpInfo('div',
+           variant_name='floor_rounding',
+           dtypes=all_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=partial(sample_inputs_div, rounding_mode='floor'),
            assert_autodiffed=True),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
