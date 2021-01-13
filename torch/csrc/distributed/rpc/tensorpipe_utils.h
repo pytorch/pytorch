@@ -32,7 +32,7 @@ struct LazyStreamContext {
   LazyStreamContext& operator=(const LazyStreamContext& rhs) = delete;
   LazyStreamContext& operator=(LazyStreamContext&& rhs) & = delete;
 
-  LazyStreamContext() {}
+  LazyStreamContext() = default;
   virtual void blockCurrentStreams() {}
   virtual void waitForCurrentStreams(const std::vector<torch::Tensor>& = {}) {}
 

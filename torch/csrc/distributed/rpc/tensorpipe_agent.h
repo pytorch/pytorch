@@ -59,7 +59,7 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
-class LazyStreamContext;
+struct LazyStreamContext;
 
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;

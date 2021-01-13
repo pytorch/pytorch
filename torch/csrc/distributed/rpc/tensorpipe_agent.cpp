@@ -216,9 +216,10 @@ struct MultiStreamGuard {
   MultiStreamGuard& operator=(MultiStreamGuard&& rhs) = delete;
 
 #ifndef USE_CUDA_NOT_ROCM
-  MultiStreamGuard(const std::shared_ptr<LazyStreamContext>& /* unused */){};
+  explicit MultiStreamGuard(
+      const std::shared_ptr<LazyStreamContext>& /* unused */) {}
 #else
-  MultiStreamGuard(const std::shared_ptr<LazyStreamContext>& ctx)
+  explicit MultiStreamGuard(const std::shared_ptr<LazyStreamContext>& ctx)
       : guard(ctx->getReservedStreams()) {}
 
  private:
