@@ -214,7 +214,7 @@ class TestUnaryUfuncs(TestCase):
             if alt is None:
                 continue
 
-            if inplace and not torch._C._can_cast(expected.dtype, dtype):
+            if inplace and not torch.can_cast(expected.dtype, dtype):
                 # Assert that RuntimeError is raised
                 # for inplace variant of Operators that
                 # promote integer input to floating dtype.
@@ -285,7 +285,7 @@ class TestUnaryUfuncs(TestCase):
                 msg = None
 
             exact_dtype = True
-            if not torch._C._can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
+            if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype.type], dtype):
                 exact_dtype = False
 
                 if dtype in [torch.uint8, torch.int8, torch.bool]:
@@ -404,7 +404,7 @@ class TestUnaryUfuncs(TestCase):
 
     def _test_out_arg(self, op, input, output, expected):
         if op.safe_casts_outputs:
-            expect_fail = not torch._C._can_cast(expected.dtype, output.dtype)
+            expect_fail = not torch.can_cast(expected.dtype, output.dtype)
         else:
             expect_fail = output.dtype != expected.dtype
 
