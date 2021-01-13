@@ -2,6 +2,7 @@ import torch
 from torch.fx import symbolic_trace
 import operator
 
+
 """
 How to replace one op with another
 1. Iterate through all Nodes in your GraphModule's Graph.
@@ -38,10 +39,12 @@ traced = symbolic_trace(M())
 
 # As demonstrated in the above example, there are several different ways
 # to denote addition. The possible cases are:
-#     1. `x + y` - A `call_function` Node with target `operator.add`.
-#         We can match for equality on that `operator.add` directly.
+#     1. `x + y` - A `call_function` Node with target
+#        `<built-in function add>`. This is `operator.add`, so we can
+#         match on equality with that function directly.
 #     2. `torch.add(x, y)` - A `call_function` Node with target
-#         `torch.add`. Similarly, we can match this function directly.
+#        `<built-in method add of type object at MEMORY-LOCATION-OF-TORCH>`.
+#         This is `torch.add`, which we can similarly match directly.
 #     3. `x.add(y)` - The Tensor method call, whose target we can match
 #         as a string.
 

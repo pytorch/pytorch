@@ -755,8 +755,6 @@ struct TORCH_API IValue final {
   // None
   template <typename T>
   optional<T> toOptional();
-  template <typename T>
-  optional<T> toOptional() const;
 
   /// @private [doxygen private]
   /// this is a shallow comparison of two IValues to test the object identity
