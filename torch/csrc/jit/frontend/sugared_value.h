@@ -467,7 +467,8 @@ struct MethodValue : public SugaredValue {
               << "Recursive calls are not supported";
         }
         schemas.push_back(&method.getSchema());
-      } else if (auto* interface_type = self_->type()->castRaw<InterfaceType>()) {
+      } else if (
+          auto* interface_type = self_->type()->castRaw<InterfaceType>()) {
         schemas.push_back(interface_type->getMethod(method_name));
       } else {
         TORCH_INTERNAL_ASSERT(
