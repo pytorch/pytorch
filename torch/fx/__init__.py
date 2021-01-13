@@ -1,6 +1,6 @@
 # type: ignore
 r'''
-**This feature is experimental and its stability is not currently guaranteed. Proceed at your own risk**
+**This feature is under a Beta release and its API may change.**
 
 FX is a toolkit for capturing and transforming functional PyTorch programs. It
 consists of GraphModule and a corresponding intermediate representation (IR). When GraphModule is constructed
