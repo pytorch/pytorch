@@ -8309,9 +8309,13 @@ Supports real-valued and complex-valued input.
 
 .. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is True.
 
-
 .. note:: With the complex-valued input the backward operation works correctly only
           for gauge invariant loss functions. Please look at `Gauge problem in AD`_ for more details.
+
+.. note:: Since `U` and `V` of an SVD is not unique, each vector can be multiplied by
+          an arbitrary phase factor `e^{i phi}` while the SVD result is still correct.
+          With different backends (numpy, PyTorch CPU, PyTorch GPU),
+          the results of `U` and `V` could be different.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
