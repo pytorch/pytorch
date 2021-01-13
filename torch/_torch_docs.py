@@ -3137,12 +3137,18 @@ Computes the element-wise remainder of division.
 The dividend and divisor may contain both for integer and floating point
 numbers. The remainder has the same sign as the dividend :attr:`input`.
 
-When :attr:`other` is a tensor, the shapes of :attr:`input` and
-:attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
+
+.. note::
+
+    When the divisor is zero, returns ``NaN`` for floating point dtypes
+    on both CPU and GPU; raises ``RuntimeError`` for integer division by
+    zero on CPU; Integer division by zero on GPU may return any value.
 
 Args:
     input (Tensor): the dividend
-    other (Tensor or float): the divisor, which may be either a number or a tensor of the same shape as the dividend
+    other (Tensor or Scalar): the divisor
 
 Keyword args:
     {out}
@@ -3151,9 +3157,8 @@ Example::
 
     >>> torch.fmod(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
     tensor([-1., -0., -1.,  1.,  0.,  1.])
-    >>> torch.fmod(torch.tensor([1., 2, 3, 4, 5]), 1.5)
-    tensor([ 1.0000,  0.5000,  0.0000,  1.0000,  0.5000])
-
+    >>> torch.fmod(torch.tensor([1, 2, 3, 4, 5]), 1.5)
+    tensor([1.0000, 0.5000, 0.0000, 1.0000, 0.5000])
 
 """.format(**common_args))
 
@@ -7105,10 +7110,10 @@ Keyword args:
 """.format(**factory_like_common_args))
 
 add_docstr(torch.randperm,
-           r"""
-randperm(n, \*, generator=None, out=None, dtype=torch.int64, layout=torch.strided, device=None, requires_grad=False,
-    pin_memory=False) -> LongTensor
-
+           """
+randperm(n, *, generator=None, out=None, dtype=torch.int64,layout=torch.strided, \
+device=None, requires_grad=False, pin_memory=False) -> Tensor
+""" + r"""
 Returns a random permutation of integers from ``0`` to ``n - 1``.
 
 Args:
@@ -7291,17 +7296,17 @@ Computes the element-wise remainder of division.
 The dividend and divisor may contain both for integer and floating point
 numbers. The remainder has the same sign as the divisor :attr:`other`.
 
-When :attr:`other` is a tensor, the shapes of :attr:`input` and
-:attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
 
-Note:
+.. note::
     Complex inputs are not supported. In some cases, it is not mathematically
     possible to satisfy the definition of a modulo operation with complex numbers.
+    See :func:`torch.fmod` for how division by zero is handled.
 
 Args:
     input (Tensor): the dividend
-    other (Tensor or float): the divisor that may be either a number or a
-                               Tensor of the same shape as the dividend
+    other (Tensor or Scalar): the divisor
 
 Keyword args:
     {out}
@@ -7310,7 +7315,7 @@ Example::
 
     >>> torch.remainder(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
     tensor([ 1.,  0.,  1.,  1.,  0.,  1.])
-    >>> torch.remainder(torch.tensor([1., 2, 3, 4, 5]), 1.5)
+    >>> torch.remainder(torch.tensor([1, 2, 3, 4, 5]), 1.5)
     tensor([ 1.0000,  0.5000,  0.0000,  1.0000,  0.5000])
 
 .. seealso::
@@ -10049,8 +10054,7 @@ Args:
         array.
 
 Returns:
-    Tensor: Repeated tensor which has the same shape as input, except along the
-     given axis.
+    Tensor: Repeated tensor which has the same shape as input, except along the given axis.
 
 Example::
 
