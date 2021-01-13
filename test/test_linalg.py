@@ -2380,14 +2380,17 @@ class TestLinalg(TestCase):
     def test_pinv(self, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
+        def _(tensor):
+            return tensor.cpu().numpy()
+
         def run_test_main(A, hermitian):
             # Testing against definition for pseudo-inverses
             A_pinv = torch.linalg.pinv(A, hermitian=hermitian)
             if A.numel() > 0:
-                self.assertEqual(A, A @ A_pinv @ A, atol=self.precision, rtol=self.precision)
-                self.assertEqual(A_pinv, A_pinv @ A @ A_pinv, atol=self.precision, rtol=self.precision)
-                self.assertEqual(A @ A_pinv, (A @ A_pinv).conj().transpose(-2, -1))
-                self.assertEqual(A_pinv @ A, (A_pinv @ A).conj().transpose(-2, -1))
+                self.assertEqual(A, _(A) @ _(A_pinv) @ _(A), atol=self.precision, rtol=self.precision)
+                self.assertEqual(A_pinv, _(A_pinv) @ _(A) @ _(A_pinv), atol=self.precision, rtol=self.precision)
+                self.assertEqual(_(A) @ _(A_pinv), (_(A) @ _(A_pinv)).conj().swapaxes(-2, -1))
+                self.assertEqual(_(A_pinv) @ _(A), (_(A_pinv) @ _(A)).conj().swapaxes(-2, -1))
             else:
                 self.assertEqual(A.shape, A_pinv.shape[:-2] + (A_pinv.shape[-1], A_pinv.shape[-2]))
 
