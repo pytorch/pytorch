@@ -2778,10 +2778,15 @@
     DefaultBackend: mvlgamma_
 
 - func: narrow_copy(Tensor self, int dim, int start, int length) -> Tensor
-  variants: method
+  variants: function, method
   dispatch:
-    CPU, CUDA: narrow_copy_dense
+    CPU: narrow_copy_dense_cpu
     SparseCPU, SparseCUDA: narrow_copy_sparse
+    DefaultBackend: narrow_copy_dense
+
+- func: narrow_copy.out(Tensor self, int dim, int start, int length, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: narrow_copy_dense_cpu_out
 
 - func: narrow(Tensor(a) self, int dim, int start, int length) -> Tensor(a)
   variants: function, method
