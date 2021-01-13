@@ -16,7 +16,7 @@
 
 namespace c10 {
 
-class CAFFE2_API OperatorHandle;
+class TORCH_API OperatorHandle;
 template<class FuncType> class TypedOperatorHandle;
 
 /**
@@ -27,7 +27,7 @@ template<class FuncType> class TypedOperatorHandle;
  * NB: registration events only occur when a 'def' occurs; we don't trigger
  * on 'impl' or 'fallback' calls.
  */
-class CAFFE2_API OpRegistrationListener {
+class TORCH_API OpRegistrationListener {
 public:
   virtual ~OpRegistrationListener();
 
@@ -45,7 +45,7 @@ class SchemaRegistrationHandleRAII;
  * Most end users shouldn't use this directly; if you're trying to register
  * ops look in op_registration
  */
-class CAFFE2_API Dispatcher final {
+class TORCH_API Dispatcher final {
 private:
   // For direct access to backend fallback information
   friend class impl::OperatorEntry;
@@ -182,12 +182,6 @@ public:
    */
   RegistrationHandleRAII registerLibrary(std::string ns, std::string debug);
 
-  // This function is a temporary hack that allows generated_unboxing_wrappers.cpp to register its codegen'ed
-  // unboxing wrapper for aten operators. We still need those for some operators because not all work
-  // with the templated unboxing logic yet.
-  // TODO Delete setBoxedKernelFor_ once all operators work with the templated boxing logic
-  void setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func);
-
   // ------------------------------------------------------------------------
   //
   // Listeners on registrations
@@ -267,7 +261,7 @@ private:
  * This handle can be used to register kernels with the dispatcher or
  * to lookup a kernel for a certain set of arguments.
  */
-class CAFFE2_API OperatorHandle {
+class TORCH_API OperatorHandle {
 public:
   OperatorHandle(OperatorHandle&&) noexcept = default;
   OperatorHandle& operator=(OperatorHandle&&) noexcept = default;
@@ -310,7 +304,9 @@ public:
     // smuggle in a kernel that is typed incorrectly).  For everything
     // in core library this won't happen, because all the static registrations
     // will be done by the time a typed() handle is acquired.
+#if !defined C10_MOBILE
     operatorIterator_->op.assertSignatureIsCorrect<FuncType>();
+#endif
     return TypedOperatorHandle<FuncType>(operatorIterator_);
   }
 

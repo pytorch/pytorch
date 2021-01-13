@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/mobile/module.h>
+
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
@@ -114,6 +115,14 @@ bool Module::is_training() const {
     return object_->getSlot(*slot).toBool();
   }
   return true;
+}
+
+const std::vector<Method> Module::get_methods() const {
+  std::vector<Method> methods;
+  for (std::unique_ptr<Function>& fn : cu_->methods()) {
+    methods.emplace_back(this, fn.get());
+  }
+  return methods;
 }
 
 Method::Method(const Module* owner, Function* function)

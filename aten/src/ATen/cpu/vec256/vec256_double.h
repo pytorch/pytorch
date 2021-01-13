@@ -108,7 +108,16 @@ public:
     return _mm256_andnot_pd(mask, values);
   }
   Vec256<double> angle() const {
-    return _mm256_set1_pd(0);
+    const auto zero_vec = _mm256_set1_pd(0.f);
+    const auto nan_vec = _mm256_set1_pd(NAN);
+    const auto not_nan_mask = _mm256_cmp_pd(values, values, _CMP_EQ_OQ);
+    const auto nan_mask = _mm256_cmp_pd(not_nan_mask, zero_vec, _CMP_EQ_OQ);
+    const auto pi = _mm256_set1_pd(M_PI);
+    
+    const auto neg_mask = _mm256_cmp_pd(values, zero_vec, _CMP_LT_OQ);
+    auto angle = _mm256_blendv_pd(zero_vec, pi, neg_mask);
+    angle = _mm256_blendv_pd(angle, nan_vec, nan_mask);
+    return angle;
   }
   Vec256<double> real() const {
     return *this;
