@@ -6,10 +6,11 @@ namespace jit {
 
 void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) const {
 #ifdef FBCODE_CAFFE2
-  if (this->type()->getForwardHooks().size() > 0 || this->type()->getForwardPreHooks().size() > 0) {
+  if (this->type()->getForwardHooks().size() > 0 ||
+      this->type()->getForwardPreHooks().size() > 0) {
     throw std::runtime_error(
-          "Cannot save module '" + this->type()->name()->name() 
-          + "' because it has forward hooks or pre-hooks attached. " +
+          "Cannot save module '" + this->type()->name()->name() +
+          "' because it has forward hooks or pre-hooks attached. " +
           "Saving modules with hooks not supported in FBCODE yet. Please " +
           "remove the hooks before scripting if you want to save this model.");
 
@@ -21,10 +22,11 @@ void Module::save(std::ostream& out, const ExtraFilesMap& extra_files) const {
 void Module::save(const std::string& filename, const ExtraFilesMap& extra_files)
     const {
 #ifdef FBCODE_CAFFE2
-  if (this->type()->getForwardHooks().size() > 0 || this->type()->getForwardPreHooks().size() > 0) {
+  if (this->type()->getForwardHooks().size() > 0 ||
+      this->type()->getForwardPreHooks().size() > 0) {
       throw std::runtime_error(
-      "Cannot save module '" + this->type()->name()->name() 
-      + "' because it has forward hooks or pre-hooks attached. " +
+      "Cannot save module '" + this->type()->name()->name() +
+      "' because it has forward hooks or pre-hooks attached. " +
       "Saving modules with hooks not supported in FBCODE yet. Please " +
       "remove the hooks before scripting if you want to save this model.");
   }
