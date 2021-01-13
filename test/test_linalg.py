@@ -23,7 +23,7 @@ from torch.testing._internal.common_device_type import \
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
      onlyCUDA)
-from torch.testing import floating_and_complex_types, floating_types
+from torch.testing import floating_and_complex_types, floating_types, all_types
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
 from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
 from torch.autograd import gradcheck, gradgradcheck
@@ -2369,6 +2369,105 @@ class TestLinalg(TestCase):
 
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
             run_test_singular_input(*params)
+
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3, torch.float64: 1e-7, torch.complex128: 1e-7})
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_pinv(self, device, dtype):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        def run_test_main(A, hermitian):
+            # Testing against definition for pseudo-inverses
+            A_pinv = torch.linalg.pinv(A, hermitian=hermitian)
+            if A.numel() > 0:
+                self.assertEqual(A, A @ A_pinv @ A, atol=self.precision, rtol=self.precision)
+                self.assertEqual(A_pinv, A_pinv @ A @ A_pinv, atol=self.precision, rtol=self.precision)
+                self.assertEqual(A @ A_pinv, (A @ A_pinv).conj().transpose(-2, -1))
+                self.assertEqual(A_pinv @ A, (A_pinv @ A).conj().transpose(-2, -1))
+            else:
+                self.assertEqual(A.shape, A_pinv.shape[:-2] + (A_pinv.shape[-1], A_pinv.shape[-2]))
+
+            # Check out= variant
+            out = torch.empty_like(A_pinv)
+            ans = torch.linalg.pinv(A, hermitian=hermitian, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(ans, A_pinv)
+
+        def run_test_numpy(A, hermitian):
+            # Check against NumPy output
+            # Test float rcond, and specific value for each matrix
+            rconds = [float(torch.rand(1)), ]
+            # Test different types of rcond tensor
+            for rcond_type in all_types():
+                rconds.append(torch.rand(A.shape[:-2], dtype=torch.double, device=device).to(rcond_type))
+            # Test broadcasting of rcond
+            if A.ndim > 2:
+                rconds.append(torch.rand(A.shape[-3], device=device))
+            for rcond in rconds:
+                actual = torch.linalg.pinv(A, rcond=rcond, hermitian=hermitian)
+                numpy_rcond = rcond if isinstance(rcond, float) else rcond.cpu().numpy()
+                expected = np.linalg.pinv(A.cpu().numpy(), rcond=numpy_rcond, hermitian=hermitian)
+                self.assertEqual(actual, expected, atol=self.precision, rtol=1e-5)
+
+        for sizes in [(5, 5), (3, 5, 5), (3, 2, 5, 5),  # square matrices
+                      (3, 2), (5, 3, 2), (2, 5, 3, 2),  # fat matrices
+                      (2, 3), (5, 2, 3), (2, 5, 2, 3),  # thin matrices
+                      (0, 0), (0, 2), (2, 0), (3, 0, 0), (0, 3, 0), (0, 0, 3)]:  # zero numel matrices
+            A = torch.randn(*sizes, dtype=dtype, device=device)
+            hermitian = False
+            run_test_main(A, hermitian)
+            run_test_numpy(A, hermitian)
+
+        # Check hermitian = True
+        for sizes in [(5, 5), (3, 5, 5), (3, 2, 5, 5),  # square matrices
+                      (0, 0), (3, 0, 0), ]:  # zero numel square matrices
+            A = random_hermitian_pd_matrix(sizes[-1], *sizes[:-2], dtype=dtype, device=device)
+            hermitian = True
+            run_test_main(A, hermitian)
+            run_test_numpy(A, hermitian)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_pinv_errors_and_warnings(self, device, dtype):
+        # pinv requires at least 2D tensor
+        a = torch.randn(1, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "expected a tensor with 2 or more dimensions"):
+            torch.linalg.pinv(a)
+
+        # if non-empty out tensor with wrong shape is passed a warning is given
+        a = torch.randn(3, 3, dtype=dtype, device=device)
+        out = torch.empty(7, 7, dtype=dtype, device=device)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.linalg.pinv(a, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes of out and input should match
+        out = torch.empty_like(a).to(torch.int)
+        with self.assertRaisesRegex(RuntimeError, "dtype Int does not match the expected dtype"):
+            torch.linalg.pinv(a, out=out)
+
+        if torch.cuda.is_available():
+            # device of out and input should match
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty_like(a).to(wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "Expected result and input to be on the same device"):
+                torch.linalg.pinv(a, out=out)
+
+            # device of rcond and input should match
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            rcond = torch.full((), 1e-2, device=wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "Expected rcond and input to be on the same device"):
+                torch.linalg.pinv(a, rcond=rcond)
+
+        # rcond can't be complex
+        rcond = torch.full((), 1j, device=device)
+        with self.assertRaisesRegex(RuntimeError, "rcond tensor of complex type is not supported"):
+            torch.linalg.pinv(a, rcond=rcond)
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
