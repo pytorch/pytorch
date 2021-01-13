@@ -2656,13 +2656,8 @@ def meshgrid(g, tensor_list):
 
 
 def remainder(g, input, other):
-    # torch.remainder does not follow regular type promotion logic.
-    # Instead, it is implicitly casting `other` to the same type of `input`.
-    input_scalar_type = input.type().scalarType()
-    if input_scalar_type:
-        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[input_scalar_type])
     div = g.op("Div", input, other)
-    if sym_help._is_fp(input):
+    if sym_help._is_fp(input) or sym_help._is_fp(other):
         div = g.op("Floor", div)
     quo = g.op("Mul", div, other)
     return g.op("Sub", input, quo)

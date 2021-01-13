@@ -4475,6 +4475,27 @@ class TestValidation(TestCase):
                     fail_string = 'ValueError not raised for {} example {}/{}'
                     raise AssertionError(fail_string.format(Dist.__name__, i + 1, len(params))) from e
 
+    def test_warning_unimplemented_constraints(self):
+        class Delta(Distribution):
+            def __init__(self, validate_args=True):
+                super().__init__(validate_args=validate_args)
+
+            def sample(self, sample_shape=torch.Size()):
+                return torch.tensor(0.).expand(sample_shape)
+
+            def log_prob(self, value):
+                if self._validate_args:
+                    self._validate_sample(value)
+                value[value != 0.] = -float('inf')
+                value[value == 0.] = 0.
+                return value
+
+        with self.assertWarns(UserWarning):
+            d = Delta()
+        sample = d.sample((2,))
+        with self.assertWarns(UserWarning):
+            d.log_prob(sample)
+
     def tearDown(self):
         super(TestValidation, self).tearDown()
 
