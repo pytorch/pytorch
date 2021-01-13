@@ -122,10 +122,10 @@ class OpInfo(object):
                  decorators=None,  # decorators to apply to generated tests
                  promotes_integers_to_float=False,  # whether op promotes unary output to float or not
                  sample_inputs_func=None,  # function to generate sample inputs
+                 sparse_sample_inputs_func=None,  # function to generate sparse sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
-                 aliases=None,  # list of aliases, e.g. torch.absolute -> torch.abs
-                 supports_sparse=False,  # whether the op correctly handles sparse input
-                 sparse_op_info=None,  # sparse op info as dict, e.g. flag that op supports inplace on uncoalesced
+                 aliases=None,  # list of aliases, e.g. torch.absolute -> torch.abs                 
+                 supports_inplace_on_uncoalesced=False,  # whether op supports inplace on uncoalesced sparse input
                  ):
 
         # Validates the dtypes are generated from the dispatch-related functions
@@ -146,6 +146,7 @@ class OpInfo(object):
         self.method_variant = getattr(torch.Tensor, name, None)
         inplace_name = name + "_"
         self.inplace_variant = getattr(torch.Tensor, inplace_name, None)
+        self.operator_variant = getattr(operator, name, None)
         self.skip_bfloat16_grad = skip_bfloat16_grad
 
         self.test_inplace_grad = test_inplace_grad
@@ -157,6 +158,7 @@ class OpInfo(object):
         self.decorators = decorators
         self.output_func = output_func
         self.sample_inputs_func = sample_inputs_func
+        self.sparse_sample_inputs_func = sparse_sample_inputs_func
 
         self.assert_autodiffed = assert_autodiffed
         self.autodiff_fusible_nodes = autodiff_fusible_nodes if autodiff_fusible_nodes else []
@@ -164,9 +166,8 @@ class OpInfo(object):
             self.autodiff_nonfusible_nodes = ['aten::' + self.name]
         else:
             self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes
-        self.supports_sparse = supports_sparse
-        self.sparse_op_info = sparse_op_info if sparse_op_info is not None else {}
-        self.operator_variant = getattr(operator, name, None)
+        self.supports_sparse = self.sparse_sample_inputs_func is not None
+        self.supports_inplace_on_uncoalesced = supports_inplace_on_uncoalesced
         self.aliases = []
         if aliases is not None:
             self.aliases = [OpInfo.AliasInfo(a) for a in aliases]
@@ -201,9 +202,9 @@ class OpInfo(object):
         """Returns an iterable of SampleInputs."""
         return self.sample_inputs_func(self, device, dtype, requires_grad)
 
-    def sample_sparse_inputs(self, device, dtype, requires_grad=False, **kwargs):
-        """Returns an iterable of SampleInputs."""
-        raise NotImplementedError("This method should be overriden in derived class")
+    def sparse_sample_inputs(self, device, dtype, requires_grad=False):
+        """Returns an iterable of SampleInputs for use in testing the sparse version of these operations."""
+        return self.sparse_sample_inputs_func(self, device, dtype, requires_grad)
 
     # Returns True if the test should be skipped and False otherwise
     def should_skip(self, cls_name, test_name, device_type, dtype):
@@ -259,6 +260,27 @@ def sample_inputs_unary(op_info, device, dtype, requires_grad):
             SampleInput(make_tensor((), device, dtype,
                                     low=low, high=high,
                                     requires_grad=requires_grad)))
+
+
+def sparse_sample_inputs_unary(op_info, device, dtype, requires_grad):
+    """
+    TODO: Let's elaborate in this docstring on what kind of sparse tensors are generated.
+    """
+    if not op_info.supports_sparse:
+        raise RuntimeError("This op does not support sparse input")
+
+    low, high = self.domain
+    low = -10 if low is None else low + self._domain_eps
+    high = 10 if high is None else high - self._domain_eps
+
+    numel = 10
+    t1 = torch.sparse_coo_tensor(
+        indices=torch.arange(numel).unsqueeze(0),
+        values=torch.linspace(low, high, steps=numel),
+        size=[numel, ],
+        device=device,
+        dtype=dtype,
+    )
 
 
 # Metadata class for unary "universal functions (ufuncs)" that accept a single
