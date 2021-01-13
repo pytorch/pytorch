@@ -1,6 +1,6 @@
 import torch
 from torch.fx.graph_module import GraphModule
-from typing import Callable, List, Dict, Set, Any, Optional
+from typing import Callable, List, Dict, Any, Optional
 
 class Partition:
     def __init__(self, name: str):
