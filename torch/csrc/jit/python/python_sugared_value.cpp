@@ -226,8 +226,8 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
   const std::unordered_set<std::string> cuda_ops = {
       "current_stream",
       "default_stream",
-      "_cuda_setDevice",
-      "_cuda_setStream",
+      "_setDevice",
+      "_setStream",
       "device_index",
       "device_count",
   };
@@ -975,8 +975,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   } else if (py::isinstance<py::module>(obj)) {
 #ifndef USE_ROCM
     std::string obj_name = py::cast<py::str>(py::getattr(obj, "__name__"));
-    if (obj_name.compare("torch._C") == 0 ||
-        obj_name.compare("torch.cuda") == 0) {
+    if (obj_name.compare("torch.cuda") == 0) {
       return std::make_shared<CUDAPythonModuleValue>(obj);
     }
 #endif

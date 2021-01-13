@@ -43,7 +43,7 @@ RegisterOperators const reg({
         },
         aliasAnalysisFromSchema()),
     Operator(
-        "cuda::_cuda_setDevice(int64_t val) -> ()",
+        "cuda::_setDevice(int64_t val) -> ()",
         [](Stack* stack) {
           int64_t idx = -1;
           pop(stack, idx);
@@ -63,7 +63,7 @@ RegisterOperators const reg({
         [](Stack* stack) { push(stack, at::cuda::device_count()); },
         aliasAnalysisFromSchema()),
     Operator(
-        "cuda::_cuda_setStream(__torch__.torch.classes.cuda.Stream stream) -> ()",
+        "cuda::_setStream(__torch__.torch.classes.cuda.Stream stream) -> ()",
         [](Stack* stack) {
           auto v = pop(stack);
           auto s = v.toCustomClass<torch::jit::CUDAStream>();

@@ -218,13 +218,22 @@ class device(object):
             return
         self.prev_idx = torch.cuda.current_device()
         if self.prev_idx != self.idx:
-            torch._C._cuda_setDevice(self.idx)
-        if not torch.jit.is_scripting():
-            _lazy_init()
+            # Eager and script mode API to set the device are different.
+            # Call the corresponding setDevice API depending on the mode
+            if torch.jit.is_scripting():
+                torch.cuda._setDevice(self.idx)
+            else:
+                torch._C._cuda_setDevice(self.idx)
+                _lazy_init()
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
         if self.prev_idx != self.idx:
-            torch._C._cuda_setDevice(self.prev_idx)
+            # Eager and script mode API to re-set the device are different.
+            # Call the corresponding setDevice API depending on the mode.
+            if torch.jit.is_scripting():
+                torch.cuda._setDevice(self.prev_idx)
+            else:
+                torch._C._cuda_setDevice(self.prev_idx)
 
 
 class device_of(device):
@@ -375,13 +384,19 @@ class StreamContext(object):
                 cur_stream_device = cur_stream.device
             with device(cur_stream_device):
                 self.dst_prev_stream = torch.cuda.current_stream(self.cur_stream_device_index)
-            torch._C._cuda_setDevice(self.cur_stream_device_index)
+
+            # The JIT and eager API to set the device differ. Hence, call the
+            # correct API by checking the current mode (eager/JIT).
+            if torch.jit.is_scripting():
+                torch.cuda._setDevice(self.cur_stream_device_index)
+            else:
+                torch._C._cuda_setDevice(self.cur_stream_device_index)
 
         # cur_stream here is annotated only for JIT compilation. The eager mode stream object
-        # and JIT stream object are different and depending on the mode we scripting we pass the
-        # corresponding stream object to set the current stream
+        # and JIT stream object are different and depending on the mode we call the corresponding
+        # API to set the stream
         if torch.jit.is_scripting():
-            torch._C._cuda_setStream(cur_stream)
+            torch.cuda._setStream(cur_stream)
         else:
             torch._C._cuda_setStream(cur_stream._cdata)
 
@@ -397,17 +412,18 @@ class StreamContext(object):
         # Set the current stream on the device to the src_prev_stream
         if self.prev_stream_device_index != self.cur_stream_device_index:
             # Restore the destination previous stream object to either
-            # script or eager mode stream object on the device.
+            # script or eager mode stream on the device.
             if torch.jit.is_scripting():
-                torch._C._cuda_setStream(self.dst_prev_stream) #type: ignore
+                torch.cuda._setStream(self.dst_prev_stream) #type: ignore
+                torch.cuda._setDevice(self.idx)
             else:
                 torch._C._cuda_setStream(self.dst_prev_stream._cdata)
-            torch._C._cuda_setDevice(self.idx)
+                torch._C._cuda_setDevice(self.idx)
 
         # Restore the previous stream object on the current device to either
         # script or eager mode stream object.
         if torch.jit.is_scripting():
-            torch._C._cuda_setStream(self.src_prev_stream) #type: ignore
+            torch.cuda._setStream(self.src_prev_stream) #type: ignore
         else:
             torch._C._cuda_setStream(self.src_prev_stream._cdata)
 
@@ -419,7 +435,7 @@ def stream(stream: Optional['torch.classes.cuda.Stream']) -> StreamContext: #typ
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
     ..Note:: In eager mode stream is of type Stream class while in JIT it is
-    an object of the custome class ``torch.classes.cuda.Stream``.
+    an object of the custom class ``torch.classes.cuda.Stream``.
     """
     return StreamContext(stream)
 

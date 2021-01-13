@@ -285,8 +285,8 @@ namespace c10 {
   _(aten, zero_)                     \
   _(aten, fill_)                     \
   _(aten, masked_fill_)              \
-  _(cuda, _cuda_setDevice)           \
-  _(cuda, _cuda_setStream)           \
+  _(cuda, _setDevice)                \
+  _(cuda, _setStream)                \
   _(aten, current_device)            \
   _(aten, swapaxes)                  \
   _(aten, swapaxes_)                 \

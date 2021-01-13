@@ -443,12 +443,9 @@ def _get_device_attr(get_member):
     # add more available device types here
     return None
 
-
 def _get_current_device_index():
     # current device index
-    if torch.cuda.device_count() > 0:
-        return torch.cuda.current_device()
-    return -1
+    return _get_device_attr(lambda m: m.current_device())
 
 
 def _get_all_device_indices():
@@ -489,7 +486,12 @@ def _get_device_index(device: Any, optional: bool = False, allow_cpu: bool = Fal
         device_idx = device
     if device_idx is None:
         if optional:
-            device_idx = _get_current_device_index()
+            # If we are in scripting mode, call the corresponding JIT API
+            # to get the device index else call the eager API.
+            if torch.jit.is_scripting():
+                device_idx = torch.jit.cuda.get_current_device_index()
+            else:
+                device_idx = _get_current_device_index()
         else:
             raise ValueError('Expected a torch.device with a specified index '
                              'or an integer, but got:{}'.format(device))
