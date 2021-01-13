@@ -814,6 +814,17 @@ class TestReductions(TestCase):
         torch.prod(x, 1, out=res2)
         self.assertEqual(res1, res2)
 
+    def test_prod_bool(self, device):
+        vals = [[True, True], [True, False], [False, False], []]
+        for val in vals:
+            result = torch.prod(torch.tensor(val, device=device), dtype=torch.bool).item()
+            expect = np.prod(np.array(val), dtype=np.bool)
+            self.assertEqual(result, expect)
+
+            result = torch.prod(torch.tensor(val, device=device)).item()
+            expect = np.prod(np.array(val))
+            self.assertEqual(result, expect)
+
     @onlyCPU
     def test_max_mixed_devices(self, device):
         a = torch.randn(10, device=device)
@@ -1124,6 +1135,11 @@ class TestReductions(TestCase):
     @dtypes(*(torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
                                            include_bool=True, include_complex=True)))
     def test_all_any_vs_numpy(self, device, dtype):
+        # Note [all, any uint8 compatibility]: However for compatibility reason,
+        # for `uint8`, they return Tensor of same dtype `uint8`.
+        # Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
+        exact_dtype = True if dtype != torch.uint8 else False
+
         def _test_all_any(x):
             self.compare_with_numpy(torch.all, np.all, x)
             self.compare_with_numpy(torch.any, np.any, x)
@@ -1131,15 +1147,15 @@ class TestReductions(TestCase):
         def _test_all_any_with_dim(x, dim):
             torch_fn = partial(torch.all, dim=dim)
             np_fn = partial(np.all, axis=dim)
-            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=True)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=exact_dtype)
 
             torch_fn = partial(torch.any, dim=dim)
             np_fn = partial(np.any, axis=dim)
-            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=True)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=exact_dtype)
 
         def _test_out_variant(x, dim):
             out = torch.empty_like(x)
-            if dtype == torch.bool:
+            if dtype == torch.bool or dtype == torch.uint8:
                 expected = torch.all(x, dim)
                 torch.all(x, dim, out=out)
                 self.assertEqual(expected, out)
@@ -1157,11 +1173,21 @@ class TestReductions(TestCase):
         def _test_all_any_with_dim_keepdim(x, dim, keepdim):
             torch_fn = partial(torch.all, dim=dim, keepdim=keepdim)
             np_fn = partial(np.all, axis=dim, keepdims=keepdim)
-            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=True)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=exact_dtype)
 
             torch_fn = partial(torch.any, dim=dim, keepdim=keepdim)
             np_fn = partial(np.any, axis=dim, keepdims=keepdim)
-            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=True)
+            self.compare_with_numpy(torch_fn, np_fn, x, exact_dtype=exact_dtype)
+
+        def _test_output_dtype(x):
+            # This test will fail once the functions return bool output
+            # for uint8 input.
+            expected_dtype = torch.uint8 if dtype == torch.uint8 else torch.bool
+            self.assertEqual(torch.all(x).dtype, expected_dtype)
+            self.assertEqual(torch.any(x).dtype, expected_dtype)
+
+            self.assertEqual(torch.all(x, dim=0).dtype, expected_dtype)
+            self.assertEqual(torch.any(x, dim=0).dtype, expected_dtype)
 
         for ndim in range(5):
             shape = _rand_shape(ndim, 1, 5)
@@ -1184,7 +1210,7 @@ class TestReductions(TestCase):
             _test_all_any(x)
             _test_all_any(x.T)
             _test_all_any(x[..., ::2])
-
+            _test_output_dtype(x)
             for dim in range(ndim):
                 x = _generate_input(shape, dtype, device, with_extremal=False)
                 _test_all_any_with_dim(x, dim)
@@ -2220,7 +2246,11 @@ class TestReductions(TestCase):
 
         for dtype in torch.testing.get_all_dtypes(include_half=True, include_bfloat16=False,
                                                   include_bool=True, include_complex=True):
-            out_dtype = torch.bool  # output of all/any is bool irrespective of input dtype
+            # Refer: [all, any uint8 compatibility]
+            if dtype == torch.uint8:
+                out_dtype = torch.uint8
+            else:
+                out_dtype = torch.bool  # output of all/any is bool irrespective of input dtype
 
             # any
             xb = x.to(dtype)
