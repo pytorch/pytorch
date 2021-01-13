@@ -1312,66 +1312,6 @@ std::tuple<Tensor,Tensor> _th_geqrf(const Tensor & self) {
     }
     return std::tuple<Tensor, Tensor>(res1, res2);
 }
-Tensor & _th_multinomial_alias_draw_out(Tensor & result, const Tensor & q, const Tensor & J, int64_t num_samples, c10::optional<Generator> generator) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(result);
-
-    switch (dispatch_scalar_type) {
-        case ScalarType::Double: {
-            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_multinomial_alias_draw_out", false, DeviceType::CUDA, ScalarType::Long);
-            auto q_ = checked_dense_tensor_unwrap(q, "q", 1, "_th_multinomial_alias_draw_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto J_ = checked_dense_tensor_unwrap(J, "J", 2, "_th_multinomial_alias_draw_out", false, DeviceType::CUDA, ScalarType::Long);
-            THCudaDoubleTensor_multinomialAliasDraw(globalContext().getTHCState(), result_, q_, J_, num_samples, generator);
-            break;
-        }
-        case ScalarType::Float: {
-            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_multinomial_alias_draw_out", false, DeviceType::CUDA, ScalarType::Long);
-            auto q_ = checked_dense_tensor_unwrap(q, "q", 1, "_th_multinomial_alias_draw_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto J_ = checked_dense_tensor_unwrap(J, "J", 2, "_th_multinomial_alias_draw_out", false, DeviceType::CUDA, ScalarType::Long);
-            THCudaTensor_multinomialAliasDraw(globalContext().getTHCState(), result_, q_, J_, num_samples, generator);
-            break;
-        }
-        case ScalarType::Half: {
-            auto result_ = checked_dense_tensor_unwrap(result, "result", 0, "_th_multinomial_alias_draw_out", false, DeviceType::CUDA, ScalarType::Long);
-            auto q_ = checked_dense_tensor_unwrap(q, "q", 1, "_th_multinomial_alias_draw_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto J_ = checked_dense_tensor_unwrap(J, "J", 2, "_th_multinomial_alias_draw_out", false, DeviceType::CUDA, ScalarType::Long);
-            THCudaHalfTensor_multinomialAliasDraw(globalContext().getTHCState(), result_, q_, J_, num_samples, generator);
-            break;
-        }
-        default:
-            AT_ERROR("_th_multinomial_alias_draw_out not supported on CUDAType for ", dispatch_scalar_type);
-    }
-    return result;
-}
-Tensor _th_multinomial_alias_draw(const Tensor & q, const Tensor & J, int64_t num_samples, c10::optional<Generator> generator) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(q);
-    auto result_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CUDA, scalarTypeToTypeMeta(ScalarType::Long)).release();
-    auto result = Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(result_));
-    switch (dispatch_scalar_type) {
-        case ScalarType::Double: {
-            auto q_ = checked_dense_tensor_unwrap(q, "q", 1, "_th_multinomial_alias_draw", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto J_ = checked_dense_tensor_unwrap(J, "J", 2, "_th_multinomial_alias_draw", false, DeviceType::CUDA, ScalarType::Long);
-            THCudaDoubleTensor_multinomialAliasDraw(globalContext().getTHCState(), result_, q_, J_, num_samples, generator);
-            break;
-        }
-        case ScalarType::Float: {
-            auto q_ = checked_dense_tensor_unwrap(q, "q", 1, "_th_multinomial_alias_draw", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto J_ = checked_dense_tensor_unwrap(J, "J", 2, "_th_multinomial_alias_draw", false, DeviceType::CUDA, ScalarType::Long);
-            THCudaTensor_multinomialAliasDraw(globalContext().getTHCState(), result_, q_, J_, num_samples, generator);
-            break;
-        }
-        case ScalarType::Half: {
-            auto q_ = checked_dense_tensor_unwrap(q, "q", 1, "_th_multinomial_alias_draw", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto J_ = checked_dense_tensor_unwrap(J, "J", 2, "_th_multinomial_alias_draw", false, DeviceType::CUDA, ScalarType::Long);
-            THCudaHalfTensor_multinomialAliasDraw(globalContext().getTHCState(), result_, q_, J_, num_samples, generator);
-            break;
-        }
-        default:
-            AT_ERROR("_th_multinomial_alias_draw not supported on CUDAType for ", dispatch_scalar_type);
-    }
-    return result;
-}
 Tensor & _th_copy_ignoring_overlaps_(Tensor & self, const Tensor & src) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
