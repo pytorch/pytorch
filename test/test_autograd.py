@@ -47,7 +47,7 @@ from torch.testing._internal.common_methods_invocations import (method_tests,
                                                                 mask_not_all_zeros,
                                                                 S)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
-                                                        onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
+                                                        onlyCPU, onlyCUDA, onlyOnCPUAndCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
                                                         skipCUDAIf)
 
@@ -4945,17 +4945,6 @@ for shape in [(1,), ()]:
                                          return_counts=return_counts)
                     assert_only_first_requires_grad(res)
 
-    def test_linalg_qr_r(self):
-        # torch.linalg.qr(mode='r') returns only 'r' and discards 'q', but
-        # without 'q' you cannot compute the backward pass. Check that
-        # linalg_qr_backward complains cleanly in that case.
-        inp = torch.randn((5, 7), requires_grad=True)
-        q, r = torch.linalg.qr(inp, mode='r')
-        assert q.shape == (0,)  # empty tensor
-        b = torch.sum(r)
-        with self.assertRaisesRegex(RuntimeError,
-                                    "linalg_qr_backward: cannot compute backward"):
-            b.backward()
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -6807,6 +6796,18 @@ class TestAutogradDeviceType(TestCase):
         b.backward(torch.ones(3, device=device))
         expected = torch.tensor([0., 0., 1.], device=device)
         self.assertEqual(a.grad, expected)
+
+    @onlyOnCPUAndCUDA
+    def test_elu_inplace_with_neg_alpha(self, device):
+        a = torch.tensor([-1., 1.], device=device, requires_grad=True)
+        b = torch.nn.functional.elu_(a.clone(), alpha=-2)
+        with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
+            b.backward(torch.ones(2, device=device))
+
+        a = torch.tensor([-1., 1.], device=device, requires_grad=True)
+        b = torch.nn.functional.celu_(a.clone(), alpha=-2)
+        with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
+            b.backward(torch.ones(2, device=device))
 
     @onlyCUDA
     def test_free_unneeded_tensor(self, device):

@@ -237,7 +237,7 @@ def test_batched_grad(fail_test, input, output, output_idx):
     def vjp(v):
         results = grad(v)
         results = tuple(grad if grad is not None else
-                        torch.zeros([], dtype=output.dtype, device=output.device).expand(inp.shape)
+                        torch.zeros([], dtype=inp.dtype, device=inp.device).expand(inp.shape)
                         for grad, inp in zip(results, diff_input_list))
         return results
 
@@ -332,8 +332,10 @@ def gradcheck(
         nondet_tol (float, optional): tolerance for non-determinism. When running
             identical inputs through the differentiation, the results must either match
             exactly (default, 0.0) or be within this tolerance.
-        check_undefined_grad (bool, options): if True, check if undefined output grads
+        check_undefined_grad (bool, optional): if True, check if undefined output grads
             are supported and treated as zeros, for ``Tensor`` outputs.
+        check_batched_grad (bool, optional): if True, check if we can compute
+            batched gradients using prototype vmap support. Defaults to False.
 
     Returns:
         True if all differences satisfy allclose condition
@@ -458,7 +460,9 @@ def gradcheck(
             return not_reentrant_error(' (calculated using complex valued grad output)')
 
         if check_batched_grad:
-            assert reentrant
+            assert reentrant, ('Batched gradient checking makes the assumption that '
+                               'backward is reentrant. This assertion should never '
+                               'be triggered, please open us a bug report.')
             # NB: test_batched_grad compares two autograd.grad invocations with a single
             # vmap(autograd.grad) invocation. It's not exactly a "gradcheck" in the
             # sense that we're not comparing an analytical jacobian with a numeric one, 
@@ -609,8 +613,10 @@ def gradgradcheck(
             exactly (default, 0.0) or be within this tolerance. Note that a small amount
             of nondeterminism in the gradient will lead to larger inaccuracies in
             the second derivative.
-        check_undefined_grad (bool, options): if True, check if undefined output grads
+        check_undefined_grad (bool, optional): if True, check if undefined output grads
             are supported and treated as zeros
+        check_batched_grad (bool, optional): if True, check if we can compute
+            batched gradients using prototype vmap support. Defaults to False.
 
     Returns:
         True if all differences satisfy allclose condition
