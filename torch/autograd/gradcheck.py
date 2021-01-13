@@ -462,7 +462,9 @@ def gradcheck(
         if check_batched_grad:
             assert reentrant, ('Batched gradient checking makes the assumption that '
                                'backward is reentrant. This assertion should never '
-                               'be triggered, please open us a bug report.')
+                               'be triggered: we expect gradcheck to have early '
+                               'exited before reaching this point if backward is '
+                               'not reentrant. Please file us a bug report.')
             # NB: test_batched_grad compares two autograd.grad invocations with a single
             # vmap(autograd.grad) invocation. It's not exactly a "gradcheck" in the
             # sense that we're not comparing an analytical jacobian with a numeric one, 
