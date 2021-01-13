@@ -56,7 +56,7 @@ class TestCUDA(JitTestCase):
         # matches with the device ID
         @torch.jit.script
         def fn():
-            device_index = torch.cuda._current_device()
+            device_index = torch.cuda.current_device()
             s0 = torch.cuda.current_stream(device_index)
             s1 = torch.cuda.current_stream(1)
             s2 = torch.cuda.current_stream(0)
@@ -88,17 +88,17 @@ class TestCUDA(JitTestCase):
             # on the current device. The current device id by default is 0
             s2 = torch.cuda.current_stream(0)
             check_s2 = s2.id() == s0.id()
-            check_d0 = torch.cuda._current_device() == s2.device_index()
+            check_d0 = torch.cuda.current_device() == s2.device_index()
 
             # Set the current device to d1 and check if the stream
             # has been set to the default stream on d1
-            with torch.jit.cuda.device(d):
+            with torch.cuda.device(d):
                 s3 = torch.cuda.current_stream(1)
                 check_s3 = s3.id() == s1.id()
-                check_d1 = torch.cuda._current_device() == s3.device_index()
+                check_d1 = torch.cuda.current_device() == s3.device_index()
 
             # Check if the current device was reset to 0
-            is_device_d0 = torch.cuda._current_device() == s2.device_index()
+            is_device_d0 = torch.cuda.current_device() == s2.device_index()
 
             return s0.device_index(), s1.device_index(), check_s2, check_s3, check_d0, check_d1, is_device_d0
 
@@ -113,16 +113,16 @@ class TestCUDA(JitTestCase):
         self.assertTrue(is_device_d0)
 
         # This test checks if the Stream Context manager is a no op
-        # when the stream is none for `with torch.jit.cuda.stream`
+        # when the stream is none for `with torch.cuda.stream`
         @torch.jit.script
         def test_set_none_stream():
-            device_index = torch.cuda._current_device()
+            device_index = torch.cuda.current_device()
             current_stream = torch.cuda.current_stream(device_index)
             default_stream = torch.cuda.default_stream(device_index)
 
             # When stream is none, check if this operation is a no-op
-            with torch.jit.cuda.stream(None):
-                cur_device_index = torch.cuda._current_device()
+            with torch.cuda.stream(None):
+                cur_device_index = torch.cuda.current_device()
                 is_device_index_same = cur_device_index == device_index
                 is_current_stream_same = torch.cuda.current_stream(cur_device_index).id() == current_stream.id()
                 is_default_stream_same = torch.cuda.default_stream(device_index).id() == default_stream.id()
@@ -133,22 +133,22 @@ class TestCUDA(JitTestCase):
         self.assertTrue(test_set_none_stream())
 
         # This test checks if the Device Context manager is a no op
-        # when the device is none for `with torch.jit.cuda.device`
+        # when the device is none for `with torch.cuda.device`
         @torch.jit.script
         def test_set_device_none():
-            device_index = torch.cuda._current_device()
+            device_index = torch.cuda.current_device()
             # When device is none, check if this operation is a no-op
-            with torch.jit.cuda.device(None):
+            with torch.cuda.device(None):
                 # Check if the current device is the same
-                is_device_same = torch.cuda._current_device() == device_index
+                is_device_same = torch.cuda.current_device() == device_index
             return is_device_same
         self.assertTrue(test_set_device_none())
 
         # Check if a CUDA JIT stream is created
-        # on the _current_device
+        # on the current_device
         @torch.jit.script
         def test_simple_stream():
-            device_index = torch.cuda._current_device()
+            device_index = torch.cuda.current_device()
             s = torch.jit.cuda.Stream(device_index, 0)
             return device_index == s.device_index()
 
@@ -169,7 +169,7 @@ class TestCUDA(JitTestCase):
         # The test aims at checking different stream proporties.
         @torch.jit.script
         def test_get_stream():
-            device_index = torch.cuda._current_device()
+            device_index = torch.cuda.current_device()
             current_stream = torch.cuda.current_stream(device_index)
             default_stream = torch.cuda.default_stream(device_index)
             user_stream = torch.jit.cuda.Stream(device_index, 0)
@@ -179,7 +179,7 @@ class TestCUDA(JitTestCase):
             # Check if user stream and default stream are not the same on the device
             is_default_and_user_stream_not_same = default_stream.id() != user_stream.id()
 
-            with torch.jit.cuda.stream(user_stream):
+            with torch.cuda.stream(user_stream):
                 is_stream_set = torch.cuda.current_stream(device_index).id() == user_stream.id()
 
             # Check if the stream was reset to current_stream
@@ -212,12 +212,12 @@ class TestCUDA(JitTestCase):
         # to the user stream on using the stream context manager.
         @torch.jit.script
         def test_stream_context():
-            device_index = torch.cuda._current_device()
+            device_index = torch.cuda.current_device()
             current_stream = torch.cuda.current_stream(device_index)
             user_stream = torch.jit.cuda.Stream(device_index, 0)
             A = torch.rand(1000, 1000, device="cuda")
 
-            with torch.jit.cuda.stream(user_stream):
+            with torch.cuda.stream(user_stream):
                 check = torch.cuda.current_stream(device_index).id() == user_stream.id()
                 B = torch.mm(A, A).to("cuda")
             # Wait for B to be computed
@@ -236,33 +236,33 @@ class TestCUDA(JitTestCase):
         # This test has been adapted from the eager mode tests available at test/test_cuda.py
         @torch.jit.script
         def test_multiple_stream():
-            prev_device_index = torch.cuda._current_device()
+            prev_device_index = torch.cuda.current_device()
             prev_current_stream = torch.cuda.current_stream(prev_device_index)
             s1 = torch.jit.cuda.Stream(0, 0)
             s2 = torch.jit.cuda.Stream(1, 0)
 
             A = torch.rand(1000, 1000, device="cuda")
             B = torch.rand(1000, 1000, device="cuda")
-            with torch.jit.cuda.stream(s1):
+            with torch.cuda.stream(s1):
                 C = torch.mm(A, A).to("cuda")
                 # Check if the stream and device have been set to s1
                 is_stream_s1 = torch.cuda.current_stream(s1.device_index()).id() == s1.id()
-                is_device_s1 = torch.cuda._current_device() == s1.device_index()
-                with torch.jit.cuda.stream(s2):
+                is_device_s1 = torch.cuda.current_device() == s1.device_index()
+                with torch.cuda.stream(s2):
                     # Check if the stream and device have been set to s2
                     is_stream_s2 = torch.cuda.current_stream(s2.device_index()).id() == s2.id()
-                    is_device_s2 = torch.cuda._current_device() == s2.device_index()
+                    is_device_s2 = torch.cuda.current_device() == s2.device_index()
                     D = torch.mm(B, B).to("cuda")
                 # Check if the stream and device have been set to s1
                 is_stream_s1_after = torch.cuda.current_stream(s1.device_index()).id() == s1.id()
-                is_device_s1_after = torch.cuda._current_device() == s1.device_index()
+                is_device_s1_after = torch.cuda.current_device() == s1.device_index()
                 # Wait for D to be computed
                 s2.synchronize()
             # Wait for C to be computed on S1
             s1.synchronize()
 
             # Check if the stream and device has been restored to previous stream and device
-            is_device_current = torch.cuda._current_device() == prev_device_index
+            is_device_current = torch.cuda.current_device() == prev_device_index
             is_stream_current = torch.cuda.current_stream(prev_device_index).id() == prev_current_stream.id()
 
             check_stream = is_stream_s1 and is_stream_s2 and is_stream_s1_after and is_stream_current
@@ -278,14 +278,14 @@ class TestCUDA(JitTestCase):
         # Test multiple streams waiting on each other for the operations to be completed.
         @torch.jit.script
         def test_data_dependency_between_streams():
-            device_index = torch.cuda._current_device()
+            device_index = torch.cuda.current_device()
             prev_current_stream = torch.cuda.current_stream(device_index)
             s1 = torch.jit.cuda.Stream(0, 0)
             s2 = torch.jit.cuda.Stream(0, 0)
             event = torch.jit.cuda.Event(False, False, False)
 
             A = torch.rand(1000, 1000, device="cuda")
-            with torch.jit.cuda.stream(s1):
+            with torch.cuda.stream(s1):
                 is_stream_s1 = torch.cuda.current_stream(device_index).id() == s1.id()
                 B = torch.mm(A, A).to("cuda")
             s1.record_event(event)
@@ -293,7 +293,7 @@ class TestCUDA(JitTestCase):
             is_current_stream_1 = torch.cuda.current_stream(device_index).id() == prev_current_stream.id()
             # Wait for ops on s1 to be computed
             s2.wait_event(event)
-            with torch.jit.cuda.stream(s2):
+            with torch.cuda.stream(s2):
                 is_stream_s2 = torch.cuda.current_stream(device_index).id() == s2.id()
                 C = torch.mm(B, B).to("cuda")
             # Wait for C to be computed
@@ -321,7 +321,7 @@ class TestCUDA(JitTestCase):
         # an adaption from eager mdoe CUDA tests available at test/test_cuda.py
         @torch.jit.script
         def test_event():
-            device_index = torch.cuda._current_device()
+            device_index = torch.cuda.current_device()
             stream = torch.cuda.current_stream(device_index)
             event = torch.jit.cuda.Event(True, False, False)
             is_true_event_query = event.query()
@@ -343,14 +343,14 @@ class TestCUDA(JitTestCase):
         # computed on the stream. The stream.query should be true once the synchroniztion is done
         @torch.jit.script
         def test_stream_synchronize() -> float:
-            device_index = torch.cuda._current_device()
+            device_index = torch.cuda.current_device()
             s = torch.jit.cuda.Stream(device_index, 0)
             e_tik = torch.jit.cuda.Event(True, False, False)
             e_tok = torch.jit.cuda.Event(True, False, False)
 
             e_tik.record(s)
             tensor1 = torch.rand(1000000000, 1000000000, device="cuda")
-            with torch.jit.cuda.stream(s):
+            with torch.cuda.stream(s):
                 tensor2 = torch.mm(tensor1, tensor1).to("cuda")
             s.synchronize()
             e_tok.record(s)
@@ -369,14 +369,14 @@ class TestCUDA(JitTestCase):
         # and the stream.query evaluates to true.
         @torch.jit.script
         def test_event_synchronize() -> float:
-            device_index = torch.cuda._current_device()
+            device_index = torch.cuda.current_device()
             s = torch.jit.cuda.Stream(device_index, 0)
             e_tik = torch.jit.cuda.Event(True, False, False)
             e_tok = torch.jit.cuda.Event(True, False, False)
 
             e_tik.record(s)
             tensor1 = torch.rand(1000000000, 1000000000, device="cuda")
-            with torch.jit.cuda.stream(s):
+            with torch.cuda.stream(s):
                 tensor = torch.mm(tensor1, tensor1).to("cuda")
             s.record_event(e_tok)
             e_tok.synchronize()
@@ -397,7 +397,7 @@ class TestCUDA(JitTestCase):
         # test/test_cuda.py
         @torch.jit.script
         def test_event_wait() -> float:
-            device_index = torch.cuda._current_device()
+            device_index = torch.cuda.current_device()
             s0 = torch.cuda.current_stream(device_index)
             s1 = torch.jit.cuda.Stream(device_index, 0)
             e_tik = torch.jit.cuda.Event(True, True, False)
@@ -405,12 +405,12 @@ class TestCUDA(JitTestCase):
 
             e_tik.record(s0)
             tensor1 = torch.rand(1000000000, 1000000000, device="cuda")
-            with torch.jit.cuda.stream(s0):
+            with torch.cuda.stream(s0):
                 tensor2 = torch.mm(tensor1, tensor1).cuda()
             e_sync = torch.jit.cuda.Event(True, False, False)
             e_sync.record(torch.cuda.current_stream(device_index))
             e_sync.wait(s1)
-            with torch.jit.cuda.stream(s1):
+            with torch.cuda.stream(s1):
                 tensor3 = torch.rand(1000000000, 1000000000, device="cuda")
                 tensor4 = torch.mm(tensor3, tensor3).cuda()
             s1.synchronize()
@@ -431,7 +431,7 @@ class TestCUDA(JitTestCase):
         def test_wait_event():
             d1 = torch.device('cuda:1')
 
-            with torch.jit.cuda.device(d1):
+            with torch.cuda.device(d1):
                 s0 = torch.cuda.current_stream(1)
                 tensor1 = torch.rand(1000000000, 1000000000, device="cuda")
                 tensor2 = torch.mm(tensor1, tensor1).to("cuda")
@@ -449,12 +449,12 @@ class TestCUDA(JitTestCase):
         def test_save_load(self):
             class Model(torch.nn.Module):
                 def forward(self):
-                    device_index = torch.cuda._current_device()
+                    device_index = torch.cuda.current_device()
                     s = torch.jit.cuda.Stream(device_index, 0)
                     a = torch.rand(3, 4, device="cuda")
                     b = torch.rand(3, 4, device="cuda")
 
-                    with torch.jit.cuda.stream(s):
+                    with torch.cuda.stream(s):
                         is_stream_s = torch.cuda.current_stream(s.device_index()).id() == s.id()
                         c = torch.cat((a, b), 0).cuda()
                     s.synchronize()
