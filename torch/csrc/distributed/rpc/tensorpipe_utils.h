@@ -7,9 +7,9 @@
 
 #ifdef USE_CUDA_NOT_ROCM
 #include <ATen/cuda/CUDAEvent.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>
-#include <c10/cuda/CUDACachingAllocator.h>
 #endif
 
 namespace tensorpipe {
@@ -24,11 +24,9 @@ namespace rpc {
 using at::cuda::CUDAStream;
 #endif
 
-
 // A general device context class for both CPU and CUDA. If CUDA is not
 // available, all CUDA-related methods will be no-ops.
 struct LazyStreamContext {
-
   LazyStreamContext(const LazyStreamContext& other) = delete;
   LazyStreamContext(LazyStreamContext&& other) = delete;
   LazyStreamContext& operator=(const LazyStreamContext& rhs) = delete;
@@ -36,7 +34,7 @@ struct LazyStreamContext {
 
   LazyStreamContext() {}
   virtual void blockCurrentStreams() {}
-  virtual void waitForCurrentStreams(const std::vector<torch::Tensor>&  = {}) {}
+  virtual void waitForCurrentStreams(const std::vector<torch::Tensor>& = {}) {}
 
 #ifdef USE_CUDA_NOT_ROCM
   virtual std::vector<CUDAStream> getReservedStreams() const {
@@ -51,7 +49,6 @@ struct LazyStreamContext {
         ", but torch is not built with CUDA"));
   }
 #endif
-
 };
 
 #ifndef USE_CUDA_NOT_ROCM
@@ -65,14 +62,13 @@ inline std::shared_ptr<LazyStreamContext> createLazyStreamContext() {
 
 // CUDA is available. Implement CUDA-related operations.
 struct CudaLazyStreamContext : public LazyStreamContext {
-
   using LazyStreamContext::LazyStreamContext;
 
   // let current streams wait for streams in this context.
   void blockCurrentStreams() override;
 
   // let streams in this context wiat for current streams.
-  void waitForCurrentStreams(const std::vector<torch::Tensor>&  = {}) override;
+  void waitForCurrentStreams(const std::vector<torch::Tensor>& = {}) override;
   std::vector<CUDAStream> getReservedStreams() const override;
   CUDAStream getStream(c10::DeviceIndex index) override;
 
@@ -125,8 +121,7 @@ tensorpipeSerialize(
 // by the returned holder, which must be kept alive until the asynchronous read
 // has finished. Pointers to these buffers will be stored in-place in the
 // TensorPipe message.
-TORCH_API TensorpipeReadBuffers
-tensorpipeAllocate(
+TORCH_API TensorpipeReadBuffers tensorpipeAllocate(
     tensorpipe::Message& tpMessage,
     const std::shared_ptr<LazyStreamContext>& ctx =
         std::make_shared<LazyStreamContext>());

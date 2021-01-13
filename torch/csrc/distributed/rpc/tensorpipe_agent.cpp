@@ -216,8 +216,7 @@ struct MultiStreamGuard {
   MultiStreamGuard& operator=(MultiStreamGuard&& rhs) = delete;
 
 #ifndef USE_CUDA_NOT_ROCM
-  MultiStreamGuard(
-      const std::shared_ptr<LazyStreamContext>&  /* unused */) {};
+  MultiStreamGuard(const std::shared_ptr<LazyStreamContext>& /* unused */){};
 #else
   MultiStreamGuard(const std::shared_ptr<LazyStreamContext>& ctx)
       : guard(ctx->getReservedStreams()) {}
@@ -458,7 +457,7 @@ void TensorPipeAgent::pipeRead(
     pipe->read(
         std::move(tpMessage),
         [tpBuffers{
-            std::make_shared<TensorpipeReadBuffers>(std::move(tpBuffers))},
+             std::make_shared<TensorpipeReadBuffers>(std::move(tpBuffers))},
          fn{std::move(fn)},
          ctx{std::move(ctx)}](
             const tensorpipe::Error& error,
@@ -490,9 +489,8 @@ void TensorPipeAgent::pipeWrite(
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers tpBuffers;
 
-
-  std::tie(tpMessage, tpBuffers) = tensorpipeSerialize(
-      std::move(rpcMessage), std::move(devices), ctx);
+  std::tie(tpMessage, tpBuffers) =
+      tensorpipeSerialize(std::move(rpcMessage), std::move(devices), ctx);
 
   pipe->write(
       std::move(tpMessage),
@@ -537,8 +535,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
         std::move(responseMessage),
         std::move(devices),
         std::move(ctx),
-        [this, pipe, messageId](
-            const tensorpipe::Error& error) {
+        [this, pipe, messageId](const tensorpipe::Error& error) {
           if (error) {
             LOG(WARNING)
                 << "RPC agent for " << workerInfo_.name_
@@ -557,7 +554,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
         pipe,
         createExceptionResponse(
             futureResponseMessage->tryRetrieveErrorMessage(), messageId),
-        /* devices */{},
+        /* devices */ {},
         std::move(ctx),
         [this, pipe, messageId](const tensorpipe::Error& error) {
           if (error) {
@@ -640,17 +637,16 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
           } else {
             // Not complete yet
             increaseCallCount(serverActiveAsyncCalls_);
-            futureResponseMessage->addCallback(
-                [this,
-                 pipe,
-                 futureResponseMessage,
-                 messageId,
-                 ctx{std::move(ctx)}]() mutable {
-                  decreaseCallCount(serverActiveCalls_);
-                  decreaseCallCount(serverActiveAsyncCalls_);
-                  sendCompletedResponseMessage(
-                      pipe, futureResponseMessage, messageId, std::move(ctx));
-                });
+            futureResponseMessage->addCallback([this,
+                                                pipe,
+                                                futureResponseMessage,
+                                                messageId,
+                                                ctx{std::move(ctx)}]() mutable {
+              decreaseCallCount(serverActiveCalls_);
+              decreaseCallCount(serverActiveAsyncCalls_);
+              sendCompletedResponseMessage(
+                  pipe, futureResponseMessage, messageId, std::move(ctx));
+            });
           }
 
           VLOG(1) << "RPC agent for " << workerInfo_.name_

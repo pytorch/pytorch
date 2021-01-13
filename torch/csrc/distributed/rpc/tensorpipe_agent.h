@@ -164,7 +164,6 @@ struct AggregatedNetworkData {
   uint64_t totalErrors{0};
 };
 
-
 // TensorPipeAgent leverages TensorPipe (https://github.com/pytorch/tensorpipe)
 // to transparently move tensors and payloads through the fastest available
 // transport or channel. It acts like a hybrid RPC transport, providing shared
@@ -306,8 +305,7 @@ class TensorPipeAgent : public RpcAgent {
     AtomicJitFuture(bool noCuda = true) {
 #ifdef USE_CUDA_NOT_ROCM
       if (!noCuda) {
-        jitFuture =
-            std::make_shared<RpcCUDAFuture>(at::AnyClassType::get());
+        jitFuture = std::make_shared<RpcCUDAFuture>(at::AnyClassType::get());
       } else {
 #else
       {
