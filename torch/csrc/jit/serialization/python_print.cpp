@@ -1365,8 +1365,8 @@ struct PythonPrintImpl {
             body_ << "\"" << hook->name() << "\", ";
           }
           body_ << "]\n";
-#endif
         }
+#endif
       }
 
       for (size_t i = 0; i < numAttrs; i++) {
@@ -1414,9 +1414,6 @@ struct PythonPrintImpl {
         printFunction(*method);
       }
 #ifndef FBCODE_CAFFE2
-      // TODO Change to print hooks outside of module if same hook
-      // is being used on multiple modules and serialzed file size
-      // is bloating because of it
       std::set<std::string> already_printed;
       for (auto& hook : classType->getForwardHooks()) {
         if (already_printed.count(hook->name()) == 0) {
