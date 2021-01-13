@@ -4744,13 +4744,18 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         numpy_dtype = dtype if dtype != torch.bfloat16 else torch.float32
 
         is_supported = True
+        is_cuda_bfloat = False
         if dtype == torch.bfloat16 and self.device_type == 'cuda':
             is_supported = TEST_WITH_ROCM or (CUDA11 and SM53)
+            is_cuda_bfloat = True
 
         if not is_supported:
-            b1 = torch.randn(num_batches, M, N, device=device).to(dtype)
-            b2 = torch.randn(num_batches, N, O, device=device).to(dtype)
-            self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|Ampere", lambda: torch.bmm(b1, b2))
+            if not is_cuda_bfloat:
+                # Bfloat16 on CUDA is partially supported depending on architecture
+                # So we skip asserting "not supported"
+                b1 = torch.randn(num_batches, M, N, device=device).to(dtype)
+                b2 = torch.randn(num_batches, N, O, device=device).to(dtype)
+                self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED", lambda: torch.bmm(b1, b2))
             return
 
         def invert_perm(p):
@@ -4917,17 +4922,22 @@ else:
         M, N, O = 2, 3, 4
 
         is_supported = True
+        is_cuda_bfloat = False
         if dtype == torch.bfloat16:
             if self.device_type == 'cpu':
                 self.precision = 1  # 43 vs 43.75
             else:
+                is_cuda_bfloat = True
                 is_supported = TEST_WITH_ROCM or (CUDA11 and SM53)
 
         if not is_supported:
-            b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
-            b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
-            t = make_tensor((M, O), device, dtype, low=-1, high=1)
-            self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|Ampere", lambda: torch.addbmm(t, b1, b2))
+            if not is_cuda_bfloat:
+                # Bfloat16 on CUDA is partially supported depending on architecture
+                # So we skip asserting "not supported"
+                b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
+                b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
+                t = make_tensor((M, O), device, dtype, low=-1, high=1)
+                self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED", lambda: torch.addbmm(t, b1, b2))
             return
 
         def invert_perm(p):
@@ -4983,14 +4993,19 @@ else:
         M, N, O = 12, 8, 5
 
         is_supported = True
+        is_cuda_bfloat = False
         if dtype == torch.bfloat16 and self.device_type == 'cuda':
             is_supported = TEST_WITH_ROCM or (CUDA11 and SM53)
+            is_cuda_bfloat = True
 
         if not is_supported:
-            b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
-            b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
-            t = make_tensor((num_batches, M, O), device, dtype, low=-1, high=1)
-            self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|Ampere", lambda: torch.baddbmm(t, b1, b2))
+            if not is_cuda_bfloat:
+                # Bfloat16 on CUDA is partially supported depending on architecture
+                # So we skip asserting "not supported"
+                b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
+                b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
+                t = make_tensor((num_batches, M, O), device, dtype, low=-1, high=1)
+                self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED", lambda: torch.baddbmm(t, b1, b2))
             return
 
         def invert_perm(p):
