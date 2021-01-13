@@ -57,7 +57,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       # namely CONDA_MKL_INTERFACE_LAYER_BACKUP from libblas so let's just ignore unbound variables when
       # it comes to the conda installation commands
       set +u
-      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "cudatoolkit=\${cu_ver}"
+      CONDA_MKL_INTERFACE_LAYER_BACKUP="" retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "cudatoolkit=\${cu_ver}"
     )
   fi
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
