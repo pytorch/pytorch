@@ -453,7 +453,7 @@ def _is_builtin_or_stdlib_module(module: types.ModuleType) -> bool:
 _MOCK_IMPL = """\
 from _mock import MockedObject
 def __getattr__(attr: str):
-    return MockedObject(__name__ + '.' + attr)
+    return MockedObject(__name__ + '.' + attr, _suppress_err=True)
 """
 
 def _read_file(filename: str) -> str:
