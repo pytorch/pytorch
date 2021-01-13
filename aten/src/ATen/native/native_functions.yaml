@@ -5951,12 +5951,6 @@
     CPU: legacy::cpu::_th_geqrf
     CUDA: legacy::cuda::_th_geqrf
 
-- func: _orgqr_out_helper_(Tensor(a!) self, Tensor tau, Tensor(b!) infos, int n_columns) -> Tensor(a!)
-  use_c10_dispatcher: full
-  variants: function
-  dispatch:
-    CPU: _orgqr_out_helper_cpu
-
 - func: orgqr.out(Tensor self, Tensor input2, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: full
   dispatch:

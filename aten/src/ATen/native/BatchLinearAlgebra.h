@@ -21,4 +21,10 @@ using eig_fn = std::tuple<Tensor, Tensor> (*)(const Tensor&, bool&);
 
 DECLARE_DISPATCH(eig_fn, eig_stub);
 
+template <typename scalar_t>
+void apply_orgqr(Tensor& self, const Tensor& tau, Tensor& infos, int64_t n_columns);
+
+using orgqr_fn = Tensor& (*)(Tensor& /*result*/, const Tensor& /*tau*/, Tensor& /*infos*/, int64_t /*n_columns*/);
+DECLARE_DISPATCH(orgqr_fn, orgqr_stub);
+
 }} // namespace at::native

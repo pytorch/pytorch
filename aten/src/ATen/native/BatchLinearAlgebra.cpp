@@ -982,13 +982,12 @@ static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
 #endif
 }
 
-
 /*
   The orgqr function allows reconstruction of an orthogonal (or unitary) matrix Q,
   from a sequence of elementary reflectors, such as produced by the geqrf function.
 
   Args:
-  * `input` - Tensor with the directions of the elementary reflectors below the diagonal,
+  * `self` - Tensor with the directions of the elementary reflectors below the diagonal,
               it will be overwritten with the result
   * `tau` - Tensor containing the magnitudes of the elementary reflectors
   * `infos` - Tensor to store LAPACK's error codes
@@ -996,10 +995,11 @@ static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
 
   For further details, please see the LAPACK documentation for ORGQR and UNGQR.
 */
-template<typename scalar_t>
-static void apply_orgqr(Tensor& self, const Tensor& tau, Tensor& infos, int64_t n_columns) {
+template <typename scalar_t>
+void apply_orgqr(Tensor& self, const Tensor& tau, Tensor& infos, int64_t n_columns) {
 #ifndef USE_LAPACK
-  TORCH_CHECK(false, "orgqr: LAPACK library not found in compilation");
+  TORCH_CHECK(false, "Calling torch.orgqr on a CPU tensor requires compiling ",
+    "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
@@ -1132,13 +1132,7 @@ std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, boo
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ orgqr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// This is a type dispatching helper function for 'apply_orgqr'
-Tensor& _orgqr_out_helper_cpu(Tensor &result, const Tensor& tau, Tensor& infos, int64_t n_columns) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "orgqr_out_cpu", [&]{
-    apply_orgqr<scalar_t>(result, tau, infos, n_columns);
-  });
-  return result;
-}
+DEFINE_DISPATCH(orgqr_stub);
 
 /*
   The orgqr function allows reconstruction of an orthogonal (or unitary) matrix Q,
@@ -1177,6 +1171,8 @@ Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, T
 
   // result tensor must be in batched column major order (Fortran contiguous)
   TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
+
+  // orgqr_stub (apply_orgqr) performs calculations in-place and result must be a copy of input
   result.copy_(input);
 
   // infos must be contiguous
@@ -1184,7 +1180,7 @@ Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, T
   infos.fill_(0);
 
   auto n = input.size(-1);
-  result = at::_orgqr_out_helper_(result, tau, infos, n);
+  result = orgqr_stub(result.device().type(), result, tau, infos, n);
   return result;
 }
 
