@@ -448,16 +448,42 @@ class TestMkldnn(TestCase):
         C = torch.randint(3, 100, (1,)).item()
         x = torch.randn(N, C, 35, 45, dtype=torch.float32) * 10
 
-        # TODO: support training
-        for train in [False]:
-            bn = torch.nn.BatchNorm2d(C).float().train(train)
-            mkldnn_bn = mkldnn_utils.to_mkldnn(copy.deepcopy(bn))
-            self.assertEqual(
-                bn(x),
-                mkldnn_bn(x.to_mkldnn()).to_dense())
-
-            self._test_serialization(mkldnn_bn, (x.to_mkldnn(),))
-            self._test_tracing(mkldnn_bn, (x.to_mkldnn(),))
+        for train in [True, False]:
+            # TODO: support none affine
+            for affine in [True]:
+                for track_running_stats in [True, False]:
+                    bn = torch.nn.BatchNorm2d(
+                        num_features=C,
+                        affine=affine,
+                        track_running_stats=track_running_stats).float().train(train)
+                    if train:
+                        mkldnn_bn = copy.deepcopy(bn)
+                    elif track_running_stats and not train:
+                        mkldnn_bn = mkldnn_utils.to_mkldnn(copy.deepcopy(bn))
+                    x1 = x.clone()
+                    x2 = x.clone().to_mkldnn()
+                    if train:
+                        x1.requires_grad_()
+                        x2.requires_grad_()
+                    if train or track_running_stats:
+                        y1 = bn(x1)
+                        y2 = mkldnn_bn(x2).to_dense()
+                        self.assertEqual(y1, y2)
+                    if train:
+                        loss1 = y1.sum()
+                        loss2 = y2.sum()
+                        loss1.backward()
+                        loss2.backward()
+                        self.assertEqual(x1.grad, x2.grad.to_dense())
+                        self.assertEqual(bn.weight.grad, mkldnn_bn.weight.grad, rtol=1e-3, atol=1e-3)
+                        if track_running_stats:
+                            self.assertEqual(bn.running_mean, mkldnn_bn.running_mean)
+                            self.assertEqual(bn.running_var, mkldnn_bn.running_var)
+                    elif not train and track_running_stats:
+                        self._test_serialization(mkldnn_bn, (x.to_mkldnn(),))
+                        self._test_tracing(mkldnn_bn, (x.to_mkldnn(),))
+                        self.assertEqual(bn.running_mean, mkldnn_bn.running_mean.to_dense())
+                        self.assertEqual(bn.running_var, mkldnn_bn.running_var.to_dense())
 
     def test_batch_norm3d(self):
         N = torch.randint(3, 10, (1,)).item()
