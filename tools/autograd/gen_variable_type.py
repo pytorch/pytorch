@@ -648,13 +648,17 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 stmts.append('}')
         return stmts
 
-    def emit_dispatch_call(f: NativeFunction, input_base: str, unpacked_args: Sequence[str]) -> str:
+    def emit_dispatch_call(f: NativeFunction, input_base: str, unpacked_args: Sequence[str], *, mask_out_autograd: bool) -> str:
         """ Dispatch call via function in a namespace or method on Tensor."""
         dispatcher_sig = DispatcherSignature.from_schema(f.func)
         dispatcher_exprs = dispatcher_sig.exprs()
         # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.
         # See Note [Plumbing Keys Through The Dispatcher] for details.
-        dispatch_key_set = 'ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther)'
+        if mask_out_autograd:
+            dispatch_key_set = 'ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther)'
+        else:
+            # view functions need to be able to re-run autograd
+            dispatch_key_set = 'ks'
 
         ret_and_arg_types = ', '.join([dispatcher_sig.returns_type()] + [a.type.cpp_type() for a in dispatcher_exprs])
         redispatch_args = ', '.join(['op', dispatch_key_set] + unpacked_args)
@@ -702,7 +706,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         dispatcher_exprs = dispatcher_sig.exprs()
         type_signature = f"{dispatcher_sig.returns_type()} ({', '.join([a.type.cpp_type() for a in dispatcher_exprs])})"
 
-        replay_view_call = emit_dispatch_call(f, input_base, updated_unpacked_args)
+        replay_view_call = emit_dispatch_call(f, input_base, updated_unpacked_args, mask_out_autograd=False)
         replay_view_func += REPLAY_VIEW_LAMBDA_FUNC.substitute(
             operator_name=operator_name,
             overload_name=overload_name,
@@ -802,7 +806,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         # in are now Variables.
         # See NOTE [ Treating Variables as non-Variables in type dispatch ] for details.
         unpacked_args = [b.name for b in unpacked_bindings]
-        base_type_call = emit_dispatch_call(f, 'self_', unpacked_args)
+        base_type_call = emit_dispatch_call(f, 'self_', unpacked_args, mask_out_autograd=True)
 
         operator_name = f.func.name.name
         overload_name = f.func.name.overload_name
