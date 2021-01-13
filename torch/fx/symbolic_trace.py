@@ -1,13 +1,13 @@
 import inspect
 from types import CodeType, FunctionType
-from typing import Any, Dict, Optional, Tuple, List, Callable, Union
+from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
 import torch
 from torch._C import ScriptObject  # type: ignore
 
-from .node import Argument
+from .node import Argument, map_aggregate
 from .graph import Graph
 from .graph_module import GraphModule
-from .proxy import TracerBase
+from .proxy import TracerBase, Proxy
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -88,9 +88,9 @@ class Tracer(TracerBase):
                     return self.create_node('get_attr', n, (), {})
             raise NameError('parameter is not a member of this module')
         elif isinstance(a, torch.Tensor):
-            for n, p in self.root.named_buffers():
-                if a is p:
-                    return self.create_node('get_attr', n, (), {})
+            for n_, p_ in self.root.named_buffers():
+                if a is p_:
+                    return self.create_node('get_attr', n_, (), {})
 
         # For NamedTuple instances that appear literally as args, we emit
         # a node to construct the NamedTuple and use that Node as the argument.
@@ -307,13 +307,133 @@ class Tracer(TracerBase):
             # Seems to be a mypy limitation: https://github.com/python/mypy/issues/2427
             torch.nn.Module.__getattr__ = module_getattr_wrapper  # type: ignore
             torch.nn.Module.__call__ = module_call_wrapper
+
+            orig_fns = _patch_wrapped_functions()
+
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                              type_expr=fn.__annotations__.get('return', None))
         finally:
+            _unpatch_wrapped_functions(orig_fns)
             torch.nn.Module.__call__ = orig_call
             torch.nn.Module.__getattr__ = orig_getattr  # type: ignore
         return self.graph
 
+# List of pairs of (global dict, function name) functions
+# to patch for the purposes of the wrap() API.
+_wrapped_fns_to_patch : List[Tuple[dict, str]] = []
+
+def _create_wrapped_func(orig_fn):
+    def wrapped(*args, **kwargs):
+        """
+        Given an closed-over ``orig_function`` to invoke, search the args and kwargs for
+        a Proxy object. If there is one, emit a ``call_function`` node to preserve the
+        call to this leaf function directly. Otherwise, just return the results of
+        this function call, as this function is not being traced.
+        """
+        proxy = None
+
+        def find_proxy(x):
+            nonlocal proxy
+            if isinstance(x, Proxy):
+                proxy = x
+
+        map_aggregate(args, find_proxy)
+        map_aggregate(kwargs, find_proxy)
+
+        if proxy is not None:
+            return proxy.tracer.create_proxy('call_function', orig_fn, args, kwargs)
+        else:
+            return orig_fn(*args, **kwargs)
+
+    return wrapped
+
+class PatchedFn(NamedTuple):
+    frame_dict : Dict[str, Any]
+    fn_name : str
+    orig_fn : Any
+
+def _patch_wrapped_functions() -> List[PatchedFn]:
+    """
+    Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
+    the listed global functions in the `_create_wrapped_func` wrapper. Returns
+    a list of PatchedFn, which is a record specifiying a single function
+    entry that was patched and contains the original function for unpatching
+    """
+    orig_fns : List[PatchedFn] = []
+    # Set to deduplicate entries. Wrapping a function multiple times would
+    # be an error, since it would cause a `call_function` node for the
+    # wrapper to be emitted rather than the actual underlying function
+    #
+    # Use id(frame_dict) as a hashable identity here since none of the
+    # frame dicts should be destroyed during symtracing
+    processed_entries : Set[Tuple[int, str]] = set()
+
+    for frame_dict, name in _wrapped_fns_to_patch:
+        if (id(frame_dict), name) in processed_entries:
+            continue
+        orig_fn = frame_dict[name]
+        orig_fns.append(PatchedFn(frame_dict, name, orig_fn))
+
+        frame_dict[name] = _create_wrapped_func(orig_fn)
+
+        processed_entries.add((id(frame_dict), name))
+
+    return orig_fns
+
+def _unpatch_wrapped_functions(orig_fns : List[PatchedFn]):
+    """
+    Given the ``orig_fns`` dict that ``_patch_wrapped_functions``,
+    replace all of the global functions with the original global functions
+    that were there before symbolic tracing.
+    """
+    for frame_dict, fn_name, orig_fn in orig_fns:
+        frame_dict[fn_name] = orig_fn
+
+def wrap(fn_or_name : Union[str, Callable]):
+    """
+    This function can be called at global scope in a module to cause
+    references to the global function secified by `fn_name` to use
+    them in FX.
+
+        # foo/bar/baz.py
+        def my_custom_function(x, y):
+            return x * x + y * y
+
+        torch.fx.wrap('my_custom_function')
+
+        def fn_to_be_traced(x, y):
+            # When symbolic tracing, the below call to my_custom_function will be inserted into
+            # the graph rather than tracing it.
+            return my_custom_function(x, y)
+
+    Args:
+
+        fn_name (Union[str, Callable]): The function or name of the global function to insert into the
+            graph when it's called
+    """
+    if callable(fn_or_name):
+        fn_name = fn_or_name.__code__.co_name
+    elif isinstance(fn_or_name, str):
+        fn_name = fn_or_name
+    else:
+        raise RuntimeError('Unsupported type for global function! Must be either a callable or '
+                           'string name')
+
+    if hasattr(fn_or_name, '__code__'):
+        assert not isinstance(fn_or_name, str)  # to make mypy happy
+        fn_name = fn_or_name.__code__.co_name
+    else:
+        assert isinstance(fn_or_name, str), "fn_or_name must be a global function or string name"
+        fn_name = fn_or_name
+
+    currentframe = inspect.currentframe()
+    assert currentframe is not None
+    f = currentframe.f_back
+    assert f is not None
+    if f.f_code.co_name != '<module>':
+        raise NotImplementedError('wrap must be called at the top level of a module')
+
+    _wrapped_fns_to_patch.append((f.f_globals, fn_name))
 
 def symbolic_trace(root : Union[torch.nn.Module, Callable]) -> GraphModule:
     """Symbolic tracing API
