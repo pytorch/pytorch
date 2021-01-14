@@ -248,7 +248,7 @@ void SmoothL1LossImpl::pretty_print(std::ostream& stream) const {
 }
 
 Tensor SmoothL1LossImpl::forward(const Tensor& input, const Tensor& target) {
-  return F::detail::smooth_l1_loss(input, target, options.reduction());
+  return F::detail::smooth_l1_loss(input, target, options.reduction(), options.beta());
 }
 
 // ============================================================================
