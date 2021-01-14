@@ -14,6 +14,9 @@
 #include <torch/csrc/jit/runtime/operator_options.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
+#include "ATen/core/interned_strings.h"
+#include "jit/passes/constant_propagation.h"
+#include <torch/csrc/jit/passes/peephole.h>
 
 namespace torch {
 namespace jit {
@@ -471,6 +474,9 @@ class TensorExprFuser {
     prepareFusionGroupAndGuardOutputs(graph_->block());
     GRAPH_DUMP("After guarding fusion groups: ", graph_);
     removeTensorTypeSpecializations(graph_->block());
+    //
+    // PeepholeOptimize(graph_);
+    // ConstantPropagation(graph_);
     GRAPH_DUMP("After removing tensor type specializations: ", graph_);
   }
 
@@ -952,7 +958,7 @@ class TensorExprFuser {
   }
 #undef REQ
 
-  void guardFusionGroup(Node* fusion_group) {
+  Node* guardFusionGroup(Node* fusion_group) {
     GRAPH_DEBUG("Inserting a typecheck guard for a node", *fusion_group);
     auto subgraph = SubgraphUtils::getSubgraph(fusion_group);
 
@@ -973,7 +979,7 @@ class TensorExprFuser {
       inputs_to_check.push_back(input);
     }
     if (!inputs_to_check.size()) {
-      return;
+      return nullptr;
     }
 
     // Add prim::TypeCheck node
@@ -1043,6 +1049,8 @@ class TensorExprFuser {
     for (Value* output : fusion_group->outputs()) {
       true_block->registerOutput(output);
     }
+
+    return versioning_if;
   }
 
   // TODO: support constant tensors instead of setting them as input
@@ -1066,6 +1074,235 @@ class TensorExprFuser {
     }
   }
 
+  void specializeSizeOnInput(Value* inp, Block* target, std::unordered_map<Value*, Value*>& value_map) {
+    TORCH_INTERNAL_ASSERT(inp->node()->kind() == aten::size || inp->node()->kind() == prim::If);
+    GRAPH_DEBUG("@@@ Looking up aten::size %", getHeader(inp->node()));
+    if (value_map.count(inp) != 0) {
+      return;
+    }
+
+    if (inp->node()->kind() == aten::size) {
+      auto size_input = inp->node()->input(0);
+      auto new_size =target->owningGraph()->create(aten::size, {value_map.at(size_input)}, 1);
+      auto ns_out = new_size->output();
+      ns_out->setType(ListType::ofInts());
+      target->appendNode(new_size);
+      GRAPH_DEBUG("@@@ Mapping %", inp->debugName(), " to ", getHeader(ns_out->node()));
+      value_map[inp] = ns_out;
+    } else {
+      GRAPH_DEBUG("@@@ Mapping %", inp->debugName(), " to (itlsef) ", getHeader(inp->node()));
+      value_map[inp] = inp;
+    }
+  }
+
+  void splitNode(Node* node, Block* target, std::unordered_map<Value*, Value*>& value_map) {
+      auto g = node->owningGraph();
+      auto value_map_func = [&](Value* v) { 
+        GRAPH_DEBUG("In splitNode, looking up %", v->debugName());
+        return value_map.at(v); 
+      };
+
+      if (node->kind() == aten::_size_if_not_equal) {
+        specializeSizeOnInput(node->input(0), target, value_map);
+        specializeSizeOnInput(node->input(1), target, value_map);
+      }
+
+      auto new_node = g->createClone(node, value_map_func);
+      target->appendNode(new_node);
+      
+      for (size_t i = 0; i < node->outputs().size(); ++i) {
+        GRAPH_DEBUG("%%% Mapping %", node->outputs()[i]->debugName(), " to %", new_node->outputs()[i]);
+        value_map[node->outputs()[i]] = new_node->outputs()[i];
+      }
+  }
+
+
+  void addIdentityMappingForNode(Node* it, std::unordered_map<Value*, Value*>& map, const std::unordered_set<Node*>& sizes_set, Node* if_group) {
+      for (auto inp : it->inputs()) {
+        if (sizes_set.count(inp->node()) == 0 && inp->node() != if_group) {
+            GRAPH_DEBUG("Mapping %", inp->debugName(), " to itself");
+            map[inp] = inp;
+        }
+      }
+  }
+
+  void splitSizes(Node* if_group) {
+
+    if (!if_group) {
+      return;
+    }
+
+    GRAPH_DUMP("Before splitSizes:", if_group->owningGraph());
+    std::vector<Node*> sizes;
+    std::unordered_set<Node*> sizes_set;
+
+    std::unordered_map<Value*, Value*> false_map;
+    std::unordered_map<Value*, Value*> true_map;
+
+    auto is_intermediate_use = [&](const Use& use) {return sizes_set.count(use.user) != 0; };
+
+
+    //
+    auto typecheck = if_group->input(0)->node();
+    for (size_t i = 0; i < typecheck->inputs().size(); i++) {
+      GRAPH_DEBUG("True block: Mapping input %", typecheck->input(i)->debugName(), " to ", typecheck->output(i)->debugName()); 
+      true_map[typecheck->input(i)]=typecheck->output(i);
+      GRAPH_DEBUG("False block: Mapping input %", typecheck->input(i)->debugName(), " to ", typecheck->input(i)->debugName());
+      false_map[typecheck->input(i)]=typecheck->input(i);
+    }
+
+    auto it = if_group->next();
+    while (it->kind() == aten::size || it->kind() == prim::BroadcastSizes || it->kind() == aten::_size_if_not_equal) {
+      GRAPH_DEBUG("Adding ", *it, " to sizes");
+      sizes.push_back(it);
+      sizes_set.insert(it);
+      // addIdentityMappingForNode(it, true_map, sizes_set, if_group);
+      // addIdentityMappingForNode(it, false_map, sizes_set, if_group);
+      it = it->next();
+    }
+  
+    // TODO: check if outputs if its uses are also one of aten::size, etc
+    for (auto ifo : if_group->outputs()) {
+      for (auto u: ifo->uses()) {
+        if (is_intermediate_use(u)) {
+          continue;
+        }
+        auto un = u.user;
+        if (un->kind() == aten::size || un->kind() == prim::BroadcastSizes || un->kind() == aten::_size_if_not_equal) {
+          GRAPH_DEBUG("Trying to move ", un->output()->debugName(), " to ", *it);
+          if (aliasDb_->moveBeforeTopologicallyValid(un, it)) {
+            sizes.push_back(un);
+            sizes_set.insert(un);
+            addIdentityMappingForNode(un, true_map, sizes_set, if_group);
+            addIdentityMappingForNode(un, false_map, sizes_set, if_group);
+          }
+        }
+      }
+    }
+
+    if (sizes.empty()) {
+      return;
+    }
+
+    
+
+
+    auto tb = if_group->blocks()[0];
+    auto fb = if_group->blocks()[1];
+
+    for (size_t i = 0; i < if_group->outputs().size(); i++) {
+      true_map[if_group->output(i)] = tb->outputs()[i];
+      false_map[if_group->output(i)] = fb->outputs()[i];
+    }
+
+    for (size_t i = 0; i < sizes.size(); i++) {
+      GRAPH_DEBUG("Splitting ", *sizes[i]);
+      splitNode(sizes[i], tb, true_map);
+      splitNode(sizes[i], fb, false_map);
+    }
+
+
+    for (int64_t i = sizes.size() - 1; i >= 0; i--) {
+      auto s = sizes[i];
+      auto all_int_uses = std::all_of(s->output(0)->uses().begin(),s->output(0)->uses().end(), is_intermediate_use);
+      if (!all_int_uses) {
+        GRAPH_DEBUG("non_intermediate_use ", *s);
+        tb->registerOutput(true_map[s->output()]);
+        fb->registerOutput(false_map[s->output()]);
+        auto no = if_group->addOutput();
+        no->setType(false_map[s->output()]->type());
+        s->output()->replaceAllUsesWith(no);
+      }
+      s->destroy();
+    }
+
+    GRAPH_DUMP("Before folding: ", if_group->owningGraph());
+
+
+
+
+    // fold sizes in a specialized block
+    // TODO: destroy size nodes
+    GRAPH_DEBUG("Folding aten::size and aten::_size_if_not_equal");
+    for (auto node : tb->nodes()) {
+      if (node->matches("aten::size(Tensor self) -> int[]")) {
+        GRAPH_DEBUG()
+        GRAPH_DEBUG("Looking at input ", node->input()->debugName());
+        if (auto ptt = node->input()->type()->cast<TensorType>()) {
+          if (auto sizes = ptt->sizes().concrete_sizes()) {
+            WithInsertPoint guard(node);
+            IValue ival(sizes);
+            auto const_sizes_val = node->owningGraph()->insertConstant(ival);
+            GRAPH_UPDATE(
+                getHeader(node),
+                "@@@ (x.size()) is replaced with ",
+                getHeader(const_sizes_val->node()));
+            node->output()->replaceAllUsesWith(const_sizes_val);
+          }
+        }
+      } else if (node->kind() == aten::_size_if_not_equal) {
+        GRAPH_DEBUG("$$$ Running runNodeIfInputsAreConstant for ", getHeader(node));
+        auto opt_stack = runNodeIfInputsAreConstant(node);
+        if (opt_stack.has_value()) {
+          auto bool_res = opt_stack->back();
+          WithInsertPoint guard(node);
+          auto bool_res_cnst = node->owningGraph()->insertConstant(bool_res);
+          GRAPH_UPDATE(
+            getHeader(node),
+            "@@@ (x.size()) is replaced with ",
+            getHeader(bool_res_cnst->node()));
+          node->output()->replaceAllUsesWith(bool_res_cnst); 
+        }
+      }
+    }
+
+    // erase unused outputs in fusion group
+    GRAPH_DUMP("Before dead values removal: ", if_group->owningGraph());
+    //std::set<Value*> needed_for_backward;
+    for (int i = if_group->outputs().size() - 1; i >= 0; i--) {
+      GRAPH_DEBUG("%", if_group->output(i)->debugName(), " has ", if_group->output(i)->uses().size(), " uses");
+      if (if_group->output(i)->uses().size() == 0) {
+        GRAPH_DEBUG("Erasing %", if_group->output(i)->debugName());
+        tb->eraseOutput(i);
+        fb->eraseOutput(i);
+        if_group->eraseOutput(i);
+      } else {
+        //needed_for_backward.insert(tb->outputs()[i]);
+      }
+    }
+    GRAPH_DUMP("Removing dead values from tb block: ", if_group->owningGraph());
+    //Note, the direction is important. Otherwise we won't be able to 
+    // remove some aten::size nodes if they are used in subsequent size_if_not_equal
+    for (auto it = tb->nodes().rbegin(); it != tb->nodes().rend(); it++) {
+      if (!it->hasUses()) {
+        GRAPH_DEBUG("Destroying %", it->output(0)->debugName());
+        it.destroyCurrent();
+      }
+    }
+
+    auto fusion_group = *tb->nodes().begin();
+    TORCH_INTERNAL_ASSERT(fusion_group->kind() == prim::TensorExprGroup);
+    for (int i = fusion_group->outputs().size() - 1; i >= 0; i--) {
+      GRAPH_DEBUG("%", fusion_group->output(i)->debugName(), " has ", fusion_group->output(i)->uses().size(), " uses");
+      if (!fusion_group->output(i)->hasUses()) {
+        GRAPH_DEBUG("Erasing %", fusion_group->output(i)->debugName());
+        fusion_group->eraseOutput(i);
+        fusion_group->g(attr::Subgraph)->eraseOutput(i);
+      }
+    }
+
+    // auto fusion_group = *tb->nodes().begin();
+    // TORCH_INTERNAL_ASSERT(fusion_group->kind() == prim::TensorExprGroup);
+    // for (int i = fusion_group->outputs().size() - 1; i >= 0; i--) {
+    //   GRAPH_DEBUG("%", fusion_group->output(i)->debugName(), " has ", fusion_group->output(i)->uses().size(), " uses");
+    //   if (needed_for_backward.count(fusion_group->output(i)) == 0) {
+    //     fusion_group->eraseOutput(i);
+    //     fusion_group->g(attr::Subgraph)->eraseOutput(i);
+    //   }
+    // }
+   
+  }
+
   void prepareFusionGroupAndGuardOutputs(Block* block) {
     std::vector<Node*> fusion_groups;
     for (Node* n : block->nodes()) {
@@ -1077,9 +1314,10 @@ class TensorExprFuser {
       }
     }
     for (Node* fusion_group : fusion_groups) {
-      removeOutputsUsedOnlyInSize(fusion_group);
+      //removeOutputsUsedOnlyInSize(fusion_group);
       liftTensorConstantsFromFusionGroups(fusion_group);
-      guardFusionGroup(fusion_group);
+      auto group_if = guardFusionGroup(fusion_group);
+      splitSizes(group_if);
     }
   }
 
