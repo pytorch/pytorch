@@ -2,7 +2,6 @@
 
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/SparseGCSTensorImpl.h>
 #include <ATen/Parallel.h>
 
 namespace at { namespace sparse {
@@ -19,10 +18,9 @@ using SparseType = Type;
 // the low level setters/getters that were implemented using this.
 //
 // This may be called repeatedly, so make sure it's pretty cheap.
-template <typename SparseType=SparseTensorImpl>
-inline SparseType* get_sparse_impl(const SparseTensor& self) {
+inline SparseTensorImpl* get_sparse_impl(const SparseTensor& self) {
   AT_ASSERTM(self.is_sparse(), "_internal_get_SparseTensorImpl: not a sparse tensor");
-  return static_cast<SparseType*>(self.unsafeGetTensorImpl());
+  return static_cast<SparseTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
 // Takes indices and values and directly puts them into the sparse tensor, no

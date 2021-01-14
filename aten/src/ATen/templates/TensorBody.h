@@ -345,6 +345,9 @@ class TORCH_API Tensor {
   /// Returns if a `Tensor` has sparse backend.
   bool is_sparse() const;
 
+  /// Returns is a `Tensor` has a sparse GCS backend.
+  bool is_sparse_gcs() const;
+
   /// Returns if a `Tensor` is mkldnn tensor.
   bool is_mkldnn() const;
 

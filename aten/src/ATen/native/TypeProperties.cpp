@@ -30,6 +30,10 @@ bool is_sparse(const Tensor& self) {
   return self.is_sparse();
 }
 
+bool is_sparse_gcs(const Tensor& self) {
+  return self.is_sparse_gcs();
+}
+
 bool is_quantized(const Tensor& self) {
   return self.is_quantized();
 }

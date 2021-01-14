@@ -120,6 +120,14 @@ bool is_sparse(Tensor self) {
   return self.is_sparse();
 }
 
+bool Tensor::is_sparse_gcs() const {
+  return impl_->is_sparse_gcs();
+}
+
+bool is_sparse_gcs(Tensor self) {
+  return self.is_sparse_gcs();
+}
+
 bool Tensor::is_mkldnn() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->is_mkldnn();

@@ -5,6 +5,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/SparseGCSTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
 #include <TH/THBlasUtils.h>
@@ -151,7 +152,7 @@ Tensor& add_sparse_gcs_(Tensor& self, const Tensor& other, Scalar alpha) {
 int32_t gcs_to_dense_convert(int32_t iptr, int32_t icol, Tensor& out,
                              const SparseTensor& src) {
   int32_t index = out.storage_offset();
-  auto src_impl = get_sparse_impl<SparseGCSTensorImpl>(src);
+  auto src_impl = get_sparse_gcs_impl(src);
   
   auto strides0 = src_impl->strides0();
   auto strides1 = src_impl->strides1();
@@ -172,9 +173,9 @@ int32_t gcs_to_dense_convert(int32_t iptr, int32_t icol, Tensor& out,
 
 Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
                                      const SparseTensor& src, Scalar alpha) {
-  AT_ASSERT(!out.is_sparse());
-  AT_ASSERT(!dense.is_sparse());
-  AT_ASSERT(src.is_sparse());
+  AT_ASSERT(!out.is_sparse_gcs());
+  AT_ASSERT(!dense.is_sparse_gcs());
+  AT_ASSERT(src.is_sparse_gcs());
 
   AT_ASSERT(!dense.is_cuda());
   TORCH_CHECK(!out.is_cuda(), "add: expected 'out' to be CPU tensor, but got CUDA tensor");
@@ -227,7 +228,7 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
 
 Tensor& add_out_sparse_gcs_cpu(const Tensor& self, const SparseTensor& other, 
                                     Scalar alpha, SparseTensor& out) {
-  if (!self.is_sparse()) {
+  if (!self.is_sparse_gcs()) {
     return add_out_dense_sparse_gcs_cpu(out, self, other, alpha);
   }
   else {

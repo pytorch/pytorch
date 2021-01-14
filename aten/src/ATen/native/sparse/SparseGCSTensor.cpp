@@ -7,7 +7,7 @@
 #include <ATen/SparseGCSTensorImpl.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>
-#include <ATen/SparseTensorUtils.h>
+#include <ATen/SparseGCSTensorUtils.h>
 
 #include <TH/THBlasUtils.h>
 
@@ -43,32 +43,42 @@ Tensor sparse_gcs_tensor(const Tensor& pointers, const Tensor& indices, const Te
   int64_t ptr_size = pointers.numel();
   int64_t redux_size = reduction.numel();
   
-  get_sparse_impl<SparseGCSTensorImpl>(self)->resize_and_clear_(nnz_size, ptr_size, redux_size, size);
-  get_sparse_impl<SparseGCSTensorImpl>(self)->set_member_tensors_unsafe(pointers,
-                                                                        indices, values, reduction);
-    
+  get_sparse_gcs_impl(self)->resize_and_clear_(nnz_size, ptr_size, redux_size, size);
+  get_sparse_gcs_impl(self)->set_member_tensors_unsafe(pointers, indices, values, reduction);
+  
   return self;
 }
 
 // Access members of GCS tensors.
 int64_t _nnz_sparse_gcs(const SparseTensor& self) {
-  return get_sparse_impl<SparseGCSTensorImpl>(self)->nnz();
+  return get_sparse_gcs_impl(self)->nnz();
 }
 
 Tensor values_sparse_gcs(const Tensor& self) {
-  return get_sparse_impl<SparseGCSTensorImpl>(self)->values().alias();      
+  return get_sparse_gcs_impl(self)->values().alias();      
 }
 
 Tensor pointers_sparse_gcs(const Tensor& self) {
-  return get_sparse_impl<SparseGCSTensorImpl>(self)->pointers().alias();      
+  return get_sparse_gcs_impl(self)->pointers().alias();      
 }
 
 Tensor indices_sparse_gcs(const Tensor& self) {
-  return get_sparse_impl<SparseGCSTensorImpl>(self)->indices().alias();      
+  return get_sparse_gcs_impl(self)->indices().alias();      
 }
 
 Tensor reduction_sparse_gcs(const Tensor& self) {
-  return get_sparse_impl<SparseGCSTensorImpl>(self)->reduction().alias();      
+  return get_sparse_gcs_impl(self)->reduction().alias();      
+}
+
+bool _is_same_size_as_sparse_gcs(const SparseTensor& self, const SparseTensor& src) {
+  return self.dim() == src.dim() && self.sizes().equals(src.sizes());
+}
+
+SparseTensor& resize_as_sparse_gcs_(SparseTensor& self, const SparseTensor& src) {
+  if (!_is_same_size_as_sparse_gcs(self, src)) {
+    get_sparse_gcs_impl(self)->resize_as_(src);
+  }
+  return self;
 }
 
 }} // namespace at::native
