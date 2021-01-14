@@ -268,8 +268,6 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
   const int64_t n = self.size(-1);
   const int64_t k = std::min(m, n);
 
-  char jobchar = compute_uv ? (some ? 'S' : 'A') : 'N';
-
   Tensor U_working_copy, S_working_copy, VT_working_copy;
   std::tie(U_working_copy, S_working_copy, VT_working_copy) = \
     _create_U_S_VT(self, some, compute_uv, /* svd_use_cusolver = */ true);
