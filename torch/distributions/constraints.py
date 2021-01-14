@@ -63,8 +63,8 @@ class Constraint(object):
     A constraint object represents a region over which a variable is valid,
     e.g. within which a variable can be optimized.
     """
-    is_discrete = False
-    event_dim = 0
+    is_discrete = False  # Default to continuous.
+    event_dim = 0  # Default to univariate.
 
     def check(self, value):
         """
@@ -82,6 +82,23 @@ class _Dependent(Constraint):
     Placeholder for variables whose support depends on other variables.
     These variables obey no simple coordinate-wise constraints.
     """
+    def __init__(self, *, is_discrete=False, event_dim=0):
+        self.is_discrete = is_discrete
+        self.event_dim = event_dim
+        super().__init__()
+
+    def __call__(self, *, is_discrete=None, event_dim=None):
+        """
+        Support for syntax to customize static attributes::
+
+            constraints.dependent(is_discrete=True, event_dim=1)
+        """
+        if is_discrete is None:
+            is_discrete = self.is_discrete
+        if event_dim is None:
+            event_dim = self.event_dim
+        return _Dependent(is_discrete=is_discrete, event_dim=event_dim)
+
     def check(self, x):
         raise ValueError('Cannot determine validity of dependent constraint')
 
@@ -105,7 +122,20 @@ class _DependentProperty(property, _Dependent):
             def support(self):
                 return constraints.interval(self.low, self.high)
     """
-    pass
+    def __init__(self, fn=None, *, is_discrete=False, event_dim=0):
+        self.is_discrete = is_discrete
+        self.event_dim = event_dim
+        super().__init__(fn)
+
+    def __call__(self, fn):
+        """
+        Support for syntax to customize static attributes::
+
+            @constraints.dependent_dependent(is_discrete=True, event_dim=1)
+            def support(self):
+                ...
+        """
+        return _DependentProperty(fn, is_discrete=self.is_discrete, event_dim=self.event_dim)
 
 
 class _IndependentConstraint(Constraint):
@@ -120,14 +150,15 @@ class _IndependentConstraint(Constraint):
         assert reinterpreted_batch_ndims >= 0
         self.base_constraint = base_constraint
         self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
+        super().__init__()
 
     @property
     def is_discrete(self):
-        return self.base_dist.is_discrete
+        return self.base_constraint.is_discrete
 
     @property
     def event_dim(self):
-        return self.base_dist.event_dim + self.reinterpreted_batch_ndims
+        return self.base_constraint.event_dim + self.reinterpreted_batch_ndims
 
     def check(self, value):
         result = self.base_constraint.check(value)
@@ -168,6 +199,7 @@ class _IntegerInterval(Constraint):
     def __init__(self, lower_bound, upper_bound):
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
+        super().__init__()
 
     def check(self, value):
         return (value % 1 == 0) & (self.lower_bound <= value) & (value <= self.upper_bound)
@@ -186,6 +218,7 @@ class _IntegerLessThan(Constraint):
 
     def __init__(self, upper_bound):
         self.upper_bound = upper_bound
+        super().__init__()
 
     def check(self, value):
         return (value % 1 == 0) & (value <= self.upper_bound)
@@ -204,6 +237,7 @@ class _IntegerGreaterThan(Constraint):
 
     def __init__(self, lower_bound):
         self.lower_bound = lower_bound
+        super().__init__()
 
     def check(self, value):
         return (value % 1 == 0) & (value >= self.lower_bound)
@@ -228,6 +262,7 @@ class _GreaterThan(Constraint):
     """
     def __init__(self, lower_bound):
         self.lower_bound = lower_bound
+        super().__init__()
 
     def check(self, value):
         return self.lower_bound < value
@@ -244,6 +279,7 @@ class _GreaterThanEq(Constraint):
     """
     def __init__(self, lower_bound):
         self.lower_bound = lower_bound
+        super().__init__()
 
     def check(self, value):
         return self.lower_bound <= value
@@ -260,6 +296,7 @@ class _LessThan(Constraint):
     """
     def __init__(self, upper_bound):
         self.upper_bound = upper_bound
+        super().__init__()
 
     def check(self, value):
         return value < self.upper_bound
@@ -277,6 +314,7 @@ class _Interval(Constraint):
     def __init__(self, lower_bound, upper_bound):
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
+        super().__init__()
 
     def check(self, value):
         return (self.lower_bound <= value) & (value <= self.upper_bound)
@@ -294,6 +332,7 @@ class _HalfOpenInterval(Constraint):
     def __init__(self, lower_bound, upper_bound):
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
+        super().__init__()
 
     def check(self, value):
         return (self.lower_bound <= value) & (value < self.upper_bound)
@@ -384,6 +423,7 @@ class _Cat(Constraint):
         self.lengths = list(lengths)
         assert len(self.lengths) == len(self.cseq)
         self.dim = dim
+        super().__init__()
 
     @property
     def is_discrete(self):
@@ -414,6 +454,7 @@ class _Stack(Constraint):
         assert all(isinstance(c, Constraint) for c in cseq)
         self.cseq = list(cseq)
         self.dim = dim
+        super().__init__()
 
     @property
     def is_discrete(self):

@@ -3915,7 +3915,7 @@ class TestConstraints(TestCase):
                 constraint = dist.support
                 message = '{} example {}/{} sample = {}'.format(
                     Dist.__name__, i + 1, len(params), value)
-                ok = constraint.check(value).all()
+                ok = constraint.check(value)
                 assert ok.shape == dist.batch_shape
                 self.assertTrue(ok.all(), msg=message)
 
