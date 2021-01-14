@@ -754,7 +754,7 @@ Tensor& index_fill_(Tensor& self, int64_t dim, const Tensor & index, Scalar valu
   auto numel = index.numel();
 
   if (self_dim > 1) {
-    for (decltype(numel) i = 0; i < numel; i++) {
+    for (int64_t i = 0; i < numel; i++) {
       auto slice_view = self.select(dim, index_data[i]);
       slice_view.fill_(value);
     }
@@ -764,7 +764,7 @@ Tensor& index_fill_(Tensor& self, int64_t dim, const Tensor & index, Scalar valu
           auto self_ptr = self.data_ptr<scalar_t>();
           auto self_stride = self.strides()[0];
           auto self_numel = self.numel();
-          for (decltype(numel) i = 0; i < numel; i++) {
+          for (int64_t i = 0; i < numel; i++) {
             TORCH_CHECK(
                 index_data[i] < self_numel, "index_fill: index ", index_data[i], " out of range");
             *(self_ptr + (self_stride * index_data[i])) = value.to<scalar_t>();
