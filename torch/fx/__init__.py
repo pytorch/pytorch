@@ -1,6 +1,6 @@
 # type: ignore
 r'''
-**This feature is experimental and its stability is not currently guaranteed. Proceed at your own risk**
+**This feature is under a Beta release and its API may change.**
 
 FX is a toolkit for capturing and transforming functional PyTorch programs. It
 consists of GraphModule and a corresponding intermediate representation (IR). When GraphModule is constructed
@@ -32,11 +32,11 @@ The Intermediate Representation centers around a 5-opcode format::
 
     graph(x):
         %linear_weight : [#users=1] = self.linear.weight
-        %add_1 : [#users=1] = call_function[target=<built-in function add>](args = (%x, %linear_weight), kwargs = {})
+        %add_1 : [#users=1] = call_function[target=operator.add](args = (%x, %linear_weight), kwargs = {})
         %linear_1 : [#users=1] = call_module[target=linear](args = (%add_1,), kwargs = {})
         %relu_1 : [#users=1] = call_method[target=relu](args = (%linear_1,), kwargs = {})
-        %sum_1 : [#users=1] = call_function[target=<built-in method sum of type object at 0x7ff2da9dc300>](args = (%relu_1,), kwargs = {dim: -1}) # noqa: B950
-        %topk_1 : [#users=1] = call_function[target=<built-in method topk of type object at 0x7ff2da9dc300>](args = (%sum_1, 3), kwargs = {}) # noqa: B950
+        %sum_1 : [#users=1] = call_function[target=torch.sum](args = (%relu_1,), kwargs = {dim: -1})
+        %topk_1 : [#users=1] = call_function[target=torch.topk](args = (%sum_1, 3), kwargs = {})
         return topk_1
 
 The Node semantics are as follows:
@@ -69,25 +69,19 @@ GraphModule automatically generates Python code for the operations it symbolical
     import torch
     def forward(self, x):
         linear_weight = self.linear.weight
-        add_1 = x + linear_weight
-        x = linear_weight = None
-        linear_1 = self.linear(add_1)
-        add_1 = None
-        relu_1 = linear_1.relu()
-        linear_1 = None
-        sum_1 = torch.sum(relu_1, dim = -1)
-        relu_1 = None
-        topk_1 = torch.topk(sum_1, 3)
-        sum_1 = None
+        add_1 = x + linear_weight;  x = linear_weight = None
+        linear_1 = self.linear(add_1);  add_1 = None
+        relu_1 = linear_1.relu();  linear_1 = None
+        sum_1 = torch.sum(relu_1, dim = -1);  relu_1 = None
+        topk_1 = torch.topk(sum_1, 3);  sum_1 = None
         return topk_1
-        topk_1 = None
 
 Because this code is valid PyTorch code, the resulting ``GraphModule`` can be used in any context another
 ``nn.Module`` can be used, including in TorchScript tracing/compilation.
 '''
 
 from .graph_module import GraphModule
-from .symbolic_trace import symbolic_trace, Tracer
+from .symbolic_trace import symbolic_trace, Tracer, wrap
 from .graph import Graph
 from .node import Node, map_arg
 from .proxy import Proxy, len
