@@ -38,7 +38,7 @@ class Categorical(Distribution):
         logits (Tensor): event log-odds
     """
     arg_constraints = {'probs': constraints.simplex,
-                       'logits': constraints.real}
+                       'logits': constraints.real_vector}
     has_enumerate_support = True
 
     def __init__(self, probs=None, logits=None, validate_args=None):

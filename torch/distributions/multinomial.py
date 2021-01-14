@@ -38,7 +38,7 @@ class Multinomial(Distribution):
         logits (Tensor): event log probabilities
     """
     arg_constraints = {'probs': constraints.simplex,
-                       'logits': constraints.real}
+                       'logits': constraints.real_vector}
     total_count: int
 
     @property

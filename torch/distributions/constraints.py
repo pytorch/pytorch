@@ -7,6 +7,7 @@ The following constraints are implemented:
 - ``constraints.dependent``
 - ``constraints.greater_than(lower_bound)``
 - ``constraints.greater_than_eq(lower_bound)``
+- ``constraints.independent(constraint, reinterpreted_batch_ndims)``
 - ``constraints.integer_interval(lower_bound, upper_bound)``
 - ``constraints.interval(lower_bound, upper_bound)``
 - ``constraints.less_than(upper_bound)``
@@ -14,11 +15,11 @@ The following constraints are implemented:
 - ``constraints.lower_triangular``
 - ``constraints.nonnegative_integer``
 - ``constraints.one_hot``
-- ``constraints.positive``
 - ``constraints.positive_definite``
 - ``constraints.positive_integer``
-- ``constraints.real``
+- ``constraints.positive``
 - ``constraints.real_vector``
+- ``constraints.real``
 - ``constraints.simplex``
 - ``constraints.stack``
 - ``constraints.unit_interval``
@@ -35,6 +36,7 @@ __all__ = [
     'dependent_property',
     'greater_than',
     'greater_than_eq',
+    'independent',
     'integer_interval',
     'interval',
     'half_open_interval',
@@ -62,6 +64,7 @@ class Constraint(object):
     e.g. within which a variable can be optimized.
     """
     is_discrete = False
+    event_dim = 0
 
     def check(self, value):
         """
@@ -105,6 +108,34 @@ class _DependentProperty(property, _Dependent):
     pass
 
 
+class _IndependentConstraint(Constraint):
+    """
+    Wraps a constraint by aggregating over ``reinterpreted_batch_ndims``-many
+    dims in :meth:`check`, so that an event is valid only if all its
+    independent entries are valid.
+    """
+    def __init__(self, base_constraint, reinterpreted_batch_ndims):
+        assert isinstance(base_constraint, Constraint)
+        assert isinstance(reinterpreted_batch_ndims, int)
+        assert reinterpreted_batch_ndims >= 0
+        self.base_constraint = base_constraint
+        self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
+
+    @property
+    def is_discrete(self):
+        return self.base_dist.is_discrete
+
+    @property
+    def event_dim(self):
+        return self.base_dist.event_dim + self.reinterpreted_batch_ndims
+
+    def check(self, value):
+        result = self.base_constraint.check(value)
+        result = result.reshape(result.shape[:result.dim() - self.reinterpreted_batch_ndims] + (-1,))
+        result = result.all(-1)
+        return result
+
+
 class _Boolean(Constraint):
     """
     Constrain to the two values `{0, 1}`.
@@ -120,6 +151,7 @@ class _OneHot(Constraint):
     Constrain to one-hot vectors.
     """
     is_discrete = True
+    event_dim = 1
 
     def check(self, value):
         is_boolean = (value == 0) | (value == 1)
@@ -277,6 +309,8 @@ class _Simplex(Constraint):
     Constrain to the unit simplex in the innermost (rightmost) dimension.
     Specifically: `x >= 0` and `x.sum(-1) == 1`.
     """
+    event_dim = 1
+
     def check(self, value):
         return torch.all(value >= 0, dim=-1) & ((value.sum(-1) - 1).abs() < 1e-6)
 
@@ -285,6 +319,8 @@ class _LowerTriangular(Constraint):
     """
     Constrain to lower-triangular square matrices.
     """
+    event_dim = 2
+
     def check(self, value):
         value_tril = value.tril()
         return (value_tril == value).view(value.shape[:-2] + (-1,)).min(-1)[0]
@@ -294,6 +330,8 @@ class _LowerCholesky(Constraint):
     """
     Constrain to lower-triangular square matrices with positive diagonals.
     """
+    event_dim = 2
+
     def check(self, value):
         value_tril = value.tril()
         lower_triangular = (value_tril == value).view(value.shape[:-2] + (-1,)).min(-1)[0]
@@ -307,6 +345,8 @@ class _CorrCholesky(Constraint):
     Constrain to lower-triangular square matrices with positive diagonals and each
     row vector being of unit length.
     """
+    event_dim = 2
+
     def check(self, value):
         tol = torch.finfo(value.dtype).eps * value.size(-1) * 10  # 10 is an adjustable fudge factor
         row_norm = torch.linalg.norm(value.detach(), dim=-1)
@@ -318,6 +358,8 @@ class _PositiveDefinite(Constraint):
     """
     Constrain to positive-definite matrices.
     """
+    event_dim = 2
+
     def check(self, value):
         matrix_shape = value.shape[-2:]
         batch_shape = value.unsqueeze(0).shape[:-2]
@@ -326,15 +368,6 @@ class _PositiveDefinite(Constraint):
         flattened_value = value.reshape((-1,) + matrix_shape)
         return torch.stack([v.symeig(eigenvectors=False)[0][:1] > 0.0
                             for v in flattened_value]).view(batch_shape)
-
-
-class _RealVector(Constraint):
-    """
-    Constrain to real-valued vectors. This is the same as `constraints.real`,
-    but additionally reduces across the `event_shape` dimension.
-    """
-    def check(self, value):
-        return torch.all(value == value, dim=-1)  # False for NANs.
 
 
 class _Cat(Constraint):
@@ -351,6 +384,14 @@ class _Cat(Constraint):
         self.lengths = list(lengths)
         assert len(self.lengths) == len(self.cseq)
         self.dim = dim
+
+    @property
+    def is_discrete(self):
+        return any(c.is_discrete for c in self.cseq)
+
+    @property
+    def event_dim(self):
+        return max(c.event_dim for c in self.cseq)
 
     def check(self, value):
         assert -value.dim() <= self.dim < value.dim()
@@ -374,22 +415,35 @@ class _Stack(Constraint):
         self.cseq = list(cseq)
         self.dim = dim
 
+    @property
+    def is_discrete(self):
+        return any(c.is_discrete for c in self.cseq)
+
+    @property
+    def event_dim(self):
+        dim = max(c.event_dim for c in self.cseq)
+        if self.dim + dim < 0:
+            dim += 1
+        return dim
+
     def check(self, value):
         assert -value.dim() <= self.dim < value.dim()
         vs = [value.select(self.dim, i) for i in range(value.size(self.dim))]
         return torch.stack([constr.check(v)
                             for v, constr in zip(vs, self.cseq)], self.dim)
 
+
 # Public interface.
 dependent = _Dependent()
 dependent_property = _DependentProperty
+independent = _IndependentConstraint
 boolean = _Boolean()
 one_hot = _OneHot()
 nonnegative_integer = _IntegerGreaterThan(0)
 positive_integer = _IntegerGreaterThan(1)
 integer_interval = _IntegerInterval
 real = _Real()
-real_vector = _RealVector()
+real_vector = independent(real, 1)
 positive = _GreaterThan(0.)
 greater_than = _GreaterThan
 greater_than_eq = _GreaterThanEq
