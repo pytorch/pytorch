@@ -2089,7 +2089,10 @@ class TestLinalg(TestCase):
             # check linalg.svd vs numpy
             expected = np.linalg.svd(np_t, full_matrices, compute_uv=True)
             actual = torch.linalg.svd(t, full_matrices, compute_uv=True)
-            # self.assertEqual(actual, expected)
+            # sign/phase of the singular vectors is not unique and therefore absolute values are compared
+            self.assertEqual(abs(actual[0]), abs(expected[0]))
+            self.assertEqual(actual[1], expected[1])
+            self.assertEqual(abs(actual[2][:t.shape[0], :]), abs(expected[2][:t.shape[0], :]))
             # check linalg.svd vs linalg.svd(out=...)
             out = (torch.empty_like(actual[0]),
                    torch.empty_like(actual[1]),
