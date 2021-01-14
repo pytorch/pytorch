@@ -962,7 +962,7 @@ class HuberLoss(_Loss):
             ``'mean'``: the sum of the output will be divided by the number of
             elements in the output, ``'sum'``: the output will be summed. Default: ``'mean'``
         beta (float, optional): Specifies the threshold at which to change between beta-scaled L1 and L2 loss.
-            The value must be non-negative.  Default: 1.0
+            The value must be positive.  Default: 1.0
 
     Shape:
         - Input: :math:`(N, *)` where :math:`*` means any number of additional dimensions
