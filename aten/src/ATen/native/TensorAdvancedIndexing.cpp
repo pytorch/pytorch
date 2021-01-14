@@ -732,7 +732,7 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
   auto index_sizes = std::vector<int64_t>(self.dim(), 1);
   auto index_strides = std::vector<int64_t>(self.dim(), 0);
   index_sizes[dim] = index.numel();
-  index_strides[dim] = 1;
+  index_strides[dim] = index.stride(0); // `index` is 1d
   auto index_restrided = index.as_strided(
     index_sizes, index_strides);
 
@@ -752,11 +752,15 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
   auto self_restrided = self.as_strided(self_sizes, self_strides);
 
   auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_output(self_restrided)
     .add_input(index_restrided)
     .build();
+
+  auto self_dim_stride = self.stride(dim);
+  auto index_stride = index.stride(0); // `index` is 1d
 
   return self;
 }
