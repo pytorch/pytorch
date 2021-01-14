@@ -2754,7 +2754,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 5, dtype=torch.float)
         self.run_test(ReducedOpModule(), x)
 
-    @skipIfUnsupportedOpsetVersion([13])
     def test_reduced_sum(self):
         return self._test_reduced_ops(op=torch.sum)
 

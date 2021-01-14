@@ -6,6 +6,7 @@ from torch.onnx.symbolic_helper import _block_list_in_opset
 import torch
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args
+from torch.onnx.symbolic_opset9 import overload_by_arg_count, _maybe_cast_reduce_op_input
 
 block_listed_operators = ['embedding_bag']
 
@@ -108,3 +109,35 @@ def unbind(g, self, dim=0, _outputs=None):
 def glu(g, input, dim):
     first, second = g.op('Split', input, dim, outputs=2)
     return g.op('Mul', first, g.op('Sigmoid', second))
+
+
+def _reduce_op_symbolic(onnx_op_name):
+    def symbolic(g, self, dim=None, keepdim=None):
+        self = _maybe_cast_reduce_op_input(g, self)
+        if dim is None:
+            # all-reduce path
+            return g.op(onnx_op_name, self, keepdims_i=0)
+        else:
+            keepdim = sym_help._get_const(keepdim, 'i', 'keepdim')
+            return g.op(onnx_op_name, self, dim, keepdims_i=keepdim)
+    return symbolic
+
+def _reduce_with_dtype(onnx_op, name):
+    symbolic = _reduce_op_symbolic(onnx_op)
+    @overload_by_arg_count
+    def reduce(g, *args, **kwargs):
+        @parse_args('v', 'none')
+        def reduce_nodim(g, self, dtype):
+            if dtype.node().kind() != 'prim::Constant':
+                return _unimplemented(name, "dtype")
+            return symbolic(g, self)
+
+        @parse_args('v', 'v', 'i', 'none')
+        def reduce_dim(g, self, dim, keepdim, dtype):
+            if dtype.node().kind() != 'prim::Constant':
+                return _unimplemented(name, "dtype")
+            return symbolic(g, self, dim, keepdim)
+        return reduce_nodim, reduce_dim
+    return reduce
+
+sum = _reduce_with_dtype('ReduceSum', 'sum')
