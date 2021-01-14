@@ -711,6 +711,56 @@ Tensor index_select_backward(const Tensor& grad, IntArrayRef self_sizes, int64_t
   return at::zeros(self_sizes, grad.options()).index_add_(dim, index, grad);
 }
 
+Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
+  at::NoNamesGuard guard;
+
+  at::assert_no_overlap(self, index);
+  if (at::has_internal_overlap(self) == at::MemOverlap::YES) {
+    TORCH_WARN(
+      "Use of index_fill_ on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[mask] = scalar");
+  }
+
+  dim = at::maybe_wrap_dim(dim, self);
+  TORCH_CHECK(index.dim() == 1, "Index has to be a vector");
+  TORCH_CHECK(0 <= dim && dim < self.dim(),
+    "Indexing dimension ", dim, " is out of bounds for tensor `self`");
+
+  // Prepare `index` for TensorIterator.
+  // It is restrided to be broadcastable over `self` in TensorIterator.
+  auto index_sizes = std::vector<int64_t>(self.dim(), 1);
+  auto index_strides = std::vector<int64_t>(self.dim(), 0);
+  index_sizes[dim] = index.numel();
+  index_strides[dim] = 1;
+  auto index_restrided = index.as_strided(
+    index_sizes, index_strides);
+
+  // Prepare `self` for TensorIterator.
+  // Restride `self` to not advance in dimension `dim`.
+  // We do not use squash_dim here because `index` will
+  // need to advance in this dimension.
+  // Note that self_sizes[dim] is set to index.numel().
+  // This is done so that self_sizes[dim] and index_sizes[dim]
+  // match as required by TensorIterator (input shape should
+  // strictly broadcast over output shape, i.e.
+  // output.shape[i] > input.shape[i] for i in range(dims)).
+  auto self_strides = self.strides().vec();
+  auto self_sizes = self.sizes().vec();
+  self_strides[dim] = 0;
+  self_sizes[dim] = index.numel();
+  auto self_restrided = self.as_strided(self_sizes, self_strides);
+
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .add_output(self_restrided)
+    .add_input(index_restrided)
+    .build();
+
+  return self;
+}
+
 Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   TORCH_CHECK(source.dim() == 0, "index_fill_ only supports a 0-dimensional value tensor, but got tensor "
       "with ", source.dim(), " dimension(s).");
