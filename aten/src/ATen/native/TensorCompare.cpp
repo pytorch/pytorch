@@ -272,7 +272,24 @@ std::vector<Tensor> where(const Tensor& condition) {
 }
 
 Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
+  if(self.dtype() != other.dtype()){
+    if(other.dtype() == ScalarType::Undefined){
+      TORCH_CHECK(false,
+        "expected scalar type ", self.dtype(), " but found ", other.dtype(), "\n"
+        "Reasons this might happen:\n",
+        "  1. You have the code `Tensor tens; tens.data_ptr<int>();` - Tensor type was not ever defined.\n"
+        "  2. Something else"
+      );
+    } else {
+      TORCH_CHECK(false,
+        "expected scalar type ", self.dtype(), " but found ", other.dtype(), "\n"
+        "Reasons this might happen:\n",
+        "  1. You have the code `Tensor tens = at::zeros(2, at::ScalarType::Int); tens.data_ptr<float>();` - Data types don't match.\n"
+        "  2. Something else"
+      );
+    }
+  }
+
   Tensor ret = at::empty(self.sizes(), self.options());
   auto iter = at::TensorIteratorConfig()
     .check_all_same_dtype(false)
