@@ -4407,6 +4407,10 @@ class TestTorchDeviceType(TestCase):
             x_noncontig.index_fill_(0, index, val)
             self.assertEqual(x_noncontig, torch.tensor(expected_noncontig, dtype=dt, device=device))
 
+            x_zero_dim = torch.tensor(0, dtype=dt, device=device)
+            x_zero_dim.index_fill_(0, torch.tensor([0], device=device), 3)
+            self.assertEqual(x_zero_dim, torch.tensor(3, dtype=dt, device=device))
+
             # Verify IndexError is raised
             index[0] = 101
             with self.assertRaises(IndexError):
