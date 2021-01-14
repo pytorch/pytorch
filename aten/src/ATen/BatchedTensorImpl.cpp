@@ -20,14 +20,11 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   const auto public_dims = value_.dim() - bdims_.size();
   const auto value_sizes = value_.sizes();
   const auto value_strides = value_.strides();
-  sizes_.clear();
-  sizes_.reserve(public_dims);
-  strides_.clear();
-  strides_.reserve(public_dims);
+  sizes_and_strides_.resize(public_dims);
   for (int64_t dim = 0; dim < public_dims; dim++) {
     auto actual_dim = actualDim(dim, /*wrap_dim=*/false);
-    sizes_.push_back(value_sizes.at(actual_dim));
-    strides_.push_back(value_strides.at(actual_dim));
+    sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(actual_dim);
+    sizes_and_strides_.stride_at_unchecked(dim) = value_strides.at(actual_dim);
   }
   refresh_numel();
   refresh_contiguous();
@@ -35,7 +32,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
 
 int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
   if (wrap_dim) {
-    const auto ndim = sizes_.size();
+    const auto ndim = sizes_and_strides_.size();
     dim = maybe_wrap_dim(dim, ndim);
   }
   auto is_bdim = createBatchDimBitset(bdims_);

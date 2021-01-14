@@ -68,9 +68,6 @@ void SparseTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
 void SparseTensorImpl::set_storage_offset(int64_t storage_offset) {
   AT_ERROR("sparse tensors do not have set_storage_offset");
 }
-int64_t SparseTensorImpl::dim() const {
-  return sparse_dim_ + dense_dim_;
-}
 bool SparseTensorImpl::has_storage() const {
   return false;
 }

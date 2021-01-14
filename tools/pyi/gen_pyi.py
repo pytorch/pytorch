@@ -306,6 +306,9 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, out: str) -> None:
                                'values: Tensor, reduction: Tensor, shape: Any,'
                                ' *, dtype: Optional[_dtype]=None,'
                               ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
+        '_sparse_coo_tensor_unsafe': ['def _sparse_coo_tensor_unsafe(indices: Tensor, values: Tensor, size: List[int],'
+                                      ' dtype: Optional[_dtype] = None, device: Optional[_device] = None,'
+                                      ' requires_grad: bool = False) -> Tensor: ...'],
         'range': ['def range(start: Number, end: Number,'
                   ' step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...'
                   .format(FACTORY_PARAMS)],
