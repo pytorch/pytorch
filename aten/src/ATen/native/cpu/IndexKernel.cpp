@@ -133,6 +133,7 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
 
 void index_fill_kernel(
   TensorIterator& iter,
+  int64_t self_dim_size,
   int64_t self_dim_stride,
   Scalar source) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,

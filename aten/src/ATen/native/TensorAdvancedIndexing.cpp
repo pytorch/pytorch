@@ -760,10 +760,12 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
     .add_input(index_restrided)
     .build();
 
+  auto self_dim_size = self.size(dim);
   auto self_dim_stride = self.stride(dim);
   index_fill_stub(
     iter.device_type(),
     iter,
+    self_dim_size,
     self_dim_stride,
     source);
 
