@@ -33,18 +33,19 @@ SparseTensor new_gcs_tensor(const TensorOptions& options) {
 
 // TODO: This constructor should probably use an ATen abstract method in order to make
 // autograd dispatch available for the GCS constructor. See the relevant note in native_functions.yaml. 
-Tensor sparse_gcs_tensor(const Tensor& pointers, const Tensor& indices, const Tensor& values,
+Tensor sparse_gcs_tensor(const Tensor& crow_indices, const Tensor& col_indices, 
+                         const Tensor& values,
                          const Tensor& reduction, IntArrayRef size,
                          const TensorOptions& options) {
   TORCH_CHECK(!options.has_layout() || options.layout() == kSparseGCS, "expected sparse GCS layout, but got layout ", options.layout());
   
   SparseTensor self = new_gcs_tensor(options);
   int64_t nnz_size = values.numel();
-  int64_t ptr_size = pointers.numel();
+  int64_t ptr_size = crow_indices.numel();
   int64_t redux_size = reduction.numel();
   
   get_sparse_gcs_impl(self)->resize_and_clear_(nnz_size, ptr_size, redux_size, size);
-  get_sparse_gcs_impl(self)->set_member_tensors_unsafe(pointers, indices, values, reduction);
+  get_sparse_gcs_impl(self)->set_member_tensors_unsafe(crow_indices, col_indices, values, reduction);
   
   return self;
 }
@@ -58,12 +59,12 @@ Tensor values_sparse_gcs(const Tensor& self) {
   return get_sparse_gcs_impl(self)->values().alias();      
 }
 
-Tensor pointers_sparse_gcs(const Tensor& self) {
-  return get_sparse_gcs_impl(self)->pointers().alias();      
+Tensor crow_indices_sparse_gcs(const Tensor& self) {
+  return get_sparse_gcs_impl(self)->crow_indices().alias();      
 }
 
-Tensor indices_sparse_gcs(const Tensor& self) {
-  return get_sparse_gcs_impl(self)->indices().alias();      
+Tensor col_indices_sparse_gcs(const Tensor& self) {
+  return get_sparse_gcs_impl(self)->col_indices().alias();      
 }
 
 Tensor reduction_sparse_gcs(const Tensor& self) {

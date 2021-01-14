@@ -4665,12 +4665,12 @@ in the output mirror changes in ``self``, and the output stays attached
 to the autograd graph. ``cls`` must be a subclass of ``Tensor``.
 """)
 
-add_docstr_all('pointers',
+add_docstr_all('crow_indices',
                r"""
-pointers() -> IntTensor
+crow_indices() -> IntTensor
 
-Returns the pointers of a GCS sparse tensor. These pointers represent
-the flattened row pointers of the N-D tensor that has been flattened
+Returns the crow_indices of a GCS sparse tensor. These crow_indices represent
+the flattened row crow_indices of the N-D tensor that has been flattened
 using reduction as described in 
 https://github.com/Quansight-Labs/rfcs/tree/pearu/rfc0005/RFC0003-sparse-roadmap.
 """)

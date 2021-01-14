@@ -26,7 +26,8 @@ Tensor& addmm_out_sparse_gcs_dense_cpu(
     Scalar beta,
     Scalar alpha) {
   Tensor expand_self;
-  std::tie(expand_self) = expand_size(self, {op1.size(0), op2.size(1)}, "addmm_out_sparse_gcs");
+  std::tie(expand_self) = expand_size(self, {op1.size(0), op2.size(1)}, 
+    "addmm_out_sparse_gcs");
 
   AT_ASSERT(expand_self.device().type() == kCPU);
   TORCH_CHECK(out.device().type() == kCPU, "addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
@@ -49,8 +50,8 @@ Tensor& addmm_out_sparse_gcs_dense_cpu(
 
   // TODO: why does that nnz == 0 condition exist in the COO code?
 
-  auto indices = op1.indices();
-  auto pointers = op1.pointers();
+  auto col_indices = op1.col_indices();
+  auto crow_indices = op1.crow_indices();
   auto values   = op1.values();
     
   AT_DISPATCH_FLOATING_TYPES(
@@ -82,17 +83,17 @@ Tensor& addmm_out_sparse_gcs_dense_cpu(
         scalar_t* dense_ptr = op1.data_ptr<scalar_t>();
         scalar_t* out_ptr = out.data_ptr<scalar_t>();
 
-        auto indices_accessor = indices.accessor<int32_t, 1>();
-        auto pointers_accessor = pointers.accessor<int32_t, 1>();
+        auto col_indices_accessor = col_indices.accessor<int32_t, 1>();
+        auto crow_indices_accessor = crow_indices.accessor<int32_t, 1>();
         auto values_accessor = values.accessor<scalar_t, 1>();
 
-        for (int iptr = 0; iptr < pointers.size(0)-1; ++iptr) {
-          int start_index = pointers_accessor[iptr];
-          int end_index = pointers_accessor[iptr+1];
+        for (int iptr = 0; iptr < crow_indices.size(0)-1; ++iptr) {
+          int start_index = crow_indices_accessor[iptr];
+          int end_index = crow_indices_accessor[iptr+1];
 
           for (int i = start_index; i < end_index; ++i) {
             auto val = values_accessor[i];
-            auto icol = indices_accessor[i];
+            auto icol = col_indices_accessor[i];
 
             THBlas_axpy<scalar_t>(dim_k,
               cast_alpha * val, dense_ptr + icol * dense_stride0, dense_stride1,
@@ -190,8 +191,8 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
               commonDtype, " to output ", out.scalar_type(), " in add operation");
 
   auto src_values = src.values().to(commonDtype);
-  auto src_pointers = src.pointers();
-  auto src_indices = src.indices();
+  auto src_crow_indices = src.crow_indices();
+  auto src_col_indices = src.col_indices();
 
   out.resize_as_(dense);
   Tensor resultBuffer = out;
@@ -205,19 +206,18 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
 
   AT_DISPATCH_ALL_TYPES(commonDtype, "add_out_op2_sparse_gcs", [&] {
     auto values_accessor = src_values.accessor<scalar_t, 1>();
-    auto pointers_accessor = src_pointers.accessor<int32_t, 1>();
-    auto indices_accessor = src_indices.accessor<int32_t, 1>();
+    auto crow_indices_accessor = src_crow_indices.accessor<int32_t, 1>();
+    auto col_indices_accessor = src_col_indices.accessor<int32_t, 1>();
 
     scalar_t *out_ptr = out.data_ptr<scalar_t>();
     scalar_t cast_value = alpha.to<scalar_t>();
 
-    for (int32_t iptr = 0; iptr < src_pointers.size(0)-1; ++iptr) {
-      int32_t start_index = pointers_accessor[iptr];
-      int32_t end_index = pointers_accessor[iptr + 1];
-      int32_t nindices = end_index - start_index;
+    for (int32_t iptr = 0; iptr < src_crow_indices.size(0)-1; ++iptr) {
+      int32_t start_index = crow_indices_accessor[iptr];
+      int32_t end_index = crow_indices_accessor[iptr + 1];
 
       for (int i = start_index; i < end_index; ++i) {
-        auto icol = indices_accessor[i];
+        auto icol = col_indices_accessor[i];
         auto index = gcs_to_dense_convert(iptr, icol, out, src);
         out_ptr[index] += cast_value * values_accessor[i];
       }

@@ -605,7 +605,7 @@ Tensor indexing_tensor_from_data(
 
 Tensor sparse_gcs_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-      "sparse_gcs_tensor.pointers_indices(PyObject* pointers, PyObject* indices, PyObject* values, PyObject* reduction, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"
+      "sparse_gcs_tensor.crow_col_indices(PyObject* crow_indices, PyObject* col_indices, PyObject* values, PyObject* reduction, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)"
   });
   ParsedArgs<10> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -616,10 +616,10 @@ Tensor sparse_gcs_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     const auto inferred_scalar_type = r.scalartypeWithDefault(5, scalar_type);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(8));    
 
-    Tensor pointers =  internal_new_from_data(inferred_dispatch_key, kInt, r.deviceOptional(7), r.pyobject(0),
+    Tensor crow_indices =  internal_new_from_data(inferred_dispatch_key, kInt, r.deviceOptional(7), r.pyobject(0),
                                               /*copy_variables=*/false, /*copy_numpy=*/true,
                                               /*type_inference=*/false);
-    Tensor indices = internal_new_from_data(inferred_dispatch_key, kInt, r.deviceOptional(7), r.pyobject(1),
+    Tensor col_indices = internal_new_from_data(inferred_dispatch_key, kInt, r.deviceOptional(7), r.pyobject(1),
                                               /*copy_variables=*/false, /*copy_numpy=*/true,
                                               /*type_inference=*/false);
     Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(7), r.pyobject(2),
@@ -628,7 +628,7 @@ Tensor sparse_gcs_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     Tensor reduction = internal_new_from_data(inferred_dispatch_key, kInt, r.deviceOptional(7), r.pyobject(3),
                                            /*copy_variables=*/false, /*copy_numpy=*/true,
                                            /*type_inference=*/true);
-    return at::sparse_gcs_tensor(pointers, indices, values, reduction, r.intlist(4),
+    return at::sparse_gcs_tensor(crow_indices, col_indices, values, reduction, r.intlist(4),
                                  options(inferred_dispatch_key, inferred_scalar_type).layout(at::kSparseGCS))
                                  .set_requires_grad(r.toBool(9));
   }

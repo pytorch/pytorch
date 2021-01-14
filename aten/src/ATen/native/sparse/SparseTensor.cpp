@@ -289,10 +289,6 @@ namespace {
   bool _is_same_size_as_sparse(const SparseTensor& self, const SparseTensor& src) {
     return self.sparse_dim() == src.sparse_dim() && self.dense_dim() == src.dense_dim() && self.sizes().equals(src.sizes());
   }
-
-  bool _is_same_size_as_sparse_gcs(const SparseTensor& self, const SparseTensor& src) {
-    return self.dim() == src.dim() && self.sizes().equals(src.sizes());
-  }
 }
 
 // Invoked from native/Resize.cpp (no dynamic dispatch necessary)

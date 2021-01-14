@@ -21,7 +21,7 @@ namespace {
 SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set,
                                          const caffe2::TypeMeta& data_type)
   :   SparseGCSTensorImpl(key_set, data_type
-      , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // pointers
+      , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // crow_indices
       // indices in case of GCS tensor is always a 1D array so need to init size as {1,0}.
       , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // indices
       , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(data_type)) // values
@@ -30,11 +30,11 @@ SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set,
 
 SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set,
                                          const caffe2::TypeMeta& data_type,
-                                         at::Tensor pointers, at::Tensor indices, at::Tensor values,
-                                         at::Tensor reduction)
+                                         at::Tensor crow_indices, at::Tensor col_indices, 
+                                         at::Tensor values, at::Tensor reduction)
   : TensorImpl(key_set, data_type, values.device()),
-    pointers_(std::move(pointers)),
-    indices_(std::move(indices)),
+    crow_indices_(std::move(crow_indices)),
+    col_indices_(std::move(col_indices)),
     values_(std::move(values)),
     reduction_(std::move(reduction)) {}
 
@@ -44,41 +44,45 @@ void SparseGCSTensorImpl::resize_and_clear_(int64_t nnz_size, int64_t ptr_size, 
               "size of the reduction array has to be len(sparse.shape)+1, but got: ", 
               redux_size);
 
-  // call pointers().options() here since the struct contructor calls the tensor constructor
+  // call crow_indices().options() here since the struct contructor calls the tensor constructor
   // with args for device specific init.
-  auto empty_pointers = at::empty(ptr_size, pointers().options());
-  auto empty_indices = at::empty(nnz_size, indices().options());
+  auto empty_crow_indices = at::empty(ptr_size, crow_indices().options());
+  auto empty_col_indices = at::empty(nnz_size, col_indices().options());
   auto empty_values = at::empty(nnz_size, values().options());
   auto empty_reduction = at::empty(redux_size, reduction().options());
 
-  TORCH_CHECK(empty_indices.scalar_type() == kInt,   "empty_indices must be an int32 type, but got: ", empty_indices.dtype());
-  TORCH_CHECK(empty_pointers.scalar_type() == kInt,  "empty_pointers must be int32 type, but got: ",   empty_pointers.dtype());
-  TORCH_CHECK(empty_reduction.scalar_type() == kInt, "empty_reduction must be int32 type, but got: ",  empty_reduction.dtype());
+  TORCH_CHECK(empty_col_indices.scalar_type() == kInt, 
+    "empty_col_indices must be an int32 type, but got: ", empty_col_indices.dtype());
+  TORCH_CHECK(empty_crow_indices.scalar_type() == kInt,
+    "empty_crow_indices must be int32 type, but got: ",   empty_crow_indices.dtype());
+  TORCH_CHECK(empty_reduction.scalar_type() == kInt, 
+    "empty_reduction must be int32 type, but got: ",  empty_reduction.dtype());
 
   // directly set to the member variables. there should be lots of error checking here.
-  pointers_ = empty_pointers;
-  indices_ = empty_indices;
+  crow_indices_ = empty_crow_indices;
+  col_indices_ = empty_col_indices;
   values_ = empty_values;
   reduction_ = empty_reduction;
   sizes_ = size.vec();
 }
 
 void SparseGCSTensorImpl::resize_as_(const Tensor& src) {
-  pointers_ = at::empty_like(src.pointers(), src.pointers().options(), src.pointers().suggest_memory_format());
-  indices_ = at::empty_like(src.indices(), src.indices().options(), src.indices().suggest_memory_format());
+  crow_indices_ = at::empty_like(src.crow_indices(), src.crow_indices().options(), src.crow_indices().suggest_memory_format());
+  col_indices_ = at::empty_like(src.col_indices(), src.col_indices().options(), 
+    src.col_indices().suggest_memory_format());
   values_ = at::empty_like(src.values(), src.values().options(), src.values().suggest_memory_format());
   reduction_ = at::empty_like(src.reduction(), src.reduction().options(), src.reduction().suggest_memory_format());
   sizes_ = src.sizes();
 }
   
-void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, const Tensor& indices,
+void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& crow_indices, const Tensor& col_indices,
                                                       const Tensor& values, const Tensor& reduction) {
-  TORCH_CHECK(!indices.is_sparse(), 
-              "expected indices to be a dense tensor, but got indices of layout ", 
-              indices.layout());
-  TORCH_CHECK(!pointers.is_sparse(), 
-              "expected pointers to be a dense tensor, but got pointers of layout ", 
-              pointers.layout());
+  TORCH_CHECK(!col_indices.is_sparse(), 
+              "expected col_indices to be a dense tensor, but got indices of layout ", 
+              col_indices.layout());
+  TORCH_CHECK(!crow_indices.is_sparse(), 
+              "expected crow_indices to be a dense tensor, but got crow_indices of layout ", 
+              crow_indices.layout());
   TORCH_CHECK(!values.is_sparse(), 
               "expected values to be a dense tensor, but got values of layout ", 
               values.layout());
@@ -88,33 +92,37 @@ void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, cons
 
   TORCH_CHECK(values.device().type() == device().type(), "device type of values (", values.device().type(),
               ") must match device type of device().type()", device().type(), ")");
-  TORCH_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", 
-              indices.get_device(), ") must match device of values (", values.get_device(), ")");
-  TORCH_CHECK(!pointers.is_cuda() || pointers.get_device() == values.get_device(), "device of pointers (", 
-              pointers.get_device(), ") must match device of values (", values.get_device(), ")");
+  TORCH_CHECK(!col_indices.is_cuda() || col_indices.get_device() == values.get_device(), "device of col_indices (", 
+              col_indices.get_device(), ") must match device of values (", values.get_device(), ")");
+  TORCH_CHECK(!crow_indices.is_cuda() || crow_indices.get_device() == values.get_device(), "device of crow_indices (", 
+              crow_indices.get_device(), ") must match device of values (", values.get_device(), ")");
 
-  TORCH_CHECK(indices.size(0) == values.size(0), "indices and values must have same nnz, but got nnz from indices: ",
-              indices.size(0), ", nnz from values: ", values.size(0));
+  TORCH_CHECK(col_indices.size(0) == values.size(0), 
+              "col_indices and values must have same nnz, but got nnz from indices: ",
+              col_indices.size(0), ", nnz from values: ", values.size(0));
 
-  TORCH_CHECK(pointers.dim() == 1, "pointers must have dim=1 but got pointers.dim()=", pointers.dim());
-  TORCH_CHECK(indices.dim() == 1, "indices must have dim=1 but got indices.dim()=", indices.dim()); 
+  TORCH_CHECK(crow_indices.dim() == 1, "crow_indices must have dim=1 but got crow_indices.dim()=", 
+              crow_indices.dim());
+  TORCH_CHECK(col_indices.dim() == 1, "col_indices must have dim=1 but got col_indices.dim()=",
+              col_indices.dim()); 
   TORCH_CHECK(values.dim() == 1, "values must have dim=1 but got values.dim()=", values.dim());
   TORCH_CHECK(reduction.dim() == 1, "reduction must have dim=1 but got reduction.dim()=", reduction.dim());
 
-  TORCH_CHECK(indices.scalar_type() == kInt, "indices must be an int32 type, but got: ", indices.dtype());
-  TORCH_CHECK(pointers.scalar_type() == kInt, "pointers must be int32 type, but got: ", pointers.dtype());
+  TORCH_CHECK(col_indices.scalar_type() == kInt, "col_indices must be an int32 type, but got: ", 
+              col_indices.dtype());
+  TORCH_CHECK(crow_indices.scalar_type() == kInt, "crow_indices must be int32 type, but got: ", crow_indices.dtype());
   TORCH_CHECK(reduction.scalar_type() == kInt, "reduction must be int32 type, but got: ", reduction.dtype());
   TORCH_CHECK(values.scalar_type() == typeMetaToScalarType(dtype()), 
               "dtype of values (", values.scalar_type(), ") must match dtype of sparse tensor (", 
               typeMetaToScalarType(dtype()), ")");
 
-  pointers_ = pointers;
-  indices_ = indices;
+  crow_indices_ = crow_indices;
+  col_indices_ = col_indices;
   values_ = values;
   reduction_ = reduction;
 
   AT_ASSERT(device() == values_.device());    
-  AT_ASSERT(indices_.device() == values_.device());
+  AT_ASSERT(col_indices_.device() == values_.device());
   AT_ASSERT(reduction_.device() == values_.device());
 
   auto reduction_accessor = reduction_.accessor<int32_t, 1>();

@@ -44,8 +44,8 @@ namespace at {
 // is a new introduction into GCS that stores the dimensions
 // of the tensor that must be collapsed 
 struct TORCH_API SparseGCSTensorImpl : public TensorImpl {
-  Tensor pointers_;
-  Tensor indices_;
+  Tensor crow_indices_;
+  Tensor col_indices_;
   Tensor values_;
   Tensor reduction_;
 
@@ -70,7 +70,7 @@ struct TORCH_API SparseGCSTensorImpl : public TensorImpl {
   void resize_as_(const Tensor& src);
   
 
-  void set_member_tensors_unsafe(const Tensor& pointers, const Tensor& indices,
+  void set_member_tensors_unsafe(const Tensor& crow_indices, const Tensor& col_indices,
                                  const Tensor& values, const Tensor& reduction);
 
   std::vector<int> strides0() const { return strides0_; }
@@ -79,8 +79,8 @@ struct TORCH_API SparseGCSTensorImpl : public TensorImpl {
   std::vector<int> dims1() const { return dims1_; }
   int rsplit_dim() const { return rsplit_dim_; }
   
-  Tensor pointers() const { return pointers_; }
-  Tensor indices() const { return indices_; }
+  Tensor crow_indices() const { return crow_indices_; }
+  Tensor col_indices() const { return col_indices_; }
   Tensor values() const { return values_; }
   Tensor reduction() const { return reduction_; }
   int nnz() const { return values_.size(0); } // TODO: methods like these also exist in COO tensor. Deduplicate?
@@ -88,7 +88,8 @@ struct TORCH_API SparseGCSTensorImpl : public TensorImpl {
  private :
   
   explicit SparseGCSTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type,
-                               at::Tensor pointers, at::Tensor indices, at::Tensor values, at::Tensor reduction);
+                               at::Tensor crow_indices, at::Tensor col_indices, at::Tensor values, 
+                               at::Tensor reduction);
 
   void make_strides(int shape_begin, std::vector<int>& strides, std::vector<int>& dims);
 };

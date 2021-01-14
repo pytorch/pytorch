@@ -43,14 +43,14 @@ namespace at { namespace native {
 namespace at { namespace native {
     using namespace at::sparse;
     
-    static inline void sparse_mm_mkl_impl(float * res, int32_t * indices, int32_t * pointers, float * values,
+    static inline void sparse_mm_mkl_impl(float * res, int32_t * col_indices, int32_t * crow_indices, float * values,
                                           float * dense, float * t, float alpha, float beta,
                                           int32_t nrows, int32_t ncols, int32_t dense_ncols) {
       sparse_matrix_t A = 0;
       matrix_descr desc;
       desc.type = SPARSE_MATRIX_TYPE_GENERAL;
-      int retval = mkl_sparse_s_create_csr(&A, SPARSE_INDEX_BASE_ZERO, nrows, ncols, pointers,
-                              pointers+1, indices, values);
+      int retval = mkl_sparse_s_create_csr(&A, SPARSE_INDEX_BASE_ZERO, nrows, ncols, crow_indices,
+                              crow_indices+1, col_indices, values);
       TORCH_CHECK(retval == 0, "mkl_sparse_d_create_csr failed with error code: ", retval);
 
       mkl_sparse_s_mm(SPARSE_OPERATION_NON_TRANSPOSE, alpha, A, desc,
@@ -60,15 +60,16 @@ namespace at { namespace native {
     }
 
     // TODO: The types here are long int32_t but int32_t = LongTensor only when using lp64 for MKL. SHould we resort
-    // to using IntTensor for the indices and pointers?
-    static inline void sparse_mm_mkl_impl(double * res, int32_t * indices, int32_t * pointers, double * values, 
+    // to using IntTensor for the indices and crow_indices?
+    static inline void sparse_mm_mkl_impl(double * res, int32_t * col_indices, int32_t * crow_indices,
+                                          double * values, 
                                           double * dense, double * t, double alpha, double beta, 
                                           int32_t nrows, int32_t ncols, int32_t dense_ncols) {
       sparse_matrix_t A = 0;
       matrix_descr desc;
       desc.type = SPARSE_MATRIX_TYPE_GENERAL;
-      int  retval = mkl_sparse_d_create_csr(&A, SPARSE_INDEX_BASE_ZERO, nrows, ncols, pointers, pointers+1,
-                              indices, values);
+      int  retval = mkl_sparse_d_create_csr(&A, SPARSE_INDEX_BASE_ZERO, nrows, ncols, crow_indices, 
+                              crow_indices+1, col_indices, values);
       TORCH_CHECK(retval == 0, "mkl_sparse_d_create_csr failed with error code: ", retval);
 
       mkl_sparse_d_mm(SPARSE_OPERATION_NON_TRANSPOSE, alpha, A, desc,
@@ -78,13 +79,13 @@ namespace at { namespace native {
     }
 
     template <typename scalar_t>
-    static inline void sparse_mm_mkl_template(Tensor& res, const Tensor& indices,
-                                              const Tensor& pointers, const Tensor& values,
+    static inline void sparse_mm_mkl_template(Tensor& res, const Tensor& col_indices,
+                                              const Tensor& crow_indices, const Tensor& values,
                                               const Tensor& dense, const Tensor& t, Scalar alpha,
                                               Scalar beta, IntArrayRef size, IntArrayRef dense_size) {
       sparse_mm_mkl_impl(res.data_ptr<scalar_t>(),
-                         indices.data_ptr<int32_t>(),
-                         pointers.data_ptr<int32_t>(),
+                         col_indices.data_ptr<int32_t>(),
+                         crow_indices.data_ptr<int32_t>(),
                          values.data_ptr<scalar_t>(),
                          dense.data_ptr<scalar_t>(),
                          t.data_ptr<scalar_t>(),
@@ -97,8 +98,8 @@ namespace at { namespace native {
                         const Tensor& t, Scalar alpha, Scalar beta) {
     AT_DISPATCH_FLOATING_TYPES(
       dense.scalar_type(), "addmm_sparse_gcs_dense", [&] {
-        sparse_mm_mkl_template<scalar_t>(self, sparse_.indices(),
-                                         sparse_.pointers(), sparse_.values(), dense, t,
+        sparse_mm_mkl_template<scalar_t>(self, sparse_.col_indices(),
+                                         sparse_.crow_indices(), sparse_.values(), dense, t,
                                          alpha, beta, sparse_.sizes(), dense.sizes());
     });
     return self;
