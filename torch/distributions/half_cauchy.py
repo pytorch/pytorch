@@ -50,6 +50,8 @@ class HalfCauchy(TransformedDistribution):
         return self.base_dist.variance
 
     def log_prob(self, value):
+        if self._validate_args:
+            self._validate_sample(value)
         value = torch.as_tensor(value, dtype=self.base_dist.scale.dtype,
                                 device=self.base_dist.scale.device)
         log_prob = self.base_dist.log_prob(value) + math.log(2)

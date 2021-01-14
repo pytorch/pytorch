@@ -532,7 +532,7 @@ bool useQuantizable(const Use& use, QuantType quant_type) {
 
 std::shared_ptr<Graph> getCallFunctionGraph(Node* n) {
   auto* func_node = n->input(0)->node();
-  auto func = func_node->output()->type()->expect<FunctionType>()->function();
+  auto func = func_node->output()->type()->expectRef<FunctionType>().function();
   TORCH_CHECK(
       func->isGraphFunction(), "Quantization only works for graph function");
   return func->graph();
