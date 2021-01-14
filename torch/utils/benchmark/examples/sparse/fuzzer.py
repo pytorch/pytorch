@@ -62,7 +62,7 @@ def main():
         x_tensor_properties = tensor_properties["x"]
         description = "".join([
             f"| {shape:<20} | ",
-            f"{x_tensor_properties['sparsity']:>10.2f} | ",
+            f"{x_tensor_properties['sparsity']:>9.2f} | ",
             f"{x_tensor_properties['sparse_dim']:>9d} | ",
             f"{x_tensor_properties['dense_dim']:>9d} | ",
             f"{('True' if x_tensor_properties['is_hybrid'] else 'False'):>9} | ",
@@ -87,8 +87,8 @@ def main():
 
     measurements.sort(key=time_fn)
 
-    template = f"{{:>6}}{' ' * 16}   Shape{' ' * 20}sparsity{' ' * 4}\
-                sparse_dim{' ' * 4}dense_dim{' ' * 4}hybrid{' ' * 4}coalesced\n{'-' * 108}"
+    template = f"{{:>6}}{' ' * 16} Shape{' ' * 17}\
+    sparsity{' ' * 4}sparse_dim{' ' * 4}dense_dim{' ' * 4}hybrid{' ' * 4}coalesced\n{'-' * 108}"
     print(template.format("Best:"))
     for m in measurements[:10]:
         print(f"{time_fn(m) * 1e9:>5.2f} ns / element     {m.description}")
