@@ -31,8 +31,8 @@ endif()
 set(CMAKE_INSTALL_MESSAGE NEVER)
 
 # check and set CMAKE_CXX_STANDARD
-string(FIND "${CMAKE_CXX_FLAGS}" "-std=c++" contains_manual_std_cpp)
-if(contains_manual_std_cpp GREATER -1)
+string(FIND "${CMAKE_CXX_FLAGS}" "-std=c++" env_cxx_standard)
+if(env_cxx_standard GREATER -1)
   message(
       WARNING "C++ standard version definition detected in environment variable."
       "PyTorch requires -std=c++14. Please remove -std=c++ settings in your environment.")
