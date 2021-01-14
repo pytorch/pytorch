@@ -211,9 +211,9 @@ def _compare_scalars_internal(a, b, *, rtol: float, atol: float, equal_nan: Unio
         b = complex(b)
 
         if equal_nan == "relaxed":
-            if math.isnan(a.real) or math.isnan(a.real):
+            if math.isnan(a.real) or math.isnan(a.imag):
                 a = complex(math.nan, math.nan)
-            if math.isnan(b.real) or math.isnan(b.real):
+            if math.isnan(b.real) or math.isnan(b.imag):
                 b = complex(math.nan, math.nan)
             equal_nan = True
 
