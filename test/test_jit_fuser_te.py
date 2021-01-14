@@ -28,6 +28,8 @@ from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_m
 
 from torch.testing._internal.te_utils import CudaCodeGenExecuted
 
+from jit.test_fuser_common import TestFuserCommon  # noqa: F401
+
 FUSION_GROUP = 'prim::TensorExprGroup'
 LLVM_ENABLED = torch._C._llvm_enabled()
 
@@ -655,7 +657,7 @@ class TestTEFuser(JitTestCase):
         y = torch.ones(1, requires_grad=True, device='cuda')
         warmup_forward(scripted_f, x, y)
         g = torch.jit.last_executed_optimized_graph()
-        diff_nodes = [n for n in g.nodes() if n.kind() == 'prim::DifferentiableGraph']
+        diff_nodes = g.findAllNodes('prim::DifferentiableGraph')
         self.assertEqual(len(diff_nodes), 1)
         g = diff_nodes[0].g('Subgraph')
         if_nodes = [n for n in g.nodes() if n.kind() == 'prim::If']
@@ -761,8 +763,7 @@ class TestTEFuser(JitTestCase):
 
     def test_scalar_arg(self):
         for device in self.devices:
-            def fn_test_scalar_arg(x, p):
-                # type: (Tensor, float) -> Tensor
+            def fn_test_scalar_arg(x: torch.Tensor, p: float) -> torch.Tensor:
                 return p * (x * x + x)
 
             x = torch.randn(4, 4, dtype=torch.float, device=device)
@@ -774,8 +775,7 @@ class TestTEFuser(JitTestCase):
 
             # use another function otherwise we will bailout
             # and won't be able to do fused checks
-            def fn_test_scalar_arg_requires_grad(x, p):
-                # type: (Tensor, float) -> Tensor
+            def fn_test_scalar_arg_requires_grad(x: torch.Tensor, p: float) -> torch.Tensor:
                 return p * (x * x + x)
 
             scripted = torch.jit.script(fn_test_scalar_arg_requires_grad)
@@ -964,7 +964,7 @@ class TestTEFuser(JitTestCase):
             forward_graph = module.graph_for(*inputs)
             self.assertGraphContainsExactly(
                 forward_graph, FUSION_GROUP, 1, consider_subgraphs=True)
-            FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
+            FileCheck().check("DifferentiableGraph").check("TupleConstruct") \
                 .check_next("return").check(FUSION_GROUP).run(str(forward_graph))
             hy, cy = module(*inputs)
             warmup_backward((hy + cy).sum())

@@ -16,6 +16,7 @@ from copy import deepcopy
 from torch.fx.proxy import TraceError
 
 from fx.quantization import Quantizer
+from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 
 from typing import Any, Callable, Dict, NamedTuple, List, Optional, Tuple, Union
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, IS_WINDOWS, IS_SANDCASTLE, IS_MACOS
@@ -679,6 +680,20 @@ class TestFX(JitTestCase):
         ud = UnpacksDict()
         with self.assertRaisesRegex(TraceError, 'Proxy object cannot be iterated.'):
             symbolic_trace(ud)
+
+    def test_pretty_print_targets(self):
+        # Test that Graph pretty-print prints friendly name for targets
+        # in `operator` and `builtins`
+
+        class SomeMod(torch.nn.Module):
+            def forward(self, x):
+                return torch.add(x.foo + x.bar, 3.0)
+
+        traced = symbolic_trace(SomeMod())
+        graph_str = str(traced.graph)
+        self.assertIn('builtins.getattr', graph_str)
+        self.assertIn('operator.add', graph_str)
+        self.assertIn('torch.add', graph_str)
 
     def test_script_tensor_constant(self):
         # TorchScript seems to ignore attributes that start with `__`.
