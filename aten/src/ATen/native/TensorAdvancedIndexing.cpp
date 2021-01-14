@@ -68,6 +68,7 @@
 namespace at { namespace native {
 
 DEFINE_DISPATCH(index_stub);
+DEFINE_DISPATCH(index_fill_stub);
 DEFINE_DISPATCH(index_put_stub);
 DEFINE_DISPATCH(index_put_accum_stub);
 DEFINE_DISPATCH(masked_fill_stub);
@@ -761,6 +762,12 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
 
   auto self_dim_stride = self.stride(dim);
   auto index_stride = index.stride(0); // `index` is 1d
+  index_fill_stub(
+    iter.device_type(),
+    iter,
+    self_dim_stride,
+    index_stride,
+    source);
 
   return self;
 }

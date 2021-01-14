@@ -131,6 +131,13 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
   });
 }
 
+void index_fill_kernel(
+  TensorIterator& iter,
+  int64_t self_dim_stride,
+  int64_t index_stride,
+  Scalar source) {
+}
+
 template <typename scalar_t, typename mask_t>
 void cpu_masked_fill_kernel(TensorIterator& iter, scalar_t value) {
   auto is_mask_bool = std::is_same<mask_t, bool>::value;
@@ -244,6 +251,7 @@ void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
 } // anonymous namespace
 
 REGISTER_DISPATCH(index_stub, &index_kernel);
+REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
 REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
 REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel);
 REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel);

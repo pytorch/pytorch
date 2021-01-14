@@ -170,6 +170,13 @@ static void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayR
   });
 }
 
+static void index_fill_kernel(
+  TensorIterator& iter,
+  int64_t self_dim_stride,
+  int64_t index_stride,
+  Scalar source) {
+}
+
 
 static void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
   TORCH_CHECK(!accumulate, "index_put does not support accumulate=true");
@@ -253,6 +260,7 @@ Tensor& take_out_cuda(Tensor& out, const Tensor& self, const Tensor& index) {
 }
 
 REGISTER_DISPATCH(index_stub, &index_kernel);
+REGISTER_DISPATCH(index_fill_stub, &index_fill_kernel);
 REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
 
 }} // namespace at::native
