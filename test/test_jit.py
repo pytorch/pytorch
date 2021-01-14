@@ -735,13 +735,13 @@ class TestJit(JitTestCase):
 
         inputs = [
             # Conv
-            (Mod(nn.Conv1d(16, 33, 3, stride=2)), torch.randn(20, 16, 50)),
-            (Mod(nn.Conv2d(16, 33, 3, stride=2)), torch.randn(20, 16, 50, 100)),
-            (Mod(nn.Conv3d(16, 33, 3, stride=2)), torch.randn(20, 16, 10, 50, 100)),
+            (Mod(nn.Conv1d(16, 33, 3, stride=2)), torch.randn(20, 16, 5)),
+            (Mod(nn.Conv2d(16, 33, 3, stride=2)), torch.randn(20, 16, 5, 10)),
+            (Mod(nn.Conv3d(16, 33, 3, stride=2)), torch.randn(20, 16, 3, 5, 4)),
             # ConvTransposed
-            (Mod(nn.ConvTranspose1d(16, 33, 3, stride=2)), torch.randn(20, 16, 50)),
-            (Mod(nn.ConvTranspose2d(16, 33, 3, stride=2)), torch.randn(20, 16, 50, 100)),
-            (Mod(nn.ConvTranspose3d(16, 33, 3, stride=2)), torch.randn(20, 16, 10, 50, 100)),
+            (Mod(nn.ConvTranspose1d(16, 33, 3, stride=2)), torch.randn(20, 16, 5)),
+            (Mod(nn.ConvTranspose2d(16, 33, 3, stride=2)), torch.randn(20, 16, 5, 10)),
+            (Mod(nn.ConvTranspose3d(16, 33, 3, stride=2)), torch.randn(20, 16, 3, 5, 4)),
         ]
 
         for m, inp in inputs:
