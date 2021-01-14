@@ -4391,6 +4391,7 @@ class TestTorchDeviceType(TestCase):
 
             # Test for path when x is a vector
             x = torch.tensor(range(0, 100), dtype=dt, device=device)
+            x_noncontig = x.clone()[::2]
             index = torch.tensor(range(3, 30, 2), device=device)
             expected = list(range(0, 100))
             val = 3
@@ -4398,6 +4399,13 @@ class TestTorchDeviceType(TestCase):
                 expected[idx] = val
             x.index_fill_(0, index, val)
             self.assertEqual(x, torch.tensor(expected, dtype=dt, device=device))
+
+            expected_noncontig = list(range(0, 100, 2))
+            val = 10
+            for idx in range(3, 30, 2):
+                expected_noncontig[idx] = val
+            x_noncontig.index_fill_(0, index, val)
+            self.assertEqual(x_noncontig, torch.tensor(expected_noncontig, dtype=dt, device=device))
 
             # Verify IndexError is raised
             index[0] = 101
