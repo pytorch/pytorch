@@ -747,9 +747,24 @@ Tensor& index_fill_(Tensor& self, int64_t dim, const Tensor & index, Scalar valu
   auto index_data = index_contiguous.data_ptr<int64_t>();
   auto numel = index.numel();
 
-  for (decltype(numel) i = 0; i < numel; i++) {
-    auto slice_view = self.select(dim, index_data[i]);
-    slice_view.fill_(value);
+  if (self_dim > 1) {
+    for (decltype(numel) i = 0; i < numel; i++) {
+      auto slice_view = self.select(dim, index_data[i]);
+      slice_view.fill_(value);
+    }
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND3(
+        kBool, kBFloat16, kHalf, self.scalar_type(), "index_fill", [&] {
+          TORCH_CHECK(self_dim == 1, "index_fill: `dim` out of range");
+          auto self_ptr = self.data_ptr<scalar_t>();
+          auto self_stride = self.strides()[0];
+          auto self_numel = self.numel();
+          for (decltype(numel) i = 0; i < numel; i++) {
+            TORCH_CHECK_INDEX(
+                index_data[i] < self_numel, "index_fill: index out of range");
+            *(self_ptr + (self_stride * index_data[i])) = value.to<scalar_t>();
+          }
+        });
   }
 
   return self;
