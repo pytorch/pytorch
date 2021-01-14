@@ -1032,6 +1032,9 @@ void apply_orgqr(Tensor& self, const Tensor& tau, Tensor& infos, int64_t n_colum
     int* info_working_ptr = &infos_data[i];
     // now compute the actual Q
     lapackOrgqr<scalar_t>(m, n_columns, k, self_working_ptr, lda, tau_working_ptr, work.data_ptr<scalar_t>(), lwork, info_working_ptr);
+    if (*info_working_ptr != 0) {
+      return;
+    }
   }
 #endif
 }
