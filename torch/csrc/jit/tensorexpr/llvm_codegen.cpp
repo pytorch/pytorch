@@ -246,6 +246,17 @@ void LLVMCodeGen::call(const std::vector<CallArg>& args) {
   USE_TRIGGER(llvm_codegen_executed);
 }
 
+at::Tensor LLVMCodeGen::empty_strided(
+    c10::IntArrayRef size,
+    c10::IntArrayRef stride,
+    c10::optional<c10::ScalarType> dtype_opt,
+    c10::optional<c10::Layout> layout_opt,
+    c10::optional<c10::Device> device_opt,
+    c10::optional<bool> pin_memory_opt) {
+  return at::native::empty_strided_cpu(
+      size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+}
+
 void* LLVMCodeGen::getKernelAddress(LLVMCodeGenImpl* impl) {
   return (void*)impl->getKernelAddress();
 }
