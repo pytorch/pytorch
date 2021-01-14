@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.backends.xnnpack
 import torch.utils.bundled_inputs
+from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.jit_utils import get_forward, get_forward_graph
 from torch.utils.mobile_optimizer import *
 from torch.nn import functional as F
@@ -12,7 +13,7 @@ from torch.nn.modules.module import ModuleAttributeError
 
 FileCheck = torch._C.FileCheck
 
-class TestOptimizer(unittest.TestCase):
+class TestOptimizer(TestCase):
 
     @unittest.skipUnless(torch.backends.xnnpack.enabled,
                          " XNNPACK must be enabled for these tests."
@@ -430,4 +431,4 @@ class TestOptimizer(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()
