@@ -4389,6 +4389,16 @@ class TestTorchDeviceType(TestCase):
                 with self.assertRaises(RuntimeError):
                     x.index_fill_(1, index.to(dt), 0)
 
+            # Test for path when x is a vector
+            x = torch.tensor(range(0, 100), dtype=dt, device=device)
+            index = torch.tensor(range(3, 30, 2), device=device)
+            expected = list(range(0, 100))
+            val = 3
+            for idx in range(3, 30, 2):
+                expected[idx] = val
+            x.index_fill_(0, index, val)
+            self.assertEqual(x, torch.tensor(expected, dtype=dt, device=device))
+
     def test_index_select(self, device):
         for dtype in [torch.int, torch.long]:
             src = torch.randn(3, 4, 5, device=device)
