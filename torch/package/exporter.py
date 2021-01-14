@@ -5,6 +5,7 @@ import pickletools
 from .find_file_dependencies import find_files_source_depends_on
 from ._custom_import_pickler import create_custom_import_pickler, import_module_from_importers
 from ._importlib import _normalize_path
+from ._mangling import is_mangled
 import types
 import importlib
 from typing import List, Any, Callable, Dict, Tuple, Union, Iterable
@@ -14,6 +15,7 @@ import linecache
 import sys
 from urllib.parse import quote
 import re
+
 
 class PackageExporter:
     """ Exporters allow you to write packages of code, pickled python data, and
@@ -162,8 +164,15 @@ class PackageExporter:
             for dep in dep_list.keys():
                 self.require_module_if_not_provided(dep)
 
-    def _import_module(self, module_name):
-        return import_module_from_importers(module_name, self.importers)
+    def _import_module(self, module_name: str):
+        try:
+            return import_module_from_importers(module_name, self.importers)
+        except ModuleNotFoundError as e:
+            if not is_mangled(module_name):
+                raise
+            msg = (f"Module not found: '{module_name}'. Modules imported "
+                   "from a torch.package cannot be re-exported directly.")
+            raise ModuleNotFoundError(msg) from None
 
     def _module_exists(self, module_name: str) -> bool:
         try:
@@ -209,7 +218,6 @@ node [shape=box];
         and call `save_module` otherwise. Clients can subclass this object
         and override this method to provide other behavior, such as automatically mocking out a whole class
         of modules"""
-
 
         root_name = module_name.split('.', maxsplit=1)[0]
         if self._can_implicitly_extern(root_name):
@@ -394,6 +402,9 @@ node [shape=box];
         self.close()
 
     def _write(self, filename, str_or_bytes):
+        if is_mangled(filename):
+            raise RuntimeError(f"Tried to save a torch.package'd module as '{filename}'. "
+                               "Directly saving torch.package'd modules is not allowed.")
         if isinstance(str_or_bytes, str):
             str_or_bytes = str_or_bytes.encode('utf-8')
         self.zip_file.write_record(filename, str_or_bytes, len(str_or_bytes))
@@ -421,7 +432,6 @@ node [shape=box];
         contents = ('\n'.join(self.external) + '\n')
         self._write('extern_modules', contents)
         del self.zip_file
-
 
     def _filename(self, package, resource):
         package_path = package.replace('.', '/')
