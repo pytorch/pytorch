@@ -21,6 +21,51 @@ if __name__ == '__main__':
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
+
+class Foo:
+    pass
+
+
+class Bar:
+    pass
+
+
+class MyClass:
+    pass
+
+
+class OneTwo:
+    pass
+
+
+class OneTwoThree:
+    pass
+
+
+class OneTwoWrong:
+    pass
+
+
+class NotMember:
+    pass
+
+
+class NotMember2:
+    pass
+
+
+class FooTest:
+    pass
+
+
+class ClassWithClassMethod:
+    pass
+
+
+class ClassWithStaticMethod:
+    pass
+
+
 class TestClassType(JitTestCase):
     def test_get_with_method(self):
         class FooTest(object):

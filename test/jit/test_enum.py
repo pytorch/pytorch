@@ -16,6 +16,34 @@ if __name__ == '__main__':
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
+
+class IntEnum:
+    pass
+
+
+class FloatEnum:
+    pass
+
+
+class StringEnum:
+    pass
+
+
+class TensorEnum:
+    pass
+
+
+class Color:
+    pass
+
+
+class Foo:
+    pass
+
+
+class Bar:
+    pass
+
 class TestEnum(JitTestCase):
     def test_enum_value_types(self):
         global IntEnum
