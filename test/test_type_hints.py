@@ -149,7 +149,7 @@ class TestTypeHints(TestCase):
             except OSError:
                 raise unittest.SkipTest('cannot symlink') from None
             (stdout, stderr, result) = mypy.api.run([
-                '--cache-dir=.mypy-doc_cache',
+                '--cache-dir=.mypy_cache/doc',
                 '--follow-imports', 'silent',
                 '--check-untyped-defs',
                 '--no-strict-optional',  # needed because of torch.lu_unpack, see gh-36584
@@ -170,7 +170,7 @@ class TestTypeHints(TestCase):
         for example in examples:
             example_path = os.path.join(examples_folder, example)
             (stdout, stderr, result) = mypy.api.run([
-                '--cache-dir=.mypy-examples_cache',
+                '--cache-dir=.mypy_cache/examples',
                 '--follow-imports', 'silent',
                 '--check-untyped-defs',
                 example_path,
@@ -208,6 +208,7 @@ class TestTypeHints(TestCase):
         # process!
         with set_cwd(repo_rootdir):
             (stdout, stderr, result) = mypy.api.run([
+                '--cache-dir=.mypy_cache/normal',
                 '--check-untyped-defs',
                 '--follow-imports', 'silent',
             ])
@@ -228,7 +229,7 @@ class TestTypeHints(TestCase):
 
         with set_cwd(repo_rootdir):
             (stdout, stderr, result) = mypy.api.run([
-                '--cache-dir=.mypy-strict_cache',
+                '--cache-dir=.mypy_cache/strict',
                 '--config', mypy_inifile,
             ])
 
