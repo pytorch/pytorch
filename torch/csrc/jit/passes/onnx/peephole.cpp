@@ -138,14 +138,14 @@ void fuseBroadcast(Block* b) {
       // Not all broadcasts are supported by ONNX broadcast.
       c10::optional<size_t> axis = fusibleExpandTo(
           unexpanded_input->type()
-              ->expect<TensorType>()
-              ->sizes()
+              ->expectRef<TensorType>()
+              .sizes()
               .concrete_sizes()
               .value(), // from
           n->output()
               ->type()
-              ->expect<TensorType>()
-              ->sizes()
+              ->expectRef<TensorType>()
+              .sizes()
               .concrete_sizes()
               .value()); // to
       if (axis == c10::nullopt)
