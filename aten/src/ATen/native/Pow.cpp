@@ -32,13 +32,11 @@ Tensor& pow_out(Tensor& result, const Tensor& base, Scalar exp) {
            "result type ", common_dtype, " can't be cast to the desired output type ",
            result.scalar_type());
 
-  auto exponent = (exp.isComplex()) ? exp.toComplexDouble() : exp.toDouble();
-
-  if (exponent == 0.0) {
+  if (exp.equal(0.0)) {
     resize_output(result, base.sizes());
     result.fill_(1);
     namedinference::propagate_names(result, base);
-  } else if (exponent == 1.0) {
+  } else if (exp.equal(1.0)) {
     resize_output(result, base.sizes());
     result.copy_(base);
     namedinference::propagate_names(result, base);
@@ -50,10 +48,11 @@ Tensor& pow_out(Tensor& result, const Tensor& base, Scalar exp) {
 }
 
 Tensor& pow_out(Tensor& result, Scalar base, const Tensor& exp) {
-
-  auto exponent = (base.isComplex()) ? base.toComplexDouble() : base.toDouble();
-
-  if (exponent == 1.0) {
+  if (base.isComplex() && base.toComplexDouble() == 1.0) {
+    resize_output(result, exp.sizes());
+    result.fill_(1);
+    namedinference::propagate_names(result, exp);
+  } else if (!base.isComplex() && base.toDouble() == 1.0) {
     resize_output(result, exp.sizes());
     result.fill_(1);
     namedinference::propagate_names(result, exp);
