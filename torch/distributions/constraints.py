@@ -13,6 +13,7 @@ The following constraints are implemented:
 - ``constraints.less_than(upper_bound)``
 - ``constraints.lower_cholesky``
 - ``constraints.lower_triangular``
+- ``constraints.multinomial``
 - ``constraints.nonnegative_integer``
 - ``constraints.one_hot``
 - ``constraints.positive_definite``
@@ -44,6 +45,7 @@ __all__ = [
     'less_than',
     'lower_cholesky',
     'lower_triangular',
+    'multinomial',
     'nonnegative_integer',
     'positive',
     'positive_definite',
@@ -162,6 +164,9 @@ class _IndependentConstraint(Constraint):
 
     def check(self, value):
         result = self.base_constraint.check(value)
+        if result.dim() < self.reinterpreted_batch_ndims:
+            expected = self.base_constraint.event_dim + self.reinterpreted_batch_ndims
+            raise ValueError(f"Expected value.dim() >= {expected} but got {value.dim()}")
         result = result.reshape(result.shape[:result.dim() - self.reinterpreted_batch_ndims] + (-1,))
         result = result.all(-1)
         return result
@@ -354,6 +359,24 @@ class _Simplex(Constraint):
         return torch.all(value >= 0, dim=-1) & ((value.sum(-1) - 1).abs() < 1e-6)
 
 
+class _Multinomial(Constraint):
+    """
+    Constrain to nonnegative integer values summing to at most an upper bound.
+
+    Note due to limitations of the Multinomial distribution, this currently
+    checks the weaker condition ``value.sum(-1) <= upper_bound``. In the future
+    this may be strengthened to ``value.sum(-1) == upper_bound``.
+    """
+    is_discrete = True
+    event_dim = 1
+
+    def __init__(self, upper_bound):
+        self.upper_bound = upper_bound
+
+    def check(self, x):
+        return (x >= 0).all(dim=-1) & (x.sum(dim=-1) <= self.upper_bound)
+
+
 class _LowerTriangular(Constraint):
     """
     Constrain to lower-triangular square matrices.
@@ -489,6 +512,7 @@ positive = _GreaterThan(0.)
 greater_than = _GreaterThan
 greater_than_eq = _GreaterThanEq
 less_than = _LessThan
+multinomial = _Multinomial
 unit_interval = _Interval(0., 1.)
 interval = _Interval
 half_open_interval = _HalfOpenInterval

@@ -72,11 +72,7 @@ class Multinomial(Distribution):
 
     @constraints.dependent_property(is_discrete=True, event_dim=1)
     def support(self):
-        total_count = self.total_count
-        if hasattr(total_count, "unsqueeze"):
-            total_count = total_count.unsqueeze(-1)
-        return constraints.independent(
-            constraints.integer_interval(0, total_count), 1)
+        return constraints.multinomial(self.total_count)
 
     @property
     def logits(self):
