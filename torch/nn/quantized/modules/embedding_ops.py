@@ -97,16 +97,16 @@ class Embedding(torch.nn.Module):
         if _weight is None:
             scales = torch.ones(num_embeddings, dtype=torch.float)
             zero_points = torch.zeros(num_embeddings, dtype=torch.float)
-            self.qweight = torch._empty_per_channel_affine_quantized([num_embeddings, embedding_dim],
-                                                                     scales=scales, zero_points=zero_points,
-                                                                     axis=0, dtype=torch.quint8)
+            qweight = torch._empty_per_channel_affine_quantized([num_embeddings, embedding_dim],
+                                                                scales=scales, zero_points=zero_points,
+                                                                axis=0, dtype=torch.quint8)
         else:
             assert list(_weight.shape) == [num_embeddings, embedding_dim], \
                 'Shape of weight does not match num_embeddings and embedding_dim'
-            self.qweight = _weight
+            qweight = _weight
 
         self._packed_params = EmbeddingPackedParams(num_embeddings, embedding_dim, dtype)
-        self._packed_params.set_weight(self.qweight)
+        self._packed_params.set_weight(qweight)
 
     def forward(self, indices: Tensor) -> Tensor:
         return torch.ops.quantized.embedding_byte(self._packed_params._packed_weight, indices)
@@ -119,7 +119,7 @@ class Embedding(torch.nn.Module):
 
     def extra_repr(self):
         extra_repr_str = 'num_embeddings={}, embedding_dim={}, dtype={}, qscheme={}'.format(
-            self.num_embeddings, self.embedding_dim, self._packed_params.dtype, self.qweight.qscheme()
+            self.num_embeddings, self.embedding_dim, self._packed_params.dtype, self.weight().qscheme()
         )
 
         return extra_repr_str

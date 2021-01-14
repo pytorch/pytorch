@@ -83,6 +83,9 @@ if(APPLE)
   set(CMAKE_MACOSX_RPATH ON)
 endif()
 
+set(CPU_AARCH64 OFF)
+set(CPU_INTEL OFF)
+
 if(WIN32)
   # On Windows, CMAKE_HOST_SYSTEM_PROCESSOR is calculated through `PROCESSOR_ARCHITECTURE`,
   # which only has the value of `x86` or `AMD64`. We cannot infer whether it's a Intel CPU
@@ -93,10 +96,10 @@ if(WIN32)
     set(CPU_INTEL OFF)
   endif()
 else()
-  if(${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "(x86_64|i[3-6]+86)")
+ if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|i[3-6]+86)")
     set(CPU_INTEL ON)
-  else()
-    set(CPU_INTEL OFF)
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
+    set(CPU_AARCH64 ON)
   endif()
 endif()
 
@@ -207,16 +210,18 @@ cmake_dependent_option(
     USE_VALGRIND "Use Valgrind. Only available on Linux." ON
     "LINUX" OFF)
 option(USE_VULKAN "Use Vulkan GPU backend" OFF)
-option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference even on fp32 tensors" ON)
+option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference even on fp32 tensors" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation (needs libshaderc)" OFF)
 option(USE_VULKAN_WRAPPER "Vulkan - Dynamically load Vulkan functions" ON)
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
+# Ensure that an MKLDNN build is the default for x86 CPUs
+# but optional for AArch64 (dependent on -DUSE_MKLDNN).
 cmake_dependent_option(
-  USE_MKLDNN "Use MKLDNN. Only available on x86 and x86_64." ON
-  "CPU_INTEL" OFF)
+  USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, and AArch64." ON
+  "CPU_INTEL OR CPU_AARCH64 AND USE_MKLDNN" OFF)
 set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 cmake_dependent_option(
     USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF
@@ -503,6 +508,20 @@ set(CAFFE2_ALLOWLIST "" CACHE STRING "A allowlist file of files that one should 
 if(NOT CMAKE_BUILD_TYPE)
     message(STATUS "Build type not set - defaulting to Release")
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build from: Debug Release RelWithDebInfo MinSizeRel Coverage." FORCE)
+endif()
+
+# The below means we are cross compiling for arm64 or x86_64 on MacOSX
+if(NOT IOS AND CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
+  set(CROSS_COMPILING_MACOSX TRUE)
+  # We need to compile a universal protoc to not fail protobuf build
+  execute_process(COMMAND ./scripts/build_host_protoc.sh --other-flags "-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64"
+                  WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+                  RESULT_VARIABLE BUILD_HOST_PROTOC_RESULT)
+  if(NOT BUILD_HOST_PROTOC_RESULT EQUAL "0")
+    message(FATAL_ERROR "Could not compile universal protoc.")
+  endif()
+  set(PROTOBUF_PROTOC_EXECUTABLE "${PROJECT_SOURCE_DIR}/build_host_protoc/bin/protoc")
+  set(CAFFE2_CUSTOM_PROTOC_EXECUTABLE "${PROJECT_SOURCE_DIR}/build_host_protoc/bin/protoc")
 endif()
 
 # ---[ Misc checks to cope with various compiler modes
