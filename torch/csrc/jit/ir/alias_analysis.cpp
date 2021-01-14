@@ -63,7 +63,7 @@ class MutableTypePtrHelper {
       }
       case TypeKind::TupleType: {
         std::vector<TypePtr> mutable_types;
-        for (const auto& elem : type->expect<TupleType>()->elements()) {
+        for (const auto& elem : type->expectRef<TupleType>().elements()) {
           if (auto mut_elem = getMutableType(elem)) {
             mutable_types.push_back(*mut_elem);
           }
@@ -511,7 +511,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::GetAttr:
       if (isFrozen_ && node->kind() == prim::GetAttr) {
         auto& ty = node->input()->type();
-        if (ty->expect<ClassType>()->is_module()) {
+        if (ty->expectRef<ClassType>().is_module()) {
           return analyzeCreator(node);
         }
       }

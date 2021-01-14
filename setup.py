@@ -186,7 +186,7 @@ if sys.version_info < python_min_version:
                                                                      python_min_version_str))
     sys.exit(-1)
 
-from setuptools import setup, Extension, distutils, find_packages
+from setuptools import setup, Extension, find_packages
 from collections import defaultdict
 from distutils import core
 from distutils.core import Distribution
