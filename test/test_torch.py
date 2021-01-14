@@ -4413,8 +4413,13 @@ class TestTorchDeviceType(TestCase):
 
             # Verify IndexError is raised
             index[0] = 101
-            with self.assertRaises(RuntimeError):
-                x.index_fill_(0, index, val)
+            if self.device_type != 'cuda':
+                # CUDA implementation throws
+                # device-side assert triggered
+                # and all the following calls to CUDA
+                # fails
+                with self.assertRaises(RuntimeError):
+                    x.index_fill_(0, index, val)
 
     def test_index_select(self, device):
         for dtype in [torch.int, torch.long]:
