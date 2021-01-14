@@ -19,6 +19,23 @@ if __name__ == '__main__':
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
+
+class OneTwoModule:
+    pass
+
+
+class OneTwoClass:
+    pass
+
+
+class TensorToAny:
+    pass
+
+
+class AnyToAny:
+    pass
+
+
 class OrigModule(nn.Module):
     def __init__(self):
         super(OrigModule, self).__init__()

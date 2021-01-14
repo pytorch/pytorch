@@ -19,6 +19,10 @@ if __name__ == "__main__":
     )
 
 
+class Context:
+    pass
+
+
 class TestWith(JitTestCase):
     """
     A suite of tests for with statements.
