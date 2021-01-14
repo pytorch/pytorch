@@ -135,6 +135,25 @@ void index_fill_kernel(
   TensorIterator& iter,
   int64_t self_dim_stride,
   Scalar source) {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16,
+    iter.dtype(), "index_fill_cpu", [&] {
+    auto fill_val = source.to<scalar_t>();
+    auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+      auto* self_data_bytes = data[0];
+      auto* index_data_bytes = data[1];
+      for (int64_t elem = 0; elem < n; ++elem) {
+        auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
+        auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
+
+        // TODO: add index checks!!!
+        self_data[idx * self_dim_stride] = fill_val;
+
+        self_data_bytes += strides[0];
+        index_data_bytes += strides[1];
+      }
+    };
+    iter.for_each(loop);
+  });
 }
 
 template <typename scalar_t, typename mask_t>

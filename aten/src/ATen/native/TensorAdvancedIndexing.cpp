@@ -746,10 +746,10 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
   // match as required by TensorIterator (input shape should
   // strictly broadcast over output shape, i.e.
   // output.shape[i] > input.shape[i] for i in range(dims)).
-  auto self_strides = self.strides().vec();
   auto self_sizes = self.sizes().vec();
-  self_strides[dim] = 0;
+  auto self_strides = self.strides().vec();
   self_sizes[dim] = index.numel();
+  self_strides[dim] = 0;
   auto self_restrided = self.as_strided(self_sizes, self_strides);
 
   auto iter = TensorIteratorConfig()
