@@ -2763,6 +2763,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 3, 2)
         self.run_test(GatherModule(), (x,))
 
+    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_expand(self):
         class ExpandModel(torch.nn.Module):
