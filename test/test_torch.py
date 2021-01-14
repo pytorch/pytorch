@@ -4399,6 +4399,11 @@ class TestTorchDeviceType(TestCase):
             x.index_fill_(0, index, val)
             self.assertEqual(x, torch.tensor(expected, dtype=dt, device=device))
 
+            # Verify IndexError is raised
+            index[0] = 101
+            with self.assertRaises(IndexError):
+                x.index_fill_(0, index, val)
+
     def test_index_select(self, device):
         for dtype in [torch.int, torch.long]:
             src = torch.randn(3, 4, 5, device=device)
