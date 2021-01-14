@@ -4825,7 +4825,7 @@ class TestNN(NNTestCase):
             var = torch.ones(3, 3)
             torch.nn.functional.gaussian_nll_loss(input, target, var)
         with self.assertRaisesRegex(ValueError, 'var has negative entry/entries'):
-            var = -1*torch.ones(3, 5)
+            var = -1 * torch.ones(3, 5)
             torch.nn.functional.gaussian_nll_loss(input, target, var)
 
     def test_KLDivLoss_batch_mean(self):
