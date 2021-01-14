@@ -65,9 +65,44 @@ struct TORCH_CUDA_API CudaLazyStreamContext : public LazyStreamContext {
   using LazyStreamContext::LazyStreamContext;
 
   // let streams in this context wiat for current streams.
-  void waitForCurrentStreams(const std::vector<torch::Tensor>& = {}) override;
-  std::vector<CUDAStream> getReservedStreams() const override;
-  CUDAStream getStream(c10::DeviceIndex index) override;
+  void waitForCurrentStreams(
+      const std::vector<torch::Tensor>& tensors = {}) override {
+    for (const auto& tensor : tensors) {
+      if (tensor.is_cuda()) {
+        getStream(tensor.device().index());
+      }
+    }
+
+    for (const auto& entry : streams_) {
+      at::cuda::CUDAEvent event;
+      event.record(at::cuda::getCurrentCUDAStream(entry.first));
+      event.block(entry.second);
+    }
+  }
+
+  // get all streams used in this context
+  std::vector<CUDAStream> getReservedStreams() const override {
+    std::vector<CUDAStream> reservedStreams;
+    reservedStreams.reserve(streams_.size());
+    for (const auto& entry : streams_) {
+      reservedStreams.push_back(entry.second);
+    }
+    return reservedStreams;
+  }
+
+  // get a stream for the given device. If it is the first time using that
+  // device, allocate a new stream and store it in the map.
+  CUDAStream getStream(c10::DeviceIndex index) override {
+    auto iter = streams_.find(index);
+    if (iter == streams_.end()) {
+      auto cudaStream = at::cuda::getStreamFromPool(
+          /* isHighPriority */ false, /* device */ index);
+      streams_.emplace(index, cudaStream);
+      return cudaStream;
+    } else {
+      return iter->second;
+    }
+  }
 
  private:
   std::unordered_map<c10::DeviceIndex, CUDAStream> streams_;

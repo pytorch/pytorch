@@ -39,47 +39,6 @@ inline c10::Device indexToDevice(c10::DeviceIndex index) {
 
 } // namespace
 
-#ifdef USE_CUDA_NOT_ROCM
-
-inline void CudaLazyStreamContext::waitForCurrentStreams(
-    const std::vector<torch::Tensor>& tensors) {
-  for (const auto& tensor : tensors) {
-    if (tensor.is_cuda()) {
-      getStream(tensor.device().index());
-    }
-  }
-
-  for (const auto& entry : streams_) {
-    at::cuda::CUDAEvent event;
-    event.record(at::cuda::getCurrentCUDAStream(entry.first));
-    event.block(entry.second);
-  }
-}
-
-inline std::vector<CUDAStream> CudaLazyStreamContext::getReservedStreams()
-    const {
-  std::vector<CUDAStream> reservedStreams;
-  reservedStreams.reserve(streams_.size());
-  for (const auto& entry : streams_) {
-    reservedStreams.push_back(entry.second);
-  }
-  return reservedStreams;
-}
-
-inline CUDAStream CudaLazyStreamContext::getStream(c10::DeviceIndex index) {
-  auto iter = streams_.find(index);
-  if (iter == streams_.end()) {
-    auto cudaStream = at::cuda::getStreamFromPool(
-        /* isHighPriority */ false, /* device */ index);
-    streams_.emplace(index, cudaStream);
-    return cudaStream;
-  } else {
-    return iter->second;
-  }
-}
-
-#endif
-
 std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
     Message&& rpcMessage,
     std::vector<c10::DeviceIndex> deviceIndices,
