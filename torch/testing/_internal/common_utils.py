@@ -1403,6 +1403,10 @@ class TestCase(expecttest.TestCase):
     def runWithPytorchAPIUsageStderr(code):
         env = os.environ.copy()
         env["PYTORCH_API_USAGE_STDERR"] = "1"
+        # remove IN_CI flag since this is a wrapped test process.
+        # IN_CI flag should be set in the parent process only.
+        if "IN_CI" in env.keys():
+            del env["IN_CI"]
         (stdout, stderr) = TestCase.run_process_no_exception(code, env=env)
         return stderr.decode('ascii')
 
