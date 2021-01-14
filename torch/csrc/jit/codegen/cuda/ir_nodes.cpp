@@ -566,43 +566,6 @@ Val* IterDomain::extent() const {
   return extent_;
 }
 
-namespace {
-
-class RejectMultipleGridReductions : public IterVisitor {
-  using IterVisitor::handle;
-
- public:
-  static void analyze(Fusion* fusion) {
-    RejectMultipleGridReductions multi_grid;
-    multi_grid.traverse(fusion);
-  }
-
- private:
-  void handle(ReductionOp* rop) override {
-    TensorView* out = dynamic_cast<TensorView*>(rop->out());
-    // Filter out non-related ReductionOp
-    if (out == nullptr) {
-      return;
-    }
-    if (!out->domain()->hasGridReduction()) {
-      return;
-    }
-    // rop is a grid reduction. It's an error if we have multiple grid
-    // reductions.
-    TORCH_CHECK(
-        grid_reduction_op_ == nullptr,
-        "Multiple grid reductions in a fusion is not supported:\n",
-        grid_reduction_op_,
-        rop);
-    grid_reduction_op_ = rop;
-  }
-
- private:
-  ReductionOp* grid_reduction_op_ = nullptr;
-};
-
-} // namespace
-
 void IterDomain::parallelize(ParallelType t) {
   parallel_type_ = t;
 
@@ -617,10 +580,6 @@ void IterDomain::parallelize(ParallelType t) {
         " and extent ",
         extent(),
         " .");
-  }
-
-  if (isReduction() && isParallelTypeBlockDim(t)) {
-    RejectMultipleGridReductions::analyze(fusion_);
   }
 }
 

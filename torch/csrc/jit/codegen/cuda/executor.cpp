@@ -155,6 +155,14 @@ void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
       !kernel_summary.has_dynamic_local_memory_allocations,
       "Allocations must be based on constant integers for local memory.");
 
+  TORCH_CHECK(
+      kernel_summary.number_of_grid_reductions <= 1,
+      "Multiple grid reductions in a fusion is not supported");
+
+  TORCH_CHECK(
+      !kernel_summary.has_grid_reduction_in_loop,
+      "Grid reduction must not be placed inside a loop.");
+
   compiled_kernel_ = executor_utils::nvrtcCompile(
       structured_code,
       (kernelNamespace() + "::" + kernelName()).c_str(),
@@ -320,7 +328,8 @@ LaunchParams FusionExecutor::computeLaunchParams(
   // Add workspace for reduction and broadcast
   uint64_t reduction_broadcast_workspace = 0;
   const bool has_workspace = kernel_summary.has_block_reductions ||
-      kernel_summary.has_grid_reductions || kernel_summary.has_block_broadcasts;
+      kernel_summary.number_of_grid_reductions > 0 ||
+      kernel_summary.has_block_broadcasts;
   if (has_workspace &&
       kernel_summary.largest_smem_data_type != DataType::Null) {
     // Not using nThreads here since it does not handle uninitialized value

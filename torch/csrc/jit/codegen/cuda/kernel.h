@@ -35,8 +35,11 @@ struct KernelSummary {
   //! Do we have any block reductions?
   bool has_block_reductions = false;
 
-  //! Do we have any grid reductions?
-  bool has_grid_reductions = false;
+  //! Number of static grid reductions
+  int number_of_grid_reductions = 0;
+
+  //! Do we have any grid reduction in a loop?
+  bool has_grid_reduction_in_loop = false;
 
   //! Do we have any block broadcasts?
   bool has_block_broadcasts = false;
