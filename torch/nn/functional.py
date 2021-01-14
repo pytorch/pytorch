@@ -2869,7 +2869,7 @@ def smooth_l1_loss(
 def huber_loss(
     input: Tensor,
     target: Tensor,
-    reduction: str ='mean',
+    reduction: str = 'mean',
     beta: float = 1.0,
 ) -> Tensor:
     r"""Function that uses a squared term if the absolute
