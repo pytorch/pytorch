@@ -131,7 +131,7 @@ class _DependentProperty(property, _Dependent):
         """
         Support for syntax to customize static attributes::
 
-            @constraints.dependent_dependent(is_discrete=True, event_dim=1)
+            @constraints.dependent_property(is_discrete=True, event_dim=1)
             def support(self):
                 ...
         """

@@ -22,8 +22,7 @@ class Uniform(Distribution):
         high (float or Tensor): upper range (exclusive).
     """
     # TODO allow (loc,scale) parameterization to allow independent constraints.
-    arg_constraints = {'low': constraints.dependent(is_discrete=False, event_dim=0),
-                       'high': constraints.dependent(is_discrete=False, event_dim=0)}
+    arg_constraints = {'low': constraints.dependent, 'high': constraints.dependent}
     has_rsample = True
 
     @property
