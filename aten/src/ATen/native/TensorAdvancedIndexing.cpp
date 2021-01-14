@@ -1092,16 +1092,20 @@ Tensor& put__cpu(Tensor& self, const Tensor& index, const Tensor& source, bool a
     TORCH_CHECK(index.scalar_type() == kLong, "index must be an int64 tensor");
     TORCH_CHECK(index.numel() == source.numel(), "src should have the same number of elements as index")
 
-    int64_t idx_numel = index.numel();
+    auto self_contiguous = self.contiguous();
+    int64_t numel = self_contiguous.numel();
+
     bool is_contiguous = self.is_contiguous();
     AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, self.scalar_type(), "put__cpu", [&] {
-        auto self_data = self.data_ptr<scalar_t>();
-        auto index_data = index.data_ptr<int64_t>();
-        auto source_data = source.data_ptr<scalar_t>();
-        for (auto i = 0; i < idx_numel; i++) {
-            checkLinearIndex(index_data[i], self.numel());
-            auto linearIndex = wrapLinearIndex(index_data[i], self.numel());
-            auto dataOffset_ = is_contiguous ? linearIndex : dataOffset(self, linearIndex);
+        auto self_data = self_contiguous.data_ptr<scalar_t>();
+        auto index_data = index.contiguous().data_ptr<int64_t>();
+        auto source_data = source.contiguous().data_ptr<scalar_t>();
+
+        for (auto i = 0; i < index.numel(); i++) {
+            int64_t idx = index_data[i];
+            checkLinearIndex(idx, self.numel());
+            int64_t linearIndex = wrapLinearIndex(idx, self.numel());
+            int64_t dataOffset_ = is_contiguous ? linearIndex : dataOffset(self, linearIndex);
             if (accumulate){
                 self_data[dataOffset_] += source_data[i];
             } else {
