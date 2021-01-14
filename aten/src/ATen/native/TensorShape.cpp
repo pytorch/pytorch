@@ -8,6 +8,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
+#include <c10/util/SmallVector.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/SparseTensorUtils.h>
@@ -105,15 +106,17 @@ static inline void check_cat_shape_except_dim(const Tensor & first, const Tensor
   }
 }
 
+static bool should_skip(const Tensor& t) {
+  return t.numel() == 0 && t.dim() == 1;
+}
+
 Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
   // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
   // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
   // size (i.e. other empty sizes are not skipped).
-  // FIXME: warn if this is the case
-  bool allSkipped = true;
+
   bool allContiguous = true;
-  Tensor notSkippedTensor;
 
   // Inputs cannot alias the output tensor
   for (int64_t i = 0; i < tensors.size(); i++) {
@@ -125,19 +128,23 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   }
   at::assert_no_internal_overlap(result);
 
-  auto should_skip = [](const Tensor& t) { return t.numel() == 0 && t.dim() == 1; };
-  for (auto const &tensor : tensors) {
-    if (should_skip(tensor)) {
-      continue;
+  const Tensor* pnotSkippedTensor = [](TensorList tensors) -> const Tensor* {
+    for (auto const &tensor : tensors) {
+      if (should_skip(tensor)) {
+        continue;
+      }
+      // we've found a non-empty tensor
+      return &tensor;
     }
-    // we've found a non-empty tensor
-    allSkipped = false;
-    notSkippedTensor = tensor;
-    break;
-  }
-  if (allSkipped) {
+    return nullptr;
+  }(tensors);
+
+  if (!pnotSkippedTensor) {
+    // FIXME: warn if this is the case -- see comment about skipped
+    // tensors at top of function.
     return result;
   }
+  const Tensor& notSkippedTensor = *pnotSkippedTensor;
 
   TORCH_CHECK(tensors.size() > 0, "expected a non-empty list of Tensors");
   TORCH_CHECK(dim <= notSkippedTensor.dim(), "dimension ", dim, "out of range");
@@ -195,7 +202,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   if (reuse_iterator &&
       result.is_contiguous(first_tensor_mem_format) &&
       no_type_promotion) {
-    auto source_slice = notSkippedTensor;
+    const auto& source_slice = notSkippedTensor;
     auto slice_dim_size = source_slice.size(dim);
     auto result_slice = result.narrow(dim, 0, slice_dim_size);
     auto result_slice_data = result_slice.data_ptr();
@@ -1467,15 +1474,25 @@ inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
   return std::make_tuple(sizes, strides);
 }
 
-std::tuple<std::vector<int64_t>, std::vector<int64_t> >
+namespace {
+// Named type instead of a pair/tuple so that we can be sure to
+// construct the vectors in place and get NRVO.
+struct InferUnsqueezeGeometryResult {
+  c10::SmallVector<int64_t, 5> sizes;
+  c10::SmallVector<int64_t, 5> strides;
+  InferUnsqueezeGeometryResult(IntArrayRef tensor_sizes, IntArrayRef tensor_strides)
+      : sizes(tensor_sizes.begin(), tensor_sizes.end())
+      , strides(tensor_strides.begin(), tensor_strides.end()) {}
+};
+}
+InferUnsqueezeGeometryResult
 inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
-  auto sizes = tensor.sizes().vec();
-  auto strides = tensor.strides().vec();
-  int64_t new_stride = dim >= tensor.dim() ? 1 : sizes[dim] * strides[dim];
-  sizes.insert(sizes.begin() + dim, 1);
-  strides.insert(strides.begin() + dim, new_stride);
+  InferUnsqueezeGeometryResult result(tensor.sizes(), tensor.strides());
+  int64_t new_stride = dim >= tensor.dim() ? 1 : result.sizes[dim] * result.strides[dim];
+  result.sizes.insert(result.sizes.begin() + dim, 1);
+  result.strides.insert(result.strides.begin() + dim, new_stride);
 
-  return std::make_tuple(sizes, strides);
+  return result;
 }
 
 Tensor squeeze_qtensor(const Tensor& self) {
@@ -1624,7 +1641,7 @@ Tensor unsqueeze_qtensor(const Tensor& self, int64_t dim) {
                                                   axis,
                                                   quantizer->scalar_type());
   }
-  return make_qtensor(self, std::get<0>(g), std::get<1>(g), quantizer);
+  return make_qtensor(self, g.sizes, g.strides, quantizer);
 }
 
 Tensor unsqueeze(const Tensor& self, int64_t dim) {
@@ -1636,7 +1653,7 @@ Tensor unsqueeze(const Tensor& self, int64_t dim) {
     return unsqueeze_qtensor(self, dim);
   } else {
     auto g = inferUnsqueezeGeometry(self, dim);
-    return self.as_strided(std::get<0>(g), std::get<1>(g));
+    return self.as_strided(g.sizes, g.strides);
   }
 }
 
@@ -1644,7 +1661,7 @@ Tensor & unsqueeze_(Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
 
   auto g = inferUnsqueezeGeometry(self, dim);
-  return self.as_strided_(std::get<0>(g), std::get<1>(g));
+  return self.as_strided_(g.sizes, g.strides);
 }
 
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {

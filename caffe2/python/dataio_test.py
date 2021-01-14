@@ -6,7 +6,6 @@
 from caffe2.python.dataio import (
     CompositeReader,
     CompositeReaderBuilder,
-    Reader,
     ReaderBuilder,
     ReaderWithDelay,
     ReaderWithLimit,
@@ -29,7 +28,6 @@ import os
 import shutil
 import unittest
 import tempfile
-import time
 
 
 def make_source_dataset(ws, size=100, offset=0, name=None):
