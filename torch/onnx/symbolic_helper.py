@@ -10,6 +10,7 @@ import torch.onnx
 import torch.onnx.utils
 
 from functools import wraps
+from torch._C import OptionalType
 
 
 # Note [Edit Symbolic Files]
@@ -534,6 +535,11 @@ def _is_split_static(split_size_or_sizes, _outputs):
     if _is_value(split_size_or_sizes) and split_size_or_sizes.node().kind() != 'onnx::Constant':
         return False
     return True
+
+def _optional_input_placeholder_tensor(g):
+    n = g.op("prim::Constant")
+    n.setType(OptionalType.ofTensor())
+    return n
 
 # ---------------------------------------------------------------------
 # ONNX operator version

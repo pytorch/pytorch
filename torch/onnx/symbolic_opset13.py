@@ -108,3 +108,109 @@ def unbind(g, self, dim=0, _outputs=None):
 def glu(g, input, dim):
     first, second = g.op('Split', input, dim, outputs=2)
     return g.op('Mul', first, g.op('Sigmoid', second))
+
+def _interpolate(name, dim, interpolate_mode):
+    def symbolic_fn(g, input, output_size, *args):
+        scales, align_corners = sym_help._get_interpolate_attributes(g, interpolate_mode, args)
+        align_corners = sym_help._maybe_get_scalar(align_corners)
+        coordinate_transformation_mode = "asymmetric" if interpolate_mode == "nearest" \
+            else "align_corners" if align_corners else "pytorch_half_pixel"
+
+        if scales is None:
+            input_size = g.op("Shape", input)
+            input_size_beg = sym_help._slice_helper(g, input_size, axes=[0], ends=[2], starts=[0])
+            output_size = g.op("Cast", output_size, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+            output_size = g.op("Concat", input_size_beg, output_size, axis_i=0)
+            return g.op("Resize",
+                        input,
+                        sym_help._optional_input_placeholder_tensor(g),
+                        sym_help._optional_input_placeholder_tensor(g),
+                        output_size,
+                        coordinate_transformation_mode_s=coordinate_transformation_mode,
+                        cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                        mode_s=interpolate_mode,  # nearest, linear, or cubic
+                        nearest_mode_s="floor")  # only valid when mode="nearest"
+        else:
+            return g.op("Resize",
+                        input,
+                        sym_help._optional_input_placeholder_tensor(g),
+                        scales,
+                        sym_help._optional_input_placeholder_tensor(g),
+                        coordinate_transformation_mode_s=coordinate_transformation_mode,
+                        cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                        mode_s=interpolate_mode,  # nearest, linear, or cubic
+                        nearest_mode_s="floor")  # only valid when mode="nearest"
+
+    return symbolic_fn
+
+
+upsample_nearest1d = _interpolate('upsample_nearest1d', 3, "nearest")
+upsample_nearest2d = _interpolate('upsample_nearest2d', 4, "nearest")
+upsample_nearest3d = _interpolate('upsample_nearest3d', 5, "nearest")
+upsample_linear1d = _interpolate('upsample_linear1d', 3, "linear")
+upsample_bilinear2d = _interpolate('upsample_bilinear2d', 4, "linear")
+upsample_trilinear3d = _interpolate('upsample_trilinear3d', 5, "linear")
+upsample_bicubic2d = _interpolate('upsample_bicubic2d', 4, "cubic")
+
+
+def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor):
+    mode = sym_help._maybe_get_const(mode, 's')
+    if 'linear' in mode:
+        mode = 'linear'
+    if 'cubic' in mode:
+        mode = 'cubic'
+    align_corners = sym_help._maybe_get_const(align_corners, 'b')
+    align_corners = False if not isinstance(align_corners, bool) else align_corners
+    coordinate_transformation_mode = "asymmetric" if mode == "nearest" \
+        else "align_corners" if align_corners else "pytorch_half_pixel"
+    # roi only takes effect with coordinate_transformation_mode="tf_crop_and_resize"
+    roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
+
+    if not sym_help._is_none(size) :
+        input_size = g.op("Shape", input)
+        input_size = sym_help._slice_helper(g, input_size, axes=[0], ends=[2], starts=[0])
+        # in some cases size is not a packed list but size is a scalar
+        # We need to also verify that (sym_help._maybe_get_const(size, 't').dim() == 0)
+        # but this information is not always available. Try to get the dim,
+        # and if not assume that it is not a scalar.
+        try:
+            is_scalar = not sym_help._is_packed_list(size) and ((sym_help._maybe_get_const(size, 't').dim() == 0))
+        except AttributeError:
+            is_scalar = not sym_help._is_packed_list(size)
+            if not is_scalar:
+                warnings.warn("Cannot verify if the output_size is a scalar "
+                              "while exporting interpolate. Assuming that it is not a scalar.")
+
+        if is_scalar:
+            rank = sym_help._get_tensor_rank(input)
+            if rank is None:
+                return sym_help._unimplemented("interpolate (with a scalar output_size)",
+                                               "missing input shape (try giving an array of output_size values)")
+            size = sym_help._unsqueeze_helper(g, size, [0])
+            size = [size for i in range(rank - 2)]
+            size = g.op("Concat", *size, axis_i=0)
+        size = g.op("Cast", size, to_i=sym_help.cast_pytorch_to_onnx['Long'])
+        size = g.op("Concat", input_size, size, axis_i=0)
+        return g.op("Resize",
+                    input,
+                    sym_help._optional_input_placeholder_tensor(g),
+                    sym_help._optional_input_placeholder_tensor(g),
+                    size,
+                    coordinate_transformation_mode_s=coordinate_transformation_mode,
+                    cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                    mode_s=mode,  # nearest, linear, or cubic
+                    nearest_mode_s="floor")
+    else:  # if not sym_help._is_none(scales)
+        rank = sym_help._get_tensor_rank(input)
+        if rank is None:
+            return sym_help._unimplemented("interpolate (with scales)", "missing input shape")
+        scales = sym_help._interpolate_get_scales(g, scale_factor, rank)
+        return g.op("Resize",
+                    input,
+                    sym_help._optional_input_placeholder_tensor(g),
+                    scales,
+                    sym_help._optional_input_placeholder_tensor(g),
+                    coordinate_transformation_mode_s=coordinate_transformation_mode,
+                    cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
+                    mode_s=mode,  # nearest, linear, or cubic
+                    nearest_mode_s="floor")  # only valid when mode="nearest"
