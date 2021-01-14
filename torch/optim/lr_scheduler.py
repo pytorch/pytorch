@@ -1359,14 +1359,14 @@ class MultiLRScheduler(_LRScheduler):
         if not all(e1 < e2 for e1, e2 in zip(self.epochs, self.epochs[1:])):
             raise ValueError("'epoch' values need to be strictly increasing")
 
-    def step(self, *args, epoch=None, **kwargs):
+    def step(self, epoch=None, **kwargs):
         if epoch is not None:
             raise ValueError("The MultiLRScheduler does not work with the deprecated epoch parameter")
 
         # Schedulers automatically increase last_epoch in step, so pass in previous value
         sched = self.scheduler
         sched.last_epoch = self.last_epoch
-        sched.step(*args, **kwargs)
+        sched.step(**kwargs)
         self.last_epoch += 1
 
     def get_last_lr(self):
