@@ -3210,6 +3210,36 @@ class TestONNXRuntime(unittest.TestCase):
             self.run_test(model, x_float)
             self.run_test(model, x_int)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_logical_and(self):
+        class AndModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.logical_or(x, y)
+
+        x = torch.torch.BoolTensor(5, 5)
+        y = torch.torch.BoolTensor(5, 5)
+        self.run_test(AndModel(), input=(x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_logical_or(self):
+        class OrModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.logical_or(x, y)
+
+        x = torch.torch.BoolTensor(5, 5)
+        y = torch.torch.BoolTensor(5, 5)
+        self.run_test(OrModel(), input=(x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_logical_xor(self):
+        class XorModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.logical_xor(x, y)
+
+        x = torch.torch.BoolTensor(5, 5)
+        y = torch.torch.BoolTensor(5, 5)
+        self.run_test(XorModel(), input=(x, y))
+
     def test_gt(self):
         class GreaterModel(torch.nn.Module):
             def forward(self, input, other):
