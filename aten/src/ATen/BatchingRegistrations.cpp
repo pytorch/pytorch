@@ -1001,6 +1001,12 @@ Tensor new_empty_strided_batching_rule(
   return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
+template <typename F, F Func>
+Tensor comparison_pointwise_batching_rule(const Tensor& self, const Tensor& other) {
+  auto physical_args = BroadcastingVmapTransform::logicalToPhysical({self, other});
+  auto result = Func(physical_args[0].tensor(), physical_args[1].tensor());
+  return physical_args[0].getPhysicalToLogicalMap().apply(result);
+}
 
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
@@ -1186,6 +1192,20 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("new_zeros", new_zeros_batching_rule);
 
   m.impl("contiguous", contiguous_batching_rule);
+
+  // Comparison ops
+#define COMPARISON_POINTWISE(op) \
+  m.impl(#op".Tensor", comparison_pointwise_batching_rule<TensorTensorType, at::op>); \
+  m.impl(#op".Scalar", unwrap_and_call<TensorScalarType, at::op, Scalar>);
+
+  COMPARISON_POINTWISE(eq);
+  COMPARISON_POINTWISE(gt);
+  COMPARISON_POINTWISE(ge);
+  COMPARISON_POINTWISE(le);
+  COMPARISON_POINTWISE(lt);
+  COMPARISON_POINTWISE(ne);
+
+#undef COMPARISON_POINTWISE
 }
 
 } // namespace at

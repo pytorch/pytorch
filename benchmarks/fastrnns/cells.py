@@ -1,4 +1,6 @@
 import torch
+from typing import Tuple
+from torch import Tensor
 
 
 def milstm_cell(x, hx, cx, w_ih, w_hh, alpha, beta_i, beta_h, bias):
