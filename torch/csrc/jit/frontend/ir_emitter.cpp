@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/frontend/convert_to_ssa.h>
+#include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
@@ -1223,8 +1224,11 @@ struct to_ir {
         }
         auto expr_out = emitToBool(expr.range(), emitExpr(expr));
         c10::optional<bool> static_if = c10::nullopt;
-        if (expr_out->node()->kind() == aten::is_scripting) {
+        auto kind = expr_out->node()->kind();
+        if (kind == aten::is_scripting) {
           static_if = true;
+        } else if (kind == aten::has_torch_function) {
+          static_if = false;
         }
         // MetaCompile on boolean literals and constants
         if (auto maybe_ivalue = toIValue(expr_out)) {
@@ -2972,7 +2976,7 @@ struct to_ir {
           return std::make_shared<SimpleValue>(
               graph
                   ->insertNode(graph->createList(
-                      type->expect<ListType>()->getElementType(), {}))
+                      type->expectRef<ListType>().getElementType(), {}))
                   ->output());
         }
         // list(iter) desugars to [_elem for _elem in iter]
@@ -3372,7 +3376,7 @@ struct to_ir {
         TypePtr elem_type = TensorType::get();
         if (type_hint) {
           if (type_hint->kind() == TypeKind::ListType) {
-            elem_type = type_hint->expect<ListType>()->getElementType();
+            elem_type = type_hint->expectRef<ListType>().getElementType();
           } else {
             // If the type hint was not a List[T] throw an error
             throw ErrorReport(tree)
@@ -4323,10 +4327,28 @@ void CompilationUnit::define_interface(
     arguments.insert(
         arguments.end(), schema.arguments().begin(), schema.arguments().end());
     iface->addMethod(schema.cloneWithArguments(std::move(arguments)));
-    if (method_def.statements().size() != 1 ||
-        method_def.statements()[0].kind() != TK_PASS) {
+    // we need to make sure everything but the last element is just string
+    // literals (aka comments) unless there is "pass" in between
+    auto stmts_size = method_def.statements().size();
+    for (size_t i = 0; i < stmts_size - 1; i++) {
+      auto cur_statement = method_def.statements()[i];
+      if (cur_statement.kind() == TK_EXPR_STMT) {
+        auto expr = ExprStmt(cur_statement).expr();
+        if (expr.kind() != TK_STRINGLITERAL) {
+          throw ErrorReport(method_def.range())
+              << "interfaces declarations should only contain a single 'pass' statement.";
+        }
+      }
+      // if we see a "pass", we just stop there
+      if (cur_statement.kind() == TK_PASS) {
+        this->register_type(iface);
+        return;
+      }
+    }
+
+    if (method_def.statements()[stmts_size - 1].kind() != TK_PASS) {
       throw ErrorReport(method_def.range())
-          << "interfaces declarations should only contain a single 'pass' statement.";
+          << "interfaces declarations should contain 'pass' statement.";
     }
   }
   this->register_type(iface);
