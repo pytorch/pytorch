@@ -25,77 +25,86 @@ class TestHooks(JitTestCase):
 
     @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_module_no_forward_input(self):
-        self.checkModule(test_module_no_forward_input_model(), ())
+        self.checkModule(create_module_no_forward_input(), ())
 
     @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_submodule_no_forward_input(self):
-        self.checkModule(test_submodule_no_forward_input_model(), ())
+        self.checkModule(create_submodule_no_forward_input(), ())
 
     @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_module_forward_multiple_inputs(self):
         self.checkModule(
-            test_module_forward_multiple_inputs_model(), (["a"], "no_pre_hook")
+            create_module_forward_multiple_inputs(), (["a"], "no_pre_hook")
         )
 
     @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_module_multiple_hooks_multiple_inputs(self):
         self.checkModule(
-            test_module_multiple_hooks_multiple_inputs_model(), (["a"], "no_pre_hook")
+            create_module_multiple_hooks_multiple_inputs(), (["a"], "no_pre_hook")
         )
 
     @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_module_forward_single_input(self):
-        self.checkModule(test_module_forward_single_input_model(), ("a",))
+        self.checkModule(create_module_forward_single_input(), ("a",))
 
     @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_module_same_hook_repeated(self):
-        self.checkModule(test_module_same_hook_repeated_model(), ("a",))
+        self.checkModule(create_module_same_hook_repeated(), ("a",))
 
     @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_module_hook_return_nothing(self):
-        self.checkModule(test_module_hook_return_nothing_model(), ("a",))
+        self.checkModule(create_module_hook_return_nothing(), ("a",))
 
     @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_module_multiple_hooks_single_input(self):
-        self.checkModule(test_module_multiple_hooks_single_input_model(), ("a",))
+        self.checkModule(create_module_multiple_hooks_single_input(), ("a",))
 
     @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_submodule_forward_multiple_inputs(self):
         self.checkModule(
-            test_submodule_forward_multiple_inputs_model(), (["a"], "no_pre_hook")
+            create_submodule_forward_multiple_inputs(), (["a"], "no_pre_hook")
         )
 
     @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_submodule_multiple_hooks_multiple_inputs(self):
         self.checkModule(
-            test_submodule_multiple_hooks_multiple_inputs_model(),
-            (["a"], "no_pre_hook"),
+            create_submodule_multiple_hooks_multiple_inputs(), (["a"], "no_pre_hook"),
         )
 
     @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_submodule_forward_single_input(self):
-        self.checkModule(test_submodule_forward_single_input_model(), ("a",))
+        self.checkModule(create_submodule_forward_single_input(), ("a",))
+
+    @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
+    def test_submodule_called_directly_with_hooks(self):
+        module = create_submodule_to_call_directly_with_hooks()
+        module_scripted = torch.jit.script(module)
+
+        submodule = module.submodule
+        scripted_submodule = module_scripted.submodule
+
+        self.assertEqual(submodule("a"), scripted_submodule("a"))
 
     @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_submodule_same_hook_repeated(self):
-        self.checkModule(test_submodule_same_hook_repeated_model(), ("a",))
+        self.checkModule(create_submodule_same_hook_repeated(), ("a",))
 
     @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_submodule_hook_return_nothing(self):
-        self.checkModule(test_submodule_hook_return_nothing_model(), ("a",))
+        self.checkModule(create_submodule_hook_return_nothing(), ("a",))
 
     @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_submodule_multiple_hooks_single_input(self):
-        self.checkModule(test_submodule_multiple_hooks_single_input_model(), (["a"]))
+        self.checkModule(create_submodule_multiple_hooks_single_input(), (["a"]))
 
     @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_forward_tuple_input(self):
-        self.checkModule(test_forward_tuple_input_model(), ((3,),))
+        self.checkModule(create_forward_tuple_input(), ((3,),))
 
     @unittest.skipIf(IS_SANDCASTLE or IS_FBCODE, saving_msg)
     def test_submodule_forward_single_input_return_not_tupled(self):
         self.checkModule(
-            test_submodule_forward_single_input_return_not_tupled_model(), ("a",)
+            create_submodule_forward_single_input_return_not_tupled(), ("a",)
         )
 
     def test_hook_method_name_collision(self):
@@ -208,7 +217,8 @@ class TestHooks(JitTestCase):
             m_submod_forward_call_scripted("a"), m_submod_call_scripted("a")
         )
 
-    """ TODO: add this test back once figured out how to print 
+    # TODO: add this test back once figured out how to print error msg
+    @unittest.skip
     def test_hook_compilation_hint(self):
         # Tests if hook error message is printed out if erroring after schema check.
         # Useful for when user is scripting hooks while not aware of it.
@@ -226,7 +236,6 @@ class TestHooks(JitTestCase):
             "This error occured while scripting the forward pre-hook 'pre_hook'",
         ):
             torch.jit.script(m)
-    """
 
     def test_wrong_pre_hook_signatures(self):
         # correct signature: pre_hook_c(self, input: Tuple[str])
