@@ -301,7 +301,7 @@ python test/test_type_hints.py
 ```
 See [Guide for adding type annotations to
 PyTorch](https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch)
-for more information on how to set up `mypy`, how to tackle type annotation
+for more information on how to set up `mypy` and tackle type annotation
 tasks, as well as other ways to run `mypy` besides running that test suite.
 
 ## Writing documentation
