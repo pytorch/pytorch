@@ -7,7 +7,7 @@ namespace torch {
 namespace jit {
 
 using SROperator = std::function<void(ProcessedNode*)>;
-using SROpFunctor = std::function<SROperator(Node* n)>;
+using SROpFunctor = SROperator (*)(Node* n);
 struct SROperatorFunctor {
   virtual SROperator Generate(Node*) {
     std::function<void(ProcessedNode*)> out;
