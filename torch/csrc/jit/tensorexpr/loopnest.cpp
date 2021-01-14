@@ -747,6 +747,11 @@ bool LoopNest::computeInline(Stmt* s) {
 }
 
 bool LoopNest::computeInline(const Buf* b) {
+  if (output_bufs_.count(b)) {
+    // Cannot inline producers of output Tensors
+    return false;
+  }
+
   // Find producers.
   Store* relevant_store{nullptr};
   auto stores = NodeFinder<Store>::find(root_stmt_);
