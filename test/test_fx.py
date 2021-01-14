@@ -51,10 +51,7 @@ def a_lifted_leaf2(a, b):
 
 wrap(a_lifted_leaf2)
 
-def fx_len(item):
-    return len(item)
-
-wrap(fx_len)
+wrap('len')
 
 class Pair(NamedTuple):
     x : torch.Tensor
@@ -697,19 +694,10 @@ class TestFX(JitTestCase):
         traced = torch.fx.symbolic_trace(IHaveATensorConstant())
         torch.jit.script(traced)
 
-    def test_len(self):
-        class LenTest(torch.nn.Module):
-            def forward(self, x):
-                return len(x)
-
-        lt = LenTest()
-        with self.assertRaisesRegex(RuntimeError, "'len' is not supported. Replace it with 'torch.fx.len'."):
-            symbolic_trace(lt)
-
     def test_torch_fx_len(self):
         class FXLenTest(torch.nn.Module):
             def forward(self, x):
-                return fx_len(x)
+                return len(x)
 
         traced = symbolic_trace(FXLenTest())
         self.assertEqual(traced(torch.rand(3, 4)), 3)
