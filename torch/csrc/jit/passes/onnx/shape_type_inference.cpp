@@ -257,34 +257,50 @@ Value* CloneValueFromListConstruct(Value* v, std::shared_ptr<Graph> n_graph) {
 }
 
 // Clone the node n for the new graph.
-Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph) {
-  auto clone_node = n_graph->createClone(n, [&n_graph](Value* v) {
-    auto v_n = v->node();
-    switch (v_n->kind()) {
-      case ::c10::onnx::Constant: {
-        // Clone the input if it is constant.
-        auto constant_n = n_graph->insertNode(
-            n_graph->createClone(v_n, [](Value* v) { return v; }));
-        return constant_n->output();
-      }
-      case ::c10::prim::ListConstruct: {
-        return CloneValueFromListConstruct(v, n_graph);
-      }
-      case ::c10::prim::PackPadded: {
-        auto input = n_graph->addInput();
-        input->copyMetadata(v_n->input(0));
-        return input;
-      }
-      default: {
-        // If the input is not constant, we cannot depend on its value
-        // in shape inference. Set it to graph input in the new graph,
-        // and copy over metadata, such as datatype and shape.
-        auto input = n_graph->addInput();
-        input->copyMetadata(v);
-        return input;
-      }
-    }
-  });
+Node* CloneNodeToGraph(
+    Node* n,
+    std::shared_ptr<Graph> n_graph,
+    const ParamMap& params_dict) {
+  auto vals_to_params_map =
+      buildValueToParamsMap(n->owningGraph()->block(), params_dict);
+  auto clone_node =
+      n_graph->createClone(n, [&n_graph, &vals_to_params_map](Value* v) {
+        auto v_n = v->node();
+        switch (v_n->kind()) {
+          case ::c10::onnx::Constant: {
+            // Clone the input if it is constant.
+            auto constant_n = n_graph->insertNode(
+                n_graph->createClone(v_n, [](Value* v) { return v; }));
+            return constant_n->output();
+          }
+          case ::c10::prim::ListConstruct: {
+            return CloneValueFromListConstruct(v, n_graph);
+          }
+          case ::c10::prim::PackPadded: {
+            auto input = n_graph->addInput();
+            input->copyMetadata(v_n->input(0));
+            return input;
+          }
+          default: {
+            if (vals_to_params_map.find(v) != vals_to_params_map.end()) {
+              // If the input is a parameter, insert a constant of its value as
+              // input.
+              auto val = vals_to_params_map.find(v)->second.second.toTensor();
+              return n_graph
+                  ->insertNode(n_graph->create(::c10::onnx::Constant)
+                                   ->t_(attr::value, val))
+                  ->output();
+            } else {
+              // If the input is not constant, we cannot depend on its value
+              // in shape inference. Set it to graph input in the new graph,
+              // and copy over metadata, such as datatype and shape.
+              auto input = n_graph->addInput();
+              input->copyMetadata(v);
+              return input;
+            }
+          }
+        }
+      });
   return clone_node;
 }
 
@@ -432,19 +448,25 @@ void FetchBlockInputMetadataFromParent(Block* b) {
   }
 }
 
-void ONNXShapeTypeInference(Block* b, int opset_version) {
+void ONNXShapeTypeInference(
+    Block* b,
+    const ParamMap& params_dict,
+    int opset_version) {
   FetchBlockInputMetadataFromParent(b);
   for (auto n : b->nodes()) {
     for (auto subblock : n->blocks()) {
-      ONNXShapeTypeInference(subblock, opset_version);
+      ONNXShapeTypeInference(subblock, params_dict, opset_version);
     }
-    ONNXShapeTypeInference(n, opset_version);
+    ONNXShapeTypeInference(n, params_dict, opset_version);
   }
 }
 
 } // namespace
 
-void ONNXShapeTypeInference(Node* n, int opset_version) {
+void ONNXShapeTypeInference(
+    Node* n,
+    const ParamMap& params_dict,
+    int opset_version) {
   GRAPH_UPDATE(
       "Running ONNX shape inference for node: ", n->kind().toDisplayString());
   if (!IsSupportedNode(n)) {
@@ -453,7 +475,7 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
   // Create a Graph containing only the single node n.
   // This graph is later converted to ONNX to run shape inference.
   auto n_graph = std::make_shared<Graph>();
-  auto clone_node = CloneNodeToGraph(n, n_graph);
+  auto clone_node = CloneNodeToGraph(n, n_graph, params_dict);
   n_graph->insertNode(clone_node);
 
   // Register all node outputs as graph outputs.
@@ -567,8 +589,11 @@ void ONNXAssignOutputShape(
   }
 }
 
-void ONNXShapeTypeInference(std::shared_ptr<Graph>& graph, int opset_version) {
-  ONNXShapeTypeInference(graph->block(), opset_version);
+void ONNXShapeTypeInference(
+    std::shared_ptr<Graph>& graph,
+    const ParamMap& params_dict,
+    int opset_version) {
+  ONNXShapeTypeInference(graph->block(), params_dict, opset_version);
 }
 
 } // namespace jit
