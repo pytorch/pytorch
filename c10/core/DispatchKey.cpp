@@ -51,10 +51,10 @@ const char* toString(DispatchKey t) {
       return "SparseCPU";
     case DispatchKey::SparseCUDA:
       return "SparseCUDA";
-    case DispatchKey::CompressedSparseCPU:
-      return "CompressedSparseCPU";
-    case DispatchKey::CompressedSparseCUDA:
-      return "CompressedSparseCUDA";
+    case DispatchKey::CompressedRowSparseCPU:
+      return "CompressedRowSparseCPU";
+    case DispatchKey::CompressedRowSparseCUDA:
+      return "CompressedRowSparseCUDA";
     case DispatchKey::SparseHIP:
       return "SparseHIP";
 

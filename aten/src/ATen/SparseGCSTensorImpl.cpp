@@ -8,9 +8,9 @@
 namespace at {
 namespace {
   DeviceType sparseGCSTensorSetToDeviceType(DispatchKeySet key_set) {
-    if (key_set.has(DispatchKey::CompressedSparseCPU)) {
+    if (key_set.has(DispatchKey::CompressedRowSparseCPU)) {
       return kCPU;
-    } else if (key_set.has(DispatchKey::CompressedSparseCUDA)) {
+    } else if (key_set.has(DispatchKey::CompressedRowSparseCUDA)) {
       return kCUDA;
     } else {
       AT_ERROR("Cannot construct SparseTensor with non-sparse tensor type ID ", key_set);
