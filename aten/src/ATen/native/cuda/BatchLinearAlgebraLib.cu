@@ -152,7 +152,7 @@ Tensor _inverse_helper_cuda_lib(const Tensor& self) {
 
 // call cusolver gesvdj function to calculate svd
 template<typename scalar_t>
-inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv) {
+inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv, bool some) {
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto U_data = U.data_ptr<scalar_t>();
@@ -177,7 +177,7 @@ inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& 
     auto handle = at::cuda::getCurrentCUDASolverDnHandle();
     auto jobz = compute_uv ? CUSOLVER_EIG_MODE_VECTOR : CUSOLVER_EIG_MODE_NOVECTOR;
     at::cuda::solver::gesvdj<scalar_t>(
-      handle, jobz, /*econ=*/ 1, m, n,
+      handle, jobz, /*econ=*/ some ? 1 : 0, m, n,
       self_data + i * self_stride,
       m,
       S_data + i * S_stride,
@@ -195,14 +195,14 @@ inline static void _apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& 
 
 // wrapper around _apply_svd_lib_gesvdj that handles dtype dispatch,
 // creates a working copy of the input, and creates V^H from the V returned by gesvdj
-inline static void apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv) {
+inline static void apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& S, Tensor& VT, Tensor& infos, bool compute_uv, bool some) {
   const int64_t m = self.size(-2);
   const int64_t n = self.size(-1);
   Tensor self_working_copy = cloneBatchedColumnMajor(self);
   VT = VT.transpose(-2, -1);  // gesvdj returns V instead of V^H
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cuda_gesvdj", [&] {
-    _apply_svd_lib_gesvdj<scalar_t>(self_working_copy, U, S, VT, infos, compute_uv);
+    _apply_svd_lib_gesvdj<scalar_t>(self_working_copy, U, S, VT, infos, compute_uv, some);
   });
 
   VT = VT.conj();
@@ -280,7 +280,7 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
     if (m <= 32 && n <= 32 && batch_size > 1 && (!some || m == n)) {
       apply_svd_lib_gesvdjBatched(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv);
     } else {
-      apply_svd_lib_gesvdj(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv);
+      apply_svd_lib_gesvdj(self, U_working_copy, S_working_copy, VT_working_copy, infos, compute_uv, some);
     }
 
     // A device-host sync will be performed.
