@@ -104,7 +104,7 @@ class Conf:
         if Conf.is_test_phase(phase):
             resource_class = "large"
             if self.gpu_resource:
-                resource_class = "gpu." + self.gpu_resource
+                resource_class = "gpu.nvidia." + self.gpu_resource
             if self.rocm_version is not None:
                 resource_class = "pytorch/amd-gpu"
             parameters["resource_class"] = resource_class
