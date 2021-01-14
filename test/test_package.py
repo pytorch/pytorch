@@ -375,5 +375,21 @@ def load():
         check('torch.**', ['torch.**.foo'], ['torch', 'torch.bar', 'torch.barfoo'], ['torch.foo', 'torch.some.foo'])
         check('**.torch', [], ['torch', 'bar.torch'], ['visiontorch'])
 
+    @skipIf(version_info < (3, 7), 'mock uses __getattr__ a 3.7 feature')
+    def test_pickle_mocked(self):
+        import package_a.subpackage
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+
+        filename = self.temp()
+        with PackageExporter(filename, verbose=False) as he:
+            he.mock(include='package_a.subpackage')
+            he.save_pickle('obj', 'obj.pkl', obj2)
+
+        hi = PackageImporter(filename)
+        with self.assertRaises(NotImplementedError):
+            hi.load_pickle('obj', 'obj.pkl')
+
+
 if __name__ == '__main__':
     main()

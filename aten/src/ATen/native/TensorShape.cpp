@@ -184,7 +184,12 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   // compute the size of the result
   auto result_size = notSkippedTensor.sizes().vec();
   result_size[dim] = cat_dim_size;
-  result.resize_(result_size, first_tensor_mem_format);
+
+  // skip resizing if size of result is same as expected
+  if (result.sizes() != result_size) {
+    result.resize_(result_size, first_tensor_mem_format);
+  }
+
   if (result.numel() == 0) {
     return result;
   }
@@ -786,8 +791,90 @@ Tensor narrow_copy_sparse(const Tensor& self, int64_t dim, int64_t start, int64_
   return newTensor._coalesced_(self.is_coalesced());
 }
 
+Tensor& narrow_copy_dense_cpu_out(
+  const Tensor& self, int64_t dim, int64_t start, int64_t length, Tensor& output
+) {
+  TORCH_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
+  TORCH_CHECK(self.dtype() == output.dtype());
+
+  Tensor self_contig = self.contiguous();
+  const auto self_sizes = self_contig.sizes();
+
+  // wrap dim if negative and do bound check
+  if (dim < 0) {
+    dim = at::maybe_wrap_dim(dim, self_sizes.size());
+  } else {
+    TORCH_CHECK(dim < self_sizes.size());
+  }
+
+  // wrap start and do bound check
+  const auto cur_size = self_sizes[dim];
+  if (start != cur_size && start < 0) { // start being the end is valid, but
+                                        // not a valid dim specification.
+    start = at::maybe_wrap_dim(start, cur_size);
+  }
+  TORCH_CHECK(
+      length >= 0 && start <= cur_size - length,
+      "start (",
+      start,
+      ") + length (",
+      length,
+      ") exceeds dimension size (",
+      cur_size,
+      ").");
+
+  // resize output
+  auto output_sizes = self_sizes.vec();
+  output_sizes[dim] = length;
+  at::native::resize_(output, output_sizes);
+
+  const int64_t unit = c10::size_from_dim_(dim + 1, self_sizes);
+  const int64_t num_blocks = c10::size_to_dim_(dim, self_sizes);
+
+  const auto itemsize = self_contig.dtype().itemsize();
+  size_t src_nbytes = itemsize * self_contig.numel();
+  size_t dst_nbytes = itemsize * output.numel();
+
+  size_t src_block_size = unit * self_sizes[dim];
+  size_t dst_block_size = unit * length;
+
+  if (num_blocks == 0 || dst_block_size == 0) {
+    return output;
+  }
+
+  char* src_bytes = static_cast<char*>(self_contig.data_ptr());
+  char* dst_bytes = static_cast<char*>(output.data_ptr());
+
+  size_t src_block_size_bytes = itemsize * src_block_size;
+  size_t dst_block_size_bytes = itemsize * dst_block_size;
+  size_t src_offset = unit * start;
+
+  char* src_offset_bytes = src_bytes + itemsize * src_offset;
+  char* dst_offset_bytes = dst_bytes;
+
+  for (size_t i = 0; i < num_blocks; ++i) {
+    char* local_src_offset_bytes = src_offset_bytes + i * src_block_size_bytes;
+    char* local_dst_offset_bytes = dst_offset_bytes + i * dst_block_size_bytes;
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        static_cast<void*>(local_src_offset_bytes + dst_block_size_bytes) <=
+        static_cast<void*>(src_bytes + src_nbytes));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        static_cast<void*>(local_dst_offset_bytes + dst_block_size_bytes) <=
+        static_cast<void*>(dst_bytes + dst_nbytes));
+
+    memcpy(
+        local_dst_offset_bytes, local_src_offset_bytes, dst_block_size_bytes);
+  }
+  return output;
+}
+
 Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length){
-    return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
+  return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
+}
+
+Tensor narrow_copy_dense_cpu(const Tensor& self, int64_t dim, int64_t start, int64_t length){
+  auto output = at::empty_like(self);
+  return narrow_copy_dense_cpu_out(self, dim, start, length, output);
 }
 
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
