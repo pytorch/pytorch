@@ -4382,6 +4382,13 @@ class TestTorchDeviceType(TestCase):
             x = torch.tensor([[1, 2], [4, 5]], dtype=dt, device=device)
             index = torch.tensor([0], device=device)
             x.index_fill_(1, index, 0)
+
+            # Verify `index` should be a LongTensor
+            if dt != torch.long:
+                with self.assertRaisesRegex(RuntimeError,
+                                            "index_fill: Expected index of scalar type Long but got scalar type"):
+                    x.index_fill_(1, index.to(dt), 0)
+
             self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dt, device=device))
 
     def test_index_select(self, device):
