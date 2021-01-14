@@ -392,7 +392,7 @@ def _unpatch_wrapped_functions(orig_fns : List[PatchedFn]):
 def wrap(fn_or_name : Union[str, Callable]):
     """
     This function can be called at global scope in a module to cause
-    references to the global function secified by `fn_name` to use
+    references to the global function specified by `fn_or_name` to use
     them in FX.
 
         # foo/bar/baz.py
@@ -408,7 +408,7 @@ def wrap(fn_or_name : Union[str, Callable]):
 
     Args:
 
-        fn_name (Union[str, Callable]): The function or name of the global function to insert into the
+        fn_or_name (Union[str, Callable]): The function or name of the global function to insert into the
             graph when it's called
     """
     if callable(fn_or_name):
