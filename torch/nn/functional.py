@@ -2873,7 +2873,7 @@ def huber_loss(
     beta: float = 1.0,
 ) -> Tensor:
     r"""Function that uses a squared term if the absolute
-    element-wise error falls below beta and an L1 term otherwise.
+    element-wise error falls below beta and a beta-scaled L1 term otherwise.
 
     See :class:`~torch.nn.HuberLoss` for details.
     """

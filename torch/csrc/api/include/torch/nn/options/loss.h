@@ -472,7 +472,7 @@ using CTCLossFuncOptions = CTCLossOptions;
 ///
 /// Example:
 /// ```
-/// SmoothL1Loss model(SmoothL1LossOptions(torch::kNone));
+/// SmoothL1Loss model(SmoothL1LossOptions().reduction(torch::kNone).beta(0.5));
 /// ```
 struct TORCH_API SmoothL1LossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
@@ -484,6 +484,8 @@ struct TORCH_API SmoothL1LossOptions {
   /// be divided by the number of elements in the output, 'sum': the output will
   /// be summed. Default: 'mean'
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
+  /// Specifies the threshold at which to change between L1 and L2 loss. Default: 1.0
+  TORCH_ARG(double, beta) = 1.0;
 };
 
 namespace functional {
