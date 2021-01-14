@@ -558,7 +558,7 @@
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(grad.new_zeros(self.sizes(), self.options()), indices, grad)
 
-- name: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
+- name: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source, Scalar alpha=1) -> Tensor(a!)
   self: grad
   source: grad.index_select(dim, index).expand_as(source)
   index: non_differentiable
