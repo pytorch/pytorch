@@ -2031,8 +2031,9 @@ class TestDeprecatedJitQuantized(JitTestCase):
                         self.cell = cell
 
                     @torch.jit.script_method
-                    def forward(self, x, hiddens):
-                        # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]
+                    def forward(self, x: torch.Tensor,
+                                hiddens: Tuple[torch.Tensor, torch.Tensor]
+                                ) -> Tuple[torch.Tensor, torch.Tensor]:
                         return self.cell(x, hiddens)
             else:
 
@@ -2042,8 +2043,7 @@ class TestDeprecatedJitQuantized(JitTestCase):
                         self.cell = cell
 
                     @torch.jit.script_method
-                    def forward(self, x, hiddens):
-                        # type: (torch.Tensor, torch.Tensor) -> torch.Tensor
+                    def forward(self, x: torch.Tensor, hiddens: torch.Tensor) -> torch.Tensor:
                         return self.cell(x, hiddens)
 
             cell = ScriptWrapper(cell)
@@ -2155,8 +2155,7 @@ class TestDeprecatedJitQuantized(JitTestCase):
                         self.cell = cell
 
                     @torch.jit.script_method
-                    def forward(self, x, hiddens):
-                        # type: (torch.Tensor, torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
+                    def forward(self, x: torch.Tensor, hiddens: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
                         return self.cell(x, hiddens)
 
                 compare_quantized_unquantized(ScriptWrapper, cell)
