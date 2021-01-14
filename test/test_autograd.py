@@ -12,7 +12,7 @@ from copy import deepcopy
 from collections import OrderedDict
 from itertools import product, permutations
 from operator import mul
-from functools import reduce
+from functools import reduce, partial
 import torch
 import json
 
@@ -47,7 +47,7 @@ from torch.testing._internal.common_methods_invocations import (method_tests,
                                                                 mask_not_all_zeros,
                                                                 S)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
-                                                        onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
+                                                        onlyCPU, onlyCUDA, onlyOnCPUAndCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
                                                         skipCUDAIf)
 
@@ -72,6 +72,10 @@ load_tests = load_tests
 import pickle
 
 PRECISION = 1e-4
+
+# See #49409, we should remove these if we end up with a global gradcheck setting
+gradcheck = partial(gradcheck, check_batched_grad=True)
+gradgradcheck = partial(gradgradcheck, check_batched_grad=True)
 
 
 @contextlib.contextmanager
@@ -3990,14 +3994,14 @@ class TestAutograd(TestCase):
                 return NonDetFunc.apply(grad_out, ctx._jitter) * (1 + torch.rand_like(grad_out) * ctx._jitter), None
 
         inp = torch.randn(5, 5, requires_grad=True)
-        gradcheck(lambda x: NonDetFunc.apply(x, 0.0), inp)
+        gradcheck(lambda x: NonDetFunc.apply(x, 0.0), inp, check_batched_grad=False)
         with self.assertRaisesRegex(RuntimeError, 'Backward is not reentrant'):
-            gradcheck(lambda x: NonDetFunc.apply(x, 1e-6), inp)
+            gradcheck(lambda x: NonDetFunc.apply(x, 1e-6), inp, check_batched_grad=False)
         with self.assertRaisesRegex(RuntimeError, 'Backward is not reentrant'):
-            gradgradcheck(lambda x: NonDetFunc.apply(x, 1e-12), inp)
-        gradcheck(lambda x: NonDetFunc.apply(x, 0.0), inp, nondet_tol=1e-5)
-        gradcheck(lambda x: NonDetFunc.apply(x, 1e-6), inp, nondet_tol=1e-5)
-        gradgradcheck(lambda x: NonDetFunc.apply(x, 1e-12), inp, nondet_tol=1e-5)
+            gradgradcheck(lambda x: NonDetFunc.apply(x, 1e-12), inp, check_batched_grad=False)
+        gradcheck(lambda x: NonDetFunc.apply(x, 0.0), inp, nondet_tol=1e-5, check_batched_grad=False)
+        gradcheck(lambda x: NonDetFunc.apply(x, 1e-6), inp, nondet_tol=1e-5, check_batched_grad=False)
+        gradgradcheck(lambda x: NonDetFunc.apply(x, 1e-12), inp, nondet_tol=1e-5, check_batched_grad=False)
 
     def test_version_counter(self):
         x = torch.randn(1, 2)
@@ -4488,14 +4492,14 @@ for shape in [(1,), ()]:
                                     with self.assertRaisesRegex(RuntimeError,
                                                                 "a view of a leaf Variable that requires grad "
                                                                 "is being used in an in-place operation."):
-                                        gradcheck(fn, (a, b))
+                                        gradcheck(fn, (a, b), check_batched_grad=False)
                                 else:
                                     # This works but the custom backward is not called (or called with partial)
                                     # gradients as tested below
-                                    gradcheck(fn, (a, b))
+                                    gradcheck(fn, (a, b), check_batched_grad=False)
                             self.assertTrue(len(w) > 0)
                         else:
-                            gradcheck(fn, (a, b))
+                            gradcheck(fn, (a, b), check_batched_grad=False)
 
                         # Was the custom backward called properly
                         bw_called[0] = 0
@@ -4941,17 +4945,6 @@ for shape in [(1,), ()]:
                                          return_counts=return_counts)
                     assert_only_first_requires_grad(res)
 
-    def test_linalg_qr_r(self):
-        # torch.linalg.qr(mode='r') returns only 'r' and discards 'q', but
-        # without 'q' you cannot compute the backward pass. Check that
-        # linalg_qr_backward complains cleanly in that case.
-        inp = torch.randn((5, 7), requires_grad=True)
-        q, r = torch.linalg.qr(inp, mode='r')
-        assert q.shape == (0,)  # empty tensor
-        b = torch.sum(r)
-        with self.assertRaisesRegex(RuntimeError,
-                                    "linalg_qr_backward: cannot compute backward"):
-            b.backward()
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -4985,8 +4978,9 @@ def gradgradcheck_method_precision_override(test_name):
     return override
 
 def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, output_variable,
-                                 input_variables, run_gradgradcheck=True):
-    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION))
+                                 input_variables, run_gradgradcheck=True, check_batched_grad=True):
+    test_case.assertTrue(gradcheck(apply_method, input_variables, eps=1e-6, atol=PRECISION,
+                                   check_batched_grad=check_batched_grad))
     if name in EXCLUDE_GRADGRADCHECK or test_name in EXCLUDE_GRADGRADCHECK_BY_TEST_NAME:
         return
     gradgradcheck_precision_override = gradgradcheck_method_precision_override(test_name)
@@ -4994,9 +4988,12 @@ def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, outpu
         atol = gradgradcheck_precision_override['atol']
         rtol = gradgradcheck_precision_override['rtol']
         test_case.assertTrue(gradgradcheck(apply_method, input_variables, None, atol=atol, rtol=rtol,
-                                           gen_non_contig_grad_outputs=True))
+                                           gen_non_contig_grad_outputs=True,
+                                           check_batched_grad=check_batched_grad))
     else:
-        test_case.assertTrue(gradgradcheck(apply_method, input_variables, gen_non_contig_grad_outputs=True))
+        test_case.assertTrue(gradgradcheck(apply_method, input_variables,
+                                           gen_non_contig_grad_outputs=True,
+                                           check_batched_grad=check_batched_grad))
 
 
 def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
@@ -5037,6 +5034,13 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'exp', 'mean', 'inverse', 'triangular_solve', 'solve', 'addcmul',
                 'addcdiv', 'linalg.tensorinv', 'matrix_exp', 'qr',
                 'narrow', 'swapaxes', 'swapdims', 'tensor_split', 'tile'] + separate_complex_tests
+
+# deny list for batched grad computation
+EXCLUDE_BATCHED_GRAD_TESTS = set([
+    'test_unfold_scalar',
+    'test_unfold_scalar_neg0',
+    'test_to_sparse',
+])
 
 def add_test(
         name,
@@ -5110,8 +5114,10 @@ def add_test(
                             return output_process_fn(output)
 
                         if not is_inplace and name not in EXCLUDE_GRADCHECK:
+                            check_batched_grad = test_name not in EXCLUDE_BATCHED_GRAD_TESTS
                             run_grad_and_gradgrad_checks(self, name, test_name, fn,
-                                                         output_variable, (self_variable,) + args_variable)
+                                                         output_variable, (self_variable,) + args_variable,
+                                                         check_batched_grad=check_batched_grad)
 
                     # functional interface tests
                     torch_fn = getattr_qualified(torch, name)
@@ -6473,9 +6479,9 @@ class TestAutogradDeviceType(TestCase):
                 z = torch.sparse_coo_tensor(y.indices(), new_v, y.size())
                 return z.coalesce().values()
 
-            gradcheck(fn, (inp,))
+            gradcheck(fn, (inp,), check_batched_grad=False)
             # FIXME: make gradgradcheck work.
-            # gradgradcheck(fn, (inp,))
+            # gradgradcheck(fn, (inp,), check_batched_grad=False)
 
             # assert that _values is non-differentiable
             with self.assertRaisesRegex(RuntimeError, "does not have a grad_fn"):
@@ -6790,6 +6796,18 @@ class TestAutogradDeviceType(TestCase):
         b.backward(torch.ones(3, device=device))
         expected = torch.tensor([0., 0., 1.], device=device)
         self.assertEqual(a.grad, expected)
+
+    @onlyOnCPUAndCUDA
+    def test_elu_inplace_with_neg_alpha(self, device):
+        a = torch.tensor([-1., 1.], device=device, requires_grad=True)
+        b = torch.nn.functional.elu_(a.clone(), alpha=-2)
+        with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
+            b.backward(torch.ones(2, device=device))
+
+        a = torch.tensor([-1., 1.], device=device, requires_grad=True)
+        b = torch.nn.functional.celu_(a.clone(), alpha=-2)
+        with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
+            b.backward(torch.ones(2, device=device))
 
     @onlyCUDA
     def test_free_unneeded_tensor(self, device):

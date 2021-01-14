@@ -86,7 +86,9 @@ VkInstance create_instance(const Runtime::Type type) {
         nullptr, &instance_extension_count, instance_extension_properties.data()));
 
     constexpr const char* const requested_instance_extensions[]{
+    #ifdef VK_EXT_debug_report
       VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
+    #endif
     };
 
     for (const auto& requested_instance_extension : requested_instance_extensions) {

@@ -141,11 +141,11 @@ class Graph:
 
         graph(x):
             %linear_weight : [#users=1] = self.linear.weight
-            %add_1 : [#users=1] = call_function[target=<built-in function add>](args = (%x, %linear_weight), kwargs = {})
+            %add_1 : [#users=1] = call_function[target=operator.add](args = (%x, %linear_weight), kwargs = {})
             %linear_1 : [#users=1] = call_module[target=linear](args = (%add_1,), kwargs = {})
             %relu_1 : [#users=1] = call_method[target=relu](args = (%linear_1,), kwargs = {})
-            %sum_1 : [#users=1] = call_function[target=<built-in method sum of type object at 0x7ff2da9dc300>](args = (%relu_1,), kwargs = {dim: -1}) # noqa: B950
-            %topk_1 : [#users=1] = call_function[target=<built-in method topk of type object at 0x7ff2da9dc300>](args = (%sum_1, 3), kwargs = {}) # noqa: B950
+            %sum_1 : [#users=1] = call_function[target=torch.sum](args = (%relu_1,), kwargs = {dim: -1})
+            %topk_1 : [#users=1] = call_function[target=torch.topk](args = (%sum_1, 3), kwargs = {})
             return topk_1
 
     For the semantics of operations represented in the ``Graph``, please see :class:`Node`.
@@ -693,13 +693,18 @@ class Graph:
         import_strs = [f'import {name}' for name in sorted(modules_used)]
         import_block = '\n'.join(import_strs)
 
+        if len(body) == 0:
+            # If the Graph has no non-placeholder nodes, no lines for the body
+            # have been emitted. To continue to have valid Python code, emit a
+            # single pass statement
+            body.append('pass\n')
+
         code = ''.join(body)
-        code = '\n'.join('    ' + line for line in code.split('\n')) + '\n'
+        code = '\n'.join('    ' + line for line in code.split('\n'))
         fn_code = f"""\
 {import_block}
 def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
-{code}
-"""
+{code}"""
 
         return fn_code
 
@@ -730,6 +735,28 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
             else:
                 return str(arg)
 
+        def pretty_print_target(target):
+            """
+            Make target printouts more user-friendly.
+            1) builtins will be printed as `builtins.xyz`
+            2) operators will be printed as `operator.xyz`
+            3) other callables will be printed with qualfied name, e.g. torch.add
+            """
+            if isinstance(target, str):
+                return target
+            if hasattr(target, '__module__'):
+                if not hasattr(target, '__name__'):
+                    # Just to be defensive, if we don't have `__name__`, get the
+                    # qualname. Not sure if this happens for any members of `operator`
+                    # or `builtins`. This fallback path is not as good, since e.g.
+                    # things in `operator` have `_operator` as their __module__.
+                    return get_qualified_name(target)
+                if target.__module__ == 'builtins':
+                    return f'builtins.{target.__name__}'
+                elif target.__module__ == '_operator':
+                    return f'operator.{target.__name__}'
+            return get_qualified_name(target)
+
         def format_node(n : Node) -> Optional[str]:
             if n.op == 'placeholder':
                 assert isinstance(n.target, str)
@@ -746,7 +773,7 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
                 return f'return {n.args[0]}'
             else:
                 maybe_typename = f'{_type_repr(n.type)} ' if n.type is not None else ''
-                return f'%{n.name} : {maybe_typename}[#users={len(n.users)}] = {n.op}[target={n.target}](' \
+                return f'%{n.name} : {maybe_typename}[#users={len(n.users)}] = {n.op}[target={pretty_print_target(n.target)}](' \
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
 
 

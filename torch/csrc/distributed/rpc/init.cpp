@@ -44,7 +44,8 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
   }
 
   auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
-  auto m = torch_C_m.def_submodule("_distributed_rpc", "distributed rpc bindings");
+  auto m =
+      torch_C_m.def_submodule("_distributed_rpc", "distributed rpc bindings");
 
   auto module = py::handle(m).cast<py::module>();
 
@@ -128,13 +129,13 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               py::call_guard<py::gil_scoped_release>())
           .def(
               "get_worker_info",
-              (const WorkerInfo& (RpcAgent::*)(void)const) &
-              RpcAgent::getWorkerInfo,
+              (const WorkerInfo& (RpcAgent::*)(void) const) &
+                  RpcAgent::getWorkerInfo,
               py::call_guard<py::gil_scoped_release>())
-        .def(
+          .def(
               "get_worker_info",
-              (const WorkerInfo& (RpcAgent::*)(const std::string&)const) &
-              RpcAgent::getWorkerInfo,
+              (const WorkerInfo& (RpcAgent::*)(const std::string&) const) &
+                  RpcAgent::getWorkerInfo,
               py::call_guard<py::gil_scoped_release>())
           .def(
               "get_worker_infos",
@@ -506,12 +507,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       }))
       .def(
           "get_worker_info",
-          (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &
+          (const WorkerInfo& (ProcessGroupAgent::*)(void) const) &
               RpcAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          (const WorkerInfo& (ProcessGroupAgent::*)(const std::string&)const) &
+          (const WorkerInfo& (ProcessGroupAgent::*)(const std::string&) const) &
               ProcessGroupAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
@@ -607,12 +608,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          (const WorkerInfo& (TensorPipeAgent::*)(void)const) &
+          (const WorkerInfo& (TensorPipeAgent::*)(void) const) &
               RpcAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          (const WorkerInfo& (TensorPipeAgent::*)(const std::string&)const) &
+          (const WorkerInfo& (TensorPipeAgent::*)(const std::string&) const) &
               TensorPipeAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(

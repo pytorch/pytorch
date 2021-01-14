@@ -49,11 +49,7 @@ Variant = Enum('Variant', ('function', 'method'))
 
 class UseC10Dispatcher(Enum):
     full = 0
-    with_codegenerated_unboxing_wrapper = 1
     hacky_wrapper_for_legacy_signatures = 2
-
-    def dispatcher_uses_new_style(self) -> bool:
-        return self in [UseC10Dispatcher.full, UseC10Dispatcher.hacky_wrapper_for_legacy_signatures]
 
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
@@ -77,7 +73,7 @@ class NativeFunction:
     func: 'FunctionSchema'
 
     # Corresponds to the 'use_c10_dispatcher' field.  The default
-    # is 'with_codegenerated_unboxing_wrapper'
+    # is 'full'
     use_c10_dispatcher: UseC10Dispatcher
 
     # Whether or not to omit automatic generation of a DeviceGuard
@@ -177,16 +173,14 @@ class NativeFunction:
         assert isinstance(cpp_no_default_args_list, list)
         cpp_no_default_args = set(cpp_no_default_args_list)
 
-        use_c10_dispatcher_s = e.pop('use_c10_dispatcher', None)
-        if use_c10_dispatcher_s is None:
-            use_c10_dispatcher = UseC10Dispatcher.full
-        elif use_c10_dispatcher_s == 'full':
+        use_c10_dispatcher_s = e.pop('use_c10_dispatcher', 'full')
+        if use_c10_dispatcher_s == 'full':
             use_c10_dispatcher = UseC10Dispatcher.full
         elif use_c10_dispatcher_s == 'hacky_wrapper_for_legacy_signatures':
             use_c10_dispatcher = UseC10Dispatcher.hacky_wrapper_for_legacy_signatures
         else:
             raise AssertionError(
-                f'use_c10_dispatcher must be unset or set to full, got {use_c10_dispatcher}')
+                f'use_c10_dispatcher must be full or hacky_wrapper_for_legacy_signatures, got {use_c10_dispatcher}')
 
         variants_s = e.pop('variants', 'function')
         assert isinstance(variants_s, str)
@@ -567,7 +561,7 @@ class FunctionSchema:
         else:
             return SchemaKind.functional
 
-    def signature(self) -> 'FunctionSchema':
+    def signature(self, *, strip_default: bool = False) -> 'FunctionSchema':
         """
         Certain schemas are 'related', in that they are simply
         inplace/out/functional versions of the same function.  This method
@@ -582,11 +576,13 @@ class FunctionSchema:
         - Out arguments are stripped
         - Mutability annotations are stripped  (this is sound
           because you cannot overload on mutability annotation)
+        - Return names are stripped since they are not overloadable and
+          some variants have return names but some not
         """
 
         def strip_ret_annotation(r: Return) -> Return:
             return Return(
-                name=r.name,
+                name=None,
                 type=r.type,
                 annotation=None,
             )
@@ -600,7 +596,7 @@ class FunctionSchema:
                 ),
                 overload_name="",  # stripped
             ),
-            arguments=self.arguments.signature(),
+            arguments=self.arguments.signature(strip_default=strip_default),
             returns=tuple(map(strip_ret_annotation, self.returns)),
         )
 
@@ -983,14 +979,14 @@ class Arguments:
         ret.extend(self.post_tensor_options_kwarg_only)
         return ret
 
-    def signature(self) -> 'Arguments':
+    def signature(self, *, strip_default: bool = False) -> 'Arguments':
         # dataclasses.replace could be used here, but it is less
         # type safe so for now I've opted to type everything out
         def strip_arg_annotation(a: Argument) -> Argument:
             return Argument(
                 name=a.name,
                 type=a.type,
-                default=a.default,  # hmmm
+                default=a.default if not strip_default else None,
                 annotation=None,
             )
 

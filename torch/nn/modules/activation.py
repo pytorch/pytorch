@@ -1,5 +1,5 @@
 import warnings
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
@@ -835,7 +835,8 @@ class MultiheadAttention(Module):
 
     .. math::
         \text{MultiHead}(Q, K, V) = \text{Concat}(head_1,\dots,head_h)W^O
-        \text{where} head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)
+
+    where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
     Args:
         embed_dim: total dimension of the model.
@@ -922,9 +923,8 @@ class MultiheadAttention(Module):
 
         super(MultiheadAttention, self).__setstate__(state)
 
-    def forward(self, query, key, value, key_padding_mask=None,
-                need_weights=True, attn_mask=None):
-        # type: (Tensor, Tensor, Tensor, Optional[Tensor], bool, Optional[Tensor]) -> Tuple[Tensor, Optional[Tensor]]
+    def forward(self, query: Tensor, key: Tensor, value: Tensor, key_padding_mask: Optional[Tensor] = None,
+                need_weights: bool = True, attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Args:
         query, key, value: map a query and a set of key-value pairs to an output.
