@@ -733,7 +733,13 @@ Tensor& index_fill_(Tensor& self, int64_t dim, const Tensor & index, Scalar valu
 
   auto self_dim = self.dim();
   dim = at::maybe_wrap_dim(dim, self_dim);
-  TORCH_CHECK(dim < self_dim, "Indexing dim ", dim, " is out of bounds of tensor");
+  if (self_dim == 0) {
+    TORCH_CHECK(
+        dim == self_dim, "Indexing dim ", dim, " is out of bounds of tensor");
+  } else {
+    TORCH_CHECK(
+        dim < self_dim, "Indexing dim ", dim, " is out of bounds of tensor");
+  }
 
   at::assert_no_overlap(self, index);
   if (at::has_internal_overlap(self) == at::MemOverlap::YES) {
@@ -755,7 +761,6 @@ Tensor& index_fill_(Tensor& self, int64_t dim, const Tensor & index, Scalar valu
   } else {
     AT_DISPATCH_ALL_TYPES_AND3(
         kBool, kBFloat16, kHalf, self.scalar_type(), "index_fill", [&] {
-          TORCH_CHECK(self_dim == 1, "index_fill: `dim` out of range");
           auto self_ptr = self.data_ptr<scalar_t>();
           auto self_stride = self.strides()[0];
           auto self_numel = self.numel();
