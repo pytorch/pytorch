@@ -1157,13 +1157,8 @@ at::Tensor CudaCodeGen::empty_strided(
     c10::optional<c10::Layout> layout_opt,
     c10::optional<c10::Device> device_opt,
     c10::optional<bool> pin_memory_opt) {
-#ifdef USE_ROCM
-  return at::native::empty_strided_hip(
-      size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
-#else
   return at::native::empty_strided_cuda(
       size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
-#endif
 }
 
 void CudaCodeGen::CompileToNVRTC(
