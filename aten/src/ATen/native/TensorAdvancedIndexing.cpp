@@ -1099,9 +1099,9 @@ Tensor& put__cpu(Tensor& self, const Tensor& index, const Tensor& source, bool a
         auto index_data = index.data_ptr<int64_t>();
         auto source_data = source.data_ptr<scalar_t>();
         for (auto i = 0; i < idx_numel; i++) {
-            checkLinearIndex(i, idx_numel);
+            checkLinearIndex(index_data[i], self.numel());
             auto linearIndex = wrapLinearIndex(index_data[i], self.numel());
-            auto dataOffset_ = is_contiguous ? linearIndex : dataOffset(index, linearIndex);
+            auto dataOffset_ = is_contiguous ? linearIndex : dataOffset(self, linearIndex);
             if (accumulate){
                 self_data[dataOffset_] += source_data[i];
             } else {
