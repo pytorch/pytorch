@@ -3913,10 +3913,11 @@ class TestConstraints(TestCase):
                 dist = Dist(**param)
                 value = dist.sample()
                 constraint = dist.support
+                self.assertEqual(constraint.event_dim, len(dist.event_shape))
                 message = '{} example {}/{} sample = {}'.format(
                     Dist.__name__, i + 1, len(params), value)
                 ok = constraint.check(value)
-                assert ok.shape == dist.batch_shape
+                self.assertEqual(ok.shape, dist.batch_shape)
                 self.assertTrue(ok.all(), msg=message)
 
 
