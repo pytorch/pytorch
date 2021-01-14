@@ -295,7 +295,7 @@ class TestUnaryUfuncs(TestCase):
                                            exact_dtype=exact_dtype, rtol=1e-3, atol=1e-2)
                     continue
 
-            self.assertEqualHelper(actual, expected, msg, dtype=dtype, exact_dtype=exact_dtype)
+            self.assertEqualHelper(actual, expected, msg, dtype=dtype, equal_nan="relaxed", exact_dtype=exact_dtype)
 
     # Tests for testing (dis)contiguity consistency
 
