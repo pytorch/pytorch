@@ -983,6 +983,34 @@ class TestQuantizeFx(QuantizationTestCase):
             # make sure it runs
             m(torch.randn(2, 1, 3, 3))
 
+    def test_preserve_attributes(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        m = M()
+        m.eval()
+        m.preserved_attr = 3
+        prepare_custom_config_dict = {
+            "preserved_attributes": ["preserved_attr"]
+        }
+        m = prepare_fx(m, {"": default_qconfig}, prepare_custom_config_dict)
+
+        def assertAttrPreserved(m):
+            self.assertTrue(hasattr(m, "preserved_attr"))
+            self.assertTrue(m.preserved_attr, 3)
+
+        assertAttrPreserved(m)
+        convert_custom_config_dict = {
+            "preserved_attributes": ["preserved_attr"]
+        }
+        m = convert_fx(m, convert_custom_config_dict=convert_custom_config_dict)
+        assertAttrPreserved(m)
+
     @skipIfNoFBGEMM
     def test_qat_and_script(self):
         model = LinearModelWithSubmodule().train()
