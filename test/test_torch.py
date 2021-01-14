@@ -4413,7 +4413,7 @@ class TestTorchDeviceType(TestCase):
 
             # Verify IndexError is raised
             index[0] = 101
-            with self.assertRaises(IndexError):
+            with self.assertRaises(RuntimeError):
                 x.index_fill_(0, index, val)
 
     def test_index_select(self, device):

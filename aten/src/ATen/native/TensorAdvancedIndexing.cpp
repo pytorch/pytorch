@@ -765,8 +765,8 @@ Tensor& index_fill_(Tensor& self, int64_t dim, const Tensor & index, Scalar valu
           auto self_stride = self.strides()[0];
           auto self_numel = self.numel();
           for (decltype(numel) i = 0; i < numel; i++) {
-            TORCH_CHECK_INDEX(
-                index_data[i] < self_numel, "index_fill: index out of range");
+            TORCH_CHECK(
+                index_data[i] < self_numel, "index_fill: index ", index_data[i], " out of range");
             *(self_ptr + (self_stride * index_data[i])) = value.to<scalar_t>();
           }
         });
