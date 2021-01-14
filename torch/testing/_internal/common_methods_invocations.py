@@ -17,6 +17,7 @@ from torch.testing import \
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm,
      expectedAlertNondeterministic, precisionOverride, onlyCPU)
+from torch.testing._internal.common_cuda import tf32_is_not_fp32
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
      random_symmetric_matrix, random_symmetric_psd_matrix,
@@ -482,9 +483,10 @@ class SpectralFuncInfo(OpInfo):
                  skips=None,
                  decorators=None,
                  **kwargs):
+        skips = skips if skips is not None else []
+
         # gradgrad is quite slow
         if not TEST_WITH_SLOW:
-            skips = skips if skips is not None else []
             skips.append(SkipInfo('TestGradients', 'test_fn_gradgrad'))
 
         decorators = decorators if decorators is not None else []
@@ -785,7 +787,8 @@ op_db: List[OpInfo] = [
     OpInfo('addmm',
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
+                                           *[torch.bfloat16] if tf32_is_not_fp32() else []),
            dtypesIfROCM=floating_types_and(torch.half),
            assert_autodiffed=True,
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
