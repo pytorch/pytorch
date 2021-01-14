@@ -109,6 +109,7 @@ def glu(g, input, dim):
     first, second = g.op('Split', input, dim, outputs=2)
     return g.op('Mul', first, g.op('Sigmoid', second))
 
+
 def _interpolate(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, *args):
         scales, align_corners = sym_help._get_interpolate_attributes(g, interpolate_mode, args)

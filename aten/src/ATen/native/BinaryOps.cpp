@@ -71,7 +71,7 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
 }
 
 TORCH_IMPL_FUNC(add_out) (
-  Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha
+  const Tensor& self, const Tensor& other, Scalar alpha, Tensor& result
 ) {
   add_stub(device_type(), *this, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
@@ -461,27 +461,15 @@ Tensor& add_(Tensor& self, Scalar other, Scalar alpha) {
 }
 
 Tensor remainder(const Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  return native::remainder(self, other_tensor.toType(self.scalar_type()));
+  return native::remainder(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_(Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  return native::remainder_(self, other_tensor.toType(self.scalar_type()));
+  return native::remainder_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_out(Tensor& result, const Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  return native::remainder_out(result, self, other_tensor.toType(self.scalar_type()));
+  return native::remainder_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
@@ -904,13 +892,7 @@ Tensor& fmod_out(Tensor & result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor& fmod_out(Tensor & result, const Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  // Issue #47779: https://github.com/pytorch/pytorch/issues/47779
-  at::fmod_out(result, self, other_tensor.to(self.dtype()));
-  return result;
+  return native::fmod_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor fmod(const Tensor& self, const Tensor & other) {
@@ -921,12 +903,7 @@ Tensor fmod(const Tensor& self, const Tensor & other) {
 }
 
 Tensor fmod(const Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  // Issue #47779: https://github.com/pytorch/pytorch/issues/47779
-  return native::fmod(self, other_tensor.to(self.dtype()));
+  return native::fmod(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& fmod_(Tensor& self, const Tensor& other) {
@@ -934,7 +911,7 @@ Tensor& fmod_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& fmod_(Tensor& self, Scalar other) {
-  return native::fmod_out(self, self, other);
+  return native::fmod_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& logaddexp_out(Tensor& result, const Tensor& self, const Tensor& other) {
@@ -1109,11 +1086,11 @@ Tensor& xlogy_out(Tensor& result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor& xlogy_out(Tensor& result, Scalar self, const Tensor& other) {
-  return at::xlogy_out(result, c10::scalar_to_tensor(self, other.device()), other);
+  return at::xlogy_out(result, wrapped_scalar_tensor(self), other);
 }
 
 Tensor& xlogy_out(Tensor& result, const Tensor& self, Scalar other) {
-  return at::xlogy_out(result, self, c10::scalar_to_tensor(other, self.device()));
+  return at::xlogy_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor xlogy(const Tensor& x, const Tensor& y) {
@@ -1124,11 +1101,11 @@ Tensor xlogy(const Tensor& x, const Tensor& y) {
 }
 
 Tensor xlogy(Scalar x, const Tensor& y) {
-  return at::xlogy(c10::scalar_to_tensor(x, y.device()), y);
+  return at::xlogy(wrapped_scalar_tensor(x), y);
 }
 
 Tensor xlogy(const Tensor& x, Scalar y) {
-  return at::xlogy(x, c10::scalar_to_tensor(y, x.device()));
+  return at::xlogy(x, wrapped_scalar_tensor(y));
 }
 
 Tensor& xlogy_(Tensor& x, const Tensor& y) {
@@ -1136,7 +1113,7 @@ Tensor& xlogy_(Tensor& x, const Tensor& y) {
 }
 
 Tensor& xlogy_(Tensor& x, Scalar y) {
-  return at::xlogy_out(x, x, c10::scalar_to_tensor(y, x.device()));
+  return at::xlogy_out(x, x, wrapped_scalar_tensor(y));
 }
 
 } // namespace native

@@ -207,6 +207,8 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         torch._C._jit_pass_onnx_scalar_type_analysis(graph)
         torch._C._jit_pass_lint(graph)
 
+        torch._C._jit_pass_onnx_fold_if(graph)
+
         from torch.onnx.symbolic_helper import _export_onnx_opset_version
         torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version, fixed_batch_size)
         torch._C._jit_pass_lint(graph)

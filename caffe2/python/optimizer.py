@@ -571,6 +571,7 @@ class AdagradOptimizer(Optimizer):
         output_effective_lr_and_update=False,
         pruning_options=None,
         swa_options=None,
+        ema_options=None,
         weight_scale=None,
         counter_halflife=-1,
         **kwargs
@@ -596,6 +597,7 @@ class AdagradOptimizer(Optimizer):
 
         self._process_pruning_options(pruning_options)
         self._process_swa_options(swa_options)
+        self._process_ema_options(ema_options)
 
     def _process_swa_options(self, swa_options):
         self.swa_enabled = True if swa_options else False
@@ -605,6 +607,14 @@ class AdagradOptimizer(Optimizer):
             self.swa_feedback_start_it = swa_options.get("swa_feedback_start_it", None)
             self.swa_feedback_step = swa_options.get("swa_feedback_step", None)
             self.swa_feedback_end_it = swa_options.get("swa_feedback_end_it", None)
+
+    def _process_ema_options(self, ema_options):
+        self.ema_enabled = True if ema_options else False
+        if self.ema_enabled:
+            self.ema_start = ema_options.get("ema_start", None)
+            self.ema_end = ema_options.get("ema_end", None)
+            self.ema_step = ema_options.get("ema_step", None)
+            self.ema_alpha = ema_options.get("ema_alpha", None)
 
     def _process_pruning_options(self, pruning_options):
         self.use_mask = False
@@ -1045,6 +1055,22 @@ class AdagradOptimizer(Optimizer):
                         feedback_step=self.swa_feedback_step,
                         feedback_end=self.swa_feedback_end_it,
                     )
+
+        if self.ema_enabled:
+            param_ema = str(param) + "_ema"
+            if not param_init_net.BlobIsDefined(param_ema):
+                param_init_net.ConstantFill([param], param_ema, value=0.0)
+                self._aux_params.local.append(param_ema)
+
+            net.EMA(
+                [param, param_ema, lr_iteration],
+                [param, param_ema],
+                ema_start=self.ema_start,
+                ema_end=self.ema_end,
+                ema_step=self.ema_step,
+                ema_alpha=self.ema_alpha,
+            )
+
         if self.weight_scale:
             net.WeightScale(
                 [param, lr_iteration],

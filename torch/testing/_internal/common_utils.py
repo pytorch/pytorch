@@ -349,7 +349,6 @@ def _check_module_exists(name):
     our tests, e.g., setting multiprocessing start method when imported
     (see librosa/#747, torchvision/#544).
     """
-    import importlib
     import importlib.util
     spec = importlib.util.find_spec(name)
     return spec is not None
@@ -1386,19 +1385,26 @@ class TestCase(expecttest.TestCase):
         s = re.sub(r'__torch__[^ ]+', '', s)
         self.assertExpected(s, subname)
 
-    # returns captured stderr
+    # run code in subprocess and capture exceptions.
     @staticmethod
-    def runWithPytorchAPIUsageStderr(code):
+    def run_process_no_exception(code, env=None):
         import subprocess
 
-        env = os.environ.copy()
-        env["PYTORCH_API_USAGE_STDERR"] = "1"
-        pipes = subprocess.Popen(
+        popen = subprocess.Popen(
             [sys.executable, '-c', code],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=env)
-        return pipes.communicate()[1].decode('ascii')
+        (stdout, stderr) = popen.communicate()
+        return (stdout, stderr)
+
+    # returns captured stderr
+    @staticmethod
+    def runWithPytorchAPIUsageStderr(code):
+        env = os.environ.copy()
+        env["PYTORCH_API_USAGE_STDERR"] = "1"
+        (stdout, stderr) = TestCase.run_process_no_exception(code, env=env)
+        return stderr.decode('ascii')
 
 
 def download_file(url, binary=True):
