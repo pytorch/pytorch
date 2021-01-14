@@ -44,7 +44,7 @@ __all__ = [
 ]
 
 @functools.lru_cache(None)
-def get_ignored_functions() -> Set[Any]:
+def get_ignored_functions() -> Set[Callable]:
     """
     Return public functions that cannot be overridden by ``__torch_function__``.
 
