@@ -8295,7 +8295,8 @@ Supports real-valued and complex-valued input.
 
 .. note:: The implementation of SVD on CPU uses the LAPACK routine `?gesdd` (a divide-and-conquer
           algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the cuSOLVER routines
-          `gesvdj` and `gesvdjBatched`.
+          `gesvdj` and `gesvdjBatched` on CUDA 10.1.243 and later, and uses the MAGMA routine `gesdd`
+          on earlier versions of CUDA.
 
 .. note:: The returned matrix `U` will be transposed, i.e. with strides
           :code:`U.contiguous().transpose(-2, -1).stride()`.
@@ -8314,8 +8315,8 @@ Supports real-valued and complex-valued input.
 
 .. note:: Since `U` and `V` of an SVD is not unique, each vector can be multiplied by
           an arbitrary phase factor `e^{i phi}` while the SVD result is still correct.
-          With different backends (numpy, PyTorch CPU, PyTorch GPU),
-          the results of `U` and `V` could be different.
+          Different platforms, like Numpy, or inputs on different device types, may produce different
+          `U` and `V` tensors.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
