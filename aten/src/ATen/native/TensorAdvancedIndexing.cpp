@@ -1092,12 +1092,12 @@ Tensor& put__cpu(Tensor& self, const Tensor& index, const Tensor& source, bool a
     TORCH_CHECK(index.scalar_type() == kLong, "index must be an int64 tensor");
     TORCH_CHECK(index.numel() == source.numel(), "src should have the same number of elements as index")
 
-    auto self_contiguous = self.contiguous();
-    int64_t numel = self_contiguous.numel();
+    // auto self_contiguous = self.contiguous();
+    int64_t numel = self.numel();
 
     bool is_contiguous = self.is_contiguous();
     AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Bool, at::ScalarType::Half, self.scalar_type(), "put__cpu", [&] {
-        auto self_data = self_contiguous.data_ptr<scalar_t>();
+        auto self_data = self.data_ptr<scalar_t>();
         auto index_data = index.contiguous().data_ptr<int64_t>();
         auto source_data = source.contiguous().data_ptr<scalar_t>();
 
