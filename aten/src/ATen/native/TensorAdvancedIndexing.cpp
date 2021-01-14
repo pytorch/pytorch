@@ -761,12 +761,10 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
     .build();
 
   auto self_dim_stride = self.stride(dim);
-  auto index_stride = index.stride(0); // `index` is 1d
   index_fill_stub(
     iter.device_type(),
     iter,
     self_dim_stride,
-    index_stride,
     source);
 
   return self;

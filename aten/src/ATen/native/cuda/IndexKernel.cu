@@ -173,7 +173,6 @@ static void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayR
 static void index_fill_kernel(
   TensorIterator& iter,
   int64_t self_dim_stride,
-  int64_t index_stride,
   Scalar source) {
 }
 
