@@ -25,6 +25,51 @@
 namespace at { namespace native {
 
 using namespace at::sparse;
+using at::cuda::detail::TensorInfo;
+using at::cuda::detail::getTensorInfo;
+
+namespace {
+
+template <typename scalar_t>
+#ifdef __HIP_PLATFORM_HCC__
+C10_LAUNCH_BOUNDS_1(512)
+#endif
+__global__ void _sparse_mask_copy_kernel(
+  int64_t total_threads,
+  int64_t t_nnz,
+  const TensorInfo<int64_t, int64_t> t_indices_ti,
+  const TensorInfo<int64_t, int64_t> mask_indices_ti,
+  const TensorInfo<int64_t, int64_t> t_indices_pos_ti,
+  const TensorInfo<scalar_t, int64_t> t_values_ti,
+  TensorInfo<scalar_t, int64_t> r_values_ti
+) {
+  const int64_t i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= total_threads) return;
+  const int64_t j = t_indices_pos_ti.data[i];
+
+  bool has_match = false;
+  if (j >= 0 &&  j < t_nnz && t_indices_ti.data[j] == mask_indices_ti.data[i]) {
+    has_match = true;
+  }
+
+  int64_t values_stride0 = r_values_ti.strides[0];
+  int64_t out_start = i * values_stride0;
+  int64_t out_end = (i + 1) * values_stride0;
+  int64_t in_start = j * t_values_ti.strides[0];
+
+  if (has_match) {
+    for (int64_t out_i = out_start, in_i = in_start; out_i < out_end; out_i++, in_i++) {
+      r_values_ti.data[out_i] = t_values_ti.data[in_i];
+    }
+  }
+  else {
+    for (int64_t out_i = out_start; out_i < out_end; out_i++) {
+      r_values_ti.data[out_i] = scalar_t(0);
+    }
+  }
+}
+
+} // end namespace
 
 SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   int64_t nnz = self._nnz();
@@ -153,62 +198,91 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   return dst;
 }
 
-
-Tensor sparse_mask_helper_cuda(const SparseTensor& t, const Tensor& mask_indices) 
-{
+Tensor sparse_mask_helper_cuda(
+    const SparseTensor& t,
+    const Tensor& mask_indices) {
   /*
-    This is a helper function which filter values from `t._values()` using the `mask_indices`.
-    This CUDA implementation uses `thrust::lower_bound` operation to find the intersection 
-    of the `mask_indices` and the `t._indices()` to then filter the values.  
+    This is a helper function which filter values from `t._values()` using the
+    `mask_indices`. This CUDA implementation uses `thrust::lower_bound`
+    operation to find the intersection of the `mask_indices` and the
+    `t._indices()` to then filter the values.
 
     Inputs:
-      `t`             - tensor input 
+      `t`             - tensor input
       `mask_indices`  - mask indices tensor
   */
-  int64_t r_nnz = mask_indices.size(1); 
-  auto t_v = t._values().contiguous();
+  int64_t r_nnz = mask_indices.size(1);
+  auto t_values = t._values().contiguous();
   auto full_size = t.sizes();
-  auto vsize = t_v.sizes().vec();
+  auto vsize = t_values.sizes().vec();
   vsize[0] = r_nnz;
- 
-  Tensor r_values = at::zeros({vsize}, t_v.options());
+  Tensor r_values = at::zeros({vsize}, t_values.options());
 
-  auto t_i = t._indices().contiguous();
+  auto t_indices = t._indices().contiguous();
   auto t_nnz = t._nnz();
 
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
 
   auto t_n_cols = t.size(1);
 
-  // Step 1: flatten the sparse indices `t._indices()` tensor into a 1D indices tensor `t_flatten_indices`.  
-  auto t_flatten_indices = at::sparse::flatten_indices(t_i, full_size);
+  // Step 1: flatten the sparse indices `t._indices()` tensor into a 1D indices
+  // tensor `t_flatten_indices`.
+  auto t_flatten_indices = at::sparse::flatten_indices(t_indices, full_size);
 
-  // Step 2: flatten the sparse indices `mask_indices` tensor into a 1D indices tensor `mask_flatten_indices`.  
-  // Note: This could be not sorted if the input indices in the constructor are not coalesced form
-  auto flattened_mask_indices = at::sparse::flatten_indices(mask_indices, full_size);
+  // Step 2: flatten the sparse indices `mask_indices` tensor into a 1D indices
+  // tensor `mask_flatten_indices`. Note: This could be not sorted if the input
+  // indices in the constructor are not in a coalesced form
+  auto flattened_mask_indices =
+      at::sparse::flatten_indices(mask_indices, full_size);
 
-  Tensor lower_bound_values = at::empty({t_nnz}, mask_indices.options());
+  Tensor t_indices_pos = at::empty({r_nnz}, mask_indices.options());
 
+  // Step 3: Match the flattened `mask_indices` with the flattened
+  // `t._indices()` using the `thrust::lower_bound`
   thrust::lower_bound(
-    policy, 
-    t_flatten_indices.data_ptr<int64_t>(),
-    t_flatten_indices.data_ptr<int64_t>() + t_nnz,
-    flattened_mask_indices.data_ptr<int64_t>(),
-    flattened_mask_indices.data_ptr<int64_t>() + t_nnz,
-    lower_bound_values.data_ptr<int64_t>()
-  );
-  Tensor lower_bound_values_host = lower_bound_values.cpu();
-  at::parallel_for(0, r_nnz, 0, [&](int64_t start, int64_t end) {
-    for (auto i = start; i < end; i++) {
-      auto j = lower_bound_values_host.data_ptr<int64_t>()[i];
-      if (j < t_nnz) {
-        r_values[i] = t_v[j];
-      }
-    }
-  });
- return r_values;
-}
+      policy,
+      t_flatten_indices.data_ptr<int64_t>(),
+      t_flatten_indices.data_ptr<int64_t>() + t_nnz,
+      flattened_mask_indices.data_ptr<int64_t>(),
+      flattened_mask_indices.data_ptr<int64_t>() + r_nnz,
+      t_indices_pos.data_ptr<int64_t>());
 
+  // Step 4: Copy the Filtered `t._values()` using the matches at `t_indices_pos`
+  int64_t total_threads = r_nnz;
+  if (total_threads > 0) {
+    const dim3 block = dim3(
+        std::min(static_cast<int64_t>(cuda::getApplyBlock().x), total_threads));
+    dim3 grid;
+    TORCH_CHECK(
+        cuda::getApplyGrid(total_threads, grid, curDevice),
+        "sparse_mask_helper_cuda: input too large or too many dimensions");
+
+    auto t_indices_ti = getTensorInfo<int64_t, int64_t>(t_flatten_indices);
+    auto mask_indices_ti =
+        getTensorInfo<int64_t, int64_t>(flattened_mask_indices);
+    auto t_indices_pos_ti =
+        getTensorInfo<int64_t, int64_t>(t_indices_pos);
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+        r_values.scalar_type(), "sparse_mask_helper_cuda", [&] {
+          auto t_values_ti = getTensorInfo<scalar_t, int64_t>(t_values);
+          auto r_values_ti =
+              getTensorInfo<scalar_t, int64_t>(r_values);
+
+          _sparse_mask_copy_kernel<scalar_t><<<grid, block, 0, stream>>>(
+              total_threads,
+              t_nnz,
+              t_indices_ti,
+              mask_indices_ti,
+              t_indices_pos_ti,
+              t_values_ti,
+              r_values_ti);
+        });
+  }
+  return r_values;
+}
 }} // namespace at::native
