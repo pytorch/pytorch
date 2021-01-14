@@ -146,7 +146,6 @@ test_jit_hooks() {
   popd
 
   # Run tests Python-side and export a script module.
-  # python test_jit_hooks.py -v
   python model.py --export-script-module=model
   # Run tests C++-side and load the exported script module.
   build/test_jit_hooks ./model
