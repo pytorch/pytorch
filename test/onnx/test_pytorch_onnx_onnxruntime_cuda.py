@@ -2,12 +2,6 @@ import unittest
 import onnxruntime  # noqa
 import torch
 
-import numpy as np
-import io
-import itertools
-import copy
-import os
-
 from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
 from test_pytorch_common import skipIfNoCuda
 
