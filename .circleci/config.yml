@@ -2064,7 +2064,6 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           package_type: conda
           upload_subfolder: cu110
-    when: << pipeline.parameters.run_binary_tests >>
   ecr_gc:
     triggers:
       - schedule:
