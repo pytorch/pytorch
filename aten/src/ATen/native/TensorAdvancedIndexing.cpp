@@ -723,7 +723,7 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Ten
 
 Tensor& index_fill_(Tensor& self, int64_t dim, const Tensor & index, Scalar value) {
   at::NoNamesGuard guard;
-  TORCH_CHECK(index.dim() == 1, "Index is supposed to be a vector");
+  TORCH_CHECK(index.dim() <= 1, "Index is supposed to be a vector");
   TORCH_CHECK(
       index.scalar_type() == ScalarType::Long,
       "index_fill: Expected index of scalar type ",
