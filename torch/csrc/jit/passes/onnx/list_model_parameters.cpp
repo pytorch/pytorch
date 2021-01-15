@@ -117,15 +117,28 @@ std::vector<IValue> getParamAttributes(
         if (type->is_parameter(slot) || type->is_buffer(slot) ||
             (attr.isObject() && !attr.toObjectRef().type()->is_module()) ||
             name == "training") {
-          try {
-            attrValues.emplace_back(
-                script::Object(attr.toObject()).run_method("__getstate__"));
+          if (attr.isTensor()) {
+            TORCH_INTERNAL_ASSERT(attr.isTensor());
+            auto tensor_ = attr.toTensor();
+            if (isEval && tensor_.requires_grad()) {
+              tensor_ = tensor_.detach();
+              tensor_.set_requires_grad(false);
+              attr = IValue(tensor_);
+            }
+            attrValues.emplace_back(attr.toTensor());
             paramConst = addParamAsArgument(function_, fullName, attr);
-          } catch (const std::exception&) {
-            auto type = attr.type();
-            throw ErrorReport(n->sourceRange())
-                << "Unknown type " << type->repr_str()
-                << " encountered in handling model params. This class type does not extend __getstate__ method.";
+          } else if (
+              attr.isObject() && !attr.toObjectRef().type()->is_module()) {
+            try {
+              attrValues.emplace_back(
+                  script::Object(attr.toObject()).run_method("__getstate__"));
+              paramConst = addParamAsArgument(function_, fullName, attr);
+            } catch (const std::exception&) {
+              auto type = attr.type();
+              throw ErrorReport(n->sourceRange())
+                  << "Unknown type " << type->repr_str()
+                  << " encountered in handling model params. This class type does not extend __getstate__ method.";
+            }
           }
         }
       }
