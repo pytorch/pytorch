@@ -5132,7 +5132,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
             def to_half(x):
                 return to_type(x, torch.float16, torch.complex32)
 
-            def to_float(x):
+            def to_single(x):
                 return to_type(x, torch.float32, torch.complex64)
 
             def to_double(x):
