@@ -8,6 +8,7 @@
 
 #pragma once
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include <qnnpack/math.h>
@@ -37,13 +38,14 @@ typedef struct {
   }
 } BCSRMatrix;
 
-BCSRMatrix generateBlockCSRMatrix(
+std::unique_ptr<BCSRMatrix> generateBlockCSRMatrix(
     const uint8_t* a,
     const size_t N,
     const size_t K,
     const uint32_t col_block_size,
     const uint8_t* zero_points) {
-  BCSRMatrix bcsr_mat;
+  std::unique_ptr<BCSRMatrix> bcsr_mat_ptr = std::make_unique<BCSRMatrix>();
+  auto& bcsr_mat = *bcsr_mat_ptr;
   bcsr_mat.row_values.resize(N);
   // K must be > 0
   const uint32_t num_blocks = (K + col_block_size - 1) / col_block_size;
@@ -102,5 +104,5 @@ BCSRMatrix generateBlockCSRMatrix(
     }
     bcsr_mat.row_values.push_back(num_nnz_blocks);
   }
-  return bcsr_mat;
+  return bcsr_mat_ptr;
 }

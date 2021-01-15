@@ -241,7 +241,6 @@ class GemmBlockSparseMicrokernelTester {
 
     for (size_t iteration = 0; iteration < 1; iteration++) {
       std::generate(a.begin(), a.end(), std::ref(u8rng));
-      std::generate(b.begin(), b.end(), std::ref(u8rng));
       std::generate(bias.begin(), bias.end(), std::ref(s32rng));
       std::fill(c.begin(), c.end(), 0.0f);
       size_t num_zero_points_padded = n() + 8;
@@ -249,12 +248,19 @@ class GemmBlockSparseMicrokernelTester {
         (num_zero_points_padded, bZeroPoint());
       //std::generate(kernel_zero_points.begin(), kernel_zero_points.end(), std::ref(u8rng));
 
-      //fillBlockSparseWeights(
-      //    b.data(), n(), k(), blockSize(), sparsity(), kernel_zero_points.data());
-
-      BCSRMatrix bcsr_matrix =
-        generateBlockCSRMatrix(
-            b.data(), n(), k(), blockSize(), kernel_zero_points.data());
+      std::unique_ptr<BCSRMatrix> bcsr_matrix;
+      uint8_t max_elem, min_elem;
+      // This loop to ensure the assert_ne on b mat does not fire.
+      do {
+        std::generate(b.begin(), b.end(), std::ref(u8rng));
+        fillBlockSparseWeights(
+            b.data(), n(), k(), blockSize(), sparsity(), kernel_zero_points.data());
+        bcsr_matrix =
+          generateBlockCSRMatrix(
+              b.data(), n(), k(), blockSize(), kernel_zero_points.data());
+        max_elem = *std::max_element(b.cbegin(), b.cend());
+        min_elem = *std::min_element(b.cbegin(), b.cend());
+      } while (max_elem == min_elem);
 
       ASSERT_NE(
           *std::max_element(a.cbegin(), a.cend()),
@@ -300,9 +306,9 @@ class GemmBlockSparseMicrokernelTester {
           n(),
           aPtr,
           aStride() * sizeof(uint8_t),
-          bcsr_matrix.values.data(),
-          bcsr_matrix.row_values.data(),
-          bcsr_matrix.col_indices.data(),
+          bcsr_matrix->values.data(),
+          bcsr_matrix->row_values.data(),
+          bcsr_matrix->col_indices.data(),
           bias.data(),
           c.data(),
           cStride(),

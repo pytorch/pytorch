@@ -25,6 +25,7 @@
 #include <qnnpack/q8dwconv.h>
 #include <qnnpack/q8gavgpool.h>
 #include <qnnpack/q8gemm.h>
+#include <qnnpack/q8gemm_sparse.h>
 #include <qnnpack/q8vadd.h>
 #include <qnnpack/u8clamp.h>
 #include <qnnpack/u8lut32norm.h>
@@ -204,6 +205,12 @@ static void init(void) {
       .mr = 4,
       .nr = 4,
       .kr = 2,
+  };
+  pytorch_qnnp_params.q8gemm_sparse = (struct pytorch_q8gemm_sparse_parameters){
+      .gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4__sse2,
+      .mr = 8,
+      .nr = 4,
+      .kr = 4,
   };
   pytorch_qnnp_params.q8conv_xzp = (struct pytorch_q8conv_xzp_parameters){
       .kthreshold = SIZE_MAX,

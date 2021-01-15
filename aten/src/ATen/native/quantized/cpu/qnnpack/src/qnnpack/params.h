@@ -510,6 +510,13 @@ struct pytorch_q8conv_parameters {
   uint8_t kr;
 };
 
+struct pytorch_q8gemm_sparse_parameters {
+  pytorch_q8gemm_dq_sparse_ukernel_function gemm_dq;
+  uint8_t mr;
+  uint8_t nr;
+  uint8_t kr;
+};
+
 struct pytorch_q8conv_xzp_parameters {
   pytorch_q8gemm_xzp_ukernel_function gemm;
   /* no conv ukernel */
@@ -571,6 +578,7 @@ struct pytorch_x8zip_parameters {
 
 struct pytorch_qnnp_parameters {
   struct pytorch_q8conv_parameters q8conv;
+  struct pytorch_q8gemm_sparse_parameters q8gemm_sparse;
   struct pytorch_q8conv_xzp_parameters q8conv_xzp;
   struct pytorch_q8dwconv_up_parameters q8dw9;
   struct pytorch_q8dwconv_mp_parameters q8dw25;
