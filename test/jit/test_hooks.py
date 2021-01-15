@@ -246,7 +246,7 @@ class TestHooks(JitTestCase):
         m.register_forward_pre_hook(pre_hook_wrong_input1)
 
         with self.assertRaisesRegex(
-            RuntimeError, "has the wrong inner types for the second tuple argument",
+            RuntimeError, "has the wrong inner types for the input tuple argument",
         ):
             torch.jit.script(m)
 
@@ -270,7 +270,7 @@ class TestHooks(JitTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "expected the second argument to be typed as a Tuple but"
+            "expected the input argument to be typed as a Tuple but"
             " found type: 'int' instead",
         ):
             torch.jit.script(m)
@@ -337,7 +337,7 @@ class TestHooks(JitTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "expected the second argument to be typed as a Tuple "
+            "expected the input argument to be typed as a Tuple "
             "but found type: 'str' instead.",
         ):
             torch.jit.script(m)
@@ -350,7 +350,7 @@ class TestHooks(JitTestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "has the wrong inner types for the second tuple"
+            "has the wrong inner types for the input tuple"
             r" argument. Received type: 'Tuple\[None\]'",
         ):
             torch.jit.script(m)

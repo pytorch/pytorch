@@ -17,7 +17,7 @@ def main():
     options = parser.parse_args()
     global save_name
     save_name = options.export_script_module_to + "_"
-    
+
     tests = [
         ("test_submodule_forward_single_input", create_submodule_forward_single_input()),
         ("test_submodule_forward_multiple_inputs", create_submodule_forward_multiple_inputs()),
