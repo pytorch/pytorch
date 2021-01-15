@@ -23,7 +23,11 @@ from torch.distributed.rpc.internal import (
     _internal_rpc_pickler,
     _build_rpc_profiling_key,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu, captured_output
+from torch.testing._internal.common_distributed import (
+    skip_if_lt_x_gpu,
+    skip_if_no_peer_access,
+    captured_output,
+)
 from torch.testing._internal.common_utils import IS_MACOS, load_tests
 from torch.testing._internal.dist_utils import (
     dist_init,
@@ -77,6 +81,7 @@ REMOTE_OP_STR = "#remote_op: "
 VALUE_FUTURE = concurrent.futures.Future()
 DONE_FUTURE = concurrent.futures.Future()
 
+FIFTY_MIL_CYCLES = 50000000
 
 class StubRpcAgent:
     def __init__(self, world_size):
@@ -4610,6 +4615,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         else:
             raise ValueError("Wrong device affinity")
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(2)
     def test_device_maps_gpu(self):
         options = self.rpc_backend_options
@@ -4634,16 +4640,24 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         rpc.shutdown()
 
     @staticmethod
-    def _gpu_add_multi_gpu(x, y):
-        if all([x.is_cuda, x.device.index == 0, y.is_cuda, y.device.index == 1]):
-            return x + y.to(0), x.to(1) - y
+    def _gpu_add_given_gpus(x, y, x_to, y_to, z_to):
+        if all([
+            x.is_cuda,
+            x.device.index == x_to,
+            y.is_cuda,
+            y.device.index == y_to
+        ]):
+            return x.to(z_to) + y.to(z_to)
         else:
             raise ValueError("Wrong device affinity")
 
-    def _test_device_maps_multi_gpu(self, dst):
+    def _test_device_maps_gpu(self, x_from, y_from, z_to, device_map):
+        x_to = device_map[x_from]
+        y_to = device_map[y_from]
+
         options = self.rpc_backend_options
-        options.set_device_map(dst, {1: 0})
-        options.set_device_map(dst, {0: 1})
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options.set_device_map(dst, device_map)
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -4653,22 +4667,185 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             rpc_backend_options=options,
         )
 
+        x = torch.zeros(2).to(x_from)
+        y = torch.ones(2).to(y_from)
+
+        ret = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._gpu_add_given_gpus,
+            args=(x, y, x_to, y_to, z_to)
+        )
+
+        reverse_device_map = {device_map[k] : k for k in device_map}
+        z_from = reverse_device_map[z_to]
+
+        self.assertEqual(ret.device.index, z_from)
+        self.assertEqual(ret, torch.ones(2).to(z_from))
+
+        rpc.shutdown()
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_default(self):
+        self._test_device_maps_gpu(
+            x_from=0,
+            y_from=0,
+            z_to=0,
+            device_map={0 : 0}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_non_default(self):
+        self._test_device_maps_gpu(
+            x_from=1,
+            y_from=1,
+            z_to=1,
+            device_map={1 : 1}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_default_to_non_default(self):
+        self._test_device_maps_gpu(
+            x_from=0,
+            y_from=0,
+            z_to=1,
+            device_map={0 : 1}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_non_default_to_default(self):
+        self._test_device_maps_gpu(
+            x_from=1,
+            y_from=1,
+            z_to=0,
+            device_map={1 : 0}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_mixed_1(self):
+        self._test_device_maps_gpu(
+            x_from=0,
+            y_from=1,
+            z_to=0,
+            device_map={0 : 0, 1 : 1}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_mixed_2(self):
+        self._test_device_maps_gpu(
+            x_from=0,
+            y_from=1,
+            z_to=1,
+            device_map={0 : 0, 1 : 1}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_mixed_3(self):
+        self._test_device_maps_gpu(
+            x_from=1,
+            y_from=0,
+            z_to=0,
+            device_map={0 : 0, 1 : 1}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_mixed_4(self):
+        self._test_device_maps_gpu(
+            x_from=1,
+            y_from=0,
+            z_to=1,
+            device_map={0 : 0, 1 : 1}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_mixed_5(self):
+        self._test_device_maps_gpu(
+            x_from=0,
+            y_from=1,
+            z_to=0,
+            device_map={0 : 1, 1 : 0}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_mixed_6(self):
+        self._test_device_maps_gpu(
+            x_from=0,
+            y_from=1,
+            z_to=1,
+            device_map={0 : 1, 1 : 0}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_mixed_7(self):
+        self._test_device_maps_gpu(
+            x_from=1,
+            y_from=0,
+            z_to=0,
+            device_map={0 : 1, 1 : 0}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_mixed_8(self):
+        self._test_device_maps_gpu(
+            x_from=1,
+            y_from=0,
+            z_to=1,
+            device_map={0 : 1, 1 : 0}
+        )
+
+    @staticmethod
+    def _gpu_add_multi_gpu(x, y):
+        if all([x.is_cuda, x.device.index == 1, y.is_cuda, y.device.index == 0]):
+            return x.to(0) + y, x - y.to(1)
+        else:
+            raise ValueError("Wrong device affinity")
+
+    def _test_device_maps_multi_gpu(self, dst):
+        options = self.rpc_backend_options
+        options.set_device_map(dst, {0: 1})
+        options.set_device_map(dst, {1: 0})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        x = torch.zeros(2).to(0)
+        y = torch.ones(2).to(1)
         rets = rpc.rpc_sync(
             dst,
             TensorPipeAgentRpcTest._gpu_add_multi_gpu,
-            args=(torch.zeros(2).to(1), torch.ones(2).to(0))
+            args=(x, y)
         )
+
         self.assertEqual(rets[0].device, torch.device(1))
         self.assertEqual(rets[1].device, torch.device(0))
         self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(1))
         self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))
         rpc.shutdown()
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(2)
     def test_device_maps_multi_gpu(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         self._test_device_maps_multi_gpu(dst)
 
+    @unittest.skip("TensorPipe agent does not yet support sending to self")
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(2)
     def test_device_maps_multi_gpu_self(self):
         dst = worker_name(self.rank)
@@ -4681,6 +4858,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         else:
             raise ValueError("Wrong device affinity")
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(2)
     def test_device_maps_in_options(self):
         dst = worker_name((self.rank + 1) % self.world_size)
@@ -4701,7 +4879,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         rets = rpc.rpc_sync(
             dst,
             TensorPipeAgentRpcTest._gpu_add_multi_gpu,
-            args=(torch.zeros(2).to(1), torch.ones(2).to(0))
+            args=(torch.zeros(2).to(0), torch.ones(2).to(1))
         )
         self.assertEqual(rets[0].device, torch.device(1))
         self.assertEqual(rets[1].device, torch.device(0))
@@ -4738,11 +4916,13 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         self.assertEqual(rets[3], (torch.zeros(2) / torch.ones(2)).to(2))
         rpc.shutdown()
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(4)
     def test_device_maps_return_to_gpu(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         self._test_device_maps_return_to_gpu(dst)
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(4)
     def test_device_maps_return_to_gpu_self(self):
         dst = worker_name(self.rank)
@@ -4795,11 +4975,13 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         ret = rpc.rpc_sync(dst, torch.add, args=(torch.ones(2), 1))
         self.assertEqual(ret, torch.ones(2) + 1)
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config(self):
         self._test_device_maps_missing_config(RPCExecMode.SYNC)
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(1)
     def test_device_maps_missing_config_not_timeout(self):
         dst = worker_name((self.rank + 1) % self.world_size)
@@ -4822,33 +5004,39 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
         self.assertTrue(tok - tik < timeout)
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config_loop(self):
         for _ in range(self.rpc_backend_options.num_worker_threads + 5):
             self._test_device_maps_missing_config(RPCExecMode.SYNC)
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config_response(self):
         self._test_device_maps_missing_config_response(RPCExecMode.SYNC)
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config_response_loop(self):
         for _ in range(self.rpc_backend_options.num_worker_threads + 5):
             self._test_device_maps_missing_config_response(RPCExecMode.SYNC)
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config_remote(self):
         self._test_device_maps_missing_config(RPCExecMode.REMOTE)
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config_remote_response(self):
         self._test_device_maps_missing_config_response(RPCExecMode.REMOTE)
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(2)
     def test_device_maps_remote(self):
         options = self.rpc_backend_options
@@ -4869,9 +5057,139 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             args=(torch.zeros(2), 1)
         )
 
+        self.assertEqual(rref.to_here().device.index, 1)
         self.assertEqual(rref.to_here(), torch.ones(2).to(1))
 
         rpc.shutdown()
+
+    @staticmethod
+    def _slow_add_on_user_stream(x, y):
+        s0 = torch.cuda.current_stream(x.device)
+        s1 = torch.cuda.Stream(device=x.device)
+        with torch.cuda.stream(s1):
+            torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+            s1.wait_stream(s0)
+            z = x + y
+            event = torch.cuda.Event()
+            event.record(s1)
+        event.wait(s0)
+        return z
+
+    def _test_custom_stream(self, fn, device_map):
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options.set_device_map(dst, device_map)
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        fn(dst)
+
+        rpc.shutdown()
+
+    def _test_stream_sync(self, dst):
+        x = torch.ones(2, 2).to(0)
+        ret = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._slow_add_on_user_stream,
+            args=(x, x)
+        )
+        self.assertEqual(ret, 2 * x)
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_custom_stream(self):
+        self._test_custom_stream(self._test_stream_sync, {"cuda:0": "cuda:1"})
+
+    def _test_stream_multi_async(self, dst):
+        futs = []
+        for i in range(20):
+            x = torch.ones(2, 2).to(0) * i
+            futs.append(
+                rpc.rpc_async(
+                    dst,
+                    TensorPipeAgentRpcTest._slow_add_on_user_stream,
+                    args=(x, x)
+                )
+            )
+
+        for i in range(20):
+            self.assertEqual(futs[i].wait(), 2 * torch.ones(2, 2).to(0) * i)
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_custom_stream_multi(self):
+        self._test_custom_stream(
+            self._test_stream_multi_async,
+            {"cuda:0": "cuda:1"}
+        )
+
+    @staticmethod
+    def _nested_slow_add_on_user_stream(dst, x, y, z):
+        ret = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._slow_add_on_user_stream,
+            args=(x, y)
+        )
+
+        return TensorPipeAgentRpcTest._slow_add_on_user_stream(ret, z)
+
+    def _test_stream_nested_sync(self, dst):
+        x = torch.ones(2, 2).to(0)
+        y = torch.ones(2, 2).to(0) * 2
+        z = torch.ones(2, 2).to(0) * 3
+        nested_dst = worker_name((self.rank + 2) % self.world_size)
+        ret = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._nested_slow_add_on_user_stream,
+            args=(nested_dst, x, y, z)
+        )
+        self.assertEqual(ret, 6 * x)
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_custom_stream_nested(self):
+        self._test_custom_stream(
+            self._test_stream_nested_sync,
+            {"cuda:0": "cuda:1", "cuda:1": "cuda:0"}
+        )
+
+    def _test_stream_nested_multi_async(self, dst):
+        if self.rank == 0:
+            futs = []
+            n = 5
+            xs, ys, zs = [], [], []
+            for i in range(n):
+                x = torch.ones(2, 2).to(0) * (i - 1)
+                y = torch.ones(2, 2).to(0) * i
+                z = torch.ones(2, 2).to(0) * (i + 1)
+                xs.append(x)
+                ys.append(y)
+                zs.append(z)
+                nested_dst = worker_name((self.rank + 2) % self.world_size)
+                futs.append(
+                    rpc.rpc_async(
+                        dst,
+                        TensorPipeAgentRpcTest._nested_slow_add_on_user_stream,
+                        args=(nested_dst, x, y, z)
+                    )
+                )
+
+            for i in range(n):
+                self.assertEqual(futs[i].wait(), xs[i] + ys[i] + zs[i])
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_custom_stream_nested_multi(self):
+        self._test_custom_stream(
+            self._test_stream_nested_multi_async,
+            {"cuda:0": "cuda:1", "cuda:1": "cuda:0"}
+        )
 
     @dist_init
     def test_op_with_invalid_args(self):
