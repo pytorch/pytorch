@@ -4,10 +4,10 @@
 #include <ATen/Layout.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/SparseGCSTensorImpl.h>
+#include <ATen/CompressedSparseTensorImpl.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>
-#include <ATen/SparseGCSTensorUtils.h>
+#include <ATen/CompressedSparseTensorUtils.h>
 
 #include <TH/THBlasUtils.h>
 
