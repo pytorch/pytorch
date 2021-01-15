@@ -7,7 +7,7 @@ from collections import OrderedDict, deque
 import copy
 from itertools import chain
 import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Deque
 
 import torch
 import torch.distributed as dist
@@ -74,7 +74,9 @@ class ZeroRedundancyOptimizer(Optimizer):
         group (group):
             torch.distributed group (default: group.WORLD)
         bucket_cap (int):
-            the size of the buffer used to batch the small parameter tensors, in number of elements (default 16M).
+            the size of the buffer used to batch the small parameter tensors, in number of elements (default 16M)
+        **default:
+            all trailing arguments will be forwarded to the requested optimizer
     """
 
     def __init__(
