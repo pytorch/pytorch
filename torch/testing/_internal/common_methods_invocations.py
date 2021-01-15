@@ -303,7 +303,7 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad):
                         kwargs=dict(dim=1)),)
 
 def sample_inputs_addmm(op_info, device, dtype, requires_grad):
-    return (SampleInput((make_tensor((S, S), device, dtype,
+    input = SampleInput((make_tensor((S, S), device, dtype,
                                      low=None, high=None,
                                      requires_grad=requires_grad),
                          make_tensor((S, S), device, dtype,
@@ -311,7 +311,21 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad):
                                      requires_grad=requires_grad),
                          make_tensor((S, S), device, dtype,
                                      low=None, high=None,
-                                     requires_grad=False))),)
+                                     requires_grad=False)))
+    if dtype.is_complex:
+        another_input = SampleInput((make_tensor((S, S), device, dtype,
+                                        low=None, high=None,
+                                        requires_grad=requires_grad),
+                                     make_tensor((S, S), device, dtype,
+                                        low=None, high=None,
+                                        requires_grad=requires_grad),
+                                     make_tensor((S, S), device, dtype,
+                                        low=None, high=None,
+                                        requires_grad=False)),
+                                     kwargs=dict(beta=1+2j, alpha=2+3j))
+        return (input, another_input)
+    else:
+        return (input, )
 
 
 def sample_inputs_xlogy(self, device, dtype, requires_grad):
@@ -793,18 +807,9 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
            skips=(
-               SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                        dtypes=[torch.cfloat, torch.cdouble]),
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=[torch.cfloat, torch.cdouble, torch.bfloat16, torch.float16]),
-               SkipInfo('TestGradients', 'test_method_gradgrad',
-                        dtypes=[torch.cdouble]),
-               SkipInfo('TestGradients', 'test_method_grad',
-                        dtypes=[torch.cdouble]),
-               SkipInfo('TestGradients', 'test_fn_gradgrad',
-                        dtypes=[torch.cdouble]),
-               SkipInfo('TestGradients', 'test_fn_grad',
-                        dtypes=[torch.cdouble]),),
+                        dtypes=[torch.bfloat16, torch.float16, torch.cfloat, torch.cdouble]),
+               ),
            sample_inputs_func=sample_inputs_addmm),
     UnaryUfuncInfo('asin',
                    ref=np.arcsin,
