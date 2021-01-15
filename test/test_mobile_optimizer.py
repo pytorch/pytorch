@@ -9,7 +9,6 @@ from torch.utils.mobile_optimizer import *
 from torch.nn import functional as F
 from torch._C import MobileOptimizerType
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.nn.modules.module import ModuleAttributeError
 
 FileCheck = torch._C.FileCheck
 
@@ -300,7 +299,7 @@ class TestOptimizer(TestCase):
         )
 
         # We expect an exception here
-        with self.assertRaises(ModuleAttributeError):
+        with self.assertRaises(AttributeError):
             module_optim_bi_not_preserved.run_on_bundled_input(0)
 
         # Add bundled inputs methods to the module

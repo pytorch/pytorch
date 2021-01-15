@@ -1211,32 +1211,19 @@ class TestNN(NNTestCase):
         with self.assertRaises(KeyError):
             m.add_module('attribute_name', nn.Module())
 
+    @unittest.expectedFailure
     def test_getattr_with_property(self):
         class Model(nn.Module):
-            def __init__(self):
-                super(Model, self).__init__()
-                self.linear = nn.Linear(4, 5)
-
-            def forward(self, input):
-                return self.linear(input)
-
             @property
             def some_property(self):
                 return self.something_that_doesnt_exist
 
         model = Model()
-        with self.assertRaises(nn.modules.module.ModuleAttributeError) as mae:
-            check = model.shouldnt_exist
-            self.assertIn("shouldnt_exist", mae)
 
-        # Before using nn.modules.ModuleAttributeError, if an AttributeError
-        # was raised in a property. The AttributeError was raised on the
-        # property itself. This checks that some_property is not in the
-        # expection.
-        with self.assertRaises(nn.modules.module.ModuleAttributeError) as mae:
-            check = model.some_property
-            self.assertIn("something_that_doesnt_exist", mae)
-            self.assertNotIn("some_propery", mae)
+        with self.assertRaisesRegex(
+                AttributeError,
+                r"'Model' object has no attribute 'something_that_doesnt_exist'"):
+            model.some_property
 
     def test_Sequential_getitem(self):
         l1 = nn.Linear(10, 20)
@@ -8593,18 +8580,6 @@ class TestNN(NNTestCase):
                 out_uint8_t = m(in_uint8_t)
             self.assertEqual(torch.ones(1, 1, 4, 4).contiguous(memory_format=memory_format), out_t.data)
             self.assertEqual(torch.ones(1, 1, 4, 4, dtype=torch.uint8).contiguous(memory_format=memory_format), out_uint8_t.data)
-
-            # test forward when input's height is not same as width
-            m = nn.Upsample(size=(4, 2), mode='nearest')
-            in_t = torch.ones(1, 1, 2, 1).contiguous(memory_format=memory_format)
-            with warnings.catch_warnings(record=True) as w:
-                out_t = m(in_t)
-            self.assertEqual(torch.ones(1, 1, 4, 2).contiguous(memory_format=memory_format), out_t.data)
-
-            # test backward when input's height is not same as width
-            input = torch.ones(1, 1, 2, 1, requires_grad=True).contiguous(memory_format=memory_format)
-            gradcheck(lambda x: F.interpolate(x, size=(4, 2), mode='nearest'), [input])
-            gradgradcheck(lambda x: F.interpolate(x, size=(4, 2), mode='nearest'), [input])
 
             input = torch.randn(1, 1, 2, 2, requires_grad=True).contiguous(memory_format=memory_format)
             self.assertEqual(
