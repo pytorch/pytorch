@@ -1693,73 +1693,10 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /*
-Copies the lower (or upper) triangle of the square matrix to the other half and conjugates it.
-This operation is performed in-place.
-*/
-template <typename scalar_t, typename IndexType>
-#ifdef __HIP_PLATFORM_HCC__
-C10_LAUNCH_BOUNDS_1(512)
-#endif
-__global__
-void reflect_conj_tri_single_kernel(
-    cuda::detail::TensorInfo<scalar_t, IndexType> self_info,
-    const int64_t numel,
-    bool upper) {
-
-  int64_t linear_idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (linear_idx >= numel) {
-    return;
-  }
-
-  auto dims = self_info.dims;
-  auto n = self_info.sizes[dims - 1];
-
-  IndexType row = linear_idx % n;
-  IndexType col = linear_idx / n;
-
-  // Compute offsets for self and self.T
-  IndexType self_offset = self_info.strides[dims - 1] * row + self_info.strides[dims - 2] * col;
-  IndexType self_transpose_offset = self_info.strides[dims - 1] * col + self_info.strides[dims - 2] * row;
-
-  IndexType k = upper ? -1 : 1;  // do not include diagonal
-  // There is nothing to do for the opposite triangle
-  if (upper ? (col - row <= k) : (col - row >= k)) {
-    return;
-  }
-  self_info.data[self_offset] = conj_wrapper(self_info.data[self_transpose_offset]);
-}
-
-template <typename scalar_t>
-static inline void apply_reflect_conj_tri_single(Tensor& input, bool upper) {
-  TORCH_INTERNAL_ASSERT(input.dim() == 2);
-  TORCH_INTERNAL_ASSERT(input.size(0) == input.size(1));
-  if (input.numel() == 0) {
-    return;
-  }
-  if (cuda::detail::canUse32BitIndexMath(input)) {
-    auto input_info = cuda::detail::getTensorInfo<scalar_t, int32_t>(input);
-    auto N = input.numel();
-    dim3 dim_block = cuda::getApplyBlock();
-    dim3 dim_grid((N + dim_block.x - 1) / dim_block.x);
-    reflect_conj_tri_single_kernel<scalar_t, int32_t>
-      <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(input_info, N, upper);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-  } else {
-    auto input_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(input);
-    auto N = input.numel();
-    dim3 dim_block = cuda::getApplyBlock();
-    dim3 dim_grid((N + dim_block.x - 1) / dim_block.x);
-    reflect_conj_tri_single_kernel<scalar_t, int64_t>
-      <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(input_info, N, upper);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-  }
-}
-
-/*
 Computes the inverse of a symmetric (Hermitian) positive-definite matrix n-by-n matrix 'input' using the Cholesky factorization
 This is an in-place routine, content of 'input' is overwritten.
 'infos' is an int Tensor containing error codes for each matrix in the batched input.
-Single matrix MAGMA routine requires 'infos' to reside in CPU memory.
+MAGMA requires 'infos' to reside in CPU memory.
 For more information see MAGMA's documentation for POTRI routine.
 */
 template <typename scalar_t>
