@@ -14,7 +14,7 @@ all_operators_with_namedtuple_return = {
     'max', 'min', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
     'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'lstsq',
     'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "unpack_dual", 'linalg_qr',
-    '_svd_helper', 'linalg_svd',
+    '_svd_helper', 'linalg_svd', 'fake_quantize_per_tensor_affine_cachemask',
 }
 
 
