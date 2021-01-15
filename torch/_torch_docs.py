@@ -2728,6 +2728,7 @@ Keyword args:
         Equivalent to C-style integer division.
         * ``"floor"`` - rounds the results of the division down.
         Equivalent to floor division in Python (the ``//`` operator) and NumPy's ``np.floor_divide``.
+
     {out}
 
 Examples::
