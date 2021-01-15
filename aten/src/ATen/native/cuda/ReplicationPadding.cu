@@ -247,7 +247,7 @@ void replication_pad1d_out_cuda_template(
     return;
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
     input.scalar_type(), "replication_pad1d_cuda", [&] {
       if (numInputDims == 2) {
         auto input_ = input.unsqueeze(0);
@@ -318,7 +318,7 @@ void replication_pad1d_backward_out_cuda_template(
   }
   gradInput.zero_();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
       input.scalar_type(), "replication_pad1d_backward_cuda", [&] {
 
       auto gradInput_ = gradInput;
@@ -396,7 +396,7 @@ void replication_pad2d_out_cuda_template(
     return;
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
     input.scalar_type(), "replication_pad2d_cuda", [&] {
       if (numInputDims == 3) {
         auto input_ = input.unsqueeze(0);
@@ -478,7 +478,7 @@ void replication_pad2d_backward_out_cuda_template(
   }
   gradInput.zero_();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
       input.scalar_type(), "replication_pad2d_backward_cuda", [&] {
 
         auto gradInput_ = gradInput;
@@ -650,7 +650,7 @@ void replication_pad3d_out_cuda_template(
     return;
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
     input.scalar_type(), "replication_pad3d_cuda", [&] {
       if (numInputDims == 4) {
         auto input_ = input.unsqueeze(0);
@@ -724,7 +724,7 @@ void replication_pad3d_backward_out_cuda_template(
   }
   gradInput.zero_();
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kHalf,
     input.scalar_type(), "replication_pad3d_backward_cuda", [&] {
       auto gradInput_ = gradInput;
       auto gradOutput_ = gradOutput;

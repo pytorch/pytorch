@@ -2108,6 +2108,14 @@ new_module_tests = [
         module_name='ReflectionPad1d',
         constructor_args=((1, 2),),
         cpp_constructor_args='torch::nn::ReflectionPad1dOptions({1, 2})',
+        input_fn=lambda: torch.rand(2, 3, 8, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
+    ),
+    dict(
+        module_name='ReflectionPad1d',
+        constructor_args=((1, 2),),
+        cpp_constructor_args='torch::nn::ReflectionPad1dOptions({1, 2})',
         input_size=(2, 3, 8),
         desc='alert_nondeterministic',
         test_cpu=False,
@@ -2118,6 +2126,14 @@ new_module_tests = [
         constructor_args=((1, 2, 3, 4),),
         cpp_constructor_args='torch::nn::ReflectionPad2dOptions({1, 2, 3, 4})',
         input_size=(2, 3, 8, 8),
+    ),
+    dict(
+        module_name='ReflectionPad2d',
+        constructor_args=((1, 2, 3, 4),),
+        cpp_constructor_args='torch::nn::ReflectionPad2dOptions({1, 2, 3, 4})',
+        input_fn=lambda: torch.rand(2, 3, 8, 8, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
     ),
     dict(
         module_name='ReflectionPad2d',
@@ -2138,6 +2154,14 @@ new_module_tests = [
         module_name='ReplicationPad1d',
         constructor_args=((1, 2),),
         cpp_constructor_args='torch::nn::ReplicationPad1dOptions({1, 2})',
+        input_fn=lambda: torch.rand(2, 3, 4, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
+    ),
+    dict(
+        module_name='ReplicationPad1d',
+        constructor_args=((1, 2),),
+        cpp_constructor_args='torch::nn::ReplicationPad1dOptions({1, 2})',
         input_size=(2, 3, 4),
         desc='alert_nondeterministic',
         test_cpu=False,
@@ -2148,6 +2172,14 @@ new_module_tests = [
         constructor_args=((1, 2, 3, 4),),
         cpp_constructor_args='torch::nn::ReplicationPad2dOptions({1, 2, 3, 4})',
         input_size=(2, 3, 4, 4),
+    ),
+    dict(
+        module_name='ReplicationPad2d',
+        constructor_args=((1, 2, 3, 4),),
+        cpp_constructor_args='torch::nn::ReplicationPad2dOptions({1, 2, 3, 4})',
+        input_fn=lambda: torch.rand(2, 3, 4, 4, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
     ),
     dict(
         module_name='ReplicationPad2d',
@@ -2166,6 +2198,14 @@ new_module_tests = [
     ),
     dict(
         module_name='ZeroPad2d',
+        constructor_args=((1, 2, 3, 4),),
+        cpp_constructor_args='torch::nn::ZeroPad2dOptions({1, 2, 3, 4})',
+        input_fn=lambda: torch.rand(2, 3, 4, 4, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
+    ),
+    dict(
+        module_name='ZeroPad2d',
         constructor_args=((-1, -1, -1, -2),),
         cpp_constructor_args='torch::nn::ZeroPad2dOptions({-1, -1, -1, -2})',
         input_size=(2, 3, 4, 4),
@@ -2178,16 +2218,40 @@ new_module_tests = [
         input_size=(2, 3, 4),
     ),
     dict(
+        module_name='ConstantPad1d',
+        constructor_args=((1, 2), 2.),
+        cpp_constructor_args='torch::nn::ConstantPad1dOptions({1, 2}, 2.)',
+        input_fn=lambda: torch.rand(2, 3, 4, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
+    ),
+    dict(
         module_name='ConstantPad2d',
         constructor_args=((1, 2, 3, 4), 2.),
         cpp_constructor_args='torch::nn::ConstantPad2dOptions({1, 2, 3, 4}, 2.)',
         input_size=(2, 3, 4, 4),
     ),
     dict(
+        module_name='ConstantPad2d',
+        constructor_args=((1, 2, 3, 4), 2.),
+        cpp_constructor_args='torch::nn::ConstantPad2dOptions({1, 2, 3, 4}, 2.)',
+        input_fn=lambda: torch.rand(2, 3, 4, 4, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
+    ),
+    dict(
         module_name='ConstantPad3d',
         constructor_args=((1, 2, 3, 4, 1, 0), 2.),
         cpp_constructor_args='torch::nn::ConstantPad3dOptions({1, 2, 3, 4, 1, 0}, 2.)',
         input_size=(2, 3, 4, 4, 5),
+    ),
+    dict(
+        module_name='ConstantPad3d',
+        constructor_args=((1, 2, 3, 4, 1, 0), 2.),
+        cpp_constructor_args='torch::nn::ConstantPad3dOptions({1, 2, 3, 4, 1, 0}, 2.)',
+        input_fn=lambda: torch.rand(2, 3, 4, 4, 5, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
     ),
     dict(
         module_name='Conv3d',
@@ -2441,6 +2505,14 @@ new_module_tests = [
         constructor_args=((1, 2, 3, 3, 2, 1),),
         cpp_constructor_args='torch::nn::ReplicationPad3dOptions({1, 2, 3, 3, 2, 1})',
         input_size=(2, 3, 2, 2, 2),
+    ),
+    dict(
+        module_name='ReplicationPad3d',
+        constructor_args=((1, 2, 3, 3, 2, 1),),
+        cpp_constructor_args='torch::nn::ReplicationPad3dOptions({1, 2, 3, 3, 2, 1})',
+        input_fn=lambda: torch.rand(2, 3, 2, 2, 2, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
     ),
     dict(
         module_name='ReplicationPad3d',
