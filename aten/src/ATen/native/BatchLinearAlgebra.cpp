@@ -847,9 +847,13 @@ DEFINE_DISPATCH(cholesky_inverse_stub);
 Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& input, bool upper) {
   TORCH_INTERNAL_ASSERT(input.dim() >= 2);
   TORCH_INTERNAL_ASSERT(input.size(-1) == input.size(-2));
+
   TORCH_INTERNAL_ASSERT(result.scalar_type() == input.scalar_type());
   TORCH_INTERNAL_ASSERT(result.device() == input.device());
+
   TORCH_INTERNAL_ASSERT(infos.scalar_type() == at::kInt);
+  TORCH_INTERNAL_ASSERT(infos.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT(infos.numel() == std::max<int64_t>(1, batchCount(input)));
 
   // if result has no elements we can modify it
   if (result.numel() == 0) {
@@ -864,7 +868,8 @@ Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& i
   // cholesky_inverse_stub (apply_cholesky_inverse) performs calculations in-place and result must be a copy of input
   result.copy_(input);
 
-  at::native::resize_output(infos, {std::max<int64_t>(1, batchCount(input))});
+  // infos must be contiguous
+  TORCH_INTERNAL_ASSERT(infos.is_contiguous());
   infos.fill_(0);
 
   result = cholesky_inverse_stub(result.device().type(), result, infos, upper);
@@ -887,7 +892,7 @@ Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
   // Single matrix MAGMA routine requires 'infos' to reside in CPU memory,
   // therefore we create 'infos' only on CPU for now.
   // This should be changed once batched version for CUDA is implemented.
-  auto infos = at::empty({0}, input.options().dtype(kInt).device(kCPU));
+  auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt).device(kCPU));
 
   // if result is not empty and not in batched column major format we have to allocate a temporary tensor
   if (result.numel() != 0 && !result.transpose(-2, -1).is_contiguous()) {
