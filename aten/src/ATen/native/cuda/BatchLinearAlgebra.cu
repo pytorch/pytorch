@@ -96,11 +96,6 @@ void magmaCholeskyBatched(
     magma_uplo_t uplo, magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue);
 
-template<class scalar_t>
-void magmaCholeskyInverse(
-    magma_uplo_t uplo, magma_int_t n, scalar_t* dA,
-    magma_int_t ldda, magma_int_t* info);
-
 template <class scalar_t>
 void magmaTriangularSolve(
     magma_uplo_t uplo,
@@ -673,42 +668,6 @@ void magmaCholeskyBatched<c10::complex<float>>(
     magma_uplo_t uplo, magma_int_t n, c10::complex<float>** dA_array, magma_int_t ldda,
     magma_int_t* info_array, magma_int_t batchsize, const MAGMAQueue& magma_queue) {
   magma_cpotrf_batched(uplo, n, reinterpret_cast<magmaFloatComplex**>(dA_array), ldda, info_array, batchsize, magma_queue.get_queue());
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskyInverse<double>(
-    magma_uplo_t uplo, magma_int_t n, double* dA,
-    magma_int_t ldda, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_dpotri_gpu(uplo, n, dA, ldda, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskyInverse<float>(
-    magma_uplo_t uplo, magma_int_t n, float* dA,
-    magma_int_t ldda, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_spotri_gpu(uplo, n, dA, ldda, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskyInverse<c10::complex<double>>(
-    magma_uplo_t uplo, magma_int_t n, c10::complex<double>* dA,
-    magma_int_t ldda, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_zpotri_gpu(uplo, n, reinterpret_cast<magmaDoubleComplex*>(dA), ldda, info);
-  AT_CUDA_CHECK(cudaGetLastError());
-}
-
-template<>
-void magmaCholeskyInverse<c10::complex<float>>(
-    magma_uplo_t uplo, magma_int_t n, c10::complex<float>* dA,
-    magma_int_t ldda, magma_int_t* info) {
-  MagmaStreamSyncGuard guard;
-  magma_cpotri_gpu(uplo, n, reinterpret_cast<magmaFloatComplex*>(dA), ldda, info);
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
