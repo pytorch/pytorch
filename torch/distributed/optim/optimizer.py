@@ -8,6 +8,7 @@ from torch import Tensor
 from torch.distributed.rpc import RRef
 from .functional_adagrad import _FunctionalAdagrad
 from .functional_adam import _FunctionalAdam
+from .functional_adamw import _FunctionalAdamW
 from .functional_sgd import _FunctionalSGD
 from .functional_adadelta import _FunctionalAdadelta
 from .functional_rmsprop import _FunctionalRMSprop
@@ -186,6 +187,7 @@ class DistributedOptimizer:
     functional_optim_map = {
         optim.Adagrad: _FunctionalAdagrad,
         optim.Adam: _FunctionalAdam,
+        optim.AdamW: _FunctionalAdamW,
         optim.SGD: _FunctionalSGD,
         optim.Adadelta: _FunctionalAdadelta,
         optim.RMSprop: _FunctionalRMSprop,
