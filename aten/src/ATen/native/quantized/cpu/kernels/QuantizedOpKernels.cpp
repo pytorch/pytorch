@@ -2124,6 +2124,7 @@ void fake_quantize_tensor_cachemask_kernel(
 
   // TODO before land: verify numerical correctness
   auto iter_combined = TensorIteratorConfig()
+    .check_all_same_dtype(false)
     .add_output(output)
     .add_output(mask)
     .add_input(input)
