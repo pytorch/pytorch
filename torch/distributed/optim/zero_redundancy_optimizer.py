@@ -55,7 +55,6 @@ class ZeroRedundancyOptimizer(Optimizer):
 
         opt = ZeroRedundancyOptimizer(params, optim=torch.optim.Adam, lr=0.01)
 
-    .. _ZeRO: https://arxiv.org/abs/1910.02054
 
     We use a greedy algorithm to pack a number of parameters at each rank.
     Each parameter belongs to a single rank and is not divided among ranks.
@@ -69,14 +68,16 @@ class ZeroRedundancyOptimizer(Optimizer):
         params (list of tensors):
             parameters to be optimized
     Keyword Args:
-        optim (torch.nn.Optimizer):
-            optimizer to shard
-        group (group):
-            torch.distributed group (default: group.WORLD)
-        bucket_cap (int):
-            the size of the buffer used to batch the small parameter tensors, in number of elements (default 16M)
-        **default:
-            all trailing arguments will be forwarded to the requested optimizer
+        optim (torch.nn.Optimizer): optimizer to shard
+        group (group): torch.distributed group (default: group.WORLD)
+        bucket_cap (int): the size of the buffer used to batch the small parameter tensors,
+            in number of elements (default 16M)
+        **default: all trailing arguments will be forwarded to the requested optimizer
+
+    .. warning: ZeroRedundancyOptimizer is experimental and subject to change.
+
+    .. _ZeRO: https://arxiv.org/abs/1910.02054
+
     """
 
     def __init__(
@@ -138,9 +139,11 @@ class ZeroRedundancyOptimizer(Optimizer):
 
         Arguments:
             param_group (dict): Specifies what Tensors should be optimized along with group
-            specific optimization options
+                specific optimization options
 
         .. warning: This handles updating the shards on all partitions, but needs to be called on all ranks.
+            Calling this on a subset of the ranks will cause the training to hang, because communication primitives
+            are called depending on the managed parameters, and expect all the ranks to participate.
         """
 
         super().add_param_group(param_group)
@@ -206,9 +209,9 @@ class ZeroRedundancyOptimizer(Optimizer):
         """Partitions parameters across distributed data parallel ranks.
 
         Returns: a list of ``param_groups`` (which is a list of dict) where each
-        element of the list contains the param_groups for a rank. Element 0
-        corresponds to rank 0, etc. We need all the ranks for the broadcast
-        inside ``step()``.
+            element of the list contains the param_groups for a rank. Element 0
+            corresponds to rank 0, etc. We need all the ranks for the broadcast
+            inside ``step()``.
         """
         if len(self._partition_parameters) == 0:
             self._partition_parameters = [list() for _ in range(self.world_size)]
@@ -429,22 +432,18 @@ class ZeroRedundancyOptimizer(Optimizer):
                     dist.broadcast(tensor=bucket, src=global_src_rank, group=self.group, async_op=True)
                 )
 
-        self._consume_work_handles()
-
-    def _consume_work_handles(self) -> None:
-        """Consume all the futures which are tied to this optimizer's communications.
-        We start from the first/older ones, since they are the most likely to be ready and non-blocking
-        """
-
+        # Consume all async calls
         while len(self.work_handles) > 0:
             work_handle = self.work_handles.popleft()
             work_handle.wait()
 
     def _sync_param_groups(self, local_to_global: bool = False) -> None:
         """Sync learning rate and other optimizer attributes (needed to support schedulers).
-        If the global param groups have been altered, and we want to make sure that the
-        wrapped optimizer uses the up to date version.
-        Conversely if the wrapped optimizer has new keys, we expose them through the global param groups"""
+
+        If the global param groups have been altered, and we want to make sure
+        that the wrapped optimizer uses the up to date version. Conversely if the wrapped
+        optimizer has new keys, we expose them through the global param groups
+        """
 
         for global_group, local_group in zip(self.param_groups, self.optim.param_groups):
             # Sync everything but the parameters
@@ -455,8 +454,9 @@ class ZeroRedundancyOptimizer(Optimizer):
                     local_group[k] = global_group[k]
 
     def _setup_bucket_strategy(self) -> None:
-        """Tag parameters to either bucket them or broadcast/reduce them directly. The parameters are ordered
-        (smallest first), the bucket will hold the smallest elements, the remaining ones will be directly sent.
+        """Tag parameters to either bucket them or broadcast/reduce them directly.
+
+        The parameters are ordered (smallest first), the bucket will hold the smallest elements, the remaining ones will be directly sent.
 
         Generating the partition once and for all allows us to save some time at runtime, and to know when all the
         network requests have been issued. The parameters which are part of a bucket become tensor views.
