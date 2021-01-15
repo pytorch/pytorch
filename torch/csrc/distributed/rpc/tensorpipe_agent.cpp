@@ -219,6 +219,28 @@ float TensorPipeAgent::TimeSeriesMetricsTracker::computeAverage() const {
 
 ////////////////////////  TensorpipeRpcAgent  /////////////////////////////////
 
+void TensorPipeAgent::removeFromTimeoutMap(
+    uint64_t messageId,
+    steady_clock_time_point expirationTime) {
+  // Remove entry from timeoutMap_.
+  {
+    std::unique_lock<std::mutex> lock(timeoutMapMutex_);
+    auto& timedOutFuturesVector = timeoutMap_[expirationTime];
+    for (auto it = timedOutFuturesVector.begin();
+         it != timedOutFuturesVector.end();
+         it++) {
+      if (it->messageId == messageId) {
+        it = timedOutFuturesVector.erase(it);
+        break;
+      }
+    }
+
+    if (timedOutFuturesVector.empty()) {
+      timeoutMap_.erase(expirationTime);
+    }
+  }
+}
+
 void TensorPipeAgent::collectNames() {
   const worker_id_t selfId = workerInfo_.id_;
   const std::string& selfName = workerInfo_.name_;
@@ -670,9 +692,10 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
   // documentation, a user-provided timeout of 0 indicates the RPC should never
   // expire (infinite timeout), so there is no need to track it in the
   // timeoutMap_.
+  steady_clock_time_point expirationTime;
   if (timeout.count() != 0) {
     // Compute the expiration time for this message based on the timeout
-    auto expirationTime = computeRpcMessageExpiryTime(timeout);
+    expirationTime = computeRpcMessageExpiryTime(timeout);
 
     // Add the Future to the right vector in the timeoutMap_
     {
@@ -680,7 +703,6 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
       auto& timeoutFuturesVector = timeoutMap_[expirationTime];
       timeoutFuturesVector.emplace_back(
           messageId, futureResponseMessage, timeout);
-      messageIdToExpiryMap_[messageId] = expirationTime;
     }
     timeoutThreadCV_.notify_one();
   }
@@ -692,7 +714,8 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
       clientPipe.pipe_,
       std::move(requestMessage),
       std::move(devices),
-      [this, &clientPipe, messageId](const tensorpipe::Error& error) mutable {
+      [this, &clientPipe, messageId, expirationTime](
+          const tensorpipe::Error& error) mutable {
         if (error) {
           if (error.isOfType<tensorpipe::PipeClosedError>() &&
               !rpcAgentRunning_.load()) {
@@ -717,7 +740,7 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
 
         pipeRead(
             clientPipe.pipe_,
-            [this, &clientPipe](
+            [this, &clientPipe, expirationTime](
                 const tensorpipe::Error& error, Message&& responseMessage) {
               if (error) {
                 if (error.isOfType<tensorpipe::PipeClosedError>() &&
@@ -743,6 +766,9 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
                 for (auto& p : pendingMsgs) {
                   markFutureWithError(std::move(p.second), errorMsg);
                 }
+
+                // Remove entry from timeoutMap_.
+                removeFromTimeoutMap(responseMessage.id(), expirationTime);
                 return;
               }
 
@@ -770,27 +796,8 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
                 clientPipe.pendingResponseMessage_.erase(it);
               }
 
-              // Remove entry from timeoutMap_ as well.
-              {
-                std::unique_lock<std::mutex> lock(timeoutMapMutex_);
-                const auto& expiryTime = messageIdToExpiryMap_[messageId];
-                auto& timedOutFuturesVector = timeoutMap_[expiryTime];
-                for (auto it = timedOutFuturesVector.begin();
-                     it != timedOutFuturesVector.end();) {
-                  if (std::get<0>(*it) == messageId) {
-                    it = timedOutFuturesVector.erase(it);
-                  } else {
-                    it++;
-                  }
-                }
-
-                if (timedOutFuturesVector.empty()) {
-                  timeoutMap_.erase(expiryTime);
-                }
-
-                // Remove from messageIdToExpriryMap_ as well.
-                messageIdToExpiryMap_.erase(messageId);
-              }
+              // Remove entry from timeoutMap_.
+              removeFromTimeoutMap(messageId, expirationTime);
 
               if (responseMessage.type() == MessageType::EXCEPTION) {
                 markFutureWithError(
@@ -834,11 +841,8 @@ void TensorPipeAgent::pollTimeoutRpcs() {
 
     // Move all these futures to a separate vector so we can process them
     // outside the lock.
-    std::vector<std::tuple<
-        uint64_t,
-        std::shared_ptr<AtomicJitFuture>,
-        std::chrono::milliseconds>>
-        timedOutFutures = std::move(timeoutMap_.begin()->second);
+    std::vector<TimeoutMessageMetadata> timedOutFutures =
+        std::move(timeoutMap_.begin()->second);
     // We can safely remove this key from the timeoutMap_ since all these
     // futures will be processed.
     timeoutMap_.erase(timeoutMap_.begin());
@@ -848,12 +852,12 @@ void TensorPipeAgent::pollTimeoutRpcs() {
     // Set an error on futures added to the timedOutFutures vector. We do this
     // outside the lock to prevent potential lock-order-inversions by callbacks
     // triggered by the setError call.
-    for (auto& futureTimeoutTuple : timedOutFutures) {
-      std::string errorMsg = fmt::format(
-          kRpcTimeoutErrorStr, std::get<2>(futureTimeoutTuple).count());
+    for (auto& timeoutMetadata : timedOutFutures) {
+      std::string errorMsg =
+          fmt::format(kRpcTimeoutErrorStr, timeoutMetadata.timeout.count());
       auto err = makeRPCError(errorMsg, RPCErrorType::TIMEOUT);
       markFutureWithError(
-          std::move(std::get<1>(futureTimeoutTuple)), std::move(err));
+          std::move(timeoutMetadata.responseFuture), std::move(err));
     }
   }
 }
