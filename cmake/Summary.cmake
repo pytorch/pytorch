@@ -48,7 +48,9 @@ function(caffe2_print_configuration_summary)
   message(STATUS "  BUILD_TEST            : ${BUILD_TEST}")
   message(STATUS "  BUILD_JNI             : ${BUILD_JNI}")
   message(STATUS "  BUILD_MOBILE_AUTOGRAD : ${BUILD_MOBILE_AUTOGRAD}")
-
+  if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    message(STATUS "  CROSS_COMPILING_MACOSX : ${CROSS_COMPILING_MACOSX}")
+  endif()
   message(STATUS "  INTERN_BUILD_MOBILE   : ${INTERN_BUILD_MOBILE}")
 
   message(STATUS "  USE_BLAS              : ${USE_BLAS}")
