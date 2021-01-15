@@ -1,7 +1,7 @@
-from typing import List
 
 import collections
 from itertools import repeat
+from typing import List
 
 
 def _ntuple(n):
