@@ -5713,7 +5713,13 @@ else:
         A = random_hermitian_pd_matrix(3, 2, dtype=dtype, device=device)
         L = torch.linalg.cholesky(A)
 
-        # batched column major out (memory is used in computations directly)
+        # There are two code paths currently for the out= variant
+        # 1. When 'out' tensor is in Fortran (column-major) memory format
+        # then the fast route is taken and the storage is reused directly in the computations
+        # 2. When 'out' tensor is not in Fortran format then a temporary tensor is allocated internally
+        # and the result is copied from the temporary tensor to 'out' tensor
+
+        # This test checks the first code path
         out = torch.empty_like(A)
         out_t = out.transpose(-2, -1).clone(memory_format=torch.contiguous_format)
         out = out_t.transpose(-2, -1)
@@ -5721,7 +5727,8 @@ else:
         self.assertEqual(ans, out)
         expected = torch.inverse(A)
         self.assertEqual(expected, out)
-        # batched row major out (temporary tensor is allocated internally and result is copied to out)
+
+        # This test checks the second code path
         out = torch.empty_like(A)
         ans = torch.cholesky_inverse(L, out=out)
         self.assertEqual(ans, out)
