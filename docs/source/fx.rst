@@ -13,6 +13,8 @@ API Reference
 
 .. autofunction:: torch.fx.symbolic_trace
 
+.. autofunction:: torch.fx.wrap
+
 .. autoclass:: torch.fx.GraphModule
   :members:
 
