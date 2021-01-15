@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/jit_opt_limit.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -975,6 +976,12 @@ class TensorExprFuser {
 
     REQ(tensorexpr::isSupported(node));
     REQ(typesAreSupported(node));
+
+    // A hook to optimizations limitter to allow bisecting the pass
+    if (!JIT_OPT_ALLOWED) {
+      return false;
+    }
+
     return true;
   }
 
