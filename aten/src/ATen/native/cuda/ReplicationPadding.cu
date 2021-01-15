@@ -76,11 +76,11 @@ template <typename scalar_t>
 __global__ void replication_pad_forward_kernel2d(
     PackedTensorAccessor64<scalar_t, 4> input,
     PackedTensorAccessor64<scalar_t, 4> output,
-    int padT, int padB, int padL, int padR) {
+    int padT, int padB, int padL, int padR, int y_shift, int z_shift) {
 
   int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
-  int plane = blockIdx.y;
-  int batch = blockIdx.z;
+  int plane = blockIdx.y + y_shift;
+  int batch = blockIdx.z + z_shift;
   if (outputPointId >= output.size(2) * output.size(3)) {
     return;
   }
@@ -103,11 +103,11 @@ template <typename scalar_t>
 __global__ void replication_pad_backward_kernel(
     PackedTensorAccessor64<scalar_t, 4> gradInput,
     PackedTensorAccessor64<scalar_t, 4> gradOutput,
-    int padT, int padB, int padL, int padR) {
+    int padT, int padB, int padL, int padR, int y_shift, int z_shift) {
 
   int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
-  int plane = blockIdx.y;
-  int batch = blockIdx.z;
+  int plane = blockIdx.y + y_shift;
+  int batch = blockIdx.z + z_shift;
   if (outputPointId >= gradOutput.size(2) * gradOutput.size(3)) {
     return;
   }
@@ -417,36 +417,38 @@ void replication_pad2d_out_cuda_template(
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(
     input.scalar_type(), "replication_pad2d_cuda", [&] {
+      at::Tensor input_ = input;
+      at::Tensor output_ = output;
       if (numInputDims == 3) {
-        auto input_ = input.unsqueeze(0);
-        auto output_ = output.unsqueeze(0);
-        auto devInput = input_.packed_accessor64<scalar_t, 4>();
-        auto devOutput = output_.packed_accessor64<scalar_t, 4>();
+        input_ = input.unsqueeze(0);
+        output_ = output.unsqueeze(0);
+      }
+      auto devInput = input_.packed_accessor64<scalar_t, 4>();
+      auto devOutput = output_.packed_accessor64<scalar_t, 4>();
 
-        int outputPlaneSize = devOutput.size(2) * devOutput.size(3);
-        dim3 gridSize(THCCeilDiv(outputPlaneSize, 256),
-            devOutput.size(1),
-            devOutput.size(0));
-        dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
+      int outputPlaneSize = devOutput.size(2) * devOutput.size(3);
+      int size1 = devOutput.size(1);
+      int size0 = devOutput.size(0);
 
-        replication_pad_forward_kernel2d <<<gridSize, blockSize, 0,
-        at::cuda::getCurrentCUDAStream()>>>(
-            devInput, devOutput, padT, padB, padL, padR);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
-      } else {
-        auto devInput = input.packed_accessor64<scalar_t, 4>();
-        auto devOutput = output.packed_accessor64<scalar_t, 4>();
+      int y_left = size1;
+      int y_shift = 0;
+      while (y_left > 0) {
+        int z_left = size0;
+        int z_shift = 0;
+        while (z_left > 0) {
+          dim3 gridSize(THCCeilDiv(outputPlaneSize, 256), y_left > 65535 ? 65535 : y_left, z_left > 65535 ? 65535 : z_left);
+          dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
-        int outputPlaneSize = devOutput.size(2) * devOutput.size(3);
-        dim3 gridSize(THCCeilDiv(outputPlaneSize, 256),
-            devOutput.size(1),
-            devOutput.size(0));
-        dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
+          replication_pad_forward_kernel2d <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
+              devInput, devOutput, padT, padB, padL, padR, y_shift, z_shift);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-        replication_pad_forward_kernel2d <<<gridSize, blockSize, 0,
-                                       at::cuda::getCurrentCUDAStream()>>>(devInput, devOutput,
-                                           padT, padB, padL, padR);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
+          z_shift += 65535;
+          z_left -= 65535;
+        }
+
+        y_shift += 65535;
+        y_left -= 65535;
       }
     }
   );
@@ -510,14 +512,28 @@ void replication_pad2d_backward_out_cuda_template(
         auto devGradOutput = gradOutput_.packed_accessor64<scalar_t, 4>();
 
         int outputPlaneSize = devGradOutput.size(2) * devGradOutput.size(3);
-        dim3 gridSize(THCCeilDiv(outputPlaneSize, 256),
-          devGradOutput.size(1),
-          devGradOutput.size(0));
-        dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
-        replication_pad_backward_kernel <<<gridSize, blockSize, 0,
-        at::cuda::getCurrentCUDAStream()>>>(devGradInput, devGradOutput,
-          padT, padB, padL, padR);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
+        int size1 = devGradOutput.size(1);
+        int size0 = devGradOutput.size(0);
+
+        int y_left = size1;
+        int y_shift = 0;
+        while (y_left > 0) {
+          int z_left = size0;
+          int z_shift = 0;
+          while (z_left > 0) {
+            dim3 gridSize(THCCeilDiv(outputPlaneSize, 256), y_left > 65535 ? 65535 : y_left, z_left > 65535 ? 65535 : z_left);
+            dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
+            replication_pad_backward_kernel <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
+              devGradInput, devGradOutput, padT, padB, padL, padR, y_shift, z_shift);
+            C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+            z_shift += 65535;
+            z_left -= 65535;
+          }
+
+          y_shift += 65535;
+          y_left -= 65535;
+        }
       }
   );
 }
