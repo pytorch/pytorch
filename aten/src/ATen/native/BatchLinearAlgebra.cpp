@@ -862,6 +862,8 @@ Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& i
 
   // result tensor must be in batched column major order (Fortran contiguous)
   TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
+
+  // cholesky_inverse_stub (apply_cholesky_inverse) performs calculations in-place and result must be a copy of input
   result.copy_(input);
 
   at::native::resize_output(infos, {std::max<int64_t>(1, batchCount(input))});
