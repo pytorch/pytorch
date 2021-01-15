@@ -723,9 +723,10 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
       "This also applies to advanced indexing e.g. tensor[mask] = scalar");
   }
 
-  dim = at::maybe_wrap_dim(dim, self);
-  // Handle the case when `self` is 0-dim
+  // Handle the case when `self` or `index` is 0-dim
   self = (0 == self.dim()) ? self.unsqueeze(-1) : self;
+
+  dim = at::maybe_wrap_dim(dim, self);
   TORCH_CHECK(index.dim() <= 1, "Index has to be a vector/scalar");
   TORCH_CHECK(dim < self.dim(),
     "Indexing dimension ", dim, " is out of bounds for tensor `self`");
@@ -735,7 +736,7 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
   auto index_sizes = std::vector<int64_t>(self.dim(), 1);
   auto index_strides = std::vector<int64_t>(self.dim(), 0);
   index_sizes[dim] = index.numel();
-  index_strides[dim] = index.stride(0); // `index` is 1d
+  index_strides[dim] = (index.dim() > 0) ? index.stride(0) : 1; // `index` is 1d or scalar
   auto index_restrided = index.as_strided(
     index_sizes, index_strides);
 
