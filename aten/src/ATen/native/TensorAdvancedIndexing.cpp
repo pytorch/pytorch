@@ -756,7 +756,7 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
   // This is done so that self_sizes[dim] and index_sizes[dim]
   // match as required by TensorIterator (input shape should
   // strictly broadcast over output shape, i.e.
-  // output.shape[i] > input.shape[i] for i in range(dims)).
+  // output.shape[i] >= input.shape[i] for i in range(dims)).
   auto self_sizes = self.sizes().vec();
   auto self_strides = self.strides().vec();
   self_sizes[dim] = index.numel();
