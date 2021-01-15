@@ -15,12 +15,18 @@ The life of a worker is very simple:
 Because this file only expects to run in a child context, error handling means
 plumbing failures up to the caller, not raising in this process.
 """
+import argparse
 import dataclasses
 import enum
+import io
 import os
 import pickle
+import re
+import traceback
 from typing import Any, Dict, Optional, Tuple, Union, TYPE_CHECKING
+import sys
 
+COMPAT_TIMER: bool = False
 if TYPE_CHECKING:
     # Benchmark utils are only partially strict compliant, so MyPy won't follow
     # imports using the public namespace. (Due to an exclusion rule in
@@ -29,7 +35,13 @@ if TYPE_CHECKING:
     from torch.utils.benchmark.utils.timer import Language, Timer
     from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import CallgrindStats
 else:
-    from torch.utils.benchmark import CallgrindStats, Language, Measurement, Timer
+    try:
+        # Give backport utils first dibs in case there is an old version of Timer.
+        from torch.utils_backport.benchmark import CallgrindStats, Language, Measurement, Timer
+        COMPAT_TIMER = True
+
+    except ImportError:
+        from torch.utils.benchmark import CallgrindStats, Language, Measurement, TaskSpec, Timer
 
 WORKER_PATH = os.path.abspath(__file__)
 
@@ -105,16 +117,104 @@ class WorkerUnpickler(pickle.Unpickler):
         sees the same symbol as `__main__.foo`. We have to help pickle
         understand that they refer to the same symbols.
         """
-        return {
+        symbol_map = {
             # Only blessed interface Enums and dataclasses need to be mapped.
             "CostEstimate": CostEstimate,
             "WorkerTimerArgs": WorkerTimerArgs,
             "WorkerOutput": WorkerOutput,
             "WorkerFailure": WorkerFailure,
-        }.get(name, None) or super().find_class(module, name)
+        }
+
+        if name in symbol_map:
+            return symbol_map[name]
+
+        # Account for symbol mismatch between worker and runner.
+        if COMPAT_TIMER and module.startswith("torch.utils."):
+            module = re.sub(r"^torch.utils", r"torch.utils_backport", module)
+        if not COMPAT_TIMER and module.startswith("torch.utils_backport"):
+            module = re.sub(r"^torch.utils_backport", r"torch.utils", module)
+
+        return super().find_class(module, name)
 
     def load_from_worker(self) -> Union[WorkerTimerArgs, WorkerOutput, WorkerFailure]:
         """Convenience method for type safe loading."""
         result = self.load()
         assert isinstance(result, (WorkerTimerArgs, WorkerOutput, WorkerFailure))
         return result
+
+
+# =============================================================================
+# == Execution ================================================================
+# =============================================================================
+CALLGRIND_COST_GUIDE: Dict[CostEstimate, Tuple[float, int]] = {
+    # (max wall time, callgrind number)
+    CostEstimate.LESS_THAN_10_US: (10e-6, 50_000),
+    CostEstimate.LESS_THAN_50_US: (50e-6, 10_000),
+    CostEstimate.LESS_THAN_100_US: (100e-6, 5_000),
+    CostEstimate.LESS_THAN_250_US: (250e-6, 2_000),
+    CostEstimate.LESS_THAN_1000_US: (1e-3, 500),
+    CostEstimate.GIANT: (1e9, 10),  # Catch all
+}
+
+# Ensure map is complete.
+assert tuple(CostEstimate) == (CostEstimate.AUTO,) + tuple(CALLGRIND_COST_GUIDE.keys())
+
+# Ensure map is strictly increasing.
+assert all(c1 > c0 for (c0, _), (c1, _) in
+    zip(CALLGRIND_COST_GUIDE.values(), list(CALLGRIND_COST_GUIDE.values())[1:]))
+
+
+def _run(timer_args: WorkerTimerArgs) -> WorkerOutput:
+    timer = Timer(
+        stmt=timer_args.stmt,
+        setup=timer_args.setup,
+        global_setup=timer_args.global_setup,
+        num_threads=timer_args.num_threads,
+        language=timer_args.language,
+    )
+
+    m = timer.blocked_autorange(min_run_time=MIN_RUN_TIME)
+    cost: CostEstimate = timer_args.cost
+    n: int
+    if cost == CostEstimate.AUTO:
+        t: float = m.median
+        for cost, (t_max, n) in CALLGRIND_COST_GUIDE.items():
+            if t <= t_max:
+                break
+    else:
+        n = CALLGRIND_COST_GUIDE[cost][1]
+
+    stats = timer.collect_callgrind(number=n, collect_baseline=False)
+    return WorkerOutput(
+        wall_time=m,
+        instructions=stats,
+        cost=cost
+    )
+
+
+def main(communication_file: str) -> None:
+    result: Union[WorkerOutput, WorkerFailure]
+    try:
+        with open(communication_file, "rb") as f:
+            timer_args: WorkerTimerArgs = WorkerUnpickler(f).load()
+            assert isinstance(timer_args, WorkerTimerArgs)
+        result = _run(timer_args)
+
+    except KeyboardInterrupt:
+        # Runner process sent SIGINT.
+        sys.exit()
+
+    except:
+        trace_f = io.StringIO()
+        traceback.print_exc(file=trace_f)
+        result = WorkerFailure(failure_trace=trace_f.getvalue())
+
+    with open(communication_file, "wb") as f:
+        pickle.dump(result, f)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--communication_file', type=str)
+    communication_file = parser.parse_args().communication_file
+    main(communication_file)
