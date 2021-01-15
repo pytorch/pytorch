@@ -1,7 +1,6 @@
 #include <limits>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/native/cuda/UnaryComplexKernels.cuh>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
@@ -68,6 +67,17 @@ void imag_kernel_cuda(TensorIterator& iter) {
       return imag_wrapper(a);
     });
   });
+}
+
+// We manually overload conj because std::conj does not work types other than c10::complex.
+template<typename scalar_t>
+__host__ __device__ static inline scalar_t conj_wrapper(scalar_t v) {
+  return v;
+}
+
+template<typename T>
+__host__ __device__ static inline c10::complex<T> conj_wrapper(c10::complex<T> v) {
+  return std::conj(v);
 }
 
 void conj_kernel_cuda(TensorIterator& iter) {

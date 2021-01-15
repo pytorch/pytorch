@@ -11,7 +11,6 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/cuda/BatchLinearAlgebraLib.h>
-#include <ATen/native/cuda/UnaryComplexKernels.cuh>
 #include <ATen/native/cpu/zmath.h>
 
 #include <THC/THC.h> // for USE_MAGMA
