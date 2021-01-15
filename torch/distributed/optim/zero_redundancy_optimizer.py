@@ -7,7 +7,7 @@ from collections import OrderedDict, deque
 import copy
 from itertools import chain
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
 import torch
 import torch.distributed as dist
@@ -16,12 +16,6 @@ from torch._six import container_abcs
 from torch.optim import Optimizer
 
 __all__ = ["ZeroRedundancyOptimizer"]
-
-
-if TYPE_CHECKING:  # pragma: no cover
-    from torch.optim.optimizer import _params_t
-else:
-    _params_t = Any
 
 
 # Credits:  classy_vision/generic/distributed_util.py
@@ -85,7 +79,7 @@ class ZeroRedundancyOptimizer(Optimizer):
 
     def __init__(
         self,
-        params: _params_t,
+        params,
         optim: Type[Optimizer],
         group: Optional[Any] = None,
         bucket_cap_kb: int = 2 ** 24,

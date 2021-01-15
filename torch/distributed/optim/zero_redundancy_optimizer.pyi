@@ -1,5 +1,5 @@
 from typing import Tuple, Optional, Any, List, Dict
-from .optimizer import _params_t, Optimizer
+from torch.optim import Optimizer
 from torch.nn import Parameter
 import torch
 
@@ -7,7 +7,7 @@ import torch
 class ZeroRedundancyOptimizer(Optimizer):
     def __init__(
         self,
-        params: _params_t,
+        params,
         optim: Optimizer = ...,
         group: Optional[Any] = ...,
         bucket_cap_kb: int = ...,
