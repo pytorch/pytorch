@@ -4078,17 +4078,24 @@ class TestLinalg(TestCase):
             reflectors, tau = generate_reflectors_and_tau(A)
             expected, _ = torch.linalg.qr(A)
             actual = torch.orgqr(reflectors, tau)
-            self.assertEqual(expected, actual)
+            # torch.linalg.qr does not work correctly for zero batch dimension tensors
+            # see https://github.com/pytorch/pytorch/issues/50576
+            if (A.numel() > 0):
+                self.assertEqual(expected, actual)
+            else:
+                self.assertTrue(actual.shape == shape)
 
             out = torch.empty_like(A)
             ans = torch.orgqr(reflectors, tau, out=out)
             self.assertEqual(ans, out)
-            self.assertEqual(expected, out)
+            if (A.numel() > 0):
+                self.assertEqual(expected, out)
 
         shapes = [(0, 0), (5, 0),  # Empty matrix
                   (5, 5), (5, 3),  # Single matrix
-                  (2, 5, 5), (2, 5, 3),  # 3-dim Tensors
-                  (2, 1, 5, 5), (2, 1, 5, 3)]  # 4-dim Tensors
+                  (0, 0, 0), (0, 5, 5), (0, 5, 3),  # Zero batch dimension tensors
+                  (2, 5, 5), (2, 5, 3),  # 3-dim tensors
+                  (2, 1, 5, 5), (2, 1, 5, 3)]  # 4-dim tensors
         for shape in shapes:
             run_test(shape)
 
