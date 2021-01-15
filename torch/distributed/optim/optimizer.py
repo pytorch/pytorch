@@ -7,6 +7,7 @@ import torch.nn as nn
 from torch import Tensor
 from torch.distributed.rpc import RRef
 from .functional_adagrad import _FunctionalAdagrad
+from .functional_adam import _FunctionalAdam
 import torch.distributed.autograd as dist_autograd
 
 
@@ -181,6 +182,7 @@ class DistributedOptimizer:
     # functional optimizer to user and still provide the same API.
     functional_optim_map = {
         optim.Adagrad: _FunctionalAdagrad,
+        optim.Adam: _FunctionalAdam,
     }
 
     def __init__(self, optimizer_class, params_rref, *args, **kwargs):
