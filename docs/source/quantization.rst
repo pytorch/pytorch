@@ -112,6 +112,16 @@ The following table compares the differences between Eager Mode Quantization and
 |Support for      |Limited Support    |Fully              |
 |Customization    |                   |Supported          |
 +-----------------+-------------------+-------------------+
+|Quantization Mode|Post Training      |Post Training      |
+|Support          |Quantization:      |Quantization:      |
+|                 |Static, Dynamic,   |Static, Dynamic,   |
+|                 |Weight Only        |Weight Only        |
+|                 |                   |                   |
+|                 |Quantiztion Aware  |Quantiztion Aware  |
+|                 |Training:          |Training:          |
+|                 |Static             |Static             |
+|                 |                   |                   |
++-----------------+-------------------+-------------------+
 |Input/Output     |``torch.nn.Module``|``torch.nn.Module``|
 |Model Type       |                   |(May need some     |
 |                 |                   |refactors to make  |
