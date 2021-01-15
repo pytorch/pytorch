@@ -1168,8 +1168,8 @@ std::string ClassType::getForwardHookErrorMessage(int hook_idx) const {
 void checkForwardHookInputArguments(
     const FunctionSchema& forward_schema, 
     const FunctionSchema& hook_schema, 
-    std::string hook_id, 
-    std::string hook_err_msg) {
+    const std::string& hook_id, 
+    const std::string& hook_err_msg) {
   // check for proper tuple input types
   const std::vector<Argument>& forward_args = forward_schema.arguments();
   const Argument input_arg = hook_schema.arguments()[1];
@@ -1336,7 +1336,6 @@ void ClassType::checkForwardHookSchema(
   );
 
   const FunctionSchema& forward_schema = getMethod("forward").getSchema();
-  const std::vector<Argument>& forward_args = forward_schema.arguments();
   checkForwardHookInputArguments(forward_schema, hook_schema, hook_id, hook_err_msg);
 
   // check output tuple
