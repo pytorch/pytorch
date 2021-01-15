@@ -5232,6 +5232,8 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             result = rref_api(timeout=timeout).my_slow_method(torch.ones(2, 2))
             if rref_api == rref.rpc_async:
                 result.wait()
+            elif rref_api == rref.remote:
+                result._get_future().wait()
 
         # Case where rpc.remote() is stuck and exceeds timeout
         slow_rref = rpc.remote(dst, MyClass, args=(torch.ones(2, 2), True))
@@ -5243,11 +5245,9 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         # which blocks on the RRef being created on owner node, until the
         # specified timeout.
         with self.assertRaisesRegex(RuntimeError, expected_error):
-            fut = rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2))
+            rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2))
 
     @dist_init
     def test_rref_proxy_timeout(self):
-        # TODO: Add test for rref.remote() which has slightly different
-        # semantics.
-        for rpc_api in ["rpc_sync", "rpc_async"]:
+        for rpc_api in ["rpc_sync", "rpc_async", "remote"]:
             self._test_rref_proxy_timeout(rpc_api)

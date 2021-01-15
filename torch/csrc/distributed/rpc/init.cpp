@@ -282,7 +282,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   >>> rpc.rpc_sync(rref.owner(), run, args=(rref, func_name, args, kwargs))
 
                   Args:
-                      timeout (float, optional): Timeout for ``rref.rpc_async()``.
+                      timeout (float, optional): Timeout for ``rref.rpc_sync()``.
                       If the call does not complete within this timeframe, an
                       exception indicating so will be raised. If this argument
                       is not provided, the default RPC timeout will be used.
@@ -346,7 +346,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   >>> rpc.remote(rref.owner(), run, args=(rref, func_name, args, kwargs))
 
                   Args:
-                      timeout (float, optional): Timeout for `rref.remote()`. If
+                      timeout (float, optional): Timeout for ``rref.remote()``. If
                       the creation of this :class:`~torch.distributed.rpc.RRef`
                       is not successfully completed within the timeout, then the
                       next time there is an attempt to use the RRef
