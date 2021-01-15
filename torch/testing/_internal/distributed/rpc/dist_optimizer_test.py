@@ -206,4 +206,4 @@ class DistOptimizerTest(RpcAgentTestFixture):
     @dist_init
     def test_dist_optim_functional(self):
         self._test_dist_optim_base(optim.Adagrad, lr=0.05)
-        self._test_dist_optim_base(optim.Adam, lr=0.05, amsgrad=True)
+        self._test_dist_optim_base(optim.Adam, lr=1e-2, amsgrad=True)

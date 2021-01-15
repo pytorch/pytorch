@@ -1,4 +1,5 @@
 import torch
+from . import functional as F
 from .optimizer import Optimizer, required
 
 
@@ -86,29 +87,29 @@ class SGD(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
+            params_with_grad = []
+            d_p_list = []
+            momentum_buffer_list = []
             weight_decay = group['weight_decay']
             momentum = group['momentum']
             dampening = group['dampening']
             nesterov = group['nesterov']
+            lr = group['lr']
 
             for p in group['params']:
-                if p.grad is None:
-                    continue
-                d_p = p.grad
-                if weight_decay != 0:
-                    d_p = d_p.add(p, alpha=weight_decay)
-                if momentum != 0:
-                    param_state = self.state[p]
-                    if 'momentum_buffer' not in param_state:
-                        buf = param_state['momentum_buffer'] = torch.clone(d_p).detach()
-                    else:
-                        buf = param_state['momentum_buffer']
-                        buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
-                    if nesterov:
-                        d_p = d_p.add(buf, alpha=momentum)
-                    else:
-                        d_p = buf
+                if p.grad is not None:
+                    params_with_grad.append(p)
+                    d_p = p.grad
+                    d_p_list.append(d_p)
+                    momentum_buffer_list.append(None)
 
-                p.add_(d_p, alpha=-group['lr'])
+            F.sgd(params_with_grad,
+                  d_p_list,
+                  momentum_buffer_list,
+                  weight_decay,
+                  momentum,
+                  lr,
+                  dampening,
+                  nesterov)
 
         return loss
