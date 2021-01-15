@@ -2638,6 +2638,35 @@ Examples::
              [ 1.0500,  0.7336, -0.3836, -1.1015]]])
 """.format(**common_args))
 
+add_docstr(torch.diff, r"""
+diff(input, *, n=1, dim=-1) -> Tensor
+
+Computes the n-th forward difference along the given dimension.
+
+The first-order differences are given by `out[i] = input[i + 1] - input[i]`. Higher-order
+differences are calculated by using :func:`torch.diff` recursively.
+
+Args:
+    input (Tensor): the tensor to compute the differences on
+
+Keyword args:
+    {out}
+
+.. note::  only `n = 1` is supported currently
+
+Example::
+
+    >>> a = torch.tensor([1, 3, 2])
+    >>> torch.diff(a)
+    tensor([ 2, -1])
+    >>> b = torch.tensor([[1, 2, 3], [3, 4, 5]])
+    >>> torch.diff(b, dim=0)
+    tensor([[2, 2, 2]])
+    >>> torch.diff(b, dim=1)
+    tensor([[1, 1],
+            [1, 1]])
+""".format(**common_args))
+
 add_docstr(torch.digamma, r"""
 digamma(input, *, out=None) -> Tensor
 

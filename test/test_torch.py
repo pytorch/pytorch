@@ -4106,6 +4106,68 @@ class TestTorchDeviceType(TestCase):
                 'expected scalar_type Double but found Float'):
             torch.logcumsumexp(b, axis, out=inplace_out)
 
+    def test_diff(self, device):
+        def _test_diff_numpy(t, dims=None):
+            for dim in dims if dims else range(t.dim()):
+                actual = torch.diff(t, dim=dim, prepend=t, append=t)
+
+                if t.dtype == torch.bfloat16:
+                    np_t = t.to(torch.float).numpy()
+                else:
+                    np_t = t.numpy()
+
+                # test when both prepend and append are tensors
+                expected = torch.from_numpy(np.diff(np_t, axis=dim, prepend=np_t, append=np_t))
+                self.assertEqual(actual, expected.to(t.dtype))
+
+                scalar = t[(0,)*t.dim()]
+                scalar_np = np_t[(0,)*t.dim()]
+
+                # test when both prepend and append are scalars
+                actual = torch.diff(t, dim=dim, prepend=scalar, append=scalar)
+                expected = torch.from_numpy(np.diff(np_t, axis=dim, prepend=scalar_np, append=scalar_np))
+                self.assertEqual(actual, expected.to(t.dtype))
+
+                # test when prepend is a scalar and append is a tensor
+                actual = torch.diff(t, dim=dim, prepend=scalar, append=t)
+                expected = torch.from_numpy(np.diff(np_t, axis=dim, prepend=scalar_np, append=np_t))
+                self.assertEqual(actual, expected.to(t.dtype))
+
+        shapes = (
+            (1,),
+            (1, 5),
+            (3, 5),
+            (1, 5, 1),
+            (2, 3, 5))
+
+        for dt in torch.testing.get_all_dtypes():
+            for shape in shapes:
+                contig = _make_tensor(shape, dt, device)
+                _test_diff_numpy(contig)
+
+                non_contig = torch.empty(shape + (2, 2), dtype=dt)[..., 0]
+                non_contig = non_contig.select(-1, -1)
+                non_contig.copy_(contig)
+                self.assertTrue(not non_contig.is_contiguous() or shape == (1,))
+
+                _test_diff_numpy(non_contig)
+
+        t = torch.ones(2, 3)
+
+        # Size of prepend/append needs to be same as t except along given dim
+        with self.assertRaises(RuntimeError):
+            invalid_prepend = torch.tensor([[0, 1]])
+            t.diff(dim=0, prepend=invalid_prepend)
+
+        with self.assertRaisesRegex(
+                RuntimeError, 'diff only supports n = 1 currently'):
+            torch.diff(t, n=2)
+
+        with self.assertRaisesRegex(
+                RuntimeError, 'diff requires input that is at least one-dimensional'):
+            scalar = torch.tensor(2)
+            torch.diff(scalar)
+
     def _test_large_cum_fn_helper(self, x, fn):
         x_cpu = x.cpu().float()
         expected = fn(x_cpu)

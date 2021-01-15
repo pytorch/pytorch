@@ -504,6 +504,33 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad):
                         0, torch.tensor(0, dtype=torch.int64, device=device))),
             )
 
+def sample_inputs_diff(op_info, device, dtype, requires_grad):
+    test_cases = (
+        ((1,), 0, None, None),
+        ((S,), 0, None, None),
+        ((S, 1), 0, None, None),
+        ((S, 1), 1, None, None),
+        ((S, S), 0, None, None),
+        ((S, S), 1, None, None),
+        ((S, S), 0, (1, S), (2, S)),
+        ((S, S), 0, None, (2, S)),
+        ((S, S, S), 1, None, None),
+        ((S, S, S), 1, (S, 1, S), (S, 1, S)),)
+
+    sample_inputs = tuple()
+    for size, dim, size_prepend, size_append in test_cases:
+        args = (make_tensor(size, device, dtype,
+                           low=None, high=None,
+                           requires_grad=requires_grad), 1, dim)
+        args += (make_tensor(size_prepend, device, dtype,
+                           low=None, high=None,
+                           requires_grad=requires_grad),) if size_prepend else (None,)
+        args += (make_tensor(size_append, device, dtype,
+                    low=None, high=None,
+                    requires_grad=requires_grad),) if size_append else (None,)
+        sample_inputs += (SampleInput(args),)
+
+    return sample_inputs
 
 def sample_inputs_index_select(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S, S), device, dtype,
@@ -1058,6 +1085,11 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
+    OpInfo('diff',
+           op=torch.diff,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_diff,
+           test_inplace_grad=False),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half),

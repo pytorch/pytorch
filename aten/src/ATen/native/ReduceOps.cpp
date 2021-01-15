@@ -413,6 +413,99 @@ Tensor cummaxmin_backward(const Tensor& grad, const Tensor& input, const Tensor&
   return result.scatter_add_(dim, indices, grad);
 }
 
+static Tensor prepend_append_on_dim(const Tensor& self, const Tensor& prepend, const Tensor& append, int64_t dim) {
+  // Prepends and/or appends to self along a given dimension using cat
+  TORCH_INTERNAL_ASSERT(prepend.defined() || append.defined(), "either prepend or append must be defined");
+  if (!prepend.defined() && append.defined()) {
+    return at::cat({self, append}, dim);
+  } else if (prepend.defined() && !append.defined()) {
+    return at::cat({prepend, self}, dim);
+  } else {
+    return at::cat({prepend, self, append}, dim);
+  }
+}
+
+static inline int64_t diff_check(const Tensor& self, int64_t n, int64_t dim) {
+  // Helper for diff that checks whether its parameters are valid
+  TORCH_CHECK(
+      n == 1,
+      "diff only supports n = 1 currently. Please file an issue at"
+      " https://github.com/pytorch/pytorch/issues/new?assignees=&labels=&template=feature-request.md"
+      " if your use case requires supporting higher-order differences");
+
+  TORCH_CHECK(
+      self.dim() >= 1,
+      "diff requires input that is at least one-dimensional");
+
+  return self.size(dim) - 1;
+}
+
+static inline Tensor diff_helper(const Tensor& self, int64_t n, int64_t dim) {
+  auto out_len = diff_check(self, n, dim);
+  if (self.dtype() == at::kBool) {
+    return at::logical_xor(at::narrow(self, dim, 1, out_len), at::narrow(self, dim, 0, out_len));
+  }
+  return at::narrow(self, dim, 1, out_len) - at::narrow(self, dim, 0, out_len);
+}
+
+Tensor diff_tensor_tensor(const Tensor& self, int64_t n, int64_t dim, const Tensor& prepend, const Tensor& append) {
+  if (!prepend.defined() && !append.defined()) {
+    return diff_helper(self, _n, _dim);
+  } else {
+    auto a = prepend_append_on_dim(self, prepend, append, _dim);
+    return diff_helper(a, _n, _dim);
+  }
+}
+
+static inline Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim, Tensor& result) {
+  auto out_len = diff_check(self, n, dim);
+  if (self.dtype() == at::kBool) {
+    return at::logical_xor_out(result, at::narrow(self, dim, 1, out_len), at::narrow(self, dim, 0, out_len));
+  }
+  return at::sub_out(result, at::narrow(self, dim, 1, out_len), at::narrow(self, dim, 0, out_len));
+}
+
+Tensor& diff_tensor_tensor_out(Tensor& result, const Tensor& self, int64_t n, int64_t dim, const Tensor& prepend, const Tensor& append) {
+  if (!prepend.defined() && !append.defined()) {
+    return diff_out_helper(self, _n, _dim, result);
+  } else {
+    auto a = prepend_append_on_dim(self, prepend, append, _dim);
+    return diff_out_helper(a, _n, _dim, result);
+  }
+}
+
+// Broadcasts a scalar to the shape of a tensor, and then narrow the size along dim to be one
+static Tensor diff_broadcast_scalar(Scalar scalar, const Tensor& tensor, int64_t dim) {
+  return at::scalar_tensor(scalar, tensor.options()).broadcast_to(tensor.sizes()).narrow(dim, 0, 1);
+}
+
+Tensor diff_scalar_scalar(const Tensor& self, int64_t n, int64_t dim, c10::optional<Scalar> prepend, c10::optional<Scalar> append) {
+  return diff_tensor_tensor(self, n, dim,
+              prepend.has_value() ? diff_broadcast_scalar(prepend.value(), self, dim) : Tensor{},
+              append.has_value() ? diff_broadcast_scalar(append.value(), self, dim) : Tensor{});
+}
+
+Tensor diff_scalar_tensor(const Tensor& self, int64_t n, int64_t dim, c10::optional<Scalar> prepend, const Tensor& append) {
+  return diff_tensor_tensor(self, n, dim, prepend.has_value() ? diff_broadcast_scalar(prepend.value(), self, dim) : Tensor{}, append);
+}
+
+Tensor diff_tensor_scalar(const Tensor& self, int64_t n, int64_t dim, const Tensor& prepend, c10::optional<Scalar> append) {
+  return diff_tensor_tensor(self, n, dim, prepend, append.has_value() ? diff_broadcast_scalar(append.value(), self, dim) : Tensor{});
+}
+
+Tensor& diff_scalar_scalar_out(const Tensor& self, int64_t n, int64_t dim, c10::optional<Scalar> prepend, c10::optional<Scalar> append, Tensor& result) {
+  return diff_tensor_tensor_out(result, self, n, dim,
+              prepend.has_value() ? diff_broadcast_scalar(prepend.value(), self, dim) : Tensor{},
+              append.has_value() ? diff_broadcast_scalar(append.value(), self, dim) : Tensor{});
+}
+
+Tensor& diff_scalar_tensor_out(Tensor& result, const Tensor& self, int64_t n, int64_t dim, c10::optional<Scalar> prepend, const Tensor& append) {
+  return diff_tensor_tensor_out(result, self, n, dim, prepend.has_value() ? diff_broadcast_scalar(prepend.value(), self, dim) : Tensor{}, append);
+}
+
+Tensor& diff_tensor_scalar_out(Tensor& result, const Tensor& self, int64_t n, int64_t dim, const Tensor& prepend, c10::optional<Scalar> append) {
+  return diff_tensor_tensor_out(result, self, n, dim, prepend, append.has_value() ? diff_broadcast_scalar(append.value(), self, dim) : Tensor{});
+}
 
 // ALL REDUCE #################################################################
 
