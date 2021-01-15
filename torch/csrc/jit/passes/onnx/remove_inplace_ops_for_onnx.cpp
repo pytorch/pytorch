@@ -567,6 +567,7 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
       if (it != node->inputs().end()) {
         int index = std::distance(node->inputs().begin(), it);
 
+				std::string input_name = input->debugName();
         std::cerr
             << "Warning: ONNX Preprocess - Removing mutation on block inputs. "
             << "This changes graph semantics." << std::endl;
@@ -579,6 +580,7 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
           newNode->insertBefore(node);
           node->replaceInput(index, newNode->output());
           input->replaceAllUsesAfterNodeWith(node, newNode->output());
+          input->setDebugName(input_name);
         } else {
           // Create an aten::clone to clone the tensor in graph inputs
           auto newNode = node->owningGraph()->create(aten::clone, 1);
@@ -593,6 +595,7 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
           noneNode->insertBefore(newNode);
           node->replaceInput(index, newNode->output());
           input->replaceAllUsesAfterNodeWith(node, newNode->output());
+          input->setDebugName(input_name);
         }
       }
     }
