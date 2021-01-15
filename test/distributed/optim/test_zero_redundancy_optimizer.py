@@ -3,6 +3,7 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 
+# type: ignore
 
 import os
 
@@ -33,65 +34,14 @@ class TestZeroRedundancyOptimizer(MultiProcessTestCase):
         except AssertionError:
             pass
 
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
     def dist_init(self, rank):
         store = dist.FileStore(self.file_name, self.world_size)
         return dist.init_process_group(backend=BACKEND, store=store, rank=rank, world_size=self.world_size)
-
-    @skip_if_no_gpu
-    def test_step(self):
-        self.dist_init(self.rank)
-        x = torch.tensor([float(self.rank + 1)], device=torch.device(self.rank))
-        m = torch.nn.Linear(1, 1)
-        m.weight.data = torch.tensor([[1.0]])
-        m.bias.data = torch.tensor([2.0])
-        m.to(self.rank)
-        o = ZeroRedundancyOptimizer(m.parameters(), optim=SGD, lr=0.1)
-        y = m(x)
-        y.backward(x)
-        for p in m.parameters():
-            dist.all_reduce(p.grad.data, op=dist.ReduceOp.SUM)
-            p.grad.data /= self.world_size
-        o.step()
-        self.assertEqual(m.weight, torch.tensor([[0.75]], device=torch.device(self.rank)))
-        self.assertEqual(m.bias, torch.tensor([1.85], device=torch.device(self.rank)))
-
-    @skip_if_no_gpu
-    def test_step_with_closure(self):
-        self.dist_init(self.rank)
-
-        x_val = self.rank + 1
-        weight = 1.0
-        bias = 2.0
-        error = 1.0
-        target = torch.tensor([x_val * weight + bias + error], device=torch.device(self.rank))
-        loss_fn = torch.nn.L1Loss()
-
-        x = torch.tensor([float(x_val)], device=torch.device(self.rank))
-        m = torch.nn.Linear(1, 1)
-        m.weight.data = torch.tensor([[weight]])
-        m.bias.data = torch.tensor([bias])
-        m.to(self.rank)
-
-        o = ZeroRedundancyOptimizer(m.parameters(), optim=SGD, lr=0.1)
-
-        y = m(x)
-        y.backward(x)
-        for p in m.parameters():
-            dist.all_reduce(p.grad.data, op=dist.ReduceOp.SUM)
-            p.grad.data /= self.world_size
-
-        def closure():
-            o.zero_grad()
-            output = m(x)
-            loss = loss_fn(output, target)
-            loss.backward()
-            return loss
-
-        loss = o.step(closure=closure)
-
-        self.assertEqual(loss, torch.tensor(error, device=torch.device(self.rank)))
-        self.assertEqual(m.weight, torch.tensor([[1.1]], device=torch.device(self.rank)))
-        self.assertEqual(m.bias, torch.tensor([2.1], device=torch.device(self.rank)))
 
 
 class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
@@ -99,12 +49,10 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
     def world_size(self):
         return 1
 
-    def test_create(self):
-        self.dist_init(self.rank)
-        params = [torch.rand(1)]
-        o = ZeroRedundancyOptimizer(params, optim=SGD, lr=0.01)
-
     def test_state_dict(self):
+        """This unit test checks that the ZeroRedundancyOptimizer exposes the expected state dict interface,
+        irrespective of the sharding.
+        """
         self.dist_init(self.rank)
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
         o = ZeroRedundancyOptimizer([x], optim=SGD, lr=0.1, momentum=0.9)
@@ -136,6 +84,7 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
         # Check that it's correctly loaded
         o = ZeroRedundancyOptimizer([x], optim=SGD, lr=0.01)
         o.load_state_dict(state_dict)
+
         # Check that state is correct and on proper device
         self.assertEqual(o.optim.state[x]["momentum_buffer"], torch.tensor([1.0], device=DEVICE))
 
@@ -151,6 +100,8 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
         self.assertEqual(o.param_groups[0]["params"][0].device, x.device)
 
     def test_lr_scheduler(self):
+        """ This unit test checks that a normal torch lr_scheduler is usable with ZeroRedundancyOptimizer"""
+
         self.dist_init(self.rank)
         x = torch.tensor([1.0], device=DEVICE, requires_grad=True)
         x2 = torch.tensor([1.0], device=DEVICE, requires_grad=True)
@@ -170,6 +121,7 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
             self.assertEqual(x, x2)
 
     def test_step_with_kwargs(self):
+        """ This unit test checks that the `step(**kwargs)` interface is properly exposed"""
         self.dist_init(self.rank)
 
         class SGDWithStepKWArg(torch.optim.SGD):
@@ -186,6 +138,9 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
         self.assertEqual(x, torch.tensor([0.9], device=DEVICE))
 
     def test_step_with_extra_inner_key(self):
+        """This unit test checks that an optimizer adding extra keys to the param_groups
+        is properly handled, in that the new key is exposed to the user
+        """
         self.dist_init(self.rank)
 
         class SGDWithNewKey(torch.optim.SGD):
@@ -244,12 +199,6 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
         o.step()
         self.assertEqual(x, torch.tensor([0.9], device=DEVICE))
 
-
-class TestZeroRedundancyOptimizerTwoRanks(TestZeroRedundancyOptimizer):
-    @property
-    def world_size(self):
-        return 2
-
     def test_zero_grad(self):
         self.dist_init(self.rank)
         x = torch.rand(1)
@@ -264,12 +213,85 @@ class TestZeroRedundancyOptimizerTwoRanks(TestZeroRedundancyOptimizer):
         self.assertFalse(m.bias.grad)
 
 
-class TestZeroRedundancyOptimizerFourRanks(TestZeroRedundancyOptimizer):
+class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     @property
     def world_size(self):
-        return 4
+        return max(2, torch.cuda.device_count())
+
+    @skip_if_no_gpu
+    def test_step(self):
+        """This unit test checks that the ZeroRedundancyOptimizer wrapper properly exposes the `.step()` interface"""
+        self.dist_init(self.rank)
+        device = torch.device(rank)
+
+        x = torch.tensor([float(self.rank + 1)], device=device)
+        m = torch.nn.Linear(1, 1)
+        m.weight.data = torch.tensor([[1.0]])
+        m.bias.data = torch.tensor([2.0])
+        m.to(self.rank)
+        o = ZeroRedundancyOptimizer(m.parameters(), optim=SGD, lr=0.1)
+        y = m(x)
+        y.backward(x)
+        for p in m.parameters():
+            dist.all_reduce(p.grad.data, op=dist.ReduceOp.SUM)
+            p.grad.data /= self.world_size
+        o.step()
+        self.assertEqual(m.weight, torch.tensor([[0.75]], device=device))
+        self.assertEqual(m.bias, torch.tensor([1.85], device=device))
+
+    def test_step_with_closure(self):
+        """This unit test checks that the ZeroRedundancyOptimizer wrapper properly exposes the `.step(closure)` interface"""
+        self.dist_init(self.rank)
+        device = torch.device(rank)
+
+        x_val = self.rank + 1
+        weight = 1.0
+        bias = 2.0
+        error = 1.0
+        target = torch.tensor([x_val * weight + bias + error], device=device)
+        loss_fn = torch.nn.L1Loss()
+
+        x = torch.tensor([float(x_val)], device=device)
+        m = torch.nn.Linear(1, 1)
+        m.weight.data = torch.tensor([[weight]])
+        m.bias.data = torch.tensor([bias])
+        m.to(self.rank)
+
+        o = ZeroRedundancyOptimizer(m.parameters(), optim=SGD, lr=0.1)
+
+        y = m(x)
+        y.backward(x)
+        for p in m.parameters():
+            dist.all_reduce(p.grad.data, op=dist.ReduceOp.SUM)
+            p.grad.data /= self.world_size
+
+        def closure():
+            o.zero_grad()
+            output = m(x)
+            loss = loss_fn(output, target)
+            loss.backward()
+            return loss
+
+        loss = o.step(closure=closure)
+
+        self.assertEqual(loss, torch.tensor(error, device=device))
+        self.assertEqual(m.weight, torch.tensor([[1.1]], device=device))
+        self.assertEqual(m.bias, torch.tensor([2.1], device=device))
+
+    def test_sharding(self):
+        """This checks the sharding at construction time"""
+        self.dist_init(self.rank)
+        sizes = [9, 7, 5, 3]
+        params = []
+        for size in sizes * self.world_size:
+            params.append(torch.rand(size, 1))
+        o = ZeroRedundancyOptimizer(params, optim=SGD, lr=0.1)
+        self.assertEqual(sum([x.numel() for x in o.optim.param_groups[0]["params"]]), sum(sizes))
 
     def test_add_param_group(self):
+        """This checks that ZeroRedundancyOptimizer properly handles adding a new param_group a posteriori,
+        and that all ranks get a shard
+        """
         self.dist_init(self.rank)
 
         # Test with all parameters trainable to begin with
@@ -315,18 +337,8 @@ class TestZeroRedundancyOptimizerFourRanks(TestZeroRedundancyOptimizer):
         all_trainable()
         some_trainable()
 
-        dist.destroy_process_group()
-
-    def test_sharding(self):
-        self.dist_init(self.rank)
-        sizes = [9, 7, 5, 3]
-        params = []
-        for size in sizes * self.world_size:
-            params.append(torch.rand(size, 1))
-        o = ZeroRedundancyOptimizer(params, optim=SGD, lr=0.1)
-        self.assertEqual(sum([x.numel() for x in o.optim.param_groups[0]["params"]]), sum(sizes))
-
     def test_collect_shards(self):
+        """This checks the state consolidation mechanism, and the state dict exposed by ZeroRedundancyOptimizer"""
         self.dist_init(self.rank)
         device = torch.device(self.rank) if torch.cuda.device_count() > 1 else torch.device("cpu")
         reference_rank = 0
@@ -374,11 +386,13 @@ class TestZeroRedundancyOptimizerFourRanks(TestZeroRedundancyOptimizer):
         dist.destroy_process_group()
 
     def test_multiple_groups(self):
+        """This that the ZeroRedundancyOptimizer handles working with multiple process groups"""
         # Only work with the even ranks, to check that the global_rank indexing is properly used
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = "29501"
         dist.init_process_group(backend="gloo", rank=self.rank, world_size=self.world_size)
-        sub_group_ranks = [0, 2]
+        sub_group_ranks = list(filter(lambda x: x % 2 == 0, range(self.world_size)))
+
         process_group = torch.distributed.new_group(ranks=sub_group_ranks, backend="gloo")
 
         # Make sure that all the ranks get different training data
@@ -443,17 +457,15 @@ class TestZeroRedundancyOptimizerFourRanks(TestZeroRedundancyOptimizer):
 
     @skip_if_no_gpu
     def test_parity(self):
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = "29501"
-        if torch.cuda.device_count() < self.world_size:
-            return
+        """When combined with DDP, check that ZeroRedundancyOptimizer(optimizer) and the same monolithic optimizer
+        give the exact same results
+        """
 
-        dist.init_process_group(backend="gloo", rank=self.rank, world_size=self.world_size)
+        self.dist_init(self.rank)
 
         device = torch.device("cuda")
         torch.cuda.set_device(self.rank)
         torch.manual_seed(self.rank)
-
         np.random.seed(self.rank)
 
         def check_optimizer_equivalence(optimizer: Type[torch.optim.Optimizer]):
@@ -515,8 +527,6 @@ class TestZeroRedundancyOptimizerFourRanks(TestZeroRedundancyOptimizer):
 
         for opt in [torch.optim.SGD, torch.optim.Adam]:
             check_optimizer_equivalence(opt)
-
-        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
