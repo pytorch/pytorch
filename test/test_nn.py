@@ -11030,6 +11030,24 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, -1, 0], g[:, :, -pb - 1 :, : pl + 1].sum((-2, -1)))
             self.assertEqual(x.grad[:, :, -1, -1], g[:, :, -pb - 1 :, -pr - 1 :].sum((-2, -1)))
 
+    @largeTensorTest("6GB")
+    def test_ReplicationPad3d_large(self, device):
+        shapes = ([1, 65736, 2, 2, 2], [65736, 1, 2, 2, 2])
+        pl, pr, pt, pbt, pf, pbk = 3, 4, 5, 6, 7, 8
+
+        for shape in shapes:
+            x = torch.randn(shape, device=device, requires_grad=True)
+            model = torch.nn.ReplicationPad3d((pl, pr, pt, pbt, pf, pbk))
+
+            # forward center
+            out = model(x)
+            self.assertEqual(out[:, :, pf : -pbk, pt : -pbt, pl : -pr], x)
+
+            # backward center
+            g = torch.randn_like(out)
+            out.backward(g)
+            self.assertEqual(x.grad[:, :, 1:-1, 1:-1, 1:-1], g[:, :, pf + 1 : -pbk - 1, pt + 1 : -pbt - 1, pl + 1 : -pr - 1])
+
     @onlyOnCPUAndCUDA
     def test_ReflectionPad_empty(self, device):
         for mod, inp in [
