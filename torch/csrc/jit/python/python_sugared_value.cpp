@@ -650,6 +650,7 @@ std::shared_ptr<SugaredValue> ModuleValue::call(
   // call pre_hooks
   if (have_pre_hooks) {
     for (const auto& hook : class_type->getForwardPreHooks()) {
+      TORCH_INTERNAL_ASSERT(forward_input != nullptr);
       Value* pre_hook_output =
           FunctionValue(hook)
               .call(
