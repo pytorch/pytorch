@@ -62,6 +62,10 @@ class Cache final {
   Factory factory_;
 };
 
+//
+// Impl
+//
+
 template<typename Factory>
 inline Cache<Factory>::Cache(Factory factory)
   : factory_(std::move(factory)) {

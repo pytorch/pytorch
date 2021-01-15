@@ -163,8 +163,8 @@ def sgd(params: List[Tensor],
             buf = momentum_buffer_list[i]
 
             if buf is None:
-                momentum_buffer_list[i] = torch.clone(d_p).detach()
-                buf = momentum_buffer_list[i]
+                buf = torch.clone(d_p).detach()
+                momentum_buffer_list[i] = buf
             else:
                 buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
 

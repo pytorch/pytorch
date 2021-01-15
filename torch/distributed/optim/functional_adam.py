@@ -58,7 +58,6 @@ class _FunctionalAdam(object):
         grads = []
         exp_avgs = []
         exp_avg_sqs = []
-        state_sums = []
         max_exp_avg_sqs = []
         state_steps: List[int] = []
 
