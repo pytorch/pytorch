@@ -681,7 +681,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         # Without empty optional arguments dictionary
         x = torch.randn(2, 3)
-        self.run_test(NoOptionalModel(), (x,), input_names=['input_x'])      
+        self.run_test(NoOptionalModel(), (x,), input_names=['input_x'])
         # With empty optional arguments dictionary
         y = torch.randn(2, 3)
         self.run_test(NoOptionalModel(), (y, {}))
@@ -6150,6 +6150,143 @@ class TestONNXRuntime(unittest.TestCase):
                       test_with_inputs=[(images2, test_features)],
                       dict_check=False)
 
+    def test_custom_class_attr_error(self):
+        class BoxCoder(object):
+            def __init__(self, bbox_xform_clip):
+                # type: (torch.Tensor) -> None
+                self.bbox_xform_clip = bbox_xform_clip
+
+            def __getstate__(self):
+                return self.bbox_xform_clip
+
+            def decode(self, rel_codes):
+                # type: (Tensor) -> Tensor
+                pred_ctr_x = torch.clamp(rel_codes[:, 0::4], max=self.bbox_xform_clip[0])
+                return pred_ctr_x
+
+        class MyModule(torch.nn.Module):
+            __annotations__ = {
+                'box_coder': BoxCoder,
+            }
+
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.box_coder = BoxCoder(torch.tensor([0.2]))
+
+            def forward(self, box_regression: torch.Tensor):
+                val = self.box_coder.bbox_xform_clip
+                self.box_coder.bbox_xform_clip = torch.tensor([0.4])
+                return self.box_coder.decode(box_regression) * val
+
+        model = torch.jit.script(MyModule())
+        box_regression = torch.randn([4, 4])
+
+        with self.assertRaises(RuntimeError) as cm:
+            self.run_test(model, (box_regression))
+
+    def test_set_attr(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.conv = torch.nn.Conv1d(3, 10, 2)
+
+            def forward(self, box_regression, weight):
+                self.conv.weight = weight
+                w = torch.softmax(self.conv.weight, dim=0)
+                self.conv.weight = w + w
+                return box_regression + self.conv.weight
+
+        model = MyModule()
+        box_regression = torch.randn(10, 3)
+        weight = torch.randn(10, 3)
+        self.run_test(model, (box_regression, weight))
+
+    def test_set_attr_2(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.conv = torch.nn.Conv1d(10, 3, 3)
+
+            def set_cell_anchors(self, anchors):
+                if self.conv.bias is not None:
+                    self.conv.bias = anchors
+                else:
+                    self.conv.bias = torch.ones(3, 10, 3)
+
+            def forward(self, feature_maps, anchors) -> List[torch.Tensor]:
+                self.set_cell_anchors(anchors)
+                result = []
+                if self.conv.bias is not None:
+                    a = self.conv.bias
+                    assert a is not None
+                    result += [a]
+                result += [feature_maps]
+                return result
+
+        model = MyModule()
+        x = torch.rand(5, 11, 30)
+        anchors = torch.randn(3, 10, 3)
+        self.run_test(model, (x, anchors))
+
+    def test_inplace_if(self):
+        @torch.jit.script
+        def check_init(input_data, hidden_size, prev_state):
+            # type: (torch.Tensor, int, torch.Tensor) -> torch.Tensor
+            batch_size = input_data.size(0)
+            spatial_size_0 = input_data.size(2)
+            spatial_size_1 = input_data.size(3)
+            # generate empty prev_state, if None is provided
+            state_size = (2, batch_size, hidden_size, spatial_size_0, spatial_size_1)
+            state = torch.zeros(state_size, device=input_data.device)
+            if prev_state.size(0) == 0:
+                state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1)
+            else:
+                state[:] = torch.randn(batch_size, hidden_size, spatial_size_0, spatial_size_1)
+            return state
+
+        class Example(torch.nn.Module):
+            def __init__(self, hidden_size):
+                super().__init__()
+                self.hidden_size = hidden_size
+
+            def forward(self, input_data, prev_state):
+                prev_state = check_init(input_data, self.hidden_size, prev_state)
+                return prev_state
+
+        model = Example(10)
+        random_data = torch.rand((1, 5, 30, 30))
+        empty_tensor = torch.tensor([], dtype=torch.float).view(0, 0, 0, 0, 0)
+        self.run_test(model, (random_data, empty_tensor))
+
+    def test_inplace_if_2(self):
+        @torch.jit.script
+        def check_init(input_data, hidden_size, prev_state):
+            # type: (torch.Tensor, int, torch.Tensor) -> torch.Tensor
+            batch_size = input_data.size(0)
+            spatial_size_0 = input_data.size(2)
+            spatial_size_1 = input_data.size(3)
+            # generate empty prev_state, if None is provided
+            state_size = (2, batch_size, hidden_size, spatial_size_0, spatial_size_1)
+            state = torch.zeros(state_size, device=input_data.device)
+            if prev_state.size(0) == 0:
+                state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1)
+            elif prev_state.size(0) == 1:
+                state[:] = prev_state
+            return state
+
+        class Example(torch.nn.Module):
+            def __init__(self, hidden_size):
+                super().__init__()
+                self.hidden_size = hidden_size
+
+            def forward(self, input_data, prev_state):
+                prev_state = check_init(input_data, self.hidden_size, prev_state)
+                return prev_state
+
+        model = Example(10)
+        random_data = torch.rand((1, 5, 30, 30))
+        empty_tensor = torch.tensor([], dtype=torch.float).view(0, 0, 0, 0, 0)
+        self.run_test(model, (random_data, empty_tensor))
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,

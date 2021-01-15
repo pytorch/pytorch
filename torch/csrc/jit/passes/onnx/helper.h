@@ -32,6 +32,20 @@ Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs);
 
 Value* addInputToBlock(Block* block);
 
+void RegisterInplaceNodeInIfBlocks(
+    Value* orig_data,
+    Value* new_inplace_node,
+    Node* block_node,
+    Block* outer_block,
+    Node* initial_node);
+
+void RegisterInplaceNodeInBlocks(
+    Value* orig_data,
+    Value* new_inplace_node,
+    Node* block_node,
+    Block* outer_block,
+    Node* initial_node);
+
 TORCH_API c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type);
 } // namespace jit
 } // namespace torch
