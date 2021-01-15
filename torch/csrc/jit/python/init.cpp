@@ -22,6 +22,8 @@
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
+#include <torch/csrc/jit/passes/frozen_conv_folding.h>
+#include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/fuse_relu.h>
 #include <torch/csrc/jit/passes/graph_fuser.h>
@@ -38,6 +40,7 @@
 #include <torch/csrc/jit/passes/onnx/eliminate_unused_items.h>
 #include <torch/csrc/jit/passes/onnx/eval_peephole.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
+#include <torch/csrc/jit/passes/onnx/fold_if_node.h>
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
 #include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
@@ -83,6 +86,7 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
+#include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
@@ -91,6 +95,7 @@
 
 #include <pybind11/functional.h>
 #include <pybind11/iostream.h>
+#include <pybind11/operators.h>
 
 #include <memory>
 #include <sstream>
@@ -145,11 +150,17 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_onnx_assign_output_shape",
           [](std::shared_ptr<Graph>& graph,
              const std::vector<at::Tensor>& tensors,
+             const python::IODescriptor& desc,
              bool onnx_shape_inference = false) {
-            ONNXAssignOutputShape(graph, tensors, onnx_shape_inference);
+            ONNXAssignOutputShape(graph, tensors, desc, onnx_shape_inference);
           })
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
+      .def(
+          "_jit_pass_onnx_fold_if",
+          [](std::shared_ptr<Graph>& graph) {
+            return FoldIfNodeONNX(graph->block());
+          })
       .def(
           "_jit_pass_onnx_peephole",
           [](std::shared_ptr<Graph>& graph,
@@ -295,6 +306,10 @@ void initJITBindings(PyObject* module) {
           py::arg("preservedAttrs") = std::vector<std::string>(),
           py::arg("freezeInterfaces") = true,
           py::arg("preserveParameters") = false)
+      .def("_jit_pass_fold_frozen_conv_bn", &FoldFrozenConvBatchnorm)
+      .def("_jit_pass_fold_frozen_conv_add_or_sub", &FoldFrozenConvAddOrSub)
+      .def("_jit_pass_fold_frozen_conv_mul_or_div", &FoldFrozenConvMulOrDiv)
+      .def("_jit_pass_optimize_frozen_graph", &OptimizeFrozenGraph)
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
           "_jit_pass_fuse_add_relu",
@@ -472,7 +487,6 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_onnx_block", BlockToONNX)
       .def("_jit_pass_fixup_onnx_controlflow_node", FixupONNXControlflowNode)
-      .def("_jit_pass_fixup_onnx_loop_node_inputs", FixupONNXLoopNodeInputs)
       .def("_jit_pass_canonicalize_graph_fuser_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
@@ -949,7 +963,7 @@ void initJITBindings(PyObject* module) {
           "get_record",
           [](PyTorchStreamReader& self, const std::string& key) {
             at::DataPtr data;
-            size_t size;
+            size_t size = 0;
             std::tie(data, size) = self.getRecord(key);
             return py::bytes(reinterpret_cast<const char*>(data.get()), size);
           })
@@ -1204,7 +1218,7 @@ void initJITBindings(PyObject* module) {
       auto fork_node = graph->insertNode(graph->create(prim::TracedFork, 1));
       auto body_block = fork_node->addBlock();
 
-      Value* node_output;
+      Value* node_output = nullptr;
       py::object py_func_output;
       // Insert new trace ops into the fork op's sub-block
       WithInsertPoint guard(body_block);
@@ -1289,6 +1303,7 @@ void initJITBindings(PyObject* module) {
   initJitScriptBindings(module);
   initJitBackendBindings(module);
   initStaticRuntimeBindings(module);
+  initTensorExprBindings(module);
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;
