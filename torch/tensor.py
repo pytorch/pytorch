@@ -944,7 +944,7 @@ class Tensor(torch._C._TensorBase):
                 co.extend(c)
                 vals.extend(v)
 
-        return torch.sparse_gcs_tensor(torch.IntTensor(ro), torch.IntTensor(co),
+        return torch.sparse_csr_tensor(torch.IntTensor(ro), torch.IntTensor(co),
                                        torch.tensor(vals, dtype=self.dtype),
                                        torch.IntTensor(reduction), shape, dtype=self.dtype)
 

@@ -19,7 +19,7 @@ using namespace at::sparse;
 SparseTensor new_gcs_tensor(const TensorOptions& options) {
   // TODO: remove this comment after enabling autograd support for GCS tensor constructor.
   // TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
-  AT_ASSERT(options.layout() == kSparseGCS);
+  AT_ASSERT(options.layout() == kCompressedRowSparse);
   DispatchKey dispatch_key;
   if (options.device().is_cuda()) {
     dispatch_key = DispatchKey::CompressedRowSparseCUDA;
@@ -27,17 +27,17 @@ SparseTensor new_gcs_tensor(const TensorOptions& options) {
     dispatch_key = DispatchKey::CompressedRowSparseCPU;
   }
   
-  return detail::make_tensor<SparseGCSTensorImpl>(
+  return detail::make_tensor<CompressedRowSparseTensorImpl>(
                                                   DispatchKeySet(dispatch_key), options.dtype());
 }
 
 // TODO: This constructor should probably use an ATen abstract method in order to make
 // autograd dispatch available for the GCS constructor. See the relevant note in native_functions.yaml. 
-Tensor sparse_gcs_tensor(const Tensor& crow_indices, const Tensor& col_indices, 
+Tensor sparse_csr_tensor(const Tensor& crow_indices, const Tensor& col_indices, 
                          const Tensor& values,
                          const Tensor& reduction, IntArrayRef size,
                          const TensorOptions& options) {
-  TORCH_CHECK(!options.has_layout() || options.layout() == kSparseGCS, "expected sparse GCS layout, but got layout ", options.layout());
+  TORCH_CHECK(!options.has_layout() || options.layout() == kCompressedRowSparse, "expected sparse GCS layout, but got layout ", options.layout());
   
   SparseTensor self = new_gcs_tensor(options);
   int64_t nnz_size = values.numel();

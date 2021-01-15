@@ -31,7 +31,7 @@ namespace at {
 // reduce, the user can reduce along the most utilized diemensions
 // in their computation for maximum data locality.
 // For further information on usage and best practices see
-// the documentation of the torch.sparse_gcs_tensor() method
+// the documentation of the torch.sparse_csr_tensor() method
 // and the benchmarks in the benchmarks/sparse folder for
 // comparisons against COO.
 
@@ -43,7 +43,7 @@ namespace at {
 // non-zero values respectively. The reduction_ tensor
 // is a new introduction into GCS that stores the dimensions
 // of the tensor that must be collapsed 
-struct TORCH_API SparseGCSTensorImpl : public TensorImpl {
+struct TORCH_API CompressedRowSparseTensorImpl : public TensorImpl {
   Tensor crow_indices_;
   Tensor col_indices_;
   Tensor values_;
@@ -63,7 +63,7 @@ struct TORCH_API SparseGCSTensorImpl : public TensorImpl {
   // a 2D GCS tensor.
   int rsplit_dim_;           
  public:
-  explicit SparseGCSTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
+  explicit CompressedRowSparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
 
   void resize_and_clear_(int64_t nnz_size, int64_t ptr_size, int64_t redux_size, 
                          IntArrayRef size);
@@ -87,7 +87,7 @@ struct TORCH_API SparseGCSTensorImpl : public TensorImpl {
 
  private :
   
-  explicit SparseGCSTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type,
+  explicit CompressedRowSparseTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type,
                                at::Tensor crow_indices, at::Tensor col_indices, at::Tensor values, 
                                at::Tensor reduction);
 

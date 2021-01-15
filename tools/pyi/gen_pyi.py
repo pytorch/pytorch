@@ -302,7 +302,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, out: str) -> None:
         'sparse_coo_tensor': ['def sparse_coo_tensor(indices: Tensor, values: Union[Tensor,List],'
                               ' size: Optional[_size]=None, *, dtype: Optional[_dtype]=None,'
                               ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],
-        'sparse_gcs_tensor' : ['def sparse_gcs_tensor(pointers: Tensor, indices: Tensor,'
+        'sparse_csr_tensor' : ['def sparse_csr_tensor(pointers: Tensor, indices: Tensor,'
                                'values: Tensor, reduction: Tensor, shape: Any,'
                                ' *, dtype: Optional[_dtype]=None,'
                               ' device: Union[_device, str, None]=None, requires_grad:_bool=False) -> Tensor: ...'],

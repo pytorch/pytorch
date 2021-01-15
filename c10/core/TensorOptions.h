@@ -649,7 +649,7 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
           default:
             AT_ERROR("Unsupported device type for mkldnn layout: ", device_.type());
         }
-      case Layout::SparseGCS:
+      case Layout::CompressedRowSparse:
         switch(device_.type()) {
           case DeviceType::CPU:
             return DispatchKey::CompressedRowSparseCPU;
