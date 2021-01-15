@@ -33,7 +33,7 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoL
                                                   suppress_warnings, slowTest,
                                                   load_tests, random_symmetric_matrix,
                                                   IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck,
-                                                  TemporaryFileName)
+                                                  TemporaryFileName, TEST_WITH_ROCM)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
@@ -6862,7 +6862,7 @@ class TestAutogradDeviceType(TestCase):
             torch.autograd.gradcheck(gradcheckfunc, inp)
             torch.autograd.gradgradcheck(gradcheckfunc, inp)
 
-        if inp.is_cuda:
+        if inp.is_cuda and not TEST_WITH_ROCM:
             # Assert that we have good error message around unsupported CuDNN double backward
             # NB: we trigger double backward using .backward() instead of autograd.grad due to
             # https://github.com/pytorch/pytorch/issues/37874
