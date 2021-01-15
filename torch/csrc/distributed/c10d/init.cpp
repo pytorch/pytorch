@@ -180,7 +180,31 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
           "_register_builtin_comm_hook",
           &_register_builtin_comm_hook,
           py::arg("reducer"),
-          py::arg("comm_hook_type"));
+          py::arg("comm_hook_type"))
+      .def(
+          "_set_construction_logging_data",
+          [](
+              ::c10d::Reducer& reducer,
+              const std::string& backend,
+              const std::string& module_name,
+              const std::vector<int>& device_ids,
+              int output_device,
+              bool broadcast_buffers) -> void {
+            reducer.set_construction_logging_data(
+                backend, module_name, device_ids, output_device, broadcast_buffers);
+          },
+          py::arg("reducer"),
+          py::arg("backend"),
+          py::arg("module_name"),
+          py::arg("device_ids"),
+          py::arg("output_device"),
+          py::arg("broadcast_buffers"))
+      .def(
+          "_get_ddp_logging_data",
+          [](::c10d::Reducer& reducer) -> c10::DDPLoggingData {
+            return reducer.get_ddp_logging_data();
+          },
+          py::arg("reducer"));
 
   shared_ptr_class_<::c10d::GradBucket>(module, "_GradBucket")
       .def(
@@ -1159,6 +1183,19 @@ Arguments:
                 Note that ``fut.done()`` returns only whether the operation has been enqueued on the GPU.
            )");
 
+  py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
+      .def(py::init<>())
+      .def_readwrite("world_size", &c10::DDPLoggingData::world_size)
+      .def_readwrite("rank", &c10::DDPLoggingData::rank)
+      .def_readwrite("backend", &c10::DDPLoggingData::backend)
+      .def_readwrite("module_name", &c10::DDPLoggingData::module_name)
+      .def_readwrite("device_ids", &c10::DDPLoggingData::device_ids)
+      .def_readwrite("output_device", &c10::DDPLoggingData::output_device)
+      .def_readwrite("broadcast_buffers", &c10::DDPLoggingData::broadcast_buffers)
+      .def_readwrite("bucket_cap_mb", &c10::DDPLoggingData::bucket_cap_mb)
+      .def_readwrite("find_unused_parameters", &c10::DDPLoggingData::find_unused_parameters)
+      .def_readwrite("gradient_as_bucket_view", &c10::DDPLoggingData::gradient_as_bucket_view);
+
   module.def(
       "_compute_bucket_assignment_by_size",
       &::c10d::compute_bucket_assignment_by_size,
@@ -1668,7 +1705,6 @@ static const auto DistributedC10dFrontendTorchBind =
         .def(
             "get_name_of_process_group",
             &::c10d::DistributedC10d::getNameOfProcessGroup);
-
 } // namespace
 
 // c10d methods on torch._C
