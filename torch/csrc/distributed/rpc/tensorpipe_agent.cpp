@@ -678,7 +678,9 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
     {
       std::unique_lock<std::mutex> lock(timeoutMapMutex_);
       auto& timeoutFuturesVector = timeoutMap_[expirationTime];
-      timeoutFuturesVector.emplace_back(futureResponseMessage, timeout);
+      timeoutFuturesVector.emplace_back(
+          messageId, futureResponseMessage, timeout);
+      messageIdToExpiryMap_[messageId] = expirationTime;
     }
     timeoutThreadCV_.notify_one();
   }
@@ -768,6 +770,28 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
                 clientPipe.pendingResponseMessage_.erase(it);
               }
 
+              // Remove entry from timeoutMap_ as well.
+              {
+                std::unique_lock<std::mutex> lock(timeoutMapMutex_);
+                const auto& expiryTime = messageIdToExpiryMap_[messageId];
+                auto& timedOutFuturesVector = timeoutMap_[expiryTime];
+                for (auto it = timedOutFuturesVector.begin();
+                     it != timedOutFuturesVector.end();) {
+                  if (std::get<0>(*it) == messageId) {
+                    it = timedOutFuturesVector.erase(it);
+                  } else {
+                    it++;
+                  }
+                }
+
+                if (timedOutFuturesVector.empty()) {
+                  timeoutMap_.erase(expiryTime);
+                }
+
+                // Remove from messageIdToExpriryMap_ as well.
+                messageIdToExpiryMap_.erase(messageId);
+              }
+
               if (responseMessage.type() == MessageType::EXCEPTION) {
                 markFutureWithError(
                     std::move(futureResponseMessage),
@@ -810,8 +834,10 @@ void TensorPipeAgent::pollTimeoutRpcs() {
 
     // Move all these futures to a separate vector so we can process them
     // outside the lock.
-    std::vector<
-        std::pair<std::shared_ptr<AtomicJitFuture>, std::chrono::milliseconds>>
+    std::vector<std::tuple<
+        uint64_t,
+        std::shared_ptr<AtomicJitFuture>,
+        std::chrono::milliseconds>>
         timedOutFutures = std::move(timeoutMap_.begin()->second);
     // We can safely remove this key from the timeoutMap_ since all these
     // futures will be processed.
@@ -822,11 +848,12 @@ void TensorPipeAgent::pollTimeoutRpcs() {
     // Set an error on futures added to the timedOutFutures vector. We do this
     // outside the lock to prevent potential lock-order-inversions by callbacks
     // triggered by the setError call.
-    for (auto& futureTimeoutPair : timedOutFutures) {
-      std::string errorMsg =
-          fmt::format(kRpcTimeoutErrorStr, futureTimeoutPair.second.count());
+    for (auto& futureTimeoutTuple : timedOutFutures) {
+      std::string errorMsg = fmt::format(
+          kRpcTimeoutErrorStr, std::get<2>(futureTimeoutTuple).count());
       auto err = makeRPCError(errorMsg, RPCErrorType::TIMEOUT);
-      markFutureWithError(std::move(futureTimeoutPair.first), std::move(err));
+      markFutureWithError(
+          std::move(std::get<1>(futureTimeoutTuple)), std::move(err));
     }
   }
 }
@@ -1112,6 +1139,20 @@ std::vector<c10::DeviceIndex> TensorPipeAgent::getDevicesForTensors(
     }
     return deviceIndices;
   }
+}
+
+size_t TensorPipeAgent::timeoutMapSize() {
+  std::unique_lock<std::mutex> lock(timeoutMapMutex_);
+  return timeoutMap_.size();
+}
+
+size_t TensorPipeAgent::numPendingResponses() {
+  size_t totalPending = 0;
+  std::unique_lock<std::mutex> lock(mutex_);
+  for (const auto& entry : connectedPipes_) {
+    totalPending += entry.second.pendingResponseMessage_.size();
+  }
+  return totalPending;
 }
 
 } // namespace rpc

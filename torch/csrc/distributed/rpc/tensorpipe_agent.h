@@ -2,6 +2,7 @@
 
 #ifdef USE_TENSORPIPE
 
+#include <gtest/gtest_prod.h>
 #include <atomic>
 #include <thread>
 
@@ -218,6 +219,10 @@ class TensorPipeAgent : public RpcAgent {
       tensorpipe::transport::uv::Context& uvContext);
 
  private:
+  FRIEND_TEST(TestE2ETensorPipe, TestTrainingLoop);
+  size_t timeoutMapSize();
+  size_t numPendingResponses();
+
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
   void collectNames();
 
@@ -319,10 +324,15 @@ class TensorPipeAgent : public RpcAgent {
   // Map to store the expiration times for each message.
   std::map<
       steady_clock_time_point,
-      std::vector<std::pair<
+      std::vector<std::tuple<
+          uint64_t, // messageId
           std::shared_ptr<AtomicJitFuture>,
-          std::chrono::milliseconds>>>
+          std::chrono::milliseconds>>> // timeout
       timeoutMap_;
+
+  // Map that ties together timeoutMap_ and pendingResponseMessage_ so a
+  // particular messageId can be looked up in the timeoutMap_.
+  std::unordered_map<uint64_t, steady_clock_time_point> messageIdToExpiryMap_;
 
   // Thread that will poll the timeoutMap_ for timed out messages and mark them
   // with an error accordingly
