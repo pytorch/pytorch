@@ -502,9 +502,12 @@ static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim
 // see https://github.com/pytorch/pytorch/pull/47305,
 Tensor trace_cpu(const Tensor& self) {
   Tensor result;
+  // Returns the ScalarType of the self tensor if the tensor is non integral type
+  // In the case, self is an integer type tensor, at::kLong is return since promote_integers
+  // is set to true
   ScalarType dtype = get_dtype(result, self, c10::nullopt, true);
   result = at::empty({}, self.options().dtype(dtype));
-  if (result.scalar_type() == at::kLong) {
+  if (dtype == at::kLong) {
     AT_DISPATCH_INTEGRAL_TYPES(self.scalar_type(), "trace", [&] {
       using accscalar_t = at::acc_type<scalar_t, false>;
       accscalar_t sum = 0;
