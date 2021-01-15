@@ -154,8 +154,11 @@ class SlowPickleClass:
 
 
 class MyClass:
-    def __init__(self, a):
+    def __init__(self, a, delay=False):
         self.a = a
+        # delay initialization to simulate errors if specified
+        if delay:
+            time.sleep(2)
 
     def my_instance_method(self, b):
         return self.a + b
@@ -173,6 +176,10 @@ class MyClass:
 
     def get_value(self):
         return self.a
+
+    def my_slow_method(self, my_tensor_arg):
+        time.sleep(5)
+        return torch.add(self.a, my_tensor_arg)
 
 
 def _call_method_on_rref(method, rref, *args, **kwargs):
@@ -5192,9 +5199,55 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         )
 
     @dist_init
+    def test_rref_get_type_timeout(self):
+        # Test where we try to get the type of a RRef from an owner, but RRef
+        # creation is slower than timeout passed into _get_type.
+        dst_rank = (self.rank + 1) % self.world_size
+        dst = worker_name(dst_rank)
+        slow_rref = rpc.remote(dst, MyClass, args=(torch.ones(2, 2), True))
+        timeout = 0.5
+        expected_err = self.get_timeout_error_regex()
+        with self.assertRaisesRegex(RuntimeError, expected_err):
+            slow_rref._get_type(timeout=timeout)
+
+    @dist_init
     def test_op_with_invalid_args(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         with self.assertRaisesRegex(
             RuntimeError, "Overloaded torch operator invoked from Python failed to many any schema"
         ):
             rpc.rpc_sync(dst, torch.add, args=())
+
+    def _test_rref_proxy_timeout(self, rref_proxy_api):
+        dst_rank = (self.rank + 1) % self.world_size
+        dst = worker_name(dst_rank)
+        rref = rpc.remote(dst, MyClass, args=(torch.ones(2, 2), ))
+        # Ensure RRef is created on remote node.
+        rref.to_here()
+        rref_api = getattr(rref, rref_proxy_api)
+        self.assertTrue(rref_api is not None, f"Failed to get RRef proxy api: {rref_proxy_api}")
+        expected_error = self.get_timeout_error_regex()
+        timeout = 2
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            result = rref_api(timeout=timeout).my_slow_method(torch.ones(2, 2))
+            if rref_api == rref.rpc_async:
+                result.wait()
+            elif rref_api == rref.remote:
+                result._get_future().wait()
+
+        # Case where rpc.remote() is stuck and exceeds timeout
+        slow_rref = rpc.remote(dst, MyClass, args=(torch.ones(2, 2), True))
+        timeout = 0.01
+        rref_api = getattr(slow_rref, rref_proxy_api)
+        # Note that even when we call rref.rpc_async() in this case, we
+        # time out in future creation, not waiting for future. This is because
+        # rref proxy function calls rref._get_type before returning future,
+        # which blocks on the RRef being created on owner node, until the
+        # specified timeout.
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2))
+
+    @dist_init
+    def test_rref_proxy_timeout(self):
+        for rpc_api in ["rpc_sync", "rpc_async", "remote"]:
+            self._test_rref_proxy_timeout(rpc_api)
