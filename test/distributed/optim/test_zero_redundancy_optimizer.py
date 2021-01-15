@@ -239,10 +239,11 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         self.assertEqual(m.weight, torch.tensor([[0.75]], device=device))
         self.assertEqual(m.bias, torch.tensor([1.85], device=device))
 
+    @skip_if_no_gpu
     def test_step_with_closure(self):
         """This unit test checks that the ZeroRedundancyOptimizer wrapper properly exposes the `.step(closure)` interface"""
         self.dist_init(self.rank)
-        device = torch.device(rank)
+        device = torch.device(self.rank)
 
         x_val = self.rank + 1
         weight = 1.0
