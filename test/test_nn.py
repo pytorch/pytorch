@@ -10963,15 +10963,15 @@ class TestNNDeviceType(NNTestCase):
     def test_ReplicationPad_large(self, device):
         # ReplicationPad1d
         shapes = ([2, 65537, 4], [65537, 2, 4], [2, 65536 * 2 + 1, 4], [65536 * 2 + 1, 2, 4])
-        p = 3
+        pl, pr = 3, 4
         for shape in shapes:
             x = torch.randn(shape, device=device)
-            model = torch.nn.ReplicationPad1d(p)
+            model = torch.nn.ReplicationPad1d((pl, pr))
             out = model(x)
-            self.assertEqual(out[:, :, p : -p], x)
-            left_padding = out[:, :, : p]
+            self.assertEqual(out[:, :, pl : -pr], x)
+            left_padding = out[:, :, : pl]
             self.assertEqual(left_padding, x[:, :, :1].expand_as(left_padding))
-            right_padding = out[:, :, -p :]
+            right_padding = out[:, :, -pr :]
             self.assertEqual(right_padding, x[:, :, -1:].expand_as(right_padding))
 
     @onlyOnCPUAndCUDA
