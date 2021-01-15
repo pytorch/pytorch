@@ -756,6 +756,9 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
   auto self_restrided = self.as_strided(self_sizes, self_strides);
 
   auto iter = TensorIteratorConfig()
+    // We do not check for overlap because `self` is restrided
+    // with zero stride. Zero strides trigger memory overlap assert
+    // within TensorIterator.
     .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .resize_outputs(false)
