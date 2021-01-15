@@ -102,7 +102,6 @@ class LLVMCodeGenImpl : public IRVisitor {
  private:
   std::unique_ptr<llvm::LLVMContext> context_;
   llvm::IRBuilder<> irb_;
-  std::unique_ptr<llvm::TargetMachine> TM_;
   std::unique_ptr<llvm::orc::PytorchLLVMJIT> jit_;
   std::unique_ptr<llvm::Module> module_;
   llvm::Function* fn_;
@@ -195,34 +194,6 @@ class LLVMCodeGenImpl : public IRVisitor {
 } // namespace jit
 } // namespace torch
 
-static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder() {
-#if 0
-  // FIXME: Switch to using detectHost() rather than setting up the JTMB manually
-  // once LLVM 10 is available.
-  return assertSuccess(llvm::orc::JITTargetMachineBuilder::detectHost());
-#else
-  llvm::orc::JITTargetMachineBuilder JTMB(
-      (llvm::Triple(llvm::sys::getProcessTriple())));
-
-  // Retrieve host CPU name and sub-target features and add them to builder.
-  // Relocation model, code model and codegen opt level are kept to default
-  // values.
-  llvm::SubtargetFeatures SubtargetFeatures;
-  llvm::StringMap<bool> FeatureMap;
-  llvm::sys::getHostCPUFeatures(FeatureMap);
-  for (auto& Feature : FeatureMap) {
-    SubtargetFeatures.AddFeature(Feature.first(), Feature.second);
-  }
-
-  JTMB.setCodeGenOptLevel(llvm::CodeGenOpt::Default);
-  JTMB.setCPU(llvm::sys::getHostCPUName().str());
-  JTMB.addFeatures(SubtargetFeatures.getFeatures());
-  JTMB.getOptions().AllowFPOpFusion = llvm::FPOpFusion::Fast;
-
-  return JTMB;
-#endif
-}
-
 LLVMCodeGen::~LLVMCodeGen() = default;
 
 LLVMCodeGen::LLVMCodeGen(Stmt* stmt)
@@ -307,13 +278,10 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
 
-  auto JTMB = makeTargetMachineBuilder();
-  TM_ = assertSuccess(JTMB.createTargetMachine());
-
   jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>();
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
-  module_->setDataLayout(assertSuccess(JTMB.getDefaultDataLayoutForTarget()));
-  module_->setTargetTriple(JTMB.getTargetTriple().str());
+  module_->setDataLayout(jit_->getDataLayout());
+  module_->setTargetTriple(jit_->getTargetMachine().getTargetTriple().str());
 
   // We support float16 ops by casting expr inputs to float32
   // and then casting the result back to float16
@@ -536,7 +504,7 @@ void LLVMCodeGenImpl::emitKernel(
   if (GRAPH_DEBUG_ENABLED) {
     module_->print(asmStream, nullptr);
     llvm::legacy::PassManager PM;
-    TM_->addPassesToEmitFile(
+    jit_->getTargetMachine().addPassesToEmitFile(
         PM,
         asmStream,
         nullptr,
@@ -1863,16 +1831,15 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   llvm::legacy::PassManager PM;
 
   // Add internal analysis passes from the target machine.
-  PM.add(
-      llvm::createTargetTransformInfoWrapperPass(TM_->getTargetIRAnalysis()));
-  FPM.add(
-      llvm::createTargetTransformInfoWrapperPass(TM_->getTargetIRAnalysis()));
+  auto& TM = jit_->getTargetMachine();
+  PM.add(llvm::createTargetTransformInfoWrapperPass(TM.getTargetIRAnalysis()));
+  FPM.add(llvm::createTargetTransformInfoWrapperPass(TM.getTargetIRAnalysis()));
 
   llvm::PassManagerBuilder PMB;
   PMB.OptLevel = 3;
   PMB.LoopVectorize = true;
   PMB.SLPVectorize = true;
-  TM_->adjustPassManager(PMB);
+  TM.adjustPassManager(PMB);
 
   PMB.populateFunctionPassManager(FPM);
   PMB.populateModulePassManager(PM);

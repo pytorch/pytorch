@@ -1,4 +1,4 @@
-from typing import Tuple, Dict
+from typing import Dict, Tuple
 
 import torch
 import torch.distributed.autograd as dist_autograd
