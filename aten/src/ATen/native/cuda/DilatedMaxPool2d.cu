@@ -346,7 +346,7 @@ void max_pool2d_with_indices_out_cuda_template(
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
     inputHeight, inputWidth,
-    outputHeight, outputWidth);
+    outputHeight, outputWidth, memory_format);
 
   Tensor input = input_.contiguous(memory_format);
 
@@ -513,7 +513,7 @@ void max_pool2d_with_indices_backward_out_cuda_template(
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
     inputHeight, inputWidth,
-    outputHeight, outputWidth,
+    outputHeight, outputWidth, memory_format,
     /*cuda=*/ true);
 
   const Tensor gradOutput = gradOutput_.contiguous(memory_format);
