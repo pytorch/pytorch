@@ -158,7 +158,9 @@ class Proxy:
         return self.tracer.keys(self)
 
     def __len__(self):
-        raise RuntimeError("'len' is not supported. Replace it with 'torch.fx.len'.")
+        raise RuntimeError("'len' is not supported in symbolic tracing by default. If you want "
+                           "this call to be recorded, please call torch.fx.wrap('len') at "
+                           "module scope")
 
     def __torch_function__(self, orig_method, types, args=None, kwargs=None):
         args = args if args else ()
