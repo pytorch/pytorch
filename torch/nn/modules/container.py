@@ -8,8 +8,10 @@ import torch
 from .module import Module
 from torch._jit_internal import _copy_to_script_wrapper
 
-from typing import Any, Iterable, Iterator, Mapping, Optional, overload, Tuple, TypeVar, Union
+from typing import Any, Iterable, Iterator, Mapping, Optional, TYPE_CHECKING, overload, Tuple, TypeVar, Union
 
+if TYPE_CHECKING:
+    from torch.nn import Parameter
 
 T = TypeVar('T', bound=Module)
 
