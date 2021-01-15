@@ -437,19 +437,25 @@ void FetchBlockInputMetadataFromParent(Block* b) {
   }
 }
 
-void ONNXShapeTypeInference(Block* b, int opset_version) {
+void ONNXShapeTypeInference(
+    Block* b,
+    const ParamMap& params_dict,
+    int opset_version) {
   FetchBlockInputMetadataFromParent(b);
   for (auto n : b->nodes()) {
     for (auto subblock : n->blocks()) {
-      ONNXShapeTypeInference(subblock, opset_version);
+      ONNXShapeTypeInference(subblock, params_dict, opset_version);
     }
-    ONNXShapeTypeInference(n, opset_version);
+    ONNXShapeTypeInference(n, params_dict, opset_version);
   }
 }
 
 } // namespace
 
-void ONNXShapeTypeInference(Node* n, int opset_version) {
+void ONNXShapeTypeInference(
+    Node* n,
+    const ParamMap& params_dict,
+    int opset_version) {
   GRAPH_UPDATE(
       "Running ONNX shape inference for node: ", n->kind().toDisplayString());
   if (!IsSupportedNode(n)) {
@@ -576,8 +582,11 @@ void ONNXAssignOutputShape(
   }
 }
 
-void ONNXShapeTypeInference(std::shared_ptr<Graph>& graph, int opset_version) {
-  ONNXShapeTypeInference(graph->block(), opset_version);
+void ONNXShapeTypeInference(
+    std::shared_ptr<Graph>& graph,
+    const ParamMap& params_dict,
+    int opset_version) {
+  ONNXShapeTypeInference(graph->block(), params_dict, opset_version);
 }
 
 } // namespace jit
