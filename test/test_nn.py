@@ -10960,6 +10960,20 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 0, 10, 10, 10, device=device)
             mod(inp)
 
+    def test_ReplicationPad_large(self, device):
+        # ReplicationPad1d
+        shapes = ([2, 65537, 4], [65537, 2, 4], [2, 65536 * 2 + 1, 4], [65536 * 2 + 1, 2, 4])
+        p = 3
+        for shape in shapes:
+            x = torch.randn(shape, device=device)
+            model = torch.nn.ReplicationPad1d(p)
+            out = model(x)
+            self.assertEqual(out[:, :, p : -p], x)
+            left_padding = out[:, :, : p]
+            self.assertEqual(left_padding, x[:, :, :1].expand_as(left_padding))
+            right_padding = out[:, :, -p :]
+            self.assertEqual(right_padding, x[:, :, -1:].expand_as(right_padding))
+
     @onlyOnCPUAndCUDA
     def test_ReflectionPad_empty(self, device):
         for mod, inp in [
