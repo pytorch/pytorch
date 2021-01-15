@@ -1607,7 +1607,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
 
-def broadcast_object_list(object_list, src, group=None):
+def broadcast_object_list(object_list, src=0, group=None):
     """
     Broadcasts picklable objects in ``object_list`` to the whole group. Similar
     to :func:`broadcast`, but Python objects can be passed in.
@@ -1700,7 +1700,7 @@ def broadcast_object_list(object_list, src, group=None):
 
 
 def scatter_object_list(
-    scatter_object_output_list, scatter_object_input_list, src=0, group=group.WORLD
+    scatter_object_output_list, scatter_object_input_list, src=0, group=None
 ):
     """
     Scatters picklable objects in ``scatter_object_input_list`` to the whole
