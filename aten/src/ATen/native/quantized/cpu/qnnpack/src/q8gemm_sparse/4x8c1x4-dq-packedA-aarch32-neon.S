@@ -60,7 +60,7 @@
 #  |----------------|
 #  
 
-# void pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__aarch32_neon(
+# void pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA__aarch32_neon(
 #     size_t mr,
 #     size_t nr,
 #     const uint8_t* a_packed,
@@ -72,7 +72,7 @@
 #     size_t c_stride,
 #     size_t output_channel_index,
 #     const union pytorch_qnnp_conv_dynamic_quantization_params quantization_params[restrict static 1])
-BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__aarch32_neon
+BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA__aarch32_neon
     .arm
 #ifndef __APPLE__
     .arch armv7-a
@@ -116,7 +116,6 @@ BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__aarch32_neon
     # r5 = r5 + 4 to point to next n
     LDR ip, [r5], #4
     LDR lr, [r5]
-    VEOR q11, q11, q11
     # r6 = temp_packed_w = packed_w + w_row_ptr[n] * 4
     # This points to the first block of nonzero value
     # for the nth row.
@@ -133,7 +132,7 @@ BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__aarch32_neon
 
 k_loop:
     # Load 2 non zero blocks of weights. Each block = 1x4.
-    VLD1.8 {d19}, [r6]!
+    VLD1.8 {d0}, [r6]!
 
     #ip = block_id_ptr[0]
     #lr = block_id_ptr[1]
@@ -141,58 +140,39 @@ k_loop:
     LDR lr, [r9], #4
 
     # Add offset to r2
-    # Shift by 5 because each packed block is a block of 8x4
-    # which 32 bytes
-    ADD r10, r2, ip, LSL #5
+    # Shift by 4 because each packed block is a block of 4x4
+    # which 16 bytes
+    ADD r10, r2, ip, LSL #4
     # q9 = vxb
-    VSUBL.U8 q9, d19, d17
+    VSUBL.U8 q0, d0, d17
 
-    VLD1.8 {d0}, [r10]!
-    VLD1.8 {d1}, [r10]!
+    # d2, d3 = 4x4 transposed
     VLD1.8 {d2}, [r10]!
     VLD1.8 {d3}, [r10]
 
-    ADD r10, r2, lr, LSL #5
+    ADD r10, r2, lr, LSL #4
 
-    VSUBL.U8 q4, d0, d16  // vxa0_t
+    VSUBL.U8 q4, d2, d16  // vxa0_t
 
+    # d4, d5 = next 4x4 transposed
     VLD1.8 {d4}, [r10]!
-    VLD1.8 {d5}, [r10]!
-    VLD1.8 {d6}, [r10]!
-    VLD1.8 {d7}, [r10]
+    VLD1.8 {d5}, [r10]
 
-    VSUBL.U8 q5, d1, d16  // vxa1_t
-    VSUBL.U8 q6, d2, d16  // vxa2_t
-    VSUBL.U8 q7, d3, d16  // vxa3_t
-    VSUBL.U8 q12, d4, d16  // vxa4_t
-    VSUBL.U8 q13, d5, d16  // vxa5_t
-    VSUBL.U8 q14, d6, d16  // vxa6_t
-    VSUBL.U8 q15, d7, d16  // vxa7_t
-    # This setup without the VMOVs is a perfect
-    # setup for double buffering
-    # Load data in q0, q1, q2, q3.
-    # vxa* ares in q4-q7, q12-q13.
-    # Now q0-q3 are free to load next iterations.
-    # We will do this as a later optimization.
+    VSUBL.U8 q5, d3, d16  // vxa1_t
+    VSUBL.U8 q6, d4, d16  // vxa4_t
+    VSUBL.U8 q7, d5, d16  // vxa5_t
 
-    VMOV q0, q9
+    # q4, q5 = 4x4 block (16 values each of 16 bits)
+    # q6, q7 = 4x4 block (16 values each of 16 bits)
 
     VMLAL.S16 q10, d8, d0[0]
-    VMLAL.S16 q11, d9, d0[0]
-    VMLAL.S16 q10, d10, d0[1]
-    VMLAL.S16 q11, d11, d0[1]
-    VMLAL.S16 q10, d12, d0[2]
-    VMLAL.S16 q11, d13, d0[2]
-    VMLAL.S16 q10, d14, d0[3]
-    VMLAL.S16 q11, d15, d0[3]
-    VMLAL.S16 q10, d24, d1[0]
-    VMLAL.S16 q11, d25, d1[0]
-    VMLAL.S16 q10, d26, d1[1]
-    VMLAL.S16 q11, d27, d1[1]
-    VMLAL.S16 q10, d28, d1[2]
-    VMLAL.S16 q11, d29, d1[2]
-    VMLAL.S16 q10, d30, d1[3]
-    VMLAL.S16 q11, d31, d1[3]
+    VMLAL.S16 q10, d9, d0[1]
+    VMLAL.S16 q10, d10, d0[2]
+    VMLAL.S16 q10, d11, d0[3]
+    VMLAL.S16 q10, d12, d1[0]
+    VMLAL.S16 q10, d13, d1[1]
+    VMLAL.S16 q10, d14, d1[2]
+    VMLAL.S16 q10, d15, d1[3]
 
     SUBS r8, r8, 2
 
@@ -203,38 +183,28 @@ k_loop:
 
     # Load last nonzero block
     # For this we will load 4 8 bit values as one 32 bit value
-    VLD1.32 {d19[]}, [r6]!
+    VLD1.32 {d0[]}, [r6]!
     # q9 = vxb
-    VSUBL.U8 q9, d19, d17
+    VSUBL.U8 q0, d0, d17
 
     #ip = block_id_ptr[0]
     LDR ip, [r9]
 
     # Add offset to r2
-    # Shift by 5 because each packed block is a block of 8x4
-    # which 32 bytes
-    ADD r10, r2, ip, LSL #5
+    # Shift by 4 because each packed block is a block of 4x4
+    # which 16 bytes
+    ADD r10, r2, ip, LSL #4
 
-    VLD1.8 {d0}, [r10]!
-    VLD1.8 {d1}, [r10]!
     VLD1.8 {d2}, [r10]!
     VLD1.8 {d3}, [r10]
 
-    VSUBL.U8 q4, d0, d16  // vxa04_t
-    VSUBL.U8 q5, d1, d16  // vxa15_t
-    VSUBL.U8 q6, d2, d16  // vxa26_t
-    VSUBL.U8 q7, d3, d16  // vxa37_t
-
-    VMOV q0, q9
+    VSUBL.U8 q4, d2, d16  // vxa0_t
+    VSUBL.U8 q5, d3, d16  // vxa1_t
 
     VMLAL.S16 q10, d8, d0[0]
-    VMLAL.S16 q11, d9, d0[0]
-    VMLAL.S16 q10, d10, d0[1]
-    VMLAL.S16 q11, d11, d0[1]
-    VMLAL.S16 q10, d12, d0[2]
-    VMLAL.S16 q11, d13, d0[2]
-    VMLAL.S16 q10, d14, d0[3]
-    VMLAL.S16 q11, d15, d0[3]
+    VMLAL.S16 q10, d9, d0[1]
+    VMLAL.S16 q10, d10, d0[2]
+    VMLAL.S16 q10, d11, d0[3]
 
     .p2align 4
 2:
@@ -250,15 +220,14 @@ k_loop:
     # create a buffer of 128 bytes inbetween to make sure pointer increment
     # never produces address that is beyond the stack frame of this function.
     SUB r9, sp, 140
-    # Each iteration produce 8 values each of 4 bytes
-    # Thus 8 x 4 = 32 bytes 2^5
+    # Each iteration produce 4 values each of 4 bytes
+    # Thus 4 x 4 = 16 bytes 2^4
     # In this implementation, first value will be stored at
-    # 1st value: sp - 12 - r1 * 32
-    # 2nd value: sp - 12 - (r1 - 1) * 32
+    # 1st value: sp - 12 - r1 * 16 
+    # 2nd value: sp - 12 - (r1 - 1) * 16
     # and so on.
-    SUB r9, r9, r1, LSL #5
-    VST1.32 {q10}, [r9]!
-    VST1.32 {q11}, [r9]
+    SUB r9, r9, r1, LSL #4
+    VST1.32 {q10}, [r9]
 
     # Check if nr >=1
     SUBS r1, r1, 1
@@ -267,21 +236,21 @@ k_loop:
     # First load all the accumulators from stack
     # Load nr
     SUB r9, sp, 140
-    SUB r9, r9, r11, LSL #5
+    SUB r9, r9, r11, LSL #4
     # Now load q8-q15
-    # This is 4x8 block (nrxmr)
-    # We will transpose this to 8x4 (mrxnr)
-    # q8, q12  : x00, x10, x20, x30; x40, x50, x60, x70
-    # q9, q13  : x01, x11, x21, x31; x41, x51, x61, x71
-    # q10, q14 : x02, x12, x22, x32; x42, x52, x62, x72
-    # q11, q15 : x03, x13, x23, x33; x43, x53, x63, x73
+    # This is 8x4 block (nrxmr)
+    # We will transpose this to 4x8 (mrxnr)
+    # q8, q12  : x00, x10, x20, x30; x04, x14, x24, x34
+    # q9, q13  : x01, x11, x21, x31; x05, x15, x25, x35
+    # q10, q14 : x02, x12, x22, x32; x06, x16, x26, x36
+    # q11, q15 : x03, x13, x23, x33; x07, x17, x27, x37
     VLD1.32 {q8}, [r9]!
-    VLD1.32 {q12}, [r9]!
     VLD1.32 {q9}, [r9]!
-    VLD1.32 {q13}, [r9]!
     VLD1.32 {q10}, [r9]!
-    VLD1.32 {q14}, [r9]!
     VLD1.32 {q11}, [r9]!
+    VLD1.32 {q12}, [r9]!
+    VLD1.32 {q13}, [r9]!
+    VLD1.32 {q14}, [r9]!
     VLD1.32 {q15}, [r9]
 
     ## Now transpose q8-11
@@ -317,11 +286,11 @@ k_loop:
     # q10: X20, x21, x22, x23
     # q11: X30, x31, x32, x33
     # Now we can do the same for q4-q7
-    # q12: X40, X41, X42, X43
-    # q13: X50, X51, X52, X53
-    # q14: X60, X61, X62, X63
-    # q15: X70, X71, X72, X73
-    # NEED TO VALIDATE THIS
+    # q12: X04, X05, X06, X07
+    # q13: X14, X15, X16, X17
+    # q14: X24, X25, X26, X27
+    # q15: X34, X35, X36, X37
+
     VTRN.32 q8, q9
     VTRN.32 q10, q11
     VSWP d16, d17
@@ -362,10 +331,13 @@ k_loop:
     LDR r6, [sp, 108]
     # Load q6: vmultiplier_c0123
     VLD1.32 {d12, d13}, [r7]!
+    # Load q7: vmultiplier_c4567
+    VLD1.32 {d14, d15}, [r7]
     VCVT.F32.S32 q8, q8
     VCVT.F32.S32 q9, q9
     VCVT.F32.S32 q10, q10
-    VLD1.32 {q0}, [r6]
+    VLD1.32 {q0}, [r6]!
+    VLD1.32 {q1}, [r6]
 
     VCVT.F32.S32 q11, q11
     VCVT.F32.S32 q12, q12
@@ -377,19 +349,19 @@ k_loop:
     VMUL.F32 q9, q9, q6
     VMUL.F32 q10, q10, q6
     VMUL.F32 q11, q11, q6
-    VMUL.F32 q12, q12, q6
-    VMUL.F32 q13, q13, q6
-    VMUL.F32 q14, q14, q6
-    VMUL.F32 q15, q15, q6
+    VMUL.F32 q12, q12, q7
+    VMUL.F32 q13, q13, q7
+    VMUL.F32 q14, q14, q7
+    VMUL.F32 q15, q15, q7
 
     VADD.F32 q8, q8, q0
     VADD.F32 q9, q9, q0
     VADD.F32 q10, q10, q0
     VADD.F32 q11, q11, q0
-    VADD.F32 q12, q12, q0
-    VADD.F32 q13, q13, q0
-    VADD.F32 q14, q14, q0
-    VADD.F32 q15, q15, q0
+    VADD.F32 q12, q12, q1
+    VADD.F32 q13, q13, q1
+    VADD.F32 q14, q14, q1
+    VADD.F32 q15, q15, q1
 
     # Load c, c_stride:
     # - r1 = c
@@ -412,37 +384,19 @@ k_loop:
     CMP r0, 4
     # r4 = c3
     ADD r4, r3, r9
-    MOVLO r4, r3
+    MOVNE r4, r3
 
-    # r5 = c4
-    ADD r5, r4, r9
-    MOVLS r5, r4
-
-    CMP r0, 6
-    # r6 = c5
-    ADD r6, r5, r9
-    MOVLO r6, r5
-
-    # r7 = c6
-    ADD r7, r6, r9
-    MOVLS r7, r6
-
-    CMP r0, 8
-    # r7 = c7
-    ADD r8, r7, r9
-    MOVNE r8, r7
-
-    CMP r11, 4
+    CMP r11, 8
     BNE 4f
 
-    VST1.32 {q8}, [r1]
-    VST1.32 {q9}, [r2]
-    VST1.32 {q10}, [r3]
-    VST1.32 {q11}, [r4]
-    VST1.32 {q12}, [r5]
-    VST1.32 {q13}, [r6]
-    VST1.32 {q14}, [r7]
-    VST1.32 {q15}, [r8]
+    VST1.32 {q8}, [r1]!
+    VST1.32 {q9}, [r2]!
+    VST1.32 {q10}, [r3]!
+    VST1.32 {q11}, [r4]!
+    VST1.32 {q12}, [r1]
+    VST1.32 {q13}, [r2]
+    VST1.32 {q14}, [r3]
+    VST1.32 {q15}, [r4]
 
     VPOP {d8-d15}
     POP {r4, r5, r6, r7, r8, r9, r10, r11, lr}
@@ -450,48 +404,52 @@ k_loop:
 
     .p2align 3
 4:
-    CMP r11, 2
+    CMP r11, 4
     BLO 5f
+
+    VST1.32 {q8}, [r1]!
+    VST1.32 {q9}, [r2]!
+    VST1.32 {q10}, [r3]!
+    VST1.32 {q11}, [r4]!
+
+    SUB r11, 4
+
+    VMOV.32 q8, q12
+    VMOV.32 q9, q13
+    VMOV.32 q10, q14
+    VMOV.32 q11, q15
+
+5:
+    CMP r11, 2
+    BLO 6f
 
     VST1.32 {d16}, [r1]!
     VST1.32 {d18}, [r2]!
     VST1.32 {d20}, [r3]!
     VST1.32 {d22}, [r4]!
-    VST1.32 {d24}, [r5]!
-    VST1.32 {d26}, [r6]!
-    VST1.32 {d28}, [r7]!
-    VST1.32 {d30}, [r8]!
 
     SUB r11, 2
 
-    VMOV.32 d16, d17
-    VMOV.32 d18, d19
-    VMOV.32 d20, d21
-    VMOV.32 d22, d23
-    VMOV.32 d24, d25
-    VMOV.32 d26, d27
-    VMOV.32 d28, d29
-    VMOV.32 d30, d31
+    VEXT.32 q8, q8, 2
+    VEXT.32 q9, q9, 2
+    VEXT.32 q10, q10, 2
+    VEXT.32 q11, q11, 2
 
-5:
-    CMP r11, 0
+6:
+    TEQ r11, 0
     BEQ 7f
 
     VST1.32 {d16[0]}, [r1]
     VST1.32 {d18[0]}, [r2]
     VST1.32 {d20[0]}, [r3]
     VST1.32 {d22[0]}, [r4]
-    VST1.32 {d24[0]}, [r5]
-    VST1.32 {d26[0]}, [r6]
-    VST1.32 {d28[0]}, [r7]
-    VST1.32 {d30[0]}, [r8]
 
 7:
     VPOP {d8-d15}
     POP {r4, r5, r6, r7, r8, r9, r10, r11, lr}
     BX lr
 
-END_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__aarch32_neon
+END_FUNCTION pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA__aarch32_neon
 
 #ifdef __ELF__
 .section ".note.GNU-stack","",%progbits
