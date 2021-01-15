@@ -395,13 +395,7 @@ class TestShapeOps(TestCase):
 
         # case: dims=()
         a = torch.randn(3, 2, 1, device=device)
-        if device == 'cpu':
-            self.assertEqual(a.flip(dims=()), a)
-        else:
-            # Reference: https://github.com/pytorch/pytorch/issues/49982
-            with self.assertRaisesRegex(IndexError,
-                                        "flip dims size out of range, got flip dims size=0"):
-                a.flip(dims=())
+        self.assertEqual(a.flip(dims=()), a)
 
     def _rand_shape(self, dim, min_size, max_size):
         shape = []
