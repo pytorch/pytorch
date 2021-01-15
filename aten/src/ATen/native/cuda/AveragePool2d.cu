@@ -262,14 +262,6 @@ void avg_pool2d_out_cuda_template(
   const int padH = safe_downcast<int, int64_t>(padding[0]);
   const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
 
-  const auto memory_format = input_.suggest_memory_format();
-  if (memory_format == at::MemoryFormat::ChannelsLast){
-    TORCH_CHECK(input_.ndimension() == 4,
-      "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
-  } else {
-    TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
-      "non-empty 3D or 4D (batch mode) tensor expected for input");
-  }
 
   TORCH_CHECK(!divisor_override.has_value() || divisor_override.value() != 0,
     "divisor must be not zero");
@@ -281,13 +273,14 @@ void avg_pool2d_out_cuda_template(
 
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, 1, ceil_mode);
   const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, 1, ceil_mode);
+  const auto memory_format = input_.suggest_memory_format();
 
   pool2d_shape_check(
     input_,
     kH, kW, dH, dW, padH, padW, 1, 1,
     nInputPlane,
     inputHeight, inputWidth,
-    outputHeight, outputWidth);
+    outputHeight, outputWidth, memory_format);
 
   Tensor input = input_.contiguous(memory_format);
 
@@ -300,18 +293,36 @@ void avg_pool2d_out_cuda_template(
   bool use_divisor = divisor_override.has_value();
   const auto divisor_override_value = use_divisor ? divisor_override.value() : 0;
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
-    "avg_pool2d_out_cuda_frame",
-    [&] {
-      using accscalar_t = acc_type<scalar_t, true>;
+  if (count != 0) {  
+    AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, input.scalar_type(),
+      "avg_pool2d_out_cuda_frame",
+      [&] {
+        using accscalar_t = acc_type<scalar_t, true>;
 
-      scalar_t *output_data = output.data_ptr<scalar_t>();
-      scalar_t *input_data = input.data_ptr<scalar_t>();
+        scalar_t *output_data = output.data_ptr<scalar_t>();
+        scalar_t *input_data = input.data_ptr<scalar_t>();
 
-      switch (memory_format){
-        case MemoryFormat::ChannelsLast: {
-          output.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
-          avg_pool2d_out_cuda_frame_nhwc<scalar_t, accscalar_t>
+        switch (memory_format){
+          case MemoryFormat::ChannelsLast: {
+            output.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::ChannelsLast);
+            avg_pool2d_out_cuda_frame_nhwc<scalar_t, accscalar_t>
+                <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+                  count,
+                  input_data,
+                  nbatch,
+                  nInputPlane,
+                  inputHeight, inputWidth,
+                  outputHeight, outputWidth,
+                  kH, kW,
+                  dH, dW,
+                  padH, padW,
+                  output_data,
+                  divisor_override_value,
+                  count_include_pad, use_divisor);
+            break;
+          }
+          case MemoryFormat::Contiguous: {
+            avg_pool2d_out_cuda_frame<scalar_t, accscalar_t>
               <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
                 count,
                 input_data,
@@ -325,31 +336,13 @@ void avg_pool2d_out_cuda_template(
                 output_data,
                 divisor_override_value,
                 count_include_pad, use_divisor);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-          break;
+            break; 
+          }
+          default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
         }
-        case MemoryFormat::Contiguous: {
-          avg_pool2d_out_cuda_frame<scalar_t, accscalar_t>
-            <<<num_blocks, num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-              count,
-              input_data,
-              nbatch,
-              nInputPlane,
-              inputHeight, inputWidth,
-              outputHeight, outputWidth,
-              kH, kW,
-              dH, dW,
-              padH, padW,
-              output_data,
-              divisor_override_value,
-              count_include_pad, use_divisor);
-          C10_CUDA_KERNEL_LAUNCH_CHECK();
-          break;
-        }
-        default: TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
       }
-    }
-  );
+    );
+  }
 
   if (input.ndimension() == 3) {
     output.resize_({nInputPlane, outputHeight, outputWidth});
@@ -395,14 +388,6 @@ Tensor& avg_pool2d_backward_out_cuda_template(
     "divisor must be not zero");
 
   const auto memory_format = input_.suggest_memory_format();
-  if (memory_format == at::MemoryFormat::ChannelsLast) {
-    TORCH_CHECK(input_.ndimension() == 4,
-      "non-empty 4D (batch mode) tensor expected for input with channels_last layout");
-  } else {
-    TORCH_CHECK((input_.ndimension() == 3 || input_.ndimension() == 4),
-      "non-empty 3D or 4D (batch mode) tensor expected for input");
-  }
-
   const Tensor input = input_.contiguous(memory_format);
   const Tensor gradOutput = gradOutput_.contiguous(memory_format);
 
@@ -421,11 +406,14 @@ Tensor& avg_pool2d_backward_out_cuda_template(
     kH, kW, dH, dW, padH, padW,
     nInputPlane,
     inputHeight, inputWidth,
-    outputHeight, outputWidth);
+    outputHeight, outputWidth, memory_format);
 
   gradInput.resize_as_(input);
-
   const int32_t count = safe_downcast<int32_t, int64_t>(input.numel());
+  if (count == 0) {
+    return gradInput;
+  }
+  
   const uint32_t num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
   const uint32_t num_blocks = cuda::ATenCeilDiv<uint32_t>(count, num_threads);
 
