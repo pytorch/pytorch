@@ -317,6 +317,20 @@ typedef void (*pytorch_q8gemm_dq_ukernel_function)(
     size_t output_channel_index,
     const struct pytorch_qnnp_conv_dynamic_quantization_params* quantization_params);
 
+typedef void (*pytorch_q8gemm_dq_sparse_ukernel_function)(
+    size_t mr,
+    size_t nr,
+    const uint8_t* a,
+    size_t a_stride,
+    const uint8_t* packed_w,
+    const uint32_t* w_row_ptr,
+    const uint32_t* w_block_ids_ptr,
+    const float* bias,
+    float* c,
+    size_t c_stride,
+    size_t output_channel_index,
+    const struct pytorch_qnnp_conv_dynamic_quantization_params* quantization_params);
+
 typedef void (*pytorch_q8conv_ukernel_function)(
     size_t mr,
     size_t nr,

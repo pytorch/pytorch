@@ -235,6 +235,7 @@ set(PYTORCH_QNNPACK_X86_SSE2_UKERNELS
   src/q8gemm/2x4c8-sse2.c
   src/q8gemm/4x4c2-dq-sse2.c
   src/q8gemm/4x4c2-sse2.c
+  src/q8gemm_sparse/8x4c1x4-dq-sse2.c
   src/q8vadd/sse2.c
   src/u8clamp/sse2.c
   src/u8maxpool/16x9p8q-sse2.c
@@ -570,6 +571,15 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
   target_include_directories(q8gemm-test PRIVATE src test)
   target_link_libraries(q8gemm-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
   add_test(q8gemm-test q8gemm-test)
+
+  add_executable(q8gemm-sparse-test test/q8gemm_sparse.cc)
+  set_target_properties(q8gemm-sparse-test PROPERTIES
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO)
+  target_include_directories(q8gemm-sparse-test PRIVATE src test)
+  target_link_libraries(q8gemm-sparse-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  add_test(q8gemm-sparse-test q8gemm-sparse-test)
 
   add_executable(q8conv-test test/q8conv.cc)
   set_target_properties(q8conv-test PROPERTIES
