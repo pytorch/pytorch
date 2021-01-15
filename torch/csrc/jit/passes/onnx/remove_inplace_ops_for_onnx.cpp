@@ -567,7 +567,7 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
       if (it != node->inputs().end()) {
         int index = std::distance(node->inputs().begin(), it);
 
-				std::string input_name = input->debugName();
+	std::string input_name = input->debugName();
         std::cerr
             << "Warning: ONNX Preprocess - Removing mutation on block inputs. "
             << "This changes graph semantics." << std::endl;
