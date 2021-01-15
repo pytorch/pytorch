@@ -3601,6 +3601,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(SplitModel2(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    @disableScriptTest()
     def test_chunk(self):
         class ChunkModel(torch.nn.Module):
             def __init__(self):

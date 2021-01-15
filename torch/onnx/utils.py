@@ -29,6 +29,8 @@ def is_in_onnx_export():
     global __IN_ONNX_EXPORT
     return __IN_ONNX_EXPORT
 
+# Skip check due to cannot import IValue from torch._C
+_params_dict = {}  # type: ignore
 
 @contextlib.contextmanager
 def select_model_mode_for_export(model, mode):
@@ -224,7 +226,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     torch._C._jit_pass_lint(graph)
     from torch.onnx.symbolic_helper import _onnx_shape_inference, _export_onnx_opset_version
     if _onnx_shape_inference:
-        torch._C._jit_pass_onnx_graph_shape_type_inference(graph, _export_onnx_opset_version)
+        torch._C._jit_pass_onnx_graph_shape_type_inference(graph, params_dict, _export_onnx_opset_version)
     return graph
 
 
@@ -358,7 +360,7 @@ def _trace(func, args, operator_export_type, return_outs=False):
         torch.jit._get_trace_graph(func, args, strict=False, _force_outplace=False, _return_inputs_states=True)
     warn_on_static_input_change(inputs_states)
 
-    trace_graph = _optimize_graph(trace_graph, operator_export_type)
+    trace_graph = _optimize_graph(trace_graph, operator_export_type, params_dict={})
     if return_outs:
         return trace_graph, torch_out
     return trace_graph
@@ -422,6 +424,11 @@ def _create_jit_graph(model, args, _retain_param_name, use_new_jit_passes):
         torch._C._jit_pass_onnx_function_substitution(graph)
     return graph, params, torch_out
 
+def _get_named_param_dict(graph, params):
+    input_and_param_names = [val.debugName() for val in graph.inputs()]
+    param_names = input_and_param_names[len(input_and_param_names) - len(params):]
+    _params_dict = dict(zip(param_names, params))
+    return _params_dict
 
 def _model_to_graph(model, args, verbose=False,
                     input_names=None, output_names=None,
@@ -443,9 +450,7 @@ def _model_to_graph(model, args, verbose=False,
                                                  _retain_param_name,
                                                  use_new_jit_passes)
 
-    input_and_param_names = [val.debugName() for val in graph.inputs()]
-    param_names = input_and_param_names[len(input_and_param_names) - len(params):]
-    params_dict = dict(zip(param_names, params))
+    params_dict = _get_named_param_dict(graph, params)
 
     graph = _optimize_graph(graph, operator_export_type,
                             _disable_torch_constant_prop=_disable_torch_constant_prop,
@@ -471,9 +476,7 @@ def _model_to_graph(model, args, verbose=False,
     flatten_args, _ = torch._C._jit_flatten(args)
     assert len(params) + len(flatten_args) == sum(1 for _ in graph.inputs())
 
-    input_and_param_names = [val.debugName() for val in graph.inputs()]
-    param_names = input_and_param_names[len(input_and_param_names) - len(params):]
-    params_dict = dict(zip(param_names, params))
+    params_dict = _get_named_param_dict(graph, params)
 
     if training is None or training == TrainingMode.EVAL:
         params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
@@ -482,6 +485,9 @@ def _model_to_graph(model, args, verbose=False,
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict,
                                                             _export_onnx_opset_version)
         torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
+
+    if _onnx_shape_inference:
+        torch._C._jit_pass_onnx_graph_shape_type_inference(graph, params_dict, _export_onnx_opset_version)
 
     params_dict = torch._C._jit_pass_onnx_eliminate_unused_items(graph, params_dict)
 
@@ -870,7 +876,7 @@ def _graph_op(g, opname, *raw_args, **kwargs):
     from torch.onnx.symbolic_helper import _onnx_shape_inference
     if _onnx_shape_inference:
         from torch.onnx.symbolic_helper import _export_onnx_opset_version as opset_version
-        torch._C._jit_pass_onnx_node_shape_type_inference(n, opset_version)
+        torch._C._jit_pass_onnx_node_shape_type_inference(n, _params_dict, opset_version)
 
     if outputs == 1:
         return n.output()
@@ -1024,7 +1030,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                 # Process Loop and If after subblock is converted.
                 from torch.onnx.symbolic_helper import _onnx_shape_inference
                 if _onnx_shape_inference:
-                    torch._C._jit_pass_onnx_node_shape_type_inference(new_node, opset_version)
+                    torch._C._jit_pass_onnx_node_shape_type_inference(new_node, _params_dict, opset_version)
                 return new_op_outputs
             else:
                 symbolic_name = 'prim_' + op_name
