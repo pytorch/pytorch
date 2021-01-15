@@ -12,7 +12,6 @@ import math
 from pathlib import Path
 import os
 import warnings
-import inspect
 
 # normal exec loses the source code, however we can patch
 # the linecache module to still recover it.
