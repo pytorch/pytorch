@@ -23,8 +23,7 @@
 // we haven't reached the optimization limit yet. Otherwise, it will return
 // false. Typical usage:
 
-// auto allowed = JIT_OPT_LIMIT();
-// if (!allowed) {
+// if (!JIT_OPT_ALLOWED) {
 //     GRAPH_DUMP(...); //supplied from jit_log
 //     return;
 // }
@@ -34,7 +33,7 @@ namespace jit {
 
 TORCH_API bool opt_limit(const char* pass_name);
 
-#define JIT_OPT_LIMIT() opt_limit(__FILE__);
+#define JIT_OPT_ALLOWED opt_limit(__FILE__)
 
 } // namespace jit
 } // namespace torch
