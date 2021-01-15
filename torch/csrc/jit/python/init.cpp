@@ -86,6 +86,7 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
+#include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 
 #include <c10/macros/Export.h>
 #include <caffe2/serialize/inline_container.h>
@@ -94,6 +95,7 @@
 
 #include <pybind11/functional.h>
 #include <pybind11/iostream.h>
+#include <pybind11/operators.h>
 
 #include <memory>
 #include <sstream>
@@ -1300,6 +1302,7 @@ void initJITBindings(PyObject* module) {
   initJitScriptBindings(module);
   initJitBackendBindings(module);
   initStaticRuntimeBindings(module);
+  initTensorExprBindings(module);
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;
