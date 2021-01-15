@@ -7,11 +7,27 @@ Overview
 --------
 .. automodule:: torch.fx
 
+Limitations of Symbolic Tracing
+-------------------------------
+
+TODO
+
+Writing Transformations
+-----------------------
+
+TODO
+
+Debugging Transformations
+-------------------------
+
+TODO
 
 API Reference
 -------------
 
 .. autofunction:: torch.fx.symbolic_trace
+
+.. autofunction:: torch.fx.wrap
 
 .. autoclass:: torch.fx.GraphModule
   :members:

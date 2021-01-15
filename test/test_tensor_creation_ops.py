@@ -2808,6 +2808,23 @@ class TestTensorCreation(TestCase):
         y = torch.logspace(0, 3, 4, base=2, device=device, dtype=dtype, out=x.narrow(1, 1, 2))
         self.assertEqual(x, torch.tensor(((0, 1, 2), (0, 4, 8)), device=device, dtype=dtype), atol=0, rtol=0)
 
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_logspace_integral(self, device, dtype):
+        "Check logspace with integer."
+        for from_, to in ((1, 5),
+                          (1.2, 2),
+                          (1.7, 4),
+                          (2, 2.5)):
+            res1 = torch.logspace(from_, to, steps=10, device=device, dtype=dtype)
+            res2 = torch.logspace(int(from_), int(to), steps=10,
+                                  device=device, dtype=torch.double).floor().type(dtype)
+            self.assertEqual(res1, res2)
+            if not device.startswith('cpu'):
+                # Compare with CPU output
+                res2_cpu = torch.logspace(int(from_), int(to), steps=10,
+                                          device='cpu', dtype=torch.double).floor().type(dtype)
+                self.assertEqual(res1, res2_cpu)
+
     @onlyOnCPUAndCUDA
     @dtypes(torch.half, torch.float, torch.double)
     def test_full_inference(self, device, dtype):
