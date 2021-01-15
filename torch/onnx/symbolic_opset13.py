@@ -216,3 +216,4 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_s
                     cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
                     mode_s=mode,  # nearest, linear, or cubic
                     nearest_mode_s="floor")  # only valid when mode="nearest"
+
