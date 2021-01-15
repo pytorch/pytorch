@@ -1,0 +1,44 @@
+name: Build Linux Wheels
+
+on:
+  pull_request:
+
+jobs:
+  build-wheel:
+    runs-on: linux.2xlarge
+    strategy:
+      matrix:
+        python_version: ["3.8"]
+        gpu_arch: ["cpu"]
+    env:
+      DESIRED_PYTHON: ${{ matrix.python_version }}
+      DESIRED_CUDA: ${{ matrix.gpu_arch }}
+    container:
+      image: pytorch/manylinux-${{ matrix.gpu_arch }}
+    steps:
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+        with:
+          path: pytorch
+          submodules: recursive
+      - name: Clone pytorch/builder
+        uses: actions/checkout@v2
+        with:
+          repository: pytorch/builder
+          path: builder
+      - name: Symlink repositories to root directory (for legacy scripts purposes)
+        run: |
+          ln -s $(pwd)/pytorch /pytorch
+          ln -s $(pwd)/builder /builder
+      - name: Build PyTorch binary (GPU specific)
+        if: ${{ matrix.gpu_arch != 'cpu' }}
+        run: |
+          /builder/manywheel/build.sh
+      - name: Build PyTorch binary (CPU specific)
+        if: ${{ matrix.gpu_arch == 'cpu' }}
+        run: |
+          /builder/manywheel/build_cpu.sh
+      - uses: actions/upload-artifact@v2
+        with:
+          name: pytorch-wheel-py${{ matrix.python_version }}-${{ matrix.gpu_arch }}
+          path: /remote/*.whl
