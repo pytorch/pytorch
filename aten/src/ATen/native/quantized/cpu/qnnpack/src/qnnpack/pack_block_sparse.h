@@ -14,9 +14,9 @@
 #include <qnnpack/math.h>
 
 typedef struct {
-  std::vector<uint32_t> col_indices;
-  std::vector<uint32_t> row_values;
-  std::vector<uint8_t> values;
+  std::vector<uint32_t, AlignedAllocator<uint32_t, 8>> col_indices;
+  std::vector<uint32_t, AlignedAllocator<uint32_t, 8>> row_values;
+  std::vector<uint8_t, AlignedAllocator<uint8_t, 32>> values;
   uint32_t col_block_size;
   uint32_t row_block_siz{1};
   void print() {

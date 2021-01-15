@@ -194,7 +194,7 @@ TEST(FULLY_CONNECTED_OP, small_batch_with_qmin_dynamic_prepacked) {
 
 TEST(FULLY_CONNECTED_OP, small_batch_with_qmax_dynamic_prepacked) {
   FullyConnectedSparseOperatorTester()
-      .batchSize(12)
+      .batchSize(13)
       .inputChannels(23)
       .outputChannels(19)
       .qmax(128)
