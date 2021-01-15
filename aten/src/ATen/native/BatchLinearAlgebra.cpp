@@ -1168,13 +1168,11 @@ Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, T
   if (result.numel() == 0) {
     at::native::resize_as_(result, input.transpose(-2, -1), MemoryFormat::Contiguous);
     result.transpose_(-2, -1);
-  } else {
-    // Resize messes up the strides and we expect strictly column major order, so let's not use at::native::resize_output
-    TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
   }
 
   // result tensor must be in batched column major order (Fortran contiguous)
   TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
 
   // orgqr_stub (apply_orgqr) performs calculations in-place and result must be a copy of input
   result.copy_(input);
