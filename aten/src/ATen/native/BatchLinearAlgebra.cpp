@@ -1193,7 +1193,7 @@ Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
 
   TORCH_CHECK(tau.scalar_type() == input.scalar_type(),
     "orgqr: tau dtype ", tau.scalar_type(), " does not match input dtype ", input.scalar_type());
-  TORCH_CHECK(input.device() == input.device(),
+  TORCH_CHECK(input.device() == tau.device(),
               "orgqr: Expected input and tau to be on the same device, but found input on ",
               input.device(), " and tau on ", tau.device(), " instead.");
 
