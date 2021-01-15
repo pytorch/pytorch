@@ -120,13 +120,13 @@ std::vector<IValue> getParamAttributes(
           try {
             attrValues.emplace_back(
                 script::Object(attr.toObject()).run_method("__getstate__"));
-                paramConst = addParamAsArgument(function_, fullName, attr);
-            } catch (const std::exception&) {
-                   auto type = attr.type();
-           throw ErrorReport(n->sourceRange())
-                 << "Unknown type " << type->repr_str()
-                 << " encountered in handling model params. This class type does not extend __getstate__ method.";
-             }
+            paramConst = addParamAsArgument(function_, fullName, attr);
+          } catch (const std::exception&) {
+            auto type = attr.type();
+            throw ErrorReport(n->sourceRange())
+                << "Unknown type " << type->repr_str()
+                << " encountered in handling model params. This class type does not extend __getstate__ method.";
+          }
         }
       }
     }
