@@ -53,11 +53,11 @@ template <typename scalar_t>
 __global__ void replication_pad_backward_kernel(
     PackedTensorAccessor64<scalar_t, 3> gradInput,
     PackedTensorAccessor64<scalar_t, 3> gradOutput,
-    int padL, int padR) {
+    int padL, int padR, int y_shift, int z_shift) {
 
   int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
-  int plane = blockIdx.y;
-  int batch = blockIdx.z;
+  int plane = blockIdx.y + y_shift;
+  int batch = blockIdx.z + z_shift;
   if (outputPointId >= gradOutput.size(2)) {
     return;
   }
@@ -260,8 +260,8 @@ void replication_pad1d_out_cuda_template(
       auto devOutput = output_.packed_accessor64<scalar_t, 3>();
 
       int outputPlaneSize = devOutput.size(2);
-      int64_t size1 = devOutput.size(1);
-      int64_t size0 = devOutput.size(0);
+      int size1 = devOutput.size(1);
+      int size0 = devOutput.size(0);
 
       int y_left = size1;
       int y_shift = 0;
@@ -336,15 +336,29 @@ void replication_pad1d_backward_out_cuda_template(
       auto devGradOutput = gradOutput_.packed_accessor64<scalar_t, 3>();
 
       int outputPlaneSize = devGradOutput.size(2);
-      dim3 gridSize(THCCeilDiv(outputPlaneSize, 256),
-          devGradOutput.size(1),
-          devGradOutput.size(0));
-      dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
+      int size1 = devGradOutput.size(1);
+      int size0 = devGradOutput.size(0);
 
-      replication_pad_backward_kernel <<<gridSize, blockSize, 0,
-                                      at::cuda::getCurrentCUDAStream()>>>(devGradInput, devGradOutput,
-                                          padL, padR);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      int y_left = size1;
+      int y_shift = 0;
+      while (y_left > 0) {
+        int z_left = size0;
+        int z_shift = 0;
+        while (z_left > 0) {
+          dim3 gridSize(THCCeilDiv(outputPlaneSize, 256), y_left > 65535 ? 65535 : y_left, z_left > 65535 ? 65535 : z_left);
+          dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
+
+          replication_pad_backward_kernel <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
+            devGradInput, devGradOutput, padL, padR, y_shift, z_shift);
+          C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+          z_shift += 65535;
+          z_left -= 65535;
+        }
+
+        y_shift += 65535;
+        y_left -= 65535;
+      }
   });
 }
 
