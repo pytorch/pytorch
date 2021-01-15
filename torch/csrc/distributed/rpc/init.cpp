@@ -337,7 +337,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   Create a helper proxy to easily launch a ``remote`` using
                   the owner of the RRef as the destination to run functions on
                   the object referenced by this RRef. More specifically,
-                  ``rref.remote()``.func_name(*args, **kwargs)`` is the same as
+                  ``rref.remote().func_name(*args, **kwargs)`` is the same as
                   the following:
 
                   >>> def run(rref, func_name, args, kwargs):
