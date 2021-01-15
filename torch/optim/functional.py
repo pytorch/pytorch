@@ -108,9 +108,9 @@ def adamw(params: List[Tensor],
           lr: float,
           weight_decay: float,
           eps: float):
-    r"""Functional API that performs Adam algorithm computation.
+    r"""Functional API that performs AdamW algorithm computation.
 
-    See :class:`~torch.optim.Adam` for details.
+    See :class:`~torch.optim.AdamW` for details.
     """
     for i, param in enumerate(params):
         grad = grads[i]
