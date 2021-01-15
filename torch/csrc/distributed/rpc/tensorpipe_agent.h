@@ -9,16 +9,17 @@
 #include <c10d/PrefixStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
+#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+
+#ifdef USE_CUDA_NOT_ROCM
+#include <ATen/cuda/CUDAFuture.h>
+#endif
 
 // Forward-declare the TensorPipe classes we need, to avoid including its
 // headers in PyTorch's ones and thus have it become a public dependency.
 
 namespace tensorpipe {
-
-#if defined(USE_CUDA) && !defined(__HIP_PLATFORM_HCC__)
-#define USE_CUDA_NOT_ROCM
-#endif
 
 class CpuBuffer;
 
@@ -57,6 +58,8 @@ using DeviceMap = std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>;
 namespace torch {
 namespace distributed {
 namespace rpc {
+
+struct LazyStreamContext;
 
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
@@ -227,7 +230,10 @@ class TensorPipeAgent : public RpcAgent {
   // by client, and read request messages by server.
   void pipeRead(
       const std::shared_ptr<tensorpipe::Pipe>&,
-      std::function<void(const tensorpipe::Error&, Message&&)>) noexcept;
+      std::function<void(
+          const tensorpipe::Error&,
+          Message&&,
+          std::shared_ptr<LazyStreamContext>)>) noexcept;
 
   // TensorPipe write function that could be used to write response
   // messages by server, and write request messages by client.
@@ -235,6 +241,7 @@ class TensorPipeAgent : public RpcAgent {
       const std::shared_ptr<tensorpipe::Pipe>&,
       Message&& message,
       std::vector<c10::DeviceIndex>&& devices,
+      std::shared_ptr<LazyStreamContext> ctx,
       std::function<void(const tensorpipe::Error&)>) noexcept;
 
   // Callback of listener accept()
@@ -248,7 +255,8 @@ class TensorPipeAgent : public RpcAgent {
   void sendCompletedResponseMessage(
       std::shared_ptr<tensorpipe::Pipe>& pipe,
       std::shared_ptr<JitFuture>& futureResponseMessage,
-      uint64_t messageId);
+      uint64_t messageId,
+      std::shared_ptr<LazyStreamContext> ctx);
 
   // Collects metrics from successful RPC calls
   void trackNetworkData(
@@ -265,6 +273,28 @@ class TensorPipeAgent : public RpcAgent {
       const std::string& remoteName,
       const Message& message) const;
 
+#ifdef USE_CUDA_NOT_ROCM
+  // An RPC-specific CUDAFuture subclass. It overrides the extractDataPtrs
+  // function to handle and only handle RPC Messages.
+  struct TORCH_CUDA_API RpcCUDAFuture final : at::cuda::CUDAFuture {
+   public:
+    using at::cuda::CUDAFuture::CUDAFuture;
+
+   protected:
+    std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
+        const at::IValue& value) override {
+      const auto message = value.toCustomClass<Message>();
+      TORCH_INTERNAL_ASSERT(
+          message, "Passed a non-Message type to RpcCUDAFuture");
+      std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
+      for (const auto& tensor : message->tensors()) {
+        data_ptrs.emplace_back(tensor.storage().data_ptr());
+      }
+      return data_ptrs;
+    }
+  };
+#endif
+
   // When a request+response completes, we need to mark the future message as
   // complete. However, if its timeout has already expired, it already has an
   // error set. There is no atomic "test-and-set" way to mark a future complete
@@ -272,9 +302,20 @@ class TensorPipeAgent : public RpcAgent {
   // then, it ends up printing a log message, which may worry the user. To solve
   // both issues we use a separate atomic flag to know the status of the future.
   struct AtomicJitFuture {
-    std::shared_ptr<JitFuture> jitFuture =
-        std::make_shared<JitFuture>(at::AnyClassType::get());
+    AtomicJitFuture(bool noCuda = true) {
+#ifdef USE_CUDA_NOT_ROCM
+      if (!noCuda) {
+        jitFuture = std::make_shared<RpcCUDAFuture>(at::AnyClassType::get());
+      } else {
+#else
+      {
+#endif
+        jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
+      }
+    }
+
     std::atomic_flag isComplete = ATOMIC_FLAG_INIT;
+    std::shared_ptr<JitFuture> jitFuture;
   };
 
   // Maintains state per client pipe to track pending response messages and
@@ -394,7 +435,8 @@ class TensorPipeAgent : public RpcAgent {
   // Helpers to set the state of the requests.
   void markFutureAsComplete(
       std::shared_ptr<AtomicJitFuture> atomicFuture,
-      Message message);
+      Message message,
+      std::shared_ptr<LazyStreamContext> ctx);
   void markFutureWithError(
       std::shared_ptr<AtomicJitFuture> atomicFuture,
       std::string errorMsg);
