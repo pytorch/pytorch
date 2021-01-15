@@ -28,6 +28,11 @@ class Setup(enum.Enum):
     """
     NONE = 0
     TRIVIAL = 1
+    GENERIC = 2
+    INDEXING = 3
+    MESOSCALE = 4
+    AUTOGRAD = 5
+    EXAMPLE_FOR_ADHOC = 6
 
 
 class Mode(enum.Enum):
