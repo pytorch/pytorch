@@ -451,4 +451,4 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable]) -> GraphModule:
     """
     return GraphModule(root if isinstance(root, torch.nn.Module) else torch.nn.Module(),
                        Tracer().trace(root),
-                       root.__class__.__name__)
+                       root.__class__.__name__ if isinstance(root, torch.nn.Module) else root.__name__)

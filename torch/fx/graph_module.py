@@ -157,8 +157,8 @@ class GraphModule(torch.nn.Module):
             graph (Graph): ``graph`` contains the nodes this GraphModule should use for code generation
 
             name (str): ``str`` denotes the name of this GraphModule for debugging purposes. If it's unset, all
-                error messages will report as originating from ``GraphModule``; it may be helpful to set this to
-                ``root``'s original name.
+                error messages will report as originating from ``GraphModule``. It may be helpful to set this
+                to ``root``'s original name or a name that makes sense within the context of your transform.
 
         """
         super().__init__()
