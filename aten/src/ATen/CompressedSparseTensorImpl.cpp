@@ -7,10 +7,10 @@
 
 namespace at {
 namespace {
-  DeviceType CompressedRowSparseTensorSetToDeviceType(DispatchKeySet key_set) {
-    if (key_set.has(DispatchKey::CompressedRowSparseCPU)) {
+  DeviceType CompressedSparseTensorSetToDeviceType(DispatchKeySet key_set) {
+    if (key_set.has(DispatchKey::CompressedSparseCPU)) {
       return kCPU;
-    } else if (key_set.has(DispatchKey::CompressedRowSparseCUDA)) {
+    } else if (key_set.has(DispatchKey::CompressedSparseCUDA)) {
       return kCUDA;
     } else {
       AT_ERROR("Cannot construct SparseTensor with non-sparse tensor type ID ", key_set);
@@ -18,17 +18,17 @@ namespace {
   }
 }
 
-CompressedRowSparseTensorImpl::CompressedRowSparseTensorImpl(at::DispatchKeySet key_set,
+CompressedSparseTensorImpl::CompressedSparseTensorImpl(at::DispatchKeySet key_set,
                                          const caffe2::TypeMeta& data_type)
-  :   CompressedRowSparseTensorImpl(key_set, data_type
-      , at::empty({0}, at::initialTensorOptions().device(CompressedRowSparseTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // crow_indices
+  :   CompressedSparseTensorImpl(key_set, data_type
+      , at::empty({0}, at::initialTensorOptions().device(CompressedSparseTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // crow_indices
       // indices in case of GCS tensor is always a 1D array so need to init size as {1,0}.
-      , at::empty({0}, at::initialTensorOptions().device(CompressedRowSparseTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // indices
-      , at::empty({0}, at::initialTensorOptions().device(CompressedRowSparseTensorSetToDeviceType(key_set)).dtype(data_type)) // values
-      , at::empty({0}, at::initialTensorOptions().device(CompressedRowSparseTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // reduction
+      , at::empty({0}, at::initialTensorOptions().device(CompressedSparseTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // indices
+      , at::empty({0}, at::initialTensorOptions().device(CompressedSparseTensorSetToDeviceType(key_set)).dtype(data_type)) // values
+      , at::empty({0}, at::initialTensorOptions().device(CompressedSparseTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // reduction
 ) {}
 
-CompressedRowSparseTensorImpl::CompressedRowSparseTensorImpl(at::DispatchKeySet key_set,
+CompressedSparseTensorImpl::CompressedSparseTensorImpl(at::DispatchKeySet key_set,
                                          const caffe2::TypeMeta& data_type,
                                          at::Tensor crow_indices, at::Tensor col_indices, 
                                          at::Tensor values, at::Tensor reduction)
@@ -38,7 +38,7 @@ CompressedRowSparseTensorImpl::CompressedRowSparseTensorImpl(at::DispatchKeySet 
     values_(std::move(values)),
     reduction_(std::move(reduction)) {}
 
-void CompressedRowSparseTensorImpl::resize_and_clear_(int64_t nnz_size, int64_t ptr_size, int64_t redux_size, IntArrayRef size) {
+void CompressedSparseTensorImpl::resize_and_clear_(int64_t nnz_size, int64_t ptr_size, int64_t redux_size, IntArrayRef size) {
   // TODO: perform error checking.
   TORCH_CHECK(size.size() + 1 == redux_size, 
               "size of the reduction array has to be len(sparse.shape)+1, but got: ", 
@@ -66,7 +66,7 @@ void CompressedRowSparseTensorImpl::resize_and_clear_(int64_t nnz_size, int64_t 
   sizes_and_strides_.set_sizes(size);
 }
 
-void CompressedRowSparseTensorImpl::resize_as_(const Tensor& src) {
+void CompressedSparseTensorImpl::resize_as_(const Tensor& src) {
   crow_indices_ = at::empty_like(src.crow_indices(), src.crow_indices().options(), src.crow_indices().suggest_memory_format());
   col_indices_ = at::empty_like(src.col_indices(), src.col_indices().options(), 
     src.col_indices().suggest_memory_format());
@@ -75,7 +75,7 @@ void CompressedRowSparseTensorImpl::resize_as_(const Tensor& src) {
   sizes_and_strides_.set_sizes(src.sizes());
 }
   
-void CompressedRowSparseTensorImpl::set_member_tensors_unsafe(const Tensor& crow_indices, const Tensor& col_indices,
+void CompressedSparseTensorImpl::set_member_tensors_unsafe(const Tensor& crow_indices, const Tensor& col_indices,
                                                       const Tensor& values, const Tensor& reduction) {
   TORCH_CHECK(!col_indices.is_sparse(), 
               "expected col_indices to be a dense tensor, but got indices of layout ", 
@@ -157,7 +157,7 @@ void CompressedRowSparseTensorImpl::set_member_tensors_unsafe(const Tensor& crow
   make_strides(rsplit_dim_, strides1_, dims1_);
 }
 
-void CompressedRowSparseTensorImpl::make_strides(int shape_start, std::vector<int>& strides, std::vector<int>& dims) {
+void CompressedSparseTensorImpl::make_strides(int shape_start, std::vector<int>& strides, std::vector<int>& dims) {
   int ndims = dims.size();
   auto sizes_ = sizes_and_strides_.sizes_arrayref();
   strides[0] = 1;

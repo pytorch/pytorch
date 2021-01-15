@@ -43,7 +43,7 @@ namespace at {
 // non-zero values respectively. The reduction_ tensor
 // is a new introduction into GCS that stores the dimensions
 // of the tensor that must be collapsed 
-struct TORCH_API CompressedRowSparseTensorImpl : public TensorImpl {
+struct TORCH_API CompressedSparseTensorImpl : public TensorImpl {
   Tensor crow_indices_;
   Tensor col_indices_;
   Tensor values_;
@@ -63,7 +63,7 @@ struct TORCH_API CompressedRowSparseTensorImpl : public TensorImpl {
   // a 2D GCS tensor.
   int rsplit_dim_;           
  public:
-  explicit CompressedRowSparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
+  explicit CompressedSparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
 
   void resize_and_clear_(int64_t nnz_size, int64_t ptr_size, int64_t redux_size, 
                          IntArrayRef size);
@@ -87,7 +87,7 @@ struct TORCH_API CompressedRowSparseTensorImpl : public TensorImpl {
 
  private :
   
-  explicit CompressedRowSparseTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type,
+  explicit CompressedSparseTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type,
                                at::Tensor crow_indices, at::Tensor col_indices, at::Tensor values, 
                                at::Tensor reduction);
 

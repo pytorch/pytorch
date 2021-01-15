@@ -104,8 +104,8 @@ enum class DispatchKey : uint8_t {
   SparseHIP, // TODO: I think this is not actually used, due to Note
              // [Masquerading as CUDA]
 
-  CompressedRowSparseCPU,
-  CompressedRowSparseCUDA,
+  CompressedSparseCPU,
+  CompressedSparseCUDA,
 
   NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
   // Here are reserved backends for user-defined backends, see Note [Private use

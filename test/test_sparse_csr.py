@@ -49,19 +49,19 @@ class TestSparseCSR(TestCase):
 
     def test_sparse_csr_from_dense(self):
         sp = torch.tensor([[1, 2], [3, 4]]).to_sparse_csr(-999)
-        self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int32), sp.pointers())
-        self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int32), sp.indices())
+        self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int32), sp.crow_indices())
+        self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int32), sp.col_indices())
         self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=torch.int64), sp.values())
 
     def test_dense_convert(self):
         size = (5, 5)
         dense = torch.randn(size)
-        sparse = dense.to_sparse_gcs(-999)
+        sparse = dense.to_sparse_csr(-999)
         self.assertEqual(sparse.to_dense(), dense)
         
         size = (4, 6)
         dense = torch.randn(size)
-        sparse = dense.to_sparse_gcs(-999)
+        sparse = dense.to_sparse_csr(-999)
         self.assertEqual(sparse.to_dense(), dense)
 
     def test_dense_convert_error(self):
@@ -89,9 +89,9 @@ class TestSparseCSR(TestCase):
         size = (5, 5)
         dense = torch.randn(size)
         coo_sparse = dense.to_sparse()
-        gcs_sparse = coo_sparse.to_sparse_csr()
+        csr_sparse = coo_sparse.to_sparse_csr()
 
-        self.assertEqual(gcs_sparse.to_dense(), dense)
+        self.assertEqual(csr_sparse.to_dense(), dense)
 
 if __name__ == '__main__':
     run_tests()

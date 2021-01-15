@@ -473,8 +473,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool is_sparse_gcs() const {
-    return key_set_.has(DispatchKey::CompressedRowSparseCPU) ||
-           key_set_.has(DispatchKey::CompressedRowSparseCUDA);
+    return key_set_.has(DispatchKey::CompressedSparseCPU) ||
+           key_set_.has(DispatchKey::CompressedSparseCUDA);
   }
 
   bool is_quantized() const {
