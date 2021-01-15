@@ -466,9 +466,9 @@ def _model_to_graph(model, args, verbose=False,
     # erased by some optimizations, so we need to set it explicitly again.
     if torch_out is not None:
         if not (isinstance(torch_out, list) or isinstance(torch_out, tuple)):
-            output_wrapped = [torch_out]
+            output_wrapped = [torch_out]  # type: ignore
         else:
-            output_wrapped = torch_out
+            output_wrapped = torch_out  # type: ignore
 
         output_tensors, out_desc = torch._C._jit_flatten(tuple(output_wrapped))
         torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference)
