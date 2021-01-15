@@ -12,6 +12,9 @@ namespace native {
 // Use REGISTER_DISPATCH to run CPU and CUDA backend.
 DEFINE_DISPATCH(fake_quant_tensor_stub);
 DEFINE_DISPATCH(fake_quant_grad_tensor_stub);
+// cachemask
+DEFINE_DISPATCH(fake_quant_tensor_cachemask_stub);
+// learnable
 DEFINE_DISPATCH(fake_quant_grad_learnable_tensor_stub);
 
 /* Fake-quantizes the 'inputs' tensor.
@@ -93,6 +96,67 @@ Tensor fake_quantize_per_tensor_affine_backward(
   fake_quant_grad_tensor_stub(
       X.device().type(), dX, X, dY, scale, zero_point, quant_min, quant_max);
   return dX;
+}
+
+// TODO(before land): docblock
+std::tuple<Tensor, Tensor> _fake_quantize_per_tensor_affine_cachemask(
+    const Tensor& self,
+    double scale,
+    int64_t zero_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  TORCH_CHECK(self.scalar_type() == ScalarType::Float);
+  TORCH_CHECK(
+      quant_min <= quant_max,
+      "`quant_min` should be less than or \
+        equal to `quant_max`.");
+  TORCH_CHECK(
+      zero_point >= quant_min && zero_point <= quant_max,
+      "`zero_point` must be between `quant_min` and `quant_max`.");
+
+  auto Y = at::empty_like(self, self.options(), MemoryFormat::Preserve);
+  // TODO(before land): should we init here or in the kernel,
+  //   and should we init to empty or zero?
+  auto mask = at::zeros_like(self, at::kBool, MemoryFormat::Preserve);
+  // fake_quant_tensor_stub(
+      // self.device().type(), Y, self, scale, zero_point, quant_min, quant_max);
+
+  fake_quant_tensor_cachemask_stub(
+      self.device().type(), Y, mask, self, scale, zero_point, quant_min, quant_max);
+
+  // TODO(before land): naive mask calculation
+  // TODO(next PR): efficient mask calculation (one kernel to get both fq and mask)
+  // TODO(future, optional): Bool Tensor uses 1 byte per value, can compress
+  //   further into 1 bit per value (might not be worth it).
+  return std::make_tuple(Y, mask);
+}
+
+// TODO(before land): docblock
+// TODO(before land): stop passing scale+zp around, since mask is already computed
+Tensor _fake_quantize_per_tensor_affine_cachemask_backward(
+    const Tensor& dY,
+    const Tensor& mask,
+    double scale,
+    int64_t zero_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
+  TORCH_CHECK(mask.scalar_type() == ScalarType::Bool);
+  TORCH_CHECK(mask.numel() == dY.numel(), "`mask` and `dY` are not the same size");
+  TORCH_CHECK(
+      quant_min <= quant_max,
+      "`quant_min` should be less than or \
+        equal to `quant_max`.");
+  TORCH_CHECK(
+      zero_point >= quant_min && zero_point <= quant_max,
+      "`zero_point` must be between `quant_min` and `quant_max`.");
+  if (dY.numel() <= 0) {
+    return dY;
+  }
+
+  // Note: no additional kernels needed, since mask is pre-computed
+  // and we can use the existing tensor multiplication kernels.
+  return dY * mask;
 }
 
 int64_t _get_zero_point_from_tensor(

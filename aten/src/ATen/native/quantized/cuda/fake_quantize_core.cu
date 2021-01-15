@@ -68,6 +68,56 @@ void fake_quantize_grad_tensor_kernel_cuda(
   });
 }
 
+void fake_quantize_tensor_cachemask_kernel_cuda(
+    Tensor& output,
+    Tensor& mask,
+    const Tensor& input,
+    float scale,
+    int64_t zero_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+
+  // populate output
+  fake_quantize_tensor_kernel_cuda(output, input, scale, zero_point, quant_min, quant_max);
+
+  // populate mask
+  auto iter_mask = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(mask)
+    .add_input(input)
+    .build();
+  // scalar type of this function is guaranteed to be float
+  float inv_scale = 1.0f / scale;
+  gpu_kernel(iter_mask, [=] GPU_LAMBDA(float input_val) -> bool {
+    auto qval = static_cast<int64_t>(std::nearbyint(input_val * inv_scale) + zero_point);
+    return ((quant_min <= qval) && (qval <= quant_max));
+  });
+
+  // TODO(before land): figure out why the following code attempting
+  //   to write the outputs in one go is not faster than the individual
+  //   loops above
+  /*
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(output)
+    .add_output(mask)
+    .add_input(input)
+    .build();
+  gpu_kernel_multiple_outputs(
+    iter, 
+    [=] GPU_LAMBDA (float input_val) -> thrust::tuple<float, bool> {
+      const auto qval = static_cast<int64_t>(std::nearbyint(input_val * inv_scale) + zero_point);
+      return {
+        // fake_quantized value
+        (fminf(quant_max, fmaxf(quant_min, qval)) - zero_point) * scale,
+        // mask for grad
+        ((quant_min <= qval) && (qval <= quant_max))
+      };
+    }
+  );
+  */
+}
+
 void _fake_quantize_grad_learnable_tensor_kernel_cuda(
     TensorIterator& iter,
     float scale,
@@ -96,6 +146,7 @@ void _fake_quantize_grad_learnable_tensor_kernel_cuda(
 }
 
 REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel_cuda);
+REGISTER_DISPATCH(fake_quant_tensor_cachemask_stub, &fake_quantize_tensor_cachemask_kernel_cuda);
 REGISTER_DISPATCH(fake_quant_grad_tensor_stub, &fake_quantize_grad_tensor_kernel_cuda);
 REGISTER_DISPATCH(fake_quant_grad_learnable_tensor_stub, &_fake_quantize_grad_learnable_tensor_kernel_cuda);
 

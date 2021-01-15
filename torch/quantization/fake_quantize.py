@@ -140,9 +140,16 @@ class FakeQuantize(FakeQuantizeBase):
                 X = torch.fake_quantize_per_channel_affine(X, self.scale, self.zero_point,
                                                            self.ch_axis, self.quant_min, self.quant_max)
             else:
-                X = torch.fake_quantize_per_tensor_affine(X, float(self.scale),
-                                                          int(self.zero_point), self.quant_min,
-                                                          self.quant_max)
+                # TODO(before land): real flag
+                use_new = True
+                if use_new:
+                    X, _mask = torch._fake_quantize_per_tensor_affine_cachemask(X, float(self.scale),
+                                                              int(self.zero_point), self.quant_min,
+                                                              self.quant_max)
+                else:
+                    X = torch.fake_quantize_per_tensor_affine(X, float(self.scale),
+                                                              int(self.zero_point), self.quant_min,
+                                                              self.quant_max)
         return X
 
     @torch.jit.export

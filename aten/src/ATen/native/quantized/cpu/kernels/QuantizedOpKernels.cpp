@@ -2091,6 +2091,58 @@ void fake_quantize_grad_tensor_kernel(
   });
 }
 
+void fake_quantize_tensor_cachemask_kernel(
+    Tensor& output,
+    Tensor& mask,
+    const Tensor& input,
+    float sc,
+    int64_t z_point,
+    int64_t quant_min,
+    int64_t quant_max) {
+  float inv_scale = 1.0f / sc;
+
+  /*
+  // TODO(before land): do it in the same loop
+  auto iter = TensorIterator::unary_op(output, input);
+  cpu_kernel(iter, [&](float self) -> float {
+    return (std::fmin(
+                std::fmax(
+                    static_cast<int64_t>(
+                        z_point + std::nearbyint(self * inv_scale)),
+                    quant_min),
+                quant_max) -
+            z_point) *
+        sc;
+  });
+
+  auto iter_mask = TensorIterator::unary_op(mask, input);
+  cpu_kernel(iter_mask, [&](float self) -> bool {
+    auto qval = static_cast<int64_t>(z_point + std::nearbyint(self * inv_scale));
+    return ((quant_min <= qval) && (qval <= quant_max));
+  });
+  */
+
+  // TODO before land: verify numerical correctness
+  auto iter_combined = TensorIteratorConfig()
+    .add_output(output)
+    .add_output(mask)
+    .add_input(input)
+    .build();
+
+  iter_combined.for_each([&](char** data, const int64_t* strides, int64_t n) {
+    for (int64_t i = 0; i < n; i++) {
+      float* output_val = (float*)(data[0] + i * strides[0]);
+      bool* mask_val = (bool*)(data[1] + i * strides[1]);
+      float* input_val = (float*)(data[2] + i * strides[2]);
+
+      const auto qval = static_cast<int64_t>(z_point + std::nearbyint(*input_val * inv_scale));
+      *output_val = (std::fmin(std::fmax(qval, quant_min), quant_max) - z_point) * sc;
+      *mask_val = ((quant_min <= qval) && (qval <= quant_max));
+    }
+  });
+
+}
+
 void fake_quantize_learnable_tensor_grad_kernel_cpu(
     TensorIterator& iter,
     float scale,
@@ -3054,6 +3106,8 @@ REGISTER_DISPATCH(fake_quant_grad_tensor_stub,
                   &fake_quantize_grad_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
 REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel);
+REGISTER_DISPATCH(fake_quant_tensor_cachemask_stub,
+                  &fake_quantize_tensor_cachemask_kernel);
 REGISTER_DISPATCH(qadaptive_avg_pool2d_nhwc_stub,
                   &qadaptive_avg_pool2d_nhwc_kernel);
 REGISTER_DISPATCH(qadaptive_avg_pool3d_ndhwc_stub,
