@@ -208,8 +208,9 @@ class DistributedOptimizer:
         else:
             logger.warn(
                 "Creating the optimizer %s without TorchScript support, this might results in "
-                "slow computation time due to the python Global Interpreter Lock (GIL). Please "
-                "file an issue if you need this optimizer in TorchScript. ",
+                "slow computation time in multithreading environment (i.e. Distributed Model "
+                "Parallel training on CPU) due to the python Global Interpreter Lock (GIL). "
+                "Please file an issue if you need this optimizer in TorchScript. ",
                 str(optimizer_class)
             )
             optimizer_new_func = _new_local_optimizer
