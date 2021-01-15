@@ -44,7 +44,8 @@ from torch.jit._async import fork, wait
 from torch.jit._serialization import save, load
 from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph
 
-from torch.jit._freeze import freeze
+from torch.jit.cuda import stream
+from torch.jit._freeze import freeze, optimize_frozen_module
 
 # For backwards compatibility
 _fork = fork
@@ -81,7 +82,7 @@ def script_if_tracing(fn):
     ``@torch.jit.script_if_tracing`` to substitute for
     ``torch.jit.script``.
 
-    Arguments:
+    Args:
         fn: A function to compile.
 
     Returns:
@@ -92,20 +93,20 @@ def script_if_tracing(fn):
     return _script_if_tracing(fn)
 
 
-# for torch.jit.isinstance 
+# for torch.jit.isinstance
 def isinstance(obj, target_type):
     """
-    This function provides for conatiner type refinement in TorchScript. It can refine 
+    This function provides for conatiner type refinement in TorchScript. It can refine
     parameterized containers of the List, Dict, Tuple, and Optional types. E.g. ``List[str]``,
-    ``Dict[str, List[torch.Tensor]]``, ``Optional[Tuple[int,str,int]]``. It can also 
+    ``Dict[str, List[torch.Tensor]]``, ``Optional[Tuple[int,str,int]]``. It can also
     refine basic types such as bools and ints that are available in TorchScript.
 
-    Arguments:
+    Args:
         obj: object to refine the type of
-        target_type: type to try to refine obj to 
+        target_type: type to try to refine obj to
     Returns:
-        ``bool``: True if obj was successfully refined to the type of target_type, 
-            False otherwise with no new type refinement     
+        ``bool``: True if obj was successfully refined to the type of target_type,
+            False otherwise with no new type refinement
 
 
     Example (using ``torch.jit.isinstance`` for type refinement):

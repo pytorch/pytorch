@@ -308,11 +308,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() {
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   for (size_t i = 0; i < devices_.size(); ++i) {
     // Checking the work's corresponding CUDA events' status
-    auto ret = cudaEventQuery((*cudaEvents_)[i]);
-    if (ret != cudaSuccess && ret != cudaErrorNotReady) {
-      AT_CUDA_CHECK(ret);
-    }
-    if (ret == cudaErrorNotReady) {
+    if (!(*cudaEvents_)[i].query()) {
       return false;
     }
   }
@@ -529,7 +525,7 @@ void ProcessGroupNCCL::abortTimedOutCollectives(std::unordered_set<std::string>&
                                           " ran for ",
                                           timeElapsed.count(),
                                           " milliseconds before timing out.");
-      LOG(INFO) << exceptionMsg;
+      LOG(ERROR) << exceptionMsg;
       std::exception_ptr exception_ptr = std::make_exception_ptr(
           std::runtime_error(exceptionMsg));
       work.setException(exception_ptr);
@@ -1008,7 +1004,7 @@ std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
 
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
     getFuture() {
-  return c10::make_intrusive<FutureNCCL>(at::IValue(*outputs_), cudaEvents_);
+  return future_;
 }
 
 void ProcessGroupNCCL::workEnqueue(
@@ -1046,17 +1042,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   bool can_profile = outputs.size() == 1;
   auto work = initWork(devices, rank_, opType, can_profile ? profilingTitle : nullptr);
 
-  // Store references to outputs to be used by WorkNCCL::getFuture.
+  // Store references to outputs to be used by WorkNCCL::result and operator<<.
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
-
-  if (work->recordFunctionEndCallback_) {
-    // recordFunctionEndCallback_ is normally called in fininsh() function by
-    // base class, but since finish is not called by WorkNCCL, we run this
-    // function now.
-    // Note when can_profile is false, profilingTitle is not provided and so,
-    // recordFunctionEndCallback_ is not set.
-    work->recordFunctionEndCallback_();
-  }
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
@@ -1097,10 +1084,28 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     work->ncclComms_[i] = ncclComms[i];
   }
 
+  {
+    at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
+    work->future_ = c10::make_intrusive<at::cuda::CUDAFuture>(
+        c10::ListType::create(c10::TensorType::get()));
+    work->future_->markCompleted(at::IValue(*work->outputs_));
+  }
+
   // Set appropriate work parameters.
   work->blockingWait_ = blockingWait_;
   work->opTimeout_ = opTimeout_;
   work->store_ = store_;
+
+  if (work->recordFunctionEndCallback_) {
+    // recordFunctionEndCallback_ is normally called in fininsh() function by
+    // base class, but since finish is not called by WorkNCCL, we schedule this
+    // function to be run when work is done. Note that addCallback() onto the
+    // Work's CUDAFuture is not useful here, as it would just run the callback
+    // inline.
+    // Note when can_profile is false, profilingTitle is not provided and so,
+    // recordFunctionEndCallback_ is not set.
+    work->recordFunctionEndCallback_();
+  }
 
   if (asyncErrorHandling_) {
     workEnqueue(work);
@@ -1130,7 +1135,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
   auto work = initWork(devices, rank_, opType);
 
   if (opType == OpType::RECV) {
-    // Store references to outputs to be used by WorkNCCL::getFuture.
+    // Store references to outputs to be used by WorkNCCL::result and operator<<.
     work->outputs_ = std::make_shared<std::vector<at::Tensor>>(tensors);
   }
 
@@ -1174,6 +1179,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
     work->blockingWait_ = blockingWait_;
     work->opTimeout_ = opTimeout_;
     work->store_ = store_;
+  }
+
+  if (opType == OpType::RECV) {
+    at::cuda::CUDAMultiStreamGuard streamGuard(ncclStreams_[key]);
+    work->future_ = c10::make_intrusive<at::cuda::CUDAFuture>(
+        c10::ListType::create(c10::TensorType::get()));
+    work->future_->markCompleted(at::IValue(*work->outputs_));
   }
 
   return work;
@@ -1397,7 +1409,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::reduce_scatter(
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
     const BarrierOptions& opts) {
   std::vector<at::Device> devices;
-  if (usedDeviceIdxs_.empty()) {
+
+  // Use user defined GPU device ids if provided
+  if (!opts.device_ids.empty()) {
+    for (auto device : opts.device_ids) {
+      devices.emplace_back(at::DeviceType::CUDA, device);
+    }
+  } else if (usedDeviceIdxs_.empty()) {
     // This means there is not yet a NCCL collective being called
     // Here we have to use the best guesses and will use a single GPU to call
     // allreduce to achieve barrier.
@@ -1405,10 +1423,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
     // ensure that each process is on a different GPU
     auto numGPUs = at::cuda::getNumGPUs();
     int16_t deviceIdx = static_cast<int16_t>(rank_ % numGPUs);
-    devices.push_back(at::Device(at::DeviceType::CUDA, deviceIdx));
+    devices.emplace_back(at::DeviceType::CUDA, deviceIdx);
   } else {
     for (auto usedDeviceIdx : usedDeviceIdxs_) {
-      devices.push_back(at::Device(at::DeviceType::CUDA, usedDeviceIdx));
+      devices.emplace_back(at::DeviceType::CUDA, usedDeviceIdx);
     }
   }
 

@@ -116,8 +116,8 @@ void div_kernel(TensorIterator& iter) {
 }
 
 void remainder_kernel(TensorIterator& iter) {
-  if (isIntegralType(iter.dtype(), /*includeBool*/ false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "remainder_cpu", [&]() {
+  if (isIntegralType(iter.common_dtype(), /*includeBool*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "remainder_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
         TORCH_CHECK(b != 0, "ZeroDivisionError");
         scalar_t r = a % b;
@@ -128,7 +128,7 @@ void remainder_kernel(TensorIterator& iter) {
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "remainder_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "remainder_cpu", [&]() {
       cpu_kernel_vec(iter,
         [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
           scalar_t mod = std::fmod(a, b);
@@ -529,7 +529,7 @@ void smooth_l1_kernel(TensorIterator& iter, double beta) {
 }
 
 void sigmoid_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "sigmoid_backward_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "sigmoid_backward_cpu", [&]() {
     auto one_vec = Vec256<scalar_t>((scalar_t)(1));
     cpu_kernel_vec(iter,
       [=](scalar_t a, scalar_t b) -> scalar_t {
@@ -639,18 +639,15 @@ void mse_kernel(TensorIterator& iter) {
 }
 
 void fmod_kernel(TensorIterator& iter) {
-  // Use the dtype of the first argument to retain BC,
-  // change to common_dtype for type promotion in the future
-  // Issue #47779: https://github.com/pytorch/pytorch/issues/47779
-  if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "fmod_cpu", [&]() {
+  if (isIntegralType(iter.common_dtype(), /*includeBool=*/ false)) {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "fmod_cpu", [&]() {
       cpu_kernel(iter, [=](scalar_t x, scalar_t d) -> scalar_t {
         TORCH_CHECK(d != 0, "ZeroDivisionError");
         return x % d;
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "fmod_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.common_dtype(), "fmod_cpu", [&]() {
       cpu_kernel_vec(
         iter,
         [](scalar_t x, scalar_t d) -> scalar_t {
@@ -659,7 +656,7 @@ void fmod_kernel(TensorIterator& iter) {
         [](Vec256<scalar_t> x, Vec256<scalar_t> d) {
           return x.fmod(d);
         });
-      });
+    });
   }
 }
 
@@ -818,6 +815,20 @@ void copysign_kernel(TensorIterator& iter) {
   });
 }
 
+void xlogy_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "xlogy_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t x, scalar_t y) -> scalar_t {
+      if (at::_isnan(y)){
+        return NAN;
+      }
+      if (x == 0){
+        return 0;
+      }
+      return x * std::log(y);
+    });
+  });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(add_stub, &add_kernel);
@@ -859,6 +870,7 @@ REGISTER_DISPATCH(igammac_stub, &igammac_kernel);
 REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel);
 REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel);
 REGISTER_DISPATCH(copysign_stub, &copysign_kernel);
+REGISTER_DISPATCH(xlogy_stub, &xlogy_kernel);
 
 } // namespace native
 } // namespace at

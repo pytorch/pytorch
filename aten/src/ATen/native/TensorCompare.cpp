@@ -38,6 +38,8 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
   TORCH_CHECK(self.scalar_type() == other.scalar_type(), self.scalar_type(), " did not match ", other.scalar_type());
   TORCH_CHECK(!(self.is_complex() && equal_nan),
     "isclose with equal_nan=True is not supported for complex inputs.");
+  TORCH_CHECK(!(self.is_quantized() || other.is_quantized()),
+    "isclose is not supported for quantized inputs.");
 
   // Checks that rtol and atol are non-negative
   // Note: consistent with Python's isclose but divergent from NumPy's, which
@@ -104,7 +106,7 @@ Tensor isinf(const Tensor &self) {
           (at::isinf(at::imag(self)));
   }
 
-  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isinf", [&]() {
+  return AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "isinf", [&]() {
     return self.abs() == std::numeric_limits<scalar_t>::infinity();
   });
 }
@@ -168,7 +170,7 @@ Tensor isfinite(const Tensor& self) {
     return at::isfinite(self.abs());
   }
 
-  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isfinite", [&]() {
+  return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "isfinite", [&]() {
     return (self == self) * (self.abs() != std::numeric_limits<scalar_t>::infinity());
   });
 }
@@ -193,7 +195,35 @@ bool is_nonzero(const Tensor& self) {
 
 namespace {
 
-static Tensor wrapped_scalar_tensor(
+// DO NOT USE THIS -- it's just an implementation detail of wrapped_scalar tensor below.
+at::Tensor scalar_to_tensor_default_dtype(
+    Scalar s,
+    const Device device = at::kCPU) {
+  if (s.isFloatingPoint()) {
+    return at::scalar_tensor(
+        s, at::device(device).dtype(at::get_default_dtype()));
+  } else if (s.isBoolean()) {
+    return at::scalar_tensor(s, at::device(device).dtype(at::kBool));
+  } else if (s.isComplex()) {
+    return at::scalar_tensor(
+        s, at::device(device).dtype(at::get_default_complex_dtype()));
+  } else {
+    TORCH_INTERNAL_ASSERT(s.isIntegral(false));
+    return at::scalar_tensor(s, at::device(device).dtype(at::kLong));
+  }
+}
+
+// TLDR: Don't call with `use_default_dtype` true -- this is only necessary to support the partial
+// type-promotion that torch.where supports.  Once torch.where fully supports type promotion, we
+// won't need this function.
+//
+// Longer explanation:
+// `use_default_dtype` is a bit of a hack because torch.where doesn't support type promotion, but
+// does support `torch.where(tensor, scalar1, scalar2)` with default scalar types.  The trickiness is we
+// usually convert double scalars to doubles, and `set_wrapped_number` defines type promotion priority
+// as being below tensor types rather than as the default dtype (perhaps we should?).  This wouldn't matter
+// if we just supported type normal type promotion on torch.where, however.
+Tensor wrapped_scalar_tensor(
     Scalar scalar,
     Device device,
     bool use_default_dtype = false) {

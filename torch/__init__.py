@@ -359,11 +359,13 @@ def set_deterministic(d):
         * :class:`torch.nn.FractionalMaxPool2d` when called on a CUDA tensor that requires grad
         * :class:`torch.nn.FractionalMaxPool3d` when called on a CUDA tensor that requires grad
         * :func:`torch.nn.functional.interpolate` when called on a CUDA tensor that requires grad
-            and one of the following modes is used:
-            - `linear`
-            - `bilinear`
-            - `bicubic`
-            - `trilinear`
+          and one of the following modes is used:
+
+          - `linear`
+          - `bilinear`
+          - `bicubic`
+          - `trilinear`
+
         * :class:`torch.nn.ReflectionPad1d` when called on a CUDA tensor that requires grad
         * :class:`torch.nn.ReflectionPad2d` when called on a CUDA tensor that requires grad
         * :class:`torch.nn.ReplicationPad1d` when called on a CUDA tensor that requires grad
@@ -572,6 +574,7 @@ import torch.fft
 import torch.futures
 import torch.nn
 import torch.nn.intrinsic
+import torch.nn.quantizable
 import torch.nn.quantized
 import torch.optim
 import torch.optim._multi_tensor
@@ -594,6 +597,7 @@ import torch.quantization
 import torch.utils.data
 import torch.__config__
 import torch.__future__
+import torch.profiler
 
 _C._init_names(list(torch._storage_classes))
 

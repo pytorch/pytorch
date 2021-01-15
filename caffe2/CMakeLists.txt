@@ -302,6 +302,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       add_dependencies(process_group_agent torch c10d)
 
       add_library(tensorpipe_agent
+        "${TORCH_SRC_DIR}/csrc/distributed/rpc/macros.h"
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.h"
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.cpp"
@@ -340,9 +341,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(GENERATED_CXX_TORCH
     "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_0.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_1.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_2.cpp"
     )
 
   if(NOT INTERN_DISABLE_AUTOGRAD)
@@ -434,8 +432,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/load_derivatives.py"
     "${TOOLS_PATH}/autograd/nested_dict.py"
     "${TOOLS_PATH}/autograd/utils.py"
-    "${TOOLS_PATH}/jit/gen_unboxing_wrappers.py"
-    "${TOOLS_PATH}/jit/templates/generated_unboxing_wrappers.cpp"
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
 
@@ -479,6 +475,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   # This one needs to be unconditionally added as Functions.cpp is also unconditionally added
   list(APPEND TORCH_SRCS
     ${TORCH_SRC_DIR}/csrc/autograd/FunctionsManual.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/out_types.cpp
   )
 
   if(NOT INTERN_DISABLE_AUTOGRAD)
@@ -515,59 +512,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
 
   if(USE_CUDA OR USE_ROCM)
-    list(APPEND Caffe2_GPU_HIP_JIT_FUSERS_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp
-      ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
-      ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/arith.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/compute_at.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/codegen.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/dispatch.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/expr_evaluator.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor_kernel_arg.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor_launch_params.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor_utils.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/fusion.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/graph_fuser.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/index_compute.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/instrumentation.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_base_nodes.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_cloner.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_graphviz.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_nodes.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_iostream.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/iter_visitor.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_cache.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_ir.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_ir_builder.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_ir_printer.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_index.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_alias_memory.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_insert_syncs.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_loops.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_thread_predicate.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_unroll.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_utils.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_validation.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower2device.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/manager.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/mutator.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/parser.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/partition.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/predicate_compute.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/register_interface.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/scheduler.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/shape_inference.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tensor_view.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_iter.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_replay.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_rfactor.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/type.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/cuda_codegen.cpp
-    )
+    append_filelist("libtorch_cuda_core_sources" Caffe2_GPU_HIP_JIT_FUSERS_SRCS)
   endif()
 
   if(USE_CUDA)

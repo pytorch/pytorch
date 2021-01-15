@@ -78,7 +78,7 @@ inline unique_ptr<BlobSerializerBase> CreateSerializer(TypeIdentifier id) {
  * @brief BlobDeserializerBase is an abstract class that deserializes a blob
  * from a BlobProto or a TensorProto.
  */
-class CAFFE2_API BlobDeserializerBase {
+class TORCH_API BlobDeserializerBase {
  public:
   virtual ~BlobDeserializerBase() {}
 

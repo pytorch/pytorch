@@ -459,7 +459,7 @@ def replace_math_functions(input_string):
     return output_string
 
 
-RE_SYNCTHREADS = re.compile(r"[:]?[:]?\b(__syncthreads)\b(\w*\()")
+RE_SYNCTHREADS = re.compile(r":?:?\b(__syncthreads)\b(\w*\()")
 
 
 def hip_header_magic(input_string):
@@ -782,7 +782,9 @@ def preprocessor(
                                                     os.path.relpath(header_filepath, output_directory),
                                                     all_files, includes, stats, hip_clang_launch, is_pytorch_extension,
                                                     clean_ctx, show_progress)
-                return templ.format(os.path.relpath(HIPIFY_FINAL_RESULT[header_filepath]["hipified_path"], header_dir))
+                value = HIPIFY_FINAL_RESULT[header_filepath]["hipified_path"]
+                assert value is not None
+                return templ.format(os.path.relpath(value, header_dir))
 
             return m.group(0)
         return repl
