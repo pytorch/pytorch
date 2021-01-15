@@ -1600,9 +1600,9 @@
   target: zeros_like(grad)
 
 - name: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
-  grad_output: l1_loss_double_backward_grad_output(grad, self, target, reduction)
-  self: zeros_like(grad)
-  target: zeros_like(grad)
+  grad_output: l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
+  self: l1_loss_double_backward(grad, grad_output, self, target, reduction)
+  target: l1_loss_double_backward(grad, grad_output, target, target, reduction)
 
 - name: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
   grad_output: log_sigmoid_backward(grad, self, buffer)
