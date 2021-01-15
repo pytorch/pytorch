@@ -1440,9 +1440,9 @@ if TEST_SCIPY:
                test_complex_grad=False,
                sample_inputs_func=sample_inputs_trace,
                skips=(
-                    SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                   SkipInfo('TestCommon', 'test_variant_consistency_jit',
                             dtypes=[torch.complex64, torch.complex128]),
-                    SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                   SkipInfo('TestCommon', 'test_variant_consistency_eager',
                             dtypes=[torch.complex64, torch.complex128]))),
     ]
     op_db = op_db + op_db_scipy_reference
