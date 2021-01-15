@@ -151,16 +151,16 @@ class JitCommonTestCase(TestCase):
             err_msg += "One or more nodes were expected to be autodiffed, " \
                 "but were not found in specified fusible/nonfusible " \
                 "DifferentiableGraph groups. \nSpecifically:"
-            diff_nodes_missing = [] # The node is intended to appear in a 
-                                    # differentiable graph but doesn't
-            diff_nodes_in_fusion = [] # The node is intended to appear in a 
-                                      # differentiable graph outside of a fusion
-                                      # group but instead is in a fusion group
-            fusion_nodes_missing = [] # The node is intended to appear in a 
-                                      # fusion group but doesn't
-            fusion_nodes_in_diff = [] # The node is intended to appear in a fusion
-                                      # group but instead is just in an outer
-                                      # differentiable graph
+            # The node is intended to appear in a differentiable graph but doesn't 
+            diff_nodes_missing = []
+            # The node is intended to appear in a differentiable graph
+            # outside of a fusion group but instead is in a fusion group
+            diff_nodes_in_fusion = []
+            # The node is intended to appear in a fusion group but doesn't
+            fusion_nodes_missing = []
+            # The node is intended to appear in a fusion group but instead
+            # is just in an outer differentiable graph
+            fusion_nodes_in_diff = []
             for node in nodes_not_in_diff_graph:
                 if node in non_fusible_nodes_being_fused:
                     diff_nodes_in_fusion.append(node)
@@ -168,9 +168,9 @@ class JitCommonTestCase(TestCase):
                     diff_nodes_missing.append(node)
             for node in fusion_nodes_not_found:
                 if node in nodes_in_diff_graph:
-                   fusion_nodes_in_diff.append(node)
+                    fusion_nodes_in_diff.append(node)
                 else:
-                   fusion_nodes_missing.append(node)
+                    fusion_nodes_missing.append(node)
             if len(diff_nodes_missing) > 0:
                 err_msg += f"\n  {diff_nodes_missing} were not in one of the " \
                     "DifferentiableGraphs when they were expected to be. " \
