@@ -449,4 +449,6 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable]) -> GraphModule:
         GraphModule: a Module created from the recorded operations from ``root``.
 
     """
-    return GraphModule(root if isinstance(root, torch.nn.Module) else torch.nn.Module(), Tracer().trace(root))
+    return GraphModule(root if isinstance(root, torch.nn.Module) else torch.nn.Module(),
+                       Tracer().trace(root),
+                       root.__class__.__name__)
