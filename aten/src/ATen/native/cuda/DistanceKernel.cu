@@ -339,11 +339,11 @@ void cdist_backward_kernel_impl(Tensor& result, const Tensor& grad, const Tensor
   const int64_t count = dist.numel();
   const int64_t grid_temp = (count + block_y - 1) / block_y;
 
-  // const int grid_y = int(sqrt(float(grid_temp - 1))) + 1;
-  // const int grid_z = (grid_temp + grid_y - 1) / grid_y;
+  const int grid_y = int(std::sqrt(float(grid_temp - 1))) + 1;
+  const int grid_z = (grid_temp + grid_y - 1) / grid_y;
 
-  const int grid_z = grid_temp / 65536 ? 65535 : grid_temp;
-  const int grid_y = (grid_temp + 65535) / 65536;
+  // const int grid_z = grid_temp / 65536 ? 65535 : grid_temp;
+  // const int grid_y = (grid_temp + 65535) / 65536;
 
   const dim3 grid(grid_x, grid_y, grid_z);
   const dim3 block(block_x, block_y);
