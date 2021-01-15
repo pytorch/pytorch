@@ -391,9 +391,9 @@ def _unpatch_wrapped_functions(orig_fns : List[PatchedFn]):
 
 def wrap(fn_or_name : Union[str, Callable]):
     """
-    This function can be called at global scope in a module to cause
-    references to the global function specified by `fn_or_name` to use
-    them in FX::
+    This function can be called at module-level scope to register fn_or_name as a "leaf function".
+    A "leaf function" will be preserved as a CallFunction node in the FX trace instead of being
+    traced through::
 
         # foo/bar/baz.py
         def my_custom_function(x, y):
