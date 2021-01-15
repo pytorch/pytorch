@@ -2643,17 +2643,14 @@ TEST(NVFuserTest, FusionUnaryOps_CUDA) {
       OpTuple{at::round, UnaryOpType::Round, "round"},
       OpTuple{at::rsqrt, UnaryOpType::Rsqrt, "rsqrt"},
       OpTuple{at::sigmoid, UnaryOpType::Sigmoid, "sigmoid"},
-      // Temporarily disable to let the other CI tests work.
-      // OpTuple{at::sin, UnaryOpType::Sin, "sin"},
       OpTuple{at::sinh, UnaryOpType::Sinh, "sinh"},
       OpTuple{at::sqrt, UnaryOpType::Sqrt, "sqrt"},
       OpTuple{at::tan, UnaryOpType::Tan, "tan"},
       OpTuple{at::tanh, UnaryOpType::Tanh, "tanh"},
       OpTuple{at::trunc, UnaryOpType::Trunc, "trunc"}};
 
-  std::vector<OpWithDTypeTuple> ops_with_dtype {
-    OpWithDTypeTuple{at::sin, UnaryOpType::Sin, "sin"}
-  };
+  std::vector<OpWithDTypeTuple> ops_with_dtype{
+      OpWithDTypeTuple{at::sin, UnaryOpType::Sin, "sin"}};
 
   std::for_each(ops.begin(), ops.end(), [](OpTuple& op) {
     test_op(
