@@ -2,7 +2,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
-#include <LossMulti.h>
+#include <ATen/native/LossMulti.h>
 
 namespace at {
 namespace native {
