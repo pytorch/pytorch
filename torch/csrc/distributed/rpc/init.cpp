@@ -384,11 +384,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
 
                   Args:
                     rref (torch.distributed.rpc.RRef): The RRef to get type of.
-                    timeout (float, optional): Timeout for ``_get_type``. If
-                          the call does not complete within this timeframe, an
-                          exception indicating so will be raised. If this
-                          argument is not provided, the default RPC timeout will
-                           be used.
+                    timeout (float, optional): Timeout, in seconds for
+                          ``_get_type``. If the call does not complete within
+                          this timeframe, an exception indicating so will be
+                          raised. If this argument is not provided, the default
+                          RPC timeout will be used.
               )")
           .def(
               "_get_future",
