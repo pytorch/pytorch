@@ -1784,7 +1784,7 @@ static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
 }
 
 // This is a type dispatching helper function for 'apply_cholesky_inverse'
-Tensor& _cholesky_inverse_out_helper_cuda(Tensor &result, Tensor& infos, bool upper) {
+Tensor& cholesky_inverse_kernel_impl(Tensor &result, Tensor& infos, bool upper) {
   // This function calculates the inverse matrix in-place
   // result should be in column major order and contain matrices to invert
   // the content of result is overwritten by 'apply_cholesky_inverse'
@@ -1793,6 +1793,8 @@ Tensor& _cholesky_inverse_out_helper_cuda(Tensor &result, Tensor& infos, bool up
   });
   return result;
 }
+
+REGISTER_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
