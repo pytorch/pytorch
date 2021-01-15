@@ -1,4 +1,5 @@
 from typing import List, Optional
+import logging
 
 import torch.distributed.rpc as rpc
 import torch.optim as optim
@@ -18,6 +19,7 @@ import torch.distributed.autograd as dist_autograd
 from collections import defaultdict
 from threading import Lock
 
+logger = logging.getLogger(__name__)
 
 # XXX: we define a _ScriptModuleOptimizer here to explicitly
 # compile the FunctionalOptimizer class into TorchScript
@@ -204,6 +206,12 @@ class DistributedOptimizer:
         if self.is_functional_optim:
             optimizer_new_func = _new_script_local_optimizer
         else:
+            logger.warn(
+                "Creating the optimizer %s without TorchScript support, this might results in "
+                "slow computation time due to the python Global Interpreter Lock (GIL). Please "
+                "file an issue if you need this optimizer in TorchScript. ",
+                str(optimizer_class)
+            )
             optimizer_new_func = _new_local_optimizer
 
         remote_optim_futs = []
