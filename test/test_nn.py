@@ -1211,32 +1211,19 @@ class TestNN(NNTestCase):
         with self.assertRaises(KeyError):
             m.add_module('attribute_name', nn.Module())
 
+    @unittest.expectedFailure
     def test_getattr_with_property(self):
         class Model(nn.Module):
-            def __init__(self):
-                super(Model, self).__init__()
-                self.linear = nn.Linear(4, 5)
-
-            def forward(self, input):
-                return self.linear(input)
-
             @property
             def some_property(self):
                 return self.something_that_doesnt_exist
 
         model = Model()
-        with self.assertRaises(nn.modules.module.ModuleAttributeError) as mae:
-            check = model.shouldnt_exist
-            self.assertIn("shouldnt_exist", mae)
 
-        # Before using nn.modules.ModuleAttributeError, if an AttributeError
-        # was raised in a property. The AttributeError was raised on the
-        # property itself. This checks that some_property is not in the
-        # expection.
-        with self.assertRaises(nn.modules.module.ModuleAttributeError) as mae:
-            check = model.some_property
-            self.assertIn("something_that_doesnt_exist", mae)
-            self.assertNotIn("some_propery", mae)
+        with self.assertRaisesRegex(
+                AttributeError,
+                r"'Model' object has no attribute 'something_that_doesnt_exist'"):
+            model.some_property
 
     def test_Sequential_getitem(self):
         l1 = nn.Linear(10, 20)
