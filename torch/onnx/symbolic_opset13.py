@@ -10,10 +10,11 @@ from torch.onnx.symbolic_helper import parse_args, _unimplemented
 from torch.onnx.symbolic_opset9 import overload_by_arg_count, _maybe_cast_reduce_op_input
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
-block_listed_operators = ['']
 
-for block_listed_op in block_listed_operators:
-    vars()[block_listed_op] = _block_list_in_opset(block_listed_op)
+# EDITING THIS FILE? READ THIS FIRST!
+# see Note [Edit Symbolic Files] in symbolic_helper.py
+
+# This file exports ONNX ops for opset 13
 
 
 @parse_args('v', 'i', 'none')
