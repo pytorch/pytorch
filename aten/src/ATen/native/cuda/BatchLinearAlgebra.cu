@@ -1758,7 +1758,8 @@ static inline void apply_reflect_conj_tri_single(Tensor& input, bool upper) {
 /*
 Computes the inverse of a symmetric (Hermitian) positive-definite matrix n-by-n matrix 'input' using the Cholesky factorization
 This is an in-place routine, content of 'input' is overwritten.
-'infos' is an int Tensors containing error codes for each matrix in the batched input.
+'infos' is an int Tensor containing error codes for each matrix in the batched input.
+Single matrix MAGMA routine requires 'infos' to reside in CPU memory.
 For more information see MAGMA's documentation for POTRI routine.
 */
 template <typename scalar_t>
