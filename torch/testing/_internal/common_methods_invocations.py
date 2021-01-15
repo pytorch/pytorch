@@ -92,6 +92,7 @@ class OpInfo(object):
                                             # with the dtypes support on the tested device
                  test_inplace_grad=True,  # whether to gradcheck and gradgradcheck the inplace variant
                  test_complex_grad=True,  # whether to gradcheck and gradgradcheck for complex dtypes
+                 test_scripted_jit=True,  # whether to test with scripted forward, grad, and grad grad
                  skip_bfloat16_grad=False,  # whether to skip grad and gradgradcheck for bfloat16 dtype
                  assert_autodiffed=False,  # if a op's aten::node is expected to be symbolically autodiffed
                  autodiff_nonfusible_nodes=None,  # a list of strings with node names that are expected to be in a
@@ -135,6 +136,7 @@ class OpInfo(object):
 
         self.test_inplace_grad = test_inplace_grad
         self.test_complex_grad = test_complex_grad
+        self.test_scripted_jit = test_scripted_jit
         self.supports_tensor_out = supports_tensor_out
         self.promotes_integers_to_float = promotes_integers_to_float
 
@@ -568,6 +570,21 @@ class TriangularOpInfo(OpInfo):
 
         return triangular_func
 
+    def get_method(self):
+        """
+        Returns the method variant of the operator
+        compatible with gradcheck for triangular input functions.
+        It works only for single input argument and upper kwarg
+        """
+        def triangular_func(non_triangular_input, upper=False):
+            if upper:
+                triangular_input = non_triangular_input.triu()
+            else:
+                triangular_input = non_triangular_input.tril()
+            return self.method_variant(triangular_input, upper=upper)
+
+        return triangular_func
+
     def sample_inputs(self, device, dtype, requires_grad=False):
         """
         This function generates Cholesky factors of positive-definite (non-singular) Hermitian (symmetric) matrices
@@ -911,6 +928,7 @@ op_db: List[OpInfo] = [
                      op=torch.cholesky_inverse,
                      dtypes=floating_and_complex_types(),
                      test_inplace_grad=False,
+                     test_scripted_jit=False,
                      supports_tensor_out=True,
                      decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
                      skips=(
@@ -922,9 +940,7 @@ op_db: List[OpInfo] = [
                          SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                   dtypes=[torch.complex64, torch.complex128]),
                          SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                                  dtypes=[torch.complex64, torch.complex128]),
-                         # These tests do not take into account custom op.get_op()
-                         SkipInfo('TestCommon', 'test_variant_consistency_jit'),),),
+                                  dtypes=[torch.complex64, torch.complex128]))),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),

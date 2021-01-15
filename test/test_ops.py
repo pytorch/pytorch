@@ -279,14 +279,15 @@ class TestCommon(JitCommonTestCase):
                         if op.skip_bfloat16_grad else floating_and_complex_types_and(torch.half, torch.bfloat16)
 
                     # Check scripted forward, grad, and grad grad
-                    script_fn = create_script_fn(self, name, func_type, op.output_func)
+                    if op.test_scripted_jit:
+                        script_fn = create_script_fn(self, name, func_type, op.output_func)
 
-                    check_against_reference(self,
-                                            script_fn,
-                                            fn,
-                                            (*sample.input,) + sample.args,
-                                            sample.kwargs,
-                                            no_grad=(dtype not in dtypes_to_grad_check))
+                        check_against_reference(self,
+                                                script_fn,
+                                                fn,
+                                                (*sample.input,) + sample.args,
+                                                sample.kwargs,
+                                                no_grad=(dtype not in dtypes_to_grad_check))
 
                     # Check traced forward, grad, and grad grad
                     traced_fn = create_traced_fn(self, variant)
@@ -317,7 +318,8 @@ class TestCommon(JitCommonTestCase):
                             fusible_nodes = op.autodiff_fusible_nodes
 
                         self.assertAutodiffNode(traced_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
-                        self.assertAutodiffNode(script_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
+                        if op.test_scripted_jit:
+                            self.assertAutodiffNode(script_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
 
 
     @ops(op_db)
