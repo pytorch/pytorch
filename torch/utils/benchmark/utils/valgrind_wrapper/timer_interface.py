@@ -604,6 +604,7 @@ class _ValgrindWrapper(object):
                 run_loop_exec = cpp_jit.compile_callgrind_template(
                     task_spec.stmt,
                     task_spec.setup,
+                    task_spec.global_setup or "",
                 )
                 run_loop_cmd = [
                     run_loop_exec,

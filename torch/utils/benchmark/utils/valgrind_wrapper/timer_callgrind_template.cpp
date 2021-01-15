@@ -1,8 +1,8 @@
 /* C++ template for Timer.collect_callgrind
 
 This template will be consumed by `cpp_jit.py`, and will replace:
+    `GLOBAL_SETUP_TEMPLATE_LOCATION`
     `SETUP_TEMPLATE_LOCATION`
-      and
     `STMT_TEMPLATE_LOCATION`
 sections with user provided statements.
 */
@@ -12,6 +12,9 @@ sections with user provided statements.
 
 #include <callgrind.h>
 #include <torch/torch.h>
+
+// Global setup. (e.g. #includes)
+// GLOBAL_SETUP_TEMPLATE_LOCATION
 
 #if defined(NVALGRIND)
 static_assert(false);

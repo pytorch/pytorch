@@ -28,6 +28,7 @@ class TaskSpec:
     """Container for information used to define a Timer. (except globals)"""
     stmt: str
     setup: str
+    global_setup: Optional[str] = None
     label: Optional[str] = None
     sub_label: Optional[str] = None
     description: Optional[str] = None
