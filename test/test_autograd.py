@@ -6867,12 +6867,18 @@ class TestAutogradDeviceType(TestCase):
             # NB: we trigger double backward using .backward() instead of autograd.grad due to
             # https://github.com/pytorch/pytorch/issues/37874
             with torch.backends.cudnn.flags(enabled=True):
-                result = gradcheckfunc(input)
+                result = gradcheckfunc(inp)
                 result[0].sum().backward(create_graph=True)
-                param0 = next(mod.parameters())
+                grad0 = next(mod.parameters()).grad
                 with self.assertRaisesRegex(RuntimeError,
                                             "please disable the CuDNN backend temporarily"):
-                    param0.grad.sum().backward()
+                    grad0.sum().backward()
+
+                # Here we avoid the backward(create_graph=True) memory leak
+                # described in https://github.com/pytorch/pytorch/issues/7343
+                for param in mod.parameters():
+                    param.grad = None
+                inp.grad = None
 
     def test_LSTM_grad_and_gradgrad(self, device):
         hsize = 4
