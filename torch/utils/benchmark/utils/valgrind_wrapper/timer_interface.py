@@ -25,8 +25,16 @@ __all__ = ["FunctionCount", "FunctionCounts", "CallgrindStats", "CopyIfCallgrind
 
 if TYPE_CHECKING:
     CompletedProcessType = subprocess.CompletedProcess[str]
+    ScriptFunction = torch.jit.ScriptFunction
 else:
     CompletedProcessType = subprocess.CompletedProcess
+
+    # This is only for back testing. Very old versions of PyTorch don't have
+    # the ScriptFunction symbol.
+    try:
+        from torch.jit import ScriptFunction
+    except ImportError:
+        ScriptFunction = torch._C.GraphExecutor
 
 
 FunctionCount = NamedTuple("FunctionCount", [("count", int), ("function", str)])
@@ -267,7 +275,7 @@ class Serialization(enum.Enum):
 
 _GLOBALS_ALLOWED_TYPES: Dict[Serialization, Tuple[Any, ...]] = {
     Serialization.PICKLE: (str, bytes, bool, int, float, complex),
-    Serialization.TORCH_JIT: (torch.jit.ScriptFunction, torch.jit.ScriptModule),
+    Serialization.TORCH_JIT: (ScriptFunction, torch.jit.ScriptModule),
     Serialization.TORCH: (torch.nn.Module,),
 }
 
@@ -464,7 +472,11 @@ class _ValgrindWrapper(object):
                 ).returncode
 
         self._build_type: Optional[str] = None
-        build_search = re.search("BUILD_TYPE=(.+),", torch.__config__.show())
+        try:
+            torch_cfg = torch.__config__.show()
+        except AttributeError:
+            torch_cfg = ""
+        build_search = re.search("BUILD_TYPE=(.+),", torch_cfg)
         if build_search is not None:
             self._build_type = build_search.groups()[0].split(",")[0]
 

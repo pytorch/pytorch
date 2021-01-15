@@ -59,7 +59,7 @@ BUILD_ROOT = os.path.join(
 #   analysis and the shims no longer justify their maintenance and code
 #   complexity costs) back testing paths will be removed.
 
-if hasattr(torch.__config__, "_cxx_flags"):
+if hasattr(torch, "__config__") and hasattr(torch.__config__, "_cxx_flags"):
     CXX_FLAGS = torch.__config__._cxx_flags().strip().split()
     if "-g" not in CXX_FLAGS:
         CXX_FLAGS.append("-g")
@@ -67,7 +67,13 @@ else:
     # FIXME: Remove when back testing is no longer required.
     CXX_FLAGS = ["-O2", "-fPIC", "-g"]
 
-EXTRA_INCLUDE_PATHS: List[str] = [os.path.join(SOURCE_ROOT, "valgrind_wrapper")]
+EXTRA_INCLUDE_PATHS: List[str] = [
+    os.path.join(SOURCE_ROOT, "valgrind_wrapper"),
+
+    # These paths are only needed for back testing.
+    os.path.join(os.path.split(torch.__file__)[0], "lib", "include"),
+    os.path.join(os.path.split(torch.__file__)[0], "lib", "include", "torch", "csrc", "api", "include"),
+]
 CONDA_PREFIX = os.getenv("CONDA_PREFIX")
 if CONDA_PREFIX is not None:
     # Load will automatically search /usr/include, but not conda include.
@@ -83,7 +89,7 @@ def get_compat_bindings() -> CallgrindModuleType:
                 name="callgrind_bindings",
                 sources=[os.path.join(
                     SOURCE_ROOT,
-                    "valgrind_wrapper",
+                    "historic",
                     "compat_bindings.cpp"
                 )],
                 extra_cflags=CXX_FLAGS,
