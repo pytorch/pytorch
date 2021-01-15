@@ -456,7 +456,8 @@ class ZeroRedundancyOptimizer(Optimizer):
     def _setup_bucket_strategy(self) -> None:
         """Tag parameters to either bucket them or broadcast/reduce them directly.
 
-        The parameters are ordered (smallest first), the bucket will hold the smallest elements, the remaining ones will be directly sent.
+        The parameters are ordered (smallest first), the bucket will hold the smallest elements,
+        the remaining ones will be directly sent.
 
         Generating the partition once and for all allows us to save some time at runtime, and to know when all the
         network requests have been issued. The parameters which are part of a bucket become tensor views.
