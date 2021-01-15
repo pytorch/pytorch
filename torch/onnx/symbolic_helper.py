@@ -342,7 +342,6 @@ def _reducesum_helper(g, input, axes_i=None, keepdims_i=1, noop_with_empty_axes_
             axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
         return g.op("ReduceSum", input, axes, keepdims_i=keepdims_i, noop_with_empty_axes_i=noop_with_empty_axes_i)
     else:
-        print("_export_onnx_opset_version<13:", _export_onnx_opset_version, axes_i, keepdims_i )
         return g.op("ReduceSum", input, axes_i=axes_i, keepdims_i=keepdims_i)
 
 def _interpolate_size_to_scales(g, input, output_size, dim):
