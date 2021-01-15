@@ -1161,6 +1161,7 @@ Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, T
   TORCH_INTERNAL_ASSERT(result.device() == input.device());
 
   TORCH_INTERNAL_ASSERT(infos.scalar_type() == at::kInt);
+  TORCH_INTERNAL_ASSERT(infos.device() == at::kCPU);
   TORCH_INTERNAL_ASSERT(infos.numel() == std::max<int64_t>(1, batchCount(input)));
 
   // if result has no elements we can modify it
