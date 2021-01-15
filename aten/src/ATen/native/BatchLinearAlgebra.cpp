@@ -855,13 +855,11 @@ Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& i
   if (result.numel() == 0) {
     at::native::resize_as_(result, input.transpose(-2, -1), MemoryFormat::Contiguous);
     result.transpose_(-2, -1);
-  } else {
-    // Resize messes up the strides and we expect strictly column major order, so let's not use at::native::resize_output
-    TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
   }
 
   // result tensor must be in batched column major order (Fortran contiguous)
   TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
 
   // cholesky_inverse_stub (apply_cholesky_inverse) performs calculations in-place and result must be a copy of input
   result.copy_(input);
@@ -879,11 +877,6 @@ Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
     "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
   TORCH_CHECK(result.device() == input.device(),
     "result device ", result.device(), " does not match input device ", input.device());
-  if (result.numel() != 0) {
-    // Resize messes up the strides, so let's not use at::native::resize_output
-    TORCH_CHECK(result.sizes().equals(input.sizes()),
-    "result shape ", result.sizes(), " does not match input shape ", input.sizes());
-  }
 
   // MAGMA doesn't have batched version of cholesky_inverse implemented.
   // as a workaround we can use cholesky_solve
@@ -896,10 +889,11 @@ Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
   // This should be changed once batched version for CUDA is implemented.
   auto infos = at::empty({0}, input.options().dtype(kInt).device(kCPU));
 
-  // if result is empty and not in batched column major format we have to allocate a temporary tensor
+  // if result is not empty and not in batched column major format we have to allocate a temporary tensor
   if (result.numel() != 0 && !result.transpose(-2, -1).is_contiguous()) {
     Tensor result_tmp = at::empty({0}, input.options());
     result_tmp = cholesky_inverse_out_info(result_tmp, infos, input, upper);
+    at::native::resize_output(result, result_tmp.sizes());
     result.copy_(result_tmp);
   } else {
     // use result's memory directly

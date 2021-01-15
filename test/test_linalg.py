@@ -5742,11 +5742,15 @@ else:
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
             torch.cholesky_inverse(a)
 
-        # if non-empty out tensor with wrong shape is passed an error is thrown
+        # if non-empty out tensor with wrong shape is passed a warning is given
         a = torch.randn(3, 3, device=device, dtype=dtype)
-        out = torch.empty(1, device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, "does not match input shape"):
+        out = torch.empty(2, 3, device=device, dtype=dtype)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
             torch.cholesky_inverse(a, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
         # dtypes should match
         out = torch.empty_like(a).to(torch.int)
