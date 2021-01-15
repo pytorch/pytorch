@@ -5245,7 +5245,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         with self.assertRaisesRegex(RuntimeError, expected_error):
             fut = rref_api(timeout=timeout).my_instance_method(torch.ones(2, 2))
 
-
     @dist_init
     def test_rref_proxy_timeout(self):
         # TODO: Add test for rref.remote() which has slightly different
