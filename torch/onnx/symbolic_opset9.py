@@ -1119,7 +1119,7 @@ def logical_or(g, input, other):
 def logical_xor(g, input, other):
     return g.op('Xor', input, other)
 
-    
+
 def __rshift_(g, self, other):
     # make sure to cast other to self's type
     # (when self is long, make sure that other is not float)
