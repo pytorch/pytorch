@@ -47,7 +47,7 @@ from torch.testing._internal.common_methods_invocations import (method_tests,
                                                                 mask_not_all_zeros,
                                                                 S)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, skipCUDAIfRocm,
-                                                        onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
+                                                        onlyCPU, onlyCUDA, onlyOnCPUAndCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipCUDAIfCudnnVersionLessThan,
                                                         skipCUDAIf)
 
@@ -6780,6 +6780,18 @@ class TestAutogradDeviceType(TestCase):
         expected = torch.tensor([0., 0., 1.], device=device)
         self.assertEqual(a.grad, expected)
 
+    @onlyOnCPUAndCUDA
+    def test_elu_inplace_with_neg_alpha(self, device):
+        a = torch.tensor([-1., 1.], device=device, requires_grad=True)
+        b = torch.nn.functional.elu_(a.clone(), alpha=-2)
+        with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
+            b.backward(torch.ones(2, device=device))
+
+        a = torch.tensor([-1., 1.], device=device, requires_grad=True)
+        b = torch.nn.functional.celu_(a.clone(), alpha=-2)
+        with self.assertRaisesRegex(RuntimeError, "call out-of-place version"):
+            b.backward(torch.ones(2, device=device))
+
     @onlyCUDA
     def test_free_unneeded_tensor(self, device):
         x = torch.randn(2, 3, 10, 10, device=device, requires_grad=True)
@@ -6849,12 +6861,18 @@ class TestAutogradDeviceType(TestCase):
         with torch.backends.cudnn.flags(enabled=False):
             torch.autograd.gradcheck(gradcheckfunc, inp)
             torch.autograd.gradgradcheck(gradcheckfunc, inp)
+
         if inp.is_cuda:
             # Assert that we have good error message around unsupported CuDNN double backward
+            # NB: we trigger double backward using .backward() instead of autograd.grad due to
+            # https://github.com/pytorch/pytorch/issues/37874
             with torch.backends.cudnn.flags(enabled=True):
+                result = gradcheckfunc(input)
+                result[0].sum().backward(create_graph=True)
+                param0 = next(mod.parameters())
                 with self.assertRaisesRegex(RuntimeError,
                                             "please disable the CuDNN backend temporarily"):
-                    torch.autograd.gradgradcheck(gradcheckfunc, inp)
+                    param0.grad.sum().backward()
 
     def test_LSTM_grad_and_gradgrad(self, device):
         hsize = 4
