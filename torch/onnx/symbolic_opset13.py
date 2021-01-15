@@ -6,7 +6,7 @@ from sys import maxsize
 from torch.onnx.symbolic_helper import _block_list_in_opset
 import torch
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args
+from torch.onnx.symbolic_helper import parse_args, _unimplemented
 from torch.onnx.symbolic_opset9 import overload_by_arg_count, _maybe_cast_reduce_op_input
 from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
@@ -41,7 +41,7 @@ def frobenius_norm(g, self, dim=None, keepdim=False):
     if not sym_help._is_value(dim_val) and len(dim_val) == 0:
         return g.op("ReduceL2", self, keepdims_i=0)
     sqr = g.op('Mul', self, self)
-    sumsqr = g.op('ReduceSum', sqr, dim, keepdims_i=keepdim)
+    sumsqr = sym_help._reducesum_helper(g, sqr, dim, keepdims_i=keepdim)
     return g.op('Sqrt', sumsqr)
 
 
@@ -126,6 +126,7 @@ def _reduce_op_symbolic(onnx_op_name):
 
 def _reduce_with_dtype(onnx_op, name):
     symbolic = _reduce_op_symbolic(onnx_op)
+
     @overload_by_arg_count
     def reduce(g, *args, **kwargs):
         @parse_args('v', 'none')
@@ -197,7 +198,7 @@ def embedding_bag(g,
         per_sample_weights_row = sym_help._unsqueeze_helper(loop_block, per_sample_weights_row, [1])
         embeddings = loop_block.op("Mul", embeddings, per_sample_weights_row)
     if mode == 0:
-        embeddings = loop_block.op("ReduceSum", embeddings, zero, keepdims_i=0)
+        embeddings = sym_help._reducesum_helper(loop_block, embeddings, zero, keepdims_i=0)
     elif mode == 1:
         embeddings = loop_block.op("ReduceMean", embeddings, axes_i=[0], keepdims_i=0)
     else:

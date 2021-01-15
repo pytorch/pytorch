@@ -935,7 +935,7 @@ def embedding_bag(g,
         per_sample_weights_row = sym_help._unsqueeze_helper(loop_block, per_sample_weights_row, [1])
         embeddings = loop_block.op("Mul", embeddings, per_sample_weights_row)
     if mode == 0:
-        embeddings = loop_block.op("ReduceSum", embeddings, axes_i=[0], keepdims_i=0)
+        embeddings = sym_help._reducesum_helper(loop_block, embeddings, axes_i=[0], keepdims_i=0)
     elif mode == 1:
         embeddings = loop_block.op("ReduceMean", embeddings, axes_i=[0], keepdims_i=0)
     else:
