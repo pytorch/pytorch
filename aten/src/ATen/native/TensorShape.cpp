@@ -29,7 +29,7 @@ Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
   TORCH_CHECK(shape_tensor.dim() == 1);
   std::vector<int64_t> shape;
   auto accessor = shape_tensor.accessor<int64_t, 1>();
-  for (size_t i = 0; i < shape_tensor.numel(); ++i) {
+  for (int64_t i = 0; i < shape_tensor.numel(); ++i) {
     shape.push_back(accessor[i]);
   }
   return self.reshape(IntArrayRef(shape));
@@ -119,7 +119,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   bool allContiguous = true;
 
   // Inputs cannot alias the output tensor
-  for (int64_t i = 0; i < tensors.size(); i++) {
+  for (size_t i = 0; i < tensors.size(); i++) {
     auto lap = at::get_overlap_status(result, tensors[i]);
     TORCH_CHECK(lap != at::MemOverlapStatus::PARTIAL &&
         lap != at::MemOverlapStatus::FULL, 0,
@@ -159,7 +159,7 @@ Tensor & _cat_out_cpu(Tensor& result, TensorList tensors, int64_t dim) {
   // compute size of the result in the cat dimension
   int64_t cat_dim_size = 0;
   auto first_tensor_mem_format = tensors[0].suggest_memory_format();
-  for (int i = 0; i < tensors.size(); i++) {
+  for (size_t i = 0; i < tensors.size(); i++) {
     auto const &tensor = tensors[i];
     if (should_skip(tensor)) {
       // don't use fast path for empty tensor
@@ -297,7 +297,7 @@ static bool sizes_match_except(IntArrayRef s1, IntArrayRef s2, int64_t dim_excep
   if (s1.size() != s2.size()) {
     return false;
   }
-  for (int64_t i = 0; i < s1.size(); ++i) {
+  for (size_t i = 0; i < s1.size(); ++i) {
     if (i != dim_except && s1[i] != s2[i]) {
       return false;
     }
@@ -852,7 +852,7 @@ Tensor& narrow_copy_dense_cpu_out(
   char* src_offset_bytes = src_bytes + itemsize * src_offset;
   char* dst_offset_bytes = dst_bytes;
 
-  for (size_t i = 0; i < num_blocks; ++i) {
+  for (int64_t i = 0; i < num_blocks; ++i) {
     char* local_src_offset_bytes = src_offset_bytes + i * src_block_size_bytes;
     char* local_dst_offset_bytes = dst_offset_bytes + i * dst_block_size_bytes;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -2052,7 +2052,7 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   DimVector normalized_dst(dst.size());
 
   auto wrap_dims = [&self_dim](const IntArrayRef& vec, DimVector& normalized_vec) {
-    for (int i = 0; i < vec.size(); i++) {
+    for (size_t i = 0; i < vec.size(); i++) {
       normalized_vec[i] = maybe_wrap_dim(vec[i], self_dim);
     }
   };
@@ -2097,7 +2097,7 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   //     order = NA, NA, 0, NA, 1
   //     source_dims = -1, -1, 2, 3, 4
   //     destination_dims = 0, 1, -1, 3, -1
-  for (int64_t i = 0; i < src.size(); ++i) {
+  for (size_t i = 0; i < src.size(); ++i) {
       order[normalized_dst[i]] = normalized_src[i];
       source_dims[normalized_src[i]] = -1;
       destination_dims[normalized_dst[i]] = -1;
