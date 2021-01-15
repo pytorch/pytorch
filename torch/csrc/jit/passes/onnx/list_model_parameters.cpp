@@ -34,6 +34,8 @@ std::deque<std::string> findSubModuleAttr(
     if (node->kind() == prim::GetAttr) {
       moduleNames.push_front(node->s(attr::name));
       node = node->inputs()[0]->node();
+    } else {
+      return moduleNames;
     }
   }
 
@@ -115,44 +117,16 @@ std::vector<IValue> getParamAttributes(
         if (type->is_parameter(slot) || type->is_buffer(slot) ||
             (attr.isObject() && !attr.toObjectRef().type()->is_module()) ||
             name == "training") {
-          if (attr.isTensor()) {
-            TORCH_INTERNAL_ASSERT(attr.isTensor());
-            auto tensor_ = attr.toTensor();
-            if (isEval && tensor_.requires_grad()) {
-              tensor_ = tensor_.detach();
-              tensor_.set_requires_grad(false);
-              attr = IValue(tensor_);
-            }
-            attrValues.emplace_back(attr.toTensor());
-            paramConst = addParamAsArgument(function_, fullName, attr);
-          } else if (
-              attr.isObject() && !attr.toObjectRef().type()->is_module()) {
-            // Only below registered torch classes are supported.
-            auto type = attr.type();
-            TORCH_CHECK(
-                (type ==
-                 getCustomClass(
-                     "__torch__.torch.classes.quantized.Conv2dPackedParamsBase")) ||
-                    (type ==
-                     getCustomClass(
-                         "__torch__.torch.classes.quantized.Conv3dPackedParamsBase")) ||
-                    (type ==
-                     getCustomClass(
-                         "__torch__.torch.classes.quantized.LinearPackedParamsBase")),
-                "Unknown type ",
-                type->repr_str(),
-                " encountered in handling model params. This type is not supported in ONNX export.");
+          try {
             attrValues.emplace_back(
                 script::Object(attr.toObject()).run_method("__getstate__"));
-            paramConst = addParamAsArgument(function_, fullName, attr);
-          } else if (attr.isNone() || name == "training") {
-            auto attrVal = tryInsertConstant(*graph, attr);
-            paramConst = *attrVal;
-          }
-          n->output()->replaceAllUsesWith(paramConst);
-          n->removeAllInputs();
-
-          GRAPH_UPDATE("Folding GetAttr %", n->outputs()[0]->debugName());
+                paramConst = addParamAsArgument(function_, fullName, attr);
+            } catch (const std::exception&) {
+                   auto type = attr.type();
+           throw ErrorReport(n->sourceRange())
+                 << "Unknown type " << type->repr_str()
+                 << " encountered in handling model params. This class type does not extend __getstate__ method.";
+             }
         }
       }
     }
