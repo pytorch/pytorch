@@ -715,6 +715,10 @@ Tensor index_select_backward(const Tensor& grad, IntArrayRef self_sizes, int64_t
 Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
   at::NoNamesGuard guard;
 
+  TORCH_CHECK_INDEX(
+    index.scalar_type() == ScalarType::Long,
+    "index_fill_(): Expected dtype int64 for index.");
+
   at::assert_no_overlap(self, index);
   if (at::has_internal_overlap(self) == at::MemOverlap::YES) {
     TORCH_WARN(
