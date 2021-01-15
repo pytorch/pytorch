@@ -887,66 +887,15 @@ class Tensor(torch._C._TensorBase):
             >>> sparse._nnz()
             3125
         """
-        def make_strides(shape, dims=None):
-            if dims is None:
-                dims = tuple(range(len(shape)))
-            ndims = len(dims)
-            if ndims == 0:
-                return ()
-            strides = [1]
-            for i in range(ndims - 1):
-                strides.insert(0, strides[0] * shape[dims[ndims - i - 1]])
-            return tuple(strides)
-
-        def apply_reduction(index, strides, dims):
-            return sum(strides[k] * index[dims[k]] for k in range(len(dims)))
-
         shape = self.size()
-        N = len(shape)
-        # TODO: N=0, N=1
-        if reduction is None:
-            dims1 = tuple(range(N//2))
-            dims2 = tuple(range(N//2, N))
-            reduction = dims1 + dims2 + (N//2,)
-            l = N // 2
-        else:
-            l = reduction[-1]
-            dims1 = reduction[:l]
-            dims2 = reduction[l:-1]
 
-        strides1 = make_strides(shape[:l])
-        strides2 = make_strides(shape[l:])
-        # <row>: <list of (colindex, value)>
-        col_value = defaultdict(list)
-        num = 0
-        # TODO: Possible optimization with https://github.com/pytorch/pytorch/pull/44190/files/9c6f074c56147a804cf2cf5e10bd8d2bac58d367#r528199371
-        for index in itertools.product(*map(range, shape)):
-            v = self
-            for i in index:
-                v = v[i]
-            if (math.isnan(v) if math.isnan(fill_value) else v == fill_value):
-                continue
-
-            num += 1
-            p1 = apply_reduction(index, strides1, dims1)
-            p2 = apply_reduction(index, strides2, dims2)
-            col_value[p1].append((p2, v))
         ro = [0]
         co = []
         vals: List[Any] = []
 
-        for i in range(reduce((lambda x, y: x * y), shape[:l])):
-            cv = col_value.get(i, [])
-            ro.append(ro[-1] + len(cv))
-            cv.sort()
-            if len(cv) != 0:
-                c, v = zip(*cv)
-                co.extend(c)
-                vals.extend(v)
-
         return torch.sparse_csr_tensor(torch.IntTensor(ro), torch.IntTensor(co),
                                        torch.tensor(vals, dtype=self.dtype),
-                                       torch.IntTensor(reduction), shape, dtype=self.dtype)
+                                       shape, dtype=self.dtype)
 
 
     def _update_names(self, names, inplace):
