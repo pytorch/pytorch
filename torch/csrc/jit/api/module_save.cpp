@@ -24,10 +24,10 @@ void Module::save(const std::string& filename, const ExtraFilesMap& extra_files)
   if (this->type()->getForwardHooks().size() > 0 ||
       this->type()->getForwardPreHooks().size() > 0) {
     throw std::runtime_error(
-       "Cannot save module '" + this->type()->name()->name() +
-       "' because it has forward hooks or pre-hooks attached. " +
-       "Saving modules with hooks not supported in FBCODE yet. Please " +
-       "remove the hooks before scripting if you want to save this model.");
+        "Cannot save module '" + this->type()->name()->name() +
+        "' because it has forward hooks or pre-hooks attached. " +
+        "Saving modules with hooks not supported in FBCODE yet. Please " +
+        "remove the hooks before scripting if you want to save this model.");
   }
 #endif
   ExportModule(*this, filename, extra_files, false /* bytecode_format */);
