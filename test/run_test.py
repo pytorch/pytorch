@@ -19,6 +19,7 @@ import torch.distributed as dist
 from typing import Dict, Optional
 
 TESTS = [
+    'test_type_hints',
     'test_autograd',
     'benchmark_utils/test_benchmark_utils',
     'test_binary_ufuncs',
@@ -72,7 +73,6 @@ TESTS = [
     'test_testing',
     'test_torch',
     'test_type_info',
-    'test_type_hints',
     'test_unary_ufuncs',
     'test_utils',
     'test_view_ops',
@@ -92,6 +92,7 @@ TESTS = [
     'test_overrides',
     'test_jit_fuser_te',
     'test_tensorexpr',
+    'test_tensorexpr_pybind',
     'test_openmp',
     'test_profiler',
     'distributed/nn/jit/test_instantiator',

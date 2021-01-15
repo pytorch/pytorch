@@ -135,7 +135,7 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
 
 // See NOTE [ Autograd View Variables ] for details.
 inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_differentiable,
-        bool is_fw_differentiable, c10::optional<std::function<Tensor(const Tensor&)>> view_func=c10::nullopt,
+        bool is_fw_differentiable, std::function<Tensor(const Tensor&)> view_func=nullptr,
         CreationMeta creation_meta=CreationMeta::DEFAULT, bool allow_tensor_metadata_change=true) {
   if (!isForwardADEnabled()) {
     // Fast codepath for backward only code
@@ -209,9 +209,9 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
                             "Functions that result multiple view must have a creation meta reflecting this behavior.");
       // It is ok to create a ViewInfo where only the base is correct in this case as inplace operations on such views are
       // not allowed
-      new_bw_info = ViewInfo(base_bw_info.base_, /* view_func */ c10::nullopt);
+      new_bw_info = ViewInfo(base_bw_info.base_, /* view_func */ nullptr);
     } else {
-      new_bw_info = ViewInfo(base, /* view_func */ c10::nullopt);
+      new_bw_info = ViewInfo(base, /* view_func */ nullptr);
     }
   } else {
     TORCH_CHECK(creation_meta == CreationMeta::DEFAULT,
@@ -228,9 +228,9 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
                             "Functions that result multiple view must have a creation meta reflecting this behavior.");
       // It is ok to create a ViewInfo where only the base is correct in this case as inplace operations on such views are
       // not allowed
-      new_fw_info = ViewInfo(base_fw_info.base_, /* view_func */ c10::nullopt);
+      new_fw_info = ViewInfo(base_fw_info.base_, /* view_func */ nullptr);
     } else {
-      new_fw_info = ViewInfo(base, /* view_func */ c10::nullopt);
+      new_fw_info = ViewInfo(base, /* view_func */ nullptr);
     }
   }
 
@@ -266,10 +266,29 @@ inline void check_no_requires_grad(TensorList tensors, const char* name) {
   }
 }
 
+inline void check_no_requires_grad(const c10::List<c10::optional<Tensor>>& tensors, const char* name) {
+  for (c10::optional<Tensor> tensor : tensors) {
+    if (tensor.has_value()) {
+      check_no_requires_grad(*tensor, name);
+    }
+  }
+}
+
 // Assumed that saved tensor lists are never inplace outputs
 inline std::vector<SavedVariable> make_saved_variable_list(TensorList tensors) {
   return fmap(tensors, [](const Tensor& tensor) -> SavedVariable {
       return SavedVariable{tensor, false /* is output */}; });
+}
+
+// Assumed that saved tensor lists are never inplace outputs
+inline std::vector<SavedVariable> make_saved_variable_list(const c10::List<c10::optional<at::Tensor>>& tensors) {
+  return fmap(tensors, [](const c10::optional<Tensor>& tensor) -> SavedVariable {
+    if (tensor.has_value()) {
+      return SavedVariable{*tensor, false /* is output */};
+    } else {
+      return SavedVariable{Tensor(), false /* is output */};
+    }
+  });
 }
 
 inline std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {

@@ -177,7 +177,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                 continue
             if isinstance(r, _ResumeIteration):
                 # Acknowledge the main process
-                data_queue.put(r)
+                data_queue.put((r, None))
                 iteration_end = False
                 # Recreate the fetcher for worker-reuse policy
                 fetcher = _DatasetKind.create_fetcher(

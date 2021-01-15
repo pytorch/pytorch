@@ -14,6 +14,7 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/native/IndexingUtils.h>
 
 #include <ciso646>
 #include <algorithm>
@@ -1876,6 +1877,22 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
   }
 }
 
+Tensor elu_double_backward(
+    const Tensor& grad,
+    const Tensor& grad_output,
+    Scalar alpha,
+    Scalar scale,
+    Scalar input_scale,
+    bool is_result,
+    const Tensor& self_or_result) {
+
+    if (is_result) {
+      return grad * grad_output * input_scale * (self_or_result < 0).type_as(grad);
+    } else {
+      return at::elu_backward(grad * grad_output * input_scale, alpha, scale, input_scale, is_result, self_or_result) * (self_or_result < 0).type_as(grad);
+    }
+}
+
 // https://j-towns.github.io/papers/svd-derivative.pdf
 //
 // This makes no assumption on the signs of sigma.
@@ -1930,10 +1947,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   }
 
   auto uh = u.conj().transpose(-2, -1);
-  auto im = at::eye(m, self.options());
-  auto in = at::eye(n, self.options());
-  auto sigma_mat = sigma.diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).to(self.dtype());
-  auto sigma_mat_inv = sigma.pow(-1).diag_embed(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).to(self.dtype());
+  auto sigma_inv = sigma.pow(-1);
   auto sigma_sq = sigma.pow(2);
   auto F = sigma_sq.unsqueeze(-2) - sigma_sq.unsqueeze(-1);
   // The following two lines invert values of F, and fills the diagonal with 0s.
@@ -1946,9 +1960,12 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 
   if (gu.defined()) {
     auto guh = gu.conj().transpose(-2, -1);
-    u_term = at::matmul(u, at::matmul(F.mul(at::matmul(uh, gu) - at::matmul(guh, u)), sigma_mat));
+    u_term = at::matmul(u, F.mul(at::matmul(uh, gu) - at::matmul(guh, u)) * sigma.unsqueeze(-2));
     if (m > k) {
-      u_term = u_term + at::matmul(im - at::matmul(u, uh), at::matmul(gu, sigma_mat_inv));
+      // projection operator onto subspace orthogonal to span(U) defined as I - UU^H
+      auto proj_on_ortho_u = -at::matmul(u, uh);
+      proj_on_ortho_u.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).add_(1);
+      u_term = u_term + proj_on_ortho_u.matmul(gu * sigma_inv.unsqueeze(-2));
     }
     u_term = at::matmul(u_term, vh);
   } else {
@@ -1957,9 +1974,12 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 
   if (gv.defined()) {
     auto gvh = gv.conj().transpose(-2, -1);
-    v_term = at::matmul(sigma_mat, at::matmul(F.mul(at::matmul(vh, gv) - at::matmul(gvh, v)), vh));
+    v_term = sigma.unsqueeze(-1) * at::matmul(F.mul(at::matmul(vh, gv) - at::matmul(gvh, v)), vh);
     if (n > k) {
-      v_term = v_term + at::matmul(sigma_mat_inv, at::matmul(gvh, in - at::matmul(v, vh)));
+      // projection operator onto subspace orthogonal to span(V) defined as I - VV^H
+      auto proj_on_v_ortho = -at::matmul(v, vh);
+      proj_on_v_ortho.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).add_(1);
+      v_term = v_term + sigma_inv.unsqueeze(-1) * at::matmul(gvh, proj_on_v_ortho);
     }
     v_term = at::matmul(u, v_term);
   } else {
@@ -1970,10 +1990,10 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   // https://giggleliu.github.io/2019/04/02/einsumbp.html
   // https://arxiv.org/abs/1909.02659
   if (self.is_complex() && gu.defined()) {
-    // computes L = Identity.mul(uh @ gu)
-    Tensor L = at::matmul(uh, gu).diagonal(0, -2, -1).diag_embed(0, -2, -1);
-    L = L - L.conj().transpose(-2, -1);
-    Tensor imag_term = 0.5 * at::matmul(at::matmul(at::matmul(u, L), sigma_mat_inv), vh);
+    Tensor L = at::matmul(uh, gu).diagonal(0, -2, -1);
+    at::real(L).zero_();
+    at::imag(L).mul_(sigma_inv);
+    Tensor imag_term = at::matmul(u * L.unsqueeze(-2), vh);
     return u_term + sigma_term + v_term + imag_term;
   }
 
@@ -2077,7 +2097,7 @@ Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, c
                           std::string mode, const Tensor& q, const Tensor& r){
   bool compute_q, reduced;
   std::tie(compute_q, reduced) = at::native::_parse_qr_mode(mode);
-  TORCH_CHECK(compute_q, "linalg_qr_backward: cannot compute backward if mode='r'. "
+  TORCH_CHECK(compute_q, "The derivative of qr is not implemented when mode='r'. "
                          "Please use torch.linalg.qr(..., mode='reduced')");
 
   auto square_deep_case_backward = [](const Tensor& grad_Q,
@@ -2144,7 +2164,7 @@ Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, c
 
   TORCH_CHECK(
       ((m <= n && (!reduced)) || reduced),
-      "The derivative is not implemented when nrows > ncols and complete QR. ");
+      "The derivative of qr is not implemented when mode='complete' and nrows > ncols.");
 
   auto grad_Q = grads[0];
   auto grad_R = grads[1];
@@ -2211,15 +2231,17 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
       return nonsingular_case_backward(grad, self, det);
     }
   } else {
-    auto nonzero_det_indices = at::where(det);
+    auto nonzero_det_indices = at::native::toListOfOptionalTensors(at::where(det));
+    c10::optional<Tensor> first_nonzero_det_index = nonzero_det_indices[0];
 
-    if (nonzero_det_indices[0].size(0) == det.numel()) {  // all determinants are nonzero (non-singular)
+    if (first_nonzero_det_index->size(0) == det.numel()) {  // all determinants are nonzero (non-singular)
       return nonsingular_case_backward(grad, self, det);
     }
 
-    auto zero_det_indices = at::where(det == 0);
+    auto zero_det_indices = at::native::toListOfOptionalTensors(at::where(det == 0));
+    c10::optional<Tensor> first_zero_det_index = zero_det_indices[0];
 
-    if (zero_det_indices[0].size(0) == det.numel()) {  // all determinants are zero (singular)
+    if (first_zero_det_index->size(0) == det.numel()) {  // all determinants are zero (singular)
       return singular_case_backward(grad, self, det);
     }
 
@@ -2261,15 +2283,17 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
       return singular_case_backward(grad, self);
     }
   } else {
-    auto finite_logdet_indices = at::where(logdet != -INFINITY);
+    auto finite_logdet_indices = at::native::toListOfOptionalTensors(at::where(logdet != -INFINITY));
+    c10::optional<Tensor> first_finite_logdet_index = finite_logdet_indices[0];
 
-    if (finite_logdet_indices[0].size(0) == logdet.numel()) {  // all log determinants are finite (non-singular)
+    if (first_finite_logdet_index->size(0) == logdet.numel()) {  // all log determinants are finite (non-singular)
       return nonsingular_case_backward(grad, self);
     }
 
-    auto neginf_logdet_indices = at::where(logdet == -INFINITY);
+    auto neginf_logdet_indices = at::native::toListOfOptionalTensors(at::where(logdet == -INFINITY));
+    c10::optional<Tensor> first_neginf_logdet_index = neginf_logdet_indices[0];
 
-    if (neginf_logdet_indices[0].size(0) == logdet.numel()) {  // all log determinants are -inf (singular)
+    if (first_neginf_logdet_index->size(0) == logdet.numel()) {  // all log determinants are -inf (singular)
       return singular_case_backward(grad, self);
     }
 
@@ -2313,15 +2337,17 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
       return nonsingular_case_backward(grad_logabsdet, self);
     }
   } else {
-    auto nonzero_signdet_indices = at::where(signdet);
+    auto nonzero_signdet_indices = at::native::toListOfOptionalTensors(at::where(signdet));
+    c10::optional<Tensor> first_nonzero_signdet_index = nonzero_signdet_indices[0];
 
-    if (nonzero_signdet_indices[0].size(0) == logabsdet.numel()) {  // all log determinants are finite (non-singular)
+    if (first_nonzero_signdet_index->size(0) == logabsdet.numel()) {  // all log determinants are finite (non-singular)
       return nonsingular_case_backward(grad_logabsdet, self);
     }
 
-    auto zero_signdet_indices = at::where(signdet == 0);
+    auto zero_signdet_indices = at::native::toListOfOptionalTensors(at::where(signdet == 0));
+    c10::optional<Tensor> first_zero_signdet_index = zero_signdet_indices[0];
 
-    if (zero_signdet_indices[0].size(0) == logabsdet.numel()) {  // all log determinants are -inf (singular)
+    if (first_zero_signdet_index->size(0) == logabsdet.numel()) {  // all log determinants are -inf (singular)
       return singular_case_backward(grad_logabsdet, self);
     }
 
@@ -2873,8 +2899,8 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
   return gg_weight.view(size);
 }
 
-Tensor index_backward(Tensor zeros_like_self, TensorList indices, const Tensor& grad) {
-   return at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
+Tensor index_backward(Tensor zeros_like_self, const torch::List<c10::optional<Tensor>>& indices, const Tensor& grad) {
+  return at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
 }
 
 Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, const Tensor& raw_grad, bool zero_infinity) {

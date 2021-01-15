@@ -621,6 +621,32 @@ class TestTensorCreation(TestCase):
         self.assertEqual(a, b)
         self.assertEqual(w[:6], y.view(-1)[:6])
 
+        # Case: 
+        # Reference: https://github.com/pytorch/pytorch/issues/49878
+        for dim in [0, 1]:
+            x = torch.zeros((10, 5, 2), device=device)
+
+            random_length = random.randint(1, 4)
+            y = x.narrow(dim, 0, x.shape[dim] - random_length)
+            val = torch.full_like(y[0], 3., device=device)
+
+            if dim == 0:
+                self.assertTrue(y.is_contiguous())
+            else:
+                self.assertFalse(y.is_contiguous())
+
+            torch.cat((val[None],) * y.shape[0], dim=0, out=y)
+
+            expected_y = torch.cat((val[None],) * y.shape[0], dim=0)
+            expected_x = torch.zeros((10, 5, 2), device=device)
+            if dim == 0:
+                expected_x[:x.shape[dim] - random_length, :, :] = expected_y
+            elif dim == 1:
+                expected_x[:, :x.shape[dim] - random_length, :] = expected_y
+
+            self.assertEqual(y, expected_y)
+            self.assertEqual(x, expected_x)
+
     def test_cat_out_channels_last(self, device):
         x = torch.randn((4, 3, 8, 8))
         y = torch.randn(x.shape)
@@ -2781,6 +2807,23 @@ class TestTensorCreation(TestCase):
         x = torch.zeros(2, 3, device=device, dtype=dtype)
         y = torch.logspace(0, 3, 4, base=2, device=device, dtype=dtype, out=x.narrow(1, 1, 2))
         self.assertEqual(x, torch.tensor(((0, 1, 2), (0, 4, 8)), device=device, dtype=dtype), atol=0, rtol=0)
+
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_logspace_integral(self, device, dtype):
+        "Check logspace with integer."
+        for from_, to in ((1, 5),
+                          (1.2, 2),
+                          (1.7, 4),
+                          (2, 2.5)):
+            res1 = torch.logspace(from_, to, steps=10, device=device, dtype=dtype)
+            res2 = torch.logspace(int(from_), int(to), steps=10,
+                                  device=device, dtype=torch.double).floor().type(dtype)
+            self.assertEqual(res1, res2)
+            if not device.startswith('cpu'):
+                # Compare with CPU output
+                res2_cpu = torch.logspace(int(from_), int(to), steps=10,
+                                          device='cpu', dtype=torch.double).floor().type(dtype)
+                self.assertEqual(res1, res2_cpu)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.half, torch.float, torch.double)
