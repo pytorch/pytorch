@@ -133,6 +133,7 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
 
 void index_fill_kernel(
   TensorIterator& iter,
+  int64_t dim,
   int64_t self_dim_size,
   int64_t self_dim_stride,
   Scalar source) {
@@ -146,7 +147,12 @@ void index_fill_kernel(
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
 
-        // TODO: add index checks!!!
+        if (idx < -self_dim_size || idx >= self_dim_size) {
+          TORCH_CHECK_INDEX(false,
+            "index ", idx, " is out of bounds for dimension ",
+            dim, " with size ", self_dim_size);
+        }
+
         self_data[idx * self_dim_stride] = fill_val;
 
         self_data_bytes += strides[0];

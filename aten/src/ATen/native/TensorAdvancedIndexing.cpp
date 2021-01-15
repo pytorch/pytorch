@@ -724,8 +724,10 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
   }
 
   dim = at::maybe_wrap_dim(dim, self);
-  TORCH_CHECK(index.dim() == 1, "Index has to be a vector");
-  TORCH_CHECK(0 <= dim && dim < self.dim(),
+  // Handle the case when `self` is 0-dim
+  self = (0 == self.dim()) ? self.unsqueeze(-1) : self;
+  TORCH_CHECK(index.dim() <= 1, "Index has to be a vector/scalar");
+  TORCH_CHECK(dim < self.dim(),
     "Indexing dimension ", dim, " is out of bounds for tensor `self`");
 
   // Prepare `index` for TensorIterator.
@@ -765,6 +767,7 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
   index_fill_stub(
     iter.device_type(),
     iter,
+    dim,
     self_dim_size,
     self_dim_stride,
     source);

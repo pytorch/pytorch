@@ -14,7 +14,7 @@ namespace at { namespace native {
 enum class SCATTER_GATHER_OP: uint8_t {REDUCE_ADD, REDUCE_MULTIPLY};
 
 using index_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides);
-using index_fill_fn = void(*)(TensorIterator & iter, int64_t self_dim_size, int64_t self_dim_stride, Scalar source);
+using index_fill_fn = void(*)(TensorIterator & iter, int64_t dim, int64_t self_dim_size, int64_t self_dim_stride, Scalar source);
 using index_put_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides, bool accumulate);
 using index_put_accum_fn = void(*)(Tensor &, TensorList , const Tensor &, bool unsafe);
 using masked_fill_fn = void(*)(TensorIterator &, Scalar scalar);
