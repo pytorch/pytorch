@@ -731,7 +731,7 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
       "This also applies to advanced indexing e.g. tensor[mask] = scalar");
   }
 
-  // Handle the case when `self` or `index` is 0-dim
+  // Handle the case when `self` is 0-dim
   self = (0 == self.dim()) ? self.unsqueeze(-1) : self;
 
   dim = at::maybe_wrap_dim(dim, self);
