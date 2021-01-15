@@ -219,9 +219,15 @@ option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
 # Ensure that an MKLDNN build is the default for x86 CPUs
 # but optional for AArch64 (dependent on -DUSE_MKLDNN).
-cmake_dependent_option(
-  USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, and AArch64." ON
-  "CPU_INTEL OR CPU_AARCH64 AND USE_MKLDNN" OFF)
+if(DEFINED USE_MKLDNN)
+  cmake_dependent_option(
+    USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, and AArch64." ON
+    "CPU_INTEL OR CPU_AARCH64 AND USE_MKLDNN" OFF)
+else()
+  cmake_dependent_option(
+    USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, and AArch64." ON
+    "CPU_INTEL" OFF)
+endif()
 set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 cmake_dependent_option(
     USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF
