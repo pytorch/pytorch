@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/SparseGCSTensorImpl.h>
+#include <ATen/CompresedSparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 
 namespace at { namespace sparse {

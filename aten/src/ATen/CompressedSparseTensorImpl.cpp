@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/SparseGCSTensorImpl.h>
+#include <ATen/CompressedSparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/core/LegacyTypeDispatch.h>
