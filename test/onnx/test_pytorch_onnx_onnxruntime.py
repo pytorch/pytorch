@@ -410,8 +410,13 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
         self.run_test(model, (x,), input_names=["images_tensors"], output_names=["outputs"],
                       dynamic_axes={"images_tensors": [0, 1, 2, 3], "outputs": [0, 1, 2, 3]}, rtol=1e-3, atol=1e-5)
+        dummy_image = [torch.ones(3, 100, 100) * 0.3]
+        images, test_images = self.get_test_images()
+        self.run_test(model, (images,), test_with_inputs=[(images,), (test_images,), (dummy_image,)],
+                      input_names=["images_tensors"], output_names=["outputs"],
+                      dynamic_axes={"images_tensors": [0, 1, 2], "outputs": [0, 1, 2]}, rtol=1e-3, atol=1e-5)
 
-    def get_image_from_url(self, url):
+    def get_image_from_url(self, url, size=None):
         import os
         from urllib.parse import urlsplit
         from urllib import request
@@ -426,15 +431,24 @@ class TestONNXRuntime(unittest.TestCase):
         with open(path, 'wb') as f:
             f.write(data)
         image = Image.open(path).convert("RGB")
-        image = image.resize((300, 200), Image.BILINEAR)
+
+        if size is None:
+            size = (300, 200)
+        image = image.resize(size, Image.BILINEAR)
+
         to_tensor = transforms.ToTensor()
         return to_tensor(image)
 
     def get_test_images(self):
         image_url = "http://farm3.staticflickr.com/2469/3915380994_2e611b1779_z.jpg"
-        image = self.get_image_from_url(url=image_url)
+        image = self.get_image_from_url(url=image_url, size=(100, 320))
+
+        image_url2 = "https://pytorch.org/tutorials/_static/img/tv_tutorial/tv_image05.png"
+        image2 = self.get_image_from_url(url=image_url2, size=(250, 380))
+
         images = [image]
-        return images
+        test_images = [image2]
+        return images, test_images
 
     @skipIfUnsupportedOpsetVersion([13])
     def test_paste_mask_in_image(self):
@@ -474,9 +488,14 @@ class TestONNXRuntime(unittest.TestCase):
     def test_mask_rcnn(self):
         model = torchvision.models.detection.mask_rcnn.maskrcnn_resnet50_fpn(pretrained=True, min_size=200,
                                                                              max_size=300)
-        images = self.get_test_images()
+        images, test_images = self.get_test_images()
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
         self.run_test(model, (images,), input_names=["images_tensors"], output_names=["boxes", "labels", "scores", "masks"],
+                      dynamic_axes={"images_tensors": [0, 1, 2], "boxes": [0, 1], "labels": [0],
+                                    "scores": [0], "masks": [0, 1, 2]}, rtol=1e-3, atol=1e-5)
+        dummy_image = [torch.ones(3, 100, 100) * 0.3]
+        self.run_test(model, (images,), test_with_inputs=[(images,), (test_images,), (dummy_image,)],
+                      input_names=["images_tensors"], output_names=["boxes", "labels", "scores", "masks"],
                       dynamic_axes={"images_tensors": [0, 1, 2], "boxes": [0, 1], "labels": [0],
                                     "scores": [0], "masks": [0, 1, 2]}, rtol=1e-3, atol=1e-5)
 
@@ -510,10 +529,15 @@ class TestONNXRuntime(unittest.TestCase):
     def test_keypoint_rcnn(self):
         model = torchvision.models.detection.keypoint_rcnn.keypointrcnn_resnet50_fpn(pretrained=True, min_size=200,
                                                                                      max_size=300)
-        images = self.get_test_images()
+        images, test_images = self.get_test_images()
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
         self.run_test(model, (images,), input_names=["images_tensors"],
                       output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
+                      dynamic_axes={"images_tensors": [0, 1, 2]},
+                      rtol=1e-3, atol=1e-5)
+        dummy_image = [torch.ones(3, 100, 100) * 0.3]
+        self.run_test(model, (images,), test_with_inputs=[(images,), (test_images,), (dummy_image,)],
+                      input_names=["images_tensors"], output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
                       dynamic_axes={"images_tensors": [0, 1, 2]},
                       rtol=1e-3, atol=1e-5)
 
@@ -4673,6 +4697,7 @@ class TestONNXRuntime(unittest.TestCase):
                          'Please try opset version 11.', the_exception.args[0])
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @unittest.skip("https://github.com/pytorch/vision/issues/3251")
     def test_if_fold(self):
         class IfFoldModel(torch.nn.Module):
             def forward(self, y):
