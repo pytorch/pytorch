@@ -77,25 +77,6 @@ void fake_quantize_tensor_cachemask_kernel_cuda(
     int64_t quant_min,
     int64_t quant_max) {
 
-  /*
-  // populate output
-  fake_quantize_tensor_kernel_cuda(output, input, scale, zero_point, quant_min, quant_max);
-
-  // populate mask
-  auto iter_mask = TensorIteratorConfig()
-    .check_all_same_dtype(false)
-    .add_output(mask)
-    .add_input(input)
-    .build();
-  // scalar type of this function is guaranteed to be float
-  float inv_scale = 1.0f / scale;
-  gpu_kernel(iter_mask, [=] GPU_LAMBDA(float input_val) -> bool {
-    auto qval = static_cast<int64_t>(std::nearbyint(input_val * inv_scale) + zero_point);
-    return ((quant_min <= qval) && (qval <= quant_max));
-  });
-  */
-
-  // TODO before land: verify numerical correctness
   float inv_scale = 1.0f / scale;
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)

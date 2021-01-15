@@ -149,7 +149,7 @@ class FakeQuantize(FakeQuantizeBase):
                         self.quant_min, self.quant_max)
                 else:
                     # During inference, use the fastest fake_quant
-                    # which does not compute any etra info for the backward.
+                    # which does not compute any extra info for the backward.
                     X = torch.fake_quantize_per_tensor_affine(
                         X, float(self.scale), int(self.zero_point),
                         self.quant_min, self.quant_max)

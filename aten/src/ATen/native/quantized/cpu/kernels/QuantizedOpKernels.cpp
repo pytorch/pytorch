@@ -2101,28 +2101,6 @@ void fake_quantize_tensor_cachemask_kernel(
     int64_t quant_max) {
   float inv_scale = 1.0f / sc;
 
-  /*
-  // TODO(before land): do it in the same loop
-  auto iter = TensorIterator::unary_op(output, input);
-  cpu_kernel(iter, [&](float self) -> float {
-    return (std::fmin(
-                std::fmax(
-                    static_cast<int64_t>(
-                        z_point + std::nearbyint(self * inv_scale)),
-                    quant_min),
-                quant_max) -
-            z_point) *
-        sc;
-  });
-
-  auto iter_mask = TensorIterator::unary_op(mask, input);
-  cpu_kernel(iter_mask, [&](float self) -> bool {
-    auto qval = static_cast<int64_t>(z_point + std::nearbyint(self * inv_scale));
-    return ((quant_min <= qval) && (qval <= quant_max));
-  });
-  */
-
-  // TODO before land: verify numerical correctness
   auto iter_combined = TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(output)
