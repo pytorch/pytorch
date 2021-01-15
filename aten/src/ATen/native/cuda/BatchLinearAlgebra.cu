@@ -1767,17 +1767,29 @@ static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
 #ifndef USE_MAGMA
   TORCH_CHECK(false, "cholesky_inverse: MAGMA library not found in compilation. Please rebuild with MAGMA.");
 #else
-  magma_uplo_t uplo = upper ? MagmaUpper : MagmaLower;
-
-  auto input_data = input.data_ptr<scalar_t>();
-  magma_int_t n = magma_int_cast(input.size(-2), "input.size(-2)");
-  auto lda = std::max<magma_int_t>(1, n);
-
   if (input.dim() == 2) {
-    TORCH_INTERNAL_ASSERT(infos.device() == at::kCPU);
-    magmaCholeskyInverse<scalar_t>(uplo, n, input_data, lda, infos.data_ptr<magma_int_t>());
-    // MAGMA writes to only upper/lower part of the matrix leaving the other side unchanged
-    apply_reflect_conj_tri_single<scalar_t>(input, upper);
+    // magmaCholeskyInverse (magma_dpotri_gpu) is extremely slow because internally
+    // it transfers data several times between GPU and CPU and calls lapack routine on CPU
+    // using magmaCholeskySolveBatched is a lot faster
+    // note that magmaCholeskySolve is also slow
+
+    // 'input' is modified in-place we need to clone it and replace with a diagonal matrix
+    // for apply_cholesky_solve
+    auto input_working_copy = cloneBatchedColumnMajor(input);
+
+    // 'input' tensor has to be a batch of diagonal matrix
+    input.fill_(0);
+    input.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
+
+    // unsqueezing here so that the batched version is used
+    Tensor result_u = input.unsqueeze(0);
+    Tensor input_u = input_working_copy.unsqueeze(0);
+
+    // magma's potrs_batched is a strange function: it doesn't take matrix-wise array of ints as an argument
+    // but returns a single 'magma_int_t'
+    int64_t info_tmp = 0;
+    apply_cholesky_solve<scalar_t>(result_u, input_u, upper, info_tmp);
+    infos.fill_(info_tmp);
     return;
   }
   TORCH_CHECK(false, "apply_cholesky_inverse does not support batched inputs on CUDA.")
