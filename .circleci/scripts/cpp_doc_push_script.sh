@@ -47,21 +47,17 @@ sudo apt-get -y install doxygen
 # Generate ATen files
 pushd "${pt_checkout}"
 pip install -r requirements.txt
-time python aten/src/ATen/gen.py \
+time python -m tools.codegen.gen \
   -s aten/src/ATen \
-  -d build/aten/src/ATen \
-  aten/src/ATen/Declarations.cwrap \
-  aten/src/THCUNN/generic/THCUNN.h \
-  aten/src/ATen/nn.yaml \
-  aten/src/ATen/native/native_functions.yaml
+  -d build/aten/src/ATen
 
 # Copy some required files
-cp aten/src/ATen/common_with_cwrap.py tools/shared/cwrap_common.py
 cp torch/_utils_internal.py tools/shared
 
 # Generate PyTorch files
 time python tools/setup_helpers/generate_code.py \
   --declarations-path build/aten/src/ATen/Declarations.yaml \
+  --native-functions-path aten/src/ATen/native/native_functions.yaml \
   --nn-path aten/src/
 
 # Build the docs
@@ -92,7 +88,7 @@ git status
 git config user.email "soumith+bot@pytorch.org"
 git config user.name "pytorchbot"
 # If there aren't changes, don't make a commit; push is no-op
-git commit -m "Automatic sync on $(date)" || true
+git commit -m "Generate C++ docs from pytorch/pytorch@$CIRCLE_SHA1" || true
 git status
 
 popd

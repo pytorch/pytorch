@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/peephole.h>
+
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
@@ -137,14 +138,14 @@ void fuseBroadcast(Block* b) {
       // Not all broadcasts are supported by ONNX broadcast.
       c10::optional<size_t> axis = fusibleExpandTo(
           unexpanded_input->type()
-              ->expect<TensorType>()
-              ->sizes()
+              ->expectRef<TensorType>()
+              .sizes()
               .concrete_sizes()
               .value(), // from
           n->output()
               ->type()
-              ->expect<TensorType>()
-              ->sizes()
+              ->expectRef<TensorType>()
+              .sizes()
               .concrete_sizes()
               .value()); // to
       if (axis == c10::nullopt)
@@ -164,7 +165,8 @@ void fuseConsecutiveTransposes(Block* b) {
       fuseConsecutiveTransposes(child_block);
     }
     if (n->kind() == onnx::Transpose &&
-        n->input()->node()->kind() == onnx::Transpose) {
+        n->input()->node()->kind() == onnx::Transpose &&
+        n->owningBlock() == n->input()->node()->owningBlock()) {
       auto origInput = n->input();
       n->is_(
           attr::perm,
@@ -309,7 +311,13 @@ void pushPackingPastRnn(Block* b) {
       std::vector<int64_t> new_sizes;
       new_sizes.push_back(*oldType->sizes()[0]);
       new_sizes.push_back(*oldType->sizes()[1]);
-      new_sizes.push_back(rnn->i(attr::hidden_size));
+      if (next->kind() == onnx::Reshape) {
+        // bidirection
+        new_sizes.push_back(rnn->i(attr::hidden_size) * 2);
+      } else {
+        // unidirection
+        new_sizes.push_back(rnn->i(attr::hidden_size));
+      }
       TensorTypePtr newType = TensorType::createContiguous(
           *oldType->scalarType(), *oldType->device(), new_sizes);
       next->outputs().at(0)->setType(newType);
@@ -513,6 +521,22 @@ static void speculateOps(Block* block) {
     auto node_input = n->input()->node();
     if (node_input->owningBlock() == n->owningBlock())
       continue;
+    // Skip if output of this node is part of block output.
+    bool is_block_output = false;
+    for (auto node_output : n->outputs()) {
+      for (auto node_output_use : node_output->uses()) {
+        if (node_output_use.user == n->owningBlock()->return_node()) {
+          is_block_output = true;
+          break;
+        }
+      }
+      if (is_block_output) {
+        break;
+      }
+    }
+    if (is_block_output) {
+      continue;
+    }
     // find the control flow node in the same block as node_input that contains
     // Node n
     auto control_flow_node = n->owningBlock()->owningNode();
@@ -576,7 +600,7 @@ static void eraseListConstruct(Block* block, int opset_version) {
               i, std::vector<Value*>({concat_node->output()}));
 
         } else {
-          if (opset_version < onnx::OPSET_VERSION_11) {
+          if (opset_version < OPSET_VERSION_11) {
             // Tensor lists are used mostly for inputs to cat/stack. They are
             // already handled in those symbolics, and should become dead
             // afterwards.
@@ -673,7 +697,8 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         // (%10)
         origLogSoftmaxNode = prev->input(0)->node();
         auto transpose = origLogSoftmaxNode->input(0)->node();
-        origLogSoftmaxNode->replaceInput(0, transpose->inputs().at(0));
+        if (transpose->inputs().size() > 0)
+          origLogSoftmaxNode->replaceInput(0, transpose->inputs().at(0));
       } else if (
           prev->kind() == onnx::Reshape &&
           prev->input(0)->node()->kind() == onnx::Transpose &&
@@ -725,11 +750,9 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
           // onnx::Reshape(%35, %36) return (%37)
           auto nllloss_output = origNllLossNode->output(0)->uses()[0].user;
           TORCH_INTERNAL_ASSERT(nllloss_output->kind() == onnx::Reshape);
-          TORCH_INTERNAL_ASSERT(
-              nllloss_output->inputs()[1]->node()->kind() ==
-              prim::ListConstruct);
           // make output of reshape the output of nllloss
           nllloss_output->replaceAllUsesWith(origNllLossNode);
+          origNllLossNode->output(0)->copyMetadata(nllloss_output->output(0));
         }
       } else {
         continue;

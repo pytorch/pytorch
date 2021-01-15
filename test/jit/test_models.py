@@ -23,6 +23,8 @@ try:
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
+except RuntimeError:
+    HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class MnistNet(nn.Module):

@@ -91,7 +91,7 @@ static std::string variableType(const std::shared_ptr<c10::Type>& t) {
     return "double";
   } else if (t->kind() == TypeKind::BoolType) {
     return "bool";
-  } else if (auto scalar_type = t->expect<TensorType>()->scalarType()) {
+  } else if (auto scalar_type = t->expectRef<TensorType>().scalarType()) {
     return calcScalarTypeName(*scalar_type);
   }
   // something went wrong with the type analysis during shape propagation
@@ -118,7 +118,7 @@ static std::string typeCastedValueName(
   } else if (t->kind() == TypeKind::NoneType) {
     // Support None value for optional arguments like memory format
     return vn;
-  } else if (auto scalar_type = t->expect<TensorType>()->scalarType()) {
+  } else if (auto scalar_type = t->expectRef<TensorType>().scalarType()) {
     if (*scalar_type != outtype) {
       return std::string("((") + calcScalarTypeName(outtype) + ") " + vn + ")";
     }
@@ -210,13 +210,15 @@ static std::string encodeRHS(const Node* n) {
       {aten::floor, {"floorf(${0})", "floor(${0})"}},
       {aten::round, {"roundf(${0})", "round(${0})"}},
       {aten::trunc, {"truncf(${0})", "trunc(${0})"}},
-      {aten::frac, {"fracf(${0})", "frac(${0})"}},
+      {aten::frac, {"${0} - truncf(${0})", "${0} - trunc(${0})"}},
       {aten::reciprocal, {"1.f/(${0})", "1./(${0})"}},
       {aten::neg, "-${0}"},
       // simple binary
       {aten::atan2, "atan2(${0}, ${1})"},
-      {aten::min, {"fminf(${0}, ${1})", "fmin(${0}, ${1})"}},
-      {aten::max, {"fmaxf(${0}, ${1})", "fmax(${0}, ${1})"}},
+      {aten::min,
+       "isnan(${0}) ? ${0} : (isnan(${1}) ? ${1} : (${0} < ${1} ? ${0} : ${1}))"},
+      {aten::max,
+       "isnan(${0}) ? ${0} : (isnan(${1}) ? ${1} : (${0} < ${1} ? ${1} : ${0}))"},
 
       // binary with other
       // TODO: some of these ops will not get generated because
@@ -250,10 +252,6 @@ static std::string encodeRHS(const Node* n) {
 
       // where
       {aten::where, "(${0} ? ${1} : ${2})"},
-
-      // simple derivatives
-      {aten::_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
-      {aten::_tanh_backward, "${0} * (1.f - ${1} * ${1})"},
   };
 
   TemplateEnv env;
@@ -263,7 +261,7 @@ static std::string encodeRHS(const Node* n) {
   } else {
     size_t i = 0;
 
-    auto outtype = n->output()->type()->expect<TensorType>()->scalarType();
+    auto outtype = n->output()->type()->expectRef<TensorType>().scalarType();
     TORCH_INTERNAL_ASSERT(outtype);
 
     for (auto in : n->inputs()) {

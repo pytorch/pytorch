@@ -483,6 +483,11 @@ Loss functions
 
 .. autofunction:: triplet_margin_loss
 
+:hidden:`triplet_margin_with_distance_loss`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: triplet_margin_with_distance_loss
+
 Vision functions
 ----------------
 
@@ -490,6 +495,11 @@ Vision functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: pixel_shuffle
+
+:hidden:`pixel_unshuffle`
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: pixel_unshuffle
 
 :hidden:`pad`
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -533,5 +543,3 @@ DataParallel functions (multi-GPU, distributed)
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: torch.nn.parallel.data_parallel
-
-

@@ -5,7 +5,7 @@ from torch.types import Device
 from torch._utils import _get_device_index as _torch_get_device_index
 
 
-def _get_device_index(device: Union[Device, str, int], optional: bool = False,
+def _get_device_index(device: Union[Device, str, int, None], optional: bool = False,
                       allow_cpu: bool = False) -> int:
     r"""Gets the device index from :attr:`device`, which can be a torch.device
     object, a Python integer, or ``None``.

@@ -80,6 +80,23 @@ void TestAdd(DeprecatedTypeProperties& type) {
   }
 }
 
+void TestZeros(DeprecatedTypeProperties& type) {
+  auto begin = std::chrono::high_resolution_clock::now();
+  Tensor a = zeros({1024, 1024}, type);
+  for (int i = 1; i < 1000; ++i) {
+    a = zeros({128, 128}, type);
+  }
+  auto end = std::chrono::high_resolution_clock::now();
+  std::cout << std::dec << "   "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(
+                   end - begin)
+                   .count()
+            << " ms" << std::endl;
+
+   std::srand(std::time(nullptr));
+   ASSERT_EQ(norm(a).item<double>(), 0.0);
+}
+
 void TestLoadsOfAdds(DeprecatedTypeProperties& type) {
   auto begin = std::chrono::high_resolution_clock::now();
   Tensor d = ones({3, 4}, type);
@@ -309,6 +326,7 @@ void test(DeprecatedTypeProperties& type) {
   TestSort(type);
   TestRandperm(type);
   TestAdd(type);
+  TestZeros(type);
   TestLoadsOfAdds(type);
   TestLoadOfAddsWithCopy(type);
   TestIsContiguous(type);
@@ -371,7 +389,6 @@ TEST(BasicTest, FactoryMethodsTest) {
 
   // Test setting requires_grad to true.
   // This is a bug. Requires_grad was set to TRUE but this is not implemented.
-  // Issue https://github.com/pytorch/pytorch/issues/30405
   EXPECT_ANY_THROW(at::empty({4}, at::TensorOptions().requires_grad(true)));
 
   // Test setting dtype

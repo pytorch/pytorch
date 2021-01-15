@@ -16,7 +16,7 @@ namespace autograd {
 
 using torch::distributed::autograd::AutogradMetadata;
 using torch::distributed::autograd::RpcWithAutograd;
-using torch::distributed::rpc::FutureMessage;
+using torch::distributed::rpc::JitFuture;
 using torch::distributed::rpc::Message;
 using torch::distributed::rpc::MessageType;
 using torch::distributed::rpc::RpcAgent;
@@ -138,22 +138,23 @@ Message getMessageWithAutograd(
   return std::move(*rpcWithAutograd).toMessage();
 }
 
-std::shared_ptr<FutureMessage> sendMessageWithAutograd(
+std::shared_ptr<JitFuture> sendMessageWithAutograd(
     RpcAgent& agent,
     const WorkerInfo& dst,
     torch::distributed::rpc::Message&& wrappedRpcMsg,
     bool forceGradRecording,
-    const float rpcTimeoutSeconds) {
+    const float rpcTimeoutSeconds,
+    bool forceDisableProfiling) {
   auto msg = getMessageWithAutograd(
       dst.id_,
       std::move(wrappedRpcMsg),
       MessageType::FORWARD_AUTOGRAD_REQ,
       forceGradRecording);
 
-  std::shared_ptr<FutureMessage> fut;
+  std::shared_ptr<JitFuture> fut;
   // If profiler is enabled, wrap this message with profiling metadata that will
   // tell the remote end to process this request with the profiler enabled.
-  if (torch::autograd::profiler::profilerEnabled()) {
+  if (!forceDisableProfiling && torch::autograd::profiler::profilerEnabled()) {
     auto profilerConfig = torch::autograd::profiler::getProfilerConfig();
     auto msgWithProfiling = getMessageWithProfiling(
         std::move(msg),

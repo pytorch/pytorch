@@ -1,6 +1,8 @@
 import concurrent.futures
 import contextlib
 import json
+import logging
+import os
 import sys
 from threading import Lock
 import time
@@ -14,14 +16,18 @@ import torch.distributed as dist
 import torch.distributed.rpc as rpc
 import torch.distributed.autograd as dist_autograd
 from torch.distributed.rpc import RRef, _get_debug_info, _rref_context_get_debug_info
-from torch.distributed.rpc.api import _delete_all_user_and_unforked_owner_rrefs, _use_rpc_pickler
+from torch.distributed.rpc.api import _delete_all_user_and_unforked_owner_rrefs, _use_rpc_pickler, _thread_local_var, _wait_all
 from torch.distributed.rpc.internal import (
     PythonUDF,
     RPCExecMode,
     _internal_rpc_pickler,
     _build_rpc_profiling_key,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    skip_if_lt_x_gpu,
+    skip_if_no_peer_access,
+    captured_output,
+)
 from torch.testing._internal.common_utils import IS_MACOS, load_tests
 from torch.testing._internal.dist_utils import (
     dist_init,
@@ -31,6 +37,7 @@ from torch.testing._internal.dist_utils import (
     wait_until_pending_futures_and_users_flushed,
     wait_until_owners_and_forks_on_rank,
     worker_name,
+    single_threaded_process_group_agent,
 )
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
@@ -41,9 +48,14 @@ from torch.testing._internal.common_utils import TemporaryFileName
 def foo_add():
     return torch.add(torch.ones(1), torch.ones(1))
 
-def udf_with_torch_ops(device=-1):
+def udf_with_torch_ops(device=-1, use_record_function=False):
     device_ctx = contextlib.suppress() if device == -1 else torch.cuda.device(device)
-    with device_ctx:
+    record_function_ctx = (
+        torch.autograd.profiler.record_function("##forward##")
+        if use_record_function
+        else contextlib.suppress()
+    )
+    with device_ctx, record_function_ctx:
         t1, t2 = torch.ones(1), torch.ones(1)
         t = torch.add(t1, t2)
         t = torch.mul(t, t)
@@ -60,13 +72,16 @@ EXPECTED_REMOTE_EVENTS = [
     "aten::relu",
     "aten::threshold",
     "aten::sigmoid",
-    "aten::sigmoid",
 ]
+
+# Remote operations are prefixed with the following string for RPC profiling.
+REMOTE_OP_STR = "#remote_op: "
 
 
 VALUE_FUTURE = concurrent.futures.Future()
 DONE_FUTURE = concurrent.futures.Future()
 
+FIFTY_MIL_CYCLES = 50000000
 
 class StubRpcAgent:
     def __init__(self, world_size):
@@ -123,6 +138,19 @@ class MyPickleClass:
 
     def set(self, val):
         self.t = val
+
+
+class SlowPickleClass:
+    def __init__(self, t):
+        self.t = t
+
+    def __getstate__(self):
+        time.sleep(self.t)
+        return (self.t, )
+
+    def __setstate__(self, obj):
+        self.t = obj[0]
+        time.sleep(self.t)
 
 
 class MyClass:
@@ -290,8 +318,13 @@ def my_script_func(tensor):
     return torch.add(tensor, tensor)
 
 
+expected_err = "Expected error"
 def raise_func():
-    raise ValueError("Expected error")
+    raise ValueError(expected_err)
+
+expected_err_escape = "\nFirst line of error \n next line of error \n last line of error"
+def raise_func_escape():
+    raise ValueError(expected_err_escape)
 
 
 global_rref = None
@@ -366,6 +399,18 @@ def async_wrong_type():
 @rpc.functions.async_execution
 def async_add(to, x, y):
     return rpc.rpc_async(to, torch.add, args=(x, y))
+
+
+def slow_add(x, y, device="cpu"):
+    time.sleep(1)
+    x = x.to(device)
+    y = y.to(device)
+    return torch.add(x, y).cpu()
+
+
+@rpc.functions.async_execution
+def slow_async_add(to, x, y, device="cpu"):
+    return rpc.rpc_async(to, slow_add, args=(x, y, device))
 
 
 @rpc.functions.async_execution
@@ -444,9 +489,23 @@ class AsyncExecutionClass:
         )
         return ret_fut
 
+    @rpc.functions.async_execution
+    def bound_async_add(self, to, x, y, z):
+        return rpc.rpc_async(to, torch.add, args=(x, y)).then(
+            lambda fut: fut.wait() + z
+        )
+
 
 def return_future():
     return torch.futures.Future()
+
+
+class FooBackendOptions(rpc.RpcBackendOptions):
+    def __init__(self, init_method):
+        # Must call the __init__ of the superclass (and do so directly,
+        # without using super()) because... pybind.
+        rpc.RpcBackendOptions.__init__(self)
+        self.init_method = init_method
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -492,6 +551,31 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(ret, torch.ones(2, 2) + 1)
 
     @dist_init
+    def test_send_to_rank(self):
+        dst_rank = (self.rank + 1) % self.world_size
+
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            ret = self._run_func_in_mode(dst_rank, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+            self.assertEqual(ret, torch.ones(2, 2) + 1)
+
+        # Test invalid ranks
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            with self.assertRaises(RuntimeError):
+                self._run_func_in_mode(self.world_size + 1, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            with self.assertRaises(RuntimeError):
+                self._run_func_in_mode(-1, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            with self.assertRaises(ValueError):
+                self._run_func_in_mode(dst_rank + 0.5, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+
+        for exec_mode in [RPCExecMode.SYNC, RPCExecMode.ASYNC, RPCExecMode.REMOTE]:
+            with self.assertRaises(ValueError):
+                self._run_func_in_mode(dst_rank - 0.5, torch.add, exec_mode, args=(torch.ones(2, 2), 1))
+
+    @dist_init
     def test_self_py_udf_remote(self):
         self_worker_info = rpc.get_worker_info()
         rref = rpc.remote(self_worker_info, my_function, args=(torch.ones(2, 2), 1, 3))
@@ -526,6 +610,20 @@ class RpcTest(RpcAgentTestFixture):
     def test_self_remote_rref_as_remote_arg(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         self._test_self_remote_rref_as_remote_arg(dst)
+
+    @dist_init
+    def test_rref_proxy_non_exist(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        rref = rpc.remote(dst, my_function, args=(torch.ones(2, 2), 1, 3))
+        msg = "has no attribute \'non_exist\'"
+        with self.assertRaisesRegex(AttributeError, msg):
+            rref.rpc_sync().non_exist()
+
+        with self.assertRaisesRegex(AttributeError, msg):
+            rref.rpc_async().non_exist()
+
+        with self.assertRaisesRegex(AttributeError, msg):
+            rref.remote().non_exist()
 
     def _test_rref_proxy_tensor(self, dst):
         rref = rpc.remote(dst, my_function, args=(torch.ones(2, 2), 1, 3))
@@ -693,11 +791,19 @@ class RpcTest(RpcAgentTestFixture):
             rpc_backend_options=self.rpc_backend_options,
         )
 
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         # Wait for all init to complete.
         dist.barrier()
 
-        with self.assertRaisesRegex(RuntimeError, "is already initialized"):
+        # TODO: with TCP init, rank 0 raises Address already in use because
+        # rank 0 is the start daemon and the store is created before checking if
+        # RPC is already initialized in init_rpc.
+        if os.environ.get("RPC_INIT_WITH_TCP", None) == "1" and self.rank == 0:
+            expected_reinit_err = "Address already in use"
+        else:
+            expected_reinit_err = "is already initialized"
+
+        with self.assertRaisesRegex(RuntimeError, expected_reinit_err):
             rpc.init_rpc(
                 name=worker_name(self.rank),
                 backend=self.rpc_backend,
@@ -899,6 +1005,21 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(expected, results)
 
     @dist_init
+    def test_all_gather_timeout(self):
+        rpc._set_rpc_timeout(0.1)
+
+        if self.rank == 0:
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "timed out in _all_gather after 0\\.10 seconds"
+            ):
+                rpc.api._all_gather(SlowPickleClass(0.5))
+        else:
+            expected_error = self.get_timeout_error_regex()
+            with self.assertRaisesRegex(RuntimeError, expected_error):
+                rpc.api._all_gather(SlowPickleClass(0.5))
+
+    @dist_init
     def test_graceful_shutdown_with_uneven_workload(self):
         """Test graceful termination."""
         self._run_uneven_workload()
@@ -980,6 +1101,33 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(rpc_event.count, 1)
 
     @dist_init
+    def test_profiler_rpc_record_shapes(self):
+        if self.rank != 1:
+            return
+        dst = (self.rank + 1) % self.world_size
+        dst_worker = worker_name(dst)
+        t1, t2 = torch.ones(100), torch.ones(100)
+        with torch.autograd.profiler.profile(record_shapes=True) as prof:
+            rpc.rpc_sync(dst_worker, torch.add, args=(t1, t2))
+
+        function_events = prof.function_events
+        remote_events = [event for event in function_events if event.is_remote]
+        remote_add_event = [
+            event for event in remote_events if "aten::add" in event.name
+        ][0]
+        remote_add_input_shapes = remote_add_event.input_shapes
+        # Run profiler on equivalent local op and validate shapes are the same.
+        with torch.autograd.profiler.profile(record_shapes=True) as prof:
+            torch.add(t1, t2)
+
+        local_function_events = prof.function_events
+        local_add_event = [
+            event for event in local_function_events if "aten::add" in event.name
+        ][0]
+        local_add_input_shapes = local_add_event.input_shapes
+        self.assertEqual(remote_add_input_shapes, local_add_input_shapes)
+
+    @dist_init
     def test_profiler_rpc_memory(self):
         if self.rank != 1:
             return
@@ -1020,6 +1168,9 @@ class RpcTest(RpcAgentTestFixture):
             fut1.wait()
             fut2.wait()
 
+        def get_name(event):
+            return event.name[event.name.find(REMOTE_OP_STR) + len(REMOTE_OP_STR):]
+
         function_events = p.function_events
         for event in function_events:
             if event.is_async:
@@ -1030,23 +1181,18 @@ class RpcTest(RpcAgentTestFixture):
                 if event.node_id == 1:
                     continue
                 self.assertTrue(event.node_id in [dst_cuda_0, dst_cuda_1])
-                self.assertGreater(event.cuda_time_total, 0)
-                self.assertEqual(1, len(event.kernels))
-                kernel = event.kernels[0]
-                if event.node_id == dst_cuda_0:
-                    self.assertEqual(kernel.device, 0)
-                if event.node_id == dst_cuda_1:
-                    self.assertEqual(kernel.device, 1)
-
-                self.assertGreater(event.cuda_time, 0)
+                if get_name(event) in EXPECTED_REMOTE_EVENTS:
+                    self.assertGreater(event.cuda_time_total, 0)
+                    self.assertEqual(1, len(event.kernels))
+                    kernel = event.kernels[0]
+                    if event.node_id == dst_cuda_0:
+                        self.assertEqual(kernel.device, 0)
+                    if event.node_id == dst_cuda_1:
+                        self.assertEqual(kernel.device, 1)
+                    self.assertGreater(event.cuda_time, 0)
 
         # Validate that EXPECTED_REMOTE_EVENTS is a subset of remotely profiled
         # events.
-        REMOTE_OP_STR = "#remote_op: "
-
-        def get_name(event):
-            return event.name[event.name.find(REMOTE_OP_STR) + len(REMOTE_OP_STR):]
-
         remote_events = [event for event in function_events if event.is_remote]
         remote_event_names = [get_name(event) for event in remote_events if get_name(event) in EXPECTED_REMOTE_EVENTS]
         self.assertEqual(set(remote_event_names), set(EXPECTED_REMOTE_EVENTS))
@@ -1141,8 +1287,7 @@ class RpcTest(RpcAgentTestFixture):
                 for fut in futs:
                     fut.result()
 
-    @dist_init
-    def test_profiler_remote_events_profiled(self):
+    def _run_test_profiler_remote_events_profiled(self):
         # Tests that we can successfully invoke the profiler on a remote node,
         # and collect the remote events back in the local profiler.
         if self.rank != 1:
@@ -1175,7 +1320,6 @@ class RpcTest(RpcAgentTestFixture):
             )
 
             for expected_remote_event_name in EXPECTED_REMOTE_EVENTS:
-                REMOTE_OP_STR = "#remote_op: "
                 expected_key = rpc_profiling_key + REMOTE_OP_STR + expected_remote_event_name
                 self.assertTrue(expected_key in remote_events)
                 remote_event = remote_events[expected_key]
@@ -1196,7 +1340,20 @@ class RpcTest(RpcAgentTestFixture):
                 for event in events
                 if convert_remote_to_local(event.name) in EXPECTED_REMOTE_EVENTS
             ]
-            self.assertEqual(remote_events_list, EXPECTED_REMOTE_EVENTS)
+            self.assertEqual(
+                set(remote_events_list),
+                set(EXPECTED_REMOTE_EVENTS),
+                f"Mismatch between profiled events: {set(remote_events_list)} and expected events: {set(EXPECTED_REMOTE_EVENTS)}",
+            )
+
+    @dist_init
+    def test_profiler_remote_events_profiled(self):
+        self._run_test_profiler_remote_events_profiled()
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_remote_events_profiled_single_threaded(self):
+        self._run_test_profiler_remote_events_profiled()
 
     def run_profiling_workload(self, dst):
         fut = rpc.rpc_async(
@@ -1209,12 +1366,140 @@ class RpcTest(RpcAgentTestFixture):
         )
         fut.wait()
 
+    def _run_rpc_profiling_async_function(self, device="cpu"):
+        if self.rank != 1:
+            return
+
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+        x = torch.ones(2)
+        y = torch.ones(2)
+        with torch.autograd.profiler.profile() as prof:
+            ret = rpc.rpc_async(
+                dst1, slow_async_add, args=(dst2, x, y, device), timeout=20
+            )
+            out = ret.wait()
+
+        function_events = prof.function_events
+        # slow_async_add resulted in an RPC from dst1 -> dst2, so this should be
+        # recorded.
+        key_prefix = _build_rpc_profiling_key(
+            RPCExecMode.ASYNC, slow_async_add.__qualname__, worker_name(self.rank), dst1
+        )
+
+        nested_rpc_key_prefix = _build_rpc_profiling_key(
+            RPCExecMode.ASYNC, slow_add.__qualname__, dst1, dst2
+        )
+        expected_key = key_prefix + REMOTE_OP_STR + nested_rpc_key_prefix
+        remote_events = [event for event in function_events if event.is_remote]
+        rpc_remote_event = [
+            event for event in remote_events if event.name == expected_key
+        ]
+        self.assertEqual(1, len(rpc_remote_event))
+        rpc_remote_event = rpc_remote_event[0]
+        self.assertEqual(rpc_remote_event.node_id, (self.rank + 1) % self.world_size)
+        # slow_async_add's RPC does an add on dst2, which should be reflected as well.
+        remote_add_key = (
+            expected_key + REMOTE_OP_STR + torch.jit._builtins._find_builtin(torch.add)
+        )
+        remote_add_event = [
+            event for event in remote_events if event.name == remote_add_key
+        ]
+        self.assertEqual(1, len(remote_add_event))
+        remote_add_event = remote_add_event[0]
+        # Validate that node_id is dst2.
+        self.assertEqual(remote_add_event.node_id, (self.rank + 2) % self.world_size)
+
+    @dist_init
+    def test_rpc_profiling_async_function(self):
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
+        self._run_rpc_profiling_async_function()
+        if torch.cuda.is_available():
+            dist.barrier()
+            self._run_rpc_profiling_async_function(device="cuda:0")
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_rpc_profiling_async_function_single_threaded(self):
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
+        self._run_rpc_profiling_async_function()
+        if torch.cuda.is_available():
+            dist.barrier()
+            self._run_rpc_profiling_async_function(device="cuda:0")
+
+    @dist_init
+    def test_rpc_profiling_remote_record_function(self):
+        # test that functions run over RPC with record_function show the expected
+        # profiled block.
+        if self.rank != 1:
+            return
+        dst_ranks = [i for i in range(self.world_size) if i != self.rank]
+        for dst_rank in dst_ranks:
+            dst_worker = worker_name(dst_rank)
+            with torch.autograd.profiler.profile() as prof:
+                fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=(-1, True))
+                fut.wait()
+
+            function_events = prof.function_events
+            record_function_remote_event = [
+                evt for evt in function_events if "##forward##" in evt.name
+            ]
+            self.assertEqual(1, len(record_function_remote_event))
+            record_function_remote_event = record_function_remote_event[0]
+            self.assertEqual(record_function_remote_event.node_id, dst_rank)
+            remaining_remote_events = {
+                evt for evt in function_events if evt.node_id == dst_rank
+            } - {record_function_remote_event}
+            # These ops are created by the hack of casting record_function to a
+            # tensor, so they should not count in the actual UDF profiled time.
+            # TODO remove after https://github.com/pytorch/pytorch/issues/43868
+            # is resolved.
+            remote_events_denylist = [
+                "aten::zeros",
+                "aten::empty",
+                "aten::zero_",
+                "aten::fill_",
+            ]
+
+            REMOTE_OP_STR = "#remote_op: "
+
+            def convert_remote_to_local(event_name):
+                remote_op_key = REMOTE_OP_STR
+                return event_name[event_name.find(remote_op_key) + len(remote_op_key) :]
+
+            # Ideally, we should validate that the sum of remote operations within
+            # record_function are less than record_function's CPU time. However,
+            # there is a known bug in profiling
+            # (https://github.com/pytorch/pytorch/issues/45160) due to which we
+            # can't do this. So, we just validate they are child events.
+            prof.key_averages()
+
+            # cpu_children only returns direct children, so here we get all
+            # children recursively.
+            def get_cpu_children(event):
+                if not event.cpu_children:
+                    return []
+                cpu_children = event.cpu_children
+                for e in event.cpu_children:
+                    cpu_children.extend(get_cpu_children(e))
+                return cpu_children
+
+            record_function_children_names = [
+                convert_remote_to_local(c.name)
+                for c in get_cpu_children(record_function_remote_event)
+            ]
+            for evt in remaining_remote_events:
+                local_name = convert_remote_to_local(evt.name)
+                if local_name not in remote_events_denylist:
+                    self.assertTrue(
+                        local_name in record_function_children_names,
+                        f"{local_name} not in {record_function_children_names}",
+                    )
+
     def validate_profiling_workload(self, dst, prof):
-        REMOTE_OP_STR = "#remote_op: "
 
         def convert_remote_to_local(event_name):
-            remote_op_key = REMOTE_OP_STR
-            return event_name[event_name.find(remote_op_key) + len(remote_op_key) :]
+            return event_name[event_name.find(REMOTE_OP_STR) + len(REMOTE_OP_STR) :]
 
         events = prof.function_events
         remote_events = {
@@ -1233,8 +1518,7 @@ class RpcTest(RpcAgentTestFixture):
             RPCExecMode.ASYNC,
         )
 
-    @dist_init
-    def test_profiler_with_autograd_context(self):
+    def _run_test_profiler_with_autograd_context(self):
         dst = (self.rank + 1) % self.world_size
         if self.rank == 1:
             # Cases where we can double wrap messages with profiling information and autograd info.
@@ -1251,6 +1535,15 @@ class RpcTest(RpcAgentTestFixture):
                     self.run_profiling_workload(dst)
 
             self.validate_profiling_workload(dst, prof)
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_autograd_context_single_threaded(self):
+        self._run_test_profiler_with_autograd_context()
+
+    @dist_init
+    def test_profiler_with_autograd_context(self):
+        self._run_test_profiler_with_autograd_context()
 
     def _profiler_test_with_rpc(self, rpc_exec_mode, func, args, use_record_function=False, dst=None):
         dst = dst if dst is not None else (self.rank + 1) % self.world_size
@@ -1295,8 +1588,8 @@ class RpcTest(RpcAgentTestFixture):
                 scope_event = get_function_event(events, "foo")
                 # Since RPC call is within the scope, its CPU interval should be
                 # contained within foo's interval.
-                self.assertTrue(scope_event.cpu_interval.start < rpc_event.cpu_interval.start)
-                self.assertTrue(scope_event.cpu_interval.end > rpc_event.cpu_interval.end)
+                self.assertLessEqual(scope_event.time_range.start, rpc_event.time_range.start)
+                self.assertGreaterEqual(scope_event.time_range.end, rpc_event.time_range.end)
             # the sender, dest worker, function run, and type of RPC should all
             # be recorded.
             self_worker_name = worker_name(self.rank)
@@ -1309,14 +1602,21 @@ class RpcTest(RpcAgentTestFixture):
                 rpc_event_idx = next(i for i, event in enumerate(events) if rpc_exec_mode.value in event.name)
                 self.assertLess(foo_event_ix, rpc_event_idx)
 
-    @dist_init
-    def test_profiler_with_sync_rpc_udf(self):
+    def _run_test_profiler_with_sync_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.SYNC, my_sleep_func, args=(1,),
                                      use_record_function=True)
 
     @dist_init
-    def test_profiler_with_sync_rpc_builtin(self):
+    def test_profiler_with_sync_rpc_udf(self):
+        self._run_test_profiler_with_sync_rpc_udf()
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_sync_rpc_udf_single_threaded(self):
+        self._run_test_profiler_with_sync_rpc_udf()
+
+    def _run_test_profiler_with_sync_rpc_builtin(self):
         self._profiler_test_with_rpc(
             RPCExecMode.SYNC, torch.mul, args=(torch.ones(1), torch.ones(1))
         )
@@ -1326,13 +1626,29 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @dist_init
-    def test_profiler_with_async_rpc_udf(self):
+    def test_profiler_with_sync_rpc_builtin(self):
+        self._run_test_profiler_with_sync_rpc_builtin()
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_sync_rpc_builtin_single_threaded(self):
+        self._run_test_profiler_with_sync_rpc_builtin()
+
+    def _run_test_profiler_with_async_rpc_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(RPCExecMode.ASYNC, my_sleep_func, args=(1,),
                                      use_record_function=True)
 
     @dist_init
-    def test_profiler_with_async_rpc_builtin(self):
+    def test_profiler_with_async_rpc_udf(self):
+        self._run_test_profiler_with_async_rpc_udf()
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_async_rpc_udf_single_threaded(self):
+        self._run_test_profiler_with_async_rpc_udf()
+
+    def _run_test_profiler_with_async_rpc_builtin(self):
         self._profiler_test_with_rpc(
             RPCExecMode.ASYNC, torch.mul, args=(torch.ones(1), torch.ones(1))
         )
@@ -1342,7 +1658,15 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @dist_init
-    def test_profiler_with_remote_udf(self):
+    def test_profiler_with_async_rpc_builtin(self):
+        self._run_test_profiler_with_async_rpc_builtin()
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_async_rpc_builtin_single_threaded(self):
+        self._run_test_profiler_with_async_rpc_builtin()
+
+    def _run_test_profiler_with_remote_udf(self):
         self._profiler_test_with_rpc(RPCExecMode.REMOTE, my_sleep_func, args=(1,))
         self._profiler_test_with_rpc(
             RPCExecMode.REMOTE, my_sleep_func, args=(1,), use_record_function=True
@@ -1353,7 +1677,15 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @dist_init
-    def test_profiler_with_remote_builtin(self):
+    def test_profiler_with_remote_udf(self):
+        self._run_test_profiler_with_remote_udf()
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_remote_udf_single_threaded(self):
+        self._run_test_profiler_with_remote_udf()
+
+    def _run_test_profiler_with_remote_builtin(self):
         self._profiler_test_with_rpc(
             RPCExecMode.REMOTE, torch.mul, args=(torch.ones(1), torch.ones(1))
         )
@@ -1370,7 +1702,15 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @dist_init
-    def test_profiler_with_script_async_rpc(self):
+    def test_profiler_with_remote_builtin(self):
+        self._run_test_profiler_with_remote_builtin()
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_remote_builtin_single_threaded(self):
+        self._run_test_profiler_with_remote_builtin()
+
+    def _run_test_profiler_with_script_async_rpc(self):
         self._profiler_test_with_rpc(
             RPCExecMode.ASYNC, my_script_func, args=(torch.tensor(1),)
         )
@@ -1382,7 +1722,15 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @dist_init
-    def test_profiler_with_script_sync_rpc(self):
+    def test_profiler_with_script_async_rpc(self):
+        self._run_test_profiler_with_script_async_rpc()
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_script_async_rpc_single_threaded(self):
+        self._run_test_profiler_with_script_async_rpc()
+
+    def _run_test_profiler_with_script_sync_rpc(self):
         self._profiler_test_with_rpc(
             RPCExecMode.SYNC, my_script_func, args=(torch.tensor(1),)
         )
@@ -1394,7 +1742,15 @@ class RpcTest(RpcAgentTestFixture):
         )
 
     @dist_init
-    def test_profiler_with_script_remote_rpc(self):
+    def test_profiler_with_script_sync_rpc(self):
+        self._run_test_profiler_with_script_sync_rpc()
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_script_sync_rpc_single_threaded(self):
+        self._run_test_profiler_with_script_sync_rpc()
+
+    def _run_test_profiler_with_script_remote_rpc(self):
         self._profiler_test_with_rpc(
             RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),)
         )
@@ -1409,6 +1765,14 @@ class RpcTest(RpcAgentTestFixture):
             RPCExecMode.REMOTE, my_script_func, args=(torch.tensor(1),), dst=self.rank
         )
 
+    @dist_init
+    def test_profiler_with_script_remote_rpc(self):
+        self._run_test_profiler_with_script_remote_rpc()
+
+    @single_threaded_process_group_agent
+    @dist_init
+    def test_profiler_with_script_remote_rpc_single_threaded(self):
+        self._run_test_profiler_with_script_remote_rpc()
 
     def _assert_top_level_events(self, process_global_events, expected_top_level_event_names):
         top_level_event_names = []
@@ -1417,11 +1781,17 @@ class RpcTest(RpcAgentTestFixture):
             last_end_time = 0
             for event in thread_local_events:
                 event_name = event.name
-                cpu_interval = event.cpu_interval
-                if cpu_interval.start > last_end_time:
+                time_range = event.time_range
+                if time_range.start > last_end_time:
                     top_level_event_names.append(event_name)
-                    last_end_time = cpu_interval.end
-        self.assertEqual(sorted(top_level_event_names), sorted(expected_top_level_event_names))
+                    last_end_time = time_range.end
+        top_level_event_names = sorted(top_level_event_names)
+        expected_top_level_event_names = sorted(expected_top_level_event_names)
+        self.assertEqual(
+            top_level_event_names,
+            expected_top_level_event_names,
+            f"Expected events {expected_top_level_event_names}, but got {top_level_event_names}",
+        )
 
     @dist_init
     def test_server_process_global_profiler(self):
@@ -1444,9 +1814,12 @@ class RpcTest(RpcAgentTestFixture):
         outer_profile_rref.rpc_sync().__exit__(None, None, None)
 
         inner_events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (inner_profile_rref,))
-        self._assert_top_level_events(inner_events, ['aten::sub'])
+        expected_inner_events = ['aten::sub']
+        expected_outer_events = expected_inner_events + ['aten::add']
+
+        self._assert_top_level_events(inner_events, expected_inner_events)
         outer_events = rpc.rpc_sync(dst_worker_name, get_events_from_profile, (outer_profile_rref,))
-        self._assert_top_level_events(outer_events, ['aten::add', 'aten::sub'])
+        self._assert_top_level_events(outer_events, expected_outer_events)
 
         inner_profile_rref.rpc_sync().key_averages()
         outer_profile_rref.rpc_sync().key_averages()
@@ -1613,11 +1986,37 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_py_raise_in_user_func(self):
+        with captured_output() as (_, err):
+            # This barrier prevents a race condition where the main thread has
+            # not entered the context manager when the remote function runs.
+            initialize_pg(self.file_init_method, self.rank, self.world_size)
+            dist.barrier()
+            n = self.rank + 1
+            dst_rank = n % self.world_size
+            fut = rpc.rpc_async(worker_name(dst_rank), raise_func)
+            with self.assertRaisesRegex(ValueError, expected_err):
+                fut.wait()
+            # This barrier prevents a race condition where the main thread exits
+            # context manager before the remote function has ran.
+            dist.barrier()
+
+        # Validate that trainers log errors when running functions.
+        stderr_lines = err.getvalue()
+        self.assertTrue(expected_err in stderr_lines)
+
+    @dist_init
+    def test_py_raise_in_user_func_escaped_str(self):
         n = self.rank + 1
         dst_rank = n % self.world_size
-        fut = rpc.rpc_async(worker_name(dst_rank), raise_func)
-        with self.assertRaises(ValueError):
+        fut = rpc.rpc_async(worker_name(dst_rank), raise_func_escape)
+        try:
             fut.wait()
+        except ValueError as e:
+            msg = str(e)
+            # Ensure newlines are unescaped to provide a better repr of error.
+            self.assertEqual(msg, msg.encode("utf-8").decode("unicode_escape"))
+        else:
+            self.assertTrue(False, "expected raise_func_escape to raise ValueError.")
 
     @dist_init
     def test_nested_rpc(self):
@@ -1935,6 +2334,60 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(rets, [11, 12, 13])
 
     @dist_init
+    def test_rref_type(self):
+
+        def launched_rpc(events):
+            expected_name = "rpc_sync#_rref_typeof_on_owner"
+            return any([e.name.startswith(expected_name) for e in events])
+
+        dst = worker_name((self.rank + 1) % self.world_size)
+        rref = rpc.remote(dst, torch.add, args=(torch.ones(2), 1))
+
+        with torch.autograd.profiler.profile() as p:
+            t = rref._get_type()
+
+        self.assertTrue(launched_rpc(p.function_events))
+        self.assertEqual(t, type(torch.ones(2)))
+
+        with torch.autograd.profiler.profile() as p:
+            for _ in range(10):
+                t = rref._get_type()
+
+        self.assertFalse(launched_rpc(p.function_events))
+        self.assertEqual(t, type(torch.ones(2)))
+
+        rref = rpc.remote(dst, MyClass, args=(0,))
+        self.assertEqual(rref._get_type(), MyClass)
+
+    @dist_init
+    def test_rref_type_with_error(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        # 10 ms timeout
+        rref = rpc.remote(dst, raise_func)
+
+        with self.assertRaisesRegex(ValueError, "Expected error"):
+            rref._get_type()
+
+    @dist_init
+    def test_rref_type_owner(self):
+        rref = RRef(torch.ones(2) + 1)
+        self.assertEqual(rref._get_type(), type(torch.ones(2)))
+
+        rref = RRef(MyClass(0))
+        self.assertEqual(rref._get_type(), MyClass)
+
+    @staticmethod
+    def _slow_add(x, y):
+        time.sleep(1)
+        return x + y
+
+    @dist_init
+    def test_rref_type_slow_init(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        rref = rpc.remote(dst, RpcTest._slow_add, args=(torch.ones(2), 1))
+        self.assertEqual(rref._get_type(), type(torch.ones(2)))
+
+    @dist_init
     def test_owner_equality(self):
         a = RRef(40)
         b = RRef(50)
@@ -2050,7 +2503,7 @@ class RpcTest(RpcAgentTestFixture):
             rpc_backend_options=self.rpc_backend_options,
         )
 
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         # Wait for all init to complete.
         dist.barrier()
 
@@ -2128,7 +2581,7 @@ class RpcTest(RpcAgentTestFixture):
         # The barrier before the check makes sure that all previous states are
         # cleared globally, the barrier after ensures that no following states
         # change gets into the current check.
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
 
         # Check 1: local RRef does not update owners_ map or add a pending user.
         #################################################
@@ -2192,7 +2645,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_disable_gil_profiling(self):
-        # test that rpc.enable_gil_profilig(false) will result in
+        # test that rpc.enable_gil_profiling(false) will result in
         # GIL wait time not being recorded.
 
         # GIL profiling should be disabled by default.
@@ -2265,7 +2718,7 @@ class RpcTest(RpcAgentTestFixture):
         rpc._set_rpc_timeout(10)
         # This barrier is needed to ensure that some workers do not exit before
         # others have been brought up, for non ProcessGroupAgent backends.
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         dist.barrier()
         if self.rank == 1:
             dst_rank = (self.rank + 1) % self.world_size
@@ -2280,6 +2733,24 @@ class RpcTest(RpcAgentTestFixture):
                 fut.wait()
         # exit all workers non-gracefully.
         rpc.shutdown(graceful=False)
+
+    @dist_init
+    def test_deadlock(self):
+        # this test is copied from https://github.com/pytorch/pytorch/issues/45089
+        if self.rank == 1:
+            dst1 = worker_name((self.rank + 1) % self.world_size)
+            x = torch.ones(2)
+            y = torch.ones(2)
+            rpc.rpc_async(dst1, RpcTest._slow_add, args=(x, y), timeout=15).wait()
+
+        dist_initialized = dist.is_initialized()
+        if not dist_initialized:
+            dist.init_process_group(
+                backend="gloo",
+                init_method=self.file_init_method,
+                rank=self.rank,
+                world_size=self.world_size,
+            )
 
     @dist_init(setup_rpc=False)
     def test_local_shutdown_with_rpc(self):
@@ -2301,7 +2772,7 @@ class RpcTest(RpcAgentTestFixture):
         # A barrier is needed to ensure that all RPCs are processed.
         # Otherwise, some RPCs can timeout since the receiving end
         # has terminated.
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         dist.barrier()
         # pass in graceful=False to ensure that we don't wait for other workers.
         rpc.shutdown(graceful=False)
@@ -2428,6 +2899,58 @@ class RpcTest(RpcAgentTestFixture):
         self.assertTrue(
             torch.distributed.rpc.api._default_pickler is _internal_rpc_pickler
         )
+
+    @dist_init
+    def test_wait_all(self):
+        with _wait_all():
+            self.assertTrue(_thread_local_var.future_list == [])
+            dst = worker_name((self.rank + 1) % self.world_size)
+            fut = rpc.rpc_async(dst, torch.add, (torch.ones(2, 2), 1))
+            self.assertTrue(len(_thread_local_var.future_list) == 1)
+            self.assertTrue(isinstance(_thread_local_var.future_list[0], torch._C.Future))
+        self.assertTrue(fut.done())
+        self.assertEqual(fut.wait(), torch.ones(2, 2) + 1)
+        self.assertFalse(hasattr(_thread_local_var, "future_list"))
+
+    @dist_init
+    def test_wait_all_multiple_call(self):
+        with _wait_all():
+            self.assertTrue(_thread_local_var.future_list == [])
+            dst = worker_name((self.rank + 1) % self.world_size)
+            for i in range(20):
+                fut = rpc.rpc_async(dst, torch.add, (torch.ones(i, i), 1))
+                res = rpc.rpc_sync(dst, torch.add, (torch.ones(i, i), 1))
+                self.assertEqual(res, torch.ones(i, i) + 1)
+                self.assertEqual(fut.wait(), torch.ones(i, i) + 1)
+            self.assertTrue(len(_thread_local_var.future_list) == 20)
+        self.assertFalse(hasattr(_thread_local_var, "future_list"))
+
+    @dist_init
+    def test_wait_all_timeout(self):
+        expected_error = self.get_timeout_error_regex()
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            with _wait_all():
+                self.assertTrue(_thread_local_var.future_list == [])
+                dst = worker_name((self.rank + 1) % self.world_size)
+                timeout = 0.1  # 100 ms
+                fut = rpc.rpc_async(dst, my_sleep_func, args=(1,), timeout=timeout)
+        self.assertFalse(hasattr(_thread_local_var, "future_list"))
+
+    @dist_init
+    def test_wait_all_raise_in_user_func(self):
+        with self.assertRaises(ValueError):
+            with _wait_all():
+                self.assertTrue(_thread_local_var.future_list == [])
+                dst = worker_name((self.rank + 1) % self.world_size)
+                fut = rpc.rpc_async(dst, raise_func)
+        self.assertFalse(hasattr(_thread_local_var, "future_list"))
+
+    @dist_init
+    def test_wait_all_raise_in_body(self):
+        with self.assertRaises(ValueError):
+            with _wait_all():
+                raise_func()
+        self.assertFalse(hasattr(_thread_local_var, "future_list"))
 
     @dist_init
     def test_function_not_on_callee(self):
@@ -2740,6 +3263,33 @@ class RpcTest(RpcAgentTestFixture):
             rpc.rpc_async(dst, raise_func).then(None)
 
     @dist_init
+    def test_add_done_callback(self):
+        set_by_cb = False
+        n = self.rank + 1
+
+        def callback(fut):
+            nonlocal set_by_cb
+            fut.wait()
+            set_by_cb = True
+
+        fut = rpc.rpc_async(
+            worker_name(n % self.world_size),
+            torch.add,
+            args=(torch.ones(n, n), torch.ones(n, n))
+        )
+
+        fut.add_done_callback(callback)
+        fut_then = fut.then(lambda _: True)
+
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+        # We have no guarantee that the add_done_callback fn will execute before the test finishes.
+        # Adding a 'then' callback that runs afterwards to guarantee we wait for the first callback
+        fut_then.wait()
+        self.assertTrue(set_by_cb)
+        self.assertEqual(fut.wait(), torch.ones(n, n) * 2)
+
+    @dist_init
     def test_mark_future_twice(self):
         fut = rpc.rpc_async(
             worker_name((self.rank + 1) % self.world_size),
@@ -2922,6 +3472,40 @@ class RpcTest(RpcAgentTestFixture):
             RPCExecMode.REMOTE
         )
 
+    def _test_test_async_class_rref_proxy(self, mode=RPCExecMode.SYNC):
+        dst1 = worker_name((self.rank + 1) % self.world_size)
+        dst2 = worker_name((self.rank + 2) % self.world_size)
+        rref = rpc.remote(dst1, AsyncExecutionClass)
+
+        x = torch.ones(2, 2)
+        y = torch.ones(2, 2) + 1
+        if mode == RPCExecMode.SYNC:
+            ret = rref.rpc_sync().static_async_add(dst2, x, x, y)
+            ret += rref.rpc_sync().class_async_add(dst2, x, x, y)
+            ret += rref.rpc_sync().bound_async_add(dst2, x, x, y)
+        elif mode == RPCExecMode.ASYNC:
+            ret = rref.rpc_async().static_async_add(dst2, x, x, y).wait()
+            ret += rref.rpc_async().class_async_add(dst2, x, x, y).wait()
+            ret += rref.rpc_async().bound_async_add(dst2, x, x, y).wait()
+        elif mode == RPCExecMode.REMOTE:
+            ret = rref.remote().static_async_add(dst2, x, x, y).to_here()
+            ret += rref.remote().class_async_add(dst2, x, x, y).to_here()
+            ret += rref.remote().bound_async_add(dst2, x, x, y).to_here()
+
+        self.assertEqual(ret, 3 * 4 * x)
+
+    @dist_init
+    def test_async_class_rref_proxy(self):
+        self._test_test_async_class_rref_proxy()
+
+    @dist_init
+    def test_async_class_rref_proxy_async(self):
+        self._test_test_async_class_rref_proxy(mode=RPCExecMode.ASYNC)
+
+    @dist_init
+    def test_async_class_rref_proxy_remote(self):
+        self._test_test_async_class_rref_proxy(mode=RPCExecMode.REMOTE)
+
     def _test_async_function_multi(self, fn, mode=RPCExecMode.SYNC):
         dst1 = worker_name((self.rank + 1) % self.world_size)
         dst2 = worker_name((self.rank + 2) % self.world_size)
@@ -3014,6 +3598,10 @@ class RpcTest(RpcAgentTestFixture):
         wait_until_owners_and_forks_on_rank(1, 1, rank=1)
 
     @dist_init(setup_rpc=False)
+    @unittest.skipIf(
+        os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
+        "init_pg_then_rpc does not work with TCP init, see https://github.com/pytorch/pytorch/issues/41614."
+    )
     def test_init_pg_then_rpc(self):
         dist.init_process_group(
             backend="gloo",
@@ -3041,6 +3629,10 @@ class RpcTest(RpcAgentTestFixture):
         rpc.shutdown()
 
     @dist_init(setup_rpc=False)
+    @unittest.skipIf(
+        os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
+        "init_rpc_then_pg does not work with TCP init, see https://github.com/pytorch/pytorch/issues/41614."
+    )
     def test_init_rpc_then_pg(self):
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -3090,8 +3682,12 @@ class RpcTest(RpcAgentTestFixture):
             ret = torch.futures.wait_all(futs)
 
     @dist_init(setup_rpc=False)
+    @unittest.skipIf(
+        os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
+        "Test does not work with TCP init, see https://github.com/pytorch/pytorch/issues/46491",
+    )
     def test_init_rpc_twice(self):
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -3121,8 +3717,158 @@ class RpcTest(RpcAgentTestFixture):
 
         rpc.shutdown()
 
+    def test_wrong_types(self):
+        with self.assertRaisesRegex(
+            TypeError,
+            "Argument backend must be a member of BackendType",
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend="TENSORPIPE",
+            )
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "Argument rpc_backend_options must be an instance of RpcBackendOptions",
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend=self.rpc_backend,
+                rpc_backend_options={"init_method": self.init_method}
+            )
+
+    def test_cannot_infer_backend_from_options(self):
+        # An exception should be raised if the backend isn't specified but
+        # options are given which are not an instance of any of the known
+        # agents' option classes.
+        rpc_backend_options = FooBackendOptions(self.init_method)
+
+        with self.assertRaisesRegex(TypeError, "Could not infer backend for options"):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                # Do _not_ pass backend.
+                rpc_backend_options=rpc_backend_options,
+            )
+
+    @dist_init
+    def test_owner_rref_backward(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        t1 = torch.rand(10, 10, requires_grad=True)
+        rref = rpc.RRef(t1.sum() + t1.sum())
+        rref.backward()
+        expected_grad = torch.ones_like(t1) * 2
+        self.assertEqual(expected_grad, t1.grad)
+
+        with dist_autograd.context() as context_id:
+            t2 = rpc.rpc_sync(dst, torch.add, args=(t1, t1))
+            rref = rpc.RRef(t2.sum())
+            rref.backward(context_id)
+            self.assertEqual(expected_grad, dist_autograd.get_gradients(context_id)[t1])
+
+        # Double backward.
+        with dist_autograd.context() as context_id:
+            t2 = rpc.rpc_sync(dst, torch.add, args=(t1, t1))
+            rref = rpc.RRef(t2.sum())
+            rref.backward(context_id, retain_graph=True)
+            rref.backward(context_id)
+            self.assertEqual(expected_grad * 2, dist_autograd.get_gradients(context_id)[t1])
+
+        # Test errors.
+        with self.assertRaisesRegex(RuntimeError, "tensors does not require grad and does not have a grad_fn"):
+            rpc.RRef(torch.rand(10)).backward()
+
+        with self.assertRaisesRegex(RuntimeError, "grad can be implicitly created only for scalar outputs"):
+            rpc.RRef(torch.rand(10, requires_grad=True)).backward()
+
+        with self.assertRaisesRegex(RuntimeError, "Could not find autograd context with id: 100"):
+            rpc.RRef(torch.rand(10, requires_grad=True).sum()).backward(100)
+
+        with self.assertRaisesRegex(RuntimeError, "RRef should contain a tensor for .backward()"):
+            rpc.RRef("foo").backward()
+
+    @staticmethod
+    def _sum(x):
+        return x.sum()
+
+    @staticmethod
+    def _identity(x):
+        return x
+
+    @dist_init
+    def test_user_rref_backward(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        t = torch.rand(10, requires_grad=True)
+        with dist_autograd.context() as context_id:
+            rref = rpc.remote(dst, RpcTest._sum, args=(t,))
+            rref.backward(context_id, retain_graph=True)
+            rref.backward(context_id)
+            self.assertEqual(torch.ones_like(t) * 2, dist_autograd.get_gradients(context_id)[t])
+
+        with dist_autograd.context() as context_id:
+            rref = rpc.remote(dst, RpcTest._identity, args=("foo",))
+            with self.assertRaisesRegex(RuntimeError, "RRef should contain a tensor for .backward()"):
+                rref.backward(context_id)
+
+            with self.assertRaisesRegex(RuntimeError, "User RRefs require 'dist_autograd_ctx_id' to be specified"):
+                rref.backward()
 
 class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
+
+    def test_mismatched_type_for_options(self):
+        # An exception should be raised if the options are not an instance of
+        # ProcessGroupRpcBackendOptions.
+        rpc_backend_options = FooBackendOptions(self.init_method)
+
+        with self.assertRaisesRegex(
+            TypeError, "`rpc_backend_options` must be a `ProcessGroupRpcBackendOptions`"
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend=rpc.BackendType.PROCESS_GROUP,
+                rpc_backend_options=rpc_backend_options,
+            )
+
+    def test_infer_backend_from_options(self):
+        rpc_backend_options = rpc.ProcessGroupRpcBackendOptions(
+            init_method=self.init_method
+        )
+
+        with self.assertLogs("torch.distributed.rpc", logging.WARNING) as cm:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                # Do _not_ pass backend.
+                rpc_backend_options=rpc_backend_options,
+            )
+        self.assertIn(
+            "To silence this warning pass `backend=BackendType.PROCESS_GROUP` explicitly.",
+            "\n".join(cm.output),
+        )
+
+        self.assertIsInstance(rpc.api._get_current_rpc_agent(), rpc.ProcessGroupAgent)
+
+    def test_logs_deprecation_warning(self):
+        with self.assertLogs("torch.distributed.rpc", logging.WARNING) as cm:
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend=rpc.BackendType.PROCESS_GROUP,
+                rpc_backend_options=self.rpc_backend_options,
+            )
+        self.assertIn(
+            "It is recommended to migrate to the TENSORPIPE backend.",
+            "\n".join(cm.output),
+        )
 
     @skip_if_lt_x_gpu(2)
     @dist_init
@@ -3159,12 +3905,7 @@ class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
 
     def test_single_threaded_rref_owner(self):
         # We need a process group in order to perform a barrier at the end.
-        dist.init_process_group(
-            backend="gloo",
-            init_method=self.init_method,
-            rank=self.rank,
-            world_size=self.world_size,
-        )
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
 
         # This test aims to verify if the server can handle all internal RPC
         # messages using just one thread.
@@ -3230,12 +3971,7 @@ class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
 
     def test_single_threaded_rref_to_here(self):
         # We need a process group in order to perform a barrier at the end.
-        dist.init_process_group(
-            backend="gloo",
-            init_method=self.init_method,
-            rank=self.rank,
-            world_size=self.world_size,
-        )
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
 
         # This test aims to verify if the server can handle all internal RPC
         # messages using just one thread.
@@ -3294,7 +4030,7 @@ class ProcessGroupAgentRpcTest(RpcAgentTestFixture):
     @dist_init
     def test_process_group_debug_info(self):
         rpc.enable_gil_profiling(True)
-        initialize_pg(self.init_method, self.rank, self.world_size)
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
         NUM_THREAD = self.rpc_backend_options.num_send_recv_threads
 
         info = rpc.api._get_current_rpc_agent().get_debug_info()
@@ -3718,6 +4454,37 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
 
 class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
+    def test_mismatched_type_for_options(self):
+        # An exception should be raised if the options are not an instance of
+        # TensorPipeRpcBackendOptions.
+        rpc_backend_options = FooBackendOptions(self.init_method)
+
+        with self.assertRaisesRegex(
+            TypeError, "`rpc_backend_options` must be a `TensorPipeRpcBackendOptions`"
+        ):
+            rpc.init_rpc(
+                name=worker_name(self.rank),
+                rank=self.rank,
+                world_size=self.world_size,
+                backend=rpc.BackendType.TENSORPIPE,
+                rpc_backend_options=rpc_backend_options,
+            )
+
+    def test_infer_backend_from_options(self):
+        rpc_backend_options = rpc.TensorPipeRpcBackendOptions(
+            init_method=self.init_method
+        )
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            rank=self.rank,
+            world_size=self.world_size,
+            # Do _not_ pass backend.
+            rpc_backend_options=rpc_backend_options,
+        )
+
+        self.assertIsInstance(rpc.api._get_current_rpc_agent(), rpc.TensorPipeAgent)
+
     # FIXME Merge this test with the corresponding one in RpcTest.
     @dist_init(setup_rpc=False)
     def test_set_and_get_num_worker_threads(self):
@@ -3848,6 +4615,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         else:
             raise ValueError("Wrong device affinity")
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(2)
     def test_device_maps_gpu(self):
         options = self.rpc_backend_options
@@ -3872,16 +4640,24 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         rpc.shutdown()
 
     @staticmethod
-    def _gpu_add_multi_gpu(x, y):
-        if all([x.is_cuda, x.device.index == 0, y.is_cuda, y.device.index == 1]):
-            return x + y.to(0), x.to(1) - y
+    def _gpu_add_given_gpus(x, y, x_to, y_to, z_to):
+        if all([
+            x.is_cuda,
+            x.device.index == x_to,
+            y.is_cuda,
+            y.device.index == y_to
+        ]):
+            return x.to(z_to) + y.to(z_to)
         else:
             raise ValueError("Wrong device affinity")
 
-    def _test_device_maps_multi_gpu(self, dst):
+    def _test_device_maps_gpu(self, x_from, y_from, z_to, device_map):
+        x_to = device_map[x_from]
+        y_to = device_map[y_from]
+
         options = self.rpc_backend_options
-        options.set_device_map(dst, {1: 0})
-        options.set_device_map(dst, {0: 1})
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options.set_device_map(dst, device_map)
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -3891,22 +4667,185 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             rpc_backend_options=options,
         )
 
+        x = torch.zeros(2).to(x_from)
+        y = torch.ones(2).to(y_from)
+
+        ret = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._gpu_add_given_gpus,
+            args=(x, y, x_to, y_to, z_to)
+        )
+
+        reverse_device_map = {device_map[k] : k for k in device_map}
+        z_from = reverse_device_map[z_to]
+
+        self.assertEqual(ret.device.index, z_from)
+        self.assertEqual(ret, torch.ones(2).to(z_from))
+
+        rpc.shutdown()
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_default(self):
+        self._test_device_maps_gpu(
+            x_from=0,
+            y_from=0,
+            z_to=0,
+            device_map={0 : 0}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_non_default(self):
+        self._test_device_maps_gpu(
+            x_from=1,
+            y_from=1,
+            z_to=1,
+            device_map={1 : 1}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_default_to_non_default(self):
+        self._test_device_maps_gpu(
+            x_from=0,
+            y_from=0,
+            z_to=1,
+            device_map={0 : 1}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_non_default_to_default(self):
+        self._test_device_maps_gpu(
+            x_from=1,
+            y_from=1,
+            z_to=0,
+            device_map={1 : 0}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_mixed_1(self):
+        self._test_device_maps_gpu(
+            x_from=0,
+            y_from=1,
+            z_to=0,
+            device_map={0 : 0, 1 : 1}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_mixed_2(self):
+        self._test_device_maps_gpu(
+            x_from=0,
+            y_from=1,
+            z_to=1,
+            device_map={0 : 0, 1 : 1}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_mixed_3(self):
+        self._test_device_maps_gpu(
+            x_from=1,
+            y_from=0,
+            z_to=0,
+            device_map={0 : 0, 1 : 1}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_mixed_4(self):
+        self._test_device_maps_gpu(
+            x_from=1,
+            y_from=0,
+            z_to=1,
+            device_map={0 : 0, 1 : 1}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_mixed_5(self):
+        self._test_device_maps_gpu(
+            x_from=0,
+            y_from=1,
+            z_to=0,
+            device_map={0 : 1, 1 : 0}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_mixed_6(self):
+        self._test_device_maps_gpu(
+            x_from=0,
+            y_from=1,
+            z_to=1,
+            device_map={0 : 1, 1 : 0}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_mixed_7(self):
+        self._test_device_maps_gpu(
+            x_from=1,
+            y_from=0,
+            z_to=0,
+            device_map={0 : 1, 1 : 0}
+        )
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_device_map_gpu_mixed_8(self):
+        self._test_device_maps_gpu(
+            x_from=1,
+            y_from=0,
+            z_to=1,
+            device_map={0 : 1, 1 : 0}
+        )
+
+    @staticmethod
+    def _gpu_add_multi_gpu(x, y):
+        if all([x.is_cuda, x.device.index == 1, y.is_cuda, y.device.index == 0]):
+            return x.to(0) + y, x - y.to(1)
+        else:
+            raise ValueError("Wrong device affinity")
+
+    def _test_device_maps_multi_gpu(self, dst):
+        options = self.rpc_backend_options
+        options.set_device_map(dst, {0: 1})
+        options.set_device_map(dst, {1: 0})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        x = torch.zeros(2).to(0)
+        y = torch.ones(2).to(1)
         rets = rpc.rpc_sync(
             dst,
             TensorPipeAgentRpcTest._gpu_add_multi_gpu,
-            args=(torch.zeros(2).to(1), torch.ones(2).to(0))
+            args=(x, y)
         )
+
         self.assertEqual(rets[0].device, torch.device(1))
         self.assertEqual(rets[1].device, torch.device(0))
         self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(1))
         self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))
         rpc.shutdown()
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(2)
     def test_device_maps_multi_gpu(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         self._test_device_maps_multi_gpu(dst)
 
+    @unittest.skip("TensorPipe agent does not yet support sending to self")
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(2)
     def test_device_maps_multi_gpu_self(self):
         dst = worker_name(self.rank)
@@ -3919,6 +4858,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         else:
             raise ValueError("Wrong device affinity")
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(2)
     def test_device_maps_in_options(self):
         dst = worker_name((self.rank + 1) % self.world_size)
@@ -3939,7 +4879,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         rets = rpc.rpc_sync(
             dst,
             TensorPipeAgentRpcTest._gpu_add_multi_gpu,
-            args=(torch.zeros(2).to(1), torch.ones(2).to(0))
+            args=(torch.zeros(2).to(0), torch.ones(2).to(1))
         )
         self.assertEqual(rets[0].device, torch.device(1))
         self.assertEqual(rets[1].device, torch.device(0))
@@ -3976,11 +4916,13 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         self.assertEqual(rets[3], (torch.zeros(2) / torch.ones(2)).to(2))
         rpc.shutdown()
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(4)
     def test_device_maps_return_to_gpu(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         self._test_device_maps_return_to_gpu(dst)
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(4)
     def test_device_maps_return_to_gpu_self(self):
         dst = worker_name(self.rank)
@@ -3993,7 +4935,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     def _test_device_maps_missing_config(self, mode):
         dst = worker_name((self.rank + 1) % self.world_size)
         errMsg = (
-            "TensorPipeAgent only supports CPU tensors by default.*"
+            "TensorPipe RPC backend only supports CPU tensors by default.*"
             "`set_device_map` on `TensorPipeRpcBackendOptions`"
         )
 
@@ -4033,38 +4975,68 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         ret = rpc.rpc_sync(dst, torch.add, args=(torch.ones(2), 1))
         self.assertEqual(ret, torch.ones(2) + 1)
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config(self):
         self._test_device_maps_missing_config(RPCExecMode.SYNC)
 
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(1)
+    def test_device_maps_missing_config_not_timeout(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options = self.rpc_backend_options
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=self.rpc_backend_options
+        )
+
+        timeout = rpc.get_rpc_timeout()
+
+        tik = time.time()
+        self._test_device_maps_missing_config(RPCExecMode.SYNC)
+        rpc.shutdown()
+        tok = time.time()
+
+        self.assertTrue(tok - tik < timeout)
+
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config_loop(self):
         for _ in range(self.rpc_backend_options.num_worker_threads + 5):
             self._test_device_maps_missing_config(RPCExecMode.SYNC)
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config_response(self):
         self._test_device_maps_missing_config_response(RPCExecMode.SYNC)
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config_response_loop(self):
         for _ in range(self.rpc_backend_options.num_worker_threads + 5):
             self._test_device_maps_missing_config_response(RPCExecMode.SYNC)
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config_remote(self):
         self._test_device_maps_missing_config(RPCExecMode.REMOTE)
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config_remote_response(self):
         self._test_device_maps_missing_config_response(RPCExecMode.REMOTE)
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(2)
     def test_device_maps_remote(self):
         options = self.rpc_backend_options
@@ -4085,4 +5057,144 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             args=(torch.zeros(2), 1)
         )
 
+        self.assertEqual(rref.to_here().device.index, 1)
         self.assertEqual(rref.to_here(), torch.ones(2).to(1))
+
+        rpc.shutdown()
+
+    @staticmethod
+    def _slow_add_on_user_stream(x, y):
+        s0 = torch.cuda.current_stream(x.device)
+        s1 = torch.cuda.Stream(device=x.device)
+        with torch.cuda.stream(s1):
+            torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+            s1.wait_stream(s0)
+            z = x + y
+            event = torch.cuda.Event()
+            event.record(s1)
+        event.wait(s0)
+        return z
+
+    def _test_custom_stream(self, fn, device_map):
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size)
+        options.set_device_map(dst, device_map)
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        fn(dst)
+
+        rpc.shutdown()
+
+    def _test_stream_sync(self, dst):
+        x = torch.ones(2, 2).to(0)
+        ret = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._slow_add_on_user_stream,
+            args=(x, x)
+        )
+        self.assertEqual(ret, 2 * x)
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_custom_stream(self):
+        self._test_custom_stream(self._test_stream_sync, {"cuda:0": "cuda:1"})
+
+    def _test_stream_multi_async(self, dst):
+        futs = []
+        for i in range(20):
+            x = torch.ones(2, 2).to(0) * i
+            futs.append(
+                rpc.rpc_async(
+                    dst,
+                    TensorPipeAgentRpcTest._slow_add_on_user_stream,
+                    args=(x, x)
+                )
+            )
+
+        for i in range(20):
+            self.assertEqual(futs[i].wait(), 2 * torch.ones(2, 2).to(0) * i)
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_custom_stream_multi(self):
+        self._test_custom_stream(
+            self._test_stream_multi_async,
+            {"cuda:0": "cuda:1"}
+        )
+
+    @staticmethod
+    def _nested_slow_add_on_user_stream(dst, x, y, z):
+        ret = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._slow_add_on_user_stream,
+            args=(x, y)
+        )
+
+        return TensorPipeAgentRpcTest._slow_add_on_user_stream(ret, z)
+
+    def _test_stream_nested_sync(self, dst):
+        x = torch.ones(2, 2).to(0)
+        y = torch.ones(2, 2).to(0) * 2
+        z = torch.ones(2, 2).to(0) * 3
+        nested_dst = worker_name((self.rank + 2) % self.world_size)
+        ret = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._nested_slow_add_on_user_stream,
+            args=(nested_dst, x, y, z)
+        )
+        self.assertEqual(ret, 6 * x)
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_custom_stream_nested(self):
+        self._test_custom_stream(
+            self._test_stream_nested_sync,
+            {"cuda:0": "cuda:1", "cuda:1": "cuda:0"}
+        )
+
+    def _test_stream_nested_multi_async(self, dst):
+        if self.rank == 0:
+            futs = []
+            n = 5
+            xs, ys, zs = [], [], []
+            for i in range(n):
+                x = torch.ones(2, 2).to(0) * (i - 1)
+                y = torch.ones(2, 2).to(0) * i
+                z = torch.ones(2, 2).to(0) * (i + 1)
+                xs.append(x)
+                ys.append(y)
+                zs.append(z)
+                nested_dst = worker_name((self.rank + 2) % self.world_size)
+                futs.append(
+                    rpc.rpc_async(
+                        dst,
+                        TensorPipeAgentRpcTest._nested_slow_add_on_user_stream,
+                        args=(nested_dst, x, y, z)
+                    )
+                )
+
+            for i in range(n):
+                self.assertEqual(futs[i].wait(), xs[i] + ys[i] + zs[i])
+
+    @skip_if_no_peer_access
+    @skip_if_lt_x_gpu(2)
+    def test_custom_stream_nested_multi(self):
+        self._test_custom_stream(
+            self._test_stream_nested_multi_async,
+            {"cuda:0": "cuda:1", "cuda:1": "cuda:0"}
+        )
+
+    @dist_init
+    def test_op_with_invalid_args(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        with self.assertRaisesRegex(
+            RuntimeError, "Overloaded torch operator invoked from Python failed to many any schema"
+        ):
+            rpc.rpc_sync(dst, torch.add, args=())

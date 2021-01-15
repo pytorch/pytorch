@@ -3,100 +3,37 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
-#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 
 #include <iostream>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
-class Fusion;
-
-// Hierarchal dispatch functions for handle
-class Statement;
-class Expr;
-class Val;
-
-// Vals
-class IterDomain;
-class TensorDomain;
-class TensorView;
-class Bool;
-class Float;
-class Half;
-class Int;
-class NamedScalar;
-
-// Exprs
-class Split;
-class Merge;
-class UnaryOp;
-class BinaryOp;
-class TernaryOp;
-class ReductionOp;
-class BroadcastOp;
-
-// Kernel IR
-namespace kir {
-
-class Bool;
-class Float;
-class Half;
-class Int;
-class NamedScalar;
-
-class IterDomain;
-class TensorDomain;
-class TensorView;
-
-class UnaryOp;
-class BinaryOp;
-class TernaryOp;
-class ReductionOp;
-class BroadcastOp;
-
-class TensorIndex;
-class Allocate;
-class ForLoop;
-class IfThenElse;
-class GridReduction;
-class Sync;
-
-} // namespace kir
-
-/*
- * Define pretty printing functions for all nodes. handle is used so we can take
- * advantage of OptInConstDispatch. Where we will throw an error if a print
- * function is not defined for a node. Stream operator << is also provided for
- * Fusion&, Fusion* and Statement* which allow us to print any node through
- * stream operator <<.
- */
-
-class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
+//! Define pretty printing functions for IR nodes
+//!
+//! This class is intended for debug printing, so it attempts
+//! to handle invalid states as well.
+//!
+class TORCH_CUDA_API IrPrinter : public OptInConstDispatch {
  public:
-  std::ostream& os;
-  bool print_inline_ = false;
-
-  // Track the indentation size for pretty printing
-  int indent_size = 0;
+  explicit IrPrinter(std::ostream& os) : os_(os) {}
 
   // Indent the generated code
   void indent() {
-    for (int i = 0; i < indent_size; i++)
-      os << "  ";
+    for (int i = 0; i < indent_size_; i++) {
+      os_ << "  ";
+    }
   }
 
   void resetIndent() {
-    indent_size = 0;
+    indent_size_ = 0;
   }
 
-  void printHeader(
-      Fusion* fusion,
-      const std::string& kernel_name_,
-      const std::vector<Val*>& global_buffers);
-
-  IRPrinter(std::ostream& _os) : os(_os) {}
+  bool printInline() const {
+    return print_inline_;
+  }
 
   virtual void handle(Fusion* f);
 
@@ -118,7 +55,6 @@ class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
   void handle(const TensorDomain*) override;
   void handle(const TensorView*) override;
   void handle(const IterDomain*) override;
-  void handle(const kir::TensorIndex*) override;
 
   void handle(const Bool*) override;
   void handle(const Float*) override;
@@ -138,6 +74,7 @@ class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
   void handle(const kir::Int*) override;
   void handle(const kir::NamedScalar*) override;
 
+  void handle(const kir::TensorIndex*) override;
   void handle(const kir::IterDomain*) override;
   void handle(const kir::TensorDomain*) override;
   void handle(const kir::TensorView*) override;
@@ -164,25 +101,42 @@ class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
     print_inline_ = prev;
   }
 
-  void printReductionOps(Fusion* fusion);
-
-  void printKernel(
-      const std::vector<Expr*>& exprs,
-      const std::string& kernel_name,
-      const std::vector<Val*>& global_buffers);
-
  private:
-  std::unique_ptr<ThreadPredicateMap> thread_predicates_;
-
-  const ThreadPredicateMap& getThreadPredicateMap();
+  std::ostream& os_;
+  bool print_inline_ = false;
+  int indent_size_ = 0;
 };
 
 TORCH_CUDA_API std::ostream& operator<<(
     std::ostream& os,
     const Statement* stmt);
+
 TORCH_CUDA_API std::ostream& operator<<(std::ostream& os, Fusion* f);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream& os, Fusion& f);
 
+// TODO(kir): catch accidental << printing of Kernel IR nodes
+// (use kir::toString(node) instead)
+std::ostream& operator<<(std::ostream& os, const kir::Bool*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::Float*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::Half*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::Int*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::NamedScalar*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::TensorIndex*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::IterDomain*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::TensorDomain*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::TensorView*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::UnaryOp*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::BinaryOp*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::TernaryOp*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::ReductionOp*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::BroadcastOp*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::GridReduction*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::ForLoop*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::IfThenElse*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::Allocate*) = delete;
+std::ostream& operator<<(std::ostream& os, const kir::Sync*) = delete;
+
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

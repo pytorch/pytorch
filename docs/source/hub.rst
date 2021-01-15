@@ -77,8 +77,10 @@ Important Notice
 Loading models from Hub
 -----------------------
 
-Pytorch Hub provides convenient APIs to explore all available models in hub through ``torch.hub.list()``,
-show docstring and examples through ``torch.hub.help()`` and load the pre-trained models using ``torch.hub.load()``
+Pytorch Hub provides convenient APIs to explore all available models in hub
+through :func:`torch.hub.list()`, show docstring and examples through
+:func:`torch.hub.help()` and load the pre-trained models using
+:func:`torch.hub.load()`.
 
 
 .. automodule:: torch.hub
@@ -96,8 +98,9 @@ show docstring and examples through ``torch.hub.help()`` and load the pre-traine
 Running a loaded model:
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-Note that ``*args, **kwargs`` in :func:`torch.load()` are used to **instantiate** a model.
-After you loaded a model, how can you find out what you can do with the model?
+Note that ``*args`` and ``**kwargs`` in :func:`torch.hub.load()` are used to
+**instantiate** a model. After you have loaded a model, how can you find out
+what you can do with the model?
 A suggested workflow is
 
 - ``dir(model)`` to see all available methods of the model.

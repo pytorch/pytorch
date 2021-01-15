@@ -1,6 +1,6 @@
-#include "test/cpp/jit/test_base.h"
-#include "test/cpp/jit/test_utils.h"
+#include <gtest/gtest.h>
 
+#include "test/cpp/jit/test_utils.h"
 #include "torch/csrc/jit/frontend/code_template.h"
 
 namespace torch {
@@ -33,31 +33,29 @@ static const auto ct_expect = R"(
   int notest(int a)
   )";
 
-void testCodeTemplate() {
-  {
-    TemplateEnv e;
-    e.s("hi", "foo");
-    e.v("what", {"is", "this"});
-    TemplateEnv c(e);
-    c.s("hi", "foo2");
-    ASSERT_EQ(e.s("hi"), "foo");
-    ASSERT_EQ(c.s("hi"), "foo2");
-    ASSERT_EQ(e.v("what")[0], "is");
-  }
+TEST(TestCodeTemplate, Copying) {
+  TemplateEnv e;
+  e.s("hi", "foo");
+  e.v("what", {"is", "this"});
+  TemplateEnv c(e);
+  c.s("hi", "foo2");
+  ASSERT_EQ(e.s("hi"), "foo");
+  ASSERT_EQ(c.s("hi"), "foo2");
+  ASSERT_EQ(e.v("what")[0], "is");
+}
 
-  {
-    TemplateEnv e;
-    e.v("args", {"hi", "8"});
-    e.v("bar", {"what\non many\nlines...", "7"});
-    e.s("a", "3");
-    e.s("b", "4");
-    e.v("stuff", {"things...", "others"});
-    e.v("empty", {});
-    auto s = ct.format(e);
-    // std::cout << "'" << s << "'\n";
-    // std::cout << "'" << ct_expect << "'\n";
-    ASSERT_EQ(s, ct_expect);
-  }
+TEST(TestCodeTemplate, Formatting) {
+  TemplateEnv e;
+  e.v("args", {"hi", "8"});
+  e.v("bar", {"what\non many\nlines...", "7"});
+  e.s("a", "3");
+  e.s("b", "4");
+  e.v("stuff", {"things...", "others"});
+  e.v("empty", {});
+  auto s = ct.format(e);
+  // std::cout << "'" << s << "'\n";
+  // std::cout << "'" << ct_expect << "'\n";
+  ASSERT_EQ(s, ct_expect);
 }
 
 } // namespace jit

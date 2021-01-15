@@ -1,9 +1,9 @@
 ## @package batch_sigmoid_cross_entropy_loss
 # Module caffe2.python.layers.batch_sigmoid_cross_entropy_loss
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import schema
 from caffe2.python.layers.layers import ModelLayer

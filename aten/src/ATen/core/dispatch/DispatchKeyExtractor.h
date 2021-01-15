@@ -15,7 +15,9 @@ namespace impl {
 // Some keys are ALWAYS considered for inclusion by default, so they are
 // included in the set here.  (const appears to be sufficient for
 // always_included to get inlined, constexpr not necessary)
-const DispatchKeySet always_included{DispatchKey::Autograd, DispatchKey::BackendSelect};
+// Note DispatchKey::Autograd used to be in this set and it now has been
+// moved to TensorImpl constructor.
+const DispatchKeySet always_included{DispatchKey::BackendSelect};
 
 // Take a DispatchKeySet for a Tensor and determine what the actual dispatch
 // DispatchKey should be, taking into account TLS, and skipping backends which
@@ -100,7 +102,7 @@ namespace detail {
  *    varies from operator, as some operators may have overridden the
  *    fallthrough with custom behavior.
  */
-struct CAFFE2_API DispatchKeyExtractor final {
+struct TORCH_API DispatchKeyExtractor final {
 public:
   static DispatchKeyExtractor make(const FunctionSchema& schema) {
     return DispatchKeyExtractor(makeBitsetForDispatchArgs(schema));

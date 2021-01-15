@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import numpy as np
 import unittest
 
@@ -14,6 +9,7 @@ from caffe2.python import core
 from caffe2.python import workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
+import datetime
 import caffe2.python.serialized_test.serialized_test_util as serial
 
 core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
@@ -23,7 +19,7 @@ GLOW_MATMUL_RTOL = 0
 
 class FCTest(serial.SerializedTestCase):
     @given(seed=st.integers(0, 65534))
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_clip(self, seed):
         np.random.seed(seed)
         m, n, k = 8, 8, 8
@@ -48,7 +44,7 @@ class FCTest(serial.SerializedTestCase):
         )
         workspace.GlobalInit(
             ['caffe2', '--caffe2_log_level=0', '--glow_global_fp16=1',
-             '--glow_clip_fp16'])
+             '--glow_clip_fp16', '--glow_global_fp16_constants=1'])
         workspace.SwitchWorkspace("glow_test_ws", True)
         workspace.ResetWorkspace()
         W0 = np.full((n, k), 65536.0, dtype)
@@ -82,7 +78,7 @@ class FCTest(serial.SerializedTestCase):
         n=st.integers(4, 50),
         seed=st.integers(0, 65534)
     )
-    @settings(deadline=None)
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_fc_exercise(self, m, k, n, seed):
         """ Test that the matmul engine is working, this doesn't test
             precision
@@ -146,11 +142,13 @@ class FCTest(serial.SerializedTestCase):
                     "diff": np.abs((Y_c2 - Y_glow) / Y_c2)})
                 assert(0)
 
-    @settings(deadline=None, max_examples=1)
-    def test_fc_numeric_cases(self):
+    @given(seed=st.integers(0, 65534))
+    @settings(deadline=datetime.timedelta(seconds=10))
+    def test_fc_numeric_cases(self, seed):
         """ Test numerics, use examples found from the unit test.
             Use Fp16FCAcc16NNPI as a reference.
         """
+        np.random.seed(seed)
         m = 1
         k = 20
         n = 1
@@ -263,7 +261,6 @@ class FCTest(serial.SerializedTestCase):
                     "rowdiff": rowdiff})
                 assert(0)
 
-    @settings(deadline=None)
     @given(
         m=st.integers(1, 50),
         k=st.integers(1, 1000),
@@ -271,6 +268,7 @@ class FCTest(serial.SerializedTestCase):
         seed=st.integers(0, 65534),
         use_packed=st.integers(0, 2)
     )
+    @settings(deadline=datetime.timedelta(seconds=10))
     def test_fc_num0(self, seed, m, k, n, use_packed):
         """ Test numerics, fix a dimension and determine the ranges of error.
             Use Fp16FCAcc16 as a reference.

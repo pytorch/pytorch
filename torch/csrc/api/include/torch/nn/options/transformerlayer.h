@@ -46,7 +46,8 @@ struct TORCH_API TransformerEncoderLayerOptions {
 /// TransformerDecoderLayer model(TransformerDecoderLayerOptions(512, 8).dropout(0.2));
 /// ```
 struct TORCH_API TransformerDecoderLayerOptions {
-  typedef c10::variant<enumtype::kGELU, enumtype::kReLU> activation_t;
+
+  using activation_t = c10::variant<enumtype::kReLU, enumtype::kGELU>;
 
   TransformerDecoderLayerOptions(int64_t d_model, int64_t nhead);
 

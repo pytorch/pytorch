@@ -15,12 +15,12 @@ Tensor &addmv_impl_cuda(Tensor& result, const Tensor &self, const Tensor &mat, c
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, mat.scalar_type(), "addmv_impl_cuda", [&] {
     auto beta = beta_.to<scalar_t>();
     auto alpha = alpha_.to<scalar_t>();
-    if (mat.stride(0) == 1) {
+    if (mat.stride(0) == 1 && mat.stride(1) >= std::max<int64_t>(1, mat.size(0))) {
       at::cuda::blas::gemv<scalar_t>('n',
         mat.size(0), mat.size(1), alpha, mat.data_ptr<scalar_t>(), mat.stride(1), vec_contiguous.data_ptr<scalar_t>(),
         vec_stride, beta, result.data_ptr<scalar_t>(), r_stride);
     }
-    else if (mat.stride(1) == 1) {
+    else if (mat.stride(1) == 1 && mat.stride(0) >= std::max<int64_t>(1, mat.size(1))) {
       at::cuda::blas::gemv<scalar_t>('t',
         mat.size(1), mat.size(0), alpha, mat.data_ptr<scalar_t>(), mat.stride(0),
         vec_contiguous.data_ptr<scalar_t>(), vec_stride, beta, result.data_ptr<scalar_t>(), r_stride);

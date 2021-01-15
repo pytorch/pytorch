@@ -9,12 +9,23 @@
 #include <c10d/PrefixStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
+#include <torch/csrc/distributed/rpc/macros.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+
+#ifdef USE_CUDA_NOT_ROCM
+#include <ATen/cuda/CUDAFuture.h>
+#endif
 
 // Forward-declare the TensorPipe classes we need, to avoid including its
 // headers in PyTorch's ones and thus have it become a public dependency.
 
 namespace tensorpipe {
+
+class CpuBuffer;
+
+#ifdef USE_CUDA_NOT_ROCM
+class CudaBuffer;
+#endif
 
 class Context;
 class Error;
@@ -30,7 +41,14 @@ class Context;
 } // namespace transport
 
 namespace channel {
+template <typename TBuffer>
 class Context;
+using CpuContext = Context<CpuBuffer>;
+
+#ifdef USE_CUDA_NOT_ROCM
+using CudaContext = Context<CudaBuffer>;
+#endif
+
 } // namespace channel
 
 using DeviceMap = std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>;
@@ -41,6 +59,8 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+struct LazyStreamContext;
+
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 
@@ -50,14 +70,26 @@ struct TransportRegistration {
   std::string address;
 };
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
-struct ChannelRegistration {
-  std::shared_ptr<tensorpipe::channel::Context> channel;
+struct CpuChannelRegistration {
+  std::shared_ptr<tensorpipe::channel::CpuContext> channel;
   int64_t priority;
 };
 
-C10_DECLARE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_DECLARE_REGISTRY(TensorPipeCpuChannelRegistry, CpuChannelRegistration);
+
+struct CudaChannelRegistration {
+#ifdef USE_CUDA_NOT_ROCM
+  std::shared_ptr<tensorpipe::channel::CudaContext> channel;
+  int64_t priority;
+#endif
+};
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_DECLARE_REGISTRY(TensorPipeCudaChannelRegistry, CudaChannelRegistration);
 
 constexpr auto kDefaultNumWorkerThreads = 16;
 
@@ -91,7 +123,8 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
     if (channels.has_value()) {
       for (const std::string& channelName : channels.value()) {
         TORCH_CHECK(
-            TensorPipeChannelRegistry()->Has(channelName),
+            TensorPipeCudaChannelRegistry()->Has(channelName) ||
+                TensorPipeCpuChannelRegistry()->Has(channelName),
             "Unknown channel: ",
             channelName);
       }
@@ -138,18 +171,18 @@ struct AggregatedNetworkData {
 class TensorPipeAgent : public RpcAgent {
  public:
   TensorPipeAgent(
-      const std::shared_ptr<::c10d::Store>& store,
+      const c10::intrusive_ptr<::c10d::Store>& store,
       std::string selfName,
       worker_id_t selfId,
       int worldSize,
-      std::shared_ptr<c10d::ProcessGroup> processGroup,
+      c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
       TensorPipeRpcBackendOptions opts,
       std::unique_ptr<RequestCallback> cb);
 
   TensorPipeAgent(const TensorPipeAgent&) = delete;
   TensorPipeAgent& operator=(const TensorPipeAgent&) = delete;
 
-  std::shared_ptr<FutureMessage> send(
+  std::shared_ptr<JitFuture> send(
       const WorkerInfo& to,
       Message&& message,
       const float rpcTimeoutSeconds = kUnsetRpcTimeout) override;
@@ -197,14 +230,19 @@ class TensorPipeAgent : public RpcAgent {
   // by client, and read request messages by server.
   void pipeRead(
       const std::shared_ptr<tensorpipe::Pipe>&,
-      std::function<void(const tensorpipe::Error&, Message&&)>);
+      std::function<void(
+          const tensorpipe::Error&,
+          Message&&,
+          std::shared_ptr<LazyStreamContext>)>) noexcept;
 
   // TensorPipe write function that could be used to write response
   // messages by server, and write request messages by client.
   void pipeWrite(
       const std::shared_ptr<tensorpipe::Pipe>&,
       Message&& message,
-      std::function<void(const tensorpipe::Error&)>);
+      std::vector<c10::DeviceIndex>&& devices,
+      std::shared_ptr<LazyStreamContext> ctx,
+      std::function<void(const tensorpipe::Error&)>) noexcept;
 
   // Callback of listener accept()
   void onListenerAccepted(
@@ -216,8 +254,9 @@ class TensorPipeAgent : public RpcAgent {
 
   void sendCompletedResponseMessage(
       std::shared_ptr<tensorpipe::Pipe>& pipe,
-      std::shared_ptr<FutureMessage>& futureResponseMessage,
-      uint64_t messageId);
+      std::shared_ptr<JitFuture>& futureResponseMessage,
+      uint64_t messageId,
+      std::shared_ptr<LazyStreamContext> ctx);
 
   // Collects metrics from successful RPC calls
   void trackNetworkData(
@@ -230,15 +269,53 @@ class TensorPipeAgent : public RpcAgent {
       uint64_t requestSize,
       const std::string& destWorkerName);
 
+  inline std::vector<c10::DeviceIndex> getDevicesForTensors(
+      const std::string& remoteName,
+      const Message& message) const;
+
+#ifdef USE_CUDA_NOT_ROCM
+  // An RPC-specific CUDAFuture subclass. It overrides the extractDataPtrs
+  // function to handle and only handle RPC Messages.
+  struct TORCH_CUDA_API RpcCUDAFuture final : at::cuda::CUDAFuture {
+   public:
+    using at::cuda::CUDAFuture::CUDAFuture;
+
+   protected:
+    std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
+        const at::IValue& value) override {
+      const auto message = value.toCustomClass<Message>();
+      TORCH_INTERNAL_ASSERT(
+          message, "Passed a non-Message type to RpcCUDAFuture");
+      std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
+      for (const auto& tensor : message->tensors()) {
+        data_ptrs.emplace_back(tensor.storage().data_ptr());
+      }
+      return data_ptrs;
+    }
+  };
+#endif
+
   // When a request+response completes, we need to mark the future message as
   // complete. However, if its timeout has already expired, it already has an
   // error set. There is no atomic "test-and-set" way to mark a future complete
   // only if it isn't yet. It does exist for errors (setErrorIfNeeded) but, even
   // then, it ends up printing a log message, which may worry the user. To solve
   // both issues we use a separate atomic flag to know the status of the future.
-  struct AtomicFutureMessage {
-    FutureMessage futMsg;
+  struct AtomicJitFuture {
+    AtomicJitFuture(bool noCuda = true) {
+#ifdef USE_CUDA_NOT_ROCM
+      if (!noCuda) {
+        jitFuture = std::make_shared<RpcCUDAFuture>(at::AnyClassType::get());
+      } else {
+#else
+      {
+#endif
+        jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
+      }
+    }
+
     std::atomic_flag isComplete = ATOMIC_FLAG_INIT;
+    std::shared_ptr<JitFuture> jitFuture;
   };
 
   // Maintains state per client pipe to track pending response messages and
@@ -251,7 +328,7 @@ class TensorPipeAgent : public RpcAgent {
     std::shared_ptr<tensorpipe::Pipe> pipe_;
     bool readError_{false};
     // Map from Message Request ID's to corresponding futures.
-    std::unordered_map<uint64_t, std::shared_ptr<AtomicFutureMessage>>
+    std::unordered_map<uint64_t, std::shared_ptr<AtomicJitFuture>>
         pendingResponseMessage_;
   };
 
@@ -275,7 +352,7 @@ class TensorPipeAgent : public RpcAgent {
   // The join method is required to behave like a barrier and perform collective
   // operations. For simplicity and reliability, we offload this to a process
   // group, but probably one day we might want to re-implement them using RPCs.
-  const std::shared_ptr<c10d::ProcessGroup> processGroup_;
+  const c10::intrusive_ptr<::c10d::ProcessGroup> processGroup_;
 
   mutable std::mutex mutex_;
   uint64_t nextMessageID_{0};
@@ -284,7 +361,7 @@ class TensorPipeAgent : public RpcAgent {
   std::map<
       steady_clock_time_point,
       std::vector<std::pair<
-          std::shared_ptr<AtomicFutureMessage>,
+          std::shared_ptr<AtomicJitFuture>,
           std::chrono::milliseconds>>>
       timeoutMap_;
 
@@ -357,10 +434,11 @@ class TensorPipeAgent : public RpcAgent {
 
   // Helpers to set the state of the requests.
   void markFutureAsComplete(
-      std::shared_ptr<AtomicFutureMessage> futureMessage,
-      Message message);
+      std::shared_ptr<AtomicJitFuture> atomicFuture,
+      Message message,
+      std::shared_ptr<LazyStreamContext> ctx);
   void markFutureWithError(
-      std::shared_ptr<AtomicFutureMessage> futureMessage,
+      std::shared_ptr<AtomicJitFuture> atomicFuture,
       std::string errorMsg);
 };
 

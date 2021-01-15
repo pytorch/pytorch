@@ -2,10 +2,10 @@
 # Module caffe2.python.examples.seq2seq_util
 """ A bunch of util functions to build Seq2Seq models with Caffe2."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import collections
 from future.utils import viewitems

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
+
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
@@ -9,18 +10,19 @@
 namespace torch {
 namespace jit {
 
+std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
+    const ConvBNParameters& p) {
+  at::Tensor bn_var_rsqrt = at::rsqrt(p.bn_rv + p.bn_eps);
+  const int64_t ndim = p.conv_w.dim();
+  at::DimVector sizes(ndim, 1);
+  sizes.at(0) = -1;
+  at::Tensor new_w = p.conv_w * (p.bn_w * bn_var_rsqrt).reshape(sizes);
+  at::Tensor new_b = (p.conv_b - p.bn_rm) * bn_var_rsqrt * p.bn_w + p.bn_b;
+  return std::make_tuple(new_w, new_b);
+}
+
 namespace {
 using graph_rewrite_helper::PatternInfo;
-
-struct ConvBNParameters {
-  at::Tensor conv_w;
-  at::Tensor conv_b;
-  at::Tensor bn_rm;
-  at::Tensor bn_rv;
-  double bn_eps = 0.0;
-  at::Tensor bn_w;
-  at::Tensor bn_b;
-};
 
 static bool hastensor(Module& m, const char* name) {
   return m.hasattr(name) && m.attr(name).isTensor();
@@ -34,27 +36,39 @@ void replaceConvBiasWithGetAttr(Module& module) {
   const PatternInfo& pattern_convolution = PatternInfo::parse_from_str(R"(
       graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
           %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+          %deterministic:bool, %cudnn_enabled:bool, %allow_tf32:bool):
+        %conv_out = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
+            %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled, %allow_tf32)
+        return (%conv_out) )");
+  const PatternInfo& pattern_convolution_deprecated =
+      PatternInfo::parse_from_str(R"(
+      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+          %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
           %deterministic:bool, %cudnn_enabled:bool):
         %conv_out = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
             %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
         return (%conv_out) )");
-  const Graph& pattern_convolution_graph = *pattern_convolution.pattern_graph;
-  const auto& convolution_vmap = pattern_convolution.vmap;
+  auto replace_pattern = [&](const PatternInfo& pattern_convolution) {
+    const Graph& pattern_convolution_graph = *pattern_convolution.pattern_graph;
+    const auto& convolution_vmap = pattern_convolution.vmap;
 
-  const auto& matches = findPatternMatches(pattern_convolution_graph, *graph);
-  for (const auto& match : matches) {
-    // We come here only if the bias was not present in the module.
-    // In that case, the corresponding graph will not have getAttr("bias")
-    // Insert that in the graph.
-    // And change _convolution to take the new value.
-    auto conv_node =
-        match.values_map.at(convolution_vmap.at("conv_out"))->node();
-    WithInsertPoint ins(conv_node);
-    Value* bias_attr_val = graph->insertGetAttr(graph->inputs()[0], "bias")
-                               ->setType(TensorType::get());
-    constexpr size_t conv_bias_index = 2;
-    conv_node->replaceInput(conv_bias_index, bias_attr_val);
-  }
+    const auto& matches = findPatternMatches(pattern_convolution_graph, *graph);
+    for (const auto& match : matches) {
+      // We come here only if the bias was not present in the module.
+      // In that case, the corresponding graph will not have getAttr("bias")
+      // Insert that in the graph.
+      // And change _convolution to take the new value.
+      auto conv_node =
+          match.values_map.at(convolution_vmap.at("conv_out"))->node();
+      WithInsertPoint ins(conv_node);
+      Value* bias_attr_val = graph->insertGetAttr(graph->inputs()[0], "bias")
+                                 ->setType(TensorType::get());
+      constexpr size_t conv_bias_index = 2;
+      conv_node->replaceInput(conv_bias_index, bias_attr_val);
+    }
+  };
+  replace_pattern(pattern_convolution);
+  replace_pattern(pattern_convolution_deprecated);
 }
 
 void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
@@ -103,16 +117,6 @@ class FoldConvBatchNormHelper {
       Module& bn,
       ConvBNParameters& r);
 
-  /**
-   * Given the current weight and bias tensors of a Conv module and parameters
-   * of the BatchNorm module we're folding with, compute the updated values
-   * for the weight and bias.
-   *
-   * The function is basically copied from torch/nn/utils/fusion.py
-   */
-  std::tuple<at::Tensor, at::Tensor> computeUpdatedConvWeightAndBias(
-      const ConvBNParameters& p);
-
   std::unordered_map<ModulePtr, std::tuple<at::Tensor, at::Tensor>>
       conv_module_and_params_;
 
@@ -136,17 +140,6 @@ class FoldConvBatchNormHelper {
   std::vector<Value*> values_to_rewrite_;
   std::unordered_set<Node*> nodes_to_delete_;
 };
-
-std::tuple<at::Tensor, at::Tensor> FoldConvBatchNormHelper::
-    computeUpdatedConvWeightAndBias(const ConvBNParameters& p) {
-  at::Tensor bn_var_rsqrt = at::rsqrt(p.bn_rv + p.bn_eps);
-  const int64_t ndim = p.conv_w.dim();
-  at::DimVector sizes(ndim, 1);
-  sizes.at(0) = -1;
-  at::Tensor new_w = p.conv_w * (p.bn_w * bn_var_rsqrt).reshape(sizes);
-  at::Tensor new_b = (p.conv_b - p.bn_rm) * bn_var_rsqrt * p.bn_w + p.bn_b;
-  return std::make_tuple(new_w, new_b);
-}
 
 bool extractOptionalBNParams(const script::Module& bn, ConvBNParameters& r) {
   auto bn_forward = bn.get_method("forward");

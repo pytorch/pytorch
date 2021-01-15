@@ -6,15 +6,14 @@ under caffe2/python, which allows one to more easily test IDEEP related
 operators.
 """
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import hypothesis.strategies as st
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import workspace
 from caffe2.python import hypothesis_test_util as hu
 
 cpu_do = hu.cpu_do

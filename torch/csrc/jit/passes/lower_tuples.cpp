@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
+
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -22,6 +23,7 @@ std::unordered_set<Symbol> supported_ops = {
     prim::Param,
     prim::Return,
     prim::PythonOp,
+    aten::format,
 };
 
 void removeTupleNodes(Node* n, bool must_remove_tuples) {

@@ -74,7 +74,7 @@ static void min_all_kernel_impl(Tensor& result, const Tensor& input) {
     reduce_all_impl<int64_t>(result, input, upper_bound<int64_t>(),
       [=](int64_t a, int64_t b) -> int64_t { return min_impl(a, b); });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(input.scalar_type(), "min_all", [&] {
+    AT_DISPATCH_ALL_TYPES(input.scalar_type(), "min_all", [&] {
       using Vec = vec256::Vec256<scalar_t>;
       reduce_all_impl_vec<scalar_t>(result, input, upper_bound<scalar_t>(),
         [=] (scalar_t a , scalar_t b) -> scalar_t { return min_impl(a, b); },
@@ -99,7 +99,7 @@ static void max_all_kernel_impl(Tensor& result, const Tensor& input) {
     reduce_all_impl<int64_t>(result, input, lower_bound<int64_t>(),
       [=](int64_t a, int64_t b) -> int64_t { return max_impl(a, b); });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(input.scalar_type(), "max_all", [&] {
+    AT_DISPATCH_ALL_TYPES(input.scalar_type(), "max_all", [&] {
       using Vec = vec256::Vec256<scalar_t>;
       reduce_all_impl_vec<scalar_t>(result, input, lower_bound<scalar_t>(),
         [=] (scalar_t a , scalar_t b) -> scalar_t { return max_impl(a, b); },
@@ -163,7 +163,7 @@ inline void reduce_all_impl_vec_two_outputs(
   output2.fill_(result.second);
 }
 
-static void _min_max_all_kernel_impl(Tensor& min_result, Tensor& max_result,
+static void _aminmax_all_kernel_impl(Tensor& min_result, Tensor& max_result,
     const Tensor& input) {
   if (input.scalar_type() == ScalarType::Bool) {
     TensorIterator iter = TensorIteratorConfig()
@@ -193,7 +193,7 @@ static void _min_max_all_kernel_impl(Tensor& min_result, Tensor& max_result,
       }
     );
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(input.scalar_type(), "_min_max_all", [&] {
+    AT_DISPATCH_ALL_TYPES(input.scalar_type(), "_aminmax_all_all", [&] {
       using Vec = vec256::Vec256<scalar_t>;
       using scalar_t_pair = std::pair<scalar_t, scalar_t>;
       reduce_all_impl_vec_two_outputs<scalar_t>(
@@ -216,6 +216,6 @@ static void _min_max_all_kernel_impl(Tensor& min_result, Tensor& max_result,
 
 REGISTER_DISPATCH(min_all_stub, &min_all_kernel_impl);
 REGISTER_DISPATCH(max_all_stub, &max_all_kernel_impl);
-REGISTER_DISPATCH(_min_max_all_stub, &_min_max_all_kernel_impl);
+REGISTER_DISPATCH(_aminmax_all_stub, &_aminmax_all_kernel_impl);
 
 }}

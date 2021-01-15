@@ -346,4 +346,4 @@ __host__ __device__ T scalar_cast(U u) {
   return ScalarConvert<U, T>::to(u);
 }
 
-#endif // THC_NUMERICS_INC
+#endif // THC_NUMERICS_INC

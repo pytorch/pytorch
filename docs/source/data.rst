@@ -22,7 +22,8 @@ These options are configured by the constructor arguments of a
     DataLoader(dataset, batch_size=1, shuffle=False, sampler=None,
                batch_sampler=None, num_workers=0, collate_fn=None,
                pin_memory=False, drop_last=False, timeout=0,
-               worker_init_fn=None, *, prefetch_factor=2)
+               worker_init_fn=None, *, prefetch_factor=2,
+               persistent_workers=False)
 
 The sections below describe in details the effects and usages of these options.
 
@@ -330,6 +331,8 @@ are compatible with Windows while using multi-process data loading:
   ``__main__`` check. This ensures that they are available in worker processes.
   (this is needed since functions are pickled as references only, not ``bytecode``.)
 
+.. _data-loading-randomness:
+
 Randomness in multi-process data loading
 """"""""""""""""""""""""""""""""""""""""""
 
@@ -402,6 +405,7 @@ Example::
 .. autoclass:: TensorDataset
 .. autoclass:: ConcatDataset
 .. autoclass:: ChainDataset
+.. autoclass:: BufferedShuffleDataset
 .. autoclass:: Subset
 .. autofunction:: torch.utils.data.get_worker_info
 .. autofunction:: torch.utils.data.random_split

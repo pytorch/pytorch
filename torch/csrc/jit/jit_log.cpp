@@ -41,7 +41,7 @@ static std::unordered_map<std::string, size_t> parseJITLogOption(
 
     auto index_at = line.find_last_of('>');
     auto begin_index = index_at == std::string::npos ? 0 : index_at + 1;
-    size_t logging_level = index_at == std::string::npos ? 1 : index_at + 2;
+    size_t logging_level = index_at == std::string::npos ? 0 : index_at + 1;
     auto end_index = line.find_last_of('.') == std::string::npos
         ? line.size()
         : line.find_last_of('.');
@@ -77,7 +77,7 @@ bool is_enabled(const char* cfname, JitLoggingLevels level) {
 std::string log_function(const std::shared_ptr<torch::jit::Graph>& graph) {
   torch::jit::GraphFunction func("source_dump", graph, nullptr);
   std::vector<at::IValue> constants;
-  std::vector<c10::NamedTypePtr> deps;
+  PrintDepsTable deps;
   PythonPrint pp(constants, deps);
   pp.printFunction(func);
   return pp.str();

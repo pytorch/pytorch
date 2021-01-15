@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 import torch
 import torch.nn.quantized.functional
 
@@ -34,7 +29,6 @@ class LayerNorm(torch.nn.LayerNorm):
 
     @classmethod
     def from_float(cls, mod):
-        activation_post_process = mod.activation_post_process
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
             mod.normalized_shape, mod.weight, mod.bias, float(scale),
@@ -68,7 +62,6 @@ class GroupNorm(torch.nn.GroupNorm):
 
     @classmethod
     def from_float(cls, mod):
-        activation_post_process = mod.activation_post_process
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
             mod.num_groups, mod.num_channels, mod.weight, mod.bias, float(scale), int(zero_point),
@@ -103,7 +96,6 @@ class InstanceNorm1d(torch.nn.InstanceNorm1d):
 
     @classmethod
     def from_float(cls, mod):
-        activation_post_process = mod.activation_post_process
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
             mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
@@ -138,7 +130,6 @@ class InstanceNorm2d(torch.nn.InstanceNorm2d):
 
     @classmethod
     def from_float(cls, mod):
-        activation_post_process = mod.activation_post_process
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
             mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),
@@ -173,7 +164,6 @@ class InstanceNorm3d(torch.nn.InstanceNorm3d):
 
     @classmethod
     def from_float(cls, mod):
-        activation_post_process = mod.activation_post_process
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         new_mod = cls(
             mod.num_features, mod.weight, mod.bias, float(scale), int(zero_point),

@@ -7,23 +7,23 @@ import torch
 
 
 class BahdanauAttention(benchmark.Benchmark):
-    def __init__(self, mode, device, b, t_q, t_k, n):
-        super().__init__(mode, device)
+    def __init__(self, mode, device, dtype, b, t_q, t_k, n):
+        super().__init__(mode, device, dtype)
         self.b = b
         self.t_q = t_q
         self.t_k = t_k
         self.n = n
         self.att_query = self.rand(
-            [b, t_q, n], device=device, requires_grad=self.requires_grad
+            [b, t_q, n], device=device, dtype=dtype, requires_grad=self.requires_grad
         )
         self.att_keys = self.rand(
-            [b, t_k, n], device=device, requires_grad=self.requires_grad
+            [b, t_k, n], device=device, dtype=dtype, requires_grad=self.requires_grad
         )
         self.normalize_bias = self.rand(
-            [n], device=device, requires_grad=self.requires_grad
+            [n], device=device, dtype=dtype, requires_grad=self.requires_grad
         )
         self.linear_att = self.rand(
-            [n], device=device, requires_grad=self.requires_grad
+            [n], device=device, dtype=dtype, requires_grad=self.requires_grad
         )
         self.inputs = [
             self.att_query,

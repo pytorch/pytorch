@@ -1,9 +1,11 @@
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
+
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 // Transform dispatch
 void ReplayTransformations::handle(Expr* e) {
@@ -431,6 +433,7 @@ int BestEffortReplay::findFirstMismatchedID(
   return td1->nDims();
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

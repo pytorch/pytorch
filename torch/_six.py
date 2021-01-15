@@ -33,7 +33,6 @@ int_classes = int
 FileNotFoundError = builtins.FileNotFoundError
 StringIO = io.StringIO
 container_abcs = collections.abc
-PY3 = sys.version_info[0] == 3
 PY37 = sys.version_info[0] == 3 and sys.version_info[1] >= 7
 
 def with_metaclass(meta: type, *bases) -> type:
@@ -51,13 +50,6 @@ def with_metaclass(meta: type, *bases) -> type:
             return meta.__prepare__(name, bases)
 
     return type.__new__(metaclass, 'temporary_class', (), {})
-
-
-def raise_from(value: BaseException, from_value: BaseException) -> None:
-    try:
-        raise value from from_value
-    finally:
-        value = None  # type: ignore[assignment]
 
 
 # Gets a function from the name of a method on a type

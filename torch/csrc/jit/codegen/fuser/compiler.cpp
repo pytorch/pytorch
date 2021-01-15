@@ -145,7 +145,7 @@ static std::vector<int64_t> getInputDependencies(const Value* output) {
 }
 
 static void setInputBroadcastGroups(KernelSpec& spec) {
-  std::unordered_set<std::vector<int64_t>, torch::hash<std::vector<int64_t>>>
+  std::unordered_set<std::vector<int64_t>, c10::hash<std::vector<int64_t>>>
       broadcast_groups;
   for (const Value* output : (spec.graph())->outputs()) {
     if (output->node()->kind() == prim::FusedConcat) {
@@ -260,7 +260,7 @@ std::shared_ptr<FusedKernel> compileKernel(
       sizes.at(o->node()->i(attr::dim)) *= o->node()->inputs().size();
     }
 
-    auto scalar_type = o->type()->expect<TensorType>()->scalarType();
+    auto scalar_type = o->type()->expectRef<TensorType>().scalarType();
     TORCH_INTERNAL_ASSERT(scalar_type);
     auto type = TensorType::createContiguous(*scalar_type, device, sizes);
     output_desc.emplace_back(type);

@@ -1,5 +1,5 @@
 import warnings
-from typing import Tuple, Optional
+from typing import Optional, Tuple
 
 import torch
 from torch import Tensor
@@ -365,11 +365,11 @@ class SiLU(Module):
         \text{silu}(x) = x * \sigma(x), \text{where } \sigma(x) \text{ is the logistic sigmoid.}
 
     .. note::
-        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_ 
-        where the SiLU (Sigmoid Linear Unit) was originally coined, and see 
-        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation 
-        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish: 
-        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_ 
+        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_
+        where the SiLU (Sigmoid Linear Unit) was originally coined, and see
+        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation
+        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish:
+        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_
         where the SiLU was experimented with later.
 
     Shape:
@@ -442,7 +442,10 @@ class ELU(Module):
     r"""Applies the element-wise function:
 
     .. math::
-        \text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))
+        \text{ELU}(x) = \begin{cases}
+        x, & \text{ if } x > 0\\
+        \alpha * (\exp(x) - 1), & \text{ if } x \leq 0
+        \end{cases}
 
     Args:
         alpha: the :math:`\alpha` value for the ELU formulation. Default: 1.0
@@ -828,11 +831,12 @@ class Softshrink(Module):
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information
     from different representation subspaces.
-    See reference: Attention Is All You Need
+    See `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_
 
     .. math::
         \text{MultiHead}(Q, K, V) = \text{Concat}(head_1,\dots,head_h)W^O
-        \text{where} head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)
+
+    where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
     Args:
         embed_dim: total dimension of the model.
@@ -845,18 +849,17 @@ class MultiheadAttention(Module):
         kdim: total number of features in key. Default: None.
         vdim: total number of features in value. Default: None.
 
-        Note: if kdim and vdim are None, they will be set to embed_dim such that
-        query, key, and value have the same number of features.
+    Note that if :attr:`kdim` and :attr:`vdim` are None, they will be set
+    to :attr:`embed_dim` such that query, key, and value have the same
+    number of features.
 
     Examples::
 
         >>> multihead_attn = nn.MultiheadAttention(embed_dim, num_heads)
         >>> attn_output, attn_output_weights = multihead_attn(query, key, value)
     """
-    __annotations__ = {
-        'bias_k': torch._jit_internal.Optional[torch.Tensor],
-        'bias_v': torch._jit_internal.Optional[torch.Tensor],
-    }
+    bias_k: Optional[torch.Tensor]
+    bias_v: Optional[torch.Tensor]
 
     def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None):
         super(MultiheadAttention, self).__init__()
@@ -920,9 +923,8 @@ class MultiheadAttention(Module):
 
         super(MultiheadAttention, self).__setstate__(state)
 
-    def forward(self, query, key, value, key_padding_mask=None,
-                need_weights=True, attn_mask=None):
-        # type: (Tensor, Tensor, Tensor, Optional[Tensor], bool, Optional[Tensor]) -> Tuple[Tensor, Optional[Tensor]]
+    def forward(self, query: Tensor, key: Tensor, value: Tensor, key_padding_mask: Optional[Tensor] = None,
+                need_weights: bool = True, attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Args:
         query, key, value: map a query and a set of key-value pairs to an output.
@@ -936,8 +938,7 @@ class MultiheadAttention(Module):
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
             the batches while a 3D mask allows to specify a different mask for the entries of each batch.
 
-    Shape:
-        - Inputs:
+    Shapes for inputs:
         - query: :math:`(L, N, E)` where L is the target sequence length, N is the batch size, E is
           the embedding dimension.
         - key: :math:`(S, N, E)`, where S is the source sequence length, N is the batch size, E is
@@ -948,15 +949,17 @@ class MultiheadAttention(Module):
           If a ByteTensor is provided, the non-zero positions will be ignored while the position
           with the zero positions will be unchanged. If a BoolTensor is provided, the positions with the
           value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
-        - attn_mask: 2D mask :math:`(L, S)` where L is the target sequence length, S is the source sequence length.
-          3D mask :math:`(N*num_heads, L, S)` where N is the batch size, L is the target sequence length,
-          S is the source sequence length. attn_mask ensure that position i is allowed to attend the unmasked
-          positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
+        - attn_mask: if a 2D mask: :math:`(L, S)` where L is the target sequence length, S is the
+          source sequence length.
+
+          If a 3D mask: :math:`(N\cdot\text{num\_heads}, L, S)` where N is the batch size, L is the target sequence
+          length, S is the source sequence length. ``attn_mask`` ensure that position i is allowed to attend
+          the unmasked positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
           while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
           is not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
           is provided, it will be added to the attention weight.
 
-        - Outputs:
+    Shapes for outputs:
         - attn_output: :math:`(L, N, E)` where L is the target sequence length, N is the batch size,
           E is the embedding dimension.
         - attn_output_weights: :math:`(N, L, S)` where N is the batch size,
@@ -1111,7 +1114,7 @@ class Softmin(Module):
           dimensions
         - Output: :math:`(*)`, same shape as the input
 
-    Arguments:
+    Args:
         dim (int): A dimension along which Softmin will be computed (so every slice
             along dim will sum to 1).
 
@@ -1165,7 +1168,7 @@ class Softmax(Module):
         a Tensor of the same dimension and shape as the input with
         values in the range [0, 1]
 
-    Arguments:
+    Args:
         dim (int): A dimension along which Softmax will be computed (so every slice
             along dim will sum to 1).
 
@@ -1239,7 +1242,7 @@ class LogSoftmax(Module):
           dimensions
         - Output: :math:`(*)`, same shape as the input
 
-    Arguments:
+    Args:
         dim (int): A dimension along which LogSoftmax will be computed.
 
     Returns:

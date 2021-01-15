@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 
@@ -30,12 +31,27 @@ class TORCH_API TensorExprKernel {
 
   Stmt* getCodeGenStmt();
 
+  std::string getCodeText() {
+    return codegen_->getCodeText();
+  }
+
  private:
+  enum ElementType {
+    kAllTypes = 0,
+    kIntegralTypes = 1 << 0,
+    kFloatingPointTypes = 1 << 1,
+    kBoolType = 1 << 2,
+    kComplexTypes = 1 << 3,
+    kQintTypes = 1 << 4,
+    kNonComplexOrQintTypes = kIntegralTypes | kBoolType | kFloatingPointTypes,
+  };
+
   enum BackendType {
     kUninitialized,
     kSimpleIREval,
     kLLVMCodeGen,
     kCudaCodeGen,
+    kBlockCodeGen,
   };
 
   void compile();
@@ -59,13 +75,17 @@ class TORCH_API TensorExprKernel {
   ExprHandle chunk(
       Tensor* t,
       size_t chunkIdx,
-      size_t dim,
-      size_t chunks,
+      int64_t dim,
+      int64_t chunks,
       const std::vector<ExprHandle>& axes);
 
   std::vector<ExprHandle> valueShape(const torch::jit::Value* v);
 
-  void promoteInputs(std::vector<ExprHandle>& inputs);
+  bool checkTypes(const ScalarType highType, const int typeConstraints);
+
+  void promoteInputs(
+      std::vector<ExprHandle>& inputs,
+      int typeConstraints = kAllTypes);
 
   ExprHandle demoteOutput(const ExprHandle& e, const torch::jit::Value* v);
 
@@ -76,7 +96,8 @@ class TORCH_API TensorExprKernel {
   Tensor* computeOneOperand(
       const std::string& name,
       const torch::jit::Value* v,
-      const std::function<ExprHandle(const ExprHandle&)>& innerExpr);
+      const std::function<ExprHandle(const ExprHandle&)>& innerExpr,
+      const int checkParamTypes = kAllTypes);
 
   Tensor* computeTwoOperand(
       const std::string& name,
@@ -95,7 +116,8 @@ class TORCH_API TensorExprKernel {
       const torch::jit::Value* v,
       const std::function<
           ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
-          innerExpr);
+          innerExpr,
+      bool promote_inputs = true);
 
   Tensor* computeConditionWithTwoOperand(
       const std::string& name,
@@ -113,9 +135,12 @@ class TORCH_API TensorExprKernel {
           const ExprHandle&,
           const ExprHandle&)>& innerExpr);
 
+  Tensor* computeSum(const torch::jit::Value* v);
+
+  Tensor* computeSoftmax(const torch::jit::Value* v, bool log_softmax);
+
   Tensor* computeValue(const torch::jit::Value* v);
 
-  void flattenTensors(BackendType backendType);
   Stmt* generateStmt(BackendType backendType);
   std::vector<CodeGen::BufferArg> prepareBufferArgs();
 
@@ -125,9 +150,25 @@ class TORCH_API TensorExprKernel {
       const at::ArrayRef<IValue>& inputs,
       std::vector<at::Tensor>& outputs);
   BackendType inferBackendTypeFromDevice(at::Device device);
-  at::Device pickDeviceType(const at::ArrayRef<torch::jit::Value*>& inputs);
 
   void bindInput(const torch::jit::Value* input);
+
+  Tensor* convertOutputToCorrectStrides(torch::jit::Value* v);
+
+  // Captures the information for reduction operation nodes.
+  struct ReductionInfo {
+    std::vector<DimArg> reductionDims;
+    std::vector<DimArg> outputDims;
+    std::vector<size_t> axes;
+    bool keepdim;
+    c10::optional<Dtype> dtype;
+  };
+
+  // Get the reduction info for the given node, based on properties and inputs.
+  ReductionInfo getReductionInfo(const torch::jit::Node* node);
+
+  // Get the reduction axes for the given node, based on properties and inputs.
+  std::vector<int64_t> getReductionAxes(const torch::jit::Node* node);
 
  private:
   struct ShapeArg {
@@ -166,8 +207,10 @@ class TORCH_API TensorExprKernel {
 
   int64_t nInputs_ = 0;
   std::vector<KernelArg> kernelArgs_;
+  std::vector<std::vector<int64_t>> tensorOutputSizes_;
+  std::vector<std::vector<int64_t>> tensorOutputStrides_;
+  std::vector<c10::TensorOptions> tensorOutputTensorOptions_;
   std::vector<Tensor*> tensorOutputs_;
-  std::vector<Tensor*> flatTensorOutputs_;
   std::unordered_map<int64_t, Tensor*> tensors_;
   std::unordered_map<int64_t, VarHandle> scalars_;
   std::unique_ptr<CodeGen> codegen_;
@@ -176,7 +219,8 @@ class TORCH_API TensorExprKernel {
   std::vector<TypePtr> inputTypes_;
   std::shared_ptr<Graph> graph_;
   Code code_;
-  bool fallback_{false};
+  bool allow_fallback_{false};
+  bool use_fallback_{false};
   bool hasRandom_{false};
   bool hasBroadcast_{false};
   std::unordered_map<const torch::jit::Value*, std::vector<ExprHandle>>
@@ -186,8 +230,13 @@ class TORCH_API TensorExprKernel {
 TORCH_API int& getTECudaPointwiseLoopLevels();
 TORCH_API int& getTECudaPointwiseBlockCount();
 TORCH_API int& getTECudaPointwiseBlockSize();
+TORCH_API bool& getTEGenerateBlockCode();
+TORCH_API bool& getTEMustUseLLVMOnCPU();
 TORCH_API bool fallbackAllowed();
 TORCH_API bool setFallbackAllowed(bool value);
+
+TORCH_API c10::optional<at::Device> pickDeviceType(
+    const at::ArrayRef<torch::jit::Value*>& inputs);
 
 } // namespace tensorexpr
 } // namespace jit

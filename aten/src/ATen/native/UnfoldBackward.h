@@ -92,6 +92,7 @@ static TensorIterator _make_unfold_backward_iter_over_grad_out(
   /* } */
 
   auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_output(grad_out_restrided)
@@ -163,6 +164,7 @@ static TensorIterator _make_unfold_backward_iter_over_grad_in(
   /* } */
 
   auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_output(grad_out_restrided)

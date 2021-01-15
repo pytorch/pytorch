@@ -123,26 +123,27 @@ void DistAutogradContext::resetGraphTask() {
 }
 
 void DistAutogradContext::addOutstandingRpc(
-    const std::shared_ptr<rpc::FutureMessage>& futureMessage) {
-  futureMessage->addCallback([this](const rpc::FutureMessage& futureMessage) {
-    if (futureMessage.hasError()) {
+    const std::shared_ptr<rpc::JitFuture>& jitFuture) {
+  std::weak_ptr<rpc::JitFuture> wp = jitFuture;
+  jitFuture->addCallback([this, wp]() {
+    auto future = wp.lock();
+    if (future->hasError()) {
       // If we have an error, let the local autograd engine know about it.
-      std::runtime_error err((*futureMessage.error()).what());
       std::unique_lock<std::mutex> lock(lock_);
       if (graphTask_) {
         graphTask_->set_exception_without_signal(nullptr);
         lock.unlock();
         if (!graphTask_->future_completed_.exchange(true)) {
-          graphTask_->future_result_->setErrorIfNeeded(err.what());
+          graphTask_->future_result_->setErrorIfNeeded(future->exception_ptr());
         }
       } else {
         LOG(WARNING) << "Ignoring error since GraphTask is no longer valid: "
-                     << err.what();
+                     << future->tryRetrieveErrorMessage();
       }
     }
   });
   std::lock_guard<std::mutex> guard(lock_);
-  outStandingRpcs_.push_back(futureMessage);
+  outStandingRpcs_.push_back(jitFuture);
 }
 
 void DistAutogradContext::clearOutstandingRpcs() {
@@ -150,7 +151,7 @@ void DistAutogradContext::clearOutstandingRpcs() {
   outStandingRpcs_.clear();
 }
 
-std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
+std::shared_ptr<c10::ivalue::Future> DistAutogradContext::
     clearAndWaitForOutstandingRpcsAsync() {
   std::unique_lock<std::mutex> lock(lock_);
   auto outStandingRpcs = std::move(outStandingRpcs_);
@@ -158,18 +159,22 @@ std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
 
   struct State {
     explicit State(int32_t count)
-        : future(std::make_shared<rpc::FutureMessage>()), remaining(count) {}
-    std::shared_ptr<rpc::FutureMessage> future;
+        : future(
+              std::make_shared<c10::ivalue::Future>(c10::NoneType::create())),
+          remaining(count) {}
+    std::shared_ptr<c10::ivalue::Future> future;
     std::atomic<int32_t> remaining;
     std::atomic<bool> alreadySentError{false};
   };
   auto state = std::make_shared<State>(outStandingRpcs.size());
   if (outStandingRpcs.empty()) {
-    state->future->markCompleted(rpc::Message());
+    state->future->markCompleted(c10::IValue());
   } else {
     for (auto& rpc : outStandingRpcs) {
-      rpc->addCallback([state](const rpc::FutureMessage& rpc) {
-        if (rpc.hasError()) {
+      std::weak_ptr<rpc::JitFuture> wp = rpc;
+      rpc->addCallback([state, wp]() {
+        auto future = wp.lock();
+        if (future->hasError()) {
           // If there's an error, we want to setError() on the future,
           // unless another error has already been sent - use a CAS to
           // guard.
@@ -181,13 +186,13 @@ std::shared_ptr<rpc::FutureMessage> DistAutogradContext::
           bool expectedAlreadySent = false;
           if (state->alreadySentError.compare_exchange_strong(
                   expectedAlreadySent, true)) {
-            state->future->setError(rpc.error()->what());
+            state->future->setError(future->exception_ptr());
           }
           return;
         }
 
         if (--state->remaining == 0) {
-          state->future->markCompleted(rpc::Message());
+          state->future->markCompleted(c10::IValue());
         }
       });
     }

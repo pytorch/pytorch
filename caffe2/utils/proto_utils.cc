@@ -53,7 +53,6 @@ C10_EXPORT bool IsCPUDeviceType(int device_type) {
       PROTO_CPU,
       PROTO_MKLDNN,
       PROTO_IDEEP,
-      PROTO_ONLY_FOR_TEST,
   };
   return cpu_types.count(device_type);
 }
@@ -217,10 +216,17 @@ C10_EXPORT bool ReadProtoFromTextFile(const char* filename, Message* proto) {
 
 C10_EXPORT void WriteProtoToTextFile(
     const Message& proto,
-    const char* filename) {
+    const char* filename,
+    bool throwIfError) {
   int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   FileOutputStream* output = new FileOutputStream(fd);
-  CAFFE_ENFORCE(google::protobuf::TextFormat::Print(proto, output));
+  if(!google::protobuf::TextFormat::Print(proto, output)) {
+     if (throwIfError) {
+       CAFFE_THROW("Cannot write proto to text file: ", filename);
+     } else {
+       LOG(ERROR) << "Cannot write proto to text file: " << filename;
+     }
+  }
   delete output;
   close(fd);
 }

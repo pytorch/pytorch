@@ -59,7 +59,6 @@ template <typename To, typename From>
 inline constexpr To safe_downcast_internal(const From v) {
   typedef std::common_type_t<From, To> Type;
   constexpr Type min{static_cast<Type>(std::numeric_limits<To>::lowest())};
-  const Type value{static_cast<Type>(v)};
   constexpr Type max{static_cast<Type>(std::numeric_limits<To>::max())};
   TORCH_CHECK(min <= v && v <= max, "Cast failed: out of range");
   return static_cast<To>(v);

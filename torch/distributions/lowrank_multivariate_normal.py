@@ -96,9 +96,9 @@ class LowRankMultivariateNormal(Distribution):
         cov_diag_ = cov_diag.unsqueeze(-1)
         try:
             loc_, self.cov_factor, cov_diag_ = torch.broadcast_tensors(loc_, cov_factor, cov_diag_)
-        except RuntimeError:
+        except RuntimeError as e:
             raise ValueError("Incompatible batch shapes: loc {}, cov_factor {}, cov_diag {}"
-                             .format(loc.shape, cov_factor.shape, cov_diag.shape))
+                             .format(loc.shape, cov_factor.shape, cov_diag.shape)) from e
         self.loc = loc_[..., 0]
         self.cov_diag = cov_diag_[..., 0]
         batch_shape = self.loc.shape[:-1]

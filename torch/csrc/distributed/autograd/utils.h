@@ -45,13 +45,14 @@ TORCH_API rpc::Message getMessageWithAutograd(
     bool forceGradRecording = false);
 
 // Send message after autograd checking
-TORCH_API std::shared_ptr<torch::distributed::rpc::FutureMessage>
+TORCH_API std::shared_ptr<c10::ivalue::Future>
 sendMessageWithAutograd(
     rpc::RpcAgent& agent,
     const rpc::WorkerInfo& dst,
     rpc::Message&& wrappedRpcMsg,
     bool forceGradRecording = false,
-    const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout);
+    const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout,
+    bool forceDisableProfiling = false);
 
 } // namespace autograd
 } // namespace distributed

@@ -6,6 +6,10 @@
 #include <cusparse.h>
 #include <cublas_v2.h>
 
+#ifdef CUDART_VERSION
+#include <cusolverDn.h>
+#endif
+
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/Context.h>
 #include <c10/cuda/CUDAStream.h>
@@ -58,12 +62,17 @@ TORCH_CUDA_API int warp_size();
 
 TORCH_CUDA_API cudaDeviceProp* getDeviceProperties(int64_t device);
 
+TORCH_CUDA_API bool canDeviceAccessPeer(int64_t device, int64_t peer_device);
+
 TORCH_CUDA_API Allocator* getCUDADeviceAllocator();
 
 /* Handles */
 TORCH_CUDA_API cusparseHandle_t getCurrentCUDASparseHandle();
 TORCH_CUDA_API cublasHandle_t getCurrentCUDABlasHandle();
 
+#ifdef CUDART_VERSION
+TORCH_CUDA_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
+#endif
 
 } // namespace cuda
 } // namespace at

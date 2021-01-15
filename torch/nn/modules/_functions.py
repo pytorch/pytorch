@@ -9,12 +9,13 @@ class SyncBatchNorm(Function):
     def forward(self, input, weight, bias, running_mean, running_var, eps, momentum, process_group, world_size):
         input = input.contiguous()
 
-        count = torch.empty(1,
-                            dtype=running_mean.dtype,
-                            device=input.device).fill_(input.numel() // input.size(1))
-
         # calculate mean/invstd for input.
         mean, invstd = torch.batch_norm_stats(input, eps)
+
+        count = torch.full((1,), input.numel() // input.size(1),
+                           dtype=mean.dtype,
+                           device=mean.device)
+
 
         num_channels = input.shape[1]
         # C, C, 1 -> (2C + 1)
@@ -24,7 +25,7 @@ class SyncBatchNorm(Function):
             torch.empty_like(combined) for k in range(world_size)
         ]
         # Use allgather instead of allreduce since I don't trust in-place operations ..
-        dist.all_gather(combined_list, combined, async_op=False)
+        dist.all_gather(combined_list, combined, process_group, async_op=False)
         combined = torch.stack(combined_list, dim=0)
         # world_size * (2C + 1) -> world_size * C, world_size * C, world_size * 1
         mean_all, invstd_all, count_all = torch.split(combined, num_channels, dim=1)
@@ -196,3 +197,13 @@ class CrossMapLRN2d(Function):
                 accum_ratio.add_(paddded_ratio[c], alpha=-1)
 
         return grad_input, None, None, None, None
+
+class BackwardHookFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, *args):
+        ctx.mark_non_differentiable(*[arg for arg in args if not arg.requires_grad])
+        return args
+
+    @staticmethod
+    def backward(ctx, *args):
+        return args

@@ -1,5 +1,10 @@
 #pragma once
 
+// TODO: unify to C10_MOBILE. In theory this header could be used in OSS.
+#ifdef XPLAT_MOBILE_BUILD
+#include <ATen/selected_mobile_ops.h>
+#endif
+
 /**
  * This header implements functionality to build PyTorch with only a certain
  * set of operators (+ dependencies) included.
@@ -31,7 +36,9 @@ namespace impl {
 // returns true iff whitelist contains item
 // op_whitelist_contains("a;bc;d", "bc") == true
 constexpr bool op_whitelist_contains(string_view whitelist, string_view item) {
-    size_t next = -1;
+    //Choose a really big value for next so that if something goes wrong
+    //this code will blow up in a hopefully detectable way.
+    size_t next = std::numeric_limits<size_t>::max();
     for (size_t cur = 0; cur <= whitelist.size(); cur = next) {
       next = whitelist.find(';', cur);
       if (next != string_view::npos) {
@@ -60,9 +67,13 @@ constexpr bool op_whitelist_check(string_view op_name) {
 #else
   return op_whitelist_contains(
     C10_STRINGIZE(TORCH_OPERATOR_WHITELIST),
-    // Strip overload name (as whitelist doesn't contain overloads)
-    OperatorNameView::parse(op_name).name
-  );
+    // This function is majorly used for mobile selective build with
+    // root operators, where the overload is included in the whitelist.
+    op_name);
+    // // Strip overload name (as whitelist doesn't contain overloads)
+    // // Another function based on this may be added when there's usage
+    // // on op names without overload.
+    // OperatorNameView::parse(op_name).name);
 #endif
 }
 
@@ -74,6 +85,12 @@ constexpr bool schema_whitelist_check(string_view schema) {
 #else
   return op_whitelist_check(schema.substr(0, schema.find("(")));
 #endif
+}
+
+// schema_whitelist_check() implicitly depends on a macro, TORCH_OPERATOR_WHITELIST.
+// Add this API to pass arbitrary whitelist.
+constexpr bool op_whitelist_contains_name_in_schema(string_view whitelist, string_view schema) {
+  return op_whitelist_contains(whitelist, schema.substr(0, schema.find("(")));
 }
 
 // Returns true iff the given dispatch key is on the whitelist

@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
@@ -143,6 +144,26 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   rewriter.RegisterRewritePattern(
       conv_2d_pattern, prepacked_ops_conv2d_pattern);
   rewriter.runOnGraph(graph);
+
+  std::string conv_2d_transpose_pattern = R"(
+      graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[],
+          %output_padding:int[], %groups:int):
+        %r = aten::conv_transpose2d(%input, %weight, %bias, %stride, %padding, %output_padding, %groups, %dilation)
+        return (%r) )";
+
+  std::string prepacked_ops_conv2d_transpose_pattern = R"(
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %output_padding:int[], %groups:int):
+        %output_min_max : None = prim::Constant()
+        %packed_weight_bias = prepacked::conv2d_transpose_clamp_prepack(
+            %weight, %bias, %stride, %padding, %output_padding, %dilation, %groups,
+            %output_min_max, %output_min_max)
+        %r = prepacked::conv2d_transpose_clamp_run(%input, %packed_weight_bias)
+        return (%r) )";
+
+  SubgraphRewriter transpose_rewriter;
+  transpose_rewriter.RegisterRewritePattern(
+      conv_2d_transpose_pattern, prepacked_ops_conv2d_transpose_pattern);
+  transpose_rewriter.runOnGraph(graph);
 }
 
 void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {
@@ -314,6 +335,9 @@ void fusePrePackedLinearConvWithClamp(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   fuseReluWithPackedOps(graph);
   fuseHardtanhWithPackedOps(graph);
+
+  // Ignore user defined classes for later passes
+  ConstantPropagation(graph, true);
 }
 
 void FoldPrePackingOps(script::Module& m) {
@@ -321,9 +345,16 @@ void FoldPrePackingOps(script::Module& m) {
     return (
         (n->kind() ==
          Symbol::fromQualString("prepacked::linear_clamp_prepack")) ||
-        n->kind() == Symbol::fromQualString("prepacked::conv2d_clamp_prepack"));
+        n->kind() ==
+            Symbol::fromQualString("prepacked::conv2d_clamp_prepack") ||
+        n->kind() ==
+            Symbol::fromQualString(
+                "prepacked::conv2d_transpose_clamp_prepack"));
   };
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
+  auto graph = m.get_method("forward").graph();
+  // Folding requires a const propagation through user defined classes
+  ConstantPropagation(graph, false);
 }
 
 script::Module optimizeForMobile(
@@ -366,7 +397,7 @@ script::Module optimizeForMobile(
   if (!optimization_blocklist.count(MobileOptimizerType::FUSE_ADD_RELU)) {
     FuseAddRelu(cloned_module);
   }
-
+  cloned_module.register_attribute("mobile_optimized", BoolType::get(), true);
   return cloned_module;
 }
 
@@ -397,7 +428,7 @@ script::Module optimizeForMobile(
     const std::set<MobileOptimizerType>& blocklist,
     const std::vector<std::string>& preserved_methods) {
   TORCH_INTERNAL_ASSERT(
-      "Mobile optimizaiton only available with XNNPACK at the moment. "
+      "Mobile optimization only available with XNNPACK at the moment. "
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
   return module;
 }

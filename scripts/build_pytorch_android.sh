@@ -6,17 +6,17 @@ set -eux
 ##############################################################################
 # Example usage:
 # - Build default AARs:
-#   scipts/build_pytorch_androis.sh
+#   scripts/build_pytorch_android.sh
 #
 # - Build for specific ABI(s):
-#   scipts/build_pytorch_androis.sh armeabi-v7a
-#   scipts/build_pytorch_androis.sh arm64-v8a,x86,x86_64
+#   scripts/build_pytorch_android.sh armeabi-v7a
+#   scripts/build_pytorch_android.sh arm64-v8a,x86,x86_64
 #
 # Script's workflow:
 # 1. Builds libtorch for android for specified android abisi (by default for all 4).
 # Custom list of android abis can be specified as a bash argument as comma separated list.
 # For example just for testing on android x86 emulator we need only x86 build.
-# ./scipts/build_pytorch_androis.sh x86
+# ./scripts/build_pytorch_android.sh x86
 # 2. Creates symbolic links to android/pytorch_android/src/main/jniLibs/${abi} for libtorch build output,
 # android/pytorch_android/src/main/cpp/libtorch_include/${abi} for headers.
 # 3. Runs pyotrch_android gradle build:

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <aten/src/ATen/Context.h>
+#include <ATen/Context.h>
 #include <c10/core/DeviceType.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
@@ -9,6 +9,7 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
+#include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -55,6 +56,19 @@ template <>
 c10::impl::GenericList make_result_list<IValue>(const TypePtr& elemType);
 
 inline void noop(Stack* n) {}
+
+// As described in https://docs.python.org/3/library/functions.html#round
+// When a number is exactly halfway between two integers, python builtin round
+// function will round to even number. We use round(x/2)*2 to handle the
+// special halfway case. For positive 'x', round(x/2)*2 =
+// round((x_e + x_r)/2)*2 = x_e + round(x_r/2)*2, where x_e is an even integer,
+// x_r is either 0.5 of 1.5, round(x_r/2)*2 results a 0 or 2, so the final
+// result will always be a even number. Due to symmetricity, it also applies to
+// negative cases.
+inline double round_to_even(double a) {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+  return a - std::floor(a) == 0.5 ? (std::round(a * 0.5) * 2.0) : std::round(a);
+}
 
 // using the rules from python_arg_parser FunctionParameter::check
 // tensor cannot have grad set, tensor must be 0 dim,
@@ -165,7 +179,7 @@ void setItem(const c10::List<T>& list, int64_t idx, T&& value) {
   if (normalized_idx < 0 || normalized_idx >= list_size) {
     throw std::out_of_range("list index out of range");
   }
-  list.set(normalized_idx, std::move(value));
+  list.set(normalized_idx, std::forward<T>(value));
 }
 
 void listAppend(Stack* stack);
@@ -416,36 +430,38 @@ void listCopyAndSort<at::Tensor>(Stack* stack);
 
 void listSetItem(Stack* stack);
 
-#define DEFINE_GENERIC_BINARY_OP(aten_op, op, result)            \
-  Operator(                                                      \
-      #aten_op ".int_int(int a, int b) -> " #result,             \
-      [](Stack* stack) {                                         \
-        int64_t a, b;                                            \
-        pop(stack, a, b);                                        \
-        push(stack, op);                                         \
-      },                                                         \
-      aliasAnalysisFromSchema()),                                \
-      Operator(                                                  \
-          #aten_op ".float_float(float a, float b) -> " #result, \
-          [](Stack* stack) {                                     \
-            double a, b;                                         \
-            pop(stack, a, b);                                    \
-            push(stack, op);                                     \
-          },                                                     \
+#define DEFINE_GENERIC_BINARY_OP(aten_op, op, result)                        \
+  OperatorGenerator(                                                         \
+      TORCH_SELECTIVE_SCHEMA(#aten_op ".int_int(int a, int b) -> " #result), \
+      [](Stack* stack) {                                                     \
+        int64_t a, b;                                                        \
+        pop(stack, a, b);                                                    \
+        push(stack, op);                                                     \
+      },                                                                     \
+      aliasAnalysisFromSchema()),                                            \
+      OperatorGenerator(                                                     \
+          TORCH_SELECTIVE_SCHEMA(                                            \
+              #aten_op ".float_float(float a, float b) -> " #result),        \
+          [](Stack* stack) {                                                 \
+            double a, b;                                                     \
+            pop(stack, a, b);                                                \
+            push(stack, op);                                                 \
+          },                                                                 \
           aliasAnalysisFromSchema())
 
 // define implementations for primitive number ops
 #define DEFINE_GENERIC_OP(aten_op, int_op, float_op, int_result, float_result) \
-  Operator(                                                                    \
-      #aten_op ".int(int a, int b) -> " #int_result,                           \
+  OperatorGenerator(                                                           \
+      TORCH_SELECTIVE_SCHEMA(#aten_op ".int(int a, int b) -> " #int_result),   \
       [](Stack* stack) {                                                       \
         int64_t a, b;                                                          \
         pop(stack, a, b);                                                      \
         push(stack, int_op);                                                   \
       },                                                                       \
       aliasAnalysisFromSchema()),                                              \
-      Operator(                                                                \
-          #aten_op ".float(float a, float b) -> " #float_result,               \
+      OperatorGenerator(                                                       \
+          TORCH_SELECTIVE_SCHEMA(                                              \
+              #aten_op ".float(float a, float b) -> " #float_result),          \
           [](Stack* stack) {                                                   \
             double a, b;                                                       \
             pop(stack, a, b);                                                  \
@@ -453,83 +469,86 @@ void listSetItem(Stack* stack);
           },                                                                   \
           aliasAnalysisFromSchema())
 
-#define DEFINE_INT_FLOAT_OP(aten_op, op, result)             \
-  Operator(                                                  \
-      #aten_op ".int_float(int a, float b) -> " #result,     \
-      [](Stack* stack) {                                     \
-        int64_t a;                                           \
-        double b;                                            \
-        pop(stack, a, b);                                    \
-        push(stack, op);                                     \
-      },                                                     \
-      aliasAnalysisFromSchema()),                            \
-      Operator(                                              \
-          #aten_op ".float_int(float a, int b) -> " #result, \
-          [](Stack* stack) {                                 \
-            double a;                                        \
-            int64_t b;                                       \
-            pop(stack, a, b);                                \
-            push(stack, op);                                 \
-          },                                                 \
+#define DEFINE_INT_FLOAT_OP(aten_op, op, result)                            \
+  OperatorGenerator(                                                        \
+      TORCH_SELECTIVE_SCHEMA(#aten_op                                       \
+                             ".int_float(int a, float b) -> " #result),     \
+      [](Stack* stack) {                                                    \
+        int64_t a;                                                          \
+        double b;                                                           \
+        pop(stack, a, b);                                                   \
+        push(stack, op);                                                    \
+      },                                                                    \
+      aliasAnalysisFromSchema()),                                           \
+      OperatorGenerator(                                                    \
+          TORCH_SELECTIVE_SCHEMA(#aten_op                                   \
+                                 ".float_int(float a, int b) -> " #result), \
+          [](Stack* stack) {                                                \
+            double a;                                                       \
+            int64_t b;                                                      \
+            pop(stack, a, b);                                               \
+            push(stack, op);                                                \
+          },                                                                \
           aliasAnalysisFromSchema())
 
-#define DEFINE_INT_OP(aten_op, op)                          \
-  Operator(                                                 \
-      #aten_op ".int(int a, int b) -> int",                 \
-      [](Stack* stack) {                                    \
-        int64_t a, b;                                       \
-        pop(stack, a, b);                                   \
-        push(stack, op); /* NOLINT(hicpp-signed-bitwise) */ \
-      },                                                    \
+#define DEFINE_INT_OP(aten_op, op)                                  \
+  OperatorGenerator(                                                \
+      TORCH_SELECTIVE_SCHEMA(#aten_op ".int(int a, int b) -> int"), \
+      [](Stack* stack) {                                            \
+        int64_t a, b;                                               \
+        pop(stack, a, b);                                           \
+        push(stack, op); /* NOLINT(hicpp-signed-bitwise) */         \
+      },                                                            \
       aliasAnalysisFromSchema())
 
-#define DEFINE_STR_CMP_OP(aten_op, op)       \
-  Operator(                                  \
-      #aten_op ".str(str a, str b) -> bool", \
-      [](Stack* stack) {                     \
-        auto b = pop(stack).toStringRef();   \
-        auto a = pop(stack).toStringRef();   \
-        push(stack, op);                     \
-      },                                     \
+#define DEFINE_STR_CMP_OP(aten_op, op)                               \
+  OperatorGenerator(                                                 \
+      TORCH_SELECTIVE_SCHEMA(#aten_op ".str(str a, str b) -> bool"), \
+      [](Stack* stack) {                                             \
+        auto b = pop(stack).toStringRef();                           \
+        auto a = pop(stack).toStringRef();                           \
+        push(stack, op);                                             \
+      },                                                             \
       aliasAnalysisFromSchema())
 
 // define a primitive op over Scalar operands.
 // it's necessary to register this overload following
 // int/float variations to avoid trapping Scalar args
 // in unintended implicit conversions
-#define DEFINE_SCALAR_BINARY_OP(aten_op, int_op, float_op, result) \
-  Operator(                                                        \
-      #aten_op "(Scalar a, Scalar b) -> " #result,                 \
-      [](Stack* stack) {                                           \
-        IValue x, y;                                               \
-        pop(stack, x, y);                                          \
-        if (x.isDouble()) {                                        \
-          if (y.isDouble()) {                                      \
-            double a = x.toDouble();                               \
-            double b = y.toDouble();                               \
-            push(stack, float_op);                                 \
-          } else {                                                 \
-            double a = x.toDouble();                               \
-            int64_t b = y.toInt();                                 \
-            push(stack, float_op);                                 \
-          }                                                        \
-        } else {                                                   \
-          if (y.isDouble()) {                                      \
-            int64_t a = x.toInt();                                 \
-            double b = y.toDouble();                               \
-            push(stack, float_op);                                 \
-          } else {                                                 \
-            int64_t a = x.toInt();                                 \
-            int64_t b = y.toInt();                                 \
-            push(stack, int_op);                                   \
-          }                                                        \
-        }                                                          \
-      },                                                           \
+#define DEFINE_SCALAR_BINARY_OP(aten_op, int_op, float_op, result)         \
+  OperatorGenerator(                                                       \
+      TORCH_SELECTIVE_SCHEMA(#aten_op "(Scalar a, Scalar b) -> " #result), \
+      [](Stack* stack) {                                                   \
+        IValue x, y;                                                       \
+        pop(stack, x, y);                                                  \
+        if (x.isDouble()) {                                                \
+          if (y.isDouble()) {                                              \
+            double a = x.toDouble();                                       \
+            double b = y.toDouble();                                       \
+            push(stack, float_op);                                         \
+          } else {                                                         \
+            double a = x.toDouble();                                       \
+            int64_t b = y.toInt();                                         \
+            push(stack, float_op);                                         \
+          }                                                                \
+        } else {                                                           \
+          if (y.isDouble()) {                                              \
+            int64_t a = x.toInt();                                         \
+            double b = y.toDouble();                                       \
+            push(stack, float_op);                                         \
+          } else {                                                         \
+            int64_t a = x.toInt();                                         \
+            int64_t b = y.toInt();                                         \
+            push(stack, int_op);                                           \
+          }                                                                \
+        }                                                                  \
+      },                                                                   \
       aliasAnalysisFromSchema())
 
 #define DEFINE_SCALAR_SCALAR_BINARY_OP(aten_op, int_op, float_op, result) \
-  Operator(                                                               \
-      #aten_op ".Scalar_Scalar(Scalar a, Scalar b) -> " #result,          \
+  OperatorGenerator(                                                      \
+      TORCH_SELECTIVE_SCHEMA(                                             \
+          #aten_op ".Scalar_Scalar(Scalar a, Scalar b) -> " #result),     \
       [](Stack* stack) {                                                  \
         IValue x, y;                                                      \
         pop(stack, x, y);                                                 \
@@ -573,60 +592,60 @@ void listSetItem(Stack* stack);
       DEFINE_SCALAR_BINARY_OP(aten_op, op, op, bool), \
       DEFINE_STR_CMP_OP(aten_op, op)
 
-#define DEFINE_UNARY_INT_OP(aten_op, op, result) \
-  Operator(                                      \
-      #aten_op ".int(int a) -> " #result,        \
-      [](Stack* stack) {                         \
-        int64_t a;                               \
-        pop(stack, a);                           \
-        push(stack, op);                         \
-      },                                         \
+#define DEFINE_UNARY_INT_OP(aten_op, op, result)                  \
+  OperatorGenerator(                                              \
+      TORCH_SELECTIVE_SCHEMA(#aten_op ".int(int a) -> " #result), \
+      [](Stack* stack) {                                          \
+        int64_t a;                                                \
+        pop(stack, a);                                            \
+        push(stack, op);                                          \
+      },                                                          \
       aliasAnalysisFromSchema())
 
-#define DEFINE_UNARY_FLOAT_OP(aten_op, op, result) \
-  Operator(                                        \
-      #aten_op ".float(float a) -> " #result,      \
-      [](Stack* stack) {                           \
-        double a;                                  \
-        pop(stack, a);                             \
-        push(stack, op);                           \
-      },                                           \
+#define DEFINE_UNARY_FLOAT_OP(aten_op, op, result)                    \
+  OperatorGenerator(                                                  \
+      TORCH_SELECTIVE_SCHEMA(#aten_op ".float(float a) -> " #result), \
+      [](Stack* stack) {                                              \
+        double a;                                                     \
+        pop(stack, a);                                                \
+        push(stack, op);                                              \
+      },                                                              \
       aliasAnalysisFromSchema())
 
-#define DEFINE_UNARY_OP(aten_op, op, int_result, float_result) \
-  DEFINE_UNARY_INT_OP(aten_op, op, int_result),                \
-      DEFINE_UNARY_FLOAT_OP(aten_op, op, float_result),        \
-      Operator(                                                \
-          #aten_op ".Scalar(Scalar a) -> Scalar",              \
-          [](Stack* stack) {                                   \
-            IValue x;                                          \
-            pop(stack, x);                                     \
-            if (x.isDouble()) {                                \
-              double a = x.toDouble();                         \
-              push(stack, static_cast<float_result>(op));      \
-            } else {                                           \
-              int64_t a = x.toInt();                           \
-              push(stack, static_cast<int_result>(op));        \
-            }                                                  \
-          },                                                   \
+#define DEFINE_UNARY_OP(aten_op, op, int_result, float_result)            \
+  DEFINE_UNARY_INT_OP(aten_op, op, int_result),                           \
+      DEFINE_UNARY_FLOAT_OP(aten_op, op, float_result),                   \
+      OperatorGenerator(                                                  \
+          TORCH_SELECTIVE_SCHEMA(#aten_op ".Scalar(Scalar a) -> Scalar"), \
+          [](Stack* stack) {                                              \
+            IValue x;                                                     \
+            pop(stack, x);                                                \
+            if (x.isDouble()) {                                           \
+              double a = x.toDouble();                                    \
+              push(stack, static_cast<float_result>(op));                 \
+            } else {                                                      \
+              int64_t a = x.toInt();                                      \
+              push(stack, static_cast<int_result>(op));                   \
+            }                                                             \
+          },                                                              \
           aliasAnalysisFromSchema())
-#define DEFINE_BOOL_OP(aten_op, op)             \
-  Operator(                                     \
-      #aten_op ".bool(bool a, bool b) -> bool", \
-      [](Stack* stack) {                        \
-        bool a, b;                              \
-        pop(stack, a, b);                       \
-        push(stack, op);                        \
-      },                                        \
+#define DEFINE_BOOL_OP(aten_op, op)                                     \
+  OperatorGenerator(                                                    \
+      TORCH_SELECTIVE_SCHEMA(#aten_op ".bool(bool a, bool b) -> bool"), \
+      [](Stack* stack) {                                                \
+        bool a, b;                                                      \
+        pop(stack, a, b);                                               \
+        push(stack, op);                                                \
+      },                                                                \
       aliasAnalysisFromSchema())
-#define DEFINE_STRING_OP(op_name, string_op, result) \
-  Operator(                                          \
-      #op_name ".str(str a, str b) ->" #result,      \
-      [](Stack* stack) {                             \
-        auto b = pop(stack).toStringRef();           \
-        auto a = pop(stack).toStringRef();           \
-        push(stack, string_op);                      \
-      },                                             \
+#define DEFINE_STRING_OP(op_name, string_op, result)                    \
+  OperatorGenerator(                                                    \
+      TORCH_SELECTIVE_SCHEMA(#op_name ".str(str a, str b) ->" #result), \
+      [](Stack* stack) {                                                \
+        auto b = pop(stack).toStringRef();                              \
+        auto a = pop(stack).toStringRef();                              \
+        push(stack, string_op);                                         \
+      },                                                                \
       aliasAnalysisFromSchema())
 } // namespace jit
 } // namespace torch

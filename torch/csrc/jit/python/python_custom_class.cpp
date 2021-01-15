@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/python/python_custom_class.h>
+
 #include <torch/csrc/jit/frontend/sugared_value.h>
 
 #include <fmt/format.h>
@@ -28,7 +29,10 @@ void initPythonCustomClassBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   py::class_<ScriptClass>(m, "ScriptClass")
-      .def("__call__", &ScriptClass::__call__);
+      .def("__call__", &ScriptClass::__call__)
+      .def_property_readonly("__doc__", [](const ScriptClass& self) {
+        return self.class_type_.type_->expectRef<ClassType>().doc_string();
+      });
 
   // This function returns a ScriptClass that wraps the constructor
   // of the given class, specified by the qualified name passed in.

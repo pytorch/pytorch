@@ -1,10 +1,13 @@
 from collections import namedtuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing import FileCheck
 from torch import jit
-from typing import NamedTuple, List, Optional, Dict, Tuple, Any
+from textwrap import dedent
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
+import inspect
 import unittest
 import sys
 import torch
@@ -51,7 +54,7 @@ class TestScriptPy3(JitTestCase):
         def fn():
             return NormalizationInfo(1, 2, 3, 4, 5)
 
-        with self.assertRaisesRegex(OSError, "NormalizationInfo"):
+        with self.assertRaisesRegex(OSError, "could not get source code"):
             torch.jit.script(fn)
 
     def test_optional_dict_construct(self):
@@ -187,8 +190,7 @@ class TestScriptPy3(JitTestCase):
                 super().__init__()
 
             @torch.jit.ignore
-            def foo(self, x, z):
-                # type: (Tensor, Tensor) -> Tuple[GG, GG]
+            def foo(self, x: torch.Tensor, z: torch.Tensor) -> Tuple[GG, GG]:
                 return GG(x, z), GG(x, z)
 
             def forward(self, x, z):
@@ -406,6 +408,65 @@ class TestScriptPy3(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Lists must contain only a single type"):
             torch.jit.script(wrong_type)
 
+    def test_optional_no_element_type_annotation(self):
+        """
+        Test that using an optional with no contained types produces an error.
+        """
+        def fn_with_comment(x: torch.Tensor) -> Optional:
+            return (x, x)
+
+        def annotated_fn(x: torch.Tensor) -> Optional:
+            return (x, x)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn_with_comment)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(annotated_fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            torch.jit.script(fn_with_comment)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+            torch.jit.script(annotated_fn)
+
+    def test_tuple_no_element_type_annotation(self):
+        """
+        Test that using a tuple with no contained types produces an error.
+        """
+        def fn_with_comment(x: torch.Tensor) -> Tuple:
+            return (x, x)
+
+        def annotated_fn(x: torch.Tensor) -> Tuple:
+            return (x, x)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(fn_with_comment)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+            cu = torch.jit.CompilationUnit()
+            cu.define(dedent(inspect.getsource(annotated_fn)))
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+            torch.jit.script(fn_with_comment)
+
+        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+            torch.jit.script(annotated_fn)
+
+    def test_tuple_subscripted_assign(self):
+        with self.assertRaisesRegex(RuntimeError, "subscripted assignment"):
+            @torch.jit.script
+            def foo(a: Tuple[int, int]) -> None:
+                a[0] = a[1]
+
+        with self.assertRaisesRegex(RuntimeError, "augmented assignment"):
+            @torch.jit.script
+            def bar(a: Tuple[int, int]) -> None:
+                a[0] += a[1]
+
     def test_subexpression_List_Future(self):
 
         @torch.jit.script
@@ -492,7 +553,7 @@ class TestScriptPy3(JitTestCase):
             @torch.jit.script
             def foo():
                 x = 5
-                if True:
+                if 1 == 1:
                     x : Optional[int] = 7
 
     def test_module_inplace_construct(self):
@@ -542,47 +603,161 @@ class TestScriptPy3(JitTestCase):
         # Check that ignored method is still intact.
         self.assertEqual(inp, n.ignored_method(inp))
 
+    def test_if_returning_any(self):
+        """
+        Check that an if statement can return different
+        types early from each branch when the return
+        type of the function is Any.
+        """
+        def if_function(inp: torch.Tensor) -> Any:
+            if inp.shape[0] == 1:
+                return inp * inp
+            else:
+                return "str"
+
+        self.checkScript(if_function, (torch.randn(5),))
+
+    def test_module_properties(self):
+        class ModuleWithProperties(torch.nn.Module):
+            __jit_unused_properties__ = ["ignored_attr"]
+
+            def __init__(self, a: int):
+                super().__init__()
+                self.a = a
+
+            def forward(self, a: int, b: int):
+                self.attr = a + b
+                return self.attr
+
+            @property
+            def attr(self):
+                return self.a
+
+            @property
+            def ignored_attr(self):
+                return sum([self.a])
+
+            @torch.jit.unused
+            @property
+            def ignored_attr_2(self):
+                return sum([self.a])
+
+            @ignored_attr_2.setter
+            def ignored_attr_2(self, value):
+                self.a = sum([self.a])
+
+            @attr.setter
+            def attr(self, a: int):
+                if a > 0:
+                    self.a = a
+                else:
+                    self.a = 0
+
+        class ModuleWithNoSetter(torch.nn.Module):
+            def __init__(self, a: int):
+                super().__init__()
+                self.a = a
+
+            def forward(self, a: int, b: int):
+                self.attr + a + b
+
+            @property
+            def attr(self):
+                return self.a + 1
+
+        self.checkModule(ModuleWithProperties(5), (5, 6,))
+        self.checkModule(ModuleWithProperties(5), (-5, -6,))
+        self.checkModule(ModuleWithNoSetter(5), (5, 6,))
+        self.checkModule(ModuleWithNoSetter(5), (-5, -6,))
+
+        mod = ModuleWithProperties(3)
+        scripted_mod = torch.jit.script(mod)
+
+        with self.assertRaisesRegex(AttributeError, "has no attribute"):
+            scripted_mod.ignored_attr
+
+    def test_ignoring_module_attributes(self):
+        """
+        Test that module attributes can be ignored.
+        """
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, a: int) -> int:
+                return sum([a])
+
+        class ModuleWithIgnoredAttr(torch.nn.Module):
+            __jit_ignored_attributes__ = ["a", "sub"]
+
+            def __init__(self, a: int, b: int):
+                super().__init__()
+                self.a = a
+                self.b = b
+                self.sub = Sub()
+
+            def forward(self) -> int:
+                return self.b
+
+            @torch.jit.ignore
+            def ignored_fn(self) -> int:
+                return self.sub.forward(self.a)
+
+        mod = ModuleWithIgnoredAttr(1, 4)
+        scripted_mod = torch.jit.script(mod)
+        self.assertEqual(scripted_mod(), 4)
+        self.assertEqual(scripted_mod.ignored_fn(), 1)
+
+        # Test the error message for ignored attributes.
+        class ModuleUsesIgnoredAttr(torch.nn.Module):
+            __jit_ignored_attributes__ = ["a", "sub"]
+
+            def __init__(self, a: int):
+                super().__init__()
+                self.a = a
+                self.sub = Sub()
+
+            def forward(self) -> int:
+                return self.sub(self.b)
+
+        mod = ModuleUsesIgnoredAttr(1)
+
+        with self.assertRaisesRegexWithHighlight(RuntimeError, r"attribute was ignored during compilation", "self.sub"):
+            scripted_mod = torch.jit.script(mod)
+
+
     def test_export_opnames_interface(self):
         global OneTwoModule
 
         @torch.jit.interface
         class OneTwoModule(nn.Module):
-            def one(self, x, y):
-                # type: (Tensor, Tensor) -> Tensor
+            def one(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 pass
 
-            def two(self, x):
-                # type: (Tensor) -> Tensor
+            def two(self, x: torch.Tensor) -> torch.Tensor:
                 pass
 
-            def forward(self, x):
-                # type: (Tensor) -> Tensor
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
                 pass
 
         class FooMod(nn.Module):
-            def one(self, x, y):
-                # type: (Tensor, Tensor) -> Tensor
+            def one(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 return x + y
 
-            def two(self, x):
-                # type: (Tensor) -> Tensor
+            def two(self, x: torch.Tensor) -> torch.Tensor:
                 return 2 * x
 
-            def forward(self, x):
-                # type: (Tensor) -> Tensor
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return self.one(self.two(x), x)
 
         class BarMod(nn.Module):
-            def one(self, x, y):
-                # type: (Tensor, Tensor) -> Tensor
+            def one(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 return x * y
 
-            def two(self, x):
-                # type: (Tensor) -> Tensor
+            def two(self, x: torch.Tensor) -> torch.Tensor:
                 return 2 / x
 
-            def forward(self, x):
-                # type: (Tensor) -> Tensor
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return self.two(self.one(x, x))
 
         class M(nn.Module):
@@ -592,8 +767,7 @@ class TestScriptPy3(JitTestCase):
                 super(M, self).__init__()
                 self.sub = BarMod()
 
-            def forward(self, x):
-                # type: (Tensor) -> Tensor
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return self.sub.forward(x)
 
         def use_module_interface(mod_list: List[OneTwoModule], x: torch.Tensor):
@@ -610,6 +784,22 @@ class TestScriptPy3(JitTestCase):
         self.assertTrue(len(torch.jit.export_opnames(scripted_M_mod)) == 0)
         # self.assertTrue(set(['aten::add.Tensor', 'aten::mul.Scalar']).issubset(
         #     set(torch.jit.export_opnames(scripted_M_mod))))
+
+    def test_broadcasting_list(self):
+        """
+        Test BroadcastingList and torch.nn._size_N_t alias
+        """
+        from torch._jit_internal import BroadcastingList2
+        from torch.nn.common_types import _size_2_t
+
+        def sum_i(x: _size_2_t) -> int:
+            return x[0] + x[1]
+
+        def sum_f(x: BroadcastingList2[float]) -> float:
+            return x[0] + x[1]
+
+        self.assertTrue(torch.jit.script(sum_i)(4) == 8)
+        self.assertTrue(torch.jit.script(sum_f)(4.5) == 9.)
 
 
 if __name__ == '__main__':

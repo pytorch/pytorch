@@ -1,14 +1,18 @@
+#include <torch/csrc/jit/codegen/cuda/lower_unroll.h>
+
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
+#include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/predicate_compute.h>
-
-#include <torch/csrc/jit/codegen/cuda/lower_unroll.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 kir::Bool* UnrollPass::getThreadPredicate(TensorView* tv) {
   // No thread predicate is needed predicate when tv is output of a
@@ -36,8 +40,10 @@ void UnrollPass::handle(Expr* expr) {
     // If we need a predicate, put expr inside an if then else
     if (!(pred->isConst()) || !(pred->isConst() && pred->value().value())) {
       non_trivial_pred_found = true;
+      kir::IrBuilder ir_builder(GpuLower::current()->kernel());
       kir::IfThenElse* inline_ite =
-          new kir::IfThenElse(pred, {expr}, {}, for_loops.back());
+          ir_builder.create<kir::IfThenElse>(pred, for_loops.back());
+      inline_ite->thenBody().push_back(expr);
       for_loops.back()->body().insert_before(expr, inline_ite);
       for_loops.back()->body().erase(expr);
     }
@@ -72,13 +78,14 @@ void UnrollPass::handle(kir::ForLoop* fl) {
 
   kir::ForLoop* parent_scope = for_loops.empty() ? nullptr : for_loops.back();
 
+  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
   kir::IfThenElse* unroll_ite =
-      new kir::IfThenElse(unroll_pred, {}, {}, parent_scope);
+      ir_builder.create<kir::IfThenElse>(unroll_pred, parent_scope);
 
   // Get the loop nest for the unrolled path
   kir::ForLoop* unrolled_loop_nest = scope_utils::cloneLoopNest(fl, unroll_ite);
 
-  unroll_ite->body().push_back(unrolled_loop_nest);
+  unroll_ite->thenBody().push_back(unrolled_loop_nest);
 
   // Loop nest for inlined path
   kir::ForLoop* inlined_loop = scope_utils::cloneLoopNest(fl, unroll_ite);
@@ -99,6 +106,8 @@ void UnrollPass::handle(kir::ForLoop* fl) {
 
 // Generate the loop nest structure and place it in lowered_exprs
 void UnrollPass::computeMap() {
+  FUSER_PERF_SCOPE("UnrollPass::computeMap");
+
   FusionGuard fg(fusion_);
 
   // Run through loop nests and further lower the expressions
@@ -111,6 +120,7 @@ std::vector<Expr*> UnrollPass::runPass(
     Fusion* fusion,
     const std::vector<Expr*>& exprs,
     const ThreadPredicateMap& thread_predicates) {
+  FUSER_PERF_SCOPE("UnrollPass::runPass");
   FusionGuard fg(fusion);
   UnrollPass up(fusion, exprs, thread_predicates);
   up.computeMap();
@@ -127,6 +137,7 @@ std::vector<Expr*> UnrollPass::runPass(
   return mutated_exprs;
 }
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

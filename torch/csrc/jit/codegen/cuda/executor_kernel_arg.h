@@ -61,6 +61,14 @@ struct ULongArg : public ArgAbstract {
   }
 };
 
+struct LongArg : public ArgAbstract {
+  int64_t val_;
+  LongArg(int64_t _val) : val_(_val){};
+  void* arg() {
+    return &val_;
+  }
+};
+
 struct IntArg : public ArgAbstract {
   int val_;
   IntArg(int _val) : val_(_val){};

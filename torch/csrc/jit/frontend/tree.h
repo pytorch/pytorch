@@ -12,20 +12,17 @@
 namespace torch {
 namespace jit {
 
-// Tree's are used to represent all forms of TC IR, pre- and post- typechecking.
-// Rather than have a full class hierarchy for all TC statements,
-// Trees are a slight variation of Lisp S-expressions.
-// for instance the expression a*b+1 is represented as:
+// Trees are used to represent all forms of TC IR, pre- and post-typechecking.
+// Rather than have a full class hierarchy for all TC statements, trees are a
+// slight variation of Lisp s-expressions. For instance, the expression a*b+1
+// is represented as:
 // (+ (* (ident a) (ident b)) (const 1))
 // Atoms like 'a', 'b', and '1' are represented by subclasses of Tree which
-// define stringValue().
-// Everything else is a Compound object, which has a 'kind' that is a token from
-// Lexer.h's TokenKind enum, and contains a list of subtrees.
-// Like TokenKind single-character operators like '+' are representing using the
-// character itself, so add.kind() == '+'.
-// Compound objects are also always associated with a SourceRange for
-// reporting error message.
-
+// define stringValue(). Everything else is a Compound object, which has a
+// 'kind' that is a token from lexer.h's TokenKind enum. Single-character
+// operators like '+' are represented using the character itself (so, add.kind()
+// would be '+'). Each Compound object also contains a list of subtrees and is
+// associated with a SourceRange for error reporting.
 // Memory management of trees is done using intrusive_ptr.
 
 struct Tree;

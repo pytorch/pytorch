@@ -8,7 +8,7 @@ namespace caffe2 {
 REGISTER_CPU_OPERATOR(
     Sqrt,
     UnaryElementwiseOp<
-        TensorTypes<float>,
+        TensorTypes<float, double>,
         CPUContext,
         SqrtFunctor<CPUContext>>);
 

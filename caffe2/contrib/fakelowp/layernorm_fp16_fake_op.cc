@@ -5,8 +5,7 @@
 
 namespace caffe2 {
 
-template <>
-void LayerNormFakeFp16Op<CPUContext>::calcY(
+void LayerNormUtils::calcY(
     const int M,
     const int N,
     const float* X,
@@ -52,8 +51,7 @@ void LayerNormFakeFp16Op<CPUContext>::calcY(
   }
 }
 
-template <>
-float LayerNormFakeFp16Op<CPUContext>::ReducedAdd(const std::vector<float>& vec) {
+float LayerNormUtils::ReducedAdd(const std::vector<float>& vec) {
   constexpr int VEC_SIZE = 32;
   std::vector<float> v(vec.begin(), vec.end());
 
@@ -69,8 +67,7 @@ float LayerNormFakeFp16Op<CPUContext>::ReducedAdd(const std::vector<float>& vec)
   return v[0];
 }
 
-template <>
-void LayerNormFakeFp16Op<CPUContext>::calcMeanStd(
+void LayerNormUtils::calcMeanStd(
     const int M,
     const int N,
     const float eps,
@@ -191,7 +188,14 @@ void LayerNormFakeFp16Op<CPUContext>::calcMeanStd(
     FLAGS_caffe2_fbgemm_fake_fp16_clamp);
 }
 
-REGISTER_CPU_OPERATOR(LayerNormFakeFP16NNPI, LayerNormFakeFp16Op<CPUContext>);
+REGISTER_CPU_OPERATOR(LayerNormFakeFP16NNPI, LayerNormFakeFp16Op<false>);
 OPERATOR_SCHEMA(LayerNormFakeFP16NNPI).NumInputs({1, 3}).NumOutputs(3);
+
+REGISTER_CPU_OPERATOR(LayerNormInt8QuantizeFakeNNPI,
+                      LayerNormFakeFp16Op<true>);
+OPERATOR_SCHEMA(LayerNormInt8QuantizeFakeNNPI)
+    .IdenticalTypeAndShape()
+    .NumInputs({1, 3})
+    .NumOutputs(3);
 
 } // namespace caffe2
