@@ -1430,7 +1430,7 @@ def all_gather_object(object_list, obj, group=None):
             size of the group for this collective and will contain the output.
         object (Any): Pickable Python object to be broadcast from current process.
         group (ProcessGroup, optional): The process group to work on. If None,
-            the default process group will be used.
+            the default process group will be used. Default is ``None``.
 
     Returns:
         None. If the calling rank is part of this group, the output of the
@@ -1521,7 +1521,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
             ranks. (default is ``None``)
         dst (int, optional): Destination rank. (default is 0)
         group: (ProcessGroup, optional): The process group to work on. If None,
-            the default process group will be used.
+            the default process group will be used. Default is ``None``.
 
     Returns:
         None. On the ``dst`` rank, ``object_gather_list`` will contain the
@@ -1620,7 +1620,7 @@ def broadcast_object_list(object_list, src=0, group=None):
             be broadcast, but each rank must provide lists of equal sizes.
         src (int): Source rank from which to broadcast ``object_list``.
         group: (ProcessGroup, optional): The process group to work on. If None,
-            the default process group will be used.
+            the default process group will be used. Default is ``None``.
 
     Returns:
         ``None``. If rank is part of the group, ``object_list`` will contain the
@@ -1717,7 +1717,8 @@ def scatter_object_list(
             be scattered, and the argument can be ``None`` for non-src ranks.
         src (int): Source rank from which to scatter
             ``scatter_object_input_list``.
-        group: (ProcessGroup, optional): The process group to work on.
+        group: (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used. Default is ``None``.
 
     Returns:
         ``None``. If rank is part of the group, ``scatter_object_output_list``
