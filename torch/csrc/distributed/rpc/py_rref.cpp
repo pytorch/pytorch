@@ -228,20 +228,22 @@ std::string PyRRef::str() const {
   }
 }
 
-py::object PyRRef::createRRefProxy(const RRefProxyType& type) const {
+py::object PyRRef::createRRefProxy(
+    const RRefProxyType& type,
+    float timeoutSeconds) const {
   auto& pythonRpcHandler = PythonRpcHandler::getInstance();
   pybind11::gil_scoped_acquire ag;
   auto& functions = pythonRpcHandler.getRRefProxyFunctions();
   auto& ctor = functions.rrefProxyCtor_;
   switch (type) {
     case RRefProxyType::RPC_SYNC: {
-      return ctor(*this, functions.rpcSync_);
+      return ctor(*this, functions.rpcSync_, timeoutSeconds);
     }
     case RRefProxyType::RPC_ASYNC: {
-      return ctor(*this, functions.rpcAsync_);
+      return ctor(*this, functions.rpcAsync_, timeoutSeconds);
     }
     case RRefProxyType::REMOTE: {
-      return ctor(*this, functions.remote_);
+      return ctor(*this, functions.remote_, timeoutSeconds);
     }
     default: {
       TORCH_INTERNAL_ASSERT(false, "Unrecognized RRefProxy type ", type);
