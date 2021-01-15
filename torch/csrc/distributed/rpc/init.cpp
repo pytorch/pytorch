@@ -281,6 +281,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   >>>
                   >>> rpc.rpc_sync(rref.owner(), run, args=(rref, func_name, args, kwargs))
 
+                  Args:
+                      timeout (float, optional): Timeout for ``rref.rpc_async()``.
+                      If the call does not complete within this timeframe, an
+                      exception indicating so will be raised. If this argument
+                      is not provided, the default RPC timeout will be used.
+
                   Example::
                       >>> from torch.distributed import rpc
                       >>> rref = rpc.remote("worker1", torch.add, args=(torch.zeros(2, 2), 1))
@@ -307,6 +313,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   >>>
                   >>> rpc.rpc_async(rref.owner(), run, args=(rref, func_name, args, kwargs))
 
+                  Args:
+                      timeout (float, optional): Timeout for ``rref.rpc_async()``.
+                      If the call does not complete within this timeframe, an
+                      exception indicating so will be raised. If this argument
+                      is not provided, the default RPC timeout will be used.
+
                   Example::
                       >>> from torch.distributed import rpc
                       >>> rref = rpc.remote("worker1", torch.add, args=(torch.zeros(2, 2), 1))
@@ -325,13 +337,24 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   Create a helper proxy to easily launch a ``remote`` using
                   the owner of the RRef as the destination to run functions on
                   the object referenced by this RRef. More specifically,
-                  ``rref.remote().func_name(*args, **kwargs)`` is the same as
+                  ``rref.remote()``.func_name(*args, **kwargs)`` is the same as
                   the following:
 
                   >>> def run(rref, func_name, args, kwargs):
                   >>>   return getattr(rref.local_value(), func_name)(*args, **kwargs)
                   >>>
                   >>> rpc.remote(rref.owner(), run, args=(rref, func_name, args, kwargs))
+
+                  Args:
+                      timeout (float, optional): Timeout for `rref.remote()`. If
+                      the creation of this :class:`~torch.distributed.rpc.RRef`
+                      is not successfully completed within the timeout, then the
+                      next time there is an attempt to use the RRef
+                      (such as ``to_here``), a timeout will be raised. If not
+                      provided, the default RPC timeout will be used. Please see
+                      ``rpc.remote()`` for specific timeout semantics for
+                      :class:`~torch.distributed.rpc.RRef`.
+
 
                   Example::
                       >>> from torch.distributed import rpc
@@ -390,11 +413,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
 
                   Args:
                     rref (torch.distributed.rpc.RRef): The RRef to get type of.
-                    timeout (float, optional): Timeout for ``_get_type``. If
-                          the call does not complete within this timeframe, an
-                          exception indicating so will be raised. If this
-                          argument is not provided, the default RPC timeout will
-                           be used.
+                    timeout (float, optional): Timeout, in seconds for
+                          ``_get_type``. If the call does not complete within
+                          this timeframe, an exception indicating so will be
+                          raised. If this argument is not provided, the default
+                          RPC timeout will be used.
               )")
           .def(
               "_get_future",

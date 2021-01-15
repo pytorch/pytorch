@@ -50,7 +50,7 @@ class PYBIND11_EXPORT PyRRef {
       const RRefProxyType& mode,
       float timeoutSeconds = rpc::kUnsetRpcTimeout) const;
 
-  // get the type of the data object referenced by this RRef. Timeout argumen
+  // get the type of the data object referenced by this RRef. Timeout argument
   // is only used in the first invocation of this function as an argument to the
   // RPC to the owner node of the RRef.
   py::object getRRefType(float timeout = rpc::kUnsetRpcTimeout);
