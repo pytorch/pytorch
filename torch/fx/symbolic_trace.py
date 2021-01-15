@@ -281,7 +281,7 @@ class Tracer(TracerBase):
 
         fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module))
 
-        parameter_proxy_cache = {}  # Reduce number of get_attr calls
+        parameter_proxy_cache : Dict[str, Proxy] = {}  # Reduce number of get_attr calls
 
         # Method dispatch on parameters is not recorded unless it's directly used.
         # Thus, we need to insert a proxy when __getattr__ requests a parameter.
@@ -354,13 +354,13 @@ class PatchedFn(NamedTuple):
     fn_name : str
     orig_fn : Any
 
-    # isinstance(orig_fn, NoneSentinel) if the original global namespace
-    # did not contain this function at the time of patching. This can
-    # occur, for example, when patching a builtin function
-    class NoneSentinel:
-        pass
+# isinstance(orig_fn, NoneSentinel) if the original global namespace
+# did not contain this function at the time of patching. This can
+# occur, for example, when patching a builtin function
+class PatchedFnNoneSentinel:
+    pass
 
-def _patch_wrapped_functions(orig_fns : List[PatchedFn]) -> List[PatchedFn]:
+def _patch_wrapped_functions(orig_fns : List[PatchedFn]):
     """
     Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
     the listed global functions in the `_create_wrapped_func` wrapper. Returns
@@ -383,7 +383,7 @@ def _patch_wrapped_functions(orig_fns : List[PatchedFn]) -> List[PatchedFn]:
             continue
         if name not in frame_dict and hasattr(builtins, name):
             orig_fn = getattr(builtins, name)
-            orig_fns.append(PatchedFn(frame_dict, name, PatchedFn.NoneSentinel()))
+            orig_fns.append(PatchedFn(frame_dict, name, PatchedFnNoneSentinel()))
         else:
             orig_fn = frame_dict[name]
             orig_fns.append(PatchedFn(frame_dict, name, orig_fn))
@@ -399,7 +399,7 @@ def _unpatch_wrapped_functions(orig_fns : List[PatchedFn]):
     that were there before symbolic tracing.
     """
     for frame_dict, fn_name, orig_fn in orig_fns:
-        if isinstance(orig_fn, PatchedFn.NoneSentinel):
+        if isinstance(orig_fn, PatchedFnNoneSentinel):
             del frame_dict[fn_name]
         else:
             frame_dict[fn_name] = orig_fn
