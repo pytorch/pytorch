@@ -525,7 +525,7 @@ void ProcessGroupNCCL::abortTimedOutCollectives(std::unordered_set<std::string>&
                                           " ran for ",
                                           timeElapsed.count(),
                                           " milliseconds before timing out.");
-      LOG(INFO) << exceptionMsg;
+      LOG(ERROR) << exceptionMsg;
       std::exception_ptr exception_ptr = std::make_exception_ptr(
           std::runtime_error(exceptionMsg));
       work.setException(exception_ptr);
