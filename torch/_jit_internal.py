@@ -235,10 +235,12 @@ def get_annotation_str(annotation):
     """
     if isinstance(annotation, ast.Name):
         return annotation.id
+    elif isinstance(annotation, ast.Index):
+        return get_annotation_str(annotation.value)
     elif isinstance(annotation, ast.Attribute):
         return '.'.join([get_annotation_str(annotation.value), annotation.attr])
     elif isinstance(annotation, ast.Subscript):
-        return f"{get_annotation_str(annotation.value)}[{get_annotation_str(annotation.slice.value)}]"  # type: ignore
+        return f"{get_annotation_str(annotation.value)}[{get_annotation_str(annotation.slice)}]"  # type: ignore
     elif isinstance(annotation, ast.Tuple):
         return ','.join([get_annotation_str(elt) for elt in annotation.elts])
     elif isinstance(annotation, ast.Constant) or isinstance(annotation, ast.NameConstant):
