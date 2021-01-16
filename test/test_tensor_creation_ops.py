@@ -339,7 +339,8 @@ class TestTensorCreation(TestCase):
         expected = torch.eye(4, dtype=torch.complex128)
         self.assertEqual(result, expected)
 
-        # Complex support for torch.diag
+     # Complex support for torch.diag
+    def test_diag_complex(self, device):
         result = torch.diag(torch.ones(4, dtype=torch.complex128))
         expected = torch.eye(4, dtype=torch.complex128)
         self.assertEqual(result, expected)
