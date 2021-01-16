@@ -9,7 +9,7 @@ from itertools import product, combinations, combinations_with_replacement, perm
 import random
 
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
+    TestCase, run_tests, do_test_empty_full, skipIfRocm, TEST_WITH_ROCM, suppress_warnings,
     torch_to_numpy_dtype_dict, slowTest, TEST_SCIPY, IS_MACOS, IS_PPC,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
@@ -2808,6 +2808,7 @@ class TestTensorCreation(TestCase):
         y = torch.logspace(0, 3, 4, base=2, device=device, dtype=dtype, out=x.narrow(1, 1, 2))
         self.assertEqual(x, torch.tensor(((0, 1, 2), (0, 4, 8)), device=device, dtype=dtype), atol=0, rtol=0)
 
+    @skipIfRocm
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_logspace_integral(self, device, dtype):
         "Check logspace with integer."
