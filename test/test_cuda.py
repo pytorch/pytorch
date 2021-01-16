@@ -765,12 +765,6 @@ class TestCuda(TestCase):
             torch.cuda.set_device(1)
         self.assertEqual(x.cuda().get_device(), 0)
 
-    def test_is_tensor(self):
-        for t in types:
-            tensor = getattr(torch.cuda, t.__name__)()
-            self.assertTrue(torch.is_tensor(tensor))
-        self.assertTrue(torch.is_tensor(torch.cuda.HalfTensor()))
-
     def test_cuda_synchronize(self):
         torch.cuda.synchronize()
         torch.cuda.synchronize('cuda')
