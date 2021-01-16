@@ -540,11 +540,11 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (images,), test_with_inputs=[(images,), (test_images,), (dummy_image,)],
                       input_names=["images_tensors"], output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
                       dynamic_axes={"images_tensors": [0, 1, 2]},
-                      rtol=1e-3, atol=1e-5)
+                      rtol=5e-3, atol=1e-5)
         self.run_test(model, (dummy_images,), test_with_inputs=[(dummy_images,), (test_images,)],
                       input_names=["images_tensors"], output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
                       dynamic_axes={"images_tensors": [0, 1, 2]},
-                      rtol=1e-3, atol=1e-5)
+                      rtol=5e-3, atol=1e-5)
 
     @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
