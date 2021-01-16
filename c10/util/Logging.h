@@ -315,13 +315,16 @@ struct DDPLoggingData {
   int rank;
   std::string backend;
   std::string module_name;
-  std::vector<int> device_ids;
+  std::string device_ids;
   int output_device;
   bool broadcast_buffers;
   int bucket_cap_mb;
   bool find_unused_parameters;
   bool gradient_as_bucket_view;
 };
+
+C10_API void SetPyTorchDDPUsageLogger(std::function<void(const c10::DDPLoggingData&)> logger);
+C10_API void LogPyTorchDDPUsage(const c10::DDPLoggingData& ddpData);
 
 namespace detail {
 // Return value is needed to do the static variable initialization trick

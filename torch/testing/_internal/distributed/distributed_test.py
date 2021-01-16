@@ -3150,7 +3150,7 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.rank, dist.get_rank())
             self.assertEqual(ddp_logging_data.backend, 'gloo')
             self.assertEqual(ddp_logging_data.module_name, 'Net')
-            self.assertEqual(ddp_logging_data.device_ids, [])
+            self.assertEqual(ddp_logging_data.device_ids, "")
             self.assertEqual(ddp_logging_data.output_device, -1)
             self.assertEqual(ddp_logging_data.broadcast_buffers, True)
             self.assertEqual(ddp_logging_data.bucket_cap_mb, 25)
