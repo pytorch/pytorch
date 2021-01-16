@@ -1122,4 +1122,105 @@ std::vector<Tensor> nonzero_numpy(const Tensor& self) {
   return self.nonzero().unbind(1);
 }
 
+Tensor& nonzero_out_cpu(Tensor& out, const Tensor& self) {
+  TORCH_CHECK(
+      self.numel() < std::numeric_limits<int>::max(),
+      "nonzero is not supported for tensors with more than INT_MAX elements, \
+  file a support request");
+  TORCH_CHECK(
+      out.dtype() == at::kLong,
+      "Expected object of scalar type ",
+      at::kLong,
+      " as out, but got ",
+      out.dtype());
+  TORCH_CHECK(
+      self.device() == out.device(),
+      "expected self and out to be on the same device, but got out on ",
+      out.device(),
+      " and self on ",
+      self.device());
+
+  auto numel_t = self.count_nonzero();
+  auto numel_s = numel_t.item();
+  auto numel = numel_s.toLong();
+
+  int64_t dimensions = self.dim();
+  out.resize_({numel, dimensions});
+  if (numel <= 0) {
+    return out;
+  }
+
+  // +1 faster than additional condition check inside loop
+  int64_t* sizes = new int64_t[dimensions + 1];
+  int64_t* idx = new int64_t[dimensions + 1];
+  int64_t* ii;
+  int64_t* ss;
+  auto self_sizes = self.sizes();
+  std::fill(idx, idx + dimensions + 1, 0);
+  for (int64_t i = 0; i < dimensions; ++i) {
+    sizes[dimensions - i - 1] = self_sizes[i]; // reverse order important
+  }
+  sizes[dimensions] = 0;
+
+  /* Second pass populates out */
+  auto out_data = out.data_ptr<int64_t>();
+  auto out_strides = out.strides();
+  auto out_strides_0 = out_strides[0] - (out_strides[1] * dimensions);
+  auto out_strides_1 = out_strides[1];
+
+  auto iter = TensorIteratorConfig()
+                  .set_check_mem_overlap(false)
+                  .check_all_same_dtype(false)
+                  .resize_outputs(false)
+                  .add_input(self)
+                  .build();
+
+  AT_DISPATCH_ALL_TYPES_AND3(
+      kBool, kHalf, kBFloat16, self.scalar_type(), "nonzero_cpu", [&]() {
+        auto loop = [&](char** data, const int64_t* strides, int64_t n) {
+          char* self_data = data[0];
+          const int64_t self_stride = strides[0];
+
+          for (int64_t i = 0; i < n; i++) {
+            scalar_t self_data_i = *(scalar_t*)(self_data + self_stride * i);
+            if (self_data_i != 0) {
+              ii = idx + dimensions;
+              for (int64_t dim = dimensions - 1; dim >= 0; dim--) {
+                --ii;
+                *out_data = *ii;
+                out_data += out_strides_1;
+              }
+              out_data += out_strides_0;
+            }
+            ii = idx;
+            ss = sizes;
+            ++(*ii);
+            while (*ii == *ss) {
+              *ii = 0;
+              ++ii;
+              ++ss;
+              ++(*ii);
+            }
+          }
+        };
+
+        iter.serial_for_each(loop, {0, self.numel()});
+      });
+
+  delete[] sizes;
+  delete[] idx;
+
+  return out;
+}
+
+Tensor nonzero_cpu(const Tensor& self) {
+  Tensor out = at::native::empty_cpu(
+      {0},
+      kLong,
+      self.options().layout_opt(),
+      self.options().device_opt(),
+      self.options().pinned_memory_opt());
+  return nonzero_out_cpu(out, self);
+}
+
 }} // at::native
