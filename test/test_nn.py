@@ -3474,44 +3474,6 @@ class TestNN(NNTestCase):
         input = torch.randn(num_features, b, d, w, h)
         self._test_alpha_dropout(nn.FeatureAlphaDropout, input)
 
-    def test_pad(self):
-        inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
-        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,))
-        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,))
-        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,))
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,)))
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,)))
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='circular'), (inputs,)))
-
-        inputs = torch.randn(1, 2, 3, 4, 4, requires_grad=True)
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,)))
-
-        # Assert assertion errors are raised for invalid circular padding values
-        inputs = torch.randn(1, 1, 4, requires_grad=True)
-        # Should raise error when trying to wrap around more than once
-        self.assertRaises(AssertionError, lambda: F.pad(inputs, (5, 4), mode='circular'))
-        self.assertRaises(AssertionError, lambda: F.pad(inputs, (3, 6), mode='circular'))
-        # Should raise error when negative padding results in negative output shape
-        self.assertRaises(AssertionError, lambda: F.pad(inputs, (-3, -2), mode='circular'))
-
-        # assert that relfection padding errors when pad >= input size
-        expected_err_msg = r"Padding size should be less than the corresponding input dimension"
-        self.assertRaisesRegex(RuntimeError, expected_err_msg,
-                               lambda: F.pad(torch.randn(1, 1, 2, 3), (1, 1, 3, 0), mode='reflect'))
-        self.assertRaisesRegex(RuntimeError, expected_err_msg,
-                               lambda: F.pad(torch.randn(1, 1, 2), (2, 1), mode='reflect'))
-
-        inputs = torch.rand(1, 3, 4, 4)
-        # assert that pad doesn't return a view into the input tensor
-        for mode in 'constant', 'reflect', 'replicate', 'circular':
-            out = F.pad(inputs, (0, 0, 0, 0), mode=mode)
-            out.fill_(4)
-            self.assertTrue(torch.all(inputs < 2))
-
-            out = F.pad(inputs, (0, 0, -1, -1), mode=mode)
-            out.fill_(4)
-            self.assertTrue(torch.all(inputs < 2))
-
     def test_pad_scalar_error(self):
         inputs = torch.tensor(0., requires_grad=True)
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1, 1)))
@@ -10944,48 +10906,92 @@ class TestNNDeviceType(NNTestCase):
                 self._test_module_empty_input(mod, inp)
 
     @onlyOnCPUAndCUDA
-    def test_ReplicationPad_empty(self, device):
+    @dtypes(torch.float64, torch.complex128)
+    def test_pad(self, device, dtype):
+        inputs = torch.randn(1, 3, 4, 4, device=device, dtype=dtype, requires_grad=True)
+        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,))
+        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,))
+        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,)))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,)))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='circular'), (inputs,)))
+
+        inputs = torch.randn(1, 2, 3, 4, 4, device=device, dtype=dtype, requires_grad=True)
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,)))
+
+        # Assert assertion errors are raised for invalid circular padding values
+        inputs = torch.randn(1, 1, 4, device=device, dtype=dtype, requires_grad=True)
+        # Should raise error when trying to wrap around more than once
+        self.assertRaises(AssertionError, lambda: F.pad(inputs, (5, 4), mode='circular'))
+        self.assertRaises(AssertionError, lambda: F.pad(inputs, (3, 6), mode='circular'))
+        # Should raise error when negative padding results in negative output shape
+        self.assertRaises(AssertionError, lambda: F.pad(inputs, (-3, -2), mode='circular'))
+
+        # assert that relfection padding errors when pad >= input size
+        expected_err_msg = r"Padding size should be less than the corresponding input dimension"
+        inputs = torch.randn(1, 1, 2, 3, device=device, dtype=dtype)
+        self.assertRaisesRegex(RuntimeError, expected_err_msg,
+                               lambda: F.pad(inputs, (1, 1, 3, 0), mode='reflect'))
+        inputs = torch.randn(1, 1, 2, device=device, dtype=dtype)
+        self.assertRaisesRegex(RuntimeError, expected_err_msg,
+                               lambda: F.pad(inputs, (2, 1), mode='reflect'))
+
+        inputs = torch.rand(1, 3, 4, 4, device=device, dtype=dtype)
+        # assert that pad doesn't return a view into the input tensor
+        for mode in 'constant', 'reflect', 'replicate', 'circular':
+            out = F.pad(inputs, (0, 0, 0, 0), mode=mode)
+            out.fill_(4)
+            self.assertTrue(torch.all(torch.abs(inputs) < 2))
+
+            out = F.pad(inputs, (0, 0, -1, -1), mode=mode)
+            out.fill_(4)
+            self.assertTrue(torch.all(torch.abs(inputs) < 2))
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float64, torch.complex128)
+    def test_ReplicationPad_empty(self, device, dtype):
         for mod, inp in [
-                (torch.nn.ReplicationPad1d(3), torch.randn(0, 3, 10, device=device)),
-                (torch.nn.ReplicationPad2d(3), torch.randn(0, 3, 10, 10, device=device)),
-                (torch.nn.ReplicationPad3d(3), torch.randn(0, 3, 10, 10, 10, device=device))]:
+                (torch.nn.ReplicationPad1d(3), torch.randn(0, 3, 10, device=device, dtype=dtype)),
+                (torch.nn.ReplicationPad2d(3), torch.randn(0, 3, 10, 10, device=device, dtype=dtype)),
+                (torch.nn.ReplicationPad3d(3), torch.randn(0, 3, 10, 10, 10, device=device, dtype=dtype))]:
             self._test_module_empty_input(mod, inp, check_size=False)
 
         with self.assertRaisesRegex(NotImplementedError, 'Only 3D'):
             mod = torch.nn.ReplicationPad1d(2)
-            inp = torch.randn(3, 10, device=device)
+            inp = torch.randn(3, 10, device=device, dtype=dtype)
             mod(inp)
 
         with self.assertRaisesRegex(RuntimeError, 'Expected 2D or 3D'):
             mod = torch.nn.ReplicationPad1d(2)
-            inp = torch.randn(3, 0, 10, device=device)
+            inp = torch.randn(3, 0, 10, device=device, dtype=dtype)
             mod(inp)
 
         with self.assertRaisesRegex(RuntimeError, 'Expected 3D or 4D'):
             mod = torch.nn.ReplicationPad2d((2, 2, 2, 2))
-            inp = torch.randn(43, 0, 10, 10, device=device)
+            inp = torch.randn(43, 0, 10, 10, device=device, dtype=dtype)
             mod(inp)
 
         with self.assertRaisesRegex(RuntimeError, 'Expected 4D or 5D'):
             mod = torch.nn.ReplicationPad3d((2, 2, 2, 2, 2, 2))
-            inp = torch.randn(3, 0, 10, 10, 10, device=device)
+            inp = torch.randn(3, 0, 10, 10, 10, device=device, dtype=dtype)
             mod(inp)
 
     @onlyOnCPUAndCUDA
-    def test_ReflectionPad_empty(self, device):
+    @dtypes(torch.float32, torch.complex64)
+    def test_ReflectionPad_empty(self, device, dtype):
         for mod, inp in [
-                (torch.nn.ReflectionPad1d(2), torch.randn(0, 3, 10, device=device)),
-                (torch.nn.ReflectionPad2d(2), torch.randn(0, 3, 10, 10, device=device))]:
+                (torch.nn.ReflectionPad1d(2), torch.randn(0, 3, 10, device=device, dtype=dtype)),
+                (torch.nn.ReflectionPad2d(2), torch.randn(0, 3, 10, 10, device=device, dtype=dtype))]:
             self._test_module_empty_input(mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, '2D or 3D'):
             mod = torch.nn.ReflectionPad1d(2)
-            inp = torch.randn(3, 0, 10, device=device)
+            inp = torch.randn(3, 0, 10, device=device, dtype=dtype)
             mod(inp)
 
         with self.assertRaisesRegex(RuntimeError, '3D or 4D'):
             mod = torch.nn.ReflectionPad2d(2)
-            inp = torch.randn(3, 0, 10, 10, device=device)
+            inp = torch.randn(3, 0, 10, 10, device=device, dtype=dtype)
             mod(inp)
 
     @onlyOnCPUAndCUDA
