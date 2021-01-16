@@ -898,6 +898,7 @@ def embedding_bag(g,
         return sym_help._onnx_unsupported('embedding_bag with scale_grad_by_freq for training mode')
 
     loop_condition = g.op("Constant", value_t=torch.tensor(1))
+    loop_condition = g.op("Cast", loop_condition, to_i=9)
     zero = g.op("Constant", value_t=torch.tensor([0]))
 
     indices_len = g.op("Unsqueeze",
@@ -918,6 +919,7 @@ def embedding_bag(g,
 
     loop_block = _add_block(loop.node())
     block_input_iter = _add_input_to_block(loop_block)
+    cond = _add_input_to_block(loop_block)
 
     indices_start = loop_block.op("Gather", offsets_starts, block_input_iter, axis_i=0)
     indices_end = loop_block.op("Gather", offsets_ends, block_input_iter, axis_i=0)
@@ -940,10 +942,9 @@ def embedding_bag(g,
     else:
         embeddings = loop_block.op("ReduceMax", embeddings, axes_i=[0], keepdims_i=0)
 
-    _add_output_to_block(loop_block, loop_condition)
+    cond_out = loop_block.op("Cast", loop_condition, to_i=9)
+    _add_output_to_block(loop_block, cond_out)
     _add_output_to_block(loop_block, embeddings)
-    # This pass does all required type casting for loop inputs (condition and iter)
-    torch._C._jit_pass_fixup_onnx_loop_node_inputs(loop.node())
 
     # aten::embedding_bag returns a tuple of 4 elements: output, offset2bag, bag_size, max_indices.
     # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.

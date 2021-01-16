@@ -349,7 +349,6 @@ def _check_module_exists(name):
     our tests, e.g., setting multiprocessing start method when imported
     (see librosa/#747, torchvision/#544).
     """
-    import importlib
     import importlib.util
     spec = importlib.util.find_spec(name)
     return spec is not None
@@ -602,14 +601,10 @@ def to_gpu(obj, type_map=None):
         type_map = {}
     if isinstance(obj, torch.Tensor):
         assert obj.is_leaf
-        res = obj.cuda()
-
-        t = type_map.get(obj.type(), None)
-        if t is not None:
-            res = res.type(t)
-
-        res = res.detach()
-        res.requires_grad = obj.requires_grad
+        t = type_map.get(obj.dtype, obj.dtype)
+        with torch.no_grad():
+            res = obj.clone().to(dtype=t, device="cuda")
+            res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):
         return obj.new().resize_(obj.size()).copy_(obj)
@@ -1394,6 +1389,10 @@ class TestCase(expecttest.TestCase):
     def runWithPytorchAPIUsageStderr(code):
         env = os.environ.copy()
         env["PYTORCH_API_USAGE_STDERR"] = "1"
+        # remove IN_CI flag since this is a wrapped test process.
+        # IN_CI flag should be set in the parent process only.
+        if "IN_CI" in env.keys():
+            del env["IN_CI"]
         (stdout, stderr) = TestCase.run_process_no_exception(code, env=env)
         return stderr.decode('ascii')
 

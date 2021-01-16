@@ -30,8 +30,16 @@ endif()
 
 set(CMAKE_INSTALL_MESSAGE NEVER)
 
+# check and set CMAKE_CXX_STANDARD
+string(FIND "${CMAKE_CXX_FLAGS}" "-std=c++" env_cxx_standard)
+if(env_cxx_standard GREATER -1)
+  message(
+      WARNING "C++ standard version definition detected in environment variable."
+      "PyTorch requires -std=c++14. Please remove -std=c++ settings in your environment.")
+endif()
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_C_STANDARD 11)
+
 if(DEFINED GLIBCXX_USE_CXX11_ABI)
   if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
@@ -83,6 +91,9 @@ if(APPLE)
   set(CMAKE_MACOSX_RPATH ON)
 endif()
 
+set(CPU_AARCH64 OFF)
+set(CPU_INTEL OFF)
+
 if(WIN32)
   # On Windows, CMAKE_HOST_SYSTEM_PROCESSOR is calculated through `PROCESSOR_ARCHITECTURE`,
   # which only has the value of `x86` or `AMD64`. We cannot infer whether it's a Intel CPU
@@ -93,10 +104,10 @@ if(WIN32)
     set(CPU_INTEL OFF)
   endif()
 else()
-  if(${CMAKE_HOST_SYSTEM_PROCESSOR} MATCHES "(x86_64|i[3-6]+86)")
+ if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|i[3-6]+86)")
     set(CPU_INTEL ON)
-  else()
-    set(CPU_INTEL OFF)
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
+    set(CPU_AARCH64 ON)
   endif()
 endif()
 
@@ -214,9 +225,11 @@ option(USE_VULKAN_WRAPPER "Vulkan - Dynamically load Vulkan functions" ON)
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
+# Ensure that an MKLDNN build is the default for x86 CPUs
+# but optional for AArch64 (dependent on -DUSE_MKLDNN).
 cmake_dependent_option(
-  USE_MKLDNN "Use MKLDNN. Only available on x86 and x86_64." ON
-  "CPU_INTEL" OFF)
+  USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, and AArch64." ON
+  "CPU_INTEL OR CPU_AARCH64 AND USE_MKLDNN" OFF)
 set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 cmake_dependent_option(
     USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF
