@@ -42,7 +42,8 @@ install_ubuntu() {
     software-properties-common \
     sudo \
     wget \
-    vim
+    vim \
+    libssl-dev
 
   # Cleanup package manager
   apt-get autoclean && apt-get clean
