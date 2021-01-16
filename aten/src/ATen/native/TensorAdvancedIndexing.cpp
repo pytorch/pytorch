@@ -721,60 +721,6 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Ten
   return self.index_fill_(dim, index, source.item());
 }
 
-Tensor& index_fill_(Tensor& self, int64_t dim, const Tensor & index, Scalar value) {
-  at::NoNamesGuard guard;
-  TORCH_CHECK(index.dim() <= 1, "Index is supposed to be a vector");
-  TORCH_CHECK(
-      index.scalar_type() == ScalarType::Long,
-      "index_fill: Expected index of scalar type ",
-      ScalarType::Long,
-      " but got scalar type ",
-      index.scalar_type());
-
-  auto self_dim = self.dim();
-  dim = at::maybe_wrap_dim(dim, self_dim);
-  if (self_dim == 0) {
-    TORCH_CHECK(
-        dim == self_dim, "Indexing dim ", dim, " is out of bounds of tensor");
-  } else {
-    TORCH_CHECK(
-        dim < self_dim, "Indexing dim ", dim, " is out of bounds of tensor");
-  }
-
-  at::assert_no_overlap(self, index);
-  if (at::has_internal_overlap(self) == at::MemOverlap::YES) {
-    TORCH_WARN(
-      "Use of index_fill_ on expanded tensors is deprecated. "
-      "Please clone() the tensor before performing this operation. "
-      "This also applies to advanced indexing e.g. tensor[mask] = scalar");
-  }
-
-  auto index_contiguous = index.contiguous();
-  auto index_data = index_contiguous.data_ptr<int64_t>();
-  auto numel = index.numel();
-
-  if (self_dim > 1) {
-    for (int64_t i = 0; i < numel; i++) {
-      auto slice_view = self.select(dim, index_data[i]);
-      slice_view.fill_(value);
-    }
-  } else {
-    AT_DISPATCH_ALL_TYPES_AND3(
-        kBool, kBFloat16, kHalf, self.scalar_type(), "index_fill", [&] {
-          auto self_ptr = self.data_ptr<scalar_t>();
-          auto self_stride = self.strides()[0];
-          auto self_numel = self.numel();
-          for (int64_t i = 0; i < numel; i++) {
-            TORCH_CHECK(
-                index_data[i] < self_numel, "index_fill: index ", index_data[i], " out of range");
-            *(self_ptr + (self_stride * index_data[i])) = value.to<scalar_t>();
-          }
-        });
-  }
-
-  return self;
-}
-
 Tensor index_fill(const Tensor & self, int64_t dim, const Tensor & index, Scalar source) {
   return self.clone(at::MemoryFormat::Preserve).index_fill_(dim, index, source);
 }
