@@ -84,8 +84,8 @@ public:
     // Implemented inline so that steady-state code needn't incur
     // function-call overhead. We can't just inline `realSingleton`
     // because the function-local static would get duplicated across
-    // DSOs, leading to multiple Dispatcher "singletons" in their
-    // presence.
+    // all DSOs that include & use this header, leading to multiple
+    // singleton instances.
     static Dispatcher& s = realSingleton();
     return s;
   }
