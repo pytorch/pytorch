@@ -1140,6 +1140,7 @@ Tensor& nonzero_out_cpu(Tensor& out, const Tensor& self) {
       " and self on ",
       self.device());
 
+  /* First Pass to determine size of out */
   auto numel_t = self.count_nonzero();
   auto numel_s = numel_t.item();
   auto numel = numel_s.toLong();
