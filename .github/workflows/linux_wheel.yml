@@ -8,7 +8,8 @@ jobs:
     runs-on: linux.2xlarge
     strategy:
       matrix:
-        python_version: ["3.8"]
+        # Perhaps these can be generated with a python script in the future?
+        python_version: ["3.6", "3.7", "3.8", "3.9"]
         gpu_arch: ["cpu"]
     env:
       DESIRED_PYTHON: ${{ matrix.python_version }}
@@ -41,4 +42,4 @@ jobs:
       - uses: actions/upload-artifact@v2
         with:
           name: pytorch-wheel-py${{ matrix.python_version }}-${{ matrix.gpu_arch }}
-          path: /remote/*.whl
+          path: /remote/**/*.whl
