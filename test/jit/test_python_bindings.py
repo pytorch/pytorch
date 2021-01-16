@@ -65,3 +65,13 @@ class TestPythonBindings(JitTestCase):
         list(i)
         o = test_iterator_keepalive_fn.inlined_graph.outputs()
         list(o)
+
+    def test_aliasdb(self):
+        @torch.jit.script
+        def test_aliasdb_fn(x: torch.Tensor):
+            return 2 * x
+
+        gr = test_aliasdb_fn.graph.copy()
+        alias_db = gr.alias_db()
+        self.assertTrue("WILDCARD" in str(alias_db))
+        self.assertTrue("digraph fusion_ir" in alias_db.to_graphviz_str())
