@@ -280,6 +280,9 @@ class TestBinaryUfuncs(TestCase):
             a = torch.randint(low, high, (100,), device=device, dtype=dtype)
             b = torch.randint(1, high, (100,), device=device, dtype=dtype)
 
+            # floor(a / b) * b can be < a, so fixup slightly to avoid underflow
+            a = torch.where(a < 0, a + b, a)
+
         d_true = torch.divide(a, b, rounding_mode='true')
         self.assertTrue(d_true.is_floating_point())
         self.assertEqual(d_true * b, a.to(d_true.dtype))
@@ -288,7 +291,8 @@ class TestBinaryUfuncs(TestCase):
         if dtype != torch.bfloat16:
             self.assertEqual(d_floor * b + torch.remainder(a, b), a)
         else:
-            self.assertEqual(d_floor * b + torch.remainder(a.float(), b.float()).to(torch.bfloat16), a, exact_dtype=False)
+            self.assertEqual(d_floor * b + torch.remainder(a.float(), b.float()), a,
+                             exact_dtype=False)
 
         d_trunc = torch.divide(a, b, rounding_mode='trunc')
         rounding_unsupported = (
