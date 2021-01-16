@@ -38,7 +38,6 @@ std::deque<std::string> findSubModuleAttr(
       return moduleNames;
     }
   }
-
   // Assign the inner module to attrModule.
   for (auto& moduleName : moduleNames) {
     attrModule = attrModule.attr(moduleName).toModule();
@@ -139,7 +138,14 @@ std::vector<IValue> getParamAttributes(
                   << "Unknown type " << type->repr_str()
                   << " encountered in handling model params. This class type does not extend __getstate__ method.";
             }
+          } else if (attr.isNone() || name == "training") {
+            auto attrVal = tryInsertConstant(*graph, attr);
+            paramConst = *attrVal;
           }
+          n->output()->replaceAllUsesWith(paramConst);
+          n->removeAllInputs();
+
+          GRAPH_UPDATE("Folding GetAttr %", n->outputs()[0]->debugName());
         }
       }
     }
