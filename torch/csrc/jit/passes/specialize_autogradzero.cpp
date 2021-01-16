@@ -150,8 +150,11 @@ struct AutogradZeroSpecializer {
     }
   }
 
-  static void getUsesWithAttribute_(Value* inp, Symbol attr, std::vector<Node*>& uses) {
-      for (auto use : inp->uses()) {
+  static void getUsesWithAttribute_(
+      Value* inp,
+      Symbol attr,
+      std::vector<Node*>& uses) {
+    for (auto use : inp->uses()) {
       if (use.user->kind() != prim::profile_ivalue) {
         continue;
       }
@@ -174,7 +177,6 @@ struct AutogradZeroSpecializer {
     return uses;
   }
 
-
   static Node* getUse(Value* inp, Symbol kind) {
     for (auto use : inp->uses()) {
       if (use.user->kind() == kind) {
@@ -188,9 +190,9 @@ struct AutogradZeroSpecializer {
   void removeProfiledOptionalUses(const std::vector<Node*>& uses) {
     TORCH_INTERNAL_ASSERT(!uses.empty());
     auto inp = uses[0]->input();
-    // this removes `prim::profile_ivalue` from the original and to-specialize blocks
-    // N.B. the false block isn't impacted as it has been already encapsulated in
-    // a fallback function
+    // this removes `prim::profile_ivalue` from the original and to-specialize
+    // blocks N.B. the false block isn't impacted as it has been already
+    // encapsulated in a fallback function
     for (auto u : uses) {
       u->output()->replaceAllUsesWith(inp);
     }
@@ -216,11 +218,12 @@ struct AutogradZeroSpecializer {
     std::vector<Value*> nonzero_values;
 
     for (auto inp : graph_->inputs()) {
-      std::vector<Node*> iprofile_counts_nodes = getUsesWithAttribute(inp, countsAttribute);
+      std::vector<Node*> iprofile_counts_nodes =
+          getUsesWithAttribute(inp, countsAttribute);
       if (!iprofile_counts_nodes.empty()) {
-      // the original `prim::profile_value[num_present=0,...]` on `inp` is copied into
-      // `true_block` and `false_block`.
-        auto profile_ivalue_node =  iprofile_counts_nodes[0];
+        // the original `prim::profile_value[num_present=0,...]` on `inp` is
+        // copied into `true_block` and `false_block`.
+        auto profile_ivalue_node = iprofile_counts_nodes[0];
         TORCH_INTERNAL_ASSERT(
             profile_ivalue_node->hasAttribute(countsAttribute));
         const auto& counts_attr =
