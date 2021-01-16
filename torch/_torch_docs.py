@@ -2722,12 +2722,12 @@ Keyword args:
     rounding_mode (str, optional): Type of rounding applied to the result:
 
         * ``"true"`` - default behavior. Performs no rounding and, if both :attr:`input` and
-        :attr:`other` are integer types, promotes the inputs to the default scalar type.
-        Equivalent to true division in Python (the ``/`` operator) and NumPy's ``np.true_divide``.
+          :attr:`other` are integer types, promotes the inputs to the default scalar type.
+          Equivalent to true division in Python (the ``/`` operator) and NumPy's ``np.true_divide``.
         * ``"trunc"`` - rounds the results of the division down.
-        Equivalent to C-style integer division.
+          Equivalent to C-style integer division.
         * ``"floor"`` - rounds the results of the division down.
-        Equivalent to floor division in Python (the ``//`` operator) and NumPy's ``np.floor_divide``.
+          Equivalent to floor division in Python (the ``//`` operator) and NumPy's ``np.floor_divide``.
 
     {out}
 
