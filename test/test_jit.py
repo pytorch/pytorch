@@ -15855,7 +15855,10 @@ def add_nn_module_test(*args, **kwargs):
         dtype = torch.double
         if 'input_fn' in kwargs:
             input = kwargs['input_fn']()
-            if input.is_complex():
+            if isinstance(input, Tensor):
+                input = (input,)
+
+            if all(tensor.is_complex() for tensor in input):
                 dtype = torch.cdouble
         else:
             input = (kwargs['input_size'],)
