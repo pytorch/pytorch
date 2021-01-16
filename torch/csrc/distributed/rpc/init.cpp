@@ -355,7 +355,6 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                       ``rpc.remote()`` for specific timeout semantics for
                       :class:`~torch.distributed.rpc.RRef`.
 
-
                   Example::
                       >>> from torch.distributed import rpc
                       >>> rref = rpc.remote("worker1", torch.add, args=(torch.zeros(2, 2), 1))
