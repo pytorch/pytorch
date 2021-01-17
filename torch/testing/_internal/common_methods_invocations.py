@@ -16,7 +16,7 @@ from torch.testing import \
      all_types_and_complex_and, all_types_and)
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm,
-     expectedAlertNondeterministic, precisionOverride)
+     expectedAlertNondeterministic, precisionOverride, onlyCPU)
 from torch.testing._internal.common_cuda import tf32_is_not_fp32
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
@@ -314,39 +314,39 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad):
                                      requires_grad=False)))
     if dtype.is_complex:
         another_input = SampleInput((make_tensor((S, S), device, dtype,
-                                        low=None, high=None,
-                                        requires_grad=requires_grad),
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
                                      make_tensor((S, S), device, dtype,
-                                        low=None, high=None,
-                                        requires_grad=requires_grad),
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
                                      make_tensor((S, S), device, dtype,
-                                        low=None, high=None,
-                                        requires_grad=False)),
-                                     kwargs=dict(beta=1+2j, alpha=2+3j))
+                                     low=None, high=None,
+                                     requires_grad=False)),
+                                    kwargs=dict(beta=1 + 2j, alpha=2 + 3j))
         return (input, another_input)
     else:
         return (input, )
 
 def sample_inputs_addr(op_info, device, dtype, requires_grad):
     input1 = SampleInput((make_tensor((S, M), device, dtype,
-                                     low=None, high=None,
-                                     requires_grad=requires_grad),
-                         make_tensor((S, ), device, dtype,
-                                     low=None, high=None,
-                                     requires_grad=requires_grad),
-                         make_tensor((M, ), device, dtype,
-                                     low=None, high=None,
-                                     requires_grad=requires_grad)))
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((S, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((M, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad)))
 
     input2 = SampleInput((make_tensor((), device, dtype,
-                                     low=None, high=None,
-                                     requires_grad=requires_grad),
-                         make_tensor((S, ), device, dtype,
-                                     low=None, high=None,
-                                     requires_grad=requires_grad),
-                         make_tensor((M, ), device, dtype,
-                                     low=None, high=None,
-                                     requires_grad=requires_grad)))
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((S, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((M, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad)))
 
     if dtype.is_complex:
         alpha, beta = 0.1 + 0.3j, 0.4 + 0.6j
@@ -356,27 +356,27 @@ def sample_inputs_addr(op_info, device, dtype, requires_grad):
         alpha, beta = 2, 3
 
     input3 = SampleInput((make_tensor((S, M), device, dtype,
-                                     low=None, high=None,
-                                     requires_grad=requires_grad),
-                         make_tensor((S, ), device, dtype,
-                                     low=None, high=None,
-                                     requires_grad=requires_grad),
-                         make_tensor((M, ), device, dtype,
-                                     low=None, high=None,
-                                     requires_grad=requires_grad)),
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((S, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((M, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad)),
                          kwargs=dict(beta=beta, alpha=alpha))
 
     input4 = SampleInput((make_tensor((), device, dtype,
-                                     low=None, high=None,
-                                     requires_grad=requires_grad),
-                         make_tensor((S, ), device, dtype,
-                                     low=None, high=None,
-                                     requires_grad=requires_grad),
-                         make_tensor((M, ), device, dtype,
-                                     low=None, high=None,
-                                     requires_grad=requires_grad)),
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((S, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((M, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad)),
                          kwargs=dict(beta=beta, alpha=alpha))
-
+    return (input1, input3)
     return (input1, input2, input3, input4)
 
 def sample_inputs_xlogy(self, device, dtype, requires_grad):
@@ -859,12 +859,16 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
            skips=(
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=[torch.bfloat16, torch.float16, torch.cfloat, torch.cdouble]),
-               ),
+                        dtypes=[torch.bfloat16, torch.float16, torch.cfloat, torch.cdouble]),),
            sample_inputs_func=sample_inputs_addmm),
     OpInfo('addr',
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           # test_inplace_grad=False,
+           skips=(
+               # SkipInfo('TestCommon', 'test_variant_consistency_eager',
+               #          dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.float16, torch.cfloat, torch.cdouble]),),
            sample_inputs_func=sample_inputs_addr),
 
     UnaryUfuncInfo('asin',
@@ -2525,12 +2529,19 @@ def method_tests():
         ('resize_as_', (), (non_differentiable(torch.tensor(5.)),), 'scalar'),
         ('resize_as_', (), (non_differentiable(torch.randn((1, 1, 1))),), 'scalar_to_dims'),
         ('resize_as_', (S, S, S), (non_differentiable(torch.randn(S * S, S)),)),
+        # TODO(@nikitaved) enable stable sort tests for CUDA once they are implemented
         ('sort', (S, M, S), NO_ARGS),
+        ('sort', (S, M, S), (0, False, True), 'stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (S, M, S), (1,), 'dim'),
+        ('sort', (S, M, S), (1, False, True), 'dim_stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (S, M, S), (1, True), 'dim_desc'),
+        ('sort', (S, M, S), (1, True, True), 'dim_desc_stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (), NO_ARGS, 'scalar'),
+        ('sort', (), (0, False, True), 'scalar_stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (), (0,), 'dim_scalar'),
+        ('sort', (), (0, False, True), 'dim_scalar_stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (), (0, True), 'dim_desc_scalar'),
+        ('sort', (), (0, True, True), 'dim_desc_scalar_stable', (), NO_ARGS, [onlyCPU]),
         ('msort', (S, M, S), NO_ARGS),
         ('topk', (S, M, S), (3,)),
         ('topk', (S, M, S), (3, 1), 'dim', (), [1]),
