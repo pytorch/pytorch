@@ -551,9 +551,9 @@ class TestONNXRuntime(unittest.TestCase):
     @disableScriptTest()
     def test_shufflenet_v2_dynamic_axes(self):
         model = torchvision.models.shufflenet_v2_x0_5(pretrained=True)
-        dummy_input = [torch.randn(1, 3, 224, 224, requires_grad=True)]
+        dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)
         test_inputs = [torch.cat([dummy_input, dummy_input, dummy_input], 0)]
-        self.run_test(model, (dummy_input,), test_with_inputs=[(dummy_input,), (test_inputs,)],
+        self.run_test(model, ([dummy_input],), test_with_inputs=[([dummy_input],), (test_inputs,)],
                       input_names=["input_images"], output_names=["outputs"],
                       dynamic_axes={"input_images": {0: 'batch_size'}, "output": {0: 'batch_size'}},
                       rtol=1e-3, atol=1e-5)
