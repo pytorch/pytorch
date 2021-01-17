@@ -172,7 +172,7 @@ class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
         self.assertEqual(x, torch.tensor([0.9], device=DEVICE))
 
     def test_local_state_dict(self):
-         """ Check that it's possible to pull a local state dict
+        """ Check that it's possible to pull a local state dict
         .. warning: probably deprecated in the near future
         """
         self.dist_init(self.rank)
