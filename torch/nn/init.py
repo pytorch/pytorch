@@ -1,8 +1,8 @@
 import math
 import warnings
 
-import torch
 from torch import Tensor
+import torch
 
 
 # These no_grad_* functions are necessary as wrappers around the parts of these

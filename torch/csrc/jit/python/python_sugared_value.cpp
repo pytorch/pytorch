@@ -631,7 +631,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   // Check if it's a property.
   auto prop =
-      concreteType_->getJitType()->expect<ClassType>()->getProperty(field);
+      concreteType_->getJitType()->expectRef<ClassType>().getProperty(field);
   if (prop) {
     return MethodValue(self_, prop->getter->name())
         .call(loc, m, {}, {}, /*n_binders=*/1);
@@ -647,7 +647,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   throw ErrorReport(loc)
       << "Module '"
-      << concreteType_->getJitType()->expect<ClassType>()->name()->name() << "'"
+      << concreteType_->getJitType()->expectRef<ClassType>().name()->name()
+      << "'"
       << " has no attribute '" << field << "' " << hint;
 }
 

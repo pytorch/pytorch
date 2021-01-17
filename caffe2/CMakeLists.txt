@@ -302,6 +302,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       add_dependencies(process_group_agent torch c10d)
 
       add_library(tensorpipe_agent
+        "${TORCH_SRC_DIR}/csrc/distributed/rpc/macros.h"
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.h"
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.cpp"
