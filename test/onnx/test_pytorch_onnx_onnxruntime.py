@@ -553,6 +553,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = torchvision.models.shufflenet_v2_x0_5(pretrained=True)
         dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)
         test_inputs = torch.randn(3, 3, 224, 224, requires_grad=True)
+
         self.run_test(model, (dummy_input,), test_with_inputs=[(dummy_input,), (test_inputs,)],
                       input_names=["input_images"], output_names=["outputs"],
                       dynamic_axes={"input_images": {0: 'batch_size'}, "output": {0: 'batch_size'}},
