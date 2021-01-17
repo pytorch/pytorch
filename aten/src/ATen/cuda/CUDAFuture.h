@@ -21,7 +21,7 @@
 
 namespace at { namespace cuda {
 
-struct TORCH_CUDA_API CUDAFuture final : at::ivalue::Future {
+struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
  public:
   using at::ivalue::Future::Future;
 
@@ -106,22 +106,7 @@ struct TORCH_CUDA_API CUDAFuture final : at::ivalue::Future {
     }
   }
 
- private:
-  // The device that was current when markCompleted was called, which we'll
-  // restore when invoking callbacks.
-  c10::DeviceIndex currentDevice_;
-
-  // The events that correspond to the completion of the async I/O kernels. They
-  // are recorded on the appropriate streams when the future is marked completed
-  // and can then be queried/waited/blocked on. There is one event for each
-  // distinct device on which the value's tensors reside.
-  std::vector<at::cuda::CUDAEvent> cudaEvents_;
-
-  // A cached version of the data ptrs extracted from the value when the future
-  // is first marked completed.
-  std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs_;
-
-  std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
+  virtual std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
       const at::IValue& value) {
     at::IValue::HashAliasedIValues sub_values;
     // Prefer getSubValues() over visit() as the latter is a silent no-op for
@@ -136,6 +121,21 @@ struct TORCH_CUDA_API CUDAFuture final : at::ivalue::Future {
     }
     return data_ptrs;
   }
+
+ private:
+  // The device that was current when markCompleted was called, which we'll
+  // restore when invoking callbacks.
+  c10::DeviceIndex currentDevice_;
+
+  // The events that correspond to the completion of the async I/O kernels. They
+  // are recorded on the appropriate streams when the future is marked completed
+  // and can then be queried/waited/blocked on. There is one event for each
+  // distinct device on which the value's tensors reside.
+  std::vector<at::cuda::CUDAEvent> cudaEvents_;
+
+  // A cached version of the data ptrs extracted from the value when the future
+  // is first marked completed.
+  std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs_;
 };
 
 } // namespace cuda

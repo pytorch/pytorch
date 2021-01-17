@@ -553,7 +553,7 @@ def _is_split_static(split_size_or_sizes, _outputs):
 
 
 _default_onnx_opset_version = 9
-_onnx_master_opset = 10
+_onnx_main_opset = 13
 _onnx_stable_opsets = [7, 8, 9, 10, 11, 12]
 _export_onnx_opset_version = _default_onnx_opset_version
 
@@ -563,7 +563,7 @@ def _set_opset_version(opset_version):
     if opset_version == _default_onnx_opset_version:
         _export_onnx_opset_version = opset_version
         return
-    if opset_version in _onnx_stable_opsets + [_onnx_master_opset]:
+    if opset_version in _onnx_stable_opsets + [_onnx_main_opset]:
         _export_onnx_opset_version = opset_version
         return
     raise ValueError("Unsupported ONNX opset version: " + str(opset_version))
