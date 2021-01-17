@@ -536,8 +536,8 @@ class TestONNXRuntime(unittest.TestCase):
                       output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
                       dynamic_axes={"images_tensors": [0, 1, 2]},
                       rtol=1e-3, atol=1e-5)
-        dummy_image = [torch.ones(3, 100, 100) * 0.3]
-        self.run_test(model, (images,), test_with_inputs=[(images,), (test_images,), (dummy_image,)],
+        dummy_images = [torch.ones(3, 100, 100) * 0.3]
+        self.run_test(model, (images,), test_with_inputs=[(images,), (test_images,), (dummy_images,)],
                       input_names=["images_tensors"], output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
                       dynamic_axes={"images_tensors": [0, 1, 2]},
                       rtol=5e-3, atol=1e-5)
@@ -552,8 +552,8 @@ class TestONNXRuntime(unittest.TestCase):
     def test_shufflenet_v2_dynamic_axes(self):
         model = torchvision.models.shufflenet_v2_x0_5(pretrained=True)
         dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)
-        test_inputs = [torch.cat([dummy_input, dummy_input, dummy_input], 0)]
-        self.run_test(model, ([dummy_input],), test_with_inputs=[([dummy_input],), (test_inputs,)],
+        test_inputs = torch.randn(3, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (dummy_input,), test_with_inputs=[(dummy_input,), (test_inputs,)],
                       input_names=["input_images"], output_names=["outputs"],
                       dynamic_axes={"input_images": {0: 'batch_size'}, "output": {0: 'batch_size'}},
                       rtol=1e-3, atol=1e-5)
