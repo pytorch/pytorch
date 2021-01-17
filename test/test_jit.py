@@ -270,7 +270,7 @@ def get_grad_executor(plan_state, diff_graph_idx=None, skip_check=False):
             nodes = list(filter(lambda n : n.kind() != "prim::BailOut" and n.kind() != "prim::BailoutTemplate", nodes))
             if len(nodes) == 1 or (len(nodes) == 2 and nodes[1].kind() == "prim::TupleConstruct"):
                 pass
-            elif len(nodes) == 2 and nodes[0].kind() == "prim::TypeCheck" and nodes[1].kind() == "prim::If":
+            elif len(nodes) == 2 and nodes[0].kind() == "prim::RequiresGradCheck" and nodes[1].kind() == "prim::If":
                 pass
             else:
                 raise RuntimeError("Can't get a grad_executor for a non-differentiable graph")

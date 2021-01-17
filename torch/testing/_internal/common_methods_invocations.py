@@ -16,7 +16,7 @@ from torch.testing import \
      all_types_and_complex_and, all_types_and)
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm,
-     expectedAlertNondeterministic, precisionOverride)
+     expectedAlertNondeterministic, precisionOverride, onlyCPU)
 from torch.testing._internal.common_cuda import tf32_is_not_fp32
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
@@ -314,15 +314,15 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad):
                                      requires_grad=False)))
     if dtype.is_complex:
         another_input = SampleInput((make_tensor((S, S), device, dtype,
-                                        low=None, high=None,
-                                        requires_grad=requires_grad),
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
                                      make_tensor((S, S), device, dtype,
-                                        low=None, high=None,
-                                        requires_grad=requires_grad),
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
                                      make_tensor((S, S), device, dtype,
-                                        low=None, high=None,
-                                        requires_grad=False)),
-                                     kwargs=dict(beta=1+2j, alpha=2+3j))
+                                     low=None, high=None,
+                                     requires_grad=False)),
+                                    kwargs=dict(beta=1 + 2j, alpha=2 + 3j))
         return (input, another_input)
     else:
         return (input, )
@@ -808,8 +808,7 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
            skips=(
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=[torch.bfloat16, torch.float16, torch.cfloat, torch.cdouble]),
-               ),
+                        dtypes=[torch.bfloat16, torch.float16, torch.cfloat, torch.cdouble]),),
            sample_inputs_func=sample_inputs_addmm),
     UnaryUfuncInfo('asin',
                    ref=np.arcsin,
@@ -2469,12 +2468,19 @@ def method_tests():
         ('resize_as_', (), (non_differentiable(torch.tensor(5.)),), 'scalar'),
         ('resize_as_', (), (non_differentiable(torch.randn((1, 1, 1))),), 'scalar_to_dims'),
         ('resize_as_', (S, S, S), (non_differentiable(torch.randn(S * S, S)),)),
+        # TODO(@nikitaved) enable stable sort tests for CUDA once they are implemented
         ('sort', (S, M, S), NO_ARGS),
+        ('sort', (S, M, S), (0, False, True), 'stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (S, M, S), (1,), 'dim'),
+        ('sort', (S, M, S), (1, False, True), 'dim_stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (S, M, S), (1, True), 'dim_desc'),
+        ('sort', (S, M, S), (1, True, True), 'dim_desc_stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (), NO_ARGS, 'scalar'),
+        ('sort', (), (0, False, True), 'scalar_stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (), (0,), 'dim_scalar'),
+        ('sort', (), (0, False, True), 'dim_scalar_stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (), (0, True), 'dim_desc_scalar'),
+        ('sort', (), (0, True, True), 'dim_desc_scalar_stable', (), NO_ARGS, [onlyCPU]),
         ('msort', (S, M, S), NO_ARGS),
         ('topk', (S, M, S), (3,)),
         ('topk', (S, M, S), (3, 1), 'dim', (), [1]),
