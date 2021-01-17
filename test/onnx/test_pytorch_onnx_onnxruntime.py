@@ -391,6 +391,18 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={"images_tensors": [0, 1, 2]},
                       rtol=1e-3, atol=1e-5)
 
+    @skipIfUnsupportedOpsetVersion([13])
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @disableScriptTest()
+    def test_shufflenet_v2_dynamic_axes(self):
+        model = torchvision.models.shufflenet_v2_x0_5(pretrained=True)
+        dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)
+        test_inputs = torch.randn(3, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (dummy_input,), test_with_inputs=[(dummy_input,), (test_inputs,)],
+                      input_names=["input_images"], output_names=["outputs"],
+                      dynamic_axes={"input_images": {0: 'batch_size'}, "output": {0: 'batch_size'}},
+                      rtol=1e-3, atol=1e-5)
+
     @disableScriptTest()
     def test_word_language_model_RNN_TANH(self):
         self.run_word_language_model("RNN_TANH")
