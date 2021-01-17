@@ -16,8 +16,8 @@ public:
 
   void set(terminate_handler handler) {
     if (!inited) {
-      prev = set_terminate(handler);
-      curr = get_terminate();
+      prev = std::set_terminate(handler);
+      curr = std::get_terminate();
       inited = true;
     }
   }
@@ -33,8 +33,8 @@ private:
   AbortHandlerHelper() = default;
   ~AbortHandlerHelper() {
     // Only restore the handler if we are the current one
-    if (inited && curr == get_terminate()) {
-      set_terminate(prev);
+    if (inited && curr == std::get_terminate()) {
+      std::set_terminate(prev);
     }
   }
 
