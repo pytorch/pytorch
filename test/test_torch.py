@@ -6038,7 +6038,7 @@ class TestTorchDeviceType(TestCase):
             min_val = torch._aminmax(x, dim=0)[0]
         with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             max_val = torch._aminmax(x, dim=0)[1]
-    
+
         # Tests clamp variants with complex inputs
         # Note: whether PyTorch should support clamp on complex
         # tensors is an open question.
