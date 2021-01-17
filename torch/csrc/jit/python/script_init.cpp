@@ -759,6 +759,13 @@ void initJitScriptBindings(PyObject* module) {
                   if (auto method = self.find_method(name)) {
                     return py::cast(*method);
                   }
+                  if (auto prop = self.type()->getProperty(name)) {
+                    auto getterName = prop->getter->name();
+                    std::cout << "HI: " << getterName << std::endl;
+                    if (auto getterMethod = self.find_method(getterName)) {
+                      return py::cast(prop.value());
+                    }
+                  }
                   return toPyObject(self.attr(name));
                 } catch (const ObjectAttributeError& err) {
                   throw AttributeError("%s", err.what());

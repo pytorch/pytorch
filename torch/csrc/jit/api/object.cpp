@@ -22,6 +22,7 @@ ObjectPtr Object::_ivalue() const {
 
 c10::optional<Method> Object::find_method(const std::string& basename) const {
   for (Function* fn : type()->methods()) {
+    std::cout << fn->name() << std::endl;
     if (fn->name() == basename) {
       return Method(_ivalue(), fn);
     }

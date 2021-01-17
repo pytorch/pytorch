@@ -153,6 +153,16 @@ class class_ {
     return *this;
   }
 
+
+  template <typename GetterFunc, typename SetterFunc>
+  class_& def_property(std::string name, GetterFunc getterFunc, SetterFunc setterFunc, std::string getter_doc_string = "", std::string setter_doc_string = "") {
+    auto wrapped_getter = detail::wrap_func<CurClass, GetterFunc>(std::move(getterFunc));
+    auto wrapped_setter = detail::wrap_func<CurClass, SetterFunc>(std::move(setterFunc));
+    defineProperty(std::move(name), std::move(wrapped_getter), std::move(wrapped_setter), std::move(getter_doc_string), std::move(setter_doc_string));
+    return *this;
+  }
+
+
   /// This is an unsafe method registration API added for adding custom JIT backend support via custom
   /// C++ classes. It is not for general purpose use.
   class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema, std::string doc_string = "") {
@@ -284,6 +294,46 @@ class class_ {
     // that behavior here.
     classTypePtr->addMethod(method.get());
     registerCustomClassMethod(std::move(method));
+  }
+
+  template <typename GetterFunc, typename SetterFunc>
+  void defineProperty(std::string name, GetterFunc getterFunc, SetterFunc setterFunc, std::string getter_doc_string = "", std::string setter_doc_string = "") {
+
+    // TODO do we even need this?
+    auto getterName = qualClassName + "." + name + "_getter";
+    auto setterName = qualClassName + "." + name + "_setter";
+
+    auto qualifiedGetterName = qualClassName + "." + getterName;
+    auto qualifiedSetterName = qualClassName + "." + setterName;
+
+    auto getNameSchema = c10::inferFunctionSchemaSingleReturn<GetterFunc>(std::move(getterName), "");
+    auto setNameSchema = c10::inferFunctionSchemaSingleReturn<SetterFunc>(std::move(setterName), "");
+
+    auto wrapped_getter = [func = std::move(getterFunc)](jit::Stack& stack) mutable -> void {
+      using RetType =
+          typename c10::guts::infer_function_traits_t<GetterFunc>::return_type;
+      detail::BoxedProxy<RetType, GetterFunc>()(stack, func);
+    };
+
+    auto wrapped_setter = [func = std::move(setterFunc)](jit::Stack& stack) mutable -> void {
+      using RetType =
+          typename c10::guts::infer_function_traits_t<SetterFunc>::return_type;
+      detail::BoxedProxy<RetType, SetterFunc>()(stack, func);
+    };
+
+    auto getterMethod = std::make_unique<jit::BuiltinOpFunction>(
+        qualifiedGetterName, std::move(getNameSchema), std::move(wrapped_getter), std::move(getter_doc_string));
+
+    auto setterMethod = std::make_unique<jit::BuiltinOpFunction>(
+        qualifiedSetterName, std::move(setNameSchema), std::move(wrapped_setter), std::move(setter_doc_string));
+
+
+    classTypePtr->addProperty(name, getterMethod.get(), setterMethod.get());
+    classTypePtr->addMethod(getterMethod.get());
+    classTypePtr->addMethod(setterMethod.get());
+
+    registerCustomClassMethod(std::move(getterMethod));
+    registerCustomClassMethod(std::move(setterMethod));
   }
 
   std::string qualClassName;

@@ -33,6 +33,27 @@ struct Foo : torch::CustomClassHolder {
   }
 };
 
+struct FooGetterSetter : torch::CustomClassHolder {
+  int64_t x, y;
+  FooGetterSetter() : x(0), y(0) {}
+  FooGetterSetter(int64_t x_, int64_t y_) : x(x_), y(y_) {}
+
+  int64_t getX() {
+    return x;
+  }
+  void setX(int64_t z) {
+    x = z;
+  }
+
+  int64_t getY() {
+    return y;
+  }
+
+  ~FooGetterSetter() {
+    // std::cout<<"Destroying object with values: "<<x<<' '<<y<<std::endl;
+  }
+};
+
 struct LambdaInit : torch::CustomClassHolder {
   int x, y;
   LambdaInit(int x_, int y_) : x(x_), y(y_) {}
@@ -209,6 +230,10 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("increment", &Foo::increment)
       .def("add", &Foo::add)
       .def("combine", &Foo::combine);
+
+  m.class_<FooGetterSetter>("_FooGetterSetter")
+    .def(torch::init<int64_t, int64_t>())
+    .def_property("x", &FooGetterSetter::getX, &FooGetterSetter::setX);
 
   m.class_<LambdaInit>("_LambdaInit")
       .def(torch::init([](int64_t x, int64_t y, bool swap) {

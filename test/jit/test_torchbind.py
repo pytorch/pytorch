@@ -74,7 +74,7 @@ class TestTorchbind(JitTestCase):
         class CustomWrapper(torch.nn.Module):
             def __init__(self, foo):
                 super(CustomWrapper, self).__init__()
-                self.foo = foo 
+                self.foo = foo
 
             def forward(self) -> None:
                 self.foo.increment(1)
@@ -83,7 +83,7 @@ class TestTorchbind(JitTestCase):
             def __prepare_scriptable__(self):
                 int1, int2 = self.foo.return_vals()
                 foo = torch.classes._TorchScriptTesting._Foo(int1, int2)
-                return CustomWrapper(foo) 
+                return CustomWrapper(foo)
 
         foo = CustomWrapper(NonJitableClass(1, 2))
         jit_foo = torch.jit.script(foo)
@@ -129,6 +129,16 @@ class TestTorchbind(JitTestCase):
         self.assertEqual(out[0].pop(), "hi")
         self.assertEqual(out[1].pop(), "mom")
         self.assertEqual(out[1].pop(), "hi")
+
+    def test_torchbind_def_property(self):
+        def foo():
+            fooGetterSetter = torch.classes._TorchScriptTesting._FooGetterSetter(5, 6)
+            return fooGetterSetter
+        scripted = torch.jit.script(foo)
+        out = scripted()
+        old = out.x
+        out.x = 7
+        self.assertEqual(out.x, 7)
 
     def test_torchbind_take_instance_as_method_arg(self):
         def foo():
