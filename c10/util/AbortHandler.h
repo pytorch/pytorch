@@ -14,7 +14,7 @@ public:
     return instance;
   }
 
-  void set(terminate_handler handler) {
+  void set(std::terminate_handler handler) {
     if (!inited) {
       prev = std::set_terminate(handler);
       curr = std::get_terminate();
@@ -22,13 +22,13 @@ public:
     }
   }
 
-  terminate_handler getPrev() {
+  std::terminate_handler getPrev() {
     return prev;
   }
 
 private:
-  terminate_handler prev = nullptr;
-  terminate_handler curr = nullptr;
+  std::terminate_handler prev = nullptr;
+  std::terminate_handler curr = nullptr;
   bool inited = false;
   AbortHandlerHelper() = default;
   ~AbortHandlerHelper() {
