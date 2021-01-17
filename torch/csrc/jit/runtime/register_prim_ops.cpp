@@ -1,10 +1,10 @@
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <torch/library.h>
 
-#include <c10/util/Optional.h>
 #include <algorithm>
 #include <bitset>
 #include <cctype>
