@@ -327,6 +327,57 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad):
     else:
         return (input, )
 
+def sample_inputs_addr(op_info, device, dtype, requires_grad):
+    input1 = SampleInput((make_tensor((S, M), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                         make_tensor((S, ), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                         make_tensor((M, ), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad)))
+
+    input2 = SampleInput((make_tensor((), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                         make_tensor((S, ), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                         make_tensor((M, ), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad)))
+
+    if dtype.is_complex:
+        alpha, beta = 0.1 + 0.3j, 0.4 + 0.6j
+    elif dtype.is_floating_point:
+        alpha, beta = 0.2, 0.6
+    else:
+        alpha, beta = 2, 3
+
+    input3 = SampleInput((make_tensor((S, M), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                         make_tensor((S, ), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                         make_tensor((M, ), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad)),
+                         kwargs=dict(beta=beta, alpha=alpha))
+
+    input4 = SampleInput((make_tensor((), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                         make_tensor((S, ), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad),
+                         make_tensor((M, ), device, dtype,
+                                     low=None, high=None,
+                                     requires_grad=requires_grad)),
+                         kwargs=dict(beta=beta, alpha=alpha))
+
+    return (input1, input2, input3, input4)
 
 def sample_inputs_xlogy(self, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S), device, dtype,
@@ -811,6 +862,11 @@ op_db: List[OpInfo] = [
                         dtypes=[torch.bfloat16, torch.float16, torch.cfloat, torch.cdouble]),
                ),
            sample_inputs_func=sample_inputs_addmm),
+    OpInfo('addr',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_addr),
+
     UnaryUfuncInfo('asin',
                    ref=np.arcsin,
                    domain=(-1, 1),
