@@ -1,3 +1,4 @@
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
@@ -22,7 +23,6 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include "c10/util/Optional.h"
 
 namespace torch {
 namespace jit {
@@ -113,7 +113,7 @@ RegisterOperators reg(
          // depends on the type hint and input. The implementation of this
          // operator below is intended to be as close to the Python
          // implementation in torch/csrc/utils/tensor_list.cpp as possible.
-         [](const Node * /*node*/) -> Operation {
+         [](const Node* /*node*/) -> Operation {
            return [](Stack* stack) {
              int elem_ty_val;
              int dim_val;
