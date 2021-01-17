@@ -710,7 +710,7 @@ void extra_files_to_python(const ExtraFilesMap& m, const py::dict& pydict) {
   }
 }
 
-void compilationUnit_py_define(
+void pyCompilationUnitDefine(
     CompilationUnit& cu,
     const std::string& src,
     const ResolutionCallback* rcb,
@@ -719,7 +719,7 @@ void compilationUnit_py_define(
     cu.define(c10::nullopt, src, pythonResolver(*rcb), nullptr);
   } else {
     py::object py_default_rcb =
-        py::module_::import("torch._jit_internal")
+        py::module::import("torch._jit_internal")
             .attr("createResolutionCallbackFromFrame")(_frames_up);
     auto default_rcb = py_default_rcb.cast<ResolutionCallback>();
     cu.define(c10::nullopt, src, pythonResolver(default_rcb), nullptr);
@@ -1134,7 +1134,7 @@ void initJitScriptBindings(PyObject* module) {
           py::init([](const std::string& lang, const uint32_t _frames_up) {
             auto cu = std::make_shared<CompilationUnit>();
             if (lang.size() > 0) {
-              compilationUnit_py_define(*cu, lang, nullptr, _frames_up);
+              pyCompilationUnitDefine(*cu, lang, nullptr, _frames_up);
             }
             return cu;
           }),
@@ -1179,7 +1179,7 @@ void initJitScriptBindings(PyObject* module) {
       .def("set_optimized", &CompilationUnit::set_optimized)
       .def(
           "define",
-          compilationUnit_py_define,
+          pyCompilationUnitDefine,
           py::arg("src"),
           py::arg("rcb") = nullptr,
           py::arg("_frames_up") = 0)
@@ -1547,7 +1547,6 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def("_jit_set_emit_hooks", setEmitHooks);
   m.def("_jit_get_emit_hooks", getEmitHooks);
-  m.def("_jit_get_python_cu", []() { return get_python_cu(); });
   m.def("_jit_clear_class_registry", []() {
     get_python_cu()->_clear_python_cu();
   });

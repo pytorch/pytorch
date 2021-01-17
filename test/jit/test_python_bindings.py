@@ -10,13 +10,12 @@ if __name__ == "__main__":
 
 
 class TestPythonBindings(JitTestCase):
-    def test_get_python_cu(self):
-        # tests get_python_cu
+    def test_cu_get_functions(self):
         @torch.jit.script
         def test_get_python_cu_fn(x: torch.Tensor):
             return 2 * x
 
-        cu = torch._C._jit_get_python_cu()
+        cu = torch.jit._state._python_cu
         self.assertTrue(
             "test_get_python_cu_fn" in (str(fn.name) for fn in cu.get_functions())
         )
