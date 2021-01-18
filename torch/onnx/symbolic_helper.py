@@ -496,7 +496,7 @@ def __interpolate_common(g, input, size, scale_factor, mode, align_corners, reco
             rank = _get_tensor_rank(input)
             if rank is None:
                 return _unimplemented("interpolate (with a scalar output_size)",
-                                               "missing input shape (try giving an array of output_size values)")
+                                      "missing input shape (try giving an array of output_size values)")
             size = _unsqueeze_helper(g, size, [0])
             size = [size for i in range(rank - 2)]
             size = g.op("Concat", *size, axis_i=0)
