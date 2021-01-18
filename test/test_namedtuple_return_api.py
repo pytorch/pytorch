@@ -1,9 +1,10 @@
 import os
 import re
 import yaml
-import unittest
 import textwrap
 import torch
+
+from torch.testing._internal.common_utils import TestCase, run_tests
 from collections import namedtuple
 
 
@@ -17,7 +18,7 @@ all_operators_with_namedtuple_return = {
 }
 
 
-class TestNamedTupleAPI(unittest.TestCase):
+class TestNamedTupleAPI(TestCase):
 
     def test_native_functions_yaml(self):
         operators_found = set()
@@ -108,4 +109,4 @@ class TestNamedTupleAPI(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

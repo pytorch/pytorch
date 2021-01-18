@@ -177,7 +177,7 @@ struct GraphFuser {
     if (!v->type()->isSubtypeOf(TensorType::get())) {
       return true;
     }
-    auto device = v->type()->expect<TensorType>()->device();
+    auto device = v->type()->expectRef<TensorType>().device();
     if (!device) {
       return !strict_fuser_check;
     }
