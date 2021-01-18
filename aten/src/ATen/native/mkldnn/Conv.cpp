@@ -159,7 +159,7 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined)
 {
   // for training case, grad_output and input can be cpu tensor or MKLDNN tensor,
-  // but weight and bias always cpu tensor.
+  // but weight and bias are always cpu tensor.
   const ideep::tensor mkldnn_grad_output = itensor_from_tensor(grad_output);
   const ideep::tensor mkldnn_input = itensor_from_tensor(input);
 

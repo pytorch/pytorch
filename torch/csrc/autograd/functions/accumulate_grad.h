@@ -100,12 +100,13 @@ struct TORCH_API AccumulateGrad : public Node {
       if (!GradMode::is_enabled() &&
           !new_grad.is_sparse() &&
           new_grad.use_count() <= num_expected_refs &&
-          ((!new_grad.is_mkldnn() &&utils::obeys_layout_contract(new_grad, variable))
+          ((!new_grad.is_mkldnn() && utils::obeys_layout_contract(new_grad, variable))
            || new_grad.is_mkldnn())){
         // we aren't setting up for double-backward
         // not sparse
         // no other user-visible tensor references new_grad
-        // new_grad obeys the "Gradient Layout Contract"
+        // new_grad obeys the "Gradient Layout Contract", there has a special case,
+        // For MKLDNN tensor, which is a opaque tensor, assuming it obeys layout_contract.
         // Under these conditions, we can steal new_grad without a deep copy.
         update_grad(new_grad.detach());
       } else if (
@@ -132,11 +133,15 @@ struct TORCH_API AccumulateGrad : public Node {
             new_grad.sizes(),
             new_grad.options()));
       } else {
-        if (new_grad.is_sparse() || new_grad.is_mkldnn()) {
+        if (new_grad.is_sparse()) {
           update_grad(new_grad.clone());
         } else {
-          // Deep copies new_grad according to the "Gradient Layout Contract."
-          update_grad(utils::clone_obey_contract(new_grad, variable));
+          if (new_grad.is_mkldnn()) {
+            update_grad(new_grad.clone());
+          } else {
+            // Deep copies new_grad according to the "Gradient Layout Contract."
+            update_grad(utils::clone_obey_contract(new_grad, variable));
+          }
         }
       }
     } else if (!GradMode::is_enabled()) {
