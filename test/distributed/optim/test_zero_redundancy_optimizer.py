@@ -229,17 +229,15 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     def world_size(self):
         return max(2, torch.cuda.device_count())
 
-    @skip_if_no_gpu
     def test_step(self):
         """ Check that the ZeroRedundancyOptimizer wrapper properly exposes the `.step()` interface"""
         self.dist_init(self.rank)
-        device = torch.device(self.rank)
 
-        x = torch.tensor([float(self.rank + 1)], device=device)
+        x = torch.tensor([float(self.rank + 1)])
         m = torch.nn.Linear(1, 1)
         m.weight.data = torch.tensor([[1.0]])
         m.bias.data = torch.tensor([2.0])
-        m.to(self.rank)
+
         o = ZeroRedundancyOptimizer(m.parameters(), optim=SGD, lr=0.1)
         y = m(x)
         y.backward(x)
@@ -247,27 +245,24 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             dist.all_reduce(p.grad.data, op=dist.ReduceOp.SUM)
             p.grad.data /= self.world_size
         o.step()
-        self.assertEqual(m.weight, torch.tensor([[0.75]], device=device))
-        self.assertEqual(m.bias, torch.tensor([1.85], device=device))
+        self.assertEqual(m.weight, torch.tensor([[0.75]]))
+        self.assertEqual(m.bias, torch.tensor([1.85]))
 
-    @skip_if_no_gpu
     def test_step_with_closure(self):
         """ Check that the ZeroRedundancyOptimizer wrapper properly exposes the `.step(closure)` interface"""
         self.dist_init(self.rank)
-        device = torch.device(self.rank)
 
         x_val = self.rank + 1
         weight = 1.0
         bias = 2.0
         error = 1.0
-        target = torch.tensor([x_val * weight + bias + error], device=device)
+        target = torch.tensor([x_val * weight + bias + error])
         loss_fn = torch.nn.L1Loss()
 
-        x = torch.tensor([float(x_val)], device=device)
+        x = torch.tensor([float(x_val)])
         m = torch.nn.Linear(1, 1)
         m.weight.data = torch.tensor([[weight]])
         m.bias.data = torch.tensor([bias])
-        m.to(self.rank)
 
         o = ZeroRedundancyOptimizer(m.parameters(), optim=SGD, lr=0.1)
 
@@ -286,9 +281,9 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
         loss = o.step(closure=closure)
 
-        self.assertEqual(loss, torch.tensor(error, device=device))
-        self.assertEqual(m.weight, torch.tensor([[1.1]], device=device))
-        self.assertEqual(m.bias, torch.tensor([2.1], device=device))
+        self.assertEqual(loss, torch.tensor(error))
+        self.assertEqual(m.weight, torch.tensor([[1.1]]))
+        self.assertEqual(m.bias, torch.tensor([2.1]))
 
     def test_sharding(self):
         """ Check the sharding at construction time"""
