@@ -161,8 +161,7 @@ class ArrayRef final {
     return Length == RHS.Length && std::equal(begin(), end(), RHS.begin());
   }
 
-  /// slice(n, m) - Chop off the first N elements of the array, and keep M
-  /// elements in the array.
+  /// slice(n, m) - Take M elements of the array starting at element N
   C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA ArrayRef<T> slice(size_t N, size_t M) const {
     TORCH_CHECK(
         N + M <= size(),
