@@ -275,6 +275,8 @@ struct DifferentiableGraphBackward : public autograd::Node {
       } else if (v.isTensor()) {
         produceOutput(output_index++, std::move(v).toTensor(), outputs);
       } else {
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(v.isNone());
+        output_index++;
         // Input grad can also be None even if it requires grad
         // Example: `other` in expand_as(self, other)
         outputs.emplace_back();
@@ -298,8 +300,11 @@ struct DifferentiableGraphBackward : public autograd::Node {
       for (const at::Tensor tensor : value.toTensorList()) {
         addOutputForTensor(tensor);
       }
-    } else {
+    } else if (value.isTensor()) {
       addOutputForTensor(value.toTensor());
+    } else {
+      // We could have None passed here via `Optional[Tensor]`
+      add_next_edge(autograd::Edge{});
     }
   }
 

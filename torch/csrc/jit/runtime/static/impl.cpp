@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
+
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/core/CPUAllocator.h>
@@ -306,8 +307,8 @@ void DeduceInternalValues(
     const std::shared_ptr<torch::jit::Graph>& graph,
     const std::unordered_map<Value*, size_t>& value_to_reg,
     std::vector<size_t>& internals) {
-  std::unordered_set<Value*> outputs{graph->outputs().begin(),
-                                     graph->outputs().end()};
+  std::unordered_set<Value*> outputs{
+      graph->outputs().begin(), graph->outputs().end()};
   for (Node* node : graph->nodes()) {
     if (node->kind() != prim::Constant) {
       for (Value* output : node->outputs()) {
