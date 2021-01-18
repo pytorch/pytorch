@@ -223,13 +223,14 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
     Function& m,
     const std::string& field) {
   // List of all the cuda operators which are supported in JIT
-  const std::unordered_set<std::string> cuda_ops = {"current_stream",
-                                                    "default_stream",
-                                                    "_current_device",
-                                                    "_set_device",
-                                                    "device_index",
-                                                    "device_count",
-                                                    "set_stream"};
+  const std::unordered_set<std::string> cuda_ops = {
+      "current_stream",
+      "default_stream",
+      "_current_device",
+      "_set_device",
+      "device_index",
+      "device_count",
+      "set_stream"};
 
   if (cuda_ops.find(field) != cuda_ops.end()) {
     return std::make_shared<BuiltinFunction>(Symbol::cuda(field), c10::nullopt);
@@ -630,7 +631,7 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   // Check if it's a property.
   auto prop =
-      concreteType_->getJitType()->expect<ClassType>()->getProperty(field);
+      concreteType_->getJitType()->expectRef<ClassType>().getProperty(field);
   if (prop) {
     return MethodValue(self_, prop->getter->name())
         .call(loc, m, {}, {}, /*n_binders=*/1);
@@ -646,7 +647,8 @@ std::shared_ptr<SugaredValue> ModuleValue::attr(
 
   throw ErrorReport(loc)
       << "Module '"
-      << concreteType_->getJitType()->expect<ClassType>()->name()->name() << "'"
+      << concreteType_->getJitType()->expectRef<ClassType>().name()->name()
+      << "'"
       << " has no attribute '" << field << "' " << hint;
 }
 
