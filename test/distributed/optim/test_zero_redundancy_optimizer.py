@@ -11,10 +11,12 @@ import numpy as np
 import unittest
 import torch
 import torch.distributed as dist
-from typing import List, Any, Type
+from typing import List, Any, Type, cast
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.optim import SGD
 from torch.testing._internal.common_distributed import skip_if_no_gpu, MultiProcessTestCase
+from torch.testing._internal.common_utils import skipIfRocm
+
 import copy
 from torch.nn.parallel import DistributedDataParallel as DDP
 
@@ -232,7 +234,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     def test_step(self):
         """ Check that the ZeroRedundancyOptimizer wrapper properly exposes the `.step()` interface"""
         self.dist_init(self.rank)
-        device = torch.device(rank)
+        device = torch.device(self.rank)
 
         x = torch.tensor([float(self.rank + 1)], device=device)
         m = torch.nn.Linear(1, 1)
@@ -398,8 +400,10 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
     def test_multiple_groups(self):
         """ Check that the ZeroRedundancyOptimizer handles working with multiple process groups"""
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(backend="gloo", store=store, rank=self.rank, world_size=self.world_size)
+
         # Only work with the even ranks, to check that the global_rank indexing is properly used
-        self.dist_init(self.rank)
         sub_group_ranks = list(filter(lambda x: x % 2 == 0, range(self.world_size)))
         process_group = torch.distributed.new_group(ranks=sub_group_ranks, backend="gloo")
 
@@ -464,6 +468,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             check(optimizer)
 
     @skip_if_no_gpu
+    @skipIfRocm
     def test_parity(self):
         """ When combined with DDP, check that ZeroRedundancyOptimizer(optimizer) and the same monolithic optimizer
         give the exact same results

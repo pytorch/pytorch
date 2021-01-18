@@ -81,12 +81,7 @@ class ZeroRedundancyOptimizer(Optimizer):
     """
 
     def __init__(
-        self,
-        params,
-        optim: Type[Optimizer],
-        group: Optional[Any] = None,
-        bucket_cap_kb: int = 2 ** 24,
-        **default: Any,
+        self, params, optim: Type[Optimizer], group: Optional[Any] = None, bucket_cap_kb: int = 2 ** 24, **default: Any,
     ):
         # Hold all the model params in the root .param_groups
         self.initialized = False
@@ -166,7 +161,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         .. warning: This needs to be called on all replicas"""
 
         # Sync lr and other attributes in case its been updated
-        self._sync_param_groups()
+        self._update_param_groups()
 
         local_cpu_state = _recursive_copy_to_device(
             self.local_state_dict(), non_blocking=True, device=torch.device("cpu")
@@ -277,7 +272,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         .. note: Any extra parameter is passed to the base optimizer as-is"""
 
         # Sync oss param_groups attributes in case they've been updated by a scheduler.
-        self._sync_param_groups()
+        self._update_param_groups()
 
         # Run the optimizer step on this shard only:
         if closure is not None:
@@ -289,7 +284,7 @@ class ZeroRedundancyOptimizer(Optimizer):
         self._broadcast_params()
 
         # Sync hypothethical new results from the wrapped optimizer to the exposed param_groups
-        self._sync_param_groups(local_to_global=True)
+        self._update_param_groups(local_to_global=True)
 
         return loss
 
@@ -410,10 +405,7 @@ class ZeroRedundancyOptimizer(Optimizer):
 
         i_param = 0
 
-        for (
-            device,
-            device_params,
-        ) in self.per_device_params.items():  # all the params on this device (inc all ranks)
+        for (device, device_params,) in self.per_device_params.items():  # all the params on this device (inc all ranks)
             buckets = self.buckets[device]
             # Bucket and issue all the async calls
             for (src_rank, params), bucket in zip(enumerate(device_params), buckets):
@@ -437,7 +429,7 @@ class ZeroRedundancyOptimizer(Optimizer):
             work_handle = self.work_handles.popleft()
             work_handle.wait()
 
-    def _sync_param_groups(self, local_to_global: bool = False) -> None:
+    def _update_param_groups(self, local_to_global: bool = False) -> None:
         """Sync learning rate and other optimizer attributes (needed to support schedulers).
 
         If the global param groups have been altered, and we want to make sure
