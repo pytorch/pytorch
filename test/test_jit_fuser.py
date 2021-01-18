@@ -557,8 +557,7 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_scalar_arg_cuda(self):
-        def fn_test_scalar_arg(x, p):
-            # type: (Tensor, float) -> Tensor
+        def fn_test_scalar_arg(x: torch.Tensor, p: float) -> torch.Tensor:
             return p * (x * x + x)
 
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
@@ -570,8 +569,7 @@ class TestFuser(JitTestCase):
 
         # use another function otherwise we will bailout
         # and won't be able to do fused checks
-        def fn_test_scalar_arg_requires_grad(x, p):
-            # type: (Tensor, float) -> Tensor
+        def fn_test_scalar_arg_requires_grad(x: torch.Tensor, p: float) -> torch.Tensor:
             return p * (x * x + x)
 
         scripted = torch.jit.script(fn_test_scalar_arg_requires_grad)
