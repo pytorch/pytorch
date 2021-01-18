@@ -596,6 +596,19 @@ def l1loss_no_reduce_test():
         pickle=False)
 
 
+def l1loss_no_reduce_complex_test():
+    t = torch.randn(2, 3, 4, dtype=torch.cdouble)
+    return dict(
+        fullname='L1Loss_no_reduce_complex',
+        constructor=wrap_functional(
+            lambda i: F.l1_loss(i, t.type_as(i), reduction='none')),
+        cpp_function_call='F::l1_loss(i, t.to(i.options()), F::L1LossFuncOptions().reduction(torch::kNone))',
+        input_fn=lambda: torch.randn(2, 3, 4, dtype=torch.cdouble),
+        cpp_var_map={'i': '_get_input()', 't': t},
+        reference_fn=lambda i, *_: (i - t.type_as(i)).abs(),
+        pickle=False)
+
+
 def l1loss_no_reduce_scalar_test():
     t = torch.randn(())
     return dict(
@@ -1260,6 +1273,7 @@ new_module_tests = [
     kldivloss_no_reduce_log_target_test(),
     kldivloss_no_reduce_scalar_log_target_test(),
     l1loss_no_reduce_test(),
+    l1loss_no_reduce_complex_test(),
     l1loss_no_reduce_scalar_test(),
     mseloss_no_reduce_test(),
     mseloss_no_reduce_scalar_test(),
@@ -4048,6 +4062,7 @@ criterion_tests = [
         target_fn=lambda: torch.randn((2, 3, 4), requires_grad=True),
         reference_fn=lambda i, t, _: 1. / i.numel() *
         sum((a - b).abs().sum() for a, b in zip(i, t)),
+        check_complex=True,
     ),
     dict(
         module_name='NLLLoss',
@@ -4444,6 +4459,7 @@ criterion_tests = [
         target_fn=lambda: torch.randn((), requires_grad=True),
         reference_fn=lambda i, t, _: 1. / i.numel() * (i - t).abs().sum(),
         desc='scalar',
+        check_complex=True,
     ),
     dict(
         module_name='KLDivLoss',
@@ -4934,7 +4950,7 @@ class ModuleTest(TestBase):
             raise unittest.SkipTest('Excluded from CUDA tests')
 
         cpu_input = self._get_input()
-        type_map = {'torch.DoubleTensor': torch.cuda.FloatTensor}  # type: ignore[attr-defined]
+        type_map = {torch.double: torch.float}
         cpu_input_tuple = cpu_input if isinstance(cpu_input, tuple) else (cpu_input,)
         gpu_input_tuple = to_gpu(cpu_input_tuple, type_map=type_map)
 
@@ -5015,7 +5031,7 @@ class InputVariableMixin(object):
 
         def map_variables(i):
             if isinstance(i, torch.Tensor):
-                if i.is_floating_point():
+                if i.is_floating_point() or i.is_complex():
                     i.requires_grad = True
                 return i
             else:
@@ -5207,6 +5223,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.check_half = kwargs.get('check_half', True)
         self.check_bfloat16 = kwargs.get('check_bfloat16', False)
+        self.check_complex = kwargs.get('check_complex', False)
         self.test_cpu = kwargs.get('test_cpu', True)
         self.with_tf32 = kwargs.get('with_tf32', True)
         self.tf32_precision = kwargs.get('tf32_precision', 0.001)
@@ -5290,8 +5307,8 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         test_case.assertEqualIgnoreType(cpu_output, gpu_output,
                                         atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
 
-        cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
-        gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
+        cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_output, cpu_target, extra_args=extra_args)
+        gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_output, gpu_target, extra_args=extra_args)
         # dtype used to be able to be None, so set precision in this way instead of a precision map
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput,
