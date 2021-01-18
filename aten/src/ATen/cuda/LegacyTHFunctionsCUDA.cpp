@@ -698,9 +698,11 @@ std::tuple<Tensor,Tensor> _th_mode(const Tensor & self, int64_t dim, bool keepdi
     }
     return std::tuple<Tensor, Tensor>(values, indices);
 }
-std::tuple<Tensor &,Tensor &> _th_sort_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool descending) {
+std::tuple<Tensor &,Tensor &> _th_sort_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool descending, bool stable) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
+
+    TORCH_CHECK(!stable, "stable=True is not implemented on CUDA yet.");
 
     switch (dispatch_scalar_type) {
         case ScalarType::Byte: {
@@ -764,8 +766,11 @@ std::tuple<Tensor &,Tensor &> _th_sort_out(Tensor & values, Tensor & indices, co
     }
     return std::tuple<Tensor &, Tensor &>(values, indices);
 }
-std::tuple<Tensor,Tensor> _th_sort(const Tensor & self, int64_t dim, bool descending) {
+std::tuple<Tensor,Tensor> _th_sort(const Tensor & self, int64_t dim, bool descending, bool stable) {
     // DeviceGuard omitted
+
+    TORCH_CHECK(!stable, "stable=True is not implemented on CUDA yet.");
+
     auto dispatch_scalar_type = infer_scalar_type(self);
     auto values_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CUDA, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
     auto values = Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(values_));
