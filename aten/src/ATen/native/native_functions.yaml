@@ -2778,10 +2778,15 @@
     DefaultBackend: mvlgamma_
 
 - func: narrow_copy(Tensor self, int dim, int start, int length) -> Tensor
-  variants: method
+  variants: function, method
   dispatch:
-    CPU, CUDA: narrow_copy_dense
+    CPU: narrow_copy_dense_cpu
     SparseCPU, SparseCUDA: narrow_copy_sparse
+    DefaultBackend: narrow_copy_dense
+
+- func: narrow_copy.out(Tensor self, int dim, int start, int length, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU: narrow_copy_dense_cpu_out
 
 - func: narrow(Tensor(a) self, int dim, int start, int length) -> Tensor(a)
   variants: function, method
@@ -6320,23 +6325,23 @@
 - func: nanquantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
   variants: method, function
 
-- func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+- func: sort.values(Tensor self, int dim=-1, bool descending=False, bool stable=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: sort_out_cpu
     CUDA: legacy::cuda::_th_sort_out
 
-- func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
+- func: sort(Tensor self, int dim=-1, bool descending=False, bool stable=False) -> (Tensor values, Tensor indices)
   variants: method, function
   dispatch:
     CPU: sort_cpu
     CUDA: legacy::cuda::_th_sort
     QuantizedCPU: sort_quantized_cpu
 
-- func: sort.dimname_values(Tensor self, Dimname dim, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+- func: sort.dimname_values(Tensor self, Dimname dim, bool descending=False, bool stable=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
-- func: sort.dimname(Tensor self, Dimname dim, bool descending=False) -> (Tensor values, Tensor indices)
+- func: sort.dimname(Tensor self, Dimname dim, bool descending=False, bool stable=False) -> (Tensor values, Tensor indices)
   variants: method, function
 
 - func: msort.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
