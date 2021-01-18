@@ -15,7 +15,6 @@ from typing import List, Any, Type, cast
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.optim import SGD
 from torch.testing._internal.common_distributed import skip_if_no_gpu, MultiProcessTestCase
-from torch.testing._internal.common_utils import skipIfRocm
 
 import copy
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -396,7 +395,6 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
         # Load the optimizer state dict
         optimizer.load_state_dict(optim_state[0])
-        dist.destroy_process_group()
 
     def test_multiple_groups(self):
         """ Check that the ZeroRedundancyOptimizer handles working with multiple process groups"""
@@ -468,7 +466,6 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             check(optimizer)
 
     @skip_if_no_gpu
-    @skipIfRocm
     def test_parity(self):
         """ When combined with DDP, check that ZeroRedundancyOptimizer(optimizer) and the same monolithic optimizer
         give the exact same results
