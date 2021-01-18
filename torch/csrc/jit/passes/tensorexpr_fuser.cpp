@@ -335,7 +335,8 @@ void RemoveTensorTypeSpecializations(std::shared_ptr<Graph>& graph) {
 
 void insertTypeGuard(
     Node* guarded_node,
-    tensor_type_converter_t type_converter) {
+    tensor_type_converter_t type_converter,
+    Symbol kind) {
   GRAPH_DEBUG("Inserting a typecheck guard for a node", *guarded_node);
   auto subgraph = SubgraphUtils::getSubgraph(guarded_node);
 
@@ -372,7 +373,7 @@ void insertTypeGuard(
   // of the check (bool).
   Node* typecheck_node =
       guarded_node->owningGraph()
-          ->create(prim::TypeCheck, inputs_to_check, inputs_to_check.size() + 1)
+          ->create(kind, inputs_to_check, inputs_to_check.size() + 1)
           ->insertBefore(guarded_node);
   typecheck_node->tys_(attr::types, guard_types);
   Value* typecheck_result = typecheck_node->output(inputs_to_check.size());
@@ -1101,7 +1102,10 @@ class TensorExprFuser {
     for (Node* fusion_group : fusion_groups) {
       removeOutputsUsedOnlyInSize(fusion_group);
       liftTensorConstantsFromFusionGroups(fusion_group);
-      insertTypeGuard(fusion_group, [](const TensorTypePtr& t) { return t; });
+      insertTypeGuard(
+          fusion_group,
+          [](const TensorTypePtr& t) { return t; },
+          prim::TypeCheck);
     }
   }
 

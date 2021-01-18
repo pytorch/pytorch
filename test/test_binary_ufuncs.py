@@ -1067,11 +1067,11 @@ class TestBinaryUfuncs(TestCase):
     @dtypes(*product(torch.testing.get_all_complex_dtypes(), torch.testing.get_all_dtypes()))
     def test_maximum_minimum_complex(self, device, dtypes):
         for torch_op in (torch.maximum, torch.minimum, torch.max, torch.min):
-            with self.assertRaisesRegex(RuntimeError, 'does not support complex inputs'):
+            with self.assertRaisesRegex(RuntimeError, '.+not implemented for.+'):
                 torch_op(torch.ones(1, device=device, dtype=dtypes[0]),
                          torch.ones(1, device=device, dtype=dtypes[1]))
 
-            with self.assertRaisesRegex(RuntimeError, 'does not support complex inputs'):
+            with self.assertRaisesRegex(RuntimeError, '.+not implemented for.+'):
                 torch_op(torch.ones(1, device=device, dtype=dtypes[1]),
                          torch.ones(1, device=device, dtype=dtypes[0]))
 
