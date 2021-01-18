@@ -1,6 +1,7 @@
 #ifdef TORCH_ENABLE_LLVM
 
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
 
@@ -14,7 +15,13 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/Host.h>
 #include <llvm/Support/TargetSelect.h>
+
+#if LLVM_VERSION_MAJOR >= 10
+#include <llvm/Support/CodeGen.h>
+#else
 #include <llvm/Target/TargetMachine.h>
+#endif
+
 #include <llvm/Transforms/IPO/AlwaysInliner.h>
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
 #include <llvm/Transforms/Scalar.h>
@@ -30,9 +37,14 @@
 #include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
-#define DEBUG_PRINT 0
+#include <torch/csrc/jit/jit_log.h>
 
 using namespace torch::jit::tensorexpr;
+
+C10_DEFINE_bool(
+    torch_jit_llvm_use_fast_intrinsics,
+    false,
+    "Use fast (but slightly less accurate) implementations of tanh and sigmoid");
 
 DEFINE_TRIGGER(llvm_codegen_created);
 DEFINE_TRIGGER(llvm_codegen_executed);
@@ -41,18 +53,6 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 namespace {
-
-bool is_unsigned_integral(const ScalarType& type) {
-  switch (type) {
-    case ScalarType::Bool:
-    case ScalarType::Byte:
-      return true;
-    default:
-      return false;
-  }
-
-  return false;
-}
 
 llvm::CmpInst::Predicate llvm_comparison_predicate(
     CompareSelectOperation compare_op,
@@ -63,17 +63,17 @@ llvm::CmpInst::Predicate llvm_comparison_predicate(
     case CompareSelectOperation::kNE:
       return llvm::ICmpInst::ICMP_NE;
     case CompareSelectOperation::kGT:
-      return is_unsigned_integral(type) ? llvm::ICmpInst::ICMP_UGT
-                                        : llvm::ICmpInst::ICMP_SGT;
+      return is_signed(type) ? llvm::ICmpInst::ICMP_SGT
+                             : llvm::ICmpInst::ICMP_UGT;
     case CompareSelectOperation::kGE:
-      return is_unsigned_integral(type) ? llvm::ICmpInst::ICMP_UGE
-                                        : llvm::ICmpInst::ICMP_SGE;
+      return is_signed(type) ? llvm::ICmpInst::ICMP_SGE
+                             : llvm::ICmpInst::ICMP_UGE;
     case CompareSelectOperation::kLT:
-      return is_unsigned_integral(type) ? llvm::ICmpInst::ICMP_ULT
-                                        : llvm::ICmpInst::ICMP_SLT;
+      return is_signed(type) ? llvm::ICmpInst::ICMP_SLT
+                             : llvm::ICmpInst::ICMP_ULT;
     case CompareSelectOperation::kLE:
-      return is_unsigned_integral(type) ? llvm::ICmpInst::ICMP_ULE
-                                        : llvm::ICmpInst::ICMP_SLE;
+      return is_signed(type) ? llvm::ICmpInst::ICMP_SLE
+                             : llvm::ICmpInst::ICMP_ULE;
     default:
       // TODO: change to a proper error report
       throw std::runtime_error("invalid operator type");
@@ -102,7 +102,6 @@ class LLVMCodeGenImpl : public IRVisitor {
  private:
   std::unique_ptr<llvm::LLVMContext> context_;
   llvm::IRBuilder<> irb_;
-  std::unique_ptr<llvm::TargetMachine> TM_;
   std::unique_ptr<llvm::orc::PytorchLLVMJIT> jit_;
   std::unique_ptr<llvm::Module> module_;
   llvm::Function* fn_;
@@ -158,6 +157,7 @@ class LLVMCodeGenImpl : public IRVisitor {
 #undef IMM_VISIT_DECLARE
 
   void visit(const Cast* v) override;
+  void visit(const BitCast* v) override;
   void visit(const Var* v) override;
   void visit(const Ramp* v) override;
   void visit(const Load* v) override;
@@ -173,6 +173,8 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(const Free* v) override;
   void visit(const Let* v) override;
   void visit(const Cond* v) override;
+
+  void emitIsNan(const Intrinsics* v);
 
   llvm::Value* emitUnmaskedLoad(llvm::Value* addr, llvm::Value* idx);
   llvm::Value* emitMaskedLoad(
@@ -191,34 +193,6 @@ class LLVMCodeGenImpl : public IRVisitor {
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
-
-static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder() {
-#if 0
-  // FIXME: Switch to using detectHost() rather than setting up the JTMB manually
-  // once LLVM 10 is available.
-  return assertSuccess(llvm::orc::JITTargetMachineBuilder::detectHost());
-#else
-  llvm::orc::JITTargetMachineBuilder JTMB(
-      (llvm::Triple(llvm::sys::getProcessTriple())));
-
-  // Retrieve host CPU name and sub-target features and add them to builder.
-  // Relocation model, code model and codegen opt level are kept to default
-  // values.
-  llvm::SubtargetFeatures SubtargetFeatures;
-  llvm::StringMap<bool> FeatureMap;
-  llvm::sys::getHostCPUFeatures(FeatureMap);
-  for (auto& Feature : FeatureMap) {
-    SubtargetFeatures.AddFeature(Feature.first(), Feature.second);
-  }
-
-  JTMB.setCodeGenOptLevel(llvm::CodeGenOpt::Default);
-  JTMB.setCPU(llvm::sys::getHostCPUName().str());
-  JTMB.addFeatures(SubtargetFeatures.getFeatures());
-  JTMB.getOptions().AllowFPOpFusion = llvm::FPOpFusion::Fast;
-
-  return JTMB;
-#endif
-}
 
 LLVMCodeGen::~LLVMCodeGen() = default;
 
@@ -272,6 +246,17 @@ void LLVMCodeGen::call(const std::vector<CallArg>& args) {
   USE_TRIGGER(llvm_codegen_executed);
 }
 
+at::Tensor LLVMCodeGen::empty_strided(
+    c10::IntArrayRef size,
+    c10::IntArrayRef stride,
+    c10::optional<c10::ScalarType> dtype_opt,
+    c10::optional<c10::Layout> layout_opt,
+    c10::optional<c10::Device> device_opt,
+    c10::optional<bool> pin_memory_opt) {
+  return at::native::empty_strided_cpu(
+      size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+}
+
 void* LLVMCodeGen::getKernelAddress(LLVMCodeGenImpl* impl) {
   return (void*)impl->getKernelAddress();
 }
@@ -304,13 +289,10 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
 
-  auto JTMB = makeTargetMachineBuilder();
-  TM_ = assertSuccess(JTMB.createTargetMachine());
-
   jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>();
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
-  module_->setDataLayout(assertSuccess(JTMB.getDefaultDataLayoutForTarget()));
-  module_->setTargetTriple(JTMB.getTargetTriple().str());
+  module_->setDataLayout(jit_->getDataLayout());
+  module_->setTargetTriple(jit_->getTargetMachine().getTargetTriple().str());
 
   // We support float16 ops by casting expr inputs to float32
   // and then casting the result back to float16
@@ -495,8 +477,13 @@ void LLVMCodeGenImpl::emitKernel(
   irb_.SetInsertPoint(bb_);
 
   // Maybe expand some of the intrinsics.
-  LLVMIntrinsicsExpander intrinsics_expander;
-  stmt = stmt->accept_mutator(&intrinsics_expander);
+  if (FLAGS_torch_jit_llvm_use_fast_intrinsics) {
+    LLVMIntrinsicsExpander intrinsics_expander;
+    stmt = stmt->accept_mutator(&intrinsics_expander);
+  } else {
+    GenericIntrinsicsExpander intrinsics_expander;
+    stmt = stmt->accept_mutator(&intrinsics_expander);
+  }
 
   // Compile the kernel.
   stmt->accept(this);
@@ -508,27 +495,39 @@ void LLVMCodeGenImpl::emitKernel(
 
   irb_.CreateRet(value_);
 
-#if DEBUG_PRINT
-  llvm::errs() << *module_;
-#endif
   if (llvm::verifyFunction(*fn_, &llvm::outs())) {
     throw std::runtime_error("Function verification failed");
   }
-  optimize(*module_);
 
-#if DEBUG_PRINT
-  llvm::errs() << *module_;
+  // print graph debug info before optimization
   llvm::SmallVector<char, 0> asmBuffer;
   llvm::raw_svector_ostream asmStream(asmBuffer);
-  llvm::legacy::PassManager PM;
-  TM_->addPassesToEmitFile(
-      PM,
-      asmStream,
-      nullptr,
-      llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
-  PM.run(*module_);
-  llvm::errs() << asmStream.str();
+  if (GRAPH_DEBUG_ENABLED) {
+    module_->print(asmStream, nullptr);
+  }
+  GRAPH_DEBUG(
+      "\nLLVM module before optimizations\n\n", asmStream.str().str(), "\n");
+
+  optimize(*module_);
+
+  // print graph debug info after optimization
+  asmBuffer.set_size(0);
+  if (GRAPH_DEBUG_ENABLED) {
+    module_->print(asmStream, nullptr);
+    llvm::legacy::PassManager PM;
+    jit_->getTargetMachine().addPassesToEmitFile(
+        PM,
+        asmStream,
+        nullptr,
+#if LLVM_VERSION_MAJOR >= 10
+        llvm::CodeGenFileType::CGFT_AssemblyFile);
+#else
+        llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
 #endif
+    PM.run(*module_);
+  }
+  GRAPH_DEBUG(
+      "\nLLVM module after optimizations\n\n", asmStream.str().str(), "\n");
 }
 
 // TODO: The binary ops are copypasta.
@@ -702,7 +701,8 @@ void LLVMCodeGenImpl::visit(const Max* v) {
   auto rhs = this->value_;
 
   if (v->dtype().is_integral()) {
-    auto icmp = irb_.CreateICmpSGT(lhs, rhs);
+    auto icmp = v->dtype().is_signed() ? irb_.CreateICmpSGT(lhs, rhs)
+                                       : irb_.CreateICmpUGT(lhs, rhs);
     value_ = irb_.CreateSelect(icmp, lhs, rhs);
     return;
   }
@@ -723,7 +723,8 @@ void LLVMCodeGenImpl::visit(const Min* v) {
   v->rhs()->accept(this);
   auto rhs = this->value_;
   if (v->dtype().is_integral()) {
-    auto icmp = irb_.CreateICmpSLT(lhs, rhs);
+    auto icmp = v->dtype().is_signed() ? irb_.CreateICmpSLT(lhs, rhs)
+                                       : irb_.CreateICmpULT(lhs, rhs);
     value_ = irb_.CreateSelect(icmp, lhs, rhs);
     return;
   }
@@ -815,13 +816,19 @@ void LLVMCodeGenImpl::visit(const BoolImm* v) {
   value_ = llvm::ConstantInt::get(BoolTy_, v->value());
 }
 
+llvm::Type* llvmTypeToVec(llvm::Type* type, int lanes) {
+  if (lanes > 1) {
+    return llvm::VectorType::get(type, ElementCount(lanes));
+  } else {
+    return type;
+  }
+}
+
 void LLVMCodeGenImpl::visit(const Cast* v) {
   v->src_value()->accept(this);
 
-  llvm::Type* dstType = dtypeToLLVM(v->dtype());
-  if (v->dtype().lanes() > 1) {
-    dstType = llvm::VectorType::get(dstType, ElementCount(v->dtype().lanes()));
-  }
+  llvm::Type* dstType =
+      llvmTypeToVec(dtypeToLLVM(v->dtype()), v->dtype().lanes());
   llvm::Type* srcType = dtypeToLLVM(v->src_value()->dtype());
 
   if (srcType == dstType) {
@@ -835,8 +842,27 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
   // Scalar casts
   if (srcType->isFPOrFPVectorTy()) {
     if (dstType->isFPOrFPVectorTy()) {
+      // as with eager, convert from Double -> Half by Converting to Float then
+      // Half. TODO: __truncdfhf2
+      if (v->dtype().scalar_type() == ScalarType::Half &&
+          v->src_value()->dtype().scalar_type() == ScalarType::Double) {
+        value_ = irb_.CreateFPCast(
+            value_, llvmTypeToVec(FloatTy_, v->dtype().lanes()));
+      }
       value_ = irb_.CreateFPCast(value_, dstType);
     } else if (dstType->isIntOrIntVectorTy()) {
+      // Strictly casting from Float -> i8 doesnt give correct results
+      // set one bit true if the input float is not 0
+      if (v->dtype().scalar_type() == ScalarType::Bool) {
+        llvm::Value* zero =
+            toVec(llvm::ConstantFP::get(srcType, 0.), v->dtype().lanes());
+        value_ = irb_.CreateFCmp(llvm::FCmpInst::FCMP_UNO, value_, zero);
+        value_ = irb_.CreateICmpEQ(
+            value_, llvm::ConstantInt::get(value_->getType(), 0));
+        value_ = irb_.CreateIntCast(value_, dstType, !destUnsigned);
+        return;
+      }
+
       if (destUnsigned) {
         value_ = irb_.CreateFPToUI(value_, dstType);
       } else {
@@ -868,6 +894,25 @@ void LLVMCodeGenImpl::visit(const Cast* v) {
   } else {
     throw unimplemented_lowering(v);
   }
+}
+
+void LLVMCodeGenImpl::visit(const BitCast* v) {
+  v->src_value()->accept(this);
+
+  llvm::Type* dstType = dtypeToLLVM(v->dtype());
+  if (v->dtype().lanes() > 1) {
+    dstType = llvm::VectorType::get(dstType, ElementCount(v->dtype().lanes()));
+  }
+  llvm::Type* srcType = dtypeToLLVM(v->src_value()->dtype());
+
+  if (srcType == dstType) {
+    // do nothing.
+    return;
+  }
+
+  TORCH_CHECK(llvm::CastInst::isBitCastable(
+      srcType->getScalarType(), dstType->getScalarType()));
+  value_ = irb_.CreateBitOrPointerCast(value_, dstType);
 }
 
 void LLVMCodeGenImpl::visit(const Var* v) {
@@ -1309,10 +1354,31 @@ llvm::Value* LLVMCodeGenImpl::toVec(llvm::Value* v, int lanes) {
   }
 }
 
+void LLVMCodeGenImpl::emitIsNan(const Intrinsics* v) {
+  v->param(0)->accept(this);
+  llvm::Type* dstType = dtypeToLLVM(v->dtype());
+  if (!v->param(0)->dtype().is_floating_point()) {
+    value_ = toVec(llvm::ConstantInt::get(dstType, 0), v->dtype().lanes());
+  } else {
+    TORCH_INTERNAL_ASSERT(v->dtype().scalar_type() == ScalarType::Int);
+    auto is_nan = irb_.CreateFCmpUNO(
+        value_, llvm::ConstantFP::get(value_->getType(), 0.));
+    if (v->dtype().lanes() > 1) {
+      dstType =
+          llvm::VectorType::get(dstType, ElementCount(v->dtype().lanes()));
+    }
+    value_ = irb_.CreateIntCast(is_nan, dstType, /*isSigned*/ false);
+  }
+}
+
 void LLVMCodeGenImpl::visit(const Intrinsics* v) {
   llvm::FunctionType* call_ty = nullptr;
   llvm::Value* call_fn = nullptr;
   bool call_simd_sleef = false;
+
+  if (v->op_type() == kIsNan) {
+    return emitIsNan(v);
+  }
 
   if (v->dtype().scalar_type() == ScalarType::Float) {
     switch (v->op_type()) {
@@ -1380,7 +1446,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
         SIMD_UNARY_MATH_CASE(kCos, "cosf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kSin, "sinf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kSqrt, "sqrtf", FloatTy_)
-        SIMD_UNARY_MATH_CASE(kFabs, "fabsf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kAbs, "fabsf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kFloor, "floorf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kCeil, "ceilf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kTrunc, "truncf", FloatTy_)
@@ -1528,7 +1594,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
       SIMD_UNARY_MATH_CASE(kCos, "cos", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kSin, "sin", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kSqrt, "sqrt", DoubleTy_)
-      SIMD_UNARY_MATH_CASE(kFabs, "fabs", DoubleTy_)
+      SIMD_UNARY_MATH_CASE(kAbs, "fabs", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kFloor, "floor", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kCeil, "ceil", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kTrunc, "trunc", DoubleTy_)
@@ -1630,10 +1696,10 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
         throw unimplemented_lowering(v);
       } break;
     }
-  } else if (v->dtype().is_integral() && v->op_type() == kFabs) {
+  } else if (v->dtype().is_integral() && v->op_type() == kAbs) {
     // abs is only intrinsic defined for integer inputs in pytorch eager
     v->params().front()->accept(this);
-    if (is_unsigned_integral(v->dtype().scalar_type())) {
+    if (!v->dtype().is_signed()) {
       return;
     }
     // TODO: use llvm.abs intrinsic for LLVM 12
@@ -1776,16 +1842,15 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   llvm::legacy::PassManager PM;
 
   // Add internal analysis passes from the target machine.
-  PM.add(
-      llvm::createTargetTransformInfoWrapperPass(TM_->getTargetIRAnalysis()));
-  FPM.add(
-      llvm::createTargetTransformInfoWrapperPass(TM_->getTargetIRAnalysis()));
+  auto& TM = jit_->getTargetMachine();
+  PM.add(llvm::createTargetTransformInfoWrapperPass(TM.getTargetIRAnalysis()));
+  FPM.add(llvm::createTargetTransformInfoWrapperPass(TM.getTargetIRAnalysis()));
 
   llvm::PassManagerBuilder PMB;
   PMB.OptLevel = 3;
   PMB.LoopVectorize = true;
   PMB.SLPVectorize = true;
-  TM_->adjustPassManager(PMB);
+  TM.adjustPassManager(PMB);
 
   PMB.populateFunctionPassManager(FPM);
   PMB.populateModulePassManager(PM);

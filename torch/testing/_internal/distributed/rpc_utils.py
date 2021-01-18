@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
+import os
 import unittest
 from enum import Flag, auto
 from typing import Dict, List, Type
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase
-from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_TSAN
+from torch.testing._internal.common_utils import (
+    TEST_WITH_ASAN,
+    TEST_WITH_TSAN,
+    find_free_port,
+)
 from torch.testing._internal.distributed.ddp_under_dist_autograd_test import (
     DdpComparisonTest,
     DdpUnderDistAutogradTest,
+)
+from torch.testing._internal.distributed.pipe_with_ddp_test import (
+    PipeWithDDPTest,
 )
 from torch.testing._internal.distributed.nn.api.remote_module_test import (
     RemoteModuleTest,
@@ -37,6 +45,20 @@ from torch.testing._internal.distributed.rpc.rpc_test import (
 )
 from torch.testing._internal.distributed.rpc.examples.parameter_server_test import ParameterServerTest
 
+def _check_and_set_tcp_init():
+    # if we are running with TCP init, set main address and port
+    # before spawning subprocesses, since different processes could find
+    # different ports.
+    use_tcp_init = os.environ.get("RPC_INIT_WITH_TCP", None)
+    if use_tcp_init == "1":
+        os.environ["MASTER_ADDR"] = '127.0.0.1'
+        os.environ["MASTER_PORT"] = str(find_free_port())
+
+def _check_and_unset_tcp_init():
+    use_tcp_init = os.environ.get("RPC_INIT_WITH_TCP", None)
+    if use_tcp_init == "1":
+        del os.environ["MASTER_ADDR"]
+        del os.environ["MASTER_PORT"]
 
 # The tests for the RPC module need to cover multiple possible combinations:
 # - different aspects of the API, each one having its own suite of tests;
@@ -54,8 +76,12 @@ from torch.testing._internal.distributed.rpc.examples.parameter_server_test impo
 class ForkHelper(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
+        _check_and_set_tcp_init()
         self._fork_processes()
 
+    def tearDown(self):
+        _check_and_unset_tcp_init()
+        super().tearDown()
 
 @unittest.skipIf(
     TEST_WITH_ASAN, "Skip ASAN as torch + multiprocessing spawn have known issues"
@@ -63,7 +89,12 @@ class ForkHelper(MultiProcessTestCase):
 class SpawnHelper(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
+        _check_and_set_tcp_init()
         self._spawn_processes()
+
+    def tearDown(self):
+        _check_and_unset_tcp_init()
+        super().tearDown()
 
 
 class MultiProcess(Flag):
@@ -92,6 +123,7 @@ GENERIC_TESTS = [
     RemoteModuleTest,
     DdpUnderDistAutogradTest,
     DdpComparisonTest,
+    PipeWithDDPTest,
 ]
 
 

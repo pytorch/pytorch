@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/normalize_ops.h>
+
 #include <c10/util/Exception.h>
 
 namespace torch {
@@ -103,6 +104,7 @@ const std::unordered_map<Symbol, Symbol>& getOperatorAliasMap() {
       {aten::swapdims_, aten::transpose_},
       {aten::swapaxes, aten::transpose},
       {aten::swapaxes_, aten::transpose_},
+      {aten::moveaxis, aten::movedim},
   };
   return alias_map;
 }

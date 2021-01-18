@@ -176,7 +176,9 @@ void initPythonTracerBindings(PyObject* module) {
           })
       .def(
           "set_graph",
-          [](TracingState& s, std::shared_ptr<Graph> g) { s.graph = g; })
+          [](TracingState& s, std::shared_ptr<Graph> g) {
+            s.graph = std::move(g);
+          })
       .def("graph", [](TracingState& s) { return s.graph; });
 
   m.def("_tracer_warn_use_python", []() { tracer::setWarn(pythonWarn); });
@@ -191,7 +193,7 @@ void initPythonTracerBindings(PyObject* module) {
       py::arg("self") = nullptr);
   m.def("_get_tracing_state", []() { return getTracingState(); });
   m.def("_set_tracing_state", [](std::shared_ptr<TracingState> state) {
-    return setTracingState(state);
+    return setTracingState(std::move(state));
   });
   m.def("_get_value_trace", [](const Variable& var) {
     return getValueTrace(var);
@@ -199,7 +201,7 @@ void initPythonTracerBindings(PyObject* module) {
   m.def("_set_value_trace", [](const Variable& var, Value* value) {
     return setValueTrace(var, value);
   });
-  m.def("_tracer_set_get_unique_name_fn", [](py::function func) {
+  m.def("_tracer_set_get_unique_name_fn", [](const py::function& func) {
     const auto& tracing_state = getTracingState();
     AT_ASSERT(tracing_state);
     tracing_state->lookup_var_name_fn =

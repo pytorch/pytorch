@@ -80,7 +80,7 @@ def createResolutionCallbackFromEnv(lookup_base):
             value, len_parsed = parseNestedExpr(expr, module)
             assert len_parsed == len(expr), "whole expression was not parsed, falling back to c++ parser"
             return value
-        except Exception as e:
+        except Exception:
             """
             The python resolver fails in several cases in known unit tests, and is intended
             to fall back gracefully to the c++ resolver in general.  For example, python 2 style
@@ -238,7 +238,7 @@ def get_annotation_str(annotation):
     elif isinstance(annotation, ast.Attribute):
         return '.'.join([get_annotation_str(annotation.value), annotation.attr])
     elif isinstance(annotation, ast.Subscript):
-        return f"{annotation.value}[{get_annotation_str(annotation.slice.value)}]"  # type: ignore
+        return f"{get_annotation_str(annotation.value)}[{get_annotation_str(annotation.slice.value)}]"  # type: ignore
     elif isinstance(annotation, ast.Tuple):
         return ','.join([get_annotation_str(elt) for elt in annotation.elts])
     elif isinstance(annotation, ast.Constant) or isinstance(annotation, ast.NameConstant):
@@ -254,7 +254,7 @@ def get_type_hint_captures(fn):
     for the literal annotations on 'fn'. These are not considered to be closed-over by fn
     and must be obtained separately (e.g. using this function).
 
-    Arguments:
+    Args:
         fn: A callable.
     Returns:
         A Dict[str, Any] containing a mapping from the literal annotations used on

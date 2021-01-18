@@ -104,7 +104,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             model.eval()
             if hasattr(model, "fuse_model"):
                 model.fuse_model()
-            q_model = quantize(model, test_only_eval_fn, self.img_data_2d)
+            q_model = quantize(model, test_only_eval_fn, [self.img_data_2d])
             compare_and_validate_results(model, q_model)
 
     @override_qengines
@@ -126,7 +126,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             model.eval()
             if hasattr(model, "fuse_model"):
                 model.fuse_model()
-            q_model = quantize(model, test_only_eval_fn, self.calib_data)
+            q_model = quantize(model, test_only_eval_fn, [self.calib_data])
             compare_and_validate_results(model, q_model)
 
     @override_qengines
@@ -197,7 +197,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             model.eval()
             if hasattr(model, "fuse_model"):
                 model.fuse_model()
-            q_model = quantize(model, test_only_eval_fn, self.img_data_2d)
+            q_model = quantize(model, test_only_eval_fn, [self.img_data_2d])
             compare_and_validate_results(
                 model, q_model, module_swap_list, self.img_data_2d[0][0]
             )
@@ -223,7 +223,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             model.eval()
             if hasattr(model, "fuse_model"):
                 model.fuse_model()
-            q_model = quantize(model, test_only_eval_fn, self.calib_data)
+            q_model = quantize(model, test_only_eval_fn, [self.calib_data])
             compare_and_validate_results(model, q_model, module_swap_list, linear_data)
 
     @override_qengines
@@ -233,7 +233,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         qengine = torch.backends.quantized.engine
 
         model = ModelWithSubModules().eval()
-        q_model = quantize(model, test_only_eval_fn, self.img_data_2d)
+        q_model = quantize(model, test_only_eval_fn, [self.img_data_2d])
         module_swap_list = [SubModule]
         ob_dict = compare_model_stub(
             model, q_model, module_swap_list, self.img_data_2d[0][0]
@@ -350,7 +350,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             model.eval()
             if hasattr(model, "fuse_model"):
                 model.fuse_model()
-            q_model = quantize(model, test_only_eval_fn, self.img_data_2d)
+            q_model = quantize(model, test_only_eval_fn, [self.img_data_2d])
             compare_and_validate_results(model, q_model, self.img_data_2d[0][0])
 
     @override_qengines
@@ -376,7 +376,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             model.eval()
             if hasattr(model, "fuse_model"):
                 model.fuse_model()
-            q_model = quantize(model, test_only_eval_fn, self.calib_data)
+            q_model = quantize(model, test_only_eval_fn, [self.calib_data])
             compare_and_validate_results(model, q_model, linear_data)
 
     @override_qengines

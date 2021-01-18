@@ -6,18 +6,19 @@ namespace vulkan {
 namespace ops {
 
 Persistent* persistent() {
-  static const std::unique_ptr<Persistent> persistent([]() -> Persistent* {
-    try {
-      return new Persistent{
-        api::Resource::Pool{
-          api::context()->gpu(),
-        },
-      };
-    }
-    catch (...) {
-      return nullptr;
-    }
-  }());
+  static const std::unique_ptr<Persistent> persistent(
+    []() -> Persistent* {
+      try {
+        return new Persistent{
+          api::Resource::Pool{
+            api::context()->gpu(),
+          },
+        };
+      }
+      catch (...) {
+        return nullptr;
+      }
+    }());
 
   TORCH_CHECK(
       persistent,

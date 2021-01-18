@@ -7,7 +7,9 @@
 
 #include <c10/core/DispatchKey.h>
 #include <c10/core/CompileTimeFunctionPointer.h>
-#include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/dispatch/CppSignature.h>
+#include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #if defined(EXPOSE_C2_OPS) || !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
@@ -43,7 +45,7 @@ std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor() {
  * >         .schema("my_op")
  * >         .kernel<my_kernel_cpu>(DispatchKey::CPU));
  */
-class CAFFE2_API RegisterOperators final {
+class TORCH_API RegisterOperators final {
 public:
   RegisterOperators();
   ~RegisterOperators();
@@ -53,7 +55,7 @@ public:
   RegisterOperators(RegisterOperators&&) noexcept;
   RegisterOperators& operator=(RegisterOperators&&) noexcept;
 
-  class CAFFE2_API Options final {
+  class TORCH_API Options final {
   public:
     Options(const Options&) = delete;
     Options(Options&&) noexcept = delete;

@@ -1,5 +1,5 @@
 import unittest
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, set_cwd
 import tempfile
 import torch
 import re
@@ -149,6 +149,7 @@ class TestTypeHints(TestCase):
             except OSError:
                 raise unittest.SkipTest('cannot symlink') from None
             (stdout, stderr, result) = mypy.api.run([
+                '--cache-dir=.mypy_cache/doc',
                 '--follow-imports', 'silent',
                 '--check-untyped-defs',
                 '--no-strict-optional',  # needed because of torch.lu_unpack, see gh-36584
@@ -169,6 +170,7 @@ class TestTypeHints(TestCase):
         for example in examples:
             example_path = os.path.join(examples_folder, example)
             (stdout, stderr, result) = mypy.api.run([
+                '--cache-dir=.mypy_cache/examples',
                 '--follow-imports', 'silent',
                 '--check-untyped-defs',
                 example_path,
@@ -202,17 +204,15 @@ class TestTypeHints(TestCase):
         if numpy.__version__ == '1.20.0.dev0+7af1024':
             self.skipTest("Typeannotations in numpy-1.20.0-dev are broken")
 
-        cwd = os.getcwd()
         # TODO: Would be better not to chdir here, this affects the entire
         # process!
-        os.chdir(repo_rootdir)
-        try:
+        with set_cwd(repo_rootdir):
             (stdout, stderr, result) = mypy.api.run([
+                '--cache-dir=.mypy_cache/normal',
                 '--check-untyped-defs',
                 '--follow-imports', 'silent',
             ])
-        finally:
-            os.chdir(cwd)
+
         if result != 0:
             self.fail(f"mypy failed: {stdout} {stderr}")
 
@@ -227,14 +227,12 @@ class TestTypeHints(TestCase):
         if not os.path.exists(mypy_inifile):
             self.skipTest("Can't find PyTorch MyPy strict config file")
 
-        cwd = os.getcwd()
-        os.chdir(repo_rootdir)
-        try:
+        with set_cwd(repo_rootdir):
             (stdout, stderr, result) = mypy.api.run([
+                '--cache-dir=.mypy_cache/strict',
                 '--config', mypy_inifile,
             ])
-        finally:
-            os.chdir(cwd)
+
         if result != 0:
             self.fail(f"mypy failed: {stdout} {stderr}")
 

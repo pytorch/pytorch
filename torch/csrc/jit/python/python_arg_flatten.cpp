@@ -67,9 +67,9 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.desc.structure.push_back(D::NoneType);
   } else {
     std::string msg =
-        "Only tuples, lists and Variables supported as JIT inputs/outputs. "
-        "Dictionaries and strings are also accepted but their usage is not "
-        "recommended. But got unsupported type ";
+        "Only tuples, lists and Variables are supported as JIT inputs/outputs. "
+        "Dictionaries and strings are also accepted, but their usage is not "
+        "recommended. Here, received an input of unsupported type: ";
     msg += THPUtils_typename(obj);
     throw std::runtime_error(msg);
   }
@@ -100,7 +100,7 @@ py::object cast_dict(std::vector<py::object> objs) {
   py::dict sequence = {};
   for (size_t i = 0; i < num_objs; ++i) {
     py::tuple obj = py::reinterpret_borrow<py::tuple>(objs[i]);
-    sequence[obj[0]] = std::move(obj[1]);
+    sequence[obj[0]] = obj[1];
   }
   return std::move(sequence);
 }

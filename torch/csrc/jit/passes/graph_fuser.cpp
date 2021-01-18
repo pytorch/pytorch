@@ -177,7 +177,7 @@ struct GraphFuser {
     if (!v->type()->isSubtypeOf(TensorType::get())) {
       return true;
     }
-    auto device = v->type()->expect<TensorType>()->device();
+    auto device = v->type()->expectRef<TensorType>().device();
     if (!device) {
       return !strict_fuser_check;
     }
@@ -1253,7 +1253,7 @@ void FuseGraph(std::shared_ptr<Graph>& graph, bool strict_fuser_check) {
 
 void CustomFuseGraph(
     std::shared_ptr<Graph>& graph,
-    std::function<bool(Node*)> fn,
+    const std::function<bool(Node*)>& fn,
     Symbol kind,
     size_t arg_limit) {
   AliasDb db(graph);

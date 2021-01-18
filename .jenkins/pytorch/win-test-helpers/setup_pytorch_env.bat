@@ -41,38 +41,16 @@ popd
 :: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
 pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow unittest-xml-reporting pytest coverage
 if %errorlevel% neq 0 ( exit /b %errorlevel% )
-:: No need to install faulthandler since we only test Python >= 3.6 on Windows
-:: faulthandler is builtin since Python 3.3
 
 set DISTUTILS_USE_SDK=1
 
-if "%CUDA_VERSION%" == "9" goto cuda_build_9
-if "%CUDA_VERSION%" == "10" goto cuda_build_10
-if "%CUDA_VERSION%" == "11" goto cuda_build_11
-goto cuda_build_end
+if not "%USE_CUDA%"=="1" goto cuda_build_end
 
-:cuda_build_9
+set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v%CUDA_VERSION%
 
-set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v9.2
-set CUDA_PATH_V9_2=%CUDA_PATH%
-
-goto cuda_build_common
-
-:cuda_build_10
-
-set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.1
-set CUDA_PATH_V10_1=%CUDA_PATH%
-
-goto cuda_build_common
-
-:cuda_build_11
-
-set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.0
-set CUDA_PATH_V11_0=%CUDA_PATH%
-
-goto cuda_build_common
-
-:cuda_build_common
+rem version transformer, for example 10.1 to 10_1.
+set VERSION_SUFFIX=%CUDA_VERSION:.=_%
+set CUDA_PATH_V%VERSION_SUFFIX%=%CUDA_PATH%
 
 set CUDNN_LIB_DIR=%CUDA_PATH%\lib\x64
 set CUDA_TOOLKIT_ROOT_DIR=%CUDA_PATH%

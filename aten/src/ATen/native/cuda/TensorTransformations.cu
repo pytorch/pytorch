@@ -87,7 +87,7 @@ Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
 
   // use kernel_pointwise_flip_apply2 only when to-flip dim is the 1st or last dim, where collapseDims can reduce the amount of work
   if (flip_dims_size == 1 && in_tensor.is_contiguous() && (flip_dims[0] == 0 || flip_dims[0] == total_dims - 1)) {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, in_tensor.scalar_type(), "flip_cuda", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, in_tensor.scalar_type(), "flip_cuda", [&] {
       auto in_tensor_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(in_tensor);
       auto out_tensor_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(out_tensor);
       int flip_dim = in_tensor_info.collapseDims(flip_dims[0]);
@@ -95,7 +95,7 @@ Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
       kernel_pointwise_flip_apply2<scalar_t, int64_t>
         <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
           in_tensor_info, out_tensor_info, N, flip_dim, total_dims);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
     return out_tensor;
   }
@@ -123,7 +123,7 @@ Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
     }
   }
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, in_tensor.scalar_type(), "flip_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBool, kBFloat16, in_tensor.scalar_type(), "flip_cuda", [&] {
     flip_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
       in_tensor.data_ptr<scalar_t>(), out_tensor.data_ptr<scalar_t>(), N,
       flip_dims_t.cuda().data_ptr<int64_t>(),
@@ -132,7 +132,7 @@ Tensor flip_cuda(const Tensor& self, IntArrayRef dims) {
       stride_contiguous.cuda().data_ptr<int64_t>(),
       shape_t.cuda().data_ptr<int64_t>(),
       total_dims);
-    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 
   return out_tensor;
@@ -197,7 +197,7 @@ Tensor roll_cuda(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
       size,
       in_tensor.stride(dim),
       total_dims);
-    TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 
   return out_tensor;

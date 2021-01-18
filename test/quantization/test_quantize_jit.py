@@ -74,13 +74,15 @@ from torch.testing._internal.jit_utils import get_forward_graph
 from torch.jit._recursive import wrap_cpp_module
 
 # Standard library
+from typing import List, Tuple
+import io
 import itertools
 import unittest
-import io
 
 class TestQuantizeJitPasses(QuantizationTestCase):
     """ Test graph mode quantization passes used by quantize_jit
     """
+
     def test_foldbn_trivial(self):
         bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
         conv_module = {2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
@@ -741,8 +743,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                    .run(m.graph)
 
     def test_insert_observers_propagate_observed_for_function(self):
-        def channel_shuffle(x, groups):
-            # type: (torch.Tensor, int) -> torch.Tensor
+        def channel_shuffle(x: torch.Tensor, groups: int) -> torch.Tensor:
             batchsize, num_channels, height, width = x.data.size()
             channels_per_group = num_channels // groups
             # reshape
@@ -1125,8 +1126,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 self.conv = torch.nn.Conv2d(3, 3, 1).float()
                 self.use_skip = True
 
-            def forward(self, x, cond):
-                # type: (Tensor, bool) -> Tensor
+            def forward(self, x: torch.Tensor, cond: bool) -> torch.Tensor:
                 # to avoid being frozen
                 self.use_skip = cond
                 if self.use_skip:
@@ -1226,8 +1226,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 super(ComplexModel, self).__init__()
                 self.layers = torch.nn.ModuleList([SimpleLinearLayer() for i in range(2)])
 
-            def forward(self, x):
-                # type: (torch.Tensor) -> List[torch.Tensor]
+            def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
                 states = []
                 for layer in self.layers:
                     val = layer(x)
@@ -1323,8 +1322,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         @torch.jit.interface
         class ModInterface(torch.nn.Module):
-            def forward(self, x, y):
-                # type:  (Tensor, Tensor) -> Tensor
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 pass
 
         class TestModule(torch.nn.Module):
@@ -2427,8 +2425,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
                 self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
 
-            def forward(self, x):
-                # type: (Tensor) -> Tuple[Tensor, Tensor]
+            def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
                 x1 = self.conv1(x)
                 x2 = self.conv2(x)
                 return x1, x2
@@ -2708,6 +2705,28 @@ class TestQuantizeJitOps(QuantizationTestCase):
             FileCheck().check("quantized::conv2d") \
                        .run(converted_model.graph)
 
+    @skipIfNoFBGEMM
+    def test_cat_linear(self):
+        class LinearModel(torch.nn.Module):
+            def __init__(self):
+                super(LinearModel, self).__init__()
+                self.weight = torch.randn(5, 5)
+
+            def forward(self, x, y):
+                a = torch.cat([x, y])
+                b = F.linear(a, self.weight)
+                c = F.linear(b, self.weight)
+                return b, c
+
+        model = LinearModel().eval()
+        qconfig = {'' : default_qconfig}
+        float_model = torch.jit.script(model)
+        prepared_model = prepare_jit(float_model, qconfig)
+        prepared_model(torch.rand(5, 5), torch.rand(5, 5))
+        converted_model = convert_jit(prepared_model)
+        FileCheck().check("quantized::linear") \
+                   .check("quantized::linear") \
+                   .run(converted_model.graph)
 
 class TestQuantizeDynamicJitPasses(QuantizationTestCase):
     def test_prepare_dynamic(self):
@@ -2896,8 +2915,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
                 super(Res, self).__init__()
                 self.weight = torch.nn.Parameter(torch.ones(5, 5))
 
-            def forward(self, x, cond):
-                # type: (Tensor, bool) -> Tensor
+            def forward(self, x: torch.Tensor, cond: bool) -> torch.Tensor:
                 if cond:
                     return torch.nn.functional.linear(x, self.weight)
                 else:
@@ -3095,7 +3113,7 @@ class TestQuantizeJit(QuantizationTestCase):
         # compare the result of the two quantized models later
         linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
         linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
-        model_eager = quantize(annotated_linear_model, test_only_eval_fn, self.calib_data)
+        model_eager = quantize(annotated_linear_model, test_only_eval_fn, [self.calib_data])
 
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
@@ -3135,7 +3153,7 @@ class TestQuantizeJit(QuantizationTestCase):
             linear_model.fc1.weight = torch.nn.Parameter(annotated_linear_model.fc1.module.weight.detach())
             linear_model.fc1.bias = torch.nn.Parameter(annotated_linear_model.fc1.module.bias.detach())
             model_eager = quantize(annotated_linear_model, test_only_eval_fn,
-                                   self.calib_data)
+                                   [self.calib_data])
 
             qconfig_dict = {'': qconfig}
             model_traced = torch.jit.trace(linear_model, self.calib_data[0][0])
@@ -3161,7 +3179,7 @@ class TestQuantizeJit(QuantizationTestCase):
         # copy the weight from eager mode so that we can
         # compare the result of the two quantized models later
         conv_model.conv.weight = torch.nn.Parameter(annotated_conv_model.conv.weight.detach())
-        model_eager = quantize(annotated_conv_model, test_only_eval_fn, self.img_data_2d)
+        model_eager = quantize(annotated_conv_model, test_only_eval_fn, [self.img_data_2d])
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         model_traced = torch.jit.trace(conv_model, self.img_data_2d[0][0])
         model_script = torch.jit.script(conv_model)
@@ -3189,7 +3207,7 @@ class TestQuantizeJit(QuantizationTestCase):
         # copy the weight from eager mode so that we can
         # compare the result of the two quantized models later
         conv_model.conv.weight = torch.nn.Parameter(annotated_conv_model.conv.weight.detach())
-        model_eager = quantize(annotated_conv_model, test_only_eval_fn, self.img_data_2d)
+        model_eager = quantize(annotated_conv_model, test_only_eval_fn, [self.img_data_2d])
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         model_traced = torch.jit.trace(conv_model, self.img_data_2d[0][0])
         model_script = torch.jit.script(conv_model)
@@ -3217,7 +3235,7 @@ class TestQuantizeJit(QuantizationTestCase):
         conv_model_to_script.conv.weight = torch.nn.Parameter(conv_model.conv.weight.detach())
         fuse_modules(conv_model, ['conv', 'bn'], inplace=True)
         model_eager = quantize(conv_model, test_only_eval_fn,
-                               self.img_data_2d)
+                               [self.img_data_2d])
         qconfig_dict = {
             '': default_qconfig
         }
@@ -3248,7 +3266,7 @@ class TestQuantizeJit(QuantizationTestCase):
         script_model.fc3.weight = torch.nn.Parameter(eager_model.fc3.module.weight.detach())
         script_model.fc3.bias = torch.nn.Parameter(eager_model.fc3.module.bias.detach())
 
-        model_eager = quantize(eager_model, test_only_eval_fn, self.calib_data)
+        model_eager = quantize(eager_model, test_only_eval_fn, [self.calib_data])
         qconfig_dict = {
             'sub2.fc1': default_per_channel_qconfig if qengine_is_fbgemm() else default_qconfig,
             'fc3': default_qconfig
@@ -3284,7 +3302,7 @@ class TestQuantizeJit(QuantizationTestCase):
 
         eager_model.fuse_modules()
 
-        model_eager = quantize(eager_model, test_only_eval_fn, self.calib_data)
+        model_eager = quantize(eager_model, test_only_eval_fn, [self.calib_data])
         qconfig_dict = {
             '': get_default_qconfig(torch.backends.quantized.engine),
             'fc': None

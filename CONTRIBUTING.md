@@ -2,10 +2,12 @@
 
 - [Contributing to PyTorch](#contributing-to-pytorch)
 - [Developing PyTorch](#developing-pytorch)
-  - [Nightly Checkout & Pull](#nightly-checkout--pull)
+  - [Tips and Debugging](#tips-and-debugging)
+- [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
 - [Unit testing](#unit-testing)
   - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
+  - [Running `mypy`](#running-mypy)
 - [Writing documentation](#writing-documentation)
   - [Building documentation](#building-documentation)
     - [Tips](#tips)
@@ -290,6 +292,17 @@ pytest test/test_nn.py -k Loss -v
 
 The above is an example of testing a change to Loss functions: this command runs tests such as
 `TestNN.test_BCELoss` and `TestNN.test_MSELoss` and can be useful to save keystrokes.
+
+### Running `mypy`
+
+One of the test suites runs `mypy` on the codebase:
+```bash
+python test/test_type_hints.py
+```
+See [Guide for adding type annotations to
+PyTorch](https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch)
+for more information on how to set up `mypy` and tackle type annotation
+tasks, as well as other ways to run `mypy` besides running that test suite.
 
 ## Writing documentation
 
@@ -674,7 +687,7 @@ ccache -M 25Gi
 ```
 
 To check this is working, do two clean builds of pytorch in a row. The second
-build should be substantially and noticeably faster than the first build.
+build should be substantially and noticeably faster than the first build. If this doesn't seem to be the case, check that each of the symlinks above actually link to your installation of `ccache`. For example, if you followed the first option and installed `ccache` from source on a Linux machine, running `readlink -e $(which g++)` should return `~/ccache/bin/ccache`.
 
 
 #### Use a faster linker
@@ -754,7 +767,7 @@ than Linux, which are worth keeping in mind when fixing these problems.
 1. Symbols are NOT exported by default on Windows; instead, you have to explicitly
    mark a symbol as exported/imported in a header file with `__declspec(dllexport)` /
    `__declspec(dllimport)`. We have codified this pattern into a set of macros
-   which follow the convention `*_API`, e.g., `CAFFE2_API` inside Caffe2 and ATen.
+   which follow the convention `*_API`, e.g., `TORCH_API` inside Caffe2, Aten and Torch.
    (Every separate shared library needs a unique macro name, because symbol visibility
    is on a per shared library basis. See c10/macros/Macros.h for more details.)
 
@@ -891,7 +904,7 @@ which is in PyTorch's `requirements.txt`.
 ## Pre-commit tidy/linting hook
 
 We use clang-tidy and flake8 (installed with flake8-bugbear,
-flake8-comprehensions, flake8-mypy, and flake8-pyi) to perform additional
+flake8-comprehensions, flake8-pyi, and others) to perform additional
 formatting and semantic checking of code. We provide a pre-commit git hook for
 performing these checks, before a commit is created:
 
@@ -902,6 +915,16 @@ performing these checks, before a commit is created:
 You'll need to install an appropriately configured flake8; see
 [Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
 for documentation on how to do this.
+
+If you haven't set up the pre-commit hook and have already committed files and
+CI reports `flake8` errors, you can run the check locally in your PR branch with:
+
+  ```bash
+  flake8 $(git diff --name-only $(git merge-base --fork-point master))
+  ```
+
+fix the code so that no errors are reported when you re-run the above check again,
+and then commit the fix.
 
 ## Building PyTorch with ASAN
 

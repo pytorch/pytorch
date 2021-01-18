@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/serialization/python_print.h>
+
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
@@ -309,12 +310,12 @@ struct PythonPrintImpl {
     // because it doesn't hash any information about the tensors.
     // We will probably need to optimize this at some point using hashing.
     if (val.isTensor()) {
-      auto t = val.toTensor();
+      auto& t = val.toTensor();
       for (size_t i = 0; i < constant_table_.size(); ++i) {
         if (!constant_table_[i].isTensor()) {
           continue;
         }
-        auto t2 = constant_table_[i].toTensor();
+        auto& t2 = constant_table_[i].toTensor();
         if (t.options().type_equal(t2.options()) && t.equal(t2)) {
           return i;
         }
@@ -879,10 +880,10 @@ struct PythonPrintImpl {
         return true;
       }
 
-      if (v.isTuple() && v.type()->expect<TupleType>()->schema()) {
+      if (v.isTuple() && v.type()->expectRef<TupleType>().schema()) {
         // print the namedtuple constructor and let rest of tuple printing
         // continue
-        ss << v.type()->expect<TupleType>()->annotation_str(type_printer_);
+        ss << v.type()->expectRef<TupleType>().annotation_str(type_printer_);
       }
       return false;
     };
@@ -980,7 +981,7 @@ struct PythonPrintImpl {
       } break;
       case prim::TupleConstruct: {
         if (auto qualname =
-                node->output()->type()->expect<TupleType>()->name()) {
+                node->output()->type()->expectRef<TupleType>().name()) {
           stmt << node->output()->type()->annotation_str(type_printer_);
         }
         printValueList(
@@ -1339,15 +1340,13 @@ struct PythonPrintImpl {
           body_ << "\"" << param << "\", ";
         }
         body_ << "]\n";
-#ifndef FBCODE_CAFFE2
-        // Note: Forward compat gated. TODO: @voznesenskym to remove when ready.
+
         indent();
         body_ << "__buffers__ = [";
         for (const auto& buffer : buffers) {
           body_ << "\"" << buffer << "\", ";
         }
         body_ << "]\n";
-#endif
       }
 
       for (size_t i = 0; i < numAttrs; i++) {
@@ -1466,7 +1465,7 @@ struct PythonPrintImpl {
     }
   }
 
-  ~PythonPrintImpl() {}
+  ~PythonPrintImpl() = default;
 
   TaggedStringStream body_;
   // When printing this node, is it safe to write it inline (i.e. without

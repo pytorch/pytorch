@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/mobile/function.h>
+
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/runtime/instruction.h>
@@ -116,6 +117,10 @@ c10::IValue Function::operator()(Stack& stack) {
   InterpreterState interp_state(code_);
   interp_state.run(stack);
   return stack.front();
+}
+
+const std::shared_ptr<Code> Function::get_code() const {
+  return code_;
 }
 
 } // namespace mobile

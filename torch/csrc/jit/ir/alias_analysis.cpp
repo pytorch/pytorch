@@ -63,7 +63,7 @@ class MutableTypePtrHelper {
       }
       case TypeKind::TupleType: {
         std::vector<TypePtr> mutable_types;
-        for (const auto& elem : type->expect<TupleType>()->elements()) {
+        for (const auto& elem : type->expectRef<TupleType>().elements()) {
           if (auto mut_elem = getMutableType(elem)) {
             mutable_types.push_back(*mut_elem);
           }
@@ -486,6 +486,7 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeGradOf(node);
     // TODO: think more about TensorExpr alias correctness
     case prim::TensorExprGroup:
+    case prim::StaticSubgraph:
     case prim::Constant:
     case prim::AutogradZero:
     case prim::AutogradAdd:
@@ -510,7 +511,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::GetAttr:
       if (isFrozen_ && node->kind() == prim::GetAttr) {
         auto& ty = node->input()->type();
-        if (ty->expect<ClassType>()->is_module()) {
+        if (ty->expectRef<ClassType>().is_module()) {
           return analyzeCreator(node);
         }
       }
@@ -524,10 +525,12 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::SetAttr:
       return analyzeSetAttr(node);
     case prim::profile_optional:
+    case prim::profile_ivalue:
     case prim::profile:
       makePointerTo(node->output(), node->inputs().at(0));
       return;
-    case prim::TypeCheck: {
+    case prim::TypeCheck:
+    case prim::RequiresGradCheck: {
       auto num_inputs = node->inputs().size();
       for (size_t i = 0; i < num_inputs; i++) {
         makePointerTo(node->outputs().at(i), node->inputs().at(i));
@@ -570,7 +573,8 @@ void AliasDb::analyzeImpl(Node* node) {
           !aliasAnalysisHasSpecialCaseFor(node->kind()),
       "Special cases should be handled already if we're here.");
 
-  if (node->kind().is_aten() || node->kind().is_prim()) {
+  if (node->kind().is_aten() || node->kind().is_prim() ||
+      node->kind().is_cuda()) {
     // TODO There is nothing in the system that relies on aten:: and prim::
     // ops using AliasAnalysisKind::FROM_SCHEMA or
     // AliasAnalysisKind::INTERNAL_SPECIAL_CASE, but this is the intended
@@ -992,7 +996,7 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
   // the contained types of immutable type containers (optional, tuple, future)
   // are unified, so these types can be mutable or immutable
   // and point to a type which is mutable or immutable.
-  // Any is mutable but can point to a immutable type through refinement
+  // Any is mutable but can point to an immutable type through refinement
   if (isMutableTypeInternal(from) != isMutableTypeInternal(to)) {
     bool expected_kind = false;
     for (auto kind : {from->type()->kind(), to->type()->kind()}) {

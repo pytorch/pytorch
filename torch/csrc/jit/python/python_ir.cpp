@@ -16,6 +16,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <iostream>
 #include <sstream>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -216,12 +217,12 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "dump_alias_db",
           [](std::shared_ptr<Graph> g) {
-            AliasDb db(g);
+            AliasDb db(std::move(g));
             db.dump();
           })
       .def(
           "_export_onnx",
-          [](const std::shared_ptr<Graph> g,
+          [](const std::shared_ptr<Graph>& g,
              const std::map<std::string, at::Tensor>& initializers,
              int64_t onnx_opset_version,
              const std::unordered_map<
@@ -282,7 +283,7 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("onnx_file_path") = std::string())
       .def(
           "_pretty_print_onnx",
-          [](const std::shared_ptr<Graph> g,
+          [](const std::shared_ptr<Graph>& g,
              const std::map<std::string, at::Tensor>& initializers,
              int64_t onnx_opset_version,
              bool defer_weight_export,
@@ -389,7 +390,7 @@ void initPythonIRBindings(PyObject* module_) {
       .GS(prependNode)
       .def(
           "insertConstant",
-          [](Graph& g, IValue ival) { return g.insertConstant(ival); })
+          [](Graph& g, const IValue& ival) { return g.insertConstant(ival); })
       .GS(lint)
       .GS(insertNode);
 #undef GS
@@ -433,7 +434,7 @@ void initPythonIRBindings(PyObject* module_) {
       .VS(requires_grad)
       .def(
           "requiresGrad",
-          [](Value& n) { n.type()->expect<TensorType>()->requiresGrad(); })
+          [](Value& n) { n.type()->expectRef<TensorType>().requiresGrad(); })
       .def("toIValue", [](Value& n) { return toIValue(&n); })
       .def("type", [](Value& v) { return v.type(); });
 #undef VS
@@ -503,6 +504,17 @@ void initPythonIRBindings(PyObject* module_) {
             return py::make_iterator(n.inputs().begin(), n.inputs().end());
           })
       .def(
+          "schema",
+          [](Node& n) {
+            std::stringstream ss;
+            if (auto sch = n.maybeSchema()) {
+              ss << n.schema();
+            } else {
+              ss << "(no schema)";
+            }
+            return ss.str();
+          })
+      .def(
           "outputs",
           [](Node& n) {
             return py::make_iterator(n.outputs().begin(), n.outputs().end());
@@ -567,14 +579,12 @@ void initPythonIRBindings(PyObject* module_) {
       .AS(removeAttribute)
       .AS(attributeNames)
 #undef AS
-#define CREATE_ACCESSOR(Kind, method)                          \
-  def(#method "_",                                             \
-      [](Node& n, const char* name, Kind##Attr::ValueType v) { \
-        return n.method##_(Symbol::attr(name), std::move(v));  \
-      })                                                       \
-      .def(#method, [](Node& n, const char* name) {            \
-        return n.method(Symbol::attr(name));                   \
-      })
+#define CREATE_ACCESSOR(Kind, method)                                       \
+  def(#method "_", [](Node& n, const char* name, Kind##Attr::ValueType v) { \
+    return n.method##_(Symbol::attr(name), std::move(v));                   \
+  }).def(#method, [](Node& n, const char* name) {                           \
+    return n.method(Symbol::attr(name));                                    \
+  })
       .CREATE_ACCESSOR(Float, f)
       .CREATE_ACCESSOR(Floats, fs)
       .CREATE_ACCESSOR(String, s)
@@ -587,7 +597,7 @@ void initPythonIRBindings(PyObject* module_) {
       // Tensor (t_) -- manually written to unwrap the variable into a tensor.
       .def(
           "t_",
-          [](Node& n, const char* name, torch::autograd::Variable v) {
+          [](Node& n, const char* name, const torch::autograd::Variable& v) {
             AT_ASSERT(!v.requires_grad());
             return n.t_(Symbol::attr(name), v);
           })
@@ -599,7 +609,7 @@ void initPythonIRBindings(PyObject* module_) {
           "ts_",
           [](Node& n,
              const char* name,
-             std::vector<torch::autograd::Variable> vs) {
+             const std::vector<torch::autograd::Variable>& vs) {
             std::vector<at::Tensor> tensors;
             tensors.reserve(vs.size());
             for (auto& variable : vs) {
@@ -621,10 +631,11 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def(
           "z_",
-          [](Node& n, const char* name, at::Tensor v) {
+          [](Node& n, const char* name, const at::Tensor& v) {
             return n.t_(
                 Symbol::attr(name),
-                autograd::Variable(v.view({})).set_requires_grad(false));
+                autograd::Variable(v.view(std::vector<int64_t>{}))
+                    .set_requires_grad(false));
           })
       .def(
           "z",
@@ -633,7 +644,8 @@ void initPythonIRBindings(PyObject* module_) {
           "zs_",
           [](Node& n, const char* name, TensorsAttr::ValueType v) {
             for (auto& i : v) {
-              i = autograd::Variable(i.view({})).set_requires_grad(false);
+              i = autograd::Variable(i.view(std::vector<int64_t>{}))
+                      .set_requires_grad(false);
             }
             return n.ts_(Symbol::attr(name), std::move(v));
           })
@@ -674,7 +686,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "dim",
           [](Type& t) {
-            auto vshape = t.shared_from_this()->expect<TensorType>()->sizes();
+            auto vshape = t.shared_from_this()->expectRef<TensorType>().sizes();
             return vshape.size() ? py::cast(*vshape.size())
                                  : py::cast<py::none>(Py_None);
           })
@@ -682,7 +694,7 @@ void initPythonIRBindings(PyObject* module_) {
           "undefined",
           [](Type& t) {
             auto undef =
-                t.shared_from_this()->expect<TensorType>()->undefined();
+                t.shared_from_this()->expectRef<TensorType>().undefined();
             return undef.has_value() ? py::cast(*undef)
                                      : py::cast<py::none>(Py_None);
           })
@@ -692,6 +704,16 @@ void initPythonIRBindings(PyObject* module_) {
             if (auto ptt = t.expect<TensorType>()) {
               if (auto cs = ptt->sizes().concrete_sizes()) {
                 return py::cast(*cs);
+              }
+            }
+            return py::none();
+          })
+      .def(
+          "varyingSizes",
+          [](Type& t) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              if (auto s = ptt->sizes().sizes()) {
+                return py::cast(s.value());
               }
             }
             return py::none();
@@ -710,13 +732,13 @@ void initPythonIRBindings(PyObject* module_) {
           "contiguous",
           [](Type& t) {
             return std::static_pointer_cast<Type>(
-                t.expect<TensorType>()->contiguous());
+                t.expectRef<TensorType>().contiguous());
           })
       .def(
           "scalarType",
           [](Type& t) {
             auto scalar_type =
-                t.shared_from_this()->expect<TensorType>()->scalarType();
+                t.shared_from_this()->expectRef<TensorType>().scalarType();
             return (scalar_type) ? toString(*scalar_type) : nullptr;
           })
       .def(
@@ -729,7 +751,7 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def(
           "isSubtypeOf",
-          [](std::shared_ptr<Type>& self, std::shared_ptr<Type> other) {
+          [](std::shared_ptr<Type>& self, std::shared_ptr<Type>& other) {
             if (!other) {
               return false;
             }
@@ -767,8 +789,9 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &NoneType::get);
 
   py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
-      .def(
-          py::init([](std::vector<TypePtr> a) { return TupleType::create(a); }))
+      .def(py::init([](std::vector<TypePtr> a) {
+        return TupleType::create(std::move(a));
+      }))
       .def("elements", [](TupleType& self) {
         std::vector<TypePtr> types;
         for (const auto& type : self.elements()) {
@@ -785,21 +808,22 @@ void initPythonIRBindings(PyObject* module_) {
       .def("getElementType", &ListType::getElementType);
   py::class_<DictType, Type, std::shared_ptr<DictType>>(m, "DictType")
       .def(py::init([](TypePtr key, TypePtr value) {
-        return DictType::create(key, value);
+        return DictType::create(std::move(key), std::move(value));
       }))
       .def("getKeyType", &DictType::getKeyType)
       .def("getValueType", &DictType::getValueType);
   py::class_<OptionalType, Type, std::shared_ptr<OptionalType>>(
       m, "OptionalType")
-      .def(py::init([](TypePtr a) { return OptionalType::create(a); }))
+      .def(py::init(
+          [](TypePtr a) { return OptionalType::create(std::move(a)); }))
       .def_static("ofTensor", &OptionalType::ofTensor)
       .def("getElementType", &OptionalType::getElementType);
   py::class_<RRefType, Type, std::shared_ptr<RRefType>>(m, "RRefType")
-      .def(py::init([](TypePtr a) { return RRefType::create(a); }))
+      .def(py::init([](TypePtr a) { return RRefType::create(std::move(a)); }))
       .def("getElementType", &RRefType::getElementType);
 
   py::class_<FutureType, Type, std::shared_ptr<FutureType>>(m, "FutureType")
-      .def(py::init([](TypePtr a) { return FutureType::create(a); }))
+      .def(py::init([](TypePtr a) { return FutureType::create(std::move(a)); }))
       .def("getElementType", &FutureType::getElementType);
 
   py::class_<ClassType, Type, std::shared_ptr<ClassType>>(m, "ClassType")

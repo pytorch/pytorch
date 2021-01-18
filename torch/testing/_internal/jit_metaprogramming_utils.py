@@ -16,6 +16,8 @@ import math  # noqa: F401
 
 # Testing utils
 from torch._six import inf
+
+# TODO: include files like this should not set the default dtype
 torch.set_default_dtype(torch.double)
 
 L = 20
@@ -138,6 +140,7 @@ nn_functional_tests = [
     ('multilabel_soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('cosine_embedding_loss', (S, S), ((S, S), non_differentiable(torch.rand(S,))),),
     ('pixel_shuffle', (1, 9, 4, 4), (3,),),
+    ('pixel_unshuffle', (1, 1, 12, 12), (3,),),
     ('affine_grid', (S, 2, 3), (torch.Size([S, 1, 7, 7]),),),
     ('pad', (3, 3, 4, 2), ([1, 1],),),
     ('pairwise_distance', (S, S), ((S, S),),),
@@ -227,8 +230,15 @@ def the_method({}):
     return {}
 '''
 
+def value_to_literal(value):
+    if isinstance(value, str):
+        # Quotes string and escapes special characters
+        return ascii(value)
+    else:
+        return str(value)
+
 def get_call(method_name, func_type, args, kwargs):
-    kwargs_str = ', '.join([k + '=' + str(v) for k, v in kwargs.items()])
+    kwargs_str = ', '.join([k + '=' + value_to_literal(v) for k, v in kwargs.items()])
     self_arg = args[0]
     if(func_type == 'method'):
         args = args[1:]
@@ -237,7 +247,7 @@ def get_call(method_name, func_type, args, kwargs):
     argument_str += ', ' if len(args) and len(kwargs) else ''
     argument_str += kwargs_str
 
-    if func_type == 'functional':
+    if func_type == 'functional' or func_type == 'function':
         call = 'torch.{}({})'.format(method_name, argument_str)
     elif func_type == 'method':
         call = '{}.{}({})'.format(self_arg, method_name, argument_str)
@@ -458,6 +468,13 @@ def create_script_module(self, nn_module, constructor_args, *args, **kwargs):
         create_script_module.last_graph = module.graph  # type: ignore[attr-defined]
         return module
     return script_module
+
+def check_alias_annotation(method_name, args, kwargs, *, aten_name, func_type='method'):
+    formals, tensors, actuals = get_script_args(args)
+    call = get_call(method_name, func_type, actuals, kwargs)
+    script = script_template.format(', '.join(formals), call)
+    CU = torch.jit.CompilationUnit(script)
+    torch._C._jit_check_alias_annotation(CU.the_method.graph, tuple(tensors), aten_name)
 
 def get_nn_module_name_from_kwargs(**kwargs):
     if 'module_name' in kwargs:
