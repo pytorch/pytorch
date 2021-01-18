@@ -1,4 +1,4 @@
-from functools import wraps
+from functools import partial, wraps
 
 import torch
 
