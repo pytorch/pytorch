@@ -3216,8 +3216,8 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x, y):
                 return torch.logical_and(x, y)
 
-        x = torch.torch.BoolTensor(5, 5)
-        y = torch.torch.BoolTensor(5, 5)
+        x = torch.randint(0, 2, (5, 5), dtype=bool)
+        y = torch.randint(0, 2, (5, 5), dtype=bool)
         self.run_test(AndModel(), input=(x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -3226,8 +3226,8 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x, y):
                 return torch.logical_or(x, y)
 
-        x = torch.torch.BoolTensor(5, 5)
-        y = torch.torch.BoolTensor(5, 5)
+        x = torch.randint(0, 2, (5, 5), dtype=bool)
+        y = torch.randint(0, 2, (5, 5), dtype=bool)
         self.run_test(OrModel(), input=(x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -3236,8 +3236,8 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x, y):
                 return torch.logical_xor(x, y)
 
-        x = torch.torch.BoolTensor(5, 5)
-        y = torch.torch.BoolTensor(5, 5)
+        x = torch.randint(0, 2, (5, 5), dtype=bool)
+        y = torch.randint(0, 2, (5, 5), dtype=bool)
         self.run_test(XorModel(), input=(x, y))
 
     def test_gt(self):
