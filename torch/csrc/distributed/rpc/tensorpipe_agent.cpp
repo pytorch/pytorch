@@ -85,6 +85,9 @@ constexpr int64_t kBasicChannelPriority = 0;
 
 #if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
 constexpr int64_t kCudaIpcChannelPriority = 300;
+#endif
+
+#ifdef USE_CUDA_NOT_ROCM
 constexpr int64_t kCudaXthChannelPriority = 400;
 #endif
 
