@@ -2,6 +2,7 @@ from functools import reduce, wraps
 from itertools import product
 from operator import mul, itemgetter
 import collections
+import operator
 
 import torch
 import numpy as np
@@ -132,6 +133,7 @@ class OpInfo(object):
         self.method_variant = getattr(torch.Tensor, name, None)
         inplace_name = name + "_"
         self.inplace_variant = getattr(torch.Tensor, inplace_name, None)
+        self.operator_variant = getattr(operator, name, None)
         self.skip_bfloat16_grad = skip_bfloat16_grad
 
         self.test_inplace_grad = test_inplace_grad
@@ -152,8 +154,6 @@ class OpInfo(object):
             self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes
         self.supports_sparse = supports_sparse
 
-
-
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
         return self.op(*args, **kwargs)
@@ -173,6 +173,12 @@ class OpInfo(object):
         Returns None if the operator has no inplace variant.
         """
         return self.inplace_variant
+
+    def get_operator_variant(self):
+        """Returns operator variant of the operator, e.g. operator.neg
+        Returns None if the operator has no operator variant.
+        """
+        return self.operator_variant
 
     def sample_inputs(self, device, dtype, requires_grad=False):
         """Returns an iterable of SampleInputs.
