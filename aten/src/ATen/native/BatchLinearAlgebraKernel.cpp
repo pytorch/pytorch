@@ -30,7 +30,7 @@ void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vec
 
   Tensor rwork;
   value_t* rwork_data = nullptr;
-  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
+  if (self.is_complex()) {
     ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
     rwork = at::empty({n*2}, self.options().dtype(real_dtype));
     rwork_data = rwork.data_ptr<value_t>();
@@ -71,7 +71,7 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
   // eigenvals will be a (n, 2) matrix containing the real and imaginary parts
   // in each column
   Tensor vals_;
-  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
+  if (self.is_complex()) {
       vals_ = at::empty({n}, options);
   } else {
       vals_ = at::empty_strided({n, 2}, {1, n}, options);
