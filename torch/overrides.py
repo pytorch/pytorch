@@ -895,7 +895,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor._grad.__get__: lambda self: -1,
         Tensor._grad_fn.__get__: lambda self: -1,
         Tensor.grad_fn.__get__: lambda self: -1,
-        Tensor._version.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor._version.__get__: lambda self: -1,
         Tensor.data.__get__: lambda self: -1,
         Tensor.device.__get__: lambda self: -1,
         Tensor.dtype.__get__: lambda self: -1,  # type: ignore[attr-defined]
