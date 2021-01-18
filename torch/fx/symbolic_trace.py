@@ -303,12 +303,14 @@ class Tracer(TracerBase):
 
         orig_call = torch.nn.Module.__call__
         orig_getattr = torch.nn.Module.__getattr__
+        orig_tensor_getitem = torch.Tensor.__getitem__
         orig_fns : List[PatchedFn] = []
 
         try:
             # Seems to be a mypy limitation: https://github.com/python/mypy/issues/2427
             torch.nn.Module.__getattr__ = module_getattr_wrapper  # type: ignore
             torch.nn.Module.__call__ = module_call_wrapper
+            torch.Tensor.__getitem__ = _create_wrapped_method(torch.Tensor, "__getitem__")
 
             _patch_wrapped_functions(orig_fns)
 
@@ -318,11 +320,29 @@ class Tracer(TracerBase):
             _unpatch_wrapped_functions(orig_fns)
             torch.nn.Module.__call__ = orig_call
             torch.nn.Module.__getattr__ = orig_getattr  # type: ignore
+            torch.Tensor.__getitem__ = orig_tensor_getitem
         return self.graph
 
 # List of pairs of (global dict, function name) functions
 # to patch for the purposes of the wrap() API.
 _wrapped_fns_to_patch : List[Tuple[dict, str]] = []
+
+
+def _find_proxy(*objects_to_search):
+    """
+    Recursively search a data structure for a Proxy() and return it,
+    return None if not found.
+    """
+    proxy = None
+
+    def find_proxy(x):
+        nonlocal proxy
+        if isinstance(x, Proxy):
+            proxy = x
+
+    map_aggregate(objects_to_search, find_proxy)
+    return proxy
+
 
 def _create_wrapped_func(orig_fn):
     def wrapped(*args, **kwargs):
@@ -332,22 +352,33 @@ def _create_wrapped_func(orig_fn):
         call to this leaf function directly. Otherwise, just return the results of
         this function call, as this function is not being traced.
         """
-        proxy = None
-
-        def find_proxy(x):
-            nonlocal proxy
-            if isinstance(x, Proxy):
-                proxy = x
-
-        map_aggregate(args, find_proxy)
-        map_aggregate(kwargs, find_proxy)
-
+        proxy = _find_proxy(args, kwargs)
         if proxy is not None:
             return proxy.tracer.create_proxy('call_function', orig_fn, args, kwargs)
         else:
             return orig_fn(*args, **kwargs)
 
     return wrapped
+
+
+def _create_wrapped_method(cls, name):
+    orig_fn = getattr(cls, name)
+
+    def wrapped(*args, **kwargs):
+        """
+        Search the args and kwargs for a Proxy object. If there is one,
+        emit a ``call_method`` node to preserve the call to this leaf
+        function directly. Otherwise, just return the results of this
+        function call, as this function is not being traced.
+        """
+        proxy = _find_proxy(args, kwargs)
+        if proxy is not None:
+            return proxy.tracer.create_proxy('call_method', name, args, kwargs)
+        else:
+            return orig_fn(*args, **kwargs)
+
+    return wrapped
+
 
 class PatchedFn(NamedTuple):
     frame_dict : Dict[str, Any]

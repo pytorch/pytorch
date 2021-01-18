@@ -1277,5 +1277,28 @@ class TestFX(JitTestCase):
         scripted = torch.jit.script(traced)
         self.assertIn("-> List[str]", scripted.code)
 
+    def test_getitem(self):
+        class GetItemBase(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer('pe', torch.randn(8, 8))
+
+        class GetItem1(GetItemBase):
+            def forward(self, x):
+                return self.pe[:, :x.size(0)]
+
+        class GetItem2(GetItemBase):
+            def forward(self, x):
+                return self.pe[x.size(0)]
+
+        class GetItem3(GetItemBase):
+            def forward(self, x):
+                return self.pe[4]  # fx creates `self._tensor_constant0` here
+
+        self.checkGraphModule(GetItem1(), [torch.zeros(4)])
+        self.checkGraphModule(GetItem2(), [torch.zeros(4)])
+        self.checkGraphModule(GetItem3(), [torch.zeros(4)])
+
+
 if __name__ == '__main__':
     run_tests()
