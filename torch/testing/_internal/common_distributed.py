@@ -2,7 +2,6 @@
 from multiprocessing import Manager
 from contextlib import contextmanager
 from io import StringIO
-import itertools
 import os
 import sys
 import tempfile
