@@ -141,7 +141,7 @@ def check(input: TensorOrTensors) -> None:
     """
     if isinstance(input, Sequence):
         for x in input:
-            if not isinstance(x, Tensor):
+            if x is not None and not isinstance(x, Tensor):
                 raise TypeError(f"expected Tensor, but got {input.__class__.__name__}")
         return
 
@@ -159,8 +159,11 @@ def scatter(input: TensorOrTensors, chunks: int) -> List[Batch]:
         rotated: List[Tensors] = []
 
         for tensor in input:
-            tensors = tensor.chunk(chunks)
-            rotated.append(cast(Tensors, tensors))
+            if tensor is None:
+                rotated.append([None] * chunks)
+            else:
+                tensors = tensor.chunk(chunks)
+                rotated.append(cast(Tensors, tensors))
 
         inputs = zip(*rotated)
 
@@ -179,7 +182,10 @@ def gather(outputs: List[Batch]) -> TensorOrTensors:
         output_buf = []
 
         for tensors in zip(*rotated):
-            output_buf.append(torch.cat(tensors))
+            if all(t is None for t in tensors):
+                output_buf.append(None)  # XXX: unclean - need to assert if only some of them aren't None
+            else:
+                output_buf.append(torch.cat(tensors))
 
         output = tuple(output_buf)
 

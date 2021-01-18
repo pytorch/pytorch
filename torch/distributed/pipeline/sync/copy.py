@@ -91,7 +91,7 @@ class Wait(torch.autograd.Function):
 
         wait_stream(next_stream, prev_stream)
 
-        return tuple(x.detach() for x in input)
+        return tuple(x.detach() if x is not None else x for x in input)
 
     @staticmethod
     def backward(ctx: Context, *grad_input: Tensor,) -> Tuple[Optional[Tensor], ...]:
