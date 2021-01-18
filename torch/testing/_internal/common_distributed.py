@@ -37,23 +37,6 @@ TEST_SKIPS = {
 }
 
 
-# FIXME: this should be removed when TensorPipe can detect availability of peer access
-def skip_if_no_peer_access(func):
-    """TensorPipe same-machine GPU-to-GPU comm requires peer access"""
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        if not torch.cuda.is_available():
-            sys.exit(TEST_SKIPS["no_cuda"].exit_code)
-        n = torch.cuda.device_count()
-        for i, j in itertools.product(range(n), range(n)):
-            if i != j and not torch.cuda.can_device_access_peer(i, j):
-                sys.exit(TEST_SKIPS["no_peer_access"].exit_code)
-
-        return func(*args, **kwargs)
-
-    return wrapper
-
-
 def skip_if_no_gpu(func):
     """ Nccl multigpu tests require at least 2 GPUS. Skip if this is not met"""
     @wraps(func)

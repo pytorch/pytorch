@@ -4797,7 +4797,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             device_map={0 : 1, 1 : 0}
         )
 
-    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_mixed_self_1(self):
         self._test_device_maps_gpu(
@@ -4808,7 +4807,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             dst=worker_name(self.rank)
         )
 
-    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_mixed_self_2(self):
         self._test_device_maps_gpu(
@@ -4819,7 +4817,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             dst=worker_name(self.rank)
         )
 
-    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_mixed_self_3(self):
         self._test_device_maps_gpu(
@@ -4840,7 +4837,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             dst=worker_name(self.rank)
         )
 
-    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_mixed_self_5(self):
         self._test_device_maps_gpu(
@@ -4851,7 +4847,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             dst=worker_name(self.rank)
         )
 
-    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_mixed_self_6(self):
         self._test_device_maps_gpu(
@@ -4862,7 +4857,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             dst=worker_name(self.rank)
         )
 
-    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_mixed_self_7(self):
         self._test_device_maps_gpu(
@@ -4873,7 +4867,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             dst=worker_name(self.rank)
         )
 
-    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_mixed_self_8(self):
         self._test_device_maps_gpu(
