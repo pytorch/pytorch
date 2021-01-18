@@ -88,7 +88,7 @@ std::unordered_set<int> ParseNetPositionList(const std::string& str) {
   return net_position_list;
 }
 
-std::unordered_set<std::string> ParseBlackListOps(const std::string& str) {
+std::unordered_set<std::string> ParseBlockListOps(const std::string& str) {
   std::unordered_set<std::string> ops;
   if (str.empty()) {
     return ops;
@@ -162,7 +162,7 @@ void onnxifi(
 
   // ONNX mode will change the op order so it doesn't apply here
   if (!opts.use_onnx) {
-    auto blocklisted_ops = ParseBlackListOps(FLAGS_onnxifi_blacklist_ops);
+    auto blocklisted_ops = ParseBlockListOps(FLAGS_onnxifi_blacklist_ops);
     for (const auto& op : net->op()) {
       if (blocklisted_ops.count(op.type())) {
         ArgumentHelper helper(op);
