@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/serialization/python_print.h>
+
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
@@ -879,10 +880,10 @@ struct PythonPrintImpl {
         return true;
       }
 
-      if (v.isTuple() && v.type()->expect<TupleType>()->schema()) {
+      if (v.isTuple() && v.type()->expectRef<TupleType>().schema()) {
         // print the namedtuple constructor and let rest of tuple printing
         // continue
-        ss << v.type()->expect<TupleType>()->annotation_str(type_printer_);
+        ss << v.type()->expectRef<TupleType>().annotation_str(type_printer_);
       }
       return false;
     };
@@ -980,7 +981,7 @@ struct PythonPrintImpl {
       } break;
       case prim::TupleConstruct: {
         if (auto qualname =
-                node->output()->type()->expect<TupleType>()->name()) {
+                node->output()->type()->expectRef<TupleType>().name()) {
           stmt << node->output()->type()->annotation_str(type_printer_);
         }
         printValueList(
