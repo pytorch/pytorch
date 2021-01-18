@@ -1,12 +1,11 @@
+from torch import Tensor, _VF  # noqa: F401
+from torch.nn.utils.rnn import PackedSequence
 import torch
 
-from typing import Tuple, Optional, List
-
-from torch import Tensor, _VF  # noqa: F401
-
-from torch.nn.utils.rnn import PackedSequence
-
 import warnings
+
+from typing import List, Optional, Tuple
+
 
 class QuantizedLinear(torch.jit.ScriptModule):
     __constants__ = ['scale', 'zero_point']
