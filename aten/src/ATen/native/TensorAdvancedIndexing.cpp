@@ -1151,18 +1151,6 @@ Tensor& nonzero_out_cpu(Tensor& out, const Tensor& self) {
     return out;
   }
 
-  // +1 faster than additional condition check inside loop
-  int64_t* sizes = new int64_t[dimensions + 1];
-  int64_t* idx = new int64_t[dimensions + 1];
-  int64_t* ii;
-  int64_t* ss;
-  auto self_sizes = self.sizes();
-  std::fill(idx, idx + dimensions + 1, 0);
-  for (int64_t i = 0; i < dimensions; ++i) {
-    sizes[dimensions - i - 1] = self_sizes[i]; // reverse order important
-  }
-  sizes[dimensions] = 0;
-
   /* Second pass populates out */
   auto out_data = out.data_ptr<int64_t>();
   auto out_strides = out.strides();
@@ -1176,6 +1164,36 @@ Tensor& nonzero_out_cpu(Tensor& out, const Tensor& self) {
                   .add_input(self)
                   .build();
 
+  auto increment_idx = [](int64_t* idx_ptr, int64_t const* size_ptr) {
+    ++(*idx_ptr);
+    // If we have reached the max element,
+    // in current dimension, increase the idx
+    // in next dimension and reset current dim
+    // to idx zero.
+    // Eg. For Tensor of size {2, 3} and starting idx = {0, 0, 0} and sizes =
+    // {3, 2, 0} First call to increment_idx(idx, sizes) -> idx = {1, 0, 0}
+    // Second call to increment_idx(idx, sizes) -> idx = {2, 0, 0}
+    // Third call to increment_idx(idx, sizes) -> idx = {0, 1, 0}
+    while (*idx_ptr == *size_ptr) {
+      *idx_ptr = 0;
+      ++idx_ptr;
+      ++size_ptr;
+      ++(*idx_ptr);
+    }
+  };
+
+  // +1 faster than additional condition check inside loop
+  int64_t* sizes = new int64_t[dimensions + 1];
+  int64_t* idx = new int64_t[dimensions + 1];
+  auto self_sizes = self.sizes();
+
+  // Initialize `idx` to first index i.e. 0, 0, ..
+  std::fill(idx, idx + dimensions + 1, 0);
+  for (int64_t i = 0; i < dimensions; ++i) {
+    sizes[dimensions - i - 1] = self_sizes[i]; // reverse order important
+  }
+  sizes[dimensions] = 0;
+
   AT_DISPATCH_ALL_TYPES_AND3(
       kBool, kHalf, kBFloat16, self.scalar_type(), "nonzero_cpu", [&]() {
         auto loop = [&](char** data, const int64_t* strides, int64_t n) {
@@ -1185,7 +1203,8 @@ Tensor& nonzero_out_cpu(Tensor& out, const Tensor& self) {
           for (int64_t i = 0; i < n; i++) {
             scalar_t self_data_i = *(scalar_t*)(self_data + self_stride * i);
             if (self_data_i != 0) {
-              ii = idx + dimensions;
+              // `ii` is read-only pointer.
+              auto const* ii = idx + dimensions;
               for (int64_t dim = dimensions - 1; dim >= 0; dim--) {
                 --ii;
                 *out_data = *ii;
@@ -1193,15 +1212,7 @@ Tensor& nonzero_out_cpu(Tensor& out, const Tensor& self) {
               }
               out_data += out_strides_0;
             }
-            ii = idx;
-            ss = sizes;
-            ++(*ii);
-            while (*ii == *ss) {
-              *ii = 0;
-              ++ii;
-              ++ss;
-              ++(*ii);
-            }
+            increment_idx(idx, sizes);
           }
         };
 
