@@ -598,7 +598,7 @@ from torch import backends as backends
 # import torch.backends.openmp # moved to torch.backends
 # import torch.backends.quantized # moved to torch.backends
 from torch import quantization as quantization
-# import torch.utils.data # moved to torch.utils
+import torch.utils.data # kept here to avoid recursive import of Tensor 
 
 # Kept private due to prefix.
 import torch.optim._multi_tensor

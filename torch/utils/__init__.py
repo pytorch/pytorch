@@ -16,4 +16,5 @@ cmake_prefix_path = _osp.join(_osp.dirname(_osp.dirname(__file__)), 'share', 'cm
 # Re-export submodules
 
 from torch.utils import backcompat as backcompat
-from torch.utils import data as data
+# cannot export data , as this would cause recursive import
+# from torch.utils import data as data
