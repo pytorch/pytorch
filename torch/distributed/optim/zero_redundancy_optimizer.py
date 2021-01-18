@@ -84,6 +84,9 @@ class ZeroRedundancyOptimizer(Optimizer):
         self, params, optim: Type[Optimizer], group: Optional[Any] = None, bucket_cap_kb: int = 2 ** 24, **default: Any,
     ):
         # Hold all the model params in the root .param_groups
+        # NOTE: the default constructor uses `add_param_group` which is partially overloaded here
+        # we introduce the `initialized` flag for be able to dissociate the behaviour of
+        # `add_param_group` in between super() and ZeroRedundancyOptimizer
         self.initialized = False
         super().__init__(params, default)
 
@@ -169,6 +172,9 @@ class ZeroRedundancyOptimizer(Optimizer):
 
         # Pull the sharded state from all the other replicas
         # Store all the states in order, rank by rank
+        # NOTE: In practice, `broadcast` is used, which is wasteful (gather would have been appropriate)
+        # compatibility issues with some backends make the use of broadcast mandatory for now.
+        # a possible follow up would be to move all sharded state management to RPC RRef
         if self.rank == recipient_rank:
             logging.debug("Pulling the sharded optimizer state from all replicas")
             self._all_states = []
@@ -197,7 +203,7 @@ class ZeroRedundancyOptimizer(Optimizer):
                 else:
                     global_rank = _get_global_rank(self.group, rank)
 
-                    # Discard this tensor/rank, broadcast necessary for syncing and because NCCL does not support gather
+                    # Discard this tensor/rank, broadcast was being use for compatibility reasons
                     dist.broadcast_object_list([0], src=global_rank, group=self.group)
 
     def partition_parameters(self) -> List[List[Dict]]:
