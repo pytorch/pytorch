@@ -1081,8 +1081,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::exp: {
-      return computeOneOperand(
-          "aten_exp", v, [](const ExprHandle& a) { return exp(a); });
+      return computeOneOperand("aten_exp", v, [](const ExprHandle& a) {
+        return exp(promoteIntegerToDefaultType(a));
+      });
     } break;
 
     case aten::expm1: {
@@ -2132,7 +2133,7 @@ void TensorExprKernel::compile() {
     }
 
     tensorOutputs_.emplace_back(tensors_.at(output->unique()));
-    tensorOutputTensorOptions_.push_back(
+    tensorOutputTensorOptions_.emplace_back(
         c10::TensorOptions(tensorType(tensors_[output->unique()]))
             .device(device_));
     tensors_.erase(output->unique());
@@ -2204,11 +2205,14 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
   }
 
   for (size_t i = 0, e = tensorOutputs_.size(); i < e; ++i) {
-    auto t = at::empty_strided(
+    auto const& opts = tensorOutputTensorOptions_[i];
+    outputs.emplace_back(codegen_->empty_strided(
         tensorOutputSizes_[i],
         tensorOutputStrides_[i],
-        tensorOutputTensorOptions_[i]);
-    outputs.push_back(t);
+        opts.dtype,
+        opts.layout,
+        opts.device,
+        opts.pinned_memory));
     runArgs.emplace_back(outputs.back().data_ptr());
   }
   return runArgs;

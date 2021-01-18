@@ -63,7 +63,7 @@ void max_pool2d_with_indices_out_cpu_template(
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
     inputHeight, inputWidth,
-    outputHeight, outputWidth);
+    outputHeight, outputWidth, input.suggest_memory_format());
 
   /* resize output and indices */
   if (input.ndimension() == 3) {
@@ -151,7 +151,8 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
     inputHeight, inputWidth,
-    outputHeight_for_shape_check, outputWidth_for_shape_check);
+    outputHeight_for_shape_check, outputWidth_for_shape_check,
+    input.suggest_memory_format());
 
   max_pool2d_backward_kernel(kCPU, gradInput, gradOutput, indices);
 
