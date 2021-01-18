@@ -5202,16 +5202,6 @@
     CPU: legacy::cpu::_th_renorm_
     CUDA: legacy::cuda::_th_renorm_
 
-- func: pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
-  variants: method
-  dispatch:
-    CPU, CUDA: pow_
-
-- func: pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
-  variants: method
-  dispatch:
-    CPU, CUDA: pow_
-
 - func: lerp_.Scalar(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
   variants: method
   dispatch:
@@ -6446,6 +6436,18 @@
   dispatch:
     CPU, CUDA: pow
     SparseCPU, SparseCUDA: pow_sparse_scalar
+
+- func: pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    CPU, CUDA: pow_
+
+- func: pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    CPU, CUDA: pow_
 
 - func: float_power.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
