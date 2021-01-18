@@ -104,7 +104,7 @@ def calculate_gain(nonlinearity, param=None):
             raise ValueError("negative_slope {} not a valid number".format(param))
         return math.sqrt(2.0 / (1 + negative_slope ** 2))
     elif nonlinearity == 'selu':
-        return 3.0 / 4 #Value found empirically (https://github.com/pytorch/pytorch/pull/50664)
+        return 3.0 / 4  # Value found empirically (https://github.com/pytorch/pytorch/pull/50664)
     else:
         raise ValueError("Unsupported nonlinearity {}".format(nonlinearity))
 
