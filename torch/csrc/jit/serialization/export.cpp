@@ -221,6 +221,14 @@ class EncoderBase {
       bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
+  void AddInitializersIntoGraphProto(
+      onnx::GraphProto* graph_proto,
+      const Block* block,
+      const std::map<std::string, at::Tensor>& initializers =
+          std::map<std::string, at::Tensor>(),
+      bool use_external_data_format = false,
+      const std::string& onnx_file_path = std::string());
+
   virtual void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
@@ -553,14 +561,33 @@ void EncoderBase::EncodeBlock(
           onnx_file_path);
     }
   }
+  AddInitializersIntoGraphProto(
+      graph_proto,
+      block,
+      initializers,
+      use_external_data_format,
+      onnx_file_path);
+}
+
+void EncoderBase::AddInitializersIntoGraphProto(
+    onnx::GraphProto* graph_proto,
+    const Block* block,
+    const std::map<std::string, at::Tensor>& initializers,
+    bool use_external_data_format,
+    const std::string& onnx_file_path) {
   AT_ASSERT(block->inputs().size() >= initializers.size());
-  for (auto& name_tensor_pair : initializers) {
+
+  for (auto input : block->inputs()) {
+    auto name_tensor_pair = initializers.find(input->debugName());
+    if (name_tensor_pair == initializers.end()) {
+      continue;
+    }
     auto p = graph_proto->add_initializer();
-    p->set_name(name_tensor_pair.first);
+    p->set_name(name_tensor_pair->first);
     EncodeTensor(
         p,
-        name_tensor_pair.second,
-        name_tensor_pair.first,
+        name_tensor_pair->second,
+        name_tensor_pair->first,
         use_external_data_format,
         onnx_file_path);
   }

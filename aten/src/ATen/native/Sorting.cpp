@@ -687,7 +687,8 @@ std::tuple<Tensor&, Tensor&> sort_out_cpu(
     Tensor& indices,
     const Tensor& self,
     int64_t dim,
-    bool descending) {
+    bool descending,
+    bool stable) {
   values.resize_(self.sizes()).copy_(self);
   indices.resize_(self.sizes());
 
@@ -697,7 +698,7 @@ std::tuple<Tensor&, Tensor&> sort_out_cpu(
     return std::forward_as_tuple(values, indices);
   }
 
-  sort_stub(kCPU, values, indices, dim, descending);
+  sort_stub(kCPU, values, indices, dim, descending, stable);
 
   return std::forward_as_tuple(values, indices);
 }
@@ -705,15 +706,16 @@ std::tuple<Tensor&, Tensor&> sort_out_cpu(
 std::tuple<Tensor, Tensor> sort_cpu(
     const Tensor& self,
     int64_t dim,
-    bool descending) {
+    bool descending,
+    bool stable) {
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  return sort_out_cpu(values, indices, self, dim, descending);
+  return sort_out_cpu(values, indices, self, dim, descending, stable);
 }
 
 Tensor& msort_out(Tensor& values, const Tensor& self) {
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  at::sort_out(values, indices, self, 0, false);
+  at::sort_out(values, indices, self, 0, false, false);
   return values;
 }
 
