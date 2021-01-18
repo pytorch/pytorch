@@ -181,7 +181,7 @@ void Method::run(Stack& stack) {
   }
 }
 
-c10::IValue Method::operator()(std::vector<IValue> stack) {
+c10::IValue Method::operator()(std::vector<c10::IValue> stack) {
   run(stack);
   TORCH_INTERNAL_ASSERT(!stack.empty());
   return stack.front();
