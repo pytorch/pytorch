@@ -188,7 +188,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.unify_type_list,
         torch.make_dual,
         torch.unpack_dual,
-        Tensor.__delitem__,  # type: ignore[attr-defined]
+        Tensor.__delitem__,
         Tensor.__dir__,
         Tensor.__getattribute__,
         Tensor.__init__,
@@ -198,7 +198,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.__torch_function__,
         Tensor.__new__,
         Tensor.__class__,
-        Tensor.__subclasshook__,  # type: ignore[attr-defined]
+        Tensor.__subclasshook__,
         Tensor.as_subclass,
         Tensor.reinforce,
         Tensor.new,
@@ -885,38 +885,34 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.__setstate__: lambda self, d: -1,
         Tensor.T.__get__: lambda self: -1,
         Tensor._backward_hooks.__get__: lambda self: -1,
-        # type ignore[...] is required in the items below due to:
-        # torch/overrides.py:xyz: error: "int" has no attribute "__get__";
-        # torch/overrides.py:xyz: error: "bool" has no attribute "__get__";
-        # ...
-        Tensor._base.__get__: lambda self: -1,  # type: ignore[union-attr]
-        Tensor._cdata.__get__: lambda self: -1,  # type: ignore[attr-defined]
-        Tensor.grad.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor._base.__get__: lambda self: -1,
+        Tensor._cdata.__get__: lambda self: -1,
+        Tensor.grad.__get__: lambda self: -1,
         Tensor._grad.__get__: lambda self: -1,
         Tensor._grad_fn.__get__: lambda self: -1,
         Tensor.grad_fn.__get__: lambda self: -1,
         Tensor._version.__get__: lambda self: -1,
         Tensor.data.__get__: lambda self: -1,
         Tensor.device.__get__: lambda self: -1,
-        Tensor.dtype.__get__: lambda self: -1,  # type: ignore[attr-defined]
-        Tensor.is_cuda.__get__: lambda self: -1,  # type: ignore[attr-defined]
-        Tensor.is_leaf.__get__: lambda self: -1,  # type: ignore[attr-defined]
-        Tensor.is_meta.__get__: lambda self: -1,  # type: ignore[attr-defined]
-        Tensor.is_mkldnn.__get__: lambda self: -1,  # type: ignore[attr-defined]
-        Tensor.is_quantized.__get__: lambda self: -1,  # type: ignore[attr-defined]
-        Tensor.is_sparse.__get__: lambda self: -1,  # type: ignore[attr-defined]
-        Tensor.is_vulkan.__get__: lambda self: -1,  # type: ignore[attr-defined]
-        Tensor.layout.__get__: lambda self: -1,  # type: ignore[attr-defined]
-        Tensor.name.__get__: lambda self: -1,  # type: ignore[attr-defined]
-        Tensor.names.__get__: lambda self: -1,  # type: ignore[attr-defined]
-        Tensor.ndim.__get__: lambda self: -1,  # type: ignore[attr-defined]
-        Tensor.output_nr.__get__: lambda self: -1,  # type: ignore[attr-defined]
-        Tensor.requires_grad.__get__: lambda self: -1,  # type: ignore[attr-defined]
-        Tensor.shape.__get__: lambda self: -1,  # type: ignore[attr-defined]
-        Tensor.volatile.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.dtype.__get__: lambda self: -1,
+        Tensor.is_cuda.__get__: lambda self: -1,
+        Tensor.is_leaf.__get__: lambda self: -1,
+        Tensor.is_meta.__get__: lambda self: -1,
+        Tensor.is_mkldnn.__get__: lambda self: -1,
+        Tensor.is_quantized.__get__: lambda self: -1,
+        Tensor.is_sparse.__get__: lambda self: -1,
+        Tensor.is_vulkan.__get__: lambda self: -1,
+        Tensor.layout.__get__: lambda self: -1,
+        Tensor.name.__get__: lambda self: -1,
+        Tensor.names.__get__: lambda self: -1,
+        Tensor.ndim.__get__: lambda self: -1,
+        Tensor.output_nr.__get__: lambda self: -1,
+        Tensor.requires_grad.__get__: lambda self: -1,
+        Tensor.shape.__get__: lambda self: -1,
+        Tensor.volatile.__get__: lambda self: -1,
         Tensor.real.__get__: lambda self: -1,
         Tensor.imag.__get__: lambda self: -1,
-        Tensor.__cuda_array_interface__.__get__: lambda self: -1,  # type: ignore[attr-defined]
+        Tensor.__cuda_array_interface__.__get__: lambda self: -1,
         Tensor.type: lambda self, dtype=None, non_blocking=False, **kwargs: -1,
         Tensor._coalesced_: lambda self: -1,
         Tensor._dimI: lambda self: -1,
