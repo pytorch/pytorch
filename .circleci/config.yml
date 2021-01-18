@@ -50,35 +50,43 @@ jobs:
 workflows:
   build:
     jobs:
+      # - magma-build:
+      #     name: magma-build-cu101-debug
+      #     cuda_version: "101"
+      #     configuration: "Debug"
+      # - magma-build:
+      #     name: magma-build-cu101-release
+      #     cuda_version: "101"
+      #     configuration: "Release"
+      # - magma-build:
+      #     name: magma-build-cu102-debug
+      #     cuda_version: "102"
+      #     configuration: "Debug"
+      # - magma-build:
+      #     name: magma-build-cu102-release
+      #     cuda_version: "102"
+      #     configuration: "Release"
+      # - magma-build:
+      #     name: magma-build-cu110-debug
+      #     cuda_version: "110"
+      #     configuration: "Debug"
+      # - magma-build:
+      #     name: magma-build-cu110-release
+      #     cuda_version: "110"
+      #     configuration: "Release"
+      # - magma-build:
+      #     name: magma-build-cu111-debug
+      #     cuda_version: "111"
+      #     configuration: "Debug"
+      # - magma-build:
+      #     name: magma-build-cu111-release
+      #     cuda_version: "111"
+      #     configuration: "Release"
       - magma-build:
-          name: magma-build-cu101-debug
-          cuda_version: "101"
+          name: magma-build-cu112-debug
+          cuda_version: "112"
           configuration: "Debug"
       - magma-build:
-          name: magma-build-cu101-release
-          cuda_version: "101"
-          configuration: "Release"
-      - magma-build:
-          name: magma-build-cu102-debug
-          cuda_version: "102"
-          configuration: "Debug"
-      - magma-build:
-          name: magma-build-cu102-release
-          cuda_version: "102"
-          configuration: "Release"
-      - magma-build:
-          name: magma-build-cu110-debug
-          cuda_version: "110"
-          configuration: "Debug"
-      - magma-build:
-          name: magma-build-cu110-release
-          cuda_version: "110"
-          configuration: "Release"
-      - magma-build:
-          name: magma-build-cu111-debug
-          cuda_version: "111"
-          configuration: "Debug"
-      - magma-build:
-          name: magma-build-cu111-release
-          cuda_version: "111"
+          name: magma-build-cu112-release
+          cuda_version: "112"
           configuration: "Release"

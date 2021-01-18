@@ -70,6 +70,10 @@ IF "%CUVER_NODOT%" == "111" (
   set "CUDA_ARCH_LIST=%CUDA_ARCH_LIST% -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86"
 )
 
+IF "%CUVER_NODOT%" == "112" (
+  set "CUDA_ARCH_LIST=%CUDA_ARCH_LIST% -gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86"
+)
+
 cmake .. -DGPU_TARGET="%GPU_TARGET%" ^
              -DUSE_FORTRAN=0 ^
              -DCMAKE_CXX_FLAGS="/FS /Zf" ^
