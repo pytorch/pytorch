@@ -788,6 +788,11 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=IS_WINDOWS),
+                       # Reference: https://github.com/pytorch/pytorch/issues/50692
+                       SkipInfo('TestGradients', 'test_fn_grad',
+                                device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
+                       SkipInfo('TestGradients', 'test_method_grad',
+                                device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                    )),
     OpInfo('addmm',
            dtypes=floating_types(),
