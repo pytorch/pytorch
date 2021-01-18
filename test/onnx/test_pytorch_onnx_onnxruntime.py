@@ -3214,7 +3214,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_logical_and(self):
         class AndModel(torch.nn.Module):
             def forward(self, x, y):
-                return torch.logical_or(x, y)
+                return torch.logical_and(x, y)
 
         x = torch.torch.BoolTensor(5, 5)
         y = torch.torch.BoolTensor(5, 5)
