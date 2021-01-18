@@ -309,8 +309,8 @@ class Tracer(TracerBase):
         try:
             # Seems to be a mypy limitation: https://github.com/python/mypy/issues/2427
             torch.nn.Module.__getattr__ = module_getattr_wrapper  # type: ignore
-            torch.nn.Module.__call__ = module_call_wrapper
-            torch.Tensor.__getitem__ = _create_wrapped_method(torch.Tensor, "__getitem__")
+            torch.nn.Module.__call__ = module_call_wrapper  # type: ignore
+            torch.Tensor.__getitem__ = _create_wrapped_method(torch.Tensor, "__getitem__")  # type: ignore
 
             _patch_wrapped_functions(orig_fns)
 
@@ -318,9 +318,9 @@ class Tracer(TracerBase):
                              type_expr=fn.__annotations__.get('return', None))
         finally:
             _unpatch_wrapped_functions(orig_fns)
-            torch.nn.Module.__call__ = orig_call
             torch.nn.Module.__getattr__ = orig_getattr  # type: ignore
-            torch.Tensor.__getitem__ = orig_tensor_getitem
+            torch.nn.Module.__call__ = orig_call  # type: ignore
+            torch.Tensor.__getitem__ = orig_tensor_getitem  # type: ignore
         return self.graph
 
 # List of pairs of (global dict, function name) functions
