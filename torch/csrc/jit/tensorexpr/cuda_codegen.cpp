@@ -1150,6 +1150,18 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   }
 }
 
+at::Tensor CudaCodeGen::empty_strided(
+    c10::IntArrayRef size,
+    c10::IntArrayRef stride,
+    c10::optional<c10::ScalarType> dtype_opt,
+    c10::optional<c10::Layout> layout_opt,
+    c10::optional<c10::Device> device_opt,
+    c10::optional<bool> pin_memory_opt) {
+  c10::DeviceGuard device_guard(device_opt.value());
+  return at::native::empty_strided_cuda(
+      size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+}
+
 void CudaCodeGen::CompileToNVRTC(
     const std::string& code,
     const std::string& func_name) {
