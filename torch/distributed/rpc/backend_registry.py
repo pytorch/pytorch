@@ -256,6 +256,18 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
             )
         )
 
+    if torch.cuda.is_available():
+        # It's necessary to initialize PyTorch CUDA states here (e.g.,
+        # CUDACachingAllocator). If this is missing, we could hit errors like
+        # "allocator not initialized", because other processes might send
+        # CUDA-related RPC request to this process before user code in this
+        # process initializes its PyTorch CUDA states.
+        torch.cuda.init()
+        # FIXME: this is needed for now because TensorPipe calls
+        # cudaPointerGetAttributes() on the default device.
+        # This error was also reported in https://github.com/pytorch/pytorch/issues/36594
+        torch.zeros([1], device="cuda:0")
+
     # The agent's join method is required to behave like a barrier and perform
     # collective operations, for which it relies on a process group, instead of
     # re-implementing this on top of RPCs.
