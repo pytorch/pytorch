@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
+#include <torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <limits>
@@ -348,7 +348,6 @@ void SquashSliceAndSelect(Node* index_put_node) {
 
   RegisterInplaceNodeInBlocks(
       orig_data, new_index_put, block_node, outer_block, next_node);
-
 }
 
 void PrepareCopyForONNX(Block* block) {

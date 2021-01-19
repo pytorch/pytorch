@@ -16,7 +16,7 @@ from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, disableScript
                                  skipIfUnsupportedMaxOpsetVersion, skipIfONNXShapeInference)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
-from typing import List
+from typing import List, Tuple
 import model_defs.word_language_model as word_language_model
 import torchvision
 from torchvision import ops
@@ -39,7 +39,7 @@ def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
                     dynamic_axes=None, input_names=None, output_names=None,
                     fixed_batch_size=False, training=None,
                     onnx_shape_inference=False,
-                    use_new_jit_passes=False):
+                    use_new_jit_passes=True):
     # export the model to ONNX
     f = io.BytesIO()
     input_copy = copy.deepcopy(input)
@@ -203,7 +203,7 @@ class TestONNXRuntime(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     opset_version = _export_onnx_opset_version
     keep_initializers_as_inputs = True  # For IR version 3 type export.
-    use_new_jit_passes = False  # For testing main code-path
+    use_new_jit_passes = True  # For testing main code-path
     onnx_shape_inference = True
 
     def setUp(self):
@@ -6196,11 +6196,12 @@ class TestONNXRuntime(unittest.TestCase):
                 self.conv.weight = w + w
                 return box_regression + self.conv.weight
 
-        model = MyModule()
-        box_regression = torch.randn(10, 3)
-        weight = torch.randn(10, 3)
+        model = torch.jit.script(MyModule())
+        weight = torch.ones(3, 2)
+        box_regression = torch.randn(3, 2)
         self.run_test(model, (box_regression, weight))
 
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_set_attr_2(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -6213,7 +6214,7 @@ class TestONNXRuntime(unittest.TestCase):
                 else:
                     self.conv.bias = torch.ones(3, 10, 3)
 
-            def forward(self, feature_maps, anchors) -> List[torch.Tensor]:
+            def forward(self, feature_maps, anchors) -> Tuple[torch.Tensor, torch.Tensor]:
                 self.set_cell_anchors(anchors)
                 result = []
                 if self.conv.bias is not None:
@@ -6221,14 +6222,15 @@ class TestONNXRuntime(unittest.TestCase):
                     assert a is not None
                     result += [a]
                 result += [feature_maps]
-                return result
+                return result[0], result[0]
 
-        model = MyModule()
+        model = torch.jit.script(MyModule())
         x = torch.rand(5, 11, 30)
         anchors = torch.randn(3, 10, 3)
         self.run_test(model, (x, anchors))
 
-    def test_inplace_if(self):
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_if(self):
         @torch.jit.script
         def check_init(input_data, hidden_size, prev_state):
             # type: (torch.Tensor, int, torch.Tensor) -> torch.Tensor
@@ -6258,7 +6260,8 @@ class TestONNXRuntime(unittest.TestCase):
         empty_tensor = torch.tensor([], dtype=torch.float).view(0, 0, 0, 0, 0)
         self.run_test(model, (random_data, empty_tensor))
 
-    def test_inplace_if_2(self):
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_if_2(self):
         @torch.jit.script
         def check_init(input_data, hidden_size, prev_state):
             # type: (torch.Tensor, int, torch.Tensor) -> torch.Tensor
@@ -6287,6 +6290,7 @@ class TestONNXRuntime(unittest.TestCase):
         random_data = torch.rand((1, 5, 30, 30))
         empty_tensor = torch.tensor([], dtype=torch.float).view(0, 0, 0, 0, 0)
         self.run_test(model, (random_data, empty_tensor))
+
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
@@ -6433,22 +6437,20 @@ TestONNXRuntime_opset13 = type(str("TestONNXRuntime_opset13"),
 
 # opset 9 tests, with use_new_jit_passes=True for using new jit API,
 # and with keep_initializers_as_inputs=False for IR version 4 style export.
-TestONNXRuntime_opset9_IRv4_new_jit_API = type(str("TestONNXRuntime_opset9_IRv4_new_jit_API"),
+TestONNXRuntime_opset9_IRv4_old_jit_API = type(str("TestONNXRuntime_opset9_IRv4_old_jit_API"),
                                                (unittest.TestCase,),
                                                dict(TestONNXRuntime.__dict__,
                                                     keep_initializers_as_inputs=False,
-                                                    use_new_jit_passes=True,
-                                                    onnx_shape_inference=True))
+                                                    use_new_jit_passes=False))
 
 
 # opset 12 tests, with use_new_jit_passes=True for using new jit API,
 # and keep_initializers_as_inputs=False for IR version 4 style export.
-TestONNXRuntime_opset12_IRv4_new_jit_API = type(str("TestONNXRuntime_opset12_IRv4_new_jit_API"),
+TestONNXRuntime_opset12_IRv4_old_jit_API = type(str("TestONNXRuntime_opset12_IRv4_old_jit_API"),
                                                 (unittest.TestCase,),
                                                 dict(TestONNXRuntime.__dict__, opset_version=12,
                                                      keep_initializers_as_inputs=False,
-                                                     use_new_jit_passes=True,
-                                                     onnx_shape_inference=True))
+                                                     use_new_jit_passes=False))
 
 
 # opset 12 tests, with _onnx_shape_inference=True.
