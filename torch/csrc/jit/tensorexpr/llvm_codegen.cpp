@@ -1,6 +1,7 @@
 #ifdef TORCH_ENABLE_LLVM
 
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/tensorexpr/llvm_jit.h>
 
@@ -14,7 +15,13 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/Host.h>
 #include <llvm/Support/TargetSelect.h>
+
+#if LLVM_VERSION_MAJOR >= 10
+#include <llvm/Support/CodeGen.h>
+#else
 #include <llvm/Target/TargetMachine.h>
+#endif
+
 #include <llvm/Transforms/IPO/AlwaysInliner.h>
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
 #include <llvm/Transforms/Scalar.h>
@@ -31,7 +38,6 @@
 #include <torch/csrc/jit/tensorexpr/types.h>
 
 #include <torch/csrc/jit/jit_log.h>
-#define DEBUG_PRINT 0
 
 using namespace torch::jit::tensorexpr;
 
@@ -96,7 +102,6 @@ class LLVMCodeGenImpl : public IRVisitor {
  private:
   std::unique_ptr<llvm::LLVMContext> context_;
   llvm::IRBuilder<> irb_;
-  std::unique_ptr<llvm::TargetMachine> TM_;
   std::unique_ptr<llvm::orc::PytorchLLVMJIT> jit_;
   std::unique_ptr<llvm::Module> module_;
   llvm::Function* fn_;
@@ -189,34 +194,6 @@ class LLVMCodeGenImpl : public IRVisitor {
 } // namespace jit
 } // namespace torch
 
-static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder() {
-#if 0
-  // FIXME: Switch to using detectHost() rather than setting up the JTMB manually
-  // once LLVM 10 is available.
-  return assertSuccess(llvm::orc::JITTargetMachineBuilder::detectHost());
-#else
-  llvm::orc::JITTargetMachineBuilder JTMB(
-      (llvm::Triple(llvm::sys::getProcessTriple())));
-
-  // Retrieve host CPU name and sub-target features and add them to builder.
-  // Relocation model, code model and codegen opt level are kept to default
-  // values.
-  llvm::SubtargetFeatures SubtargetFeatures;
-  llvm::StringMap<bool> FeatureMap;
-  llvm::sys::getHostCPUFeatures(FeatureMap);
-  for (auto& Feature : FeatureMap) {
-    SubtargetFeatures.AddFeature(Feature.first(), Feature.second);
-  }
-
-  JTMB.setCodeGenOptLevel(llvm::CodeGenOpt::Default);
-  JTMB.setCPU(llvm::sys::getHostCPUName().str());
-  JTMB.addFeatures(SubtargetFeatures.getFeatures());
-  JTMB.getOptions().AllowFPOpFusion = llvm::FPOpFusion::Fast;
-
-  return JTMB;
-#endif
-}
-
 LLVMCodeGen::~LLVMCodeGen() = default;
 
 LLVMCodeGen::LLVMCodeGen(Stmt* stmt)
@@ -269,6 +246,17 @@ void LLVMCodeGen::call(const std::vector<CallArg>& args) {
   USE_TRIGGER(llvm_codegen_executed);
 }
 
+at::Tensor LLVMCodeGen::empty_strided(
+    c10::IntArrayRef size,
+    c10::IntArrayRef stride,
+    c10::optional<c10::ScalarType> dtype_opt,
+    c10::optional<c10::Layout> layout_opt,
+    c10::optional<c10::Device> device_opt,
+    c10::optional<bool> pin_memory_opt) {
+  return at::native::empty_strided_cpu(
+      size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+}
+
 void* LLVMCodeGen::getKernelAddress(LLVMCodeGenImpl* impl) {
   return (void*)impl->getKernelAddress();
 }
@@ -301,13 +289,10 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
 
-  auto JTMB = makeTargetMachineBuilder();
-  TM_ = assertSuccess(JTMB.createTargetMachine());
-
   jit_ = std::make_unique<llvm::orc::PytorchLLVMJIT>();
   module_ = std::make_unique<llvm::Module>("pytorch", getContext());
-  module_->setDataLayout(assertSuccess(JTMB.getDefaultDataLayoutForTarget()));
-  module_->setTargetTriple(JTMB.getTargetTriple().str());
+  module_->setDataLayout(jit_->getDataLayout());
+  module_->setTargetTriple(jit_->getTargetMachine().getTargetTriple().str());
 
   // We support float16 ops by casting expr inputs to float32
   // and then casting the result back to float16
@@ -510,34 +495,39 @@ void LLVMCodeGenImpl::emitKernel(
 
   irb_.CreateRet(value_);
 
-#if DEBUG_PRINT
-  llvm::errs() << *module_;
-#endif
   if (llvm::verifyFunction(*fn_, &llvm::outs())) {
     throw std::runtime_error("Function verification failed");
   }
 
-  // print graph debug info.
-  std::string fnstr;
-  llvm::raw_string_ostream FS(fnstr);
-  fn_->print(FS);
-  GRAPH_DEBUG("LLVM Function:\n", FS.str(), "\n");
+  // print graph debug info before optimization
+  llvm::SmallVector<char, 0> asmBuffer;
+  llvm::raw_svector_ostream asmStream(asmBuffer);
+  if (GRAPH_DEBUG_ENABLED) {
+    module_->print(asmStream, nullptr);
+  }
+  GRAPH_DEBUG(
+      "\nLLVM module before optimizations\n\n", asmStream.str().str(), "\n");
 
   optimize(*module_);
 
-#if DEBUG_PRINT
-  llvm::errs() << *module_;
-  llvm::SmallVector<char, 0> asmBuffer;
-  llvm::raw_svector_ostream asmStream(asmBuffer);
-  llvm::legacy::PassManager PM;
-  TM_->addPassesToEmitFile(
-      PM,
-      asmStream,
-      nullptr,
-      llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
-  PM.run(*module_);
-  llvm::errs() << asmStream.str();
+  // print graph debug info after optimization
+  asmBuffer.set_size(0);
+  if (GRAPH_DEBUG_ENABLED) {
+    module_->print(asmStream, nullptr);
+    llvm::legacy::PassManager PM;
+    jit_->getTargetMachine().addPassesToEmitFile(
+        PM,
+        asmStream,
+        nullptr,
+#if LLVM_VERSION_MAJOR >= 10
+        llvm::CodeGenFileType::CGFT_AssemblyFile);
+#else
+        llvm::TargetMachine::CodeGenFileType::CGFT_AssemblyFile);
 #endif
+    PM.run(*module_);
+  }
+  GRAPH_DEBUG(
+      "\nLLVM module after optimizations\n\n", asmStream.str().str(), "\n");
 }
 
 // TODO: The binary ops are copypasta.
@@ -1456,7 +1446,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
         SIMD_UNARY_MATH_CASE(kCos, "cosf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kSin, "sinf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kSqrt, "sqrtf", FloatTy_)
-        SIMD_UNARY_MATH_CASE(kFabs, "fabsf", FloatTy_)
+        SIMD_UNARY_MATH_CASE(kAbs, "fabsf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kFloor, "floorf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kCeil, "ceilf", FloatTy_)
         SIMD_UNARY_MATH_CASE(kTrunc, "truncf", FloatTy_)
@@ -1604,7 +1594,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
       SIMD_UNARY_MATH_CASE(kCos, "cos", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kSin, "sin", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kSqrt, "sqrt", DoubleTy_)
-      SIMD_UNARY_MATH_CASE(kFabs, "fabs", DoubleTy_)
+      SIMD_UNARY_MATH_CASE(kAbs, "fabs", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kFloor, "floor", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kCeil, "ceil", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kTrunc, "trunc", DoubleTy_)
@@ -1706,7 +1696,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
         throw unimplemented_lowering(v);
       } break;
     }
-  } else if (v->dtype().is_integral() && v->op_type() == kFabs) {
+  } else if (v->dtype().is_integral() && v->op_type() == kAbs) {
     // abs is only intrinsic defined for integer inputs in pytorch eager
     v->params().front()->accept(this);
     if (!v->dtype().is_signed()) {
@@ -1852,16 +1842,15 @@ void LLVMCodeGenImpl::optimize(llvm::Module& M) {
   llvm::legacy::PassManager PM;
 
   // Add internal analysis passes from the target machine.
-  PM.add(
-      llvm::createTargetTransformInfoWrapperPass(TM_->getTargetIRAnalysis()));
-  FPM.add(
-      llvm::createTargetTransformInfoWrapperPass(TM_->getTargetIRAnalysis()));
+  auto& TM = jit_->getTargetMachine();
+  PM.add(llvm::createTargetTransformInfoWrapperPass(TM.getTargetIRAnalysis()));
+  FPM.add(llvm::createTargetTransformInfoWrapperPass(TM.getTargetIRAnalysis()));
 
   llvm::PassManagerBuilder PMB;
   PMB.OptLevel = 3;
   PMB.LoopVectorize = true;
   PMB.SLPVectorize = true;
-  TM_->adjustPassManager(PMB);
+  TM.adjustPassManager(PMB);
 
   PMB.populateFunctionPassManager(FPM);
   PMB.populateModulePassManager(PM);

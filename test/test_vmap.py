@@ -951,8 +951,8 @@ class TestVmapOperators(Namespace.TestVmapBase):
     def _vmap_view_test(self, *args, **kwargs):
         self._vmap_test(*args, **kwargs, check_view=True)
 
-    def _test_unary(self, op, getter, device):
-        test = self._vmap_test
+    def _test_unary(self, op, getter, device, *args, **kwargs):
+        test = functools.partial(self._vmap_test, *args, **kwargs)
         B0, B1 = 7, 11
 
         # Single vmap, various in_dims / out_dims
@@ -1329,6 +1329,39 @@ class TestVmapOperators(Namespace.TestVmapBase):
         )
         for op, getter in clamp_cases:
             self._test_unary(op, getter, 'cpu')
+
+    def test_comparison_ops(self):
+        test = functools.partial(self._vmap_test, check_propagates_grad=False)
+
+        getter = TensorFactory.randn
+        B0, B1 = 7, 11
+
+        ops = (
+            torch.eq, lambda x, y: x == y,
+            torch.gt, lambda x, y: x > y,
+            torch.ge, lambda x, y: x >= y,
+            torch.le, lambda x, y: x <= y,
+            torch.lt, lambda x, y: x < y,
+            torch.ne, lambda x, y: x != y,
+        )
+
+        for op in ops:
+            # Single vmap: op(Tensor, Tensor)
+            test(op, (getter([B0, 3]), getter([B0, 3])))
+            test(op, (getter([B0]), getter([B0, 2, 3])))
+            test(op, (getter([B0]), getter([2, B0, 3])), in_dims=(0, 1))
+            test(op, (getter([B0]), getter([2, B0, 3])), in_dims=(0, 1), out_dims=1)
+            test(op, (getter([B0]), getter([2, 3])), in_dims=(0, None))
+            test(op, (getter([2, 3]), getter([B0, 3])), in_dims=(0, None))
+
+            # Nested vmap: op(Tensor, Tensor)
+            test(vmap(op), (getter([B0, B1, 2, 3]), getter([B0, B1, 3])))
+            test(vmap(op, in_dims=(None, 0)),
+                 (getter([B0, 2, 3]), getter([B1, 3])), in_dims=(0, None))
+
+            # test number as inputs
+            number = getter([]).item()
+            self._test_unary(lambda t: op(t, number), getter, 'cpu', check_propagates_grad=False)
 
     def test_diagonal(self):
         tensor = torch.randn(3, 5, 7, 11, 13)
@@ -1907,6 +1940,16 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(lambda t: op(t, [4] * 8 + [8] * 4, 1), in_dims=2)),
              (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
 
+    def test_trace(self):
+        op = torch.trace
+        test = self._vmap_test
+        B0, B1, B2 = 7, 11, 13
+
+        test(op, (torch.rand(B0, 2, 5),))
+        test(op, (torch.rand(2, B0, 5),), in_dims=1)
+        test(vmap(op), (torch.rand(B1, 2, B0, 5),), in_dims=2)
+        test(vmap(vmap(op, in_dims=2)), (torch.rand(B1, 2, B0, 5, B2),), in_dims=2)
+
     def test_transpose(self):
         op = torch.transpose
         test = self._vmap_view_test
@@ -2313,6 +2356,10 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_test(lambda x: x[:, 1:3], (x,))
         self._batched_grad_test(lambda x: x[..., 1:3], (x,))
 
+    def test_trace(self, device):
+        x = torch.randn(2, 3, device=device, requires_grad=True)
+        self._batched_grad_test(Tensor.trace, (x,))
+
     @allowVmapFallbackUsage
     def test_symeig(self, device):
         def op(x):
@@ -2321,6 +2368,11 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         x = torch.randn(3, 3, device=device, requires_grad=True)
         self._batched_grad_test(op, (x,), {})
         self._batched_grad_grad_test(op, (x,), {})
+
+    def test_threshold(self, device):
+        x = torch.randn(2, 3, device=device, requires_grad=True)
+        self._batched_grad_test(lambda x: F.threshold(x, 0.5, 0.0), (x,))
+
 
     @allowVmapFallbackUsage
     def test_inplace_view(self, device):

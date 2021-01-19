@@ -47,11 +47,12 @@ variable_list RecvRpcBackward::apply(variable_list&& grads) {
 
   // Send the gradients over to the appropriate node.
   auto rpcAgent = rpc::RpcAgent::getCurrentRpcAgent();
-  auto futureMessage = rpcAgent->send(
-      rpcAgent->getWorkerInfo(fromWorkerId_), std::move(gradCall).toMessage());
+  auto jitFuture = rpcAgent->send(
+      rpcAgent->getWorkerInfo(fromWorkerId_),
+      std::move(gradCall).toMessage());
 
   // Record the future in the context.
-  sharedContext->addOutstandingRpc(futureMessage);
+  sharedContext->addOutstandingRpc(jitFuture);
 
   // 'recv' function sends the gradients over the wire using RPC, it doesn't
   // need to return anything for any downstream autograd function.

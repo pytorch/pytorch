@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/frontend/convert_to_ssa.h>
+#include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
@@ -989,8 +990,8 @@ struct to_ir {
   }
 
   void emitReturn(const Return& stmt) {
-    Value* result = emitExpr(stmt.expr());
     TypePtr result_type = def_stack_.back().declared_return_type_;
+    Value* result = emitExpr(stmt.expr(), result_type);
     // result type is annotated, every return must convert to that type
     if (result_type) {
       // this guard skips implicit conversion from None -> Tensor for the return
@@ -1128,8 +1129,7 @@ struct to_ir {
     // propagate further in all loaded models. The handling of
     // unwrap_optional will fail in these cases since export did
     // not expect that the input would be none and an unannotated None.
-    // cannot be passed to unwrapoptional To enable this,
-    // we need to (1) implement a real casting operator
+    // To enable this, we need to (1) implement a real casting operator
     // annotated(T, X) that stays in the graph and does the cast
     // and (2) only enable this OPTIONAL_NONE when loading newer
     // graphs because it is incompatible with older graphs.
@@ -1224,8 +1224,11 @@ struct to_ir {
         }
         auto expr_out = emitToBool(expr.range(), emitExpr(expr));
         c10::optional<bool> static_if = c10::nullopt;
-        if (expr_out->node()->kind() == aten::is_scripting) {
+        auto kind = expr_out->node()->kind();
+        if (kind == aten::is_scripting) {
           static_if = true;
+        } else if (kind == aten::has_torch_function) {
+          static_if = false;
         }
         // MetaCompile on boolean literals and constants
         if (auto maybe_ivalue = toIValue(expr_out)) {
@@ -1251,10 +1254,12 @@ struct to_ir {
     return graph->create(kind, n_outputs)->setSourceRange(loc);
   }
 
-  Value* emitTernaryIf(const TernaryIf& expr) {
+  Value* emitTernaryIf(
+      const TernaryIf& expr,
+      const TypePtr& type_hint = nullptr) {
     CondValue cond_value = emitCondExpr(expr.cond());
-    auto true_expr = [&] { return emitExpr(expr.true_expr()); };
-    auto false_expr = [&] { return emitExpr(expr.false_expr()); };
+    auto true_expr = [&] { return emitExpr(expr.true_expr(), type_hint); };
+    auto false_expr = [&] { return emitExpr(expr.false_expr(), type_hint); };
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
@@ -1280,7 +1285,7 @@ struct to_ir {
       type_set = true;
     }
 
-    // comprehension introduces it's own scope. no variable assigned
+    // comprehension introduces its own scope. no variable assigned
     // leaks into the rest of the graph
     Node* n =
         graph->insertNode(create(prim::ComprehensionScope, lc.range(), 0));
@@ -2049,6 +2054,18 @@ struct to_ir {
         return use_inplace_op ? aten::mul_ : aten::mul;
       case '%':
         return use_inplace_op ? aten::fmod_ : aten::fmod;
+      case '|':
+        return use_inplace_op ? aten::bitwise_or : aten::__or__;
+      case '&':
+        return use_inplace_op ? aten::bitwise_and : aten::__and__;
+      case '^':
+        return use_inplace_op ? aten::bitwise_xor : aten::__xor__;
+      case TK_LSHIFT:
+        return use_inplace_op ? aten::__lshift__ : aten::__lshift__;
+      case TK_RSHIFT:
+        return use_inplace_op ? aten::__irshift__ : aten::__rshift__;
+      case TK_POW:
+        return aten::pow;
       default:
         throw ErrorReport(stmt)
             << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
@@ -2959,7 +2976,7 @@ struct to_ir {
           return std::make_shared<SimpleValue>(
               graph
                   ->insertNode(graph->createList(
-                      type->expect<ListType>()->getElementType(), {}))
+                      type->expectRef<ListType>().getElementType(), {}))
                   ->output());
         }
         // list(iter) desugars to [_elem for _elem in iter]
@@ -3000,7 +3017,15 @@ struct to_ir {
     // Push the source range of a call in case compiling this function
     // triggers an error
     ErrorReport::CallStack::update_pending_range(tree.range());
-    return emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
+    Value* out_val =
+        emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
+    // AnyType is the only user-exposed type which we don't unify to from
+    // its subtypes, so we add a cast for use cases like
+    // x : Any = 1 if cond else "str"
+    if (type_hint == AnyType::get() && out_val->type() != AnyType::get()) {
+      out_val = graph->insertUncheckedCast(out_val, type_hint);
+    }
+    return out_val;
   }
 
   NodeKind reverseComparision(NodeKind kind) {
@@ -3335,7 +3360,7 @@ struct to_ir {
         return graph->insertConstant(IValue(), tree->range());
       } break;
       case TK_IF_EXPR: {
-        return emitTernaryIf(TernaryIf(tree));
+        return emitTernaryIf(TernaryIf(tree), type_hint);
       } break;
       case TK_STRINGLITERAL: {
         return emitStringLiteral(StringLiteral(tree));
@@ -3351,7 +3376,7 @@ struct to_ir {
         TypePtr elem_type = TensorType::get();
         if (type_hint) {
           if (type_hint->kind() == TypeKind::ListType) {
-            elem_type = type_hint->expect<ListType>()->getElementType();
+            elem_type = type_hint->expectRef<ListType>().getElementType();
           } else {
             // If the type hint was not a List[T] throw an error
             throw ErrorReport(tree)
@@ -4302,10 +4327,28 @@ void CompilationUnit::define_interface(
     arguments.insert(
         arguments.end(), schema.arguments().begin(), schema.arguments().end());
     iface->addMethod(schema.cloneWithArguments(std::move(arguments)));
-    if (method_def.statements().size() != 1 ||
-        method_def.statements()[0].kind() != TK_PASS) {
+    // we need to make sure everything but the last element is just string
+    // literals (aka comments) unless there is "pass" in between
+    auto stmts_size = method_def.statements().size();
+    for (size_t i = 0; i < stmts_size - 1; i++) {
+      auto cur_statement = method_def.statements()[i];
+      if (cur_statement.kind() == TK_EXPR_STMT) {
+        auto expr = ExprStmt(cur_statement).expr();
+        if (expr.kind() != TK_STRINGLITERAL) {
+          throw ErrorReport(method_def.range())
+              << "interfaces declarations should only contain a single 'pass' statement.";
+        }
+      }
+      // if we see a "pass", we just stop there
+      if (cur_statement.kind() == TK_PASS) {
+        this->register_type(iface);
+        return;
+      }
+    }
+
+    if (method_def.statements()[stmts_size - 1].kind() != TK_PASS) {
       throw ErrorReport(method_def.range())
-          << "interfaces declarations should only contain a single 'pass' statement.";
+          << "interfaces declarations should contain 'pass' statement.";
     }
   }
   this->register_type(iface);

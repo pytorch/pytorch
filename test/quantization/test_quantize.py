@@ -82,12 +82,14 @@ import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 
 # Standard library
+from typing import Tuple
 import copy
 import io
 import unittest
 import numpy as np
 
 class TestPostTrainingStatic(QuantizationTestCase):
+
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
         to nnq.Linear which is the quantized version of the module
@@ -537,6 +539,29 @@ class TestPostTrainingStatic(QuantizationTestCase):
         self.checkQuantizedLinear(model.fc)
 
     @skipIfNoFBGEMM
+    def test_embedding_linear_dynamic(self):
+        class EmbeddingWithLinearDynamic(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12)
+                self.fc = torch.nn.Linear(5, 5)
+
+            def forward(self, indices, linear_in):
+                return self.emb(indices), self.fc(linear_in)
+
+        model = EmbeddingWithLinearDynamic()
+        qconfig_dict = {'fc' : default_dynamic_qconfig}
+        model = EmbeddingWithLinear()
+        quantize_dynamic(model, qconfig_dict, inplace=True)
+
+        model.emb.qconfig = float_qparams_weight_only_qconfig
+        prepare(model, inplace=True)
+        convert(model, inplace=True)
+        self.assertTrue('QuantizedEmbedding' in str(model))
+        self.assertTrue('DynamicQuantizedLinear' in str(model))
+
+
+    @skipIfNoFBGEMM
     def test_dequant_stub(self):
         m = QuantStubModel().eval()
         prepare(m, inplace=True)
@@ -725,6 +750,20 @@ class TestPostTrainingStatic(QuantizationTestCase):
         ref_m = convert(ref_m)
         ref_res = ref_m(data)
         self.assertEqual(res, ref_res)
+
+    @skipIfNoFBGEMM
+    def test_convtranspose_per_channel_fails_early(self):
+        r"""
+        Verifies that attempting to quantize a ConvTranspose module with per-Channel
+        weight observers fails in the prepare step, as opposed to the convert step.
+        """
+        m = torch.nn.Sequential(torch.nn.ConvTranspose2d(1, 1, 1))
+        m.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+        with self.assertRaises(AssertionError) as context:
+            mp = torch.quantization.prepare(m)
+        self.assertTrue(
+            str(context.exception) ==
+            'Per channel weight observer is not supported yet for ConvTranspose{n}d.')
 
 
 @skipIfNoFBGEMM
@@ -960,40 +999,59 @@ class TestPostTrainingDynamic(QuantizationTestCase):
     def test_quantized_rnn(self, qconfig, dtype):
         r"""Test dynamic quantization, scriptability and serialization for dynamic quantized lstm modules on int8 and fp16
         """
-        model = RNNDynamicModel('LSTM').eval()
         niter = 10
         x = torch.tensor([[100, -155],
                           [-155, 100],
                           [100, -155]], dtype=torch.float).unsqueeze(0).repeat(niter, 1, 1)
         qconfig_dict = {
-            torch.nn.LSTM : qconfig
+            torch.nn.LSTM : qconfig,
+            torch.nn.GRU: qconfig
         }
-        if dtype == torch.float16:
-            model_quantized = quantize_dynamic(model=model, dtype=dtype)
-        else:
-            model_quantized = quantize_dynamic(model=model, qconfig_spec=qconfig_dict, dtype=dtype)
 
-        # Smoke test extra reprs
-        self.assertTrue('DynamicQuantizedLSTM' in str(model_quantized))
-        self.checkDynamicQuantizedModule(model_quantized.mod, torch.nn.quantized.dynamic.LSTM, dtype)
-        self.checkScriptable(model_quantized, [[x]], check_save_load=True)
+        def checkQuantized(model, module_type):
+            mod_type_map = {'LSTM': torch.nn.quantized.dynamic.LSTM,
+                            'GRU': torch.nn.quantized.dynamic.GRU}
+            mod_repr_map = {'LSTM': 'DynamicQuantizedLSTM',
+                            'GRU': 'DynamicQuantizedGRU'}
+            self.assertTrue(mod_repr_map[module_type] in str(model_quantized))
+            self.checkDynamicQuantizedModule(model_quantized.mod, mod_type_map[module_type], dtype)
 
-        class ScriptWrapperPacked(torch.nn.Module):
-            def __init__(self, cell):
-                super(ScriptWrapperPacked, self).__init__()
-                self.cell = cell
+        for module_type in ['LSTM', 'GRU']:
+            model = RNNDynamicModel(module_type).eval()
 
-            def forward(self,
-                        x  # type: PackedSequence
-                        ):
-                # type: (...) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]
-                return self.cell(x)
+            if dtype == torch.float16:
+                model_quantized = quantize_dynamic(model=model, dtype=dtype)
+            else:
+                model_quantized = quantize_dynamic(model=model, qconfig_spec=qconfig_dict, dtype=dtype)
 
-        packed_input = torch.nn.utils.rnn.pack_padded_sequence(x, torch.tensor([10, 5, 2]))
-        model_with_packed_input = ScriptWrapperPacked(model_quantized.mod)
-        scripted = torch.jit.script(model_with_packed_input)
-        # We cannot trace with input dtype being a packed sequence
-        self._checkScriptable(model_with_packed_input, scripted, [[packed_input]], True)
+            checkQuantized(model_quantized, module_type)
+            self.checkScriptable(model_quantized, [[x]], check_save_load=True)
+
+            class ScriptWrapperPackedLSTM(torch.nn.Module):
+                def __init__(self, cell):
+                    super(ScriptWrapperPackedLSTM, self).__init__()
+                    self.cell = cell
+
+                def forward(self, x: PackedSequence) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]:
+                    return self.cell(x)
+
+            class ScriptWrapperPackedGRU(torch.nn.Module):
+                def __init__(self, cell):
+                    super(ScriptWrapperPackedGRU, self).__init__()
+                    self.cell = cell
+
+                def forward(self, x: PackedSequence) -> Tuple[PackedSequence, torch.Tensor]:
+                    return self.cell(x)
+
+            script_wrapper_map = {'LSTM': ScriptWrapperPackedLSTM,
+                                  'GRU': ScriptWrapperPackedGRU}
+            packed_input = torch.nn.utils.rnn.pack_padded_sequence(x, torch.tensor([10, 5, 2]))
+            model_with_packed_input = script_wrapper_map[module_type](model_quantized.mod)
+            model_with_packed_input(packed_input)
+            scripted = torch.jit.script(model_with_packed_input)
+            scripted(packed_input)
+            # We cannot trace with input dtype being a packed sequence
+            self._checkScriptable(model_with_packed_input, scripted, [[packed_input]], True)
 
 
     @given(qconfig=st.sampled_from([per_channel_dynamic_qconfig, default_dynamic_qconfig]),
@@ -1973,8 +2031,9 @@ class TestDeprecatedJitQuantized(JitTestCase):
                         self.cell = cell
 
                     @torch.jit.script_method
-                    def forward(self, x, hiddens):
-                        # type: (torch.Tensor, Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]
+                    def forward(self, x: torch.Tensor,
+                                hiddens: Tuple[torch.Tensor, torch.Tensor]
+                                ) -> Tuple[torch.Tensor, torch.Tensor]:
                         return self.cell(x, hiddens)
             else:
 
@@ -1984,8 +2043,7 @@ class TestDeprecatedJitQuantized(JitTestCase):
                         self.cell = cell
 
                     @torch.jit.script_method
-                    def forward(self, x, hiddens):
-                        # type: (torch.Tensor, torch.Tensor) -> torch.Tensor
+                    def forward(self, x: torch.Tensor, hiddens: torch.Tensor) -> torch.Tensor:
                         return self.cell(x, hiddens)
 
             cell = ScriptWrapper(cell)
@@ -2097,8 +2155,7 @@ class TestDeprecatedJitQuantized(JitTestCase):
                         self.cell = cell
 
                     @torch.jit.script_method
-                    def forward(self, x, hiddens):
-                        # type: (torch.Tensor, torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
+                    def forward(self, x: torch.Tensor, hiddens: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
                         return self.cell(x, hiddens)
 
                 compare_quantized_unquantized(ScriptWrapper, cell)

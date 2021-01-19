@@ -629,6 +629,12 @@ struct AugAssignKind : public TreeView {
       case '*':
       case '/':
       case '%':
+      case '|':
+      case '&':
+      case '^':
+      case TK_POW:
+      case TK_LSHIFT:
+      case TK_RSHIFT:
         return;
       default:
         throw ErrorReport(tree) << "is not a valid AugAssignKind";

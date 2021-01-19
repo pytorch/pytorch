@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import \
     (TestCase, run_tests, make_tensor)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA,
-     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA)
+     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, onlyCPU)
 
 # TODO: remove this
 SIZE = 100
@@ -112,6 +112,26 @@ class TestSortAndSelect(TestCase):
         torch.sort(x, out=(res2val, res2ind), descending=True)
         self.assertIsOrdered('descending', x, res2val, res2ind,
                              'random with NaNs')
+
+    @onlyCPU
+    def test_stable_sort(self, device):
+        # no stable sort for CUDA yet
+        for dtype in (
+            torch.float, torch.double,
+            torch.int8, torch.int16, torch.int32,
+            torch.bool
+        ):
+            for ncopies in (100, 1000, 10000):
+                x = torch.tensor([0, 1] * ncopies, dtype=dtype, device=torch.device(device))
+                _, idx = x.sort(stable=True)
+                self.assertEqual(
+                    idx[:ncopies],
+                    torch.arange(start=0, end=2 * ncopies, step=2, device=torch.device(device))
+                )
+                self.assertEqual(
+                    idx[ncopies:],
+                    torch.arange(start=1, end=2 * ncopies, step=2, device=torch.device(device))
+                )
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_msort(self, device, dtype):
@@ -651,6 +671,17 @@ class TestSortAndSelect(TestCase):
             res1val, res1ind = torch.kthvalue(x, k, keepdim=False)
             self.assertEqual(res1val[:, :], res2val[:, :, k - 1], atol=0, rtol=0)
             self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], atol=0, rtol=0)
+
+    # test overlapping output
+    @dtypes(torch.double)
+    @onlyOnCPUAndCUDA   # Fails on XLA
+    def test_kthvalue_overlap(self, device, dtype):
+        S = 10
+        k = 5
+        a = torch.randn(S)
+        indices = torch.empty((), device=device, dtype=torch.long)
+        with self.assertRaisesRegex(RuntimeError, "unsupported operation:"):
+            torch.kthvalue(a, k, out=(a, indices))
 
     @dtypes(torch.float)
     @onlyOnCPUAndCUDA   # Fails on XLA

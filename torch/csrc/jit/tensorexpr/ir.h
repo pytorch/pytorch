@@ -637,7 +637,7 @@ enum IntrinsicsOp {
   kSigmoid,
   kExp,
   kExpm1,
-  kFabs,
+  kAbs,
   kLog,
   kLog2,
   kLog10,
@@ -716,8 +716,8 @@ class Intrinsics : public CallNode<Intrinsics> {
         return "sigmoid";
       case kExp:
         return "exp";
-      case kFabs:
-        return "fabs";
+      case kAbs:
+        return "abs";
       case kLog:
         return "log";
       case kLog2:

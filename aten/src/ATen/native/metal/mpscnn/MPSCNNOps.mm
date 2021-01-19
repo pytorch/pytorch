@@ -446,7 +446,7 @@ Tensor t(const Tensor& input) {
   MPSImage* X = imageFromTensor(input);
   TORCH_CHECK(X.numberOfImages == 1);
   TORCH_CHECK(X.featureChannels == 1);
-  MetalTensor mt({sizes[1], sizes[0]}, {strides[1], strides[0]});
+  MetalTensor mt({sizes[1], sizes[0]});
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
   mt.texture()->allocateTemporaryTextureStorage(
       {1, 1, sizes[1], sizes[0]}, commandBuffer);
@@ -456,7 +456,6 @@ Tensor t(const Tensor& input) {
   [transpose encodeToCommandBuffer:commandBuffer.buffer
                        sourceImage:X
                   destinationImage:Y];
-
   auto output = MetalTensor::toTensor(std::move(mt), input.options());
   return output;
 }
@@ -608,9 +607,7 @@ Tensor copy_to_host(const Tensor& input) {
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = commandBufferFromInputTensor(input);
   auto&& sizes = [X sizes];
-  auto dummy = at::zeros(input.sizes()).contiguous();
-  auto strides = dummy.strides();
-  MetalTensor mt{sizes, strides.vec()};
+  MetalTensor mt{sizes};
   mt.texture()->setCommandBuffer(commandBuffer);
   mt.texture()->allocateTextureStorage(sizes);
   MPSImage* Y = imageFromMetalTensor(mt);
