@@ -1229,10 +1229,10 @@ class AbstractTestCases:
                         dest.masked_scatter_(mask, src)
 
                         # make src smaller. this should fail
-                        src = torch.randn(num_copy - 1)
+                        src = torch.zeros(num_copy - 1, dtype=dt)
                         with self.assertRaises(RuntimeError):
                             dest.masked_scatter_(mask, src)
-            self.assertEqual(len(w), 20)
+            self.assertEqual(len(w), 27)
 
             warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
             for wi in w:
