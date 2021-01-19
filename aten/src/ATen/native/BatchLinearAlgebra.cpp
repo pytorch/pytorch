@@ -883,12 +883,6 @@ Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
   TORCH_CHECK(result.device() == input.device(),
     "result device ", result.device(), " does not match input device ", input.device());
 
-  // MAGMA doesn't have batched version of cholesky_inverse implemented.
-  // as a workaround we can use cholesky_solve
-  if (input.device().is_cuda() && input.dim() > 2) {
-    auto identity = at::eye(input.size(-1), input.options());
-    return at::cholesky_solve_out(result, identity, input, upper);
-  }
   // Single matrix MAGMA routine requires 'infos' to reside in CPU memory,
   // therefore we create 'infos' only on CPU for now.
   // This should be changed once batched version for CUDA is implemented.
