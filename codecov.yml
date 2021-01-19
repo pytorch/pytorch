@@ -5,15 +5,15 @@ coverage:
         threshold: 1%
 codecov:
   notify:
-    # Code coverage is collected by 5 configs: codecov_test[12], onnx[12] and windows_test1
-    after_n_builds: 5
+    # Code coverage is collected by 6 configs: codecov_test[12], onnx[12] and windows_test[2]
+    after_n_builds: 6
 comment:
   layout: "diff"
   behavior: once
   require_changes: true
   require_base: yes
   require_head: yes
-  after_n_builds: 5
+  after_n_builds: 6
   branches:
     - "master"
 # Disable inline comments that this code is not covered
