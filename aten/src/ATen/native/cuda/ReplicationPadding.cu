@@ -264,11 +264,11 @@ void replication_pad1d_out_cuda_template(
       int64_t size0 = devOutput.size(0);
 
       for (int64_t block_y = 0; block_y < size1; block_y += 65535) {
-        int64_t block_y_size = std::min(size1 - block_y, 65535L);
+        int64_t block_y_size = std::min(size1 - block_y, static_cast<int64_t>(65535));
         for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
-          int64_t block_z_size = std::min(size0 - block_z, 65535L);
+          int64_t block_z_size = std::min(size0 - block_z, static_cast<int64_t>(65535));
 
-          dim3 gridSize(THCCeilDiv(outputPlaneSize, 256L), block_y_size, block_z_size);
+          dim3 gridSize(THCCeilDiv(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
           dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
           replication_pad_forward_kernel1d <<<gridSize, blockSize, 0,
@@ -333,11 +333,11 @@ void replication_pad1d_backward_out_cuda_template(
       int64_t size0 = devGradOutput.size(0);
 
       for (int64_t block_y = 0; block_y < size1; block_y += 65535) {
-        int64_t block_y_size = std::min(size1 - block_y, 65535L);
+        int64_t block_y_size = std::min(size1 - block_y, static_cast<int64_t>(65535));
         for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
-          int64_t block_z_size = std::min(size0 - block_z, 65535L);
+          int64_t block_z_size = std::min(size0 - block_z, static_cast<int64_t>(65535));
 
-          dim3 gridSize(THCCeilDiv(outputPlaneSize, 256L), block_y_size, block_z_size);
+          dim3 gridSize(THCCeilDiv(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
           dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
           replication_pad_backward_kernel <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -417,11 +417,11 @@ void replication_pad2d_out_cuda_template(
       int64_t size0 = devOutput.size(0);
 
       for (int64_t block_y = 0; block_y < size1; block_y += 65535) {
-        int64_t block_y_size = std::min(size1 - block_y, 65535L);
+        int64_t block_y_size = std::min(size1 - block_y, static_cast<int64_t>(65535));
         for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
-          int64_t block_z_size = std::min(size0 - block_z, 65535L);
+          int64_t block_z_size = std::min(size0 - block_z, static_cast<int64_t>(65535));
 
-          dim3 gridSize(THCCeilDiv(outputPlaneSize, 256L), block_y_size, block_z_size);
+          dim3 gridSize(THCCeilDiv(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
           dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
           replication_pad_forward_kernel2d <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -495,11 +495,11 @@ void replication_pad2d_backward_out_cuda_template(
         int64_t size0 = devGradOutput.size(0);
 
         for (int64_t block_y = 0; block_y < size1; block_y += 65535) {
-          int64_t block_y_size = std::min(size1 - block_y, 65535L);
+          int64_t block_y_size = std::min(size1 - block_y, static_cast<int64_t>(65535));
           for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
-            int64_t block_z_size = std::min(size0 - block_z, 65535L);
+            int64_t block_z_size = std::min(size0 - block_z, static_cast<int64_t>(65535));
 
-            dim3 gridSize(THCCeilDiv(outputPlaneSize, 256L), block_y_size, block_z_size);
+            dim3 gridSize(THCCeilDiv(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
             dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
             replication_pad_backward_kernel <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -675,11 +675,11 @@ void replication_pad3d_out_cuda_template(
       int64_t size0 = devOutput.size(0);
 
       for (int64_t block_y = 0; block_y < size1; block_y += 65535) {
-        int64_t block_y_size = std::min(size1 - block_y, 65535L);
+        int64_t block_y_size = std::min(size1 - block_y, static_cast<int64_t>(65535));
         for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
-          int64_t block_z_size = std::min(size0 - block_z, 65535L);
+          int64_t block_z_size = std::min(size0 - block_z, static_cast<int64_t>(65535));
 
-          dim3 gridSize(THCCeilDiv(outputPlaneSize, 256L), block_y_size, block_z_size);
+          dim3 gridSize(THCCeilDiv(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
           dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
           replication_pad_forward_kernel3d <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -742,11 +742,11 @@ void replication_pad3d_backward_out_cuda_template(
       int64_t size0 = devGradOutput.size(0);
 
       for (int64_t block_y = 0; block_y < size1; block_y += 65535) {
-        int64_t block_y_size = std::min(size1 - block_y, 65535L);
+        int64_t block_y_size = std::min(size1 - block_y, static_cast<int64_t>(65535));
         for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
-          int64_t block_z_size = std::min(size0 - block_z, 65535L);
+          int64_t block_z_size = std::min(size0 - block_z, static_cast<int64_t>(65535));
 
-          dim3 gridSize(THCCeilDiv(outputPlaneSize, 256L), block_y_size, block_z_size);
+          dim3 gridSize(THCCeilDiv(outputPlaneSize, static_cast<int64_t>(256)), block_y_size, block_z_size);
           dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
           replication_pad_backward_kernel <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
