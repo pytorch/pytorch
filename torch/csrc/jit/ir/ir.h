@@ -156,11 +156,15 @@ struct OperatorSet;
 // access the same graph
 template <typename T>
 struct Wrap {
-  Wrap(T* p) : elem(p) {}
+  Wrap(T* p) : elem(p), clear_cb(nullptr) {}
   void clear() {
+    if (clear_cb) {
+      clear_cb(elem);
+    }
     elem = nullptr;
   }
   T* elem;
+  void (*clear_cb)(void*);
 };
 
 struct Value {

@@ -54,6 +54,8 @@
 namespace torch {
 namespace jit {
 
+void clear_registered_instances(void* ptr);
+
 IValue toIValue(
     py::handle obj,
     const TypePtr& type,

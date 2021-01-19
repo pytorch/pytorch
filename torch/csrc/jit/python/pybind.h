@@ -34,9 +34,10 @@ class unwrapping_shared_ptr {
   std::shared_ptr<torch::jit::Wrap<T>> impl;
 
  public:
-  unwrapping_shared_ptr() = default;
-  unwrapping_shared_ptr(std::shared_ptr<T> p) : impl(p) {}
-  unwrapping_shared_ptr(T* p) : impl(p->wrap()) {}
+  unwrapping_shared_ptr() : impl({}){};
+  unwrapping_shared_ptr(T* p) : impl(p->wrap()) {
+    impl->clear_cb = &clear_registered_instances;
+  }
   T* get() const {
     if (!impl->elem) {
       throw std::logic_error("has been invalidated");
