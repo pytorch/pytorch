@@ -29,10 +29,16 @@ def name(func: FunctionSchema) -> str:
 
 def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
     if str(t) == 'Tensor?':
-        if mutable:
-            return MutRefCType(BaseCType('Tensor', binds))
+        if local.use_c10_dispatcher() is UseC10Dispatcher.hacky_wrapper_for_legacy_signatures:
+            if mutable:
+                return MutRefCType(BaseCType('Tensor', binds))
+            else:
+                return ConstRefCType(BaseCType('Tensor', binds))
         else:
-            return ConstRefCType(BaseCType('Tensor', binds))
+            if mutable:
+                return MutRefCType(OptionalCType(BaseCType('Tensor', binds)))
+            else:
+                return ConstRefCType(OptionalCType(BaseCType('Tensor', binds)))
     elif str(t) == 'Tensor?[]':
         return BaseCType('const c10::List<c10::optional<Tensor>> &', binds)
     return cpp.argumenttype_type(t, mutable=mutable, binds=binds)
