@@ -3426,7 +3426,8 @@
   variants: function, method
   device_guard: False
 
-- func: slice.Tensor(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
+- func: slice.Tensor(Tensor(a) self, int dim=0, int? start=0, int? end=9223372036854775807, int step=1) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: function, method
   device_guard: False
   dispatch:
@@ -5202,16 +5203,6 @@
     CPU: legacy::cpu::_th_renorm_
     CUDA: legacy::cuda::_th_renorm_
 
-- func: pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
-  variants: method
-  dispatch:
-    CPU, CUDA: pow_
-
-- func: pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
-  variants: method
-  dispatch:
-    CPU, CUDA: pow_
-
 - func: lerp_.Scalar(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
   variants: method
   dispatch:
@@ -6004,18 +5995,6 @@
   dispatch:
     CPU, CUDA: multinomial
 
-- func: _multinomial_alias_setup(Tensor probs) -> (Tensor, Tensor)
-  variants: function
-  dispatch:
-    CPU: legacy::cpu::_th_multinomial_alias_setup
-    CUDA: legacy::cuda::_th_multinomial_alias_setup
-
-- func: _multinomial_alias_draw(Tensor J, Tensor q, int num_samples, *, Generator? generator=None) -> Tensor
-  variants: function
-  dispatch:
-    CPU: legacy::cpu::_th_multinomial_alias_draw
-    CUDA: legacy::cuda::_th_multinomial_alias_draw
-
 - func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
@@ -6327,23 +6306,23 @@
 - func: nanquantile(Tensor self, Tensor q, int? dim=None, bool keepdim=False) -> Tensor
   variants: method, function
 
-- func: sort.values(Tensor self, int dim=-1, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+- func: sort.values(Tensor self, int dim=-1, bool descending=False, bool stable=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: sort_out_cpu
     CUDA: legacy::cuda::_th_sort_out
 
-- func: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
+- func: sort(Tensor self, int dim=-1, bool descending=False, bool stable=False) -> (Tensor values, Tensor indices)
   variants: method, function
   dispatch:
     CPU: sort_cpu
     CUDA: legacy::cuda::_th_sort
     QuantizedCPU: sort_quantized_cpu
 
-- func: sort.dimname_values(Tensor self, Dimname dim, bool descending=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
+- func: sort.dimname_values(Tensor self, Dimname dim, bool descending=False, bool stable=False, *, Tensor(a!) values, Tensor(b!) indices) -> (Tensor(a!) values, Tensor(b!) indices)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
-- func: sort.dimname(Tensor self, Dimname dim, bool descending=False) -> (Tensor values, Tensor indices)
+- func: sort.dimname(Tensor self, Dimname dim, bool descending=False, bool stable=False) -> (Tensor values, Tensor indices)
   variants: method, function
 
 - func: msort.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
@@ -6446,6 +6425,18 @@
   dispatch:
     CPU, CUDA: pow
     SparseCPU, SparseCUDA: pow_sparse_scalar
+
+- func: pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    CPU, CUDA: pow_
+
+- func: pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: method
+  dispatch:
+    CPU, CUDA: pow_
 
 - func: float_power.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
@@ -8903,6 +8894,19 @@
   variants: function, method
   dispatch:
     DefaultBackend: det
+
+- func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
+  python_module: linalg
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_slogdet
+
+- func: linalg_slogdet.out(Tensor self, *, Tensor(a!) sign, Tensor(b!) logabsdet) -> (Tensor(a!) sign, Tensor(b!) logabsdet)
+  python_module: linalg
+  use_c10_dispatcher: full
+  dispatch:
+    CPU, CUDA: linalg_slogdet_out
 
 - func: _syevd_helper(Tensor self, bool compute_eigenvectors, str uplo) -> (Tensor, Tensor)
   variants: function

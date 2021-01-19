@@ -4665,10 +4665,10 @@ logspace(start, end, steps, base=10.0, *, \
          out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 """ + r"""
 
-Creates a one-dimensional tensor of size ``steps`` whose values are evenly
+Creates a one-dimensional tensor of size :attr:`steps` whose values are evenly
 spaced from :math:`{{\text{{base}}}}^{{\text{{start}}}}` to
 :math:`{{\text{{base}}}}^{{\text{{end}}}}`, inclusive, on a logarithmic scale
-with base ``base``. That is, the values are:
+with base :attr:`base`. That is, the values are:
 
 .. math::
     (\text{base}^{\text{start}},
@@ -4678,15 +4678,12 @@ with base ``base``. That is, the values are:
     \text{base}^{\text{end}})
 """ + """
 
-If ``dtype`` is an integral type, ``start`` and ``end`` are cast as integers first and the returned tensor is the floor
-of the returned tensor as if ``dtype`` were a floating-point type.
-
 .. warning::
-    Not providing a value for ``steps`` is deprecated. For backwards
-    compatibility, not providing a value for ``steps`` will create a tensor
+    Not providing a value for :attr:`steps` is deprecated. For backwards
+    compatibility, not providing a value for :attr:`steps` will create a tensor
     with 100 elements. Note that this behavior is not reflected in the
     documented function signature and should not be relied on. In a future
-    PyTorch release, failing to provide a value for ``steps`` will throw a
+    PyTorch release, failing to provide a value for :attr:`steps` will throw a
     runtime error.
 
 Args:
@@ -4708,10 +4705,6 @@ Example::
     tensor([ 1.0000e-10,  1.0000e-05,  1.0000e+00,  1.0000e+05,  1.0000e+10])
     >>> torch.logspace(start=0.1, end=1.0, steps=5)
     tensor([  1.2589,   2.1135,   3.5481,   5.9566,  10.0000])
-    >>> torch.logspace(start=0.0, end=1.0, steps=5)
-    tensor([ 1.0000,  1.7783,  3.1623,  5.6234, 10.0000])
-    >>> torch.logspace(start=0.0, end=1.0, steps=5, dtype=torch.int)
-    tensor([1, 1, 3, 5, 10])
     >>> torch.logspace(start=0.1, end=1.0, steps=1)
     tensor([1.2589])
     >>> torch.logspace(start=2, end=2, steps=1, base=2)
@@ -7741,7 +7734,7 @@ Example::
 
 add_docstr(torch.sort,
            r"""
-sort(input, dim=-1, descending=False, *, out=None) -> (Tensor, LongTensor)
+sort(input, dim=-1, descending=False, stable=False, *, out=None) -> (Tensor, LongTensor)
 
 Sorts the elements of the :attr:`input` tensor along a given dimension
 in ascending order by value.
@@ -7751,14 +7744,21 @@ If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 If :attr:`descending` is ``True`` then the elements are sorted in descending
 order by value.
 
+If :attr:`stable` is ``True`` then the sorting routine becomes stable, preserving
+the order of equivalent elements.
+
 A namedtuple of (values, indices) is returned, where the `values` are the
 sorted values and `indices` are the indices of the elements in the original
 `input` tensor.
+
+.. warning:: `stable=True` only works on the CPU for now.
 
 Args:
     {input}
     dim (int, optional): the dimension to sort along
     descending (bool, optional): controls the sorting order (ascending or descending)
+    stable (bool, optional): makes the sorting routine stable, which guarantees that the order
+       of equivalent elements is preserved.
 
 Keyword args:
     out (tuple, optional): the output tuple of (`Tensor`, `LongTensor`) that can
