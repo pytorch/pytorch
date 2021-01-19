@@ -84,6 +84,8 @@ class WindowsJob:
 
             if is_running_on_cuda:
                 props_dict["executor"] = "windows-with-nvidia-gpu"
+            elif numbered_phase == "test2":
+                props_dict["executor"] = "windows-xlarge-cpu-with-nvidia-cuda"
 
         props_dict["cuda_version"] = (
             miniutils.quote(str(self.cuda_version))

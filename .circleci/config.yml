@@ -8187,6 +8187,7 @@ workflows:
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cpu-py3
           cuda_version: cpu
+          executor: windows-xlarge-cpu-with-nvidia-cuda
           filters:
             branches:
               only:
