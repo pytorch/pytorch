@@ -4,18 +4,32 @@ on:
   pull_request:
 
 jobs:
+  generate-build-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    container:
+      image: python:3.9
+    steps:
+      - name: Clone pytorch/pytorch
+        uses: actions/checkout@v2
+      - id: set-matrix
+        run: |
+          # outputting for debugging purposes
+          python .github/scripts/generate_binary_build_matrix.py
+          MATRIX=$(python .github/scripts/generate_binary_build_matrix.py)
+          echo "::set-output name=matrix::${MATRIX}"
   build-wheel:
+    needs: generate-build-matrix
     runs-on: linux.2xlarge
     strategy:
       matrix:
-        # Perhaps these can be generated with a python script in the future?
-        python_version: ["3.6", "3.7", "3.8", "3.9"]
-        gpu_arch: ["cpu"]
+        ${{ fromJson(needs.generate-build-matrix.outputs.matrix) }}
+    container:
+      image: ${{ matrix.container_image }}
     env:
       DESIRED_PYTHON: ${{ matrix.python_version }}
       DESIRED_CUDA: ${{ matrix.gpu_arch }}
-    container:
-      image: pytorch/manylinux-${{ matrix.gpu_arch }}
     steps:
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
@@ -27,14 +41,22 @@ jobs:
         with:
           repository: pytorch/builder
           path: builder
+      # TODO: Remove this once we remove the need for the directories to be
+      #       in specific locations
       - name: Symlink repositories to root directory (for legacy scripts purposes)
         run: |
           ln -s $(pwd)/pytorch /pytorch
           ln -s $(pwd)/builder /builder
-      - name: Build PyTorch binary (GPU specific)
-        if: ${{ matrix.gpu_arch != 'cpu' }}
+      # TODO: Bundle the correct build script in the base container image so
+      #       that we don't have to do this type of specification
+      - name: Build PyTorch binary (CUDA specific)
+        if: ${{ matrix.gpu_arch_type == 'cuda' }}
         run: |
           /builder/manywheel/build.sh
+      - name: Build PyTorch binary (ROCM specific)
+        if: ${{ matrix.gpu_arch_type == 'rocm' }}
+        run: |
+          /builder/manywheel/build_rocm.sh
       - name: Build PyTorch binary (CPU specific)
         if: ${{ matrix.gpu_arch == 'cpu' }}
         run: |
