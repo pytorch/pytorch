@@ -1063,6 +1063,7 @@ inline c10::ArrayRef<IValue> IValue::toListRef() const {
       ->list;
 }
 inline c10::Dict<IValue, IValue> IValue::toGenericDict() && {
+  std::cout << "tagkind: " << tagKind() << std::endl;
   AT_ASSERT(isGenericDict(), "Expected GenericDict but got ", tagKind());
   return c10::Dict<IValue, IValue>(moveToIntrusivePtr<c10::detail::DictImpl>());
 }

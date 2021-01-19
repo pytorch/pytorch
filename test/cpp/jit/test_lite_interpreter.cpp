@@ -508,8 +508,18 @@ TEST(LiteInterpreterTest, SequentialModuleInfo) {
 
   std::stringstream ss;
   c._save_for_mobile(ss, {}, true);
-  mobile::Module bc = _load_for_mobile(ss);
-
+//  mobile::Module bc = _load_for_mobile(ss);
+//  mobile::Module bc = _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/example_debug.ptl");
+//  mobile::Module bc = _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/example_debug.ptl");
+  mobile::Module bc = _load_for_mobile("/Users/chenlai/Documents/pytorch/data/data/detection.m");
+  auto rawMetadata = bc.get_method("get_metadata")({});
+//  std::string basename = "get_metadata";
+//  for (auto& fn : mcu.methods()) {
+//    std::cout << "fn->name(): " << fn->name() << std::endl;
+//    if (fn->name() == basename) {
+//      std::cout << "find basename: " << basename << std::endl;
+//    }
+//  }
   std::unordered_set<std::string> module_debug_info_set;
   size_t pc = 0;
   while (true) {
