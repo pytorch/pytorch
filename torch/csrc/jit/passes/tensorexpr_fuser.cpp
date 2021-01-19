@@ -113,7 +113,7 @@ bool isSupported(Node* node) {
       "aten::fmod.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::fmod.Tensor(Tensor self, Tensor other) -> Tensor",
       "aten::cos(Tensor self) -> Tensor",
-      "aten::sin(Tensor self, *, ScalarType? dtype=None) -> Tensor",
+      "aten::sin(Tensor self) -> Tensor",
       "aten::tan(Tensor self) -> Tensor",
       "aten::acos(Tensor self) -> Tensor",
       "aten::asin(Tensor self) -> Tensor",

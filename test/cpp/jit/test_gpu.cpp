@@ -2606,11 +2606,6 @@ TEST(NVFuserTest, FusionUnaryOps_CUDA) {
   using OpTuple =
       std::tuple<at::Tensor (*)(const at::Tensor&), UnaryOpType, std::string>;
 
-  using OpWithDTypeTuple = std::tuple<
-      at::Tensor (*)(const at::Tensor&, c10::optional<c10::ScalarType>),
-      UnaryOpType,
-      std::string>;
-
   // [Note: explicit tuple type for uniform initialization list]
   // Tuple type must be explicitly specified for each uniform initialization
   // list within the vector to make this code compatible with some old env
@@ -2643,14 +2638,12 @@ TEST(NVFuserTest, FusionUnaryOps_CUDA) {
       OpTuple{at::round, UnaryOpType::Round, "round"},
       OpTuple{at::rsqrt, UnaryOpType::Rsqrt, "rsqrt"},
       OpTuple{at::sigmoid, UnaryOpType::Sigmoid, "sigmoid"},
+      OpTuple{at::sin, UnaryOpType::Sin, "sin"},
       OpTuple{at::sinh, UnaryOpType::Sinh, "sinh"},
       OpTuple{at::sqrt, UnaryOpType::Sqrt, "sqrt"},
       OpTuple{at::tan, UnaryOpType::Tan, "tan"},
       OpTuple{at::tanh, UnaryOpType::Tanh, "tanh"},
       OpTuple{at::trunc, UnaryOpType::Trunc, "trunc"}};
-
-  std::vector<OpWithDTypeTuple> ops_with_dtype{
-      OpWithDTypeTuple{at::sin, UnaryOpType::Sin, "sin"}};
 
   std::for_each(ops.begin(), ops.end(), [](OpTuple& op) {
     test_op(
@@ -2667,25 +2660,6 @@ TEST(NVFuserTest, FusionUnaryOps_CUDA) {
         /*Inputs Tuple*/
         std::make_tuple(std::make_pair(ValType::TensorView, DataType::Float)));
   });
-
-  std::for_each(
-      ops_with_dtype.begin(), ops_with_dtype.end(), [](OpWithDTypeTuple& op) {
-        test_op(
-            /*blocks*/ 640,
-            /*threads*/ 64,
-            /*name*/ std::get<2>(op),
-            /*Aten Func   */
-            [&op](std::array<IValue, 1>& vals) {
-              return std::get<0>(op)(vals[0].toTensor(), c10::nullopt);
-            },
-            /*JIT  Func   */
-            [&op](Val* in1) -> Val* { return unaryOp(std::get<1>(op), in1); },
-            /*Output      */
-            std::make_pair(ValType::TensorView, DataType::Float),
-            /*Inputs Tuple*/
-            std::make_tuple(
-                std::make_pair(ValType::TensorView, DataType::Float)));
-      });
 
   test_op(
       /*blocks*/ 128,
@@ -2707,13 +2681,12 @@ TEST(NVFuserTest, FusionBinaryOps_CUDA) {
   using OpTuple = std::tuple<AtenFuncSig, BinaryOpType, std::string>;
 
   // see [Note: explicit tuple type for uniform initialization list]
-  std::vector<OpTuple> logic_ops{
-      OpTuple{at::eq, BinaryOpType::Eq, "eq"},
-      OpTuple{at::ge, BinaryOpType::GE, "ge"},
-      OpTuple{at::gt, BinaryOpType::GT, "gt"},
-      OpTuple{at::le, BinaryOpType::LE, "le"},
-      OpTuple{at::lt, BinaryOpType::LT, "lt"},
-      OpTuple{at::ne, BinaryOpType::NE, "ne"}};
+  std::vector<OpTuple> logic_ops{OpTuple{at::eq, BinaryOpType::Eq, "eq"},
+                                 OpTuple{at::ge, BinaryOpType::GE, "ge"},
+                                 OpTuple{at::gt, BinaryOpType::GT, "gt"},
+                                 OpTuple{at::le, BinaryOpType::LE, "le"},
+                                 OpTuple{at::lt, BinaryOpType::LT, "lt"},
+                                 OpTuple{at::ne, BinaryOpType::NE, "ne"}};
 
   std::for_each(logic_ops.begin(), logic_ops.end(), [](OpTuple& op) {
     test_op(
@@ -4211,14 +4184,13 @@ TEST(NVFuserTest, FusionSoftmax1DNormalized_CUDA) {
   sub_tv3->computeAt(sum_exp_rf_tv9, -1);
   sub_tv3_copy->computeAt(output_tv7, -1);
 
-  TensorView* tensors_to_parallelize[] = {
-      max_val_tv1,
-      bcast_max_tv2,
-      sum_exp_tv5,
-      bcast_sum_tv6,
-      output_tv7,
-      max_val_rf_tv8,
-      sum_exp_rf_tv9};
+  TensorView* tensors_to_parallelize[] = {max_val_tv1,
+                                          bcast_max_tv2,
+                                          sum_exp_tv5,
+                                          bcast_sum_tv6,
+                                          output_tv7,
+                                          max_val_rf_tv8,
+                                          sum_exp_rf_tv9};
 
   for (auto tv : tensors_to_parallelize) {
     tv->axis(-1)->parallelize(ParallelType::TIDx);
@@ -4346,14 +4318,13 @@ TEST(NVFuserTest, FusionSoftmax3DNormalized_CUDA) {
   sub_tv3->computeAt(sum_exp_rf_tv9, -1);
   sub_tv3_copy->computeAt(output_tv7, -1);
 
-  TensorView* tensors_to_parallelize[] = {
-      max_val_tv1,
-      bcast_max_tv2,
-      sum_exp_tv5,
-      bcast_sum_tv6,
-      output_tv7,
-      max_val_rf_tv8,
-      sum_exp_rf_tv9};
+  TensorView* tensors_to_parallelize[] = {max_val_tv1,
+                                          bcast_max_tv2,
+                                          sum_exp_tv5,
+                                          bcast_sum_tv6,
+                                          output_tv7,
+                                          max_val_rf_tv8,
+                                          sum_exp_rf_tv9};
 
   for (auto tv : tensors_to_parallelize) {
     tv->axis(0)->parallelize(ParallelType::BIDx);
@@ -5960,16 +5931,15 @@ TEST(NVFuserTest, FusionSmemDynamicPersistentSoftmax2D_CUDA) {
   cache_x->setMemoryType(MemoryType::Shared);
   exp->setMemoryType(MemoryType::Shared);
 
-  std::vector<TensorView*> all_tensors(
-      {x,
-       cache_x,
-       max_val,
-       bcast_max,
-       x_max_sub,
-       exp,
-       sum_exp,
-       bcast_sum,
-       softmax});
+  std::vector<TensorView*> all_tensors({x,
+                                        cache_x,
+                                        max_val,
+                                        bcast_max,
+                                        x_max_sub,
+                                        exp,
+                                        sum_exp,
+                                        bcast_sum,
+                                        softmax});
 
   auto tidx = new Int();
   fusion.addInput(tidx);
@@ -6198,27 +6168,25 @@ TEST(NVFuserTest, FusionPersistentBatchNormLocalShared_CUDA) {
   std::vector<TensorView*> common_tensors(
       {x_sum, x_sum_bcast, x_mean, var_sum, var_sum_bcast, var, var_eps, rvar});
 
-  std::vector<TensorView*> static_tensors(
-      {sx,
-       sx_cache,
-       sx_sum,
-       sx_mean_sub,
-       sx_mean_sub_pow,
-       sx_var_sum,
-       sx_norm,
-       sx_norm_gamma,
-       sx_norm_gamma_beta});
+  std::vector<TensorView*> static_tensors({sx,
+                                           sx_cache,
+                                           sx_sum,
+                                           sx_mean_sub,
+                                           sx_mean_sub_pow,
+                                           sx_var_sum,
+                                           sx_norm,
+                                           sx_norm_gamma,
+                                           sx_norm_gamma_beta});
 
-  std::vector<TensorView*> dynamic_tensors(
-      {dx,
-       dx_cache,
-       dx_sum,
-       dx_mean_sub,
-       dx_mean_sub_pow,
-       dx_var_sum,
-       dx_norm,
-       dx_norm_gamma,
-       dx_norm_gamma_beta});
+  std::vector<TensorView*> dynamic_tensors({dx,
+                                            dx_cache,
+                                            dx_sum,
+                                            dx_mean_sub,
+                                            dx_mean_sub_pow,
+                                            dx_var_sum,
+                                            dx_norm,
+                                            dx_norm_gamma,
+                                            dx_norm_gamma_beta});
 
   std::vector<TensorView*> all_tensors;
   all_tensors.insert(
@@ -6341,21 +6309,20 @@ TEST(NVFuserTest, FusionSmemDynamicPersistentBatchNorm_CUDA) {
   cache_x->setMemoryType(MemoryType::Shared);
   x_mean_sub->setMemoryType(MemoryType::Shared);
 
-  std::vector<TensorView*> all_tensors(
-      {x_sum,
-       x_mean,
-       cache_x,
-       x_sum_bcast,
-       x_mean_sub,
-       x_mean_sub_pow,
-       var_sum,
-       var_sum_bcast,
-       var,
-       var_eps,
-       rvar,
-       norm,
-       norm_gamma,
-       norm_gamma_beta});
+  std::vector<TensorView*> all_tensors({x_sum,
+                                        x_mean,
+                                        cache_x,
+                                        x_sum_bcast,
+                                        x_mean_sub,
+                                        x_mean_sub_pow,
+                                        var_sum,
+                                        var_sum_bcast,
+                                        var,
+                                        var_eps,
+                                        rvar,
+                                        norm,
+                                        norm_gamma,
+                                        norm_gamma_beta});
 
   auto tidx = new Int();
   fusion.addInput(tidx);

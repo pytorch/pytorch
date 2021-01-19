@@ -971,11 +971,11 @@
 - name: sgn(Tensor self) -> Tensor
   self: sgn_backward(result, grad, self)
 
-- name: sin(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.to(self.dtype()) * self.cos().conj()
+- name: sin(Tensor self) -> Tensor
+  self: grad * self.cos().conj()
 
-- name: sin_(Tensor(a!) self) -> Tensor(a!)
-  self: (grad * self.cos().conj())
+- name: sin.dtype(Tensor self, *, ScalarType dtype) -> Tensor
+  self: grad.to(self.dtype()) * self.cos().conj()
 
 - name: sinc(Tensor self) -> Tensor
   self: grad * ((M_PI * self * (M_PI * self).cos() - (M_PI * self).sin()) / (M_PI * self * self)).conj()
