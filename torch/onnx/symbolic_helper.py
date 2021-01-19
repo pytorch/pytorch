@@ -136,7 +136,7 @@ def parse_args(*arg_descriptors):
                 sig = inspect.signature(fn)
                 arg_names = list(sig.parameters.keys())[1:]
                 fn_name = fn.__name__
-            except:
+            except Exception:
                 arg_names = [None] * len(args)
                 fn_name = None
             args = [_parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore
