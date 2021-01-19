@@ -66,6 +66,7 @@ class AliasInfo(object):
     """
 
     def __init__(self, alias_name):
+        self.name = alias_name
         self.op = _getattr_qual(torch, alias_name)
         self.method_variant = getattr(torch.Tensor, alias_name, None)
         self.inplace_variant = getattr(torch.Tensor, alias_name + "_", None)
@@ -167,6 +168,7 @@ class OpInfo(object):
         else:
             self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes
         self.supports_sparse = supports_sparse
+
         self.aliases = []
         if aliases is not None:
             self.aliases = [AliasInfo(a) for a in aliases]

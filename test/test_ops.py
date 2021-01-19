@@ -345,6 +345,9 @@ class TestCommon(JitCommonTestCase):
 
     @ops([op for op in op_db if op.aliases])
     def test_aliases_consistency_eager(self, device, dtype, op):
+        # Currently, there is a code duplication based on
+        # test_variant_consistency_eager to check forward only results.
+        # To refactor those methods later.
         samples = op.sample_inputs(device, dtype, requires_grad=False)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
@@ -380,7 +383,9 @@ class TestCommon(JitCommonTestCase):
 
     @ops([op for op in op_db if op.aliases])
     def test_aliases_consistency_jit(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        # Currently, there is a code duplication based on test_variant_consistency_jit
+        # To refactor those methods later.
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
 
@@ -397,6 +402,8 @@ class TestCommon(JitCommonTestCase):
                     if variant is None:
                         continue
 
+                    name = variant.__name__
+
                     # run with disable_autodiff_subgraph_inlining(True) to test
                     #   autodiff support. Context manager forces the graph to contain
                     #   DifferentiableGraph nodes if they are present
@@ -405,28 +412,28 @@ class TestCommon(JitCommonTestCase):
                             output = func(*inputs, **kwargs)
                             return op.output_func(output)
 
-                            # bfloat16 grad doesn't work for some operators
-                            dtypes_to_grad_check = floating_and_complex_types_and(torch.half) \
-                                if op.skip_bfloat16_grad else floating_and_complex_types_and(torch.half, torch.bfloat16)
+                        # bfloat16 grad doesn't work for some operators
+                        dtypes_to_grad_check = floating_and_complex_types_and(torch.half) \
+                            if op.skip_bfloat16_grad else floating_and_complex_types_and(torch.half, torch.bfloat16)
 
-                            # Check scripted forward, grad, and grad grad
-                            script_fn = create_script_fn(self, name, func_type, op.output_func)
+                        # Check scripted forward, grad, and grad grad
+                        script_fn = create_script_fn(self, name, func_type, op.output_func)
 
-                            check_against_reference(self,
-                                                    script_fn,
-                                                    fn,
-                                                    (*sample.input,) + sample.args,
-                                                    sample.kwargs,
-                                                    no_grad=(dtype not in dtypes_to_grad_check))
+                        check_against_reference(self,
+                                                script_fn,
+                                                fn,
+                                                (*sample.input,) + sample.args,
+                                                sample.kwargs,
+                                                no_grad=(dtype not in dtypes_to_grad_check))
 
-                            # Check traced forward, grad, and grad grad
-                            traced_fn = create_traced_fn(self, variant)
-                            check_against_reference(self,
-                                                    traced_fn,
-                                                    fn,
-                                                    (*sample.input,) + sample.args,
-                                                    sample.kwargs,
-                                                    no_grad=(dtype not in dtypes_to_grad_check))
+                        # Check traced forward, grad, and grad grad
+                        traced_fn = create_traced_fn(self, variant)
+                        check_against_reference(self,
+                                                traced_fn,
+                                                fn,
+                                                (*sample.input,) + sample.args,
+                                                sample.kwargs,
+                                                no_grad=(dtype not in dtypes_to_grad_check))
 
 
 instantiate_device_type_tests(TestOpInfo, globals())
