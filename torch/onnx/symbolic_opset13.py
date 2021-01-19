@@ -108,3 +108,22 @@ def unbind(g, self, dim=0, _outputs=None):
 def glu(g, input, dim):
     first, second = g.op('Split', input, dim, outputs=2)
     return g.op('Mul', first, g.op('Sigmoid', second))
+
+@parse_args('v', 'i', 'i', 'i')
+def unsafe_chunk(g, self, chunks, dim, _outputs=None):
+    if _outputs is None:
+        return g.op("SplitToSequence",
+                    self,
+                    g.op("Constant", value_t=torch.tensor(1, dtype=torch.long)),
+                    axis_i=dim, keepdims_i=0)
+
+    size = sym_help._get_tensor_dim_size(self, dim)
+    if size is None:
+        return sym_help._unimplemented('unsafe_chunk', 'unknown dimension size')
+
+    split_size = (size + chunks - 1) // chunks
+    splits = [split_size] * (size // split_size)
+    leftover = size % split_size
+    if leftover:
+        splits.append(leftover)
+    return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
