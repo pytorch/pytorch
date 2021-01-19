@@ -4375,14 +4375,35 @@ class TestTorchDeviceType(TestCase):
         test_func(self, device, 'method inplace')
 
     def test_index_fill(self, device):
+        def _verify_against_expected(x, idx, val, expected):
+            x.index_fill_(1, idx, val)
+            self.assertEqual(x, expected)
+
         for dt in torch.testing.get_all_dtypes():
             if dt == torch.half or dt == torch.bfloat16 or dt.is_complex:
                 continue
 
-            x = torch.tensor([[1, 2], [4, 5]], dtype=dt, device=device)
+            val = 0
             index = torch.tensor([0], device=device)
-            x.index_fill_(1, index, 0)
-            self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dt, device=device))
+            index_non_contig = torch.tensor([[0, 1], [1, 0]], device=device)[:, 0]
+            self.assertTrue(not index_non_contig.is_contiguous())
+
+            expected_contig_idx = torch.tensor([[0, 2], [0, 5]], dtype=dt, device=device)
+            expected_non_contig_idx = torch.tensor([[0, 0, 3], [0, 0, 6]], dtype=dt, device=device)
+
+            x = torch.tensor([[1, 2], [4, 5]], dtype=dt, device=device)
+            _verify_against_expected(x, index, val, expected_contig_idx)
+
+            x = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=dt, device=device)
+            _verify_against_expected(x, index_non_contig, val, expected_non_contig_idx)
+
+            x_non_contig = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=dt, device=device)[:, :2]
+            self.assertTrue(not x_non_contig.is_contiguous())
+            _verify_against_expected(x_non_contig, index, val, expected_contig_idx)
+
+            x_non_contig = torch.tensor([[1, 2, 3, 4], [4, 5, 6, 7]], dtype=dt, device=device)[:, :3]
+            self.assertTrue(not x_non_contig.is_contiguous())
+            _verify_against_expected(x_non_contig, index_non_contig, val, expected_non_contig_idx)
 
             # Verify `index` should be a LongTensor
             if dt != torch.long:
@@ -4391,7 +4412,6 @@ class TestTorchDeviceType(TestCase):
 
             # Test for path when x is a vector
             x = torch.tensor(range(0, 100), dtype=dt, device=device)
-            x_noncontig = x.clone()[::2]
             index = torch.tensor(range(3, 30, 2), device=device)
             expected = list(range(0, 100))
             val = 3
@@ -4400,6 +4420,7 @@ class TestTorchDeviceType(TestCase):
             x.index_fill_(0, index, val)
             self.assertEqual(x, torch.tensor(expected, dtype=dt, device=device))
 
+            x_noncontig = x.clone()[::2]
             expected_noncontig = list(range(0, 100, 2))
             val = 10
             for idx in range(3, 30, 2):
