@@ -411,7 +411,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
     output_shape = MakeDeConvOutputShape<kSpatialDim>(
         N,
         M,
-        {H, W},
+        kSpatialDim == 2 ? std::vector<int64_t>{H, W} : std::vector<int64_t>{D, H, W},
         kernel,
         stride(),
         padding(),
@@ -886,6 +886,9 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   // transpose
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose1d"),  QConv1dInt8<false>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d"),  QConvInt8<2, false>::run);
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::conv_transpose3d"),
+      QConvInt8<3, false>::run);
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {

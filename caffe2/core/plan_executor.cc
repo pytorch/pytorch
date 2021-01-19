@@ -133,8 +133,8 @@ std::function<bool(int64_t)> getContinuationTest(
 // if the blob doesn't exist or is not initialized, return false
 inline bool getShouldStop(const Blob* b) {
   if (!b ||
-      b->meta().id() ==
-          TypeIdentifier::uninitialized()) { // not exist or uninitialized
+      b->meta() ==
+          ScalarType::Undefined) { // not exist or uninitialized
     return false;
   }
 

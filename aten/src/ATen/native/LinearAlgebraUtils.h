@@ -7,6 +7,7 @@
 #include <limits>
 #include <sstream>
 #include <cstring>
+#include <cctype>
 
 namespace at { namespace native {
 
@@ -76,7 +77,7 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, c
               " but each b matrix is ", self.size(-2), " by ", self.size(-1));
 }
 
-// Validates input shapes for operations on batches of square matrices (inverse, cholesky, symeig)
+// Validates input shapes for operations on batches of square matrices (inverse, cholesky, symeig, eig)
 static inline void squareCheckInputs(const Tensor& self) {
   TORCH_CHECK(self.dim() >= 2, "Tensor of matrices must have at least 2 dimensions. ");
   TORCH_CHECK(self.size(-1) == self.size(-2),
@@ -97,7 +98,7 @@ static inline void batchCheckErrors(std::vector<int64_t>& infos, const char* nam
     } else if (info > 0) {
       if (strstr(name, "svd")) {
         AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
-      } else if (strstr(name, "symeig")) {
+      } else if (strstr(name, "symeig") || strstr(name, "syevd")) {
         AT_ERROR(name, ": For batch ", i, ": the algorithm failed to converge; ", info,
                  " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
       } else if (!allow_singular) {
@@ -134,7 +135,7 @@ static inline void singleCheckErrors(int64_t info, const char* name, bool allow_
   } else if (info > 0) {
     if (strstr(name, "svd")) {
       AT_ERROR(name, ": the updating process of SBDSDC did not converge (error: ", info, ")");
-    } else if (strstr(name, "symeig")) {
+    } else if (strstr(name, "eig")) { // this catches both "eig" and "symeig"
       AT_ERROR(name, ": the algorithm failed to converge; ", info,
                " off-diagonal elements of an intermediate tridiagonal form did not converge to zero.");
     } else if (!allow_singular) {
@@ -191,16 +192,36 @@ static inline Tensor _move_to_end(const Tensor& self, IntArrayRef axes) {
   return self.permute(perm);
 }
 
+// parse the "mode" param in linalg_qr: return a tuple of bools (compute_q, reduced)
+static inline std::tuple<bool, bool> _parse_qr_mode(std::string mode) {
+  bool compute_q;
+  bool reduced;
+  if (mode == "reduced") {
+    compute_q = true;
+    reduced = true;
+  } else if (mode == "complete") {
+    compute_q = true;
+    reduced = false;
+  } else if (mode == "r") {
+    compute_q = false;
+    reduced = true; // this is actually irrelevant in this mode
+  } else {
+      TORCH_CHECK(false, "qr received unrecognized mode '", mode,
+                  "' but expected one of 'reduced' (default), 'r', or 'complete'");
+  }
+  return std::make_tuple(compute_q, reduced);
+}
+
 // Function to compute sizes, strides and the extra columns for the Q matrix in the QR Decomposition
 static inline std::tuple<std::vector<int64_t>,
                          std::vector<int64_t>,
-                         int64_t> _compute_geometry_for_Q(const Tensor& input, bool some) {
+                         int64_t> _compute_geometry_for_Q(const Tensor& input, bool reduced) {
   int64_t m = input.size(-2), n = input.size(-1);
   int64_t n_columns_q;
 
-  // We need to compute the required size of Q based on the `some` option
+  // We need to compute the required size of Q based on the `reduced` option
   auto q_sizes = input.sizes().vec();
-  if (!some && m > n) {
+  if (!reduced && m > n) {
     q_sizes[input.dim() - 1] = m;
     n_columns_q = m;
   } else {
@@ -241,18 +262,21 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
     U_empty = at::empty_strided(sizes, strides, input.options().device(at::kCPU));
   }
 
+  // VT should be a column-major or a batch of column-major matrices
   sizes[input.dim() - 2] = n;
   sizes[input.dim() - 1] = n;
-  // VT should be a row-major or a batch of row-major matrices
+  strides = at::detail::defaultStrides(sizes);
+  strides[input.dim() - 1] = n;
+  strides[input.dim() - 2] = 1;
   Tensor VT_empty;
   if (!input.is_cuda()) {
-    VT_empty = at::empty(sizes, input.options());
+    VT_empty = at::empty_strided(sizes, strides, input.options());
   } else {
     // NB: VT_empty is an empty tensor created on the CPU intentionally, because magma_(d/s)gesdd
     // (which is the driver routine for the divide and conquer SVD operation)
     // takes in arrays on the CPU as input. This routine is a hybrid CPU-GPU routine that
     // moves the inputs between devices internally.
-    VT_empty = at::empty(sizes, input.options().device(at::kCPU));
+    VT_empty = at::empty_strided(sizes, strides, input.options().device(at::kCPU));
   }
 
   sizes.pop_back();
@@ -331,6 +355,15 @@ static inline int64_t computeLRWorkDim(const char jobz, int64_t m, int64_t n) {
     return 5 * mn * mn + 5 * mn;
   }
   return std::max(5 * mn * mn + 5 * mn, 2 * mx * mn + 2 * mn * mn + mn);
+}
+
+// This function checks whether the uplo argument input is valid
+// Allowed strings are "u", "U", "l", "L"
+static inline void checkUplo(const std::string& uplo) {
+  // To use std::toupper safely with plain chars (or signed chars), the argument should first be converted to unsigned char
+  char uplo_uppercase = static_cast<char>(std::toupper(static_cast<unsigned char>(uplo[0])));
+  TORCH_CHECK(uplo.size() == 1 && (uplo_uppercase == 'U' || uplo_uppercase == 'L'),
+    "Expected UPLO argument to be 'L' or 'U', but got ", uplo);
 }
 
 }}  // namespace at::native

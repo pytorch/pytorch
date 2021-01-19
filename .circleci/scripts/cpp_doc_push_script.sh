@@ -88,7 +88,7 @@ git status
 git config user.email "soumith+bot@pytorch.org"
 git config user.name "pytorchbot"
 # If there aren't changes, don't make a commit; push is no-op
-git commit -m "Automatic sync on $(date)" || true
+git commit -m "Generate C++ docs from pytorch/pytorch@$CIRCLE_SHA1" || true
 git status
 
 popd

@@ -106,11 +106,8 @@ Tensor group_norm(
       input.sizes());
 
   const auto input_shape = input.sizes();
-  const int64_t HxW = std::accumulate(
-      input_shape.cbegin() + 2,
-      input_shape.cend(),
-      1LL,
-      std::multiplies<int64_t>());
+  const int64_t HxW =
+      prod_intlist(input_shape.cbegin() + 2, input_shape.cend());
 
   const Tensor kEmpty;
   const auto& X = input.is_contiguous() ? input : input.contiguous();
@@ -125,6 +122,7 @@ Tensor group_norm(
 DEFINE_DISPATCH(GroupNormKernel);
 DEFINE_DISPATCH(GroupNormBackwardKernel);
 
+// Ported from pytorch/xla repo
 std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
     const at::Tensor& input,
     const at::Tensor& weight,

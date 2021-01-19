@@ -13,10 +13,6 @@ template <int kSpatialDim>
 std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
     kSpatialDim>::unpack() {
   auto* packed_weights_p = w.get();
-  TORCH_CHECK(
-      !(kSpatialDim != 2 && transpose()),
-      "FBGEMM does not support 3d unpack right "
-      "now.");
   // output channels
   const int output_channels = packed_weights_p->outputChannels();
   const int input_channels = packed_weights_p->inputChannels();
@@ -91,7 +87,7 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
   if(transpose()){
     unpacked_weights =
         at::native::fbgemm_utils::TransposeConvTensorUnpackConversion<
-            2>(unpacked_weights, groups);
+            kSpatialDim>(unpacked_weights, groups);
   }
   return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
       unpacked_weights, bias);
@@ -276,6 +272,7 @@ TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
   // ConvTranspose is the same, however, we want to have different name.
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose1d_unpack"), TORCH_FN(QConv1dUnpackWeightsInt8::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d_unpack"), TORCH_FN(QConvUnpackWeightsInt8<2>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_unpack"), TORCH_FN(QConvUnpackWeightsInt8<3>::run));
 
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d_stride"), TORCH_FN(QConvStride<2>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d_padding"), TORCH_FN(QConvPadding<2>::run));
@@ -283,6 +280,12 @@ TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d_dilation"), TORCH_FN(QConvDilation<2>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d_groups"), TORCH_FN(QConvGroups<2>::run));
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d_transpose"), TORCH_FN(QConvTranspose<2>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_stride"), TORCH_FN(QConvStride<3>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_padding"), TORCH_FN(QConvPadding<3>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_output_padding"), TORCH_FN(QConvOutputPadding<3>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_dilation"), TORCH_FN(QConvDilation<3>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_groups"), TORCH_FN(QConvGroups<3>::run));
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose3d_transpose"), TORCH_FN(QConvTranspose<3>::run));
 }
 
 } // namespace

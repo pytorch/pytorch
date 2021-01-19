@@ -1,16 +1,17 @@
 """Timer class based on the timeit.Timer class, but torch aware."""
-
+import enum
 import timeit
 import textwrap
-from typing import Any, Callable, Dict, List, NoReturn, Optional
+from typing import Any, Callable, Dict, List, NoReturn, Optional, Type, Union
 
 import numpy as np
 import torch
-from torch.utils.benchmark.utils import common
+from torch.utils.benchmark.utils import common, cpp_jit
+from torch.utils.benchmark.utils._stubs import TimerClass, TimeitModuleType
 from torch.utils.benchmark.utils.valgrind_wrapper import timer_interface as valgrind_timer_interface
 
 
-__all__ = ["Timer", "timer"]
+__all__ = ["Timer", "timer", "Language"]
 
 
 if torch.has_cuda and torch.cuda.is_available():
@@ -21,8 +22,51 @@ else:
     timer = timeit.default_timer
 
 
+class Language(enum.Enum):
+    PYTHON = 0
+    CPP = 1
+
+
+class CPPTimer:
+    def __init__(
+        self,
+        stmt: str,
+        setup: str,
+        timer: Callable[[], float],
+        globals: Dict[str, Any],
+    ) -> None:
+        if timer is not timeit.default_timer:
+            raise NotImplementedError(
+                "PyTorch was built with CUDA and a GPU is present; however "
+                "Timer does not yet support GPU measurements. If your "
+                "code is CPU only, pass `timer=timeit.default_timer` to the "
+                "Timer's constructor to indicate this. (Note that this will "
+                "produce incorrect results if the GPU is in fact used, as "
+                "Timer will not synchronize CUDA.)"
+            )
+
+        if globals:
+            raise ValueError("C++ timing does not support globals.")
+
+        self._stmt: str = textwrap.dedent(stmt)
+        self._setup: str = textwrap.dedent(setup)
+        self._timeit_module: Optional[TimeitModuleType] = None
+
+    def timeit(self, number: int) -> float:
+        if self._timeit_module is None:
+            self._timeit_module = cpp_jit.compile_timeit_template(
+                self._stmt,
+                self._setup,
+            )
+
+        return self._timeit_module.timeit(number)
+
+
 class Timer(object):
     """Helper class for measuring execution time of PyTorch statements.
+
+    For a full tutorial on how to use this class, see:
+    https://pytorch.org/tutorials/recipes/recipes/benchmark.html
 
     The PyTorch Timer is based on `timeit.Timer` (and in fact uses
     `timeit.Timer` internally), but with several key differences:
@@ -54,11 +98,19 @@ class Timer(object):
         In addition to wall times, Timer can run a statement under Callgrind
         and report instructions executed.
 
-    Arguments:
-        Directly analogous to `timeit.Timer` constructor arguments:
-        -----------------------------------------------------------------------
+    Directly analogous to `timeit.Timer` constructor arguments:
+
+        `stmt`, `setup`, `timer`, `globals`
+
+    PyTorch Timer specific constructor arguments:
+
+        `label`, `sub_label`, `description`, `env`, `num_threads`
+
+    Args:
         stmt: Code snippet to be run in a loop and timed.
+
         setup: Optional setup code. Used to define variables used in `stmt`
+
         timer:
             Callable which returns the current time. If PyTorch was built
             without CUDA or there is no GPU present, this defaults to
@@ -70,11 +122,9 @@ class Timer(object):
             executed. This is the other method for providing variables which
             `stmt` needs.
 
-        PyTorch Timer specific constructor arguments:
-        -----------------------------------------------------------------------
         label:
             String which summarizes `stmt`. For instance, if `stmt` is
-              "torch.nn.functional.relu(torch.add(x, 1, out=out))"
+            "torch.nn.functional.relu(torch.add(x, 1, out=out))"
             one might set label to "ReLU(x + 1)" to improve readability.
 
         sub_label:
@@ -82,20 +132,22 @@ class Timer(object):
             with identical stmt or label. For instance, in our example
             above sub_label might be "float" or "int", so that it is easy
             to differentiate:
-                "ReLU(x + 1): (float)"
-                "ReLU(x + 1): (int)"
+            "ReLU(x + 1): (float)"
+
+            "ReLU(x + 1): (int)"
             when printing Measurements or summarizing using `Compare`.
 
         description:
             String to distinguish measurements with identical label and
             sub_label. The principal use of `description` is to signal to
             `Compare` the columns of data. For instance one might set it
-            based on the input size  to create a table of the form:
+            based on the input size  to create a table of the form: ::
 
-                                    | n=1 | n=4 | ...
-                                    ------------- ...
-            ReLU(x + 1): (float)    | ... | ... | ...
-            ReLU(x + 1): (int)      | ... | ... | ...
+                                        | n=1 | n=4 | ...
+                                        ------------- ...
+                ReLU(x + 1): (float)    | ... | ... | ...
+                ReLU(x + 1): (int)      | ... | ... | ...
+
 
             using `Compare`. It is also included when printing a Measurement.
 
@@ -114,7 +166,7 @@ class Timer(object):
             threadpool size which tries to utilize all cores.
     """
 
-    _timer_cls = timeit.Timer
+    _timer_cls: Type[TimerClass] = timeit.Timer
 
     def __init__(
         self,
@@ -127,21 +179,32 @@ class Timer(object):
         description: Optional[str] = None,
         env: Optional[str] = None,
         num_threads: int = 1,
+        language: Union[Language, str] = Language.PYTHON,
     ):
         if not isinstance(stmt, str):
             raise ValueError("Currently only a `str` stmt is supported.")
 
-        # We copy `globals` to prevent mutations from leaking, (for instance,
-        # `eval` adds the `__builtins__` key) and include `torch` if not
-        # specified as a convenience feature.
-        globals = dict(globals or {})
-        globals.setdefault("torch", torch)
-        self._globals = globals
+        # We copy `globals` to prevent mutations from leaking.
+        # (For instance, `eval` adds the `__builtins__` key)
+        self._globals = dict(globals or {})
+        if language in (Language.PYTHON, "py", "python"):
+            # Include `torch` if not specified as a convenience feature.
+            self._globals.setdefault("torch", torch)
+            self._language: Language = Language.PYTHON
+
+        elif language in (Language.CPP, "cpp", "c++"):
+            assert self._timer_cls is timeit.Timer, "_timer_cls has already been swapped."
+            self._timer_cls = CPPTimer
+            setup = ("" if setup == "pass" else setup)
+            self._language = Language.CPP
+
+        else:
+            raise ValueError(f"Invalid language `{language}`.")
 
         # Convenience adjustment so that multi-line code snippets defined in
-        # functions do not IndentationError inside timeit.Timer. The leading
-        # newline removal is for the initial newline that appears when defining
-        # block strings. For instance:
+        # functions do not IndentationError (Python) or look odd (C++). The
+        # leading newline removal is for the initial newline that appears when
+        # defining block strings. For instance:
         #   textwrap.dedent("""
         #     print("This is a stmt")
         #   """)
@@ -150,15 +213,15 @@ class Timer(object):
         # Stripping this down to 'print("This is a stmt")' doesn't change
         # what gets executed, but it makes __repr__'s nicer.
         stmt = textwrap.dedent(stmt)
-        stmt = (stmt[1:] if stmt[0] == "\n" else stmt).rstrip()
+        stmt = (stmt[1:] if stmt and stmt[0] == "\n" else stmt).rstrip()
         setup = textwrap.dedent(setup)
-        setup = (setup[1:] if setup[0] == "\n" else setup).rstrip()
+        setup = (setup[1:] if setup and setup[0] == "\n" else setup).rstrip()
 
         self._timer = self._timer_cls(
             stmt=stmt,
             setup=setup,
             timer=timer,
-            globals=valgrind_timer_interface.CopyIfCallgrind.unwrap_all(globals),
+            globals=valgrind_timer_interface.CopyIfCallgrind.unwrap_all(self._globals),
         )
         self._task_spec = common.TaskSpec(
             stmt=stmt,
@@ -269,23 +332,24 @@ class Timer(object):
     ) -> common.Measurement:
         """Measure many replicates while keeping timer overhead to a minimum.
 
-        At a high level, blocked_autorange executes the following pseudo-code:
-        ```
-        `setup`
+        At a high level, blocked_autorange executes the following pseudo-code::
 
-        total_time = 0
-        while total_time < min_run_time
-            start = timer()
-            for _ in range(block_size):
-                `stmt`
-            total_time += (timer() - start)
-        ```
+            `setup`
+
+            total_time = 0
+            while total_time < min_run_time
+                start = timer()
+                for _ in range(block_size):
+                    `stmt`
+                total_time += (timer() - start)
 
         Note the variable `block_size` in the inner loop. The choice of block
         size is important to measurement quality, and must balance two
         competing objectives:
+
             1) A small block size results in more replicates and generally
                better statistics.
+
             2) A large block size better amortizes the cost of `timer`
                invocation, and results in a less biased measurement. This is
                important because CUDA syncronization time is non-trivial
@@ -364,8 +428,11 @@ class Timer(object):
         # simpler and quicker to raise an exception for a faulty `stmt` or `setup` in
         # the parent process rather than the valgrind subprocess.
         self._timer.timeit(1)
+        is_python = (self._language == Language.PYTHON)
+        assert is_python or not self._globals
         return valgrind_timer_interface.wrapper_singleton().collect_callgrind(
             task_spec=self._task_spec,
             globals=self._globals,
             number=number,
-            collect_baseline=collect_baseline)
+            collect_baseline=collect_baseline and is_python,
+            is_python=is_python)

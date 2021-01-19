@@ -1,7 +1,11 @@
 #pragma once
 
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/function.h>
+#include <ATen/core/ivalue.h>
+#include <c10/util/Exception.h>
+#include <c10/util/intrusive_ptr.h>
+#include <functional>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -35,7 +39,9 @@ struct BuiltinOpFunction : public Function {
     callable_(stack);
   }
 
-  c10::intrusive_ptr<c10::ivalue::Future> runAsync(Stack& stack) override {
+  c10::intrusive_ptr<c10::ivalue::Future> runAsync(
+      Stack& stack,
+      TaskLauncher /* not used */) override {
     run(stack);
     auto res = c10::make_intrusive<c10::ivalue::Future>(stack.front().type());
     res->markCompleted(std::move(stack.front()));
@@ -99,8 +105,17 @@ struct BuiltinOpFunction : public Function {
   }
 
   std::string pretty_print_schema() const override {
+    #ifdef __NVCC__
+    // Disable the "statement is unreachable" warning
+    #pragma diag_suppress code_is_unreachable
+    #endif
+
     TORCH_INTERNAL_ASSERT(false);
     return "";
+
+    #ifdef __NVCC__
+    #pragma diag_default code_is_unreachable
+    #endif
   }
 
   Function& setSchema(c10::FunctionSchema schema) override {

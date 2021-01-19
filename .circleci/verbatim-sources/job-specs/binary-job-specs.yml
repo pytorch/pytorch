@@ -174,7 +174,7 @@
 
     - run:
         name: Build
-        no_output_timeout: "1h"
+        no_output_timeout: "90m"
         command: |
           # Do not set -u here; there is some problem with CircleCI
           # variable expansion with PROMPT_COMMAND

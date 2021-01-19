@@ -10,6 +10,7 @@ from torch.quantization import (
     PlaceholderObserver,
     NoopObserver,
     FakeQuantize,
+    FixedQParamsFakeQuantize,
     default_debug_qconfig,
     default_observer,
     default_per_channel_weight_observer,
@@ -482,6 +483,43 @@ class TestObserver(QuantizationTestCase):
             # Verify that state_dict matches exactly with original one.
             self.assertEqual(scripted.state_dict(), scripted_2.state_dict())
 
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_observer_qparams_respects_device_affinity(self):
+        """
+        Ensure that the scale and zero_point returned by the observer
+        are on the same device as the input tensor.
+        """
+        observerList = [MinMaxObserver(),
+                        MovingAverageMinMaxObserver(),
+                        PerChannelMinMaxObserver(),
+                        MovingAveragePerChannelMinMaxObserver()]
+        for obs in observerList:
+            device = torch.device('cuda:1')
+            x = torch.randn(1, 2, device=device)
+            obs.to(device)
+            result = obs(x)
+            scale, zero_point = obs.calculate_qparams()
+
+            self.assertEqual(x.device, scale.device)
+            self.assertEqual(x.device, zero_point.device)
+
+    def test_zero_numel(self):
+        obs_list = [MinMaxObserver, MovingAverageMinMaxObserver,
+                    PerChannelMinMaxObserver,
+                    MovingAveragePerChannelMinMaxObserver, HistogramObserver,
+                    FakeQuantize, FixedQParamsFakeQuantize]
+        for obs_cls in obs_list:
+            if obs_cls is FixedQParamsFakeQuantize:
+                obs = obs_cls(0.1, 0)
+            else:
+                obs = obs_cls()
+            x = torch.Tensor()
+            # verify no crash
+            x = obs(x)
+
+
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
     def __init__(self, *args, **kwargs):
@@ -736,7 +774,7 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         self.assertEqual(myobs.max_val, 8.0)
         self.assertEqual(myobs.histogram, [2., 3., 3.])
 
-    @given(N=st.sampled_from([10, 1000, 10**6]),
+    @given(N=st.sampled_from([10, 1000]),
            bins=st.sampled_from([256, 512, 1024, 2048]),
            dtype=st.sampled_from([torch.qint8, torch.quint8]),
            qscheme=st.sampled_from([torch.per_tensor_affine, torch.per_tensor_symmetric]),

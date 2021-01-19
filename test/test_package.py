@@ -1,12 +1,14 @@
-from unittest import main, skipIf
-from torch.testing._internal.common_utils import TestCase, IS_WINDOWS
+from unittest import skipIf
+from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
 from tempfile import NamedTemporaryFile
 from torch.package import PackageExporter, PackageImporter
+from torch.package._mangling import PackageMangler, demangle, is_mangled, get_mangle_prefix
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import torch
 from sys import version_info
 from io import StringIO
+import pickle
 
 try:
     from torchvision.models import resnet18
@@ -119,7 +121,9 @@ b = resources.load_binary('main', 'main_binary')
     def test_extern(self):
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as he:
-            he.extern_modules(['package_a.subpackage', 'module_a'])
+            he.extern(['package_a.subpackage', 'module_a'])
+            he.require_module('package_a.subpackage')
+            he.require_module('module_a')
             he.save_module('package_a')
         hi = PackageImporter(filename)
         import package_a.subpackage
@@ -133,12 +137,139 @@ b = resources.load_binary('main', 'main_binary')
         self.assertIsNot(package_a, package_a_im)
         self.assertIs(package_a.subpackage, package_a_im.subpackage)
 
+    def test_extern_glob(self):
+        filename = self.temp()
+        with PackageExporter(filename, verbose=False) as he:
+            he.extern(['package_a.*', 'module_*'])
+            he.save_module('package_a')
+            he.save_source_string('test_module', """\
+import package_a.subpackage
+import module_a
+""")
+        hi = PackageImporter(filename)
+        import package_a.subpackage
+        import module_a
+
+        module_a_im = hi.import_module('module_a')
+        hi.import_module('package_a.subpackage')
+        package_a_im = hi.import_module('package_a')
+
+        self.assertIs(module_a, module_a_im)
+        self.assertIsNot(package_a, package_a_im)
+        self.assertIs(package_a.subpackage, package_a_im.subpackage)
+
+    def test_save_imported_module_fails(self):
+        """
+        Directly saving/requiring an PackageImported module should raise a specific error message.
+        """
+        import package_a.subpackage
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+        f1 = self.temp()
+        with PackageExporter(f1, verbose=False) as pe:
+            pe.save_pickle("obj", "obj.pkl", obj)
+
+        importer1 = PackageImporter(f1)
+        loaded1 = importer1.load_pickle("obj", "obj.pkl")
+
+        f2 = self.temp()
+        pe = PackageExporter(f2, verbose=False)
+        pe.importers.insert(0, importer1.import_module)
+        with self.assertRaisesRegex(ModuleNotFoundError, 'torch.package'):
+            pe.require_module(loaded1.__module__)
+        with self.assertRaisesRegex(ModuleNotFoundError, 'torch.package'):
+            pe.save_module(loaded1.__module__)
+
+    def test_exporting_mismatched_code(self):
+        """
+        If an object with the same qualified name is loaded from different
+        packages, the user should get an error if they try to re-save the
+        object with the wrong package's source code.
+        """
+        import package_a.subpackage
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+        f1 = self.temp()
+        with PackageExporter(f1, verbose=False) as pe:
+            pe.save_pickle("obj", "obj.pkl", obj2)
+
+        importer1 = PackageImporter(f1)
+        loaded1 = importer1.load_pickle("obj", "obj.pkl")
+        importer2 = PackageImporter(f1)
+        loaded2 = importer2.load_pickle("obj", "obj.pkl")
+
+        f2 = self.temp()
+
+        def make_exporter():
+            pe = PackageExporter(f2, verbose=False)
+            # Ensure that the importer finds the 'PackageAObject' defined in 'importer1' first.
+            pe.importers.insert(0, importer1.import_module)
+            return pe
+
+        # This should fail. The 'PackageAObject' type defined from 'importer1'
+        # is not necessarily the same 'obj2's version of 'PackageAObject'.
+        pe = make_exporter()
+        with self.assertRaises(pickle.PicklingError):
+            pe.save_pickle("obj", "obj.pkl", obj2)
+
+        # This should also fail. The 'PackageAObject' type defined from 'importer1'
+        # is not necessarily the same as the one defined from 'importer2'
+        pe = make_exporter()
+        with self.assertRaises(pickle.PicklingError):
+            pe.save_pickle("obj", "obj.pkl", loaded2)
+
+        # This should succeed. The 'PackageAObject' type defined from
+        # 'importer1' is a match for the one used by loaded1.
+        pe = make_exporter()
+        pe.save_pickle("obj", "obj.pkl", loaded1)
+
+    def test_unique_module_names(self):
+        import package_a.subpackage
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+        f1 = self.temp()
+        with PackageExporter(f1, verbose=False) as pe:
+            pe.save_pickle("obj", "obj.pkl", obj2)
+
+        importer1 = PackageImporter(f1)
+        loaded1 = importer1.load_pickle("obj", "obj.pkl")
+        importer2 = PackageImporter(f1)
+        loaded2 = importer2.load_pickle("obj", "obj.pkl")
+
+        # Modules from loaded packages should not shadow the names of modules.
+        # See mangling.md for more info.
+        self.assertNotEqual(type(obj2).__module__, type(loaded1).__module__)
+        self.assertNotEqual(type(loaded1).__module__, type(loaded2).__module__)
+
     @skipIf(version_info < (3, 7), 'mock uses __getattr__ a 3.7 feature')
     def test_mock(self):
         filename = self.temp()
         with PackageExporter(filename, verbose=False) as he:
-            he.mock_modules(['package_a.subpackage', 'module_a'])
+            he.mock(['package_a.subpackage', 'module_a'])
             he.save_module('package_a')
+            he.require_module('package_a.subpackage')
+            he.require_module('module_a')
+        hi = PackageImporter(filename)
+        import package_a.subpackage
+        _ = package_a.subpackage
+        import module_a
+        _ = module_a
+
+        m = hi.import_module('package_a.subpackage')
+        r = m.result
+        with self.assertRaisesRegex(NotImplementedError, 'was mocked out'):
+            r()
+
+    @skipIf(version_info < (3, 7), 'mock uses __getattr__ a 3.7 feature')
+    def test_mock_glob(self):
+        filename = self.temp()
+        with PackageExporter(filename, verbose=False) as he:
+            he.mock(['package_a.*', 'module*'])
+            he.save_module('package_a')
+            he.save_source_string('test_module', """\
+import package_a.subpackage
+import module_a
+""")
         hi = PackageImporter(filename)
         import package_a.subpackage
         _ = package_a.subpackage
@@ -157,7 +288,7 @@ b = resources.load_binary('main', 'main_binary')
         class Custom(PackageExporter):
             def require_module(self, name, dependencies):
                 if name == 'module_a':
-                    self.mock_module('module_a')
+                    self.save_mock_module('module_a')
                 elif name == 'package_a':
                     self.save_source_string('package_a', 'import module_a\nresult = 5\n')
                 else:
@@ -311,5 +442,115 @@ def load():
 
         self.assertTrue(torch.allclose(*results))
 
+    @skipIfNoTorchVision
+    def test_script_resnet(self):
+        resnet = resnet18()
+
+        f1 = self.temp()
+        # Option 1: save by pickling the whole model
+        # + single-line, similar to torch.jit.save
+        # - more difficult to edit the code after the model is created
+        with PackageExporter(f1, verbose=False) as e:
+            e.save_pickle('model', 'pickled', resnet)
+
+        i = PackageImporter(f1)
+        loaded = i.load_pickle('model', 'pickled')
+        torch.jit.script(loaded)
+
+
+    def test_module_glob(self):
+        from torch.package.exporter import _GlobGroup
+
+        def check(include, exclude, should_match, should_not_match):
+            x = _GlobGroup(include, exclude)
+            for e in should_match:
+                self.assertTrue(x.matches(e))
+            for e in should_not_match:
+                self.assertFalse(x.matches(e))
+
+        check('torch.*', [], ['torch.foo', 'torch.bar'], ['tor.foo', 'torch.foo.bar', 'torch'])
+        check('torch.**', [], ['torch.foo', 'torch.bar', 'torch.foo.bar', 'torch'], ['what.torch', 'torchvision'])
+        check('torch.*.foo', [], ['torch.w.foo'], ['torch.hi.bar.baz'])
+        check('torch.**.foo', [], ['torch.w.foo', 'torch.hi.bar.foo'], ['torch.f.foo.z'])
+        check('torch*', [], ['torch', 'torchvision'], ['torch.f'])
+        check('torch.**', ['torch.**.foo'], ['torch', 'torch.bar', 'torch.barfoo'], ['torch.foo', 'torch.some.foo'])
+        check('**.torch', [], ['torch', 'bar.torch'], ['visiontorch'])
+
+    @skipIf(version_info < (3, 7), 'mock uses __getattr__ a 3.7 feature')
+    def test_pickle_mocked(self):
+        import package_a.subpackage
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+
+        filename = self.temp()
+        with PackageExporter(filename, verbose=False) as he:
+            he.mock(include='package_a.subpackage')
+            he.save_pickle('obj', 'obj.pkl', obj2)
+
+        hi = PackageImporter(filename)
+        with self.assertRaises(NotImplementedError):
+            hi.load_pickle('obj', 'obj.pkl')
+
+
+class ManglingTest(TestCase):
+    def test_unique_manglers(self):
+        """
+        Each mangler instance should generate a unique mangled name for a given input.
+        """
+        a = PackageMangler()
+        b = PackageMangler()
+        self.assertNotEqual(a.mangle("foo.bar"), b.mangle("foo.bar"))
+
+    def test_mangler_is_consistent(self):
+        """
+        Mangling the same name twice should produce the same result.
+        """
+        a = PackageMangler()
+        self.assertEqual(a.mangle("abc.def"), a.mangle("abc.def"))
+
+    def test_roundtrip_mangling(self):
+        a = PackageMangler()
+        self.assertEqual("foo", demangle(a.mangle("foo")))
+
+    def test_is_mangled(self):
+        a = PackageMangler()
+        b = PackageMangler()
+        self.assertTrue(is_mangled(a.mangle("foo.bar")))
+        self.assertTrue(is_mangled(b.mangle("foo.bar")))
+
+        self.assertFalse(is_mangled("foo.bar"))
+        self.assertFalse(is_mangled(demangle(a.mangle("foo.bar"))))
+
+    def test_demangler_multiple_manglers(self):
+        """
+        PackageDemangler should be able to demangle name generated by any PackageMangler.
+        """
+        a = PackageMangler()
+        b = PackageMangler()
+
+        self.assertEqual("foo.bar", demangle(a.mangle("foo.bar")))
+        self.assertEqual("bar.foo", demangle(b.mangle("bar.foo")))
+
+    def test_mangle_empty_errors(self):
+        a = PackageMangler()
+        with self.assertRaises(AssertionError):
+            a.mangle("")
+
+    def test_demangle_base(self):
+        """
+        Demangling a mangle parent directly should currently return an empty string.
+        """
+        a = PackageMangler()
+        mangled = a.mangle("foo")
+        mangle_parent = mangled.partition(".")[0]
+        self.assertEqual("", demangle(mangle_parent))
+
+    def test_mangle_prefix(self):
+        a = PackageMangler()
+        mangled = a.mangle("foo.bar")
+        mangle_prefix = get_mangle_prefix(mangled)
+        self.assertEqual(mangle_prefix + "." + "foo.bar", mangled)
+
+
 if __name__ == '__main__':
-    main()
+    run_tests()

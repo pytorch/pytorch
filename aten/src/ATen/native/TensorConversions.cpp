@@ -29,10 +29,15 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
     return self;
   }
 
+  bool pin_out = (non_blocking && self.is_cuda() && options.device().is_cpu() &&
+                  (options.layout() == c10::kStrided));
+
   if (memory_format == MemoryFormat::Preserve) {
     if (self.is_non_overlapping_and_dense()) {
       // Copy all strides
-      auto r = at::empty_strided(self.sizes(), self.strides(), options.memory_format(c10::nullopt));
+      auto r = at::empty_strided(self.sizes(),
+                                 self.strides(),
+                                 options.memory_format(c10::nullopt).pinned_memory(pin_out));
       r.copy_(self, non_blocking);
       return r;
     } else {
@@ -40,7 +45,9 @@ static inline Tensor to_impl(const Tensor& self, const TensorOptions& options, b
     }
   }
   // See Note [Explicit nullopt MemoryFormat argument]
-  auto r = at::empty(self.sizes(), options.memory_format(memory_format), c10::nullopt);
+  auto r = at::empty(self.sizes(),
+                     options.memory_format(memory_format).pinned_memory(pin_out),
+                     c10::nullopt);
   r.copy_(self, non_blocking);
   return r;
 }
@@ -56,7 +63,7 @@ Tensor to(
     !(options_.has_memory_format() && optional_memory_format.has_value()),
     "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
     "the redundant setter.");
-  auto options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
+  auto options = options_.merge_memory_format(optional_memory_format);
 
   TORCH_CHECK(options.requires_grad_opt() == c10::nullopt,
            "to(options) expects unset requires_grad flag, but got "
@@ -99,7 +106,7 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
     auto input = input_.coalesce();
     return grad.sparse_mask(input);
   } else if (input_.layout() == c10::kMkldnn) {
-    return grad.to_mkldnn();
+    return grad.to_mkldnn(input_.scalar_type());
   } else {
     AT_ERROR("Unsupported input layout: ", input_.layout());
   }
@@ -107,7 +114,23 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
 
 Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
   AT_ASSERT(input_.layout() == c10::kStrided);
-  return grad.to_dense();
+  return grad.to_dense(input_.scalar_type());
+}
+
+Tensor view_dtype(const Tensor& self, ScalarType dtype) {
+  if (self.scalar_type() == dtype) {
+    return self;
+  }
+  auto type_meta = c10::scalarTypeToTypeMeta(dtype);
+  TORCH_CHECK(self.element_size() == type_meta.itemsize(),
+    "Viewing a tensor as a new dtype with a different number of bytes per element is not supported.");
+  Storage storage = self.storage();
+  auto new_tensor = detail::make_tensor<TensorImpl>(
+      std::move(storage), self.key_set(), type_meta);
+  auto* impl = new_tensor.unsafeGetTensorImpl();
+  impl->set_storage_offset(self.storage_offset());
+  impl->set_sizes_and_strides(self.sizes(), self.strides());
+  return new_tensor;
 }
 
 }} // namespace at::native

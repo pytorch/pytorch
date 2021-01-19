@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/serialization/export.h>
+
 #include <torch/csrc/autograd/symbolic.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
@@ -137,12 +138,13 @@ std::string GetFileRootPath(const std::string& rootPath) {
   return folder;
 }
 
-std::string GetExternalFileName(const c10::optional<std::string> external_ref) {
+std::string GetExternalFileName(
+    const c10::optional<std::string>& external_ref) {
   auto tensorName = external_ref.value();
   const std::string illegalChars = "\\/:?\"<>|";
-  for (int i = 0; i < tensorName.size(); i++) {
-    if (illegalChars.find(tensorName[i]) != std::string::npos) {
-      tensorName[i] = '_';
+  for (char& i : tensorName) {
+    if (illegalChars.find(i) != std::string::npos) {
+      i = '_';
     }
   }
   return tensorName;
@@ -160,7 +162,7 @@ void CreateExternalFile(
   std::string fullFilePath = folder + "/" + tensorName;
   std::unique_ptr<FILE, decltype(&CloseFile)> fp(
       fopen(fullFilePath.c_str(), "wb"), &CloseFile);
-  if (fp == NULL) {
+  if (fp == nullptr) {
     throw std::runtime_error(
         std::string("ONNX export failed. Could not open file or directory: ") +
         fullFilePath);
@@ -216,6 +218,14 @@ class EncoderBase {
                   std::unordered_map<int64_t, std::string>>(),
       bool keep_initializers_as_inputs = true,
       bool add_node_names = true,
+      bool use_external_data_format = false,
+      const std::string& onnx_file_path = std::string());
+
+  void AddInitializersIntoGraphProto(
+      onnx::GraphProto* graph_proto,
+      const Block* block,
+      const std::map<std::string, at::Tensor>& initializers =
+          std::map<std::string, at::Tensor>(),
       bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
@@ -322,7 +332,7 @@ void EncoderBase::EncodeValueInfo(
   std::string name = n->debugName();
   v->set_name(name);
   auto tensorTypeToONNXType = [&dynamic_axes, &name, this](
-                                  TensorTypePtr t,
+                                  const TensorTypePtr& t,
                                   onnx::TypeProto_Tensor* tensor_type) {
     if (t->dim()) {
       onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
@@ -551,14 +561,33 @@ void EncoderBase::EncodeBlock(
           onnx_file_path);
     }
   }
+  AddInitializersIntoGraphProto(
+      graph_proto,
+      block,
+      initializers,
+      use_external_data_format,
+      onnx_file_path);
+}
+
+void EncoderBase::AddInitializersIntoGraphProto(
+    onnx::GraphProto* graph_proto,
+    const Block* block,
+    const std::map<std::string, at::Tensor>& initializers,
+    bool use_external_data_format,
+    const std::string& onnx_file_path) {
   AT_ASSERT(block->inputs().size() >= initializers.size());
-  for (auto& name_tensor_pair : initializers) {
+
+  for (auto input : block->inputs()) {
+    auto name_tensor_pair = initializers.find(input->debugName());
+    if (name_tensor_pair == initializers.end()) {
+      continue;
+    }
     auto p = graph_proto->add_initializer();
-    p->set_name(name_tensor_pair.first);
+    p->set_name(name_tensor_pair->first);
     EncodeTensor(
         p,
-        name_tensor_pair.second,
-        name_tensor_pair.first,
+        name_tensor_pair->second,
+        name_tensor_pair->first,
         use_external_data_format,
         onnx_file_path);
   }

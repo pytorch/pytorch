@@ -10,7 +10,7 @@ namespace jit {
 namespace te = torch::jit::tensorexpr;
 namespace F = torch::nn::functional;
 
-void testConv2D() {
+TEST(Conv, Conv2D) {
   te::KernelScope kernel_scope;
 
   // Input dimensions.
@@ -75,9 +75,10 @@ void testConv2D() {
 
   at::Tensor result = at::empty_like(ref);
   te::SimpleIREvaluator cg(s, {inputB, filterB, conv});
-  cg.call({input.data_ptr<float>(),
-           filter.data_ptr<float>(),
-           result.data_ptr<float>()});
+  cg.call(
+      {input.data_ptr<float>(),
+       filter.data_ptr<float>(),
+       result.data_ptr<float>()});
 
   ASSERT_TRUE(at::allclose(ref, result, 1e-3, 1e-3));
 }

@@ -21,6 +21,7 @@ static constexpr char TupleOpen = '(';
 static constexpr char TupleClose = ')';
 static constexpr char Variable = 'v';
 static constexpr char String = 's';
+static constexpr char NoneType = 'n';
 } // namespace D
 
 namespace {
@@ -62,11 +63,13 @@ void flatten_rec(PyObject* obj, ParsedArgs& args) {
     args.vars.push_back(var);
     args.desc.metadata.emplace_back(var);
     args.desc.structure.push_back(D::Variable);
+  } else if (strcmp(THPUtils_typename(obj), "NoneType") == 0) {
+    args.desc.structure.push_back(D::NoneType);
   } else {
     std::string msg =
-        "Only tuples, lists and Variables supported as JIT inputs/outputs. "
-        "Dictionaries and strings are also accepted but their usage is not "
-        "recommended. But got unsupported type ";
+        "Only tuples, lists and Variables are supported as JIT inputs/outputs. "
+        "Dictionaries and strings are also accepted, but their usage is not "
+        "recommended. Here, received an input of unsupported type: ";
     msg += THPUtils_typename(obj);
     throw std::runtime_error(msg);
   }
@@ -97,7 +100,7 @@ py::object cast_dict(std::vector<py::object> objs) {
   py::dict sequence = {};
   for (size_t i = 0; i < num_objs; ++i) {
     py::tuple obj = py::reinterpret_borrow<py::tuple>(objs[i]);
-    sequence[obj[0]] = std::move(obj[1]);
+    sequence[obj[0]] = obj[1];
   }
   return std::move(sequence);
 }
@@ -136,6 +139,8 @@ py::object unflatten_rec(
       throw std::runtime_error("Not enough Variables given to unflatten");
     auto str = *str_it++;
     return py::reinterpret_borrow<py::object>(THPUtils_packString(str));
+  } else if (type == D::NoneType) {
+    return py::reinterpret_borrow<py::object>(py::none());
   } else {
     if (var_it == var_it_end)
       throw std::runtime_error("Not enough Variables given to unflatten");
