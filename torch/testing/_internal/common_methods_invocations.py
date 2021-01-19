@@ -1518,6 +1518,7 @@ if TEST_SCIPY:
                dtypes=all_types_and_complex(),
                test_inplace_grad=False,
                supports_tensor_out=False,
+               # Reference: https://github.com/pytorch/pytorch/issues/50381
                test_complex_grad=False,
                sample_inputs_func=sample_inputs_trace,
                skips=(
