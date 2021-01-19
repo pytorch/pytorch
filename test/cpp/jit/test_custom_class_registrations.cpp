@@ -232,8 +232,8 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("combine", &Foo::combine);
 
   m.class_<FooGetterSetter>("_FooGetterSetter")
-    .def(torch::init<int64_t, int64_t>())
-    .def_property("x", &FooGetterSetter::getX, &FooGetterSetter::setX);
+      .def(torch::init<int64_t, int64_t>())
+      .def_property("x", &FooGetterSetter::getX, &FooGetterSetter::setX);
 
   m.class_<LambdaInit>("_LambdaInit")
       .def(torch::init([](int64_t x, int64_t y, bool swap) {

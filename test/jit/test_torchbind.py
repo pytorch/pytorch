@@ -133,12 +133,14 @@ class TestTorchbind(JitTestCase):
     def test_torchbind_def_property(self):
         def foo():
             fooGetterSetter = torch.classes._TorchScriptTesting._FooGetterSetter(5, 6)
-            return fooGetterSetter
+            old = fooGetterSetter.x
+            fooGetterSetter.x = old + 4
+            new = fooGetterSetter.x
+            return fooGetterSetter, old, new
         scripted = torch.jit.script(foo)
-        out = scripted()
-        old = out.x
-        out.x = 7
-        self.assertEqual(out.x, 7)
+        out, old, new = scripted()
+        self.assertEqual(old, 5)
+        self.assertEqual(new, 9)
 
     def test_torchbind_take_instance_as_method_arg(self):
         def foo():
