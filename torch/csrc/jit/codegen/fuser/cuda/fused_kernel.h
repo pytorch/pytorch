@@ -17,12 +17,17 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+TORCH_CUDA_API void getMajorMinor(
+    const cudaDeviceProp* const prop,
+    int& major,
+    int& minor);
+
 // A class holding metadata for an actual CUDA function.
 // Note: CUDA functions are per device.
 struct TORCH_CUDA_API FusedKernelCUDA
     : public ::torch::jit::fuser::FusedKernel {
   FusedKernelCUDA(
-      int16_t device,
+      at::DeviceIndex device,
       std::string name,
       std::string code,
       std::vector<TensorDesc> input_desc,
@@ -45,7 +50,7 @@ struct TORCH_CUDA_API FusedKernelCUDA
 
   // Note: per device to store device properties and compute launch heuristics
   //  Acquiring these values at launch time would be too slow
-  int16_t device_;
+  at::DeviceIndex device_;
   int maxBlocks_;
   cudaDeviceProp* prop_;
   std::vector<char> ptx_;

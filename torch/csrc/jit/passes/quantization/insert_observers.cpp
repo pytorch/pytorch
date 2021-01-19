@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
+
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -164,6 +165,14 @@ class ModuleCloneHelper {
       for (auto& fn : type->methods()) {
         clone_method(module, r, *fn, module_qconfig_map, type_remap);
       }
+      // Execute __setstate__(__getstate__()) to initialize custom class
+      // members.
+      if (auto setstate_method = r.find_method("__setstate__")) {
+        auto getstate_method = r.find_method("__getstate__");
+        TORCH_INTERNAL_ASSERT(getstate_method, "expect __getstate__");
+        auto state = (*getstate_method)(Stack{});
+        (*setstate_method)(Stack{state});
+      }
     }
     return r;
   }
@@ -188,7 +197,7 @@ class ModuleCloneHelper {
     }
     for (Node* node : block->nodes()) {
       // remapping type for module instance
-      if (node->kind() == prim::CallMethod) {
+      if (node->kind() == prim::CallMethod || node->kind() == prim::GetAttr) {
         Value* instance = node->inputs()[0];
         auto child_opt = getInvokedModuleOpt(source, node, self);
         if (child_opt.has_value()) {
@@ -386,7 +395,17 @@ class InsertObserversHelper {
   // are observed
   bool shouldObserve(
       Node* n,
-      const std::unordered_set<Value*>& block_observed_values) {
+      const std::unordered_set<Value*>& block_observed_values,
+      QuantType quant_type) {
+    // Check whether node output uses can be quantized, eg cat followed by
+    // linear op
+    for (Value* v : n->outputs()) {
+      for (const auto& use : v->uses()) {
+        if (useQuantizable(use, quant_type)) {
+          return true;
+        }
+      }
+    }
     if (isPropagateQuantSingleInputOp(n)) {
       return isObserved(n->input(0), block_observed_values);
     } else if (isPropagateQuantBinaryOp(n)) {
@@ -1520,7 +1539,8 @@ InsertObserversHelper::insertObserversFor(
           // If the node is one of the propagate quant node, e.g.
           // aten::cat, we should observe its output only
           // if the input of the node is observed
-          if (observer_opt && shouldObserve(n, block_observed_values)) {
+          if (observer_opt &&
+              shouldObserve(n, block_observed_values, quant_type_)) {
             recordObserved(
                 v, *observer_opt, values_to_observe, block_observed_values);
           }

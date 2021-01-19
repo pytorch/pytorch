@@ -1,6 +1,8 @@
+#include <c10/util/Optional.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
+#include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <torch/library.h>
 
 #include <algorithm>
@@ -29,23 +31,22 @@ namespace {
 
 std::string stringSlice(
     std::string string,
-    int64_t start,
-    int64_t end,
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
     int64_t step) {
-  TORCH_CHECK(step == 1, "Slicing a string only supports step=1");
+  int64_t start_val = start.has_value() ? start.value() : INT64_MAX;
+  int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
 
-  const int64_t size = string.size();
+  const int64_t num_vals =
+      slice_indices_adjust(string.size(), &start_val, &end_val, step);
 
-  // Clamp start and end to the bounds of the list
-  start = std::max(int64_t(0), normalizeIndex(start, size));
-  end = std::min(size, normalizeIndex(end, size));
-
-  if (end <= start) {
-    // Slice is empty
-    return std::string("");
+  int64_t i = start_val;
+  std::string result = "";
+  for (int64_t j = 0; j < num_vals; j++) {
+    result += string[i];
+    i += step;
   }
 
-  std::string result(string.begin() + start, string.begin() + end);
   return result;
 }
 
@@ -98,6 +99,88 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::cpu(Tensor(a) self) -> Tensor(a|b)"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.cpu());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         prim::tolist,
+         // This operator has to be unschematized because the return type
+         // depends on the type hint and input. The implementation of this
+         // operator below is intended to be as close to the Python
+         // implementation in torch/csrc/utils/tensor_list.cpp as possible.
+         [](const Node* /*node*/) -> Operation {
+           return [](Stack* stack) {
+             int elem_ty_val;
+             int dim_val;
+             at::Tensor t;
+
+             pop(stack, elem_ty_val);
+             pop(stack, dim_val);
+             pop(stack, t);
+
+             // If the Tensor is not on the CPU, transfer it.
+             if (!t.device().is_cpu()) {
+               t = t.cpu();
+             }
+
+             // Rebuild the output type using elem_ty_val and dim_val. Start
+             // with the element type corresponding to elem_ty_val.
+             TypePtr out_ty;
+             if (elem_ty_val == 0) {
+               out_ty = IntType::get();
+             } else if (elem_ty_val == 1) {
+               out_ty = FloatType::get();
+             } else if (elem_ty_val == 2) {
+               out_ty = BoolType::get();
+             } else {
+               TORCH_CHECK(
+                   false,
+                   "Unsupported element type for tolist; only int, float and bool are supported");
+             }
+
+             // Check that type of the Tensor matches that of the annotation.
+             // Make an exception for the case in which the annotated type is
+             // float and the Tensor data type is also float; the elements will
+             // be casted to double later.
+             TORCH_CHECK(
+                 (out_ty == FloatType::get() && t.is_floating_point()) ||
+                     tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
+                 "Output annotation element type and runtime tensor element type must match for tolist()");
+
+             // Check that the dimension of the Tensor matches that of the
+             // annotation.
+             TORCH_CHECK(
+                 dim_val == t.dim(),
+                 "Output annotation list dimension and runtime tensor dimension must match for tolist()");
+
+             // Wrap out_ty in a ListType dim times.
+             for (int i = 0; i < dim_val; ++i) {
+               out_ty = ListType::create(out_ty);
+             }
+
+             int64_t dim = t.dim();
+             auto sizes = t.sizes();
+             auto strides = t.strides();
+             size_t element_size = t.element_size();
+             char* data = static_cast<char*>(t.data_ptr());
+             auto result = tensorToListRecursive(
+                 data,
+                 0,
+                 dim,
+                 out_ty,
+                 t.scalar_type(),
+                 sizes,
+                 strides,
+                 element_size);
+             push(stack, std::move(result));
+           };
+         },
+         aliasAnalysisSpecialCase()),
      // only used internally in range() translation
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
@@ -521,7 +604,7 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
-             "aten::slice.t(t[] l, int start, int end=9223372036854775807, int step=1) -> t[]"),
+             "aten::slice.t(t[] l, int? start=0, int? end=9223372036854775807, int step=1) -> t[]"),
          listSlice,
          aliasAnalysisFromSchema()),
      OperatorGenerator(
@@ -547,6 +630,14 @@ RegisterOperators reg(
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::eq.int_list(int[] a, int[] b) -> bool"),
          listEq<int64_t>,
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::eq.device(Device a, Device b) -> bool"),
+         [](Stack* stack) {
+           auto a = pop(stack).toDevice();
+           auto b = pop(stack).toDevice();
+           push(stack, a == b);
+         },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::Uninitialized() -> Any"),
@@ -589,6 +680,12 @@ RegisterOperators reg(
            push(stack, x != y);
          },
          aliasAnalysisFromSchema()),
+     // We define aten::dequantize in both native_functions.yaml and here,
+     // however, aten::dequantize.any defined here overrides
+     // aten::dequantize.tensors in native_functions.yaml. The variants here
+     // are only for graph mode quantization, and they should be removed once
+     // we deprecate graph mode quantization, and use the variants in
+     // native_functions.yaml.
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
              "aten::dequantize.tensor(Tensor qtensor) -> Tensor"),
@@ -599,9 +696,18 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::dequantize.list(Tensor[] qtensors) -> Tensor[]"),
+         [](Stack* stack) {
+           auto qtensors = pop(stack).toTensorVector();
+           push(stack, at::dequantize(qtensors));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::dequantize.any(Any tensors) -> Any"),
          [](Stack* stack) { dequantize(*stack); },
          aliasAnalysisFromSchema()),
+     DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
      DEFINE_STRING_OP(aten::add, a + b, str),
      DEFINE_COMPARISON_OP(aten::eq, a == b),
      DEFINE_COMPARISON_OP(aten::ne, a != b),
@@ -615,6 +721,7 @@ RegisterOperators reg(
      DEFINE_BOOL_OP(aten::__and__, a&& b),
      DEFINE_BOOL_OP(aten::__or__, a || b),
      DEFINE_BOOL_OP(aten::__xor__, a != b),
+     DEFINE_UNARY_OP(aten::round, round_to_even(a), float, float),
      DEFINE_UNARY_OP(aten::floor, floor(a), int, int),
      DEFINE_UNARY_OP(aten::ceil, ceil(a), int, int),
      DEFINE_UNARY_OP(aten::neg, -a, int, float),
@@ -732,6 +839,11 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA(
+             "aten::__contains__.int_list(int[] l, int item) -> bool"),
+         listContains<int64_t>,
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
              "aten::__contains__.str_list(str[] l, str item) -> bool"),
          listContains<std::string>,
          aliasAnalysisFromSchema()),
@@ -797,7 +909,7 @@ RegisterOperators reg(
          TORCH_SELECTIVE_SCHEMA(
              "aten::index.Tensor_hacked_twin(Tensor self, Tensor[] indices) -> Tensor"),
          [](Stack* stack) {
-           auto indices = pop(stack).toTensorVector();
+           auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
            auto self = pop(stack).toTensor();
            auto result = at::index(self, indices);
            push(stack, std::move(result));
@@ -810,7 +922,7 @@ RegisterOperators reg(
            auto unsafe = pop(stack).toBool();
            auto accumulate = pop(stack).toBool();
            auto values = pop(stack).toTensor();
-           auto indices = pop(stack).toTensorVector();
+           auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
            auto self = pop(stack).toTensor();
            auto result =
                at::_index_put_impl_(self, indices, values, accumulate, unsafe);
@@ -823,7 +935,7 @@ RegisterOperators reg(
          [](Stack* stack) {
            auto accumulate = pop(stack).toBool();
            auto values = pop(stack).toTensor();
-           auto indices = pop(stack).toTensorVector();
+           auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
            auto self = pop(stack).toTensor();
            auto result = at::index_put_(self, indices, values, accumulate);
            push(stack, std::move(result));
@@ -835,7 +947,7 @@ RegisterOperators reg(
          [](Stack* stack) {
            auto accumulate = pop(stack).toBool();
            auto values = pop(stack).toTensor();
-           auto indices = pop(stack).toTensorVector();
+           auto indices = pop(stack).to<List<c10::optional<at::Tensor>>>();
            auto self = pop(stack).toTensor();
            auto result = at::index_put_(self, indices, values, accumulate);
            push(stack, std::move(result));
@@ -1094,7 +1206,7 @@ void dictUpdate(Stack* stack) {
   auto dict = pop(stack).toGenericDict();
 
   for (const auto& item : to_add) {
-    dict.insert(item.key(), item.value());
+    dict.insert_or_assign(item.key(), item.value());
   }
 }
 
@@ -1255,7 +1367,7 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
 
 int64_t stringFindImpl(
     std::string string,
-    std::string substr,
+    const std::string& substr,
     int64_t start,
     int64_t end,
     bool reverse = false) {

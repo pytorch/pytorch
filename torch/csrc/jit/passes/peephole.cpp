@@ -1,9 +1,11 @@
 #include <torch/csrc/jit/passes/peephole.h>
+
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/peephole_alias_sensitive.h>
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
@@ -25,6 +27,7 @@ struct PeepholeOptimizeImpl {
       : graph_(graph), shape_peepholes_(!disable_shape_peepholes) {
     run(graph->block());
     PeepholeOptimizeListIdioms(graph);
+    PeepholeOptimizeAliasSensitive(graph);
   }
 
   // The intent for this optimization pass is to catch all of the small, easy to
@@ -87,8 +90,9 @@ struct PeepholeOptimizeImpl {
               "aten::expand(Tensor self, int[] size, *, bool implicit) -> Tensor",
               /*const_inputs=*/attr::size)) {
         // x.expand(x.size()) == x
-        if (auto input_type =
-                node->namedInput(attr::self)->type()->cast<TensorType>()) {
+        auto input_type =
+            node->namedInput(attr::self)->type()->cast<TensorType>();
+        if (input_type && shape_peepholes_) {
           auto expanded_sizes = node->get<c10::List<int64_t>>(attr::size);
           auto input_type_sizes = input_type->sizes().concrete_sizes();
           if (expanded_sizes.has_value() && input_type_sizes &&
@@ -110,8 +114,9 @@ struct PeepholeOptimizeImpl {
               input_node->input()->debugName());
           node->output()->replaceAllUsesWith(input_node->input());
         }
-      } else if (node->matches(
-                     "aten::type_as(Tensor self, Tensor other) -> Tensor")) {
+      } else if (
+          node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor") &&
+          shape_peepholes_) {
         // x.type_as(y) == x iff x.type() == y.type()
         auto self_type = node->input(0)->type()->expect<TensorType>();
         auto other_type = node->input(1)->type()->expect<TensorType>();
@@ -420,11 +425,11 @@ void FuseAddMM(Block* block) {
 
             // Attempts to find a matrix with a defined scalar type to type as
             auto* type_as_mat = mat1;
-            if (!type_as_mat->type()->expect<TensorType>()->scalarType()) {
+            if (!type_as_mat->type()->expectRef<TensorType>().scalarType()) {
               type_as_mat = mat2;
             }
             auto mat_scalar_type =
-                type_as_mat->type()->expect<TensorType>()->scalarType();
+                type_as_mat->type()->expectRef<TensorType>().scalarType();
 
             // we can't use type_as if we don't know the target type (mm), the
             // bias needs to be coerced to

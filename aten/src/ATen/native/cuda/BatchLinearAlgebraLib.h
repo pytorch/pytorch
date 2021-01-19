@@ -7,8 +7,8 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
 
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 10000
-// some cusolver functions doesn't work well on cuda 9.2, cusolver is used on cuda >= 10.0
+#if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION) && CUSOLVER_VERSION >= 10200
+// some cusolver functions don't work well on cuda 9.2 or cuda 10.1.105, cusolver is used on cuda >= 10.1.243
 #define USE_CUSOLVER
 #endif
 
@@ -18,6 +18,7 @@ namespace at {
 namespace native {
 
 Tensor _inverse_helper_cuda_lib(const Tensor& self);
+Tensor& _linalg_inv_out_helper_cuda_lib(Tensor& result, Tensor& infos_getrf, Tensor& infos_getrs);
 
 }}  // namespace at::native
 

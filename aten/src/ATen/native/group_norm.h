@@ -15,9 +15,9 @@ using forward_fn = void (*)(
     int64_t /* HxW */,
     int64_t /* group */,
     double /* eps */,
-    Tensor* /* Y */,
-    Tensor* /* mean */,
-    Tensor* /* rstd */);
+    Tensor& /* Y */,
+    Tensor& /* mean */,
+    Tensor& /* rstd */);
 
 using backward_fn = void (*)(
     const Tensor& /* dY */,
@@ -29,9 +29,9 @@ using backward_fn = void (*)(
     int64_t /* C */,
     int64_t /* HxW */,
     int64_t /* group */,
-    Tensor* /* dX */,
-    Tensor* /* dgamma */,
-    Tensor* /* dbeta */);
+    Tensor& /* dX */,
+    Tensor& /* dgamma */,
+    Tensor& /* dbeta */);
 
 DECLARE_DISPATCH(forward_fn, GroupNormKernel);
 DECLARE_DISPATCH(backward_fn, GroupNormBackwardKernel);

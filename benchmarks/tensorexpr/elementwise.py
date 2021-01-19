@@ -159,6 +159,7 @@ def register_element_ops():
 # benchmark.register_benchmark_class(ElementMulBench)
 register_element_ops()
 
+
 class SimpleElementBench(benchmark.Benchmark):
     def __init__(self, mode, device, dtype, N):
         super().__init__(mode, device, dtype)
@@ -207,4 +208,23 @@ class SimpleElementBench(benchmark.Benchmark):
     def default_configs():
         return [[1 << 25]]
 
+
 benchmark.register_benchmark_class(SimpleElementBench)
+
+
+class DynamicSimpleElementBench(benchmark.DynamicShape, SimpleElementBench):
+    def __init__(self, mode, device, dtype, N):
+        benchmark.DynamicShape.__init__(self)
+        SimpleElementBench.__init__(self, mode, device, dtype, N)
+
+    @classmethod
+    def module(cls):
+        return "simple_dynamic_element"
+
+    def instantiate_input(self):
+        N, = self.rand_shape([self.N])
+        data = self.rand([N], device=self.device, dtype=self.dtype, requires_grad=self.requires_grad)
+        self.inputs = [data]
+
+
+benchmark.register_benchmark_class(DynamicSimpleElementBench)

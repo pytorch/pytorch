@@ -1,8 +1,9 @@
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
-#include <torch/csrc/jit/tensorexpr/cuda_half_support.h>
+#include <torch/csrc/jit/tensorexpr/half_support.h>
 
 #include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <torch/csrc/jit/codegen/fuser/cuda/resource_strings.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/cuda_random.h>
@@ -89,6 +90,9 @@ static void getMajorMinor(
     max_dev_version = CudaVersion(7, 2);
   } else if (nvrtc_version.first <= 10) { // 10 supports 3-7.5
     max_dev_version = CudaVersion(7, 5);
+  } else if (nvrtc_version.first == 11 && nvrtc_version.second == 0) {
+    // 11.0 supports 3-8.0
+    max_dev_version = CudaVersion(8, 0);
   }
   if (dev_version > max_dev_version) {
     dev_version = max_dev_version;
@@ -283,8 +287,12 @@ void CudaPrinter::visit(const Intrinsics* v) {
   if (returnType == ScalarType::Half || returnType == ScalarType::Float) {
     func_name = func_name + "f";
   }
-  if (v->op_type() == IntrinsicsOp::kFabs && is_integral(returnType)) {
-    func_name = "abs";
+  if (v->op_type() == IntrinsicsOp::kAbs && !is_integral(returnType)) {
+    // since kAbs's func_name is `abs`, prefix `f` for floating point
+    func_name = "f" + func_name;
+  }
+  if (v->op_type() == IntrinsicsOp::kIsNan) {
+    func_name = "isnan";
   }
 
   os() << func_name << "(";
@@ -546,6 +554,7 @@ class PrioritizeLoad : public IRMutator {
     const Var* load_new_var = new Var("v", v->dtype());
     const Expr* new_value = IRMutator::mutate(v);
     load_list.push_back(std::make_pair(load_new_var, new_value));
+
     return load_new_var;
   }
 
@@ -657,12 +666,14 @@ class PrioritizeLoad : public IRMutator {
 };
 
 std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
-  // We are using a global counter here to make sure difference instances
-  // within CudaCodeGen have different names.
-  static int64_t counter = 0;
-  ++counter;
-  int64_t value = counter;
-  return func_prefix + "_" + std::to_string(value);
+  int64_t counter = 0;
+  std::string name = func_prefix;
+  while (taken_func_names.count(name)) {
+    name = func_prefix + "_" + std::to_string(counter++);
+  }
+
+  taken_func_names.insert(name);
+  return name;
 }
 
 bool GPUMetaVarRewriter::isFullExtent() {
@@ -865,18 +876,30 @@ static std::ostream& operator<<(
   return out;
 }
 
-static const char* resource_string = R"(
+#ifdef USE_ROCM
+static const char* device_resource_string = R"(
+#include <hip/hip_runtime.h>
+#define POS_INFINITY INFINITY
+#define NEG_INFINITY -INFINITY
+
+)";
+#else
+static const char* device_resource_string = R"(
 #define NAN __int_as_float(0x7fffffff)
 #define POS_INFINITY __int_as_float(0x7f800000)
 #define NEG_INFINITY __int_as_float(0xff800000)
 
+)";
+#endif
+
+static const char* shared_resource_string = R"(
 template<typename T>
-T maximum(T a, T b) {
+__device__ T maximum(T a, T b) {
   return isnan(a) ? a : (a > b ? a : b);
 }
 
 template<typename T>
-T minimum(T a, T b) {
+__device__ T minimum(T a, T b) {
   return isnan(a) ? a : (a < b ? a : b);
 }
 
@@ -898,7 +921,7 @@ void CudaCodeGen::Initialize() {
   metavar_rewriter_ =
       std::make_unique<GPUMetaVarRewriter>(cuda_analysis_.get());
 
-  os() << resource_string;
+  os() << device_resource_string << shared_resource_string;
 
   if (has_random_) {
     os() << philox_random_string << std::endl;
@@ -907,14 +930,26 @@ void CudaCodeGen::Initialize() {
   // Check whether the statement uses the Half type, if so add the
   // half_support_literal.
   Stmt* stmt_v = stmt();
-  CudaHalfChecker halfChecker;
-  stmt_v = stmt_v->accept_mutator(&halfChecker);
+  HalfChecker halfChecker(buffer_args());
+  stmt_v->accept(&halfChecker);
   if (halfChecker.hasHalf()) {
     os() << fuser::cuda::half_support_literal << std::endl;
   }
 
-  std::string func_name = GetUniqueFuncName("func");
-  os() << "extern \"C\" __global__" << std::endl << "void " << func_name << "(";
+  std::string func_name = GetUniqueFuncName(kernel_func_name());
+  os() << "extern \"C\" __global__" << std::endl;
+#ifdef USE_ROCM
+  // CUDA has a default limit of threads per block (=flat work group size)
+  // of 1024, but ROCm uses 256 by default. At the time of writing
+  // (#45506), I am unaware of a stricter limit that TensorExpr imposes
+  // (maybe for perf),so I use 1024 as maximum flat work group size.
+  // We put a minimum value of 1, this is also used by hip (ROCm 3.8) in
+  // the __launch_bound__ implementation. The arguments for the attribute
+  // are (min, max), for details see the documentation at
+  // https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
+  os() << "__attribute__((amdgpu_flat_work_group_size(1, 1024)))" << std::endl;
+#endif
+  os() << "void " << func_name << "(";
   const std::vector<BufferArg> buffer_args = this->buffer_args();
   for (size_t i = 0; i < buffer_args.size(); i++) {
     if (i > 0) {
@@ -962,6 +997,11 @@ void CudaCodeGen::Initialize() {
 
   PrioritizeLoad prioritize_load;
   stmt_v = stmt_v->accept_mutator(&prioritize_load);
+
+  // The registerizer might insert half-type scalars, we don't want this.
+  HalfRewriter hsFix;
+  stmt_v = stmt_v->accept_mutator(&hsFix);
+
   stmt_v = IRSimplifier::simplify(stmt_v);
   set_stmt(stmt_v);
 
@@ -1108,6 +1148,18 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   if (prior_device != this->device().index()) {
     at::cuda::set_device(prior_device);
   }
+}
+
+at::Tensor CudaCodeGen::empty_strided(
+    c10::IntArrayRef size,
+    c10::IntArrayRef stride,
+    c10::optional<c10::ScalarType> dtype_opt,
+    c10::optional<c10::Layout> layout_opt,
+    c10::optional<c10::Device> device_opt,
+    c10::optional<bool> pin_memory_opt) {
+  c10::DeviceGuard device_guard(device_opt.value());
+  return at::native::empty_strided_cuda(
+      size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
 void CudaCodeGen::CompileToNVRTC(

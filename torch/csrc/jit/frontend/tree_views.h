@@ -226,8 +226,9 @@ struct Ident : public TreeView {
   const std::string& name() const {
     return subtree(0)->stringValue();
   }
-  static Ident create(const SourceRange& range, const std::string& name) {
-    return Ident(Compound::create(TK_IDENT, range, {String::create(name)}));
+  static Ident create(const SourceRange& range, std::string name) {
+    return Ident(
+        Compound::create(TK_IDENT, range, {String::create(std::move(name))}));
   }
 };
 
@@ -308,6 +309,7 @@ struct Expr : public TreeView {
       case '^':
       case '|':
       case TK_LIST_COMP:
+      case TK_DICT_COMP:
       case TK_DOTS:
       case TK_IN:
       case TK_WITH_ITEM:
@@ -403,7 +405,7 @@ struct Def : public TreeView {
     auto new_ident = Ident::create(name().range(), std::move(new_name));
     return create(range(), new_ident, decl(), statements());
   }
-  Def withDecl(Decl decl) const {
+  Def withDecl(const Decl& decl) const {
     return create(range(), name(), decl, statements());
   }
   Ident name() const {
@@ -578,6 +580,35 @@ struct ListComp : public Expr {
   }
 };
 
+// TODO: supports only single comprehension for now
+struct DictComp : public Expr {
+  explicit DictComp(const TreeRef& tree) : Expr(tree) {
+    tree->match(TK_DICT_COMP);
+  }
+  Expr key() const {
+    return Expr(subtree(0));
+  }
+  Expr value() const {
+    return Expr(subtree(1));
+  }
+  Expr target() const {
+    return Expr(subtree(2));
+  }
+  Expr iter() const {
+    return Expr(subtree(3));
+  }
+  // TODO: no ifs for now
+  static DictComp create(
+      const SourceRange& range,
+      const Expr& key,
+      const Expr& value,
+      const Expr& target,
+      const Expr& iter) {
+    return DictComp(
+        Compound::create(TK_DICT_COMP, range, {key, value, target, iter}));
+  }
+};
+
 struct Global : public Stmt {
   explicit Global(const TreeRef& tree) : Stmt(tree) {
     tree_->match(TK_GLOBAL);
@@ -598,6 +629,12 @@ struct AugAssignKind : public TreeView {
       case '*':
       case '/':
       case '%':
+      case '|':
+      case '&':
+      case '^':
+      case TK_POW:
+      case TK_LSHIFT:
+      case TK_RSHIFT:
         return;
       default:
         throw ErrorReport(tree) << "is not a valid AugAssignKind";
@@ -839,7 +876,7 @@ struct Const : public Expr {
   }
   int64_t asIntegral() const {
     try {
-      return c10::stoll(subtree(0)->stringValue(), /*pos=*/0, /*base=*/0);
+      return c10::stoll(subtree(0)->stringValue(), /*__idx=*/0, /*base=*/0);
     } catch (const std::out_of_range& e) {
       throw ErrorReport(range()) << "Integral constant out of range "
                                     "(must fit in a signed 64 bit integer)";
@@ -928,15 +965,15 @@ struct SliceExpr : public Expr {
   Maybe<Expr> step() const {
     return Maybe<Expr>(subtree(2));
   }
-  Expr startOr(int alternative) const {
+  Expr startOr(int64_t alternative) const {
     const auto startOption = start();
     return startOption.present() ? startOption.get() : createInt(alternative);
   }
-  Expr endOr(int alternative) const {
+  Expr endOr(int64_t alternative) const {
     const auto endOption = end();
     return endOption.present() ? endOption.get() : createInt(alternative);
   }
-  Expr stepOr(int alternative) const {
+  Expr stepOr(int64_t alternative) const {
     const auto stepOption = step();
     return stepOption.present() ? stepOption.get() : createInt(alternative);
   }
@@ -950,7 +987,7 @@ struct SliceExpr : public Expr {
   }
 
  private:
-  Expr createInt(int value) const {
+  Expr createInt(int64_t value) const {
     return Expr(Const::create(range(), c10::to_string(value)));
   }
 };
@@ -1119,11 +1156,11 @@ struct Delete : public Stmt {
   explicit Delete(const TreeRef& tree) : Stmt(tree) {
     tree_->match(TK_DELETE);
   }
-  Expr expr() const {
-    return Expr(subtree(0));
+  List<Expr> targets() const {
+    return subtree(0);
   }
-  static Delete create(const Expr& value) {
-    return Delete(Compound::create(TK_DELETE, value.range(), {value}));
+  static Delete create(const SourceRange& range, const List<Expr>& targets) {
+    return Delete(Compound::create(TK_DELETE, range, {targets}));
   }
 };
 

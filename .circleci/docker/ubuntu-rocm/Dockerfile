@@ -21,7 +21,7 @@ RUN bash ./install_clang.sh && rm install_clang.sh
 ADD ./common/install_user.sh install_user.sh
 RUN bash ./install_user.sh && rm install_user.sh
 
-# Install conda
+# Install conda and other packages (e.g., numpy, coverage, pytest)
 ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
 ADD ./common/install_conda.sh install_conda.sh
@@ -58,7 +58,6 @@ ENV PATH /opt/rocm/hcc/bin:$PATH
 ENV PATH /opt/rocm/hip/bin:$PATH
 ENV PATH /opt/rocm/opencl/bin:$PATH
 ENV PATH /opt/rocm/llvm/bin:$PATH
-ENV HIP_PLATFORM hcc
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
 

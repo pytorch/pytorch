@@ -32,6 +32,8 @@ namespace nn {
 class TORCH_API TransformerEncoderImpl : public Cloneable<TransformerEncoderImpl> {
 
   public:
+    TransformerEncoderImpl(TransformerEncoderLayer encoder_layer, int64_t num_layers)
+      : TransformerEncoderImpl(TransformerEncoderOptions(encoder_layer, num_layers)) {}
     explicit TransformerEncoderImpl(TransformerEncoderOptions options_);
 
     Tensor forward(

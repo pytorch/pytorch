@@ -13,12 +13,19 @@ class ProcessGroupRpcAgentTestFixture(RpcAgentTestFixture):
 
     @property
     def rpc_backend_options(self):
-        return rpc.backend_registry.construct_rpc_backend_options(
-            self.rpc_backend,
-            init_method=self.init_method,
-            # Some tests need additional threads (ex: test_trainer_ps)
-            num_send_recv_threads=8,
-        )
+        try:
+            return self._rpc_backend_options
+        except AttributeError:
+            return rpc.backend_registry.construct_rpc_backend_options(
+                self.rpc_backend,
+                init_method=self.init_method,
+                # Some tests need additional threads (ex: test_trainer_ps)
+                num_send_recv_threads=8,
+            )
+
+    @rpc_backend_options.setter
+    def rpc_backend_options(self, new_rpc_backend_options):
+        self._rpc_backend_options = new_rpc_backend_options
 
     def get_shutdown_error_regex(self):
         error_regexes = [

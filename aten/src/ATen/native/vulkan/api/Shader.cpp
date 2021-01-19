@@ -9,7 +9,6 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-
 Shader::Layout::Factory::Factory(const GPU& gpu)
   : device_(gpu.device) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -19,12 +18,25 @@ Shader::Layout::Factory::Factory(const GPU& gpu)
 
 Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
     const Descriptor& descriptor) const {
+  c10::SmallVector<VkDescriptorSetLayoutBinding, 6u> bindings;
+
+  uint32_t binding = 0u;
+  for (const VkDescriptorType type : descriptor.signature) {
+    bindings.push_back({
+      binding++,
+      type,
+      1u,
+      VK_SHADER_STAGE_COMPUTE_BIT,
+      nullptr,
+    });
+  }
+
   const VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info{
     VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
     nullptr,
     0u,
-    static_cast<uint32_t>(descriptor.bindings.size()),
-    descriptor.bindings.data(),
+    static_cast<uint32_t>(bindings.size()),
+    bindings.data(),
   };
 
   VkDescriptorSetLayout descriptor_set_layout{};
@@ -44,24 +56,12 @@ Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
   };
 }
 
-Shader::Descriptor::Descriptor(const char* const glsl)
- : type(Type::Source) {
-  TORCH_CHECK(glsl, "Invalid shader source code!");
-
-  shader.source = {
-    glsl,
-    0u,
-  };
+Shader::Layout::Cache::Cache(Factory factory)
+  : cache_(std::move(factory)) {
 }
 
-Shader::Descriptor::Descriptor(const uint32_t* const code, const uint32_t size)
- : type(Type::Binary) {
-  TORCH_CHECK(code && (0u != size), "Invalid shader binary!");
-
-  shader.binary = {
-    code,
-    size,
-  };
+void Shader::Layout::Cache::purge() {
+  cache_.purge();
 }
 
 #ifdef USE_VULKAN_SHADERC_RUNTIME
@@ -71,6 +71,7 @@ struct Shader::Factory::Compiler final {
   shaderc::CompileOptions options;
 
   Compiler() {
+    options.SetNanClamp(/*enable =*/ true);
     options.SetSourceLanguage(shaderc_source_language_glsl);
     options.SetTargetEnvironment(shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_0);
     options.SetWarningsAsErrors();

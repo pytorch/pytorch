@@ -13,20 +13,32 @@
 
 namespace at { namespace native {
 
+template <typename acc_t>
+struct MaxNanFunctor {
+  __device__ __forceinline__ acc_t operator()(acc_t a, acc_t b) const {
+      return (THCNumerics<acc_t>::isnan(a) || a > b) ? a : b;
+  }
+};
+
 template <typename scalar_t, typename acc_t=scalar_t>
 void max_values_kernel_cuda_impl(TensorIterator& iter) {
   gpu_reduce_kernel<scalar_t, scalar_t>(
-    iter, func_wrapper<acc_t> ([]GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
-      return (THCNumerics<acc_t>::isnan(a) || a > b) ? a : b;
-    }), at::numeric_limits<acc_t>::lower_bound());
+    iter, func_wrapper<acc_t> (MaxNanFunctor<acc_t>()),
+    at::numeric_limits<acc_t>::lower_bound());
 }
+
+template <typename acc_t>
+struct MinNanFunctor {
+  __device__ __forceinline__ acc_t operator()(acc_t a, acc_t b) const {
+      return (THCNumerics<acc_t>::isnan(a) || a < b) ? a : b;
+  }
+};
 
 template <typename scalar_t, typename acc_t=scalar_t>
 void min_values_kernel_cuda_impl(TensorIterator& iter) {
   gpu_reduce_kernel<scalar_t, scalar_t>(
-    iter, func_wrapper<acc_t> ([]GPU_LAMBDA(acc_t a, acc_t b) -> acc_t {
-      return (THCNumerics<acc_t>::isnan(a) || a < b) ? a : b;
-    }), at::numeric_limits<acc_t>::upper_bound());
+    iter, func_wrapper<acc_t> (MinNanFunctor<acc_t>()),
+    at::numeric_limits<acc_t>::upper_bound());
 }
 
 void max_values_kernel_cuda(TensorIterator& iter) {

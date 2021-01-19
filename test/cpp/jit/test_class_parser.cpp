@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <test/cpp/jit/test_base.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 

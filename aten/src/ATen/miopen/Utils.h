@@ -7,12 +7,6 @@
 
 namespace at { namespace native {
 
-inline void setMIOpenStreamToCurrent() {
-  // NB: Due to in-place HIPify, getCurrentCUDAStream actually means
-  // getCurrentHIPStream
-  MIOPEN_CHECK(miopenSetStream(getMiopenHandle(), at::hip::getCurrentHIPStream()));
-}
-
 // This function makes tensors which have zero stride contiguous, by
 // setting the strides to 1.
 inline Tensor contiguousIfZeroInStrides(const Tensor& t) {

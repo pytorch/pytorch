@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/builtin_functions.h>
+
 #include <torch/csrc/api/include/torch/jit.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/frontend/resolver.h>
@@ -63,6 +64,17 @@ def _assert_int_or_pair(vals: List[int], name: str, message: str):
 def list_with_default(out_size: List[int], defaults: List[int]):
   assert len(defaults) > len(out_size)
   return out_size
+def _assert(condition : bool, message : str):
+  assert condition, message
+)SCRIPT";
+
+// an additional overload for Tensor variant of _assert
+const auto aten_ops_additional =
+    R"SCRIPT(
+def _assert(condition : Tensor, message : str):
+  assert bool(condition), message
+def __contains__(self: str, key: str):
+    return self.find(key, 0, len(self)) != -1
 )SCRIPT";
 
 // Implementations of historic symbol behaviors are defined here
@@ -215,6 +227,7 @@ struct BuiltinFunctionRegistry {
     }
 
     loadSource(aten_ops, "aten");
+    loadSource(aten_ops_additional, "aten");
 
     // Loads functions implementing historic behavior, see note [Versioned
     // Symbols]

@@ -307,9 +307,9 @@ inline Tensor cosine_embedding_loss(
 
 // ============================================================================
 
-inline Tensor _smooth_l1_loss(const Tensor& input, const Tensor& target) {
+inline Tensor _smooth_l1_loss(const Tensor& input, const Tensor& target, double beta = 1.) {
     auto t = torch::abs(input - target);
-    return torch::where(t < 1, 0.5 * torch::pow(t, 2), t - 0.5);
+    return torch::where(t < beta, 0.5 * torch::pow(t, 2) / beta, t - 0.5 * beta);
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -317,7 +317,8 @@ namespace detail {
 inline Tensor smooth_l1_loss(
     const Tensor& input,
     const Tensor& target,
-    SmoothL1LossFuncOptions::reduction_t reduction) {
+    SmoothL1LossFuncOptions::reduction_t reduction,
+    double beta = 1.) {
   if (target.sizes() != input.sizes()) {
     TORCH_WARN("Using a target size (", target.sizes(), ") that is different to the input size (", input.sizes(), "). ",
                   "This will likely lead to incorrect results due to broadcasting. ",
@@ -325,7 +326,7 @@ inline Tensor smooth_l1_loss(
   }
 
   std::vector<Tensor> expanded_tensors = torch::broadcast_tensors({input, target});
-  return torch::smooth_l1_loss(expanded_tensors[0], expanded_tensors[1], enumtype::reduction_get_enum(reduction));
+  return torch::smooth_l1_loss(expanded_tensors[0], expanded_tensors[1], enumtype::reduction_get_enum(reduction), beta);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -344,8 +345,9 @@ inline Tensor smooth_l1_loss(
 inline Tensor smooth_l1_loss(
     const Tensor& input,
     const Tensor& target,
-    const SmoothL1LossFuncOptions& options = {}) {
-  return detail::smooth_l1_loss(input, target, options.reduction());
+    const SmoothL1LossFuncOptions& options = {},
+    double beta = 1.) {
+  return detail::smooth_l1_loss(input, target, options.reduction(), beta);
 }
 
 // ============================================================================
@@ -519,6 +521,85 @@ inline Tensor triplet_margin_loss(
     options.margin(),
     options.p(),
     options.eps(),
+    options.swap(),
+    options.reduction());
+}
+
+// ============================================================================
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+namespace detail {
+inline Tensor triplet_margin_with_distance_loss(
+    const Tensor& anchor,
+    const Tensor& positive,
+    const Tensor& negative,
+    c10::optional<TripletMarginWithDistanceLossFuncOptions::distance_function_t> distance_function,
+    double margin,
+    bool swap,
+    TripletMarginWithDistanceLossFuncOptions::reduction_t reduction) {
+  Tensor dist_pos, dist_neg;
+  if (distance_function.has_value()) {
+    auto distance_function_impl = distance_function.value();
+    dist_pos = distance_function_impl(anchor, positive);
+    dist_neg = distance_function_impl(anchor, negative);
+  } else {
+    dist_pos = pairwise_distance(anchor, positive);
+    dist_neg = pairwise_distance(anchor, negative);
+  }
+
+  if (swap) {
+    Tensor dist_swap;
+    if (distance_function.has_value()) {
+      dist_swap = distance_function.value()(positive, negative);
+    } else {
+      dist_swap = pairwise_distance(positive, negative);
+    }
+    dist_neg = torch::min(dist_neg, dist_swap);
+  }
+
+  auto loss = torch::clamp_min(dist_pos - dist_neg + margin, 0);
+
+  Tensor ret;
+  if (c10::get_if<enumtype::kNone>(&reduction)) {
+    ret = loss;
+  } else if (c10::get_if<enumtype::kMean>(&reduction)) {
+    ret = loss.mean();
+  } else if (c10::get_if<enumtype::kSum>(&reduction)) {
+    ret = loss.sum();
+  } else {
+    ret = anchor;
+    TORCH_INTERNAL_ASSERT(
+      false,
+      enumtype::get_enum_name(reduction),
+      " is not valid");
+  }
+  return ret;
+}
+} // namespace detail
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */
+
+/// See https://pytorch.org/docs/master/nn.functional.html#torch.nn.functional.triplet_margin_with_distance_loss
+/// about the exact behavior of this functional.
+///
+/// See the documentation for `torch::nn::functional::TripletMarginWithDistanceLossFuncOptions` class to learn what
+/// optional arguments are supported for this functional.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::triplet_margin_with_distance_loss(anchor, positive, negative, F::TripletMarginWithDistanceLossFuncOptions().margin(1.0));
+/// ```
+inline Tensor triplet_margin_with_distance_loss(
+    const Tensor& anchor,
+    const Tensor& positive,
+    const Tensor& negative,
+    const TripletMarginWithDistanceLossFuncOptions& options = {}) {
+  return detail::triplet_margin_with_distance_loss(
+    anchor,
+    positive,
+    negative,
+    options.distance_function(),
+    options.margin(),
     options.swap(),
     options.reduction());
 }

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/fuse_relu.h>
+
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -17,7 +18,7 @@ void fuseAddReluImpl(std::shared_ptr<Graph>& graph) {
         return (%res))";
   std::string add_relu_fused = R"(
     graph(%a, %b, %alpha):
-        %res = aten::add_relu(%a, %b, %alpha)
+        %res = aten::_add_relu(%a, %b, %alpha)
         return (%res))";
   rewriter.RegisterRewritePattern(add_relu_0, add_relu_fused);
 
@@ -35,7 +36,7 @@ void fuseAddReluImpl(std::shared_ptr<Graph>& graph) {
         return (%res))";
   std::string add_inplace_relu_fused = R"(
     graph(%a, %b, %alpha):
-        %res = aten::add_relu_(%a, %b, %alpha)
+        %res = aten::_add_relu_(%a, %b, %alpha)
         return (%res))";
   rewriter.RegisterRewritePattern(add_inplace_relu_1, add_inplace_relu_fused);
 
@@ -46,7 +47,7 @@ void fuseAddReluImpl(std::shared_ptr<Graph>& graph) {
         return (%res))";
   std::string add_out_relu_fused = R"(
     graph(%a, %b, %alpha, %out):
-        %res = aten::add_relu(%a, %b, %alpha, %out)
+        %res = aten::_add_relu(%a, %b, %alpha, %out)
         return (%res))";
 
   rewriter.RegisterRewritePattern(add_out_relu, add_out_relu_fused);

@@ -151,6 +151,7 @@ If you don't see an operation listed here, but it would help your use case, plea
    ":meth:`Tensor.matmul`, :func:`torch.matmul`",:ref:`contracts_away_dims-doc`
    ":meth:`Tensor.mean`, :func:`torch.mean`",:ref:`removes_dimensions-doc`
    ":meth:`Tensor.median`, :func:`torch.median`",:ref:`removes_dimensions-doc`
+   ":meth:`Tensor.nanmedian`, :func:`torch.nanmedian`",:ref:`removes_dimensions-doc`
    ":meth:`Tensor.mm`, :func:`torch.mm`",:ref:`contracts_away_dims-doc`
    ":meth:`Tensor.mode`, :func:`torch.mode`",:ref:`removes_dimensions-doc`
    ":meth:`Tensor.mul`, :func:`torch.mul`",:ref:`unifies_names_from_inputs-doc`

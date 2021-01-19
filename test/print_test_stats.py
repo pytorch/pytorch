@@ -3,10 +3,13 @@
 # Read and print test results statistics
 from xml.dom import minidom
 from glob import glob
+import bz2
 import json
 import os
+import statistics
 import time
 
+import boto3
 import datetime
 import requests
 
@@ -42,21 +45,19 @@ class TestSuite:
         self.skipped_count += 1 if test_case.skipped else 0
         self.errored_count += 1 if test_case.errored else 0
 
-    def print_report(self):
+    def print_report(self, num_longest=3):
         sorted_tests = sorted(self.test_cases, key=lambda x: x.time)
         test_count = len(sorted_tests)
         print(f"class {self.name}:")
         print(f"    tests: {test_count} failed: {self.failed_count} skipped: {self.skipped_count} errored: {self.errored_count}")
         print(f"    run_time: {self.total_time:.2f} seconds")
         print(f"    avg_time: {self.total_time/test_count:.2f} seconds")
-        if test_count > 2:
-            print(f"    mean_time: {sorted_tests[test_count>>1].time:.2f} seconds")
-            print("    Three longest tests:")
-            for idx in [-1, -2, -3]:
-                print(f"        {sorted_tests[idx].name} time: {sorted_tests[idx].time:.2f} seconds")
-        elif test_count > 0:
-            print("    Longest test:")
-            print(f"        {sorted_tests[-1].name} time: {sorted_tests[-1].time:.2f} seconds")
+        if test_count >= 2:
+            print(f"    median_time: {statistics.median(x.time for x in sorted_tests):.2f} seconds")
+        sorted_tests = sorted_tests[-num_longest:]
+        print(f"    {len(sorted_tests)} longest tests:")
+        for test in reversed(sorted_tests):
+            print(f"        {test.name} time: {test.time:.2f} seconds")
         print("")
 
 
@@ -77,13 +78,20 @@ def parse_reports(folder):
             tests_by_class[class_name].append(test_case)
     return tests_by_class
 
+def build_info():
+    return {
+        "build_pr": os.environ.get("CIRCLE_PR_NUMBER"),
+        "build_tag": os.environ.get("CIRCLE_TAG"),
+        "build_sha1": os.environ.get("CIRCLE_SHA1"),
+        "build_branch": os.environ.get("CIRCLE_BRANCH"),
+        "build_job": os.environ.get("CIRCLE_JOB"),
+        "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID"),
+    }
+
 def build_message(test_case):
     return {
         "normal": {
-            "build_pr": os.environ.get("CIRCLE_PR_NUMBER"),
-            "build_tag": os.environ.get("CIRCLE_TAG"),
-            "build_sha1": os.environ.get("CIRCLE_SHA1"),
-            "build_branch": os.environ.get("CIRCLE_BRANCH"),
+            **build_info(),
             "test_suite_name": test_case.class_name,
             "test_case_name": test_case.name,
         },
@@ -97,7 +105,7 @@ def build_message(test_case):
         },
     }
 
-def send_report(reports):
+def send_report_to_scribe(reports):
     access_token = os.environ.get("SCRIBE_GRAPHQL_ACCESS_TOKEN")
 
     if not access_token:
@@ -122,33 +130,125 @@ def send_report(reports):
             ),
         },
     )
-    print("Scribe report status: {}".format(r.text))
     r.raise_for_status()
 
+def send_report_to_s3(reports, *, total_seconds):
+    job = os.environ.get('CIRCLE_JOB')
+    sha1 = os.environ.get('CIRCLE_SHA1')
+    branch = os.environ.get('CIRCLE_BRANCH', '')
+    if branch not in ['master', 'nightly'] and not branch.startswith("release/"):
+        print("S3 upload only enabled on master, nightly and release branches.")
+        print(f"skipping test report on branch: {branch}")
+        return
+    now = datetime.datetime.utcnow().isoformat()
+    key = f'test_time/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
+    s3 = boto3.resource('s3')
+    try:
+        s3.get_bucket_acl(Bucket='ossci-metrics')
+    except Exception as e:
+        print(f"AWS ACL failed: {e}")
+    print("AWS credential found, uploading to S3...")
+
+    obj = s3.Object('ossci-metrics', key)
+    print("")
+    # use bz2 because the results are smaller than gzip, and the
+    # compression time penalty we pay is only about half a second for
+    # input files of a few megabytes in size like these JSON files, and
+    # because for some reason zlib doesn't seem to play nice with the
+    # gunzip command whereas Python's bz2 does work with bzip2
+    obj.put(Body=bz2.compress(json.dumps({
+        **build_info(),
+        'total_seconds': total_seconds,
+        'suites': {
+            name: {
+                'total_seconds': suite.total_time,
+                'cases': [
+                    {
+                        'name': case.name,
+                        'seconds': case.time,
+                        'errored': case.errored,
+                        'failed': case.failed,
+                        'skipped': case.skipped,
+                    }
+                    for case in suite.test_cases
+                ],
+            }
+            for name, suite in reports.items()
+        }
+    }).encode()))
+
+def positive_integer(value):
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError(f"{value} is not a natural number")
+    return parsed
+
+def positive_float(value):
+    parsed = float(value)
+    if parsed <= 0.0:
+        raise argparse.ArgumentTypeError(f"{value} is not a positive rational number")
+    return parsed
+
 if __name__ == '__main__':
+    import argparse
     import sys
-    if len(sys.argv) == 1:
-        print("Please specify test report folder")
-        sys.exit(0)
+    parser = argparse.ArgumentParser(
+        "Print statistics from test XML output.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--longest-of-class",
+        type=positive_integer,
+        default=3,
+        metavar="N",
+        help="how many longest tests to show for each class",
+    )
+    parser.add_argument(
+        "--class-print-threshold",
+        type=positive_float,
+        default=1.0,
+        metavar="N",
+        help="Minimal total time to warrant class report",
+    )
+    parser.add_argument(
+        "--longest-of-run",
+        type=positive_integer,
+        default=10,
+        metavar="N",
+        help="how many longest tests to show from the entire run",
+    )
+    parser.add_argument(
+        "--upload-to-s3",
+        action="store_true",
+        help="upload test time to S3 bucket",
+    )
+    parser.add_argument(
+        "folder",
+        help="test report folder",
+    )
+    args = parser.parse_args()
 
-    reports = parse_reports(sys.argv[1])
+    reports = parse_reports(args.folder)
     if len(reports) == 0:
-        print(f"No test reports found in {sys.argv[1]}")
+        print(f"No test reports found in {args.folder}")
         sys.exit(0)
 
-    send_report(reports)
+    send_report_to_scribe(reports)
 
     longest_tests = []
     total_time = 0
     for name in sorted(reports.keys()):
         test_suite = reports[name]
-        test_suite.print_report()
+        if test_suite.total_time >= args.class_print_threshold:
+            test_suite.print_report(args.longest_of_class)
         total_time += test_suite.total_time
         longest_tests.extend(test_suite.test_cases)
-        if len(longest_tests) > 10:
-            longest_tests = sorted(longest_tests, key=lambda x: x.time)[-10:]
+    longest_tests = sorted(longest_tests, key=lambda x: x.time)[-args.longest_of_run:]
+
+    if args.upload_to_s3:
+        send_report_to_s3(reports, total_seconds=total_time)
 
     print(f"Total runtime is {datetime.timedelta(seconds=int(total_time))}")
-    print("Ten longest tests of entire run:")
+    print(f"{len(longest_tests)} longest tests of entire run:")
     for test_case in reversed(longest_tests):
         print(f"    {test_case.class_name}.{test_case.name}  time: {test_case.time:.2f} seconds")

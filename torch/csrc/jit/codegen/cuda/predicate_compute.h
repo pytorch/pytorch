@@ -32,6 +32,7 @@
 namespace torch {
 namespace jit {
 namespace fuser {
+namespace cuda {
 
 class PredicateCompute {
  public:
@@ -73,6 +74,7 @@ class TORCH_CUDA_API UnrollPredicate {
   const std::unordered_map<IterDomain*, IterDomain*>& p2c_root_map_;
 };
 
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

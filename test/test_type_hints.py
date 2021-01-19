@@ -1,5 +1,5 @@
 import unittest
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, set_cwd
 import tempfile
 import torch
 import re
@@ -149,32 +149,12 @@ class TestTypeHints(TestCase):
             except OSError:
                 raise unittest.SkipTest('cannot symlink') from None
             (stdout, stderr, result) = mypy.api.run([
-                '--follow-imports', 'silent',
-                '--check-untyped-defs',
+                '--cache-dir=.mypy_cache/doc',
                 '--no-strict-optional',  # needed because of torch.lu_unpack, see gh-36584
                 os.path.abspath(fn),
             ])
             if result != 0:
                 self.fail(f"mypy failed:\n{stdout}")
-
-    @unittest.skipIf(not HAVE_MYPY, "need mypy")
-    def test_type_hint_examples(self):
-        """
-        Runs mypy over all the test examples present in
-        `type_hint_tests` directory.
-        """
-        test_path = os.path.dirname(os.path.realpath(__file__))
-        examples_folder = os.path.join(test_path, "type_hint_tests")
-        examples = os.listdir(examples_folder)
-        for example in examples:
-            example_path = os.path.join(examples_folder, example)
-            (stdout, stderr, result) = mypy.api.run([
-                '--follow-imports', 'silent',
-                '--check-untyped-defs',
-                example_path,
-            ])
-            if result != 0:
-                self.fail(f"mypy failed for example {example}\n{stdout}")
 
     @unittest.skipIf(not HAVE_MYPY, "need mypy")
     def test_run_mypy(self):
@@ -202,17 +182,11 @@ class TestTypeHints(TestCase):
         if numpy.__version__ == '1.20.0.dev0+7af1024':
             self.skipTest("Typeannotations in numpy-1.20.0-dev are broken")
 
-        cwd = os.getcwd()
         # TODO: Would be better not to chdir here, this affects the entire
         # process!
-        os.chdir(repo_rootdir)
-        try:
-            (stdout, stderr, result) = mypy.api.run([
-                '--check-untyped-defs',
-                '--follow-imports', 'silent',
-            ])
-        finally:
-            os.chdir(cwd)
+        with set_cwd(repo_rootdir):
+            (stdout, stderr, result) = mypy.api.run([])
+
         if result != 0:
             self.fail(f"mypy failed: {stdout} {stderr}")
 
@@ -227,14 +201,11 @@ class TestTypeHints(TestCase):
         if not os.path.exists(mypy_inifile):
             self.skipTest("Can't find PyTorch MyPy strict config file")
 
-        cwd = os.getcwd()
-        os.chdir(repo_rootdir)
-        try:
+        with set_cwd(repo_rootdir):
             (stdout, stderr, result) = mypy.api.run([
                 '--config', mypy_inifile,
             ])
-        finally:
-            os.chdir(cwd)
+
         if result != 0:
             self.fail(f"mypy failed: {stdout} {stderr}")
 

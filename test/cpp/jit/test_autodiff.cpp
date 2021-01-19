@@ -81,6 +81,7 @@ variable_list grad(
       grad_outputs,
       true,
       false,
+      false,
       fmap(inputs, get_edge));
 }
 
