@@ -178,7 +178,7 @@ void cpu_masked_scatter_kernel(TensorIterator& iter, const Tensor& source) {
     for (int64_t i = 0; i < n; i++) {
       mask_t mask_value = *(mask_t*)(mask + mask_stride * i);
       if (!is_mask_bool) {
-        TORCH_CHECK(mask_value <= 1, "Mask tensor can take 0 and 1 values only");
+        TORCH_CHECK(mask_value <= static_cast<mask_t>(1), "Mask tensor can take 0 and 1 values only");
       }
       if (mask_value) {
         TORCH_CHECK(source_cntr < numel, "Number of elements of source < number of ones in mask");
