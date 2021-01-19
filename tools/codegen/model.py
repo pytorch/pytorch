@@ -174,7 +174,8 @@ class NativeFunction:
         cpp_no_default_args = set(cpp_no_default_args_list)
 
         use_c10_dispatcher_s = e.pop('use_c10_dispatcher', None)
-        assert use_c10_dispatcher_s != 'full', "There is no need to specify 'use_c10_dispatcher: full' anymore. This is the default now. Just remove the line."
+        assert use_c10_dispatcher_s != 'full', \
+            "There is no need to specify 'use_c10_dispatcher: full' anymore. This is the default now. Just remove the line."
         if use_c10_dispatcher_s is None:
             use_c10_dispatcher = UseC10Dispatcher.full
         elif use_c10_dispatcher_s == 'hacky_wrapper_for_legacy_signatures':
