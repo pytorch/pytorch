@@ -2976,7 +2976,7 @@ struct to_ir {
           return std::make_shared<SimpleValue>(
               graph
                   ->insertNode(graph->createList(
-                      type->expect<ListType>()->getElementType(), {}))
+                      type->expectRef<ListType>().getElementType(), {}))
                   ->output());
         }
         // list(iter) desugars to [_elem for _elem in iter]
@@ -3376,7 +3376,7 @@ struct to_ir {
         TypePtr elem_type = TensorType::get();
         if (type_hint) {
           if (type_hint->kind() == TypeKind::ListType) {
-            elem_type = type_hint->expect<ListType>()->getElementType();
+            elem_type = type_hint->expectRef<ListType>().getElementType();
           } else {
             // If the type hint was not a List[T] throw an error
             throw ErrorReport(tree)
