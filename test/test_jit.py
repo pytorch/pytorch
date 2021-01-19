@@ -271,7 +271,7 @@ def get_grad_executor(plan_state, diff_graph_idx=None, skip_check=False):
             nodes = list(filter(lambda n : n.kind() != "prim::BailOut" and n.kind() != "prim::BailoutTemplate", nodes))
             if len(nodes) == 1 or (len(nodes) == 2 and nodes[1].kind() == "prim::TupleConstruct"):
                 pass
-            elif len(nodes) == 2 and nodes[0].kind() == "prim::TypeCheck" and nodes[1].kind() == "prim::If":
+            elif len(nodes) == 2 and nodes[0].kind() == "prim::RequiresGradCheck" and nodes[1].kind() == "prim::If":
                 pass
             else:
                 raise RuntimeError("Can't get a grad_executor for a non-differentiable graph")
@@ -724,6 +724,29 @@ class TestJit(JitTestCase):
         y = torch.rand(3, 4)
 
         self.assertTrue(check(x, y))
+
+    def test_nn_conv(self):
+        class Mod(nn.Module):
+            def __init__(self, conv):
+                super().__init__()
+                self.conv = conv
+
+            def forward(self, input):
+                return self.conv(input)
+
+        inputs = [
+            # Conv
+            (Mod(nn.Conv1d(16, 33, 3, stride=2)), torch.randn(20, 16, 5)),
+            (Mod(nn.Conv2d(16, 33, 3, stride=2)), torch.randn(20, 16, 5, 10)),
+            (Mod(nn.Conv3d(16, 33, 3, stride=2)), torch.randn(20, 16, 3, 5, 4)),
+            # ConvTransposed
+            (Mod(nn.ConvTranspose1d(16, 33, 3, stride=2)), torch.randn(20, 16, 5)),
+            (Mod(nn.ConvTranspose2d(16, 33, 3, stride=2)), torch.randn(20, 16, 5, 10)),
+            (Mod(nn.ConvTranspose3d(16, 33, 3, stride=2)), torch.randn(20, 16, 3, 5, 4)),
+        ]
+
+        for m, inp in inputs:
+            self.checkModule(m, (inp,))
 
     def test_numel(self):
         @torch.jit.script

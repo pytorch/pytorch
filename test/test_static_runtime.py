@@ -3,6 +3,7 @@ import torch
 from torch import nn
 from torch.testing._internal.common_utils import TestCase, run_tests
 
+from typing import Dict, Optional
 
 class StaticRuntime:
     def __init__(self, scripted):
@@ -27,8 +28,7 @@ class StaticRuntime:
         )
 
 
-def linear_shim(input, weight, bias=None):
-    # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
+def linear_shim(input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor] = None) -> torch.Tensor:
     output = input.matmul(weight.t())
     if bias is not None:
         output += bias
@@ -116,7 +116,7 @@ def loop_graph(a, b, iters : int):
 def output_graph(a, b, c, iters : int):
     s = torch.tensor([[3, 3], [3, 3]])
     k = a + b * c + s
-    d : Dict[int, Tensor] = {}
+    d : Dict[int, torch.Tensor] = {}
     for i in range(iters):
         d[i] = k + i
     return d

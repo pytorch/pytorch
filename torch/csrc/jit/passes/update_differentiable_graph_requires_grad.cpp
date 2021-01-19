@@ -20,8 +20,8 @@ void UpdateDifferentiableGraphRequiresGrad(
       n->ty_(
           attr::profiled_type,
           n->ty(attr::profiled_type)
-              ->expect<TensorType>()
-              ->withRequiresGrad(new_requires_grad));
+              ->expectRef<TensorType>()
+              .withRequiresGrad(new_requires_grad));
     }
     for (Block* b : n->blocks()) {
       UpdateDifferentiableGraphRequiresGrad(b, new_requires_grad);
