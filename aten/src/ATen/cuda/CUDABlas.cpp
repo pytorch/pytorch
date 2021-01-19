@@ -342,7 +342,7 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
                                    (int) num_batches, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, 0, NULL, NULL));
   #else
-    TORCH_CHECK(false, "BFloat16 requires CUDA 11");
+    TORCH_CHECK(false, "CUDA BFloat16 bgemm requires CUDA 11 or later");
   #endif // defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 }
 #endif // __HIP_PLATFORM_HCC__
