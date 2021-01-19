@@ -1140,8 +1140,6 @@ Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & s
             "please use a mask with dtype torch.bool instead.");
   }
 
-  TORCH_CHECK(self.numel() == b_mask.numel(), "Number of elements of self != Number of elements in mask");
-
   auto src_cont = source.contiguous();
 
   auto iter = TensorIteratorConfig()
