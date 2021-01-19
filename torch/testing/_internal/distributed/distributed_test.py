@@ -302,7 +302,7 @@ class TestDistBackend(MultiProcessTestCase):
         self.rank = rank
         self.file_name = file_name
 
-        if torch.cuda.device_count() < int(self.world_size):
+        if torch.cuda.is_available() and torch.cuda.device_count() < int(self.world_size):
             sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
         try:
             timeout = timedelta(seconds=60)

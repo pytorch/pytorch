@@ -17,7 +17,6 @@ namespace c10 { namespace guts {
 template<class Func> struct function_traits {
   static_assert(!std::is_same<Func, Func>::value, "In function_traits<Func>, Func must be a plain function type.");
 };
-
 template<class Result, class... Args>
 struct function_traits<Result (Args...)> {
   using func_type = Result (Args...);
@@ -49,7 +48,6 @@ struct infer_function_traits<Result (Args...)> {
 
 template <typename T>
 using infer_function_traits_t = typename infer_function_traits<T>::type;
-
 
 /**
  * make_function_traits: creates a `function_traits` type given a Return type

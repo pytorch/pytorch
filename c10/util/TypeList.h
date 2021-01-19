@@ -117,6 +117,7 @@ template<template <class> class Condition, class TypeList>
 using filter_t = typename filter<Condition, TypeList>::type;
 
 
+
 /**
  * Counts how many types in the list fulfill a type trait
  * Examples:

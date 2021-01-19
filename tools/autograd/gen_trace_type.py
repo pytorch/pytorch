@@ -329,7 +329,7 @@ def emit_trace_body(f: NativeFunction) -> List[str]:
     ret_and_arg_types = ', '.join([dispatcher_sig.returns_type()] + [a.type.cpp_type() for a in dispatcher_exprs])
     # code-generated tracing kernels plumb and recompute dispatch keys directly through the kernel for performance.
     # See Note [Plumbing Keys Through The Dispatcher] for details.
-    dispatch_key_set = 'ks & c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::Tracer)'
+    dispatch_key_set = 'ks & c10::after_tracing_keyset'
     redispatch_args = ', '.join(['op', dispatch_key_set] + [a.expr for a in dispatcher_exprs])
 
     assign_return_values = f'{tie_return_values(f)} = ' \
