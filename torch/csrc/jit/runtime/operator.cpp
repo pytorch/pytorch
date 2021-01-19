@@ -250,6 +250,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::profile_ivalue, // used in interpreter only
       prim::TypeCheck, // used in interpreter only
       prim::FallbackGraph, // converted into prim::CallFunction
+      Symbol::prim("_conv2d_relu")
 
   };
 

@@ -1,3 +1,4 @@
+#include <math.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
 #include <ATen/record_function.h>
@@ -17,6 +18,12 @@
 #include <torch/csrc/jit/runtime/operator_options.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
+#include <ATen/Config.h>
+#include <ideep.hpp>
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/ConvUtils.h>
+#include "NativeFunctions.h"
+
 
 // NOLINTNEXTLINE
 C10_DEFINE_bool(
@@ -1146,6 +1153,99 @@ Operation createTensorExprOp(const Node* node) {
     return 0;
   };
 }
+
+Operation createConv2dRelu(const Node* node) {
+
+/*
+
+
+      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[], %groups:int, %alpha:float, %scale, %input_scale):
+        %r = aten::conv2d(%a, %w, %b, %stride, %padding, %dilation, %groups)
+        %s = aten::elu(%r, %alpha, %scale, %input_scale)
+
+*/
+
+  return [](Stack* stack) {
+
+    c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+    const auto static ARG_COUNT = 7;
+    auto input = peek(stack, 0, ARG_COUNT).toTensor();
+    // if (!input.is_mkldnn()) {
+    //   input = at::native::dense_to_mkldnn(input);
+    // }
+    auto weight = peek(stack, 1, ARG_COUNT).toTensor();
+    // if (!weight.is_mkldnn()) {
+    //   weight = at::native::dense_to_mkldnn(weight);  
+    // }
+    auto bias = peek(stack, 2, ARG_COUNT).toOptional<at::Tensor>();
+    auto stride = peek(stack, 3, ARG_COUNT).toIntVector();
+    auto padding = peek(stack, 4, ARG_COUNT).toIntVector();
+    auto dilation = peek(stack, 5, ARG_COUNT).toIntVector();
+    auto groups = peek(stack, 6, ARG_COUNT).toInt();
+
+    std::cerr << "weight is_mkldnn = " << weight.is_mkldnn() << std::endl;
+    std::cerr << "input is_mkldnn = " << input.is_mkldnn() << std::endl;
+    
+    auto attr = ideep::attr_t::fuse_relu();
+    const ideep::tensor x = at::native::itensor_from_tensor(input);
+    const ideep::tensor w = at::native::itensor_from_tensor(weight);
+    c10::optional<ideep::tensor> b{c10::nullopt};
+    if (bias.has_value()) {
+      if (!bias->is_mkldnn()) {
+        bias = at::native::dense_to_mkldnn(*bias);
+      }
+      b = at::native::itensor_from_tensor(*bias);
+    }
+
+    auto kernel_size = w.get_dims();
+
+    std::vector<int64_t> input_size = x.get_dims();
+    std::vector<int64_t> output_sizes = at::native::conv_output_size(
+        input_size, kernel_size, padding, stride, dilation);
+
+    ideep::tensor y;
+    if (b.has_value()) {
+      ideep::convolution_forward::compute(
+          x, w, b.value(), {output_sizes.cbegin(), output_sizes.cend()}, y,
+          {stride.begin(), stride.end()}, {dilation.begin(), dilation.end()},
+          {padding.begin(), padding.end()}, {padding.begin(), padding.end()},
+          groups, ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), attr);
+    } else {
+      ideep::convolution_forward::compute(
+          x, w, {output_sizes.cbegin(), output_sizes.cend()}, y,
+          {stride.begin(), stride.end()}, {dilation.begin(), dilation.end()},
+          {padding.begin(), padding.end()}, {padding.begin(), padding.end()},
+          groups, ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), attr);
+    }
+
+    at::Tensor result;
+    if (input.is_mkldnn()) {
+      result = at::native::new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
+                                    input.options().device_opt());
+    } else {
+      result = at::native::mkldnn_to_dense(
+        at::native::new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
+                                input.options().device_opt()));
+    }
+      
+    drop(stack, ARG_COUNT);
+    stack->push_back(result);
+    return 0;
+  };
+}
+
+static const Symbol getConv2dRelu() { 
+  static const auto conv2d_relu = Symbol::prim("_conv2d_relu");
+  return conv2d_relu;
+}
+
+RegisterOperators TensorExprOps2({
+    torch::jit::Operator(
+        //getConv2dRelu(),
+        "prim::_conv2d_relu(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor",
+        createConv2dRelu,
+        AliasAnalysisKind::FROM_SCHEMA),
+});
 
 RegisterOperators TensorExprOps({
     torch::jit::Operator(

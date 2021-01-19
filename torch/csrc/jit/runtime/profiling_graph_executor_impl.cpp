@@ -32,6 +32,9 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
+#include "ATen/core/interned_strings.h"
+#include "jit/ir/ir.h"
+#include "jit/ir/named_value.h"
 
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
@@ -541,6 +544,24 @@ ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
     std::string function_name)
     : GraphExecutorImplBase(graph, std::move(function_name)) {}
 
+static void replaceWithConv2dRelu(Block* block) {
+  for (auto n: block->nodes()) {
+
+    if (n->kind() == Symbol::aten("relu_")) {
+      if (n->input(0)->node()->kind() == aten::conv2d) {
+        WithInsertPoint wip {n->input(0)->node()};
+        std::vector<NamedValue> fused_inputs (n->input(0)->node()->inputs().begin(), n->input(0)->node()->inputs().end());
+        auto fused = n->owningGraph()->insert(Symbol::prim("_conv2d_relu"), fused_inputs);
+        n->output()->replaceAllUsesWith(fused);
+      }
+    }
+
+    for (auto ib : n->blocks()) {
+      replaceWithConv2dRelu(ib);
+    }
+  }
+}
+
 const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     Stack& stack,
     size_t remaining_bailout_depth) {
@@ -597,6 +618,8 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
   auto copy = pr_->graph()->copy();
   ProfilingRecord::removeProfileCounter(copy->block());
   runProfilingOptimizations(copy);
+  replaceWithConv2dRelu(copy->block());
+  EliminateDeadCode(copy);
   // replaces a fallback graph inserted by
   // specialize_autogradzero if one exists
   replaceFallbackGraphWithFallbackFunction(copy->block());
