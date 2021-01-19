@@ -7734,7 +7734,7 @@ Example::
 
 add_docstr(torch.sort,
            r"""
-sort(input, dim=-1, descending=False, stable=False, *, out=None) -> (Tensor, LongTensor)
+sort(input, dim=-1, descending=False, *, out=None) -> (Tensor, LongTensor)
 
 Sorts the elements of the :attr:`input` tensor along a given dimension
 in ascending order by value.
@@ -7744,21 +7744,14 @@ If :attr:`dim` is not given, the last dimension of the `input` is chosen.
 If :attr:`descending` is ``True`` then the elements are sorted in descending
 order by value.
 
-If :attr:`stable` is ``True`` then the sorting routine becomes stable, preserving
-the order of equivalent elements.
-
 A namedtuple of (values, indices) is returned, where the `values` are the
 sorted values and `indices` are the indices of the elements in the original
 `input` tensor.
-
-.. warning:: `stable=True` only works on the CPU for now.
 
 Args:
     {input}
     dim (int, optional): the dimension to sort along
     descending (bool, optional): controls the sorting order (ascending or descending)
-    stable (bool, optional): makes the sorting routine stable, which guarantees that the order
-       of equivalent elements is preserved.
 
 Keyword args:
     out (tuple, optional): the output tuple of (`Tensor`, `LongTensor`) that can
