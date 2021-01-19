@@ -8894,6 +8894,19 @@
   dispatch:
     DefaultBackend: det
 
+- func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
+  python_module: linalg
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU, CUDA: linalg_slogdet
+
+- func: linalg_slogdet.out(Tensor self, *, Tensor(a!) sign, Tensor(b!) logabsdet) -> (Tensor(a!) sign, Tensor(b!) logabsdet)
+  python_module: linalg
+  use_c10_dispatcher: full
+  dispatch:
+    CPU, CUDA: linalg_slogdet_out
+
 - func: _syevd_helper(Tensor self, bool compute_eigenvectors, str uplo) -> (Tensor, Tensor)
   variants: function
   dispatch:
