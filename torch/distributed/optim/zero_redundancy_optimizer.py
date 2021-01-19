@@ -14,6 +14,7 @@ import torch.distributed as dist
 from torch.nn import Parameter
 from torch._six import container_abcs
 from torch.optim import Optimizer
+import io
 
 __all__ = ["ZeroRedundancyOptimizer"]
 
@@ -42,6 +43,34 @@ def _recursive_copy_to_device(value: Any, non_blocking: bool, device: torch.devi
         }
 
     return value
+
+
+def _broadcast_object(
+    obj: Any, src_rank: int, group: object = dist.group.WORLD, dist_device: torch.device = torch.device("cpu")
+) -> Any:
+    """
+    Either broadcast from master to the fleet (default),
+    or use the src setting as the original rank.
+    """
+
+    if dist.get_rank() == src_rank:
+        # Emit data
+        buffer = io.BytesIO()
+        torch.save(obj, buffer)
+        data = bytearray(buffer.getbuffer())
+        length_tensor = torch.LongTensor([len(data)]).to(dist_device)
+        data_send_tensor = torch.ByteTensor(data).to(dist_device)
+        dist.broadcast(length_tensor, src=src_rank, group=group, async_op=False)
+        dist.broadcast(data_send_tensor, src=src_rank, group=group, async_op=False)
+    else:
+        # Fetch from the source
+        length_tensor = torch.LongTensor([0]).to(dist_device)
+        dist.broadcast(length_tensor, src=src_rank, group=group, async_op=False)
+        data_recv_tensor = torch.empty([int(length_tensor.item())], dtype=torch.uint8, device=dist_device)
+        dist.broadcast(data_recv_tensor, src=src_rank, group=group, async_op=False)
+        buffer = io.BytesIO(data_recv_tensor.cpu().numpy())
+        obj = torch.load(buffer, map_location=dist_device)
+    return obj
 
 
 def _get_global_rank(group: Any, rank: int) -> int:
@@ -81,7 +110,12 @@ class ZeroRedundancyOptimizer(Optimizer):
     """
 
     def __init__(
-        self, params, optim: Type[Optimizer], group: Optional[Any] = None, bucket_cap_kb: int = 2 ** 24, **default: Any,
+        self,
+        params,
+        optim: Type[Optimizer],
+        group: Optional[Any] = None,
+        bucket_cap_kb: int = 2 ** 24,
+        **default: Any,
     ):
         # Hold all the model params in the root .param_groups
         # NOTE: the default constructor uses `add_param_group` which is partially overloaded here
@@ -166,45 +200,55 @@ class ZeroRedundancyOptimizer(Optimizer):
         # Sync lr and other attributes in case its been updated
         self._update_param_groups()
 
-        local_cpu_state = _recursive_copy_to_device(
-            self.local_state_dict(), non_blocking=True, device=torch.device("cpu")
-        )
+        empty_messenger = torch.tensor([0], dtype=torch.uint8, device=self._device)
 
         # Pull the sharded state from all the other replicas
         # Store all the states in order, rank by rank
+
         # NOTE: In practice, `broadcast` is used, which is wasteful (gather would have been appropriate)
         # compatibility issues with some backends make the use of broadcast mandatory for now.
         # a possible follow up would be to move all sharded state management to RPC RRef
-        if self.rank == recipient_rank:
-            logging.debug("Pulling the sharded optimizer state from all replicas")
-            self._all_states = []
-            for rank in range(self.world_size):
-                if rank == self.rank:
-                    self._all_states.append(local_cpu_state)
 
-                    # Sync with other replicas, almost noop
-                    dist.broadcast_object_list([0], src=self.global_rank, group=self.group)
+        self._all_states = []
+        for rank in range(self.world_size):
+            global_rank = _get_global_rank(self.group, rank)
+
+            # This rank collects the whole state
+            if self.rank == recipient_rank:
+                if rank == self.rank:
+                    self._all_states.append(
+                        _recursive_copy_to_device(
+                            self.local_state_dict(), non_blocking=True, device=torch.device("cpu")
+                        )
+                    )
                 else:
                     # Fetch the optim state from the other replicas
-                    global_rank = _get_global_rank(self.group, rank)
-                    replica_state = [0]
-                    dist.broadcast_object_list(replica_state, src=global_rank, group=self.group)
+                    logging.warning(f"{self.rank} broadcast - pull from {global_rank}:{self.group}")
+                    replica_state = _broadcast_object(
+                        empty_messenger, src_rank=global_rank, group=self.group, dist_device=self._device
+                    )
 
                     self._all_states.append(
-                        _recursive_copy_to_device(replica_state[0], non_blocking=True, device=torch.device("cpu"))
+                        _recursive_copy_to_device(replica_state, non_blocking=True, device=torch.device("cpu"))
                     )
-        else:
-            # Acknowledge broadcasts, and send this rank's shard when needed
-            # Default to CPU space to gain some memory headroom
-            for rank in range(self.world_size):
+            else:
+                # Acknowledge broadcasts, and send this rank's shard when needed
+                # Default to CPU space to gain some memory headroom
                 if rank == self.rank:
                     # Send the state to the reference replica
-                    dist.broadcast_object_list([local_cpu_state], src=self.global_rank, group=self.group)
-                else:
-                    global_rank = _get_global_rank(self.group, rank)
+                    logging.warning(f"{self.rank} broadcast - push from {global_rank}:{self.group}")
+                    _ = _broadcast_object(
+                        self.local_state_dict(), src_rank=self.global_rank, group=self.group, dist_device=self._device
+                    )
 
+                elif rank != recipient_rank:
                     # Discard this tensor/rank, broadcast was being use for compatibility reasons
-                    dist.broadcast_object_list([0], src=global_rank, group=self.group)
+                    logging.warning(f"{self.rank} broadcast - pull from {global_rank}:{self.group} - discard")
+                    _ = _broadcast_object(
+                        empty_messenger, src_rank=global_rank, group=self.group, dist_device=self._device
+                    )
+
+            logging.warning(f"{self.rank} done")
 
     def partition_parameters(self) -> List[List[Dict]]:
         """Partitions parameters across distributed data parallel ranks.
@@ -411,7 +455,10 @@ class ZeroRedundancyOptimizer(Optimizer):
 
         i_param = 0
 
-        for (device, device_params,) in self.per_device_params.items():  # all the params on this device (inc all ranks)
+        for (
+            device,
+            device_params,
+        ) in self.per_device_params.items():  # all the params on this device (inc all ranks)
             buckets = self.buckets[device]
             # Bucket and issue all the async calls
             for (src_rank, params), bucket in zip(enumerate(device_params), buckets):
