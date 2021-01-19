@@ -1,3 +1,4 @@
+import builtins
 import inspect
 from types import CodeType, FunctionType
 from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
@@ -280,10 +281,7 @@ class Tracer(TracerBase):
 
         fn, args = self.create_args_for_root(fn, isinstance(root, torch.nn.Module))
 
-        orig_call = torch.nn.Module.__call__
-        orig_getattr = torch.nn.Module.__getattr__
-
-        parameter_proxy_cache = {}  # Reduce number of get_attr calls
+        parameter_proxy_cache : Dict[str, Proxy] = {}  # Reduce number of get_attr calls
 
         # Method dispatch on parameters is not recorded unless it's directly used.
         # Thus, we need to insert a proxy when __getattr__ requests a parameter.
@@ -303,12 +301,16 @@ class Tracer(TracerBase):
 
             return self.call_module(mod, forward, args, kwargs)
 
+        orig_call = torch.nn.Module.__call__
+        orig_getattr = torch.nn.Module.__getattr__
+        orig_fns : List[PatchedFn] = []
+
         try:
             # Seems to be a mypy limitation: https://github.com/python/mypy/issues/2427
             torch.nn.Module.__getattr__ = module_getattr_wrapper  # type: ignore
             torch.nn.Module.__call__ = module_call_wrapper
 
-            orig_fns = _patch_wrapped_functions()
+            _patch_wrapped_functions(orig_fns)
 
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                              type_expr=fn.__annotations__.get('return', None))
@@ -352,14 +354,22 @@ class PatchedFn(NamedTuple):
     fn_name : str
     orig_fn : Any
 
-def _patch_wrapped_functions() -> List[PatchedFn]:
+# isinstance(orig_fn, NoneSentinel) if the original global namespace
+# did not contain this function at the time of patching. This can
+# occur, for example, when patching a builtin function
+class PatchedFnNoneSentinel:
+    pass
+
+def _patch_wrapped_functions(orig_fns : List[PatchedFn]):
     """
     Go through ``_wrapped_fn_patch_table`` and, for each frame object, wrap
     the listed global functions in the `_create_wrapped_func` wrapper. Returns
     a list of PatchedFn, which is a record specifiying a single function
     entry that was patched and contains the original function for unpatching
+
+    Note orig_fns is taken by reference and updated as we go to facilitate
+    reverting patching if this function itself throws an exception.
     """
-    orig_fns : List[PatchedFn] = []
     # Set to deduplicate entries. Wrapping a function multiple times would
     # be an error, since it would cause a `call_function` node for the
     # wrapper to be emitted rather than the actual underlying function
@@ -371,14 +381,16 @@ def _patch_wrapped_functions() -> List[PatchedFn]:
     for frame_dict, name in _wrapped_fns_to_patch:
         if (id(frame_dict), name) in processed_entries:
             continue
-        orig_fn = frame_dict[name]
-        orig_fns.append(PatchedFn(frame_dict, name, orig_fn))
+        if name not in frame_dict and hasattr(builtins, name):
+            orig_fn = getattr(builtins, name)
+            orig_fns.append(PatchedFn(frame_dict, name, PatchedFnNoneSentinel()))
+        else:
+            orig_fn = frame_dict[name]
+            orig_fns.append(PatchedFn(frame_dict, name, orig_fn))
 
         frame_dict[name] = _create_wrapped_func(orig_fn)
 
         processed_entries.add((id(frame_dict), name))
-
-    return orig_fns
 
 def _unpatch_wrapped_functions(orig_fns : List[PatchedFn]):
     """
@@ -387,7 +399,10 @@ def _unpatch_wrapped_functions(orig_fns : List[PatchedFn]):
     that were there before symbolic tracing.
     """
     for frame_dict, fn_name, orig_fn in orig_fns:
-        frame_dict[fn_name] = orig_fn
+        if isinstance(orig_fn, PatchedFnNoneSentinel):
+            del frame_dict[fn_name]
+        else:
+            frame_dict[fn_name] = orig_fn
 
 def wrap(fn_or_name : Union[str, Callable]):
     """
@@ -445,6 +460,7 @@ def wrap(fn_or_name : Union[str, Callable]):
         raise NotImplementedError('wrap must be called at the top level of a module')
 
     _wrapped_fns_to_patch.append((f.f_globals, fn_name))
+    return fn_or_name
 
 def symbolic_trace(root : Union[torch.nn.Module, Callable]) -> GraphModule:
     """Symbolic tracing API
