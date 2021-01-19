@@ -4376,9 +4376,6 @@ class TestTorchDeviceType(TestCase):
 
     def test_index_fill(self, device):
         for dt in torch.testing.get_all_dtypes():
-            if dt == torch.half or dt == torch.bfloat16 or dt.is_complex:
-                continue
-
             x = torch.tensor([[1, 2], [4, 5]], dtype=dt, device=device)
             index = torch.tensor([0], device=device)
             x.index_fill_(1, index, 0)
