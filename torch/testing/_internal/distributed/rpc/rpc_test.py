@@ -4844,6 +4844,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             dst=worker_name(self.rank)
         )
 
+    @skip_if_no_peer_access
     @skip_if_lt_x_gpu(2)
     def test_device_map_gpu_mixed_self_4(self):
         self._test_device_maps_gpu(
