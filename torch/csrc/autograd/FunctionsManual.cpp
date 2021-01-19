@@ -1921,6 +1921,19 @@ Tensor elu_double_backward(
     }
 }
 
+Tensor slice_backward_wrapper(
+    const at::Tensor& grad,
+    const c10::IntArrayRef& input_sizes,
+    int64_t dim,
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
+    int64_t step) {
+  auto start_val = start.has_value() ? start.value() : 0;
+  auto end_val = end.has_value() ? end.value() : INT64_MAX;
+
+  return slice_backward(grad, input_sizes, dim, start_val, end_val, step);
+}
+
 // https://j-towns.github.io/papers/svd-derivative.pdf
 //
 // This makes no assumption on the signs of sigma.

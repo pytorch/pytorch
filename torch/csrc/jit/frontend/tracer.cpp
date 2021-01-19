@@ -562,7 +562,11 @@ void addInputs(Node* n, const char* name, int64_t value) {
 }
 
 void addInputs(Node* n, const char* name, c10::optional<int64_t> value) {
-  if (value) {
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  if (ArgumentStash::hasValue(name)) {
+    Value* v = ArgumentStash::popValue(name);
+    n->addInput(v);
+  } else if (value) {
     detail::genericAddInput(n, *value);
   } else {
     Graph* g = n->owningGraph();
