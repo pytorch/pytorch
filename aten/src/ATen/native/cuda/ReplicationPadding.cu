@@ -259,29 +259,22 @@ void replication_pad1d_out_cuda_template(
       auto devInput = input_.packed_accessor64<scalar_t, 3>();
       auto devOutput = output_.packed_accessor64<scalar_t, 3>();
 
-      int outputPlaneSize = devOutput.size(2);
-      int size1 = devOutput.size(1);
-      int size0 = devOutput.size(0);
+      int64_t outputPlaneSize = devOutput.size(2);
+      int64_t size1 = devOutput.size(1);
+      int64_t size0 = devOutput.size(0);
 
-      int y_left = size1;
-      int y_shift = 0;
-      while (y_left > 0) {
-        int z_left = size0;
-        int z_shift = 0;
-        while (z_left > 0) {
-          dim3 gridSize(THCCeilDiv(outputPlaneSize, 256), y_left > 65535 ? 65535 : y_left, z_left > 65535 ? 65535 : z_left);
+      for (int64_t block_y = 0; block_y < size1; block_y += 65535) {
+        int64_t block_y_size = std::min(size1 - block_y, 65535L);
+        for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
+          int64_t block_z_size = std::min(size0 - block_z, 65535L);
+
+          dim3 gridSize(THCCeilDiv(outputPlaneSize, 256L), block_y_size, block_z_size);
           dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
           replication_pad_forward_kernel1d <<<gridSize, blockSize, 0,
-            at::cuda::getCurrentCUDAStream()>>>(devInput, devOutput, padL, padR, y_shift, z_shift);
+            at::cuda::getCurrentCUDAStream()>>>(devInput, devOutput, padL, padR, block_y, block_z);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-          z_shift += 65535;
-          z_left -= 65535;
         }
-
-        y_shift += 65535;
-        y_left -= 65535;
       }
     }
   );
@@ -335,29 +328,22 @@ void replication_pad1d_backward_out_cuda_template(
       auto devGradInput = gradInput_.packed_accessor64<scalar_t, 3>();
       auto devGradOutput = gradOutput_.packed_accessor64<scalar_t, 3>();
 
-      int outputPlaneSize = devGradOutput.size(2);
-      int size1 = devGradOutput.size(1);
-      int size0 = devGradOutput.size(0);
+      int64_t outputPlaneSize = devGradOutput.size(2);
+      int64_t size1 = devGradOutput.size(1);
+      int64_t size0 = devGradOutput.size(0);
 
-      int y_left = size1;
-      int y_shift = 0;
-      while (y_left > 0) {
-        int z_left = size0;
-        int z_shift = 0;
-        while (z_left > 0) {
-          dim3 gridSize(THCCeilDiv(outputPlaneSize, 256), y_left > 65535 ? 65535 : y_left, z_left > 65535 ? 65535 : z_left);
+      for (int64_t block_y = 0; block_y < size1; block_y += 65535) {
+        int64_t block_y_size = std::min(size1 - block_y, 65535L);
+        for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
+          int64_t block_z_size = std::min(size0 - block_z, 65535L);
+
+          dim3 gridSize(THCCeilDiv(outputPlaneSize, 256L), block_y_size, block_z_size);
           dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
           replication_pad_backward_kernel <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
-            devGradInput, devGradOutput, padL, padR, y_shift, z_shift);
+            devGradInput, devGradOutput, padL, padR, block_y, block_z);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-          z_shift += 65535;
-          z_left -= 65535;
         }
-
-        y_shift += 65535;
-        y_left -= 65535;
       }
   });
 }
@@ -426,29 +412,22 @@ void replication_pad2d_out_cuda_template(
       auto devInput = input_.packed_accessor64<scalar_t, 4>();
       auto devOutput = output_.packed_accessor64<scalar_t, 4>();
 
-      int outputPlaneSize = devOutput.size(2) * devOutput.size(3);
-      int size1 = devOutput.size(1);
-      int size0 = devOutput.size(0);
+      int64_t outputPlaneSize = devOutput.size(2) * devOutput.size(3);
+      int64_t size1 = devOutput.size(1);
+      int64_t size0 = devOutput.size(0);
 
-      int y_left = size1;
-      int y_shift = 0;
-      while (y_left > 0) {
-        int z_left = size0;
-        int z_shift = 0;
-        while (z_left > 0) {
-          dim3 gridSize(THCCeilDiv(outputPlaneSize, 256), y_left > 65535 ? 65535 : y_left, z_left > 65535 ? 65535 : z_left);
+      for (int64_t block_y = 0; block_y < size1; block_y += 65535) {
+        int64_t block_y_size = std::min(size1 - block_y, 65535L);
+        for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
+          int64_t block_z_size = std::min(size0 - block_z, 65535L);
+
+          dim3 gridSize(THCCeilDiv(outputPlaneSize, 256L), block_y_size, block_z_size);
           dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
           replication_pad_forward_kernel2d <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
-              devInput, devOutput, padT, padB, padL, padR, y_shift, z_shift);
+              devInput, devOutput, padT, padB, padL, padR, block_y, block_z);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-          z_shift += 65535;
-          z_left -= 65535;
         }
-
-        y_shift += 65535;
-        y_left -= 65535;
       }
     }
   );
@@ -511,28 +490,22 @@ void replication_pad2d_backward_out_cuda_template(
         auto devGradInput = gradInput_.packed_accessor64<scalar_t, 4>();
         auto devGradOutput = gradOutput_.packed_accessor64<scalar_t, 4>();
 
-        int outputPlaneSize = devGradOutput.size(2) * devGradOutput.size(3);
-        int size1 = devGradOutput.size(1);
-        int size0 = devGradOutput.size(0);
+        int64_t outputPlaneSize = devGradOutput.size(2) * devGradOutput.size(3);
+        int64_t size1 = devGradOutput.size(1);
+        int64_t size0 = devGradOutput.size(0);
 
-        int y_left = size1;
-        int y_shift = 0;
-        while (y_left > 0) {
-          int z_left = size0;
-          int z_shift = 0;
-          while (z_left > 0) {
-            dim3 gridSize(THCCeilDiv(outputPlaneSize, 256), y_left > 65535 ? 65535 : y_left, z_left > 65535 ? 65535 : z_left);
+        for (int64_t block_y = 0; block_y < size1; block_y += 65535) {
+          int64_t block_y_size = std::min(size1 - block_y, 65535L);
+          for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
+            int64_t block_z_size = std::min(size0 - block_z, 65535L);
+
+            dim3 gridSize(THCCeilDiv(outputPlaneSize, 256L), block_y_size, block_z_size);
             dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
+
             replication_pad_backward_kernel <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
-              devGradInput, devGradOutput, padT, padB, padL, padR, y_shift, z_shift);
+              devGradInput, devGradOutput, padT, padB, padL, padR, block_y, block_z);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-            z_shift += 65535;
-            z_left -= 65535;
           }
-
-          y_shift += 65535;
-          y_left -= 65535;
         }
       }
   );
@@ -697,27 +670,22 @@ void replication_pad3d_out_cuda_template(
       auto devInput = input_.packed_accessor64<scalar_t, 5>();
       auto devOutput = output_.packed_accessor64<scalar_t, 5>();
 
-      int outputPlaneSize = devOutput.size(2) * devOutput.size(3) * devOutput.size(4);
-      int size1 = devOutput.size(1);
-      int size0 = devOutput.size(0);
-      int y_left = size1;
-      int y_shift = 0;
-      while (y_left > 0) {
-        int z_left = size0;
-        int z_shift = 0;
-        while (z_left > 0) {
-          dim3 gridSize(THCCeilDiv(outputPlaneSize, 256), y_left > 65535 ? 65535 : y_left, z_left > 65535 ? 65535 : z_left);
+      int64_t outputPlaneSize = devOutput.size(2) * devOutput.size(3) * devOutput.size(4);
+      int64_t size1 = devOutput.size(1);
+      int64_t size0 = devOutput.size(0);
+
+      for (int64_t block_y = 0; block_y < size1; block_y += 65535) {
+        int64_t block_y_size = std::min(size1 - block_y, 65535L);
+        for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
+          int64_t block_z_size = std::min(size0 - block_z, 65535L);
+
+          dim3 gridSize(THCCeilDiv(outputPlaneSize, 256L), block_y_size, block_z_size);
           dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
           replication_pad_forward_kernel3d <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
-              devInput, devOutput, pfront, pback, ptop, pbottom, pleft, pright, y_shift, z_shift);
+              devInput, devOutput, pfront, pback, ptop, pbottom, pleft, pright, block_y, block_z);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-          z_shift += 65535;
-          z_left -= 65535;
         }
-        y_shift += 65535;
-        y_left -= 65535;
       }
     }
   );
@@ -769,27 +737,22 @@ void replication_pad3d_backward_out_cuda_template(
       auto devGradInput = gradInput_.packed_accessor64<scalar_t, 5>();
       auto devGradOutput = gradOutput_.packed_accessor64<scalar_t, 5>();
 
-      int outputPlaneSize = devGradOutput.size(2) * devGradOutput.size(3) * devGradOutput.size(4);
-      int size1 = devGradOutput.size(1);
-      int size0 = devGradOutput.size(0);
-      int y_left = size1;
-      int y_shift = 0;
-      while (y_left > 0) {
-        int z_left = size0;
-        int z_shift = 0;
-        while (z_left > 0) {
-          dim3 gridSize(THCCeilDiv(outputPlaneSize, 256), y_left > 65535 ? 65535 : y_left, z_left > 65535 ? 65535 : z_left);
+      int64_t outputPlaneSize = devGradOutput.size(2) * devGradOutput.size(3) * devGradOutput.size(4);
+      int64_t size1 = devGradOutput.size(1);
+      int64_t size0 = devGradOutput.size(0);
+
+      for (int64_t block_y = 0; block_y < size1; block_y += 65535) {
+        int64_t block_y_size = std::min(size1 - block_y, 65535L);
+        for (int64_t block_z = 0; block_z < size0; block_z += 65535) {
+          int64_t block_z_size = std::min(size0 - block_z, 65535L);
+
+          dim3 gridSize(THCCeilDiv(outputPlaneSize, 256L), block_y_size, block_z_size);
           dim3 blockSize(outputPlaneSize > 256 ? 256 : outputPlaneSize);
 
           replication_pad_backward_kernel <<<gridSize, blockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
-                    devGradInput, devGradOutput, pfront, pback, ptop, pbottom, pleft, pright, y_shift, z_shift);
+                    devGradInput, devGradOutput, pfront, pback, ptop, pbottom, pleft, pright, block_y, block_z);
           C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-          z_shift += 65535;
-          z_left -= 65535;
         }
-        y_shift += 65535;
-        y_left -= 65535;
       }
     }
   );
