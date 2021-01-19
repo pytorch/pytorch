@@ -463,6 +463,34 @@ def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
                                      requires_grad=requires_grad),
                         (0, -1, -2, -3), (-3, -2, -1, -0))))
 
+
+def sample_repeat_tile(op_info, device, dtype, requires_grad):
+    rep_dims = ((), (0, ), (1, ), (0, 2), (1, 1), (2, 3), (2, 3, 2), (0, 2, 3), (2, 1, 1, 1),)
+    shapes = ((), (0,), (2,), (3, 0), (3, 2), (3, 0, 1))
+
+    if requires_grad:
+        # Tests for variant_consistency_jit, grad, gradgrad
+        # are slower. Use smaller bags of `rep_dims` and `shapes`
+        # in this case.
+        rep_dims = ((), (0, ), (0, 2), (1, 1), (2, 3), (1, 3, 2), (3, 1, 1))  # type: ignore
+        shapes = ((), (0,), (2,), (3, 2))  # type: ignore
+
+    tensors = [make_tensor(shape, device, dtype,
+                           low=None, high=None,
+                           requires_grad=requires_grad) for shape in shapes]
+
+    samples = []
+    for rep_dim, tensor in product(rep_dims, tensors):
+        for t in (tensor, tensor.T):
+            if op_info.name == 'repeat' and len(rep_dim) >= t.dim():
+                # `torch.repeat` errors for `len(rep_dims) < t.dim()`,
+                # so we filter such combinations.
+                samples.append(SampleInput((t, rep_dim),))
+            elif op_info.name == 'tile':
+                samples.append(SampleInput((t, rep_dim),))
+
+    return samples
+
 def np_unary_ufunc_integer_promotion_wrapper(fn):
     # Wrapper that passes PyTorch's default scalar
     #   type as an argument to the wrapped NumPy
@@ -549,6 +577,28 @@ class SpectralFuncInfo(OpInfo):
             ]
 
 
+class ShapeFuncInfo(OpInfo):
+    """Early version of a specialized OpInfo for Shape manipulating operations like tile and roll"""
+    def __init__(self,
+                 name,  # the string name of the function
+                 *,
+                 ref,  # a reference function
+                 dtypes=floating_types(),
+                 dtypesIfCPU=None,
+                 dtypesIfCUDA=None,
+                 dtypesIfROCM=None,
+                 sample_inputs_func=None,
+                 **kwargs):
+        super(ShapeFuncInfo, self).__init__(name,
+                                            dtypes=dtypes,
+                                            dtypesIfCPU=dtypesIfCPU,
+                                            dtypesIfCUDA=dtypesIfCUDA,
+                                            dtypesIfROCM=dtypesIfROCM,
+                                            sample_inputs_func=sample_inputs_func,
+                                            **kwargs)
+        self.ref = ref
+
+
 class HermitianOpInfo(OpInfo):
     """Operator information for Hermitian functions
     These are functions that take Hermitian matrices as input.
@@ -597,7 +647,6 @@ def sample_inputs_linalg_pinv_hermitian(op_info, device, dtype, requires_grad=Fa
     for o in out:
         o.kwargs = {"hermitian": True}
     return out
-
 
 def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False):
     """
@@ -1415,6 +1464,24 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            supports_tensor_out=False,
            sample_inputs_func=sample_movedim_moveaxis),
+    ShapeFuncInfo('repeat',
+                  op=lambda x, dims: x.repeat(dims),
+                  ref=np.tile,
+                  dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+                  supports_tensor_out=False,
+                  test_inplace_grad=False,
+                  skips=(
+                      # torch.repeat does not exist so we get a RuntimeError.
+                      SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                               dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16)),
+                  ),
+                  sample_inputs_func=sample_repeat_tile),
+    ShapeFuncInfo('tile',
+                  ref=np.tile,
+                  dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+                  supports_tensor_out=False,
+                  test_inplace_grad=False,
+                  sample_inputs_func=sample_repeat_tile),
 ]
 
 if TEST_SCIPY:
@@ -1516,6 +1583,7 @@ if TEST_SCIPY:
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse is True]
+shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
 
 def index_variable(shape, max_indices, device=torch.device('cpu')):
     if not isinstance(shape, tuple):
@@ -1992,14 +2060,6 @@ def method_tests():
         ('renorm', (S, S, S), (2, 1, 0.5), 'dim', (), [1]),
         ('renorm', (S, S, S), (1, 2, 3), 'norm_1'),
         ('renorm', (S, S, S), (inf, 2, 0.5), 'norm_inf'),
-        ('repeat', (S,), (2,), 'single_number'),
-        ('repeat', (), (2, 3), 'scalar'),
-        ('repeat', (2, 2), (3, 2)),
-        ('repeat', (2, 2), (1, 3, 1, 2), 'unsqueeze'),
-        ('repeat', (S, S), (1, 1), 'keepdim0'),
-        ('repeat', (S, S), (3, 1, 1), 'keepdim1'),
-        ('repeat', (S,), (0, ), 'zero_dim'),
-        ('repeat', (S,), (0, 2), 'zero_dim_multi'),
         ('logcumsumexp', (S, S, S), (0,), 'dim0', (), [0]),
         ('logcumsumexp', (S, S, S), (1,), 'dim1', (), [0]),
         ('logcumsumexp', (), (0,), 'dim0_scalar', (), [0]),
@@ -2216,11 +2276,6 @@ def method_tests():
         ('diagonal', (M, M, M), (1, 1, 2), '3d_1'),
         ('diagonal', (M, M, M), (2, 0, 1), '3d_2'),
         ('diagonal', (M, M, M), (-2, 0, 1), '3d_3'),
-        ('tile', (2, 2), ([2, 2, 2],), 'more_reps_dims', (False,)),
-        ('tile', (2, 2), ([2, 2],), 'same_reps_dims', (False,)),
-        ('tile', (2, 2), ([2, 3],), 'less_reps_dims', (False,)),
-        ('tile', (2, 2, 2), ([2, 2, 0],), 'zero_rep_dim', (False,)),
-        ('tile', (), ([S, S, S],), 'empty_tensor', (False,)),
         ('tril', (M, M), NO_ARGS),
         ('tril', (M, M), (2,), 'idx'),
         ('tril', (S, M, M), NO_ARGS, 'batched'),
