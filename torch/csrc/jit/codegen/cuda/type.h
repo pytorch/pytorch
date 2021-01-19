@@ -31,7 +31,7 @@ enum class ValType {
   NamedScalar,
 };
 
-enum class DataType { Bool, Double, Float, Half, Int, Null };
+enum class DataType { Bool, Double, Float, Half, Int, Int32, Null };
 
 // Returns if the datatype is a floating point type
 bool isFloatingPointType(DataType dtype);
@@ -144,6 +144,9 @@ bool isLogicalOp(const BinaryOpType bopt);
 // on input, for example bitwise_and is also used for boolean and in the jit
 bool alsoBooleanOperator(const BinaryOpType bopt);
 
+//! Operations that have tricky behaviors with all integer inputs
+bool noFullIntegerSupport(const BinaryOpType bopt);
+
 enum class TernaryOpType { Clamp, Threshold, Where };
 
 enum class ParallelType {
@@ -215,6 +218,7 @@ TORCH_CUDA_API bool isParallelTypeThread(ParallelType);
 
 TORCH_CUDA_API c10::optional<std::string> inline_op_str(const UnaryOpType);
 TORCH_CUDA_API c10::optional<std::string> inline_op_str(const BinaryOpType);
+TORCH_CUDA_API c10::optional<std::string> integer_op_str(const BinaryOpType);
 
 TORCH_CUDA_API c10::optional<std::string> cast_func_str(
     const std::pair<DataType, DataType>&);

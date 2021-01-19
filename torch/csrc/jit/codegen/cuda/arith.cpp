@@ -272,6 +272,12 @@ DataType getOutputType(BinaryOpType op_type, Val* v1, Val* v2) {
   const bool all_integer_input =
       isIntegralType(v1_dtype) && isIntegralType(v2_dtype);
 
+  if (all_integer_input) {
+    TORCH_INTERNAL_ASSERT(
+        !(noFullIntegerSupport(op_type)) || (v1->isScalar() && v2->isScalar()),
+        "unsupported op with all integer tensor inputs");
+  }
+
   // Combine categories
   const auto v1_cat = getCategory(v1);
   const auto v2_cat = getCategory(v2);

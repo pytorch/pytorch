@@ -92,3 +92,17 @@ __device__ double randLike(Philox rnd) {
 __device__ float randLikef(Philox rnd) {
   return uniformf(rnd());
 }
+
+__device__ constexpr int64_t remainder(int64_t a, int64_t b) {
+  auto mod = a % b;
+  if ((mod != 0) && ((b < 0) != (mod < 0)))
+    mod += b;
+  return mod;
+}
+
+__device__ constexpr int remainder(int a, int b) {
+  auto mod = a % b;
+  if ((mod != 0) && ((b < 0) != (mod < 0)))
+    mod += b;
+  return mod;
+}

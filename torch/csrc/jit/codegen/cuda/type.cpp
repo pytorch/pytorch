@@ -17,6 +17,7 @@ bool isFloatingPointType(DataType dtype) {
     case DataType::Half:
       return true;
     case DataType::Int:
+    case DataType::Int32:
       return false;
     case DataType::Null:
       TORCH_CHECK(
@@ -34,6 +35,7 @@ bool isIntegralType(DataType dtype) {
     case DataType::Half:
       return false;
     case DataType::Int:
+    case DataType::Int32:
       return true;
     case DataType::Null:
       TORCH_CHECK(
@@ -57,6 +59,11 @@ bool alsoBooleanOperator(const BinaryOpType bopt) {
 
 bool alsoBooleanOperator(const UnaryOpType uopt) {
   return uopt >= UnaryOpType::Not && uopt <= UnaryOpType::Not;
+}
+
+bool noFullIntegerSupport(const BinaryOpType bopt) {
+  return bopt == BinaryOpType::Div || bopt == BinaryOpType::Pow ||
+      bopt == BinaryOpType::Fmod;
 }
 
 // Return highest on list (smallest enum val)
@@ -98,6 +105,8 @@ static const char* data_type2string(DataType t) {
       return "__half";
     case DataType::Int:
       return "int64_t";
+    case DataType::Int32:
+      return "int";
     case DataType::Null:
       return "nullptr";
     default:
@@ -322,6 +331,18 @@ static const char* binary_op_type2string(BinaryOpType t) {
   }
 }
 
+static const char* binary_op_integer_op2string(BinaryOpType t) {
+  switch (t) {
+    case BinaryOpType::Max:
+      return "max";
+    case BinaryOpType::Min:
+      return "min";
+    default:
+      break;
+  }
+  return nullptr;
+}
+
 static const char* binary_op_type_inline_op2string(BinaryOpType t) {
   switch (t) {
     case BinaryOpType::Add:
@@ -477,6 +498,12 @@ static const char* supported_casts2string(
       return "(float)";
     case supported_switch_pair(DataType::Float, DataType::Double):
       return "(double)";
+    case supported_switch_pair(DataType::Int32, DataType::Float):
+      return "(float)";
+    case supported_switch_pair(DataType::Int, DataType::Float):
+      return "(double)";
+    case supported_switch_pair(DataType::Int32, DataType::Int):
+      return "(int64_t)";
     case supported_switch_pair(DataType::Float, DataType::Half):
       return "__float2half";
     case supported_switch_pair(DataType::Half, DataType::Float):
@@ -500,6 +527,8 @@ DataType aten_to_data_type(const at::ScalarType& scalar_type) {
       return DataType::Half;
     case at::ScalarType::Long:
       return DataType::Int;
+    case at::ScalarType::Int:
+      return DataType::Int32;
     default:
       return DataType::Null;
   }
@@ -517,6 +546,8 @@ at::ScalarType data_type_to_aten(const DataType& data_type) {
       return at::ScalarType::Half;
     case DataType::Int:
       return at::ScalarType::Long;
+    case DataType::Int32:
+      return at::ScalarType::Int;
     default:
       TORCH_INTERNAL_ASSERT(false, "No data type found for scalar type.");
   }
@@ -571,6 +602,12 @@ c10::optional<std::string> inline_op_str(const BinaryOpType botype) {
                         : c10::nullopt;
 }
 
+c10::optional<std::string> integer_op_str(const BinaryOpType botype) {
+  const char* str = binary_op_integer_op2string(botype);
+  return str != nullptr ? c10::optional<std::string>(std::string(str))
+                        : c10::nullopt;
+}
+
 std::string stringifyThreadSize(const ParallelType ptype) {
   return thread_size2string(ptype);
 }
@@ -589,6 +626,7 @@ std::string typePrefix(const DataType data_type) {
     case DataType::Half:
       return "f";
     case DataType::Int:
+    case DataType::Int32:
       return "i";
     default:
       TORCH_INTERNAL_ASSERT(false, "No data type found for scalar type.");
@@ -628,6 +666,8 @@ size_t dataTypeSize(DataType type) {
       return sizeof(at::Half);
     case DataType::Int:
       return sizeof(uint64_t);
+    case DataType::Int32:
+      return sizeof(uint32_t);
     default:
       TORCH_INTERNAL_ASSERT(false, "Size undefined for data type, ", type);
   }

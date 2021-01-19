@@ -24,6 +24,8 @@ std::unique_ptr<TensorArgAbstract> getTensorArg(
       return getTensorArg<bool>(nDims);
     case c10::ScalarType::Long:
       return getTensorArg<int64_t>(nDims);
+    case c10::ScalarType::Int:
+      return getTensorArg<int32_t>(nDims);
     default:
       TORCH_CHECK(
           false,

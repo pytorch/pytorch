@@ -98,6 +98,9 @@ bool validateKernelArgTensor(
     case at::ScalarType::Long:
       match = param_data_type == DataType::Int;
       break;
+    case at::ScalarType::Int:
+      match = param_data_type == DataType::Int32;
+      break;
     case at::ScalarType::Bool:
       match = param_data_type == DataType::Bool;
       break;
@@ -126,7 +129,7 @@ bool validateKernelArgScalar(
   bool match = false;
   switch (arg.toScalar().type()) {
     case c10::ScalarType::Long:
-      match = param_type == DataType::Int;
+      match = param_type == DataType::Int || param_type == DataType::Int32;
       break;
     case c10::ScalarType::Double:
       match = param_type == DataType::Double || param_type == DataType::Float ||

@@ -8,7 +8,7 @@ from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH
 from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithSeed
 from torch.testing import FileCheck
 
-from test_jit import JitTestCase, RUN_CUDA
+from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
 import itertools
 import numpy as np
 import math
@@ -42,6 +42,15 @@ class TestCudaFuser(JitTestCase):
         torch.int16,
         torch.int32,
         torch.int64
+    ]
+
+    support_tensor_dtypes = [
+        torch.int32,
+        torch.int64,
+        torch.float16,
+        torch.float32,
+        torch.float64,
+        torch.bool
     ]
 
     def _getSubgraphInFusion(self, graph):
@@ -392,20 +401,6 @@ class TestCudaFuser(JitTestCase):
         # Currently cannot fuse this
         self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GUARD)
 
-    def _binary_test_helper(self, operation):
-        def t(x: torch.Tensor, y: torch.Tensor, z: float):
-            o = x + z
-            o = operation(o, y)
-            return o
-        t_jit = torch.jit.script(t)
-        x = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
-        y = torch.randn(4, 8, 32, 32, dtype=torch.float, device="cuda")
-        jit_o = t_jit(x, y, 2.0)
-        jit_o = t_jit(x, y, 2.0)
-        o = t(x, y, 2.0)
-        self.assertEqual(o, jit_o)
-        self.assertGraphContains(t_jit.graph_for(x, y, 2.0), FUSION_GUARD)
-
     def _unary_test_helper(self, operation):
         def t(x: torch.Tensor, z: float):
             o = x + z
@@ -459,10 +454,13 @@ class TestCudaFuser(JitTestCase):
     def _unary_type_test_helper(self, operation, dtype, random_data=True):
         shape = (4, 8, 32, 32)
 
-        def t(x: torch.Tensor):
-            o = x * 1.0
+        # need additional def of t for boolean ops
+        def t(x: torch.Tensor, y: torch.Tensor):
+            o = x * y
             o = operation(o)
             return o
+
+        y = torch.tensor([1], device="cuda").to(dtype)
 
         if random_data:
             x = torch.randn(shape, dtype=torch.float32, device="cuda")
@@ -473,14 +471,16 @@ class TestCudaFuser(JitTestCase):
         else:
             x = self.special_values.to(dtype=dtype)
         try:
-            ref = t(x)
+            ref = t(x, y)
         except Exception:
             # same way as TE checker, if eager mode throws, ignore this test
             return
         t_jit = torch.jit.script(t)
-        jit_o = t_jit(x)
-        jit_o = t_jit(x)
-        o = t(x)
+        jit_o = t_jit(x, y)
+        jit_o = t_jit(x, y)
+        if dtype in self.support_tensor_dtypes:
+            self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
+        o = t(x, y)
         self.assertEqual(o, jit_o, msg=f"""
         failing case:
             {dtype} {operation} {x}
@@ -495,8 +495,6 @@ class TestCudaFuser(JitTestCase):
             torch.float16,
             torch.float32,
             torch.float64
-            # Bool cannot pass yet due to comment on logical ops
-            # torch.bool
         ]
         operations = [torch.neg,
                       torch.abs,
@@ -582,12 +580,12 @@ class TestCudaFuser(JitTestCase):
 
         # n-dim with scalar (no type-promote)
         x = torch.randn(4, 8, 32, 32, dtype=torch.float16, device="cuda")
-        z = 3.
+        z = torch.tensor(3., dtype=torch.double)
         run_scalar(x, z)
 
         # n-dim with scalar (type-promote)
         x = torch.randn(4, 8, 32, 32, device="cuda").to(dtype=torch.long)
-        z = 3.
+        z = torch.tensor(3., dtype=torch.double)
         run_scalar(x, z)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
@@ -619,10 +617,43 @@ class TestCudaFuser(JitTestCase):
         jitted.graph_for(x, y)  # Shows up in second instance, not first
         self.assertGraphContains(jitted.graph_for(x, y), FUSION_GUARD)
 
+    def _binary_test_helper(self, operation, dtype):
+        def t(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+            o = x + z
+            o = operation(o, y)
+            return o
+        x = (torch.randn(4, 32, 32, dtype=torch.float, device="cuda") * 5).to(dtype)
+        y = (torch.randn(4, 32, 32, dtype=torch.float, device="cuda") * 5).to(dtype)
+        z = torch.tensor([2], device="cuda").to(dtype)
+        o = t(x, y, z)
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x, y, z)
+        jit_o = t_jit(x, y, z)
+
+        self.assertEqual(o, jit_o)
+        self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GUARD)
+
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_binary_ops(self):
+        data_types = [
+            torch.float32,
+            torch.float64,
+            torch.int32,
+            torch.int64
+        ]
+        # need some extra support
+        # to handle below with integer inputs, and they
+        # don't look like popular integer ops in models
+        # , TODO: insert assertions in cpp
+        # if decide not to fuse these on int
+        skip_for_integer = [
+            torch.atan2,
+            torch.fmod,
+            torch.pow,
+            torch.div
+        ]
         operations = [torch.div,
                       torch.mul,
                       torch.atan2,
@@ -637,8 +668,9 @@ class TestCudaFuser(JitTestCase):
                       torch.gt,
                       torch.le,
                       torch.lt]
-        for op in operations:
-            self._binary_test_helper(op)
+        for op, dtype in itertools.product(operations, data_types):
+            if (dtype not in self.int_types) or (op not in skip_for_integer):
+                self._binary_test_helper(op, dtype)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -1458,7 +1490,7 @@ class TestCudaFuser(JitTestCase):
         x = torch.randn([7, 4, 7], dtype=dtype, device=device)
         y = torch.randn([7, 4, 7], dtype=dtype, device=device)
 
-        def t(x: torch.Tensor, y: torch.Tensor, dim: List[int], keepdim : bool):
+        def t(x: torch.Tensor, y: torch.Tensor, dim: List[int], keepdim: bool):
             o = torch.add(x, y)
             o = o.sum(dim, keepdim=keepdim)
             return o
@@ -1540,7 +1572,8 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(x.grad, ref_x.grad)
         self.assertEqual(y.grad, ref_y.grad)
         bwd_graph = list(
-            list(t_jit.get_debug_state().execution_plans.values())[0].code.grad_executor_states()[0].execution_plans.values()
+            list(t_jit.get_debug_state().execution_plans.values())[
+                0].code.grad_executor_states()[0].execution_plans.values()
         )[0].graph
         FileCheck().check(FUSION_GUARD).run(bwd_graph)
 
@@ -1572,7 +1605,7 @@ class TestCudaFuser(JitTestCase):
 
         # Test that a mul is not generated when not needed
         # Alpha=1.0 or is not used
-        def test1(x : torch.Tensor, y : torch.Tensor):
+        def test1(x: torch.Tensor, y: torch.Tensor):
             o = torch.add(x, y, alpha=1.0)
             o = o + 1.0
             return o
@@ -1583,12 +1616,13 @@ class TestCudaFuser(JitTestCase):
             jit_o.backward(grad)
 
         bwd1_graph = list(
-            list(test1_jit.get_debug_state().execution_plans.values())[0].code.grad_executor_states()[0].execution_plans.values()
+            list(test1_jit.get_debug_state().execution_plans.values())[
+                0].code.grad_executor_states()[0].execution_plans.values()
         )[0].graph
         FileCheck().check_not("aten::mul_").run(bwd1_graph)
 
         # Alpha is set to something other than 1.0
-        def test2(x : torch.Tensor, y : torch.Tensor):
+        def test2(x: torch.Tensor, y: torch.Tensor):
             o = torch.add(x, y, alpha=2.0)
             o = o + 1.0
             return o
@@ -1599,9 +1633,48 @@ class TestCudaFuser(JitTestCase):
             jit_o.backward(grad)
 
         bwd2_graph = list(
-            list(test2_jit.get_debug_state().execution_plans.values())[0].code.grad_executor_states()[0].execution_plans.values()
+            list(test2_jit.get_debug_state().execution_plans.values())[
+                0].code.grad_executor_states()[0].execution_plans.values()
         )[0].graph
         FileCheck().check("aten::mul_").run(bwd2_graph)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_backward_type(self):
+        # not super useful to check gradient of integer/bool, so skipping here
+        type_pairs = [
+            (torch.float, torch.half),
+            (torch.double, torch.half),
+            (torch.float, torch.double),
+        ]
+        for x_type, y_type in type_pairs:
+            x = torch.randn(4, 2, dtype=x_type, device='cuda', requires_grad=True)
+            y = torch.randn(4, 2, dtype=y_type, device='cuda', requires_grad=True)
+            grad = torch.randn(4, 2, dtype=torch.float, device='cuda')
+
+            def test1(x: torch.Tensor, y: torch.Tensor):
+                o = torch.add(x, y)
+                o = torch.add(o, y)
+                o = torch.add(o, y)
+                o = torch.add(o, y)
+                o = o + 1.0
+                return o
+
+            test1_jit = torch.jit.script(test1)
+            for i in range(3):
+                jit_o = test1_jit(x, y)
+                jit_o.backward(grad)
+
+            bwd_graph = list(
+                list(test1_jit.get_debug_state().execution_plans.values())[
+                    0].code.grad_executor_states()[0].execution_plans.values()
+            )[0].graph
+
+            FileCheck().check(FUSION_GROUP).run(bwd_graph)
+            self.assertEqual(x.grad.dtype, x.dtype)
+            self.assertEqual(y.grad.dtype, y.dtype)
+
 
 class TestPassManagerCudaFuser(JitTestCase):
 

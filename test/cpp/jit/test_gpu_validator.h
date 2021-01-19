@@ -120,6 +120,8 @@ std::pair<double, double> getTolerance(
     }
     case DataType::Int:
       return {0.0, 0.0};
+    case DataType::Int32:
+      return {0.0, 0.0};
     case DataType::Bool:
       return {0.0, 0.0};
     default:
