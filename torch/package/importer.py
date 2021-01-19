@@ -274,13 +274,14 @@ class PackageImporter:
         import implementation is desired.
 
         """
+        module_name = demangle(module.__name__)
         # The hell that is fromlist ...
         # If a package was imported, try to import stuff from fromlist.
         if hasattr(module, '__path__'):
             for x in fromlist:
                 if not isinstance(x, str):
                     if recursive:
-                        where = module.__name__ + '.__all__'
+                        where = module_name + '.__all__'
                     else:
                         where = "``from list''"
                     raise TypeError(f"Item in {where} must be str, "
@@ -290,7 +291,7 @@ class PackageImporter:
                         self._handle_fromlist(module, module.__all__,
                                               recursive=True)
                 elif not hasattr(module, x):
-                    from_name = '{}.{}'.format(module.__name__, x)
+                    from_name = '{}.{}'.format(module_name, x)
                     try:
                         self._gcd_import(from_name)
                     except ModuleNotFoundError as exc:
@@ -323,7 +324,8 @@ class PackageImporter:
                 cut_off = len(name) - len(name.partition('.')[0])
                 # Slice end needs to be positive to alleviate need to special-case
                 # when ``'.' not in name``.
-                return self.modules[module.__name__[:len(module.__name__) - cut_off]]
+                module_name = demangle(module.__name__)
+                return self.modules[module_name[:len(module_name) - cut_off]]
         else:
             return self._handle_fromlist(module, fromlist)
 
