@@ -25,7 +25,6 @@ from torch.testing._internal.common_device_type import \
      onlyCUDA)
 from torch.testing import floating_and_complex_types, floating_types, all_types
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
-from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
 from torch.autograd import gradcheck, gradgradcheck
 
 # Protects against includes accidentally setting the default dtype
@@ -1137,92 +1136,6 @@ class TestLinalg(TestCase):
         for p in ['wrong_norm', 5]:
             with self.assertRaisesRegex(RuntimeError, f"linalg_cond got an invalid norm type: {p}"):
                 torch.linalg.cond(a, p)
-
-    # Test autograd and jit functionality for linalg functions.
-    # TODO: Once support for linalg functions is added to method_tests in common_methods_invocations.py,
-    #       the `test_cases` entries below should be moved there. These entries are in a similar format,
-    #       so they should work with minimal changes.
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_autograd_and_jit(self, device, dtype):
-        torch.manual_seed(0)
-        S = 10
-        NO_ARGS = None  # NOTE: refer to common_methods_invocations.py if you need this feature
-        test_cases = [
-            # NOTE: Not all the features from common_methods_invocations.py are functional here, since this
-            #       is only a temporary solution.
-            # (
-            #   method name,
-            #   input size/constructing fn,
-            #   args (tuple represents shape of a tensor arg),
-            #   test variant name (will be used at test name suffix),    // optional
-            #   (should_check_autodiff[bool], nonfusible_nodes, fusible_nodes) for autodiff, // optional
-            #   indices for possible dim arg,                            // optional
-            #   fn mapping output to part that should be gradcheck'ed,   // optional
-            #   kwargs                                                   // optional
-            # )
-            ('norm', (S,), (), 'default_1d'),
-            ('norm', (S, S), (), 'default_2d'),
-            ('norm', (S, S, S), (), 'default_3d'),
-            ('norm', (S,), (inf,), 'vector_inf'),
-            ('norm', (S,), (3.5,), 'vector_3_5'),
-            ('norm', (S,), (0.5,), 'vector_0_5'),
-            ('norm', (S,), (2,), 'vector_2'),
-            ('norm', (S,), (1,), 'vector_1'),
-            ('norm', (S,), (0,), 'vector_0'),
-            ('norm', (S,), (-inf,), 'vector_neg_inf'),
-            ('norm', (S,), (-3.5,), 'vector_neg_3_5'),
-            ('norm', (S,), (-0.5,), 'vector_neg_0_5'),
-            ('norm', (S,), (2,), 'vector_neg_2'),
-            ('norm', (S,), (1,), 'vector_neg_1'),
-            ('norm', (S, S), (inf,), 'matrix_inf'),
-            ('norm', (S, S), (2,), 'matrix_2', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-            ('norm', (S, S), (1,), 'matrix_1'),
-            ('norm', (S, S), (-inf,), 'matrix_neg_inf'),
-            ('norm', (S, S), (-2,), 'matrix_neg_2', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-            ('norm', (S, S), (-1,), 'matrix_neg_1'),
-            ('norm', (S, S), ('fro',), 'fro'),
-            ('norm', (S, S), ('fro', [0, 1]), 'fro_dim'),
-            ('norm', (S, S), ('nuc',), 'nuc', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-            ('norm', (S, S), ('nuc', [0, 1]), 'nuc_dim', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ]
-        for test_case in test_cases:
-            func_name = test_case[0]
-            func = getattr(torch.linalg, func_name)
-            input_size = test_case[1]
-            args = list(test_case[2])
-            test_case_name = test_case[3] if len(test_case) >= 4 else None
-            mapping_funcs = list(test_case[6]) if len(test_case) >= 7 else None
-
-            # Skip a test if a decorator tells us to
-            if mapping_funcs is not None:
-                def decorated_func(self, device, dtype):
-                    pass
-                for mapping_func in mapping_funcs:
-                    decorated_func = mapping_func(decorated_func)
-                try:
-                    decorated_func(self, device, dtype)
-                except unittest.SkipTest:
-                    continue
-
-            msg = f'function name: {func_name}, case name: {test_case_name}'
-
-            # Test JIT
-            input = torch.randn(*input_size, dtype=dtype, device=device)
-            input_script = input.clone().detach()
-            script_method, tensors = gen_script_fn_and_args("linalg.norm", "functional", input_script, *args)
-            self.assertEqual(
-                func(input, *args),
-                script_method(input_script),
-                msg=msg)
-
-            # Test autograd
-            # gradcheck is only designed to work with torch.double inputs
-            if dtype in [torch.double, torch.cdouble]:
-                input = torch.randn(*input_size, dtype=dtype, device=device, requires_grad=True)
-
-                def run_func(input):
-                    return func(input, *args)
-                self.assertTrue(gradcheck(run_func, input), msg=msg)
 
     # This test calls torch.linalg.norm and numpy.linalg.norm with illegal arguments
     # to ensure that they both throw errors
