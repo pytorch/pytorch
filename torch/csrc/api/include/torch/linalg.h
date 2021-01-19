@@ -60,6 +60,14 @@ inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<doub
   return torch::linalg_matrix_rank_out(result, input, tol, hermitian);
 }
 
+inline Tensor pinv(const Tensor& input, double rcond, bool hermitian) {
+  return torch::linalg_pinv(input, rcond, hermitian);
+}
+
+inline Tensor& pinv_out(Tensor& result, const Tensor& input, double rcond, bool hermitian) {
+  return torch::linalg_pinv_out(result, input, rcond, hermitian);
+}
+
 inline Tensor solve(const Tensor& input, const Tensor& other) {
   return torch::linalg_solve(input, other);
 }
@@ -164,6 +172,17 @@ inline Tensor matrix_rank(const Tensor input, optional<double> tol, bool hermiti
 
 inline Tensor& matrix_rank_out(Tensor& result, const Tensor input, optional<double> tol, bool hermitian) {
   return detail::matrix_rank_out(result, input, tol, hermitian);
+}
+
+/// Computes pseudo-inverse
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.pinv
+inline Tensor pinv(const Tensor& input, double rcond=1e-15, bool hermitian=false) {
+  return detail::pinv(input, rcond, hermitian);
+}
+
+inline Tensor& pinv_out(Tensor& result, const Tensor& input, double rcond=1e-15, bool hermitian=false) {
+  return detail::pinv_out(result, input, rcond, hermitian);
 }
 
 /// Computes a tensor `x` such that `matmul(input, x) = other`.

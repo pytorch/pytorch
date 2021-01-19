@@ -1257,6 +1257,14 @@ inline optional<T> IValue::toOptional() {
   return this->to<T>();
 }
 
+template <typename T>
+inline optional<T> IValue::toOptional() const {
+  if (this->isNone()) {
+    return nullopt;
+  }
+  return this->to<T>();
+}
+
 inline bool IValue::isCustomClass() const {
   return torch::isCustomClass(*this);
 }
