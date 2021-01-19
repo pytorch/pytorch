@@ -280,7 +280,7 @@ void LayerNormBackwardKernelImpl(
   AT_DISPATCH_FLOATING_TYPES(
       X.scalar_type(), "LayerNormBackwardKernelImpl", [&]() {
         LayerNormBackwardKernelImplInternal<scalar_t>(
-            dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+            dY.is_contiguous() ? dY : dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
       });
 }
 
