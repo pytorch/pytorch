@@ -606,9 +606,9 @@ at::IntArrayRef strides_or_error(const Tensor & input, c10::string_view const & 
 Tensor mm_mat1_backward(const Tensor & grad, const Tensor & mat2, at::IntArrayRef mat1_sizes, at::IntArrayRef mat1_strides, const Scalar & alpha) {
   // if input was column-major, return grad as column-order for efficiency
   if (mat1_strides[0] == 1 && mat1_strides[1] == mat1_sizes[0]) {
-    return maybe_multiply(mat2.conj().mm(grad.t()).t(), alpha);
+    return maybe_multiply(mat2.conj().mm(grad.t()).t(), alpha.conj());
   } else {
-    return maybe_multiply(grad.mm(mat2.t().conj()), alpha);
+    return maybe_multiply(grad.mm(mat2.t().conj()), alpha.conj());
   }
 }
 
@@ -626,9 +626,9 @@ Tensor mm_mat2_backward(const Tensor & grad, const Tensor & mat1, IntArrayRef si
       at::addmm_out(r, t, mat1.t(), grad, alpha, 1);
       return r;
     }
-    return maybe_multiply(grad.t().mm(mat1.conj()).t(), alpha);
+    return maybe_multiply(grad.t().mm(mat1.conj()).t(), alpha.conj());
   } else {
-    return maybe_multiply(mat1.t().conj().mm(grad), alpha);
+    return maybe_multiply(mat1.t().conj().mm(grad), alpha.conj());
   }
 }
 
@@ -1163,14 +1163,27 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   return ggO;
 }
 
-Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
-  auto output = l1_loss_backward(grad, input, target, at::Reduction::None);
+Tensor l1_loss_double_backward(const Tensor & grad, const Tensor & grad_output, const Tensor & self, const Tensor & other, int64_t reduction) {
+  if (!self.is_complex()) {
+    return at::zeros_like(grad);
+  } else {
+    auto diff = self - other;
+    auto output = grad_output * sgn_backward(diff.sgn(), grad, diff);
+    if (reduction == at::Reduction::Mean) {
+      output /= self.numel();
+    }
+    return output;
+  }
+}
+
+Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
+  auto output = at::l1_loss_backward(grad.conj(), input, target, at::Reduction::None);
   if (reduction == at::Reduction::Mean) {
     return output.mean();
   } else if (reduction == at::Reduction::Sum) {
     return output.sum();
   }
-  return output;
+  return handle_r_to_c(grad_output, output);
 }
 
 Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction, double beta) {
@@ -2318,6 +2331,7 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
                         const Tensor& signdet, const Tensor& logabsdet) {
   auto singular_case_backward = [&](const Tensor& grad_logabsdet, const Tensor& self) -> Tensor {
     Tensor u, sigma, v;
+    // TODO: replace self.svd with linalg_svd
     std::tie(u, sigma, v) = self.svd();
     // sigma has all non-negative entries (also with at least one zero entry)
     // so logabsdet = \sum log(abs(sigma))
@@ -2327,17 +2341,19 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
   };
 
   auto nonsingular_case_backward = [&](const Tensor& grad_logabsdet, const Tensor& self) -> Tensor {
-    return unsqueeze_multiple(grad_logabsdet, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1);
+    // TODO: replace self.inverse with linalg_inverse
+    return unsqueeze_multiple(grad_logabsdet, {-1, -2}, self.dim()) * self.inverse().conj().transpose(-2, -1);
   };
 
   if (self.dim() == 2) {
-    if (signdet.item<double>() == 0) {
+    bool is_singular = self.is_complex() ? signdet.abs().item<double>() == 0 : signdet.item<double>() == 0;
+    if (is_singular) {
       return singular_case_backward(grad_logabsdet, self);
     } else {
       return nonsingular_case_backward(grad_logabsdet, self);
     }
   } else {
-    auto nonzero_signdet_indices = at::native::toListOfOptionalTensors(at::where(signdet));
+    auto nonzero_signdet_indices = at::native::toListOfOptionalTensors(self.is_complex() ? at::where(signdet.abs()) : at::where(signdet));
     c10::optional<Tensor> first_nonzero_signdet_index = nonzero_signdet_indices[0];
 
     if (first_nonzero_signdet_index->size(0) == logabsdet.numel()) {  // all log determinants are finite (non-singular)

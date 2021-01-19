@@ -181,31 +181,31 @@ class JitCommonTestCase(TestCase):
                     "when they were expected to be just in a DifferentiableGraph. If it was " \
                     "intended for these nodes to be in FusionGroups, reclassify these nodes as " \
                     "fusible nodes. If these nodes were not intended to be fused, your " \
-                    "autodifferention logic might be wrong."
+                    "autodifferentiation logic might be wrong."
             if len(fusion_nodes_missing) > 0:
-                err_msg += f"\n  {fusion_nodes_missing} were not in one of the fusion " \
-                    "groups of the DifferentiableGraphs when they were expected to be. " \
+                err_msg += f"\n  {fusion_nodes_missing} were not in one of the FusionGroups " \
+                    "of the DifferentiableGraphs when they were expected to be. " \
                     "They were also not found in an outer DifferentiableGraph. Did you " \
                     "intend for these nodes to be autodifferentiated? If not, you should " \
                     "remove these nodes from the test's fusible nodes. Otherwise your " \
-                    "autodifferention logic might be wrong."
+                    "autodifferentiation logic might be wrong."
             if len(fusion_nodes_in_diff) > 0:
-                err_msg += f"\n  {fusion_nodes_in_diff} were not in one of the fusion " \
-                    "groups of the DifferentiableGraphs when they were expected to be, " \
+                err_msg += f"\n  {fusion_nodes_in_diff} were not in one of the FusionGroups " \
+                    "of the DifferentiableGraphs when they were expected to be, " \
                     "instead they were found just in an outer DifferentiableGraph. " \
                     "Did you intend for these nodes to be fused? If not, you should " \
                     "move these nodes into the test's nonfusible nodes. Otherwise your " \
-                    "autodifferention logic might be wrong."
+                    "autodifferentiation logic might be wrong."
         else: 
             err_msg += "One or more nodes were not expected to be autodiffed " \
-                "but were found in a DifferentiableGraph or in a fusion group " \
+                "but were found in a DifferentiableGraph or in a FusionGroup " \
                 "of a DifferentiableGraph. Did you intend for these nodes to be " \
-                "autodiffed? If so, change this test to expect autodifferention. " \
+                "autodiffed? If so, change this test to expect autodifferentiation. " \
                 "\nSpecifically:"
             if len(fusion_nodes_found) > 0:
                 err_msg += f"\n  {fusion_nodes_found} were not expected to be in " \
-                    "one of the DifferentiableGraphs, but appeared in a fusion " \
-                    "group of a DifferentiableGraph. "
+                    "one of the DifferentiableGraphs, but appeared in a FusionGroup " \
+                    "of a DifferentiableGraph. "
             if len(nodes_in_diff_graph) > 0:
                 err_msg += f"\n  {nodes_in_diff_graph} were not expected to " \
                     "be in one of the DifferentiableGraphs but were."

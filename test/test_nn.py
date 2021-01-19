@@ -342,17 +342,18 @@ class TestNN(NNTestCase):
             output = criterion(input, target, *extra_args)
         return output
 
-    def _backward_criterion(self, criterion, input, target, gradOutput=None, extra_args=None):
+    def _backward_criterion(self, criterion, input, output, target, gradOutput=None, extra_args=None):
         if extra_args is None:
             extra_args = tuple()
         input_tuple = input if isinstance(input, tuple) else (input,)
+        output_tuple = output if isinstance(output, tuple) else (output,)
         for i in input_tuple:
             if i.grad is not None:
                 i.grad.data.zero_()
         args = input_tuple + (target,) + extra_args
         if gradOutput is None:
             gradOutput = torch.ones(())
-        criterion(*args).backward(gradOutput.to(input_tuple[0]))
+        criterion(*args).backward(gradOutput.to(output_tuple[0]))
         if isinstance(input, tuple):
             return tuple(i.grad.data for i in input)
         else:
@@ -7400,31 +7401,39 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     @skipIfRocm
     def test_batchnorm_cudnn_nhwc(self):
-        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda", requires_grad=True)
-        input = input.contiguous(memory_format=torch.channels_last)
-        input.retain_grad()
+        def run_test(input, grad_output):
+            c = input.size(1)
+            mod = nn.BatchNorm2d(c).cuda().float()
+            mod.weight.data.uniform_()
+            mod.bias.data.uniform_()
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_mod = nn.BatchNorm2d(c).cuda().float()
+            ref_mod.load_state_dict(mod.state_dict())
+            out = mod(input)
+            out.backward(grad_output)
+            ref_out = ref_mod(ref_input)
+            ref_out.backward(ref_grad)
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(mod.weight.grad, ref_mod.weight.grad)
+            self.assertEqual(mod.bias.grad, ref_mod.bias.grad)
+            self.assertEqual(input.grad, ref_input.grad)
+
+        input = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
+        input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
+
         grad = torch.randint(1, 10, (4, 8, 2, 2), dtype=torch.float32, device="cuda")
         grad = grad.contiguous(memory_format=torch.channels_last)
-        bn = nn.BatchNorm2d(8).cuda().float()
-        bn.weight.data.uniform_()
-        bn.bias.data.uniform_()
-
-        ref_input = input.detach().clone().contiguous().requires_grad_(True)
-        ref_grad = grad.detach().clone().contiguous()
-        ref_bn = nn.BatchNorm2d(8).cuda().float()
-        ref_bn.load_state_dict(bn.state_dict())
-
-        out = bn(input)
-        out.backward(grad)
-        ref_out = ref_bn(ref_input)
-        ref_out.backward(ref_grad)
-
-        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
-        self.assertTrue(ref_out.is_contiguous())
-        self.assertEqual(out, ref_out)
-        self.assertEqual(bn.weight.grad, ref_bn.weight.grad)
-        self.assertEqual(bn.bias.grad, ref_bn.bias.grad)
-        self.assertEqual(input.grad, ref_input.grad)
+        run_test(input, grad)
+        # see #42588, grad is channels_last contiguous, but grad.suggest_memory_format (rightly) return "contiguous"
+        # not channels_last
+        input = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
+        input = input.contiguous(memory_format=torch.channels_last).detach().requires_grad_()
+        grad = torch.randint(1, 10, (2, 8, 8, 1), dtype=torch.float32, device="cuda")
+        grad = grad.permute(0, 2, 1, 3)
+        run_test(input, grad)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_batchnorm_cudnn_half(self):
@@ -7720,11 +7729,12 @@ class TestNN(NNTestCase):
     # https://github.com/pytorch/pytorch/issues/27692 reports
     # that l1_loss get a wrong result for big batch size
     def test_l1_loss_correct(self):
-        for N in range(1, 50, 10):
-            input = torch.rand(N, 3, 1024, 1024)
-            self.assertEqual(
-                torch.nn.L1Loss()(input, torch.zeros_like(input)),
-                input.abs().mean())
+        for dtype in [torch.float, torch.cfloat]:
+            for N in range(1, 50, 10):
+                input = torch.rand(N, 3, 1024, 1024, dtype=dtype)
+                self.assertEqual(
+                    torch.nn.L1Loss()(input, torch.zeros_like(input)),
+                    input.abs().mean())
 
     def test_smoothl1loss_negative_beta_not_supported(self):
         with self.assertRaises(RuntimeError):
@@ -9512,6 +9522,8 @@ class TestNNInit(TestCase):
                 self.assertEqual(gain, 1.4142135623730951)
             elif fn == 'leaky_relu':  # sqrt(2 / 1 + slope^2))
                 self.assertEqual(gain, 1.4141428569978354)
+            elif fn == 'selu':
+                self.assertEqual(gain, 0.75)
 
     def test_calculate_gain_leaky_relu(self):
         for param in [None, 0, 0.01, 10]:
@@ -9975,6 +9987,15 @@ def add_test(test, decorator=None):
             test.test_cuda(self, dtype=torch.bfloat16, **kwargs)
         if getattr(test, 'check_bfloat16', True):
             add(cuda_test_name + '_bfloat16', test_bfloat16)
+
+        def test_cfloat(self, test=test, kwargs=kwargs):
+            test.test_cuda(self, dtype=torch.cfloat, **kwargs)
+
+        def test_cdouble(self, test=test, kwargs=kwargs):
+            test.test_cuda(self, dtype=torch.cdouble, **kwargs)
+        if getattr(test, 'check_complex', False):
+            add(cuda_test_name + '_cfloat', test_cfloat)
+            add(cuda_test_name + '_cdouble', test_cdouble)
 
     else:
         if tf32_is_not_fp32() and test.with_tf32:
@@ -10977,6 +10998,35 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 0, 10, 10, device=device)
             mod(inp)
 
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float, torch.double)
+    def test_MarginLoss_empty(self, device, dtype):
+        for mod, x, y in [
+                (torch.nn.MultiMarginLoss().to(device),
+                 torch.randn(0, 10, requires_grad=True, device=device, dtype=dtype),
+                 torch.ones(0, device=device).type(torch.long)),
+                (torch.nn.MultiLabelMarginLoss().to(device),
+                 torch.randn(0, 10, requires_grad=True, device=device, dtype=dtype),
+                 torch.ones(0, 10, device=device).type(torch.long))]:
+
+            out = mod(x, y)
+            out.sum().backward()
+
+            self.assertEqual(x, torch.zeros_like(x))
+            self.assertEqual(x.grad, torch.zeros_like(x))
+
+            with self.assertRaisesRegex(RuntimeError, 'Expected'):
+                x = torch.randn(0, requires_grad=True, device=device, dtype=dtype)
+                y = torch.ones(10, device=device).type(torch.long)
+                mod(x, y)
+
+            with self.assertRaisesRegex(RuntimeError, 'Expected'):
+                x = torch.randn(10, 0, requires_grad=True, device=device, dtype=dtype)
+                y = torch.ones(10, 0, device=device).type(torch.long)
+                mod(x, y)
+
+
     @onlyOnCPUAndCUDA
     def test_Unfold_empty(self, device):
         inp = torch.randn(0, 3, 3, 4, device=device)
@@ -11216,6 +11266,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyOnCPUAndCUDA
     def test_invalid_reduction_strings(self, device):
         input = torch.randn(3, 5, requires_grad=True, device=device)
+        cinput = torch.randn(3, 5, requires_grad=True, device=device, dtype=torch.cfloat)
         target = torch.tensor([1, 0, 4], device=device)
 
         for reduction in ['none', 'invalid']:
@@ -11232,6 +11283,7 @@ class TestNNDeviceType(NNTestCase):
             v(lambda: F.kl_div(input, input, reduction=reduction))
             v(lambda: F.smooth_l1_loss(input, input, reduction=reduction))
             v(lambda: F.l1_loss(input, input, reduction=reduction))
+            v(lambda: F.l1_loss(cinput, cinput, reduction=reduction))
             v(lambda: F.mse_loss(input, input, reduction=reduction))
             v(lambda: F.hinge_embedding_loss(input, input, reduction=reduction))
             v(lambda: F.poisson_nll_loss(input, input, reduction=reduction))
