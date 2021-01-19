@@ -283,7 +283,7 @@ module_tests = [
         cpp_constructor_args='torch::nn::CrossMapLRN2dOptions(5).alpha(5e-3).beta(1e-3).k(2)',
         input_size=(2, 3, 6, 6),
         check_gradgrad=False,
-        # TODO(rzou): Figure out the error. "RuntimeError: Unrecognized tensor type ID: Batched"
+        # TODO(#50743): Figure out the error. "RuntimeError: Unrecognized tensor type ID: Batched"
         check_batched_grad=False,
     ),
     dict(
@@ -3610,7 +3610,7 @@ new_module_tests = [
         desc='relu_activation',
         with_tf32=True,
         tf32_precision=0.1,
-        # TODO(rzou): figure out the error
+        # TODO(#50743): figure out the error
         # RuntimeError: The size of tensor a (6) must match the size of tensor b (4)
         # at non-singleton dimension 2
         check_batched_grad=False,

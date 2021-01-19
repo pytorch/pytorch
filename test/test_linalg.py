@@ -2259,7 +2259,7 @@ class TestLinalg(TestCase):
                 return torch.cholesky_solve(b, A, upper)
 
             gradcheck(func, [root, b, upper])
-            # TODO: the following fails with batched grad testing
+            # TODO(#50743): the following fails with batched grad testing
             gradgradcheck(func, [root, b, upper], atol=1e-3, check_batched_grad=False)
 
         for (a_size, b_size), upper in itertools.product([((3, 3), (3, 4)), ((3, 3), (3, 2)),
