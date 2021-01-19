@@ -13,7 +13,6 @@ import random
 from random import randrange
 from itertools import product
 from functools import reduce
-from numbers import Number
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
@@ -1143,7 +1142,7 @@ class TestLinalg(TestCase):
     # TODO: Once support for linalg functions is added to method_tests in common_methods_invocations.py,
     #       the `test_cases` entries below should be moved there. These entries are in a similar format,
     #       so they should work with minimal changes.
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_autograd_and_jit(self, device, dtype):
         torch.manual_seed(0)
         S = 10
@@ -1218,7 +1217,7 @@ class TestLinalg(TestCase):
 
             # Test autograd
             # gradcheck is only designed to work with torch.double inputs
-            if dtype == torch.double:
+            if dtype in [torch.double, torch.cdouble]:
                 input = torch.randn(*input_size, dtype=dtype, device=device, requires_grad=True)
 
                 def run_func(input):
@@ -1310,77 +1309,6 @@ class TestLinalg(TestCase):
                 torch.linalg.norm(x, ord, keepdim=keepdim, out=res_out)
                 self.assertEqual(res_out.shape, expected.shape, msg=msg)
                 self.assertEqual(res_out.cpu(), expected, msg=msg)
-
-    # Test complex number inputs for linalg.norm
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.cfloat, torch.cdouble)
-    def test_norm_complex_autograd(self, device, dtype):
-        def gen_error_message(input_size, ord, keepdim, dim=None):
-            return "complex norm autograd failed for input size %s, ord=%s, keepdim=%s, dim=%s" % (
-                input_size, ord, keepdim, dim)
-
-        if dtype == torch.cfloat:
-            dtype_real = torch.float
-        elif dtype == torch.cdouble:
-            dtype_real = torch.double
-        else:
-            raise RuntimeError(f'dtype not supported in this test: {dtype}')
-
-        vector_ords = [None, 0, 1, 2, 3, inf, -1, -2, -3, -inf]
-        matrix_ords = [None, 'fro', 'nuc', 1, 2, inf, -1, -2, -inf]
-
-        def run_test_case(x, ord, keepdim):
-            msg = gen_error_message(x.size(), ord, keepdim)
-
-            res = torch.linalg.norm(x, ord, keepdim=keepdim)
-            res.backward()
-
-            is_nuclear = isinstance(ord, str) and ord == 'nuc'
-            is_matrix_2 = isinstance(ord, Number) and abs(ord) == 2
-
-            # Matrix norms order +/-2 and Nuclear can be compared with SVD
-            # followed by max/min/sum
-            if x.dim() == 2 and (is_nuclear or is_matrix_2):
-                x_check = x.clone().detach().requires_grad_(True)
-                if is_matrix_2:
-                    if ord == 2:
-                        res_check = x_check.svd()[1].max()
-                    else:
-                        res_check = x_check.svd()[1].min()
-                else:
-                    res_check = x_check.svd()[1].sum()
-
-                if keepdim:
-                    res_check = res_check.unsqueeze(-1)
-                    res_check = res_check.unsqueeze(-1)
-
-                res_check.backward()
-
-                self.assertEqual(res.shape, res_check.shape, msg=msg)
-                self.assertEqual(res, res_check, msg=msg)
-                self.assertEqual(x.grad, x_check.grad, msg=msg)
-
-            # All other norm types can be compared with their
-            # real number variants
-            else:
-                x_real = x.clone().detach().abs().requires_grad_(True)
-                res_real = torch.linalg.norm(x_real, ord, keepdim=keepdim)
-                res_real.backward()
-
-                self.assertEqual(res.shape, res_real.shape, msg=msg)
-                self.assertEqual(res, res_real, msg=msg)
-                self.assertEqual(x.grad.abs(), x_real.grad, msg=msg)
-
-        # Test supported ords
-        for keepdim in [False, True]:
-            for ord in vector_ords:
-                x = torch.randn(25, dtype=dtype, device=device, requires_grad=True)
-                run_test_case(x, ord, keepdim)
-
-            for ord in matrix_ords:
-                x = torch.randn(25, 25, dtype=dtype, device=device, requires_grad=True)
-                run_test_case(x, ord, keepdim)
 
     # Test that linal.norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
