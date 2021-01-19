@@ -17,6 +17,8 @@ namespace autograd {
 namespace generated {
 namespace details {
 
+extern const char* kCudnnDoubleBackwardMsg;
+
 // A simple way to imperatively compute index ranges for slots
 // that have been flattened
 struct IndexRangeGenerator {
@@ -37,7 +39,8 @@ bool any_variable_defined(variable_list& variables);
 void copy_range(variable_list& out, IndexRange range, const at::Tensor & t);
 void copy_range(variable_list& out, IndexRange range, at::ArrayRef<at::Tensor> t);
 at::Tensor copysign_tensor_self_backward(const Tensor & grad, const Tensor & self, const Tensor & result);
-at::Tensor not_implemented(const char* name);
+at::Tensor not_implemented(const char* name, const char* reason="");
+std::vector<Tensor> not_implemented_list(const char* name, const char* reason="");
 at::Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result);
 at::Tensor maybe_multiply(const at::Tensor & t, const at::Scalar & s);
 int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim);
