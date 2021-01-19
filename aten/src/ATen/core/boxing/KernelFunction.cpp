@@ -24,7 +24,7 @@ void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle& op, S
     op.operator_name(), " has kernels registered to both Math and a backend mapped to AutogradOther. "
     "This makes the backend kernel unreachable (see Note [Ambiguity in AutogradOther kernel]). "
     "If it's intended to override Math kernel behavior, please open an issue to request a dedicated "
-    "Autograd dispatch key for the backend.");
+    "Autograd dispatch key for the backend.", "\nCanonical state\n~~~~~~~~~~~\n", op.dumpState(), "\n\n");
 }
 
 void named_not_supported_kernel(OperatorKernel*, const OperatorHandle& op, Stack*) {
@@ -55,27 +55,6 @@ std::string KernelFunction::dumpState() const {
 bool KernelFunction::_equalsBoxedAndUnboxed(const KernelFunction& other) const {
   return boxed_kernel_func_ == other.boxed_kernel_func_ &&
          unboxed_kernel_func_ == other.unboxed_kernel_func_;
-}
-
-void KernelFunction::checkBoxedKernel(const OperatorHandle& opHandle) const {
-  if (C10_UNLIKELY(boxed_kernel_func_ == nullptr)) {
-    if (unboxed_kernel_func_ == nullptr) {
-      TORCH_INTERNAL_ASSERT(
-          false,
-          "Tried to call KernelFunction::callBoxed() on an uninitialized KernelFunction.",
-          " opname: ",
-          opHandle.operator_name(),
-          " If you're using mobile selective build please make sure to include all ops exported from `torch.jit.export_opnames(model)`.");
-    } else {
-      // TODO We want to introduce the invariant that all kernels must be callable in a boxed way, then this case should be impossible.
-      TORCH_INTERNAL_ASSERT(
-          false,
-          "Tried to call KernelFunction::callBoxed() on a KernelFunction that can only be called with KernelFunction::call().",
-          " opname: ",
-          opHandle.operator_name(),
-          " If you're using mobile selective build please make sure to include all ops exported from `torch.jit.export_opnames(model)`.");
-    }
-  }
 }
 
 } // namespace c10
