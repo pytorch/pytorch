@@ -374,7 +374,7 @@ namespace impl {
     // Some kernels take a DispatchKeySet as their first argument in order to plumb keys through the dispatcher.
     // We don't want to expose the DispatchKeySet type to jit, so we don't include this argument on the stack.
     // See Note [Plumbing Keys Through The Dispatcher] for the background.
-    using ArgTypes = typename guts::typelist::filter_out_type_t<DispatchKeySet, typename guts::infer_function_traits_t<Functor>::parameter_types>;
+    using ArgTypes = typename c10::remove_DispatchKeySet_arg_from_func<Functor>::parameter_types;
     return wrap_kernel_functor_unboxed<Functor>::call(functor, dispatchKeySet, reference_cast<guts::typelist::element_t<ivalue_arg_indices, ArgTypes>>(
       ivalue_to_arg<std::decay_t<guts::typelist::element_t<ivalue_arg_indices, ArgTypes>>, AllowDeprecatedTypes>::call(
         std::move(torch::jit::peek(*stack, ivalue_arg_indices, sizeof...(ivalue_arg_indices)))
@@ -388,7 +388,7 @@ namespace impl {
     // Some kernels take a DispatchKeySet as their first argument in order to plumb keys through the dispatcher.
     // We don't want to expose the DispatchKeySet type to jit, so we don't include this argument on the stack.
     // See Note [Plumbing Keys Through The Dispatcher] for the background.
-    using ArgTypes = typename guts::typelist::filter_out_type_t<DispatchKeySet, typename guts::infer_function_traits_t<Functor>::parameter_types>;
+    using ArgTypes = typename c10::remove_DispatchKeySet_arg_from_func<Functor>::parameter_types;
     constexpr size_t num_ivalue_args = guts::typelist::size<ArgTypes>::value;
     return call_functor_with_args_from_stack_<Functor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack, std::make_index_sequence<num_ivalue_args>());
   }
@@ -432,7 +432,7 @@ namespace impl {
       // Some kernels take a DispatchKeySet as their first argument in order to plumb keys through the dispatcher.
       // We don't want to expose the DispatchKeySet type to jit, so we don't include this argument on the stack.
       // See Note [Plumbing Keys Through The Dispatcher] for the background.
-      using ArgTypes = typename guts::typelist::filter_out_type_t<DispatchKeySet, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>;
+      using ArgTypes = typename c10::remove_DispatchKeySet_arg_from_func<KernelFunctor>::parameter_types;
       constexpr bool has_outputs = !std::is_same<void, ReturnType>::value;
       constexpr size_t num_inputs = guts::typelist::size<ArgTypes>::value;
       guts::if_constexpr<has_outputs>([&] (auto delay_check) {

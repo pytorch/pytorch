@@ -3,7 +3,6 @@
 #include <type_traits>
 #include <array>
 #include <functional>
-#include <c10/core/DispatchKeySet.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/Array.h>
 
@@ -18,21 +17,13 @@ namespace c10 { namespace guts {
 template<class Func> struct function_traits {
   static_assert(!std::is_same<Func, Func>::value, "In function_traits<Func>, Func must be a plain function type.");
 };
-template<class Result>
-struct function_traits<Result ()> {
-  using func_type = Result ();
-  using return_type = Result;
-  using parameter_types = typelist::typelist<>;
-  static constexpr auto number_of_parameters = 0;
-};
 
-template<class Result, class FirstArg, class... Args>
-struct function_traits<Result (FirstArg, Args...)> {
-  using func_type = Result (FirstArg, Args...);
-  using func_type_skip_first_arg = Result (Args...);
+template<class Result, class... Args>
+struct function_traits<Result (Args...)> {
+  using func_type = Result (Args...);
   using return_type = Result;
-  using parameter_types = typelist::typelist<FirstArg, Args...>;
-  static constexpr auto number_of_parameters = sizeof...(Args) + 1;
+  using parameter_types = typelist::typelist<Args...>;
+  static constexpr auto number_of_parameters = sizeof...(Args);
 };
 
 /**
@@ -58,6 +49,23 @@ struct infer_function_traits<Result (Args...)> {
 
 template <typename T>
 using infer_function_traits_t = typename infer_function_traits<T>::type;
+
+
+/**
+ * make_function_traits: creates a `function_traits` type given a Return type
+ * and a typelist of Argument types
+ */
+template <typename Result, typename ArgList> struct make_function_traits {
+  static_assert(false_t<ArgList>::value, "In guts::make_function_traits<Result, TypeList>, the ArgList argument must be typelist<...>.");
+};
+
+template <typename Result, typename... Args>
+struct make_function_traits<Result, typelist::typelist<Args...>> {
+  using type = function_traits<Result(Args...)>;
+};
+
+template <typename Result, typename ArgList>
+using make_function_traits_t = typename make_function_traits<Result, ArgList>::type;
 
 /**
  * Use extract_arg_by_filtered_index to return the i-th argument whose

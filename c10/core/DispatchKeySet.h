@@ -3,6 +3,7 @@
 #include <c10/core/DispatchKey.h>
 #include <c10/util/llvmMathExtras.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Metaprogramming.h>
 #include <ostream>
 
 namespace c10 {
@@ -223,6 +224,20 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet({
   DispatchKey::SparseHIP,
   DispatchKey::Meta,
 });
+//
+// The set of dispatch keys that come after tracing
+// n.b. this relies on the fact that AutogradOther is currently the lowest Autograd key
+constexpr DispatchKeySet after_tracing_keyset = DispatchKeySet(
+        DispatchKeySet::FULL_AFTER,
+        c10::DispatchKey::Tracer
+);
+
+// The set of dispatch keys that come after autograd
+// n.b. this relies on the fact that AutogradOther is currently the lowest Autograd key
+constexpr DispatchKeySet after_autograd_keyset = DispatchKeySet(
+        DispatchKeySet::FULL_AFTER,
+        c10::DispatchKey::AutogradOther
+);
 
 // true if t is a backend dispatch key
 C10_API bool isBackendDispatchKey(DispatchKey t);
@@ -254,4 +269,17 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // we should remove all Autograd keys before taking highestPriority.
   return (s - autograd_dispatch_keyset).highestPriorityTypeId();
 }
+
+template<class T>
+using is_not_DispatchKeySet = guts::negation<std::is_same<DispatchKeySet, T>>;
+
+// Given a function type, constructs a function_traits type that removes any DispatchKeySet arguments.
+template<class FuncType>
+using remove_DispatchKeySet_arg_from_func = guts::make_function_traits_t<
+  typename guts::infer_function_traits_t<FuncType>::return_type,
+  guts::typelist::filter_t<
+    is_not_DispatchKeySet,
+    typename guts::infer_function_traits_t<FuncType>::parameter_types
+  >
+>;
 }

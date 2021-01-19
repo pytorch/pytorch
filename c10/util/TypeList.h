@@ -118,30 +118,6 @@ using filter_t = typename filter<Condition, TypeList>::type;
 
 
 /**
- * Filters out parameters of a certain type from a typelist
- * Examples:
- *   typelist<int, bool> == filter_out_type<std::string, typelist<int, std::string, bool>>
- */
-template<class Type, class TypeList> struct filter_out_type final {
-  static_assert(false_t<TypeList>::value, "In typelist::filter_out_type<Type, TypeList>, the TypeList argument must be typelist<...>.");
-};
-template<class Type, class Head, class... Tail>
-struct filter_out_type<Type, typelist<Head, Tail...>> final {
-  using type = std::conditional_t<
-    !std::is_same<Type, Head>::value,
-    concat_t<typelist<Head>, typename filter_out_type<Type, typelist<Tail...>>::type>,
-    typename filter_out_type<Type, typelist<Tail...>>::type
-  >;
-};
-template<class Type>
-struct filter_out_type<Type, typelist<>> final {
-  using type = typelist<>;
-};
-template<class Type, class TypeList>
-using filter_out_type_t = typename filter_out_type<Type, TypeList>::type;
-
-
-/**
  * Counts how many types in the list fulfill a type trait
  * Examples:
  *   2  ==  count_if<std::is_reference, typelist<void, string, int&, bool, const string&&, int>>

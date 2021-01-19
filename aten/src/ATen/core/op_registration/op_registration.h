@@ -6,6 +6,7 @@
  */
 
 #include <c10/core/DispatchKey.h>
+#include <c10/core/DispatchKeySet.h>
 #include <c10/core/CompileTimeFunctionPointer.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/infer_schema.h>
@@ -17,28 +18,13 @@
 namespace c10 {
 
 namespace detail {
-template<class KernelFunctor>
-std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor(
-          std::enable_if_t<!std::is_same<
-            DispatchKeySet,
-            guts::typelist::head_with_default_t<std::nullptr_t, typename c10::guts::infer_function_traits_t<KernelFunctor>::parameter_types>
-          >::value, std::nullptr_t> = nullptr) {
-  using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type;
-  return std::make_unique<FunctionSchema>(inferFunctionSchemaFlattenedReturns<func_type>("", ""));
-}
-
-// Specialization for when the first argument is of type DispatchKeySet
+// The first argument of the schema might be of type DispatchKeySet, in which case we remove it.
 // We do this because every argument in a function schema is expected to be convertable
 // to an ivalue, but DispatchKeySet is not a type we want the jit to be aware of.
 // See Note [Plumbing Keys Through The Dispatcher]
 template<class KernelFunctor>
-std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor(
-          std::enable_if_t<std::is_same<
-            DispatchKeySet,
-            guts::typelist::head_with_default_t<std::nullptr_t, typename c10::guts::infer_function_traits_t<KernelFunctor>::parameter_types>
-          >::value, std::nullptr_t> = nullptr) {
-  // Hide the first argument of the schema, which is expected to be of type DispatchKeySet.
-  using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type_skip_first_arg;
+std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor() {
+  using func_type = typename c10::remove_DispatchKeySet_arg_from_func<KernelFunctor>::func_type;
   return std::make_unique<FunctionSchema>(inferFunctionSchemaFlattenedReturns<func_type>("", ""));
 }
 }
