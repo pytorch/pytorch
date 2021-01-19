@@ -309,8 +309,8 @@ Tensor rrelu_with_noise_backward(
     Scalar upper,
     bool training,
     bool is_result) {
-  auto lower_tensor = scalar_to_tensor(lower, grad_output.device());
-  auto upper_tensor = scalar_to_tensor(upper, grad_output.device());
+  auto lower_tensor = scalar_to_tensor(lower);
+  auto upper_tensor = scalar_to_tensor(upper);
   if (training && (upper_tensor - lower_tensor).item().to<float>() > 1E-6) {
     return grad_output.mul(noise);
   } else {

@@ -92,6 +92,7 @@ TESTS = [
     'test_overrides',
     'test_jit_fuser_te',
     'test_tensorexpr',
+    'test_tensorexpr_pybind',
     'test_openmp',
     'test_profiler',
     'distributed/nn/jit/test_instantiator',
