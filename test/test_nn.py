@@ -3967,7 +3967,7 @@ class TestNN(NNTestCase):
         tensors = (torch.randn(4, 4, device='cuda', requires_grad=True),
                    torch.randn(4, 4, device='cuda', requires_grad=True),
                    torch.randn(4, 4, device='cuda', requires_grad=True))
-        # TODO(rzou): batched grad fails for the following
+        # TODO(#50743): the following segfaults with check_batched_grad=True
         _assertGradAndGradgradChecks(self, lambda *i: Broadcast.apply((0, 1), *i), tensors,
                                      check_batched_grad=False)
 
