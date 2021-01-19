@@ -21,7 +21,7 @@ public:
     static CppSignature make(
           std::enable_if_t<!std::is_same<
             DispatchKeySet,
-            guts::typelist::head_with_default_t<nullptr_t, typename c10::guts::infer_function_traits_t<std::decay_t<FuncType>>::parameter_types>
+            guts::typelist::head_with_default_t<std::nullptr_t, typename c10::guts::infer_function_traits_t<std::decay_t<FuncType>>::parameter_types>
           >::value, std::nullptr_t> = nullptr) {
         // Normalize functors, lambdas, function pointers, etc. into the plain function type
         using decayed_function_type = typename guts::infer_function_traits_t<std::decay_t<FuncType>>::func_type;
@@ -38,7 +38,7 @@ public:
     static CppSignature make(
           std::enable_if_t<std::is_same<
             DispatchKeySet,
-            guts::typelist::head_with_default_t<nullptr_t, typename c10::guts::infer_function_traits_t<std::decay_t<FuncType>>::parameter_types>
+            guts::typelist::head_with_default_t<std::nullptr_t, typename c10::guts::infer_function_traits_t<std::decay_t<FuncType>>::parameter_types>
           >::value, std::nullptr_t> = nullptr) {
         // Normalize functors, lambdas, function pointers, etc. into the plain function type
         using decayed_function_type = typename guts::infer_function_traits_t<std::decay_t<FuncType>>::func_type_skip_first_arg;
