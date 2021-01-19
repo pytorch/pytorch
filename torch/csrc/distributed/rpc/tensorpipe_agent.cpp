@@ -89,6 +89,7 @@ constexpr int64_t kCudaIpcChannelPriority = 300;
 
 #ifdef USE_CUDA_NOT_ROCM
 constexpr int64_t kCudaXthChannelPriority = 400;
+constexpr int64_t kCudaBasicChannelPriority = 100;
 #endif
 
 std::unique_ptr<TransportRegistration> makeUvTransport() {
@@ -221,6 +222,20 @@ C10_REGISTER_CREATOR(
     TensorPipeCudaChannelRegistry,
     cuda_xth,
     makeCudaXthChannel);
+
+std::unique_ptr<CudaChannelRegistration> makeCudaBasicChannel() {
+  auto context = std::make_shared<tensorpipe::channel::cuda_basic::Context>(
+      std::make_shared<tensorpipe::channel::basic::Context>());
+  return std::make_unique<CudaChannelRegistration>(
+      CudaChannelRegistration{std::move(context), kCudaBasicChannelPriority});
+}
+
+// The cuda_basic is the fallback channel for GPU-to-GPU comm
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_REGISTER_CREATOR(
+    TensorPipeCudaChannelRegistry,
+    cuda_basic,
+    makeCudaBasicChannel);
 
 #endif
 
