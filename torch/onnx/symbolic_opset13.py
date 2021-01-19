@@ -2,12 +2,10 @@
 # see Note [Edit Symbolic Files] in symbolic_helper.py
 
 # This file exports ONNX ops for opset 13
-from sys import maxsize
 import torch
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 from torch.onnx.symbolic_opset9 import overload_by_arg_count, _maybe_cast_reduce_op_input
-from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
 
 
 # EDITING THIS FILE? READ THIS FIRST!
