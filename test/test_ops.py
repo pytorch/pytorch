@@ -340,6 +340,73 @@ class TestCommon(JitCommonTestCase):
         op(*sample.input, *sample.args, **out_kwargs)
         self.assertEqual(expected, out)
 
+    @ops(op_db)
+    def test_out_empty_tensor(self, device, dtype, op):
+        if not op.supports_tensor_out:
+            self.skipTest("Skipped! Operator %s does not support out=..." % op.name)
+
+        samples = op.sample_inputs(device, dtype)
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
+
+        # NOTE: only tests on first sample
+        sample = samples[0]
+        # call it normally to get the expected result
+        expected = op(*sample.input, *sample.args, **sample.kwargs)
+        # call it with out=... and check we get the expected result
+        out_kwargs = sample.kwargs.copy()
+        out_kwargs['out'] = out = torch.empty(0,0)
+        op(*sample.input, *sample.args, **out_kwargs)
+        # Verify if the empty out tensor is resized and restrided to whatever
+        # striding is natural for the op to produce
+        self.assertEqual(expected.shape, out.shape)
+        self.assertEqual(expected, out)
+
+    @ops(op_db)
+    def test_out_different_shape(self, device, dtype, op):
+        if not op.supports_tensor_out:
+            self.skipTest("Skipped! Operator %s does not support out=..." % op.name)
+
+        samples = op.sample_inputs(device, dtype)
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
+
+        # NOTE: only tests on first sample
+        sample = samples[0]
+        # call it normally to get the expected result
+        expected = op(*sample.input, *sample.args, **sample.kwargs)
+        # call it with out=... and check we get the expected result
+        out_kwargs = sample.kwargs.copy()
+        out_kwargs['out'] = out = torch.empty(2,3)
+        op(*sample.input, *sample.args, **out_kwargs)
+        # Verify if the out tensor is resized and restrided to whatever
+        # striding is natural for the op to produce
+        self.assertEqual(expected.shape, out.shape)
+        self.assertEqual(expected, out)
+
+    @ops(op_db)
+    def test_out_NaN(self, device, dtype, op):
+        print(device, dtype)
+        if not op.supports_tensor_out:
+            self.skipTest("Skipped! Operator %s does not support out=..." % op.name)
+
+        samples = op.sample_inputs(device, dtype)
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
+
+        # NOTE: only tests on first sample
+        sample = samples[0]
+        # call it normally to get the expected result
+        expected = op(*sample.input, *sample.args, **sample.kwargs)
+        # call it with out=... and check we get the expected result
+        out_kwargs = sample.kwargs.copy()
+        out_kwargs['out'] = out = torch.ones(expected.shape) * torch.tensor(float('nan'))
+        op(*sample.input, *sample.args, **out_kwargs)
+        # Verify if the out tensor is resized and restrided to whatever
+        # striding is natural for the op to produce
+        self.assertEqual(expected.shape, out.shape)
+        self.assertEqual(expected, out)
+
 
 instantiate_device_type_tests(TestOpInfo, globals())
 instantiate_device_type_tests(TestGradients, globals())
