@@ -359,7 +359,7 @@ namespace impl {
 
   // call_functor_with_args_from_stack
 
-  template<class Functor, bool AllowDeprecatedTypes, class ParamTypeList, size_t... ivalue_arg_indices>
+  template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
   std::decay_t<typename guts::infer_function_traits_t<Functor>::return_type>
   call_functor_with_args_from_stack_(OperatorKernel* functor, DispatchKeySet dispatchKeySet, Stack* stack, std::index_sequence<ivalue_arg_indices...>) {
     (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
@@ -371,23 +371,27 @@ namespace impl {
      * Even though usually dangerous, this is ok here because temporaries live until the end of the statement.
      * TODO We should remove reference_cast once kernels don't take "Tensor&" arguments anymore
      */
-    // The DispatchKeySet lives as an argument in unboxed functions' schemas, but does NOT go on the stack.
-    // explicitly passing the DispatchKeySet argument to the unboxed function pointer, and moving the stack arguments
-    // to positions 1 through n of the unboxed function schema
-    // See Note [Plumbing Keys Through The Dispatcher]
-    return wrap_kernel_functor_unboxed<Functor>::call(functor, dispatchKeySet, reference_cast<guts::typelist::element_t<ivalue_arg_indices, ParamTypeList>>(
-      ivalue_to_arg<std::decay_t<guts::typelist::element_t<ivalue_arg_indices, ParamTypeList>>, AllowDeprecatedTypes>::call(
+    // We're explicitly filtering out DispatchKeySet from the argument list.
+    // Some kernels take a DispatchKeySet as their first argument in order to plumb keys through the dispatcher.
+    // We don't want to expose the DispatchKeySet type to jit, so we don't include this argument on the stack.
+    // See Note [Plumbing Keys Through The Dispatcher] for the background.
+    using ArgTypes = typename guts::typelist::filter_out_type_t<DispatchKeySet, typename guts::infer_function_traits_t<Functor>::parameter_types>;
+    return wrap_kernel_functor_unboxed<Functor>::call(functor, dispatchKeySet, reference_cast<guts::typelist::element_t<ivalue_arg_indices, ArgTypes>>(
+      ivalue_to_arg<std::decay_t<guts::typelist::element_t<ivalue_arg_indices, ArgTypes>>, AllowDeprecatedTypes>::call(
         std::move(torch::jit::peek(*stack, ivalue_arg_indices, sizeof...(ivalue_arg_indices)))
     ))...);
   }
 
-  template<class Functor, bool AllowDeprecatedTypes, class ParamTypeList>
+  template<class Functor, bool AllowDeprecatedTypes>
   std::decay_t<typename guts::infer_function_traits_t<Functor>::return_type>
   call_functor_with_args_from_stack(OperatorKernel* functor, DispatchKeySet dispatchKeySet, Stack* stack) {
-    // This functor is used by all kernels that take in a DispatchKeySet as their first argument.
-    // We don't want to put the keyset on the stack, so [num arguments on the stack] = [num parameters] - 1
-    constexpr size_t num_ivalue_args = guts::typelist::size<ParamTypeList>::value;
-    return call_functor_with_args_from_stack_<Functor, AllowDeprecatedTypes, ParamTypeList>(functor, dispatchKeySet, stack, std::make_index_sequence<num_ivalue_args>());
+    // We're explicitly filtering out DispatchKeySet from the argument list.
+    // Some kernels take a DispatchKeySet as their first argument in order to plumb keys through the dispatcher.
+    // We don't want to expose the DispatchKeySet type to jit, so we don't include this argument on the stack.
+    // See Note [Plumbing Keys Through The Dispatcher] for the background.
+    using ArgTypes = typename guts::typelist::filter_out_type_t<DispatchKeySet, typename guts::infer_function_traits_t<Functor>::parameter_types>;
+    constexpr size_t num_ivalue_args = guts::typelist::size<ArgTypes>::value;
+    return call_functor_with_args_from_stack_<Functor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack, std::make_index_sequence<num_ivalue_args>());
   }
 
   // push_outputs
@@ -425,18 +429,22 @@ namespace impl {
 
     static void call(OperatorKernel* functor, const OperatorHandle&, DispatchKeySet dispatchKeySet, Stack* stack) {
       using ReturnType = typename guts::infer_function_traits_t<KernelFunctor>::return_type;
-      using ParamTypeList = typename guts::typelist::filter_out_type_t<DispatchKeySet, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>;
+      // We're explicitly filtering out DispatchKeySet from the argument list.
+      // Some kernels take a DispatchKeySet as their first argument in order to plumb keys through the dispatcher.
+      // We don't want to expose the DispatchKeySet type to jit, so we don't include this argument on the stack.
+      // See Note [Plumbing Keys Through The Dispatcher] for the background.
+      using ArgTypes = typename guts::typelist::filter_out_type_t<DispatchKeySet, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>;
       constexpr bool has_outputs = !std::is_same<void, ReturnType>::value;
-      constexpr size_t num_inputs = guts::typelist::size<ParamTypeList>::value;
+      constexpr size_t num_inputs = guts::typelist::size<ArgTypes>::value;
       guts::if_constexpr<has_outputs>([&] (auto delay_check) {
         // Decay ReturnType to ReturnType_ so that if a reference gets returned, we actually store it by value
         // and don't get a dangling reference. This is only required because some kernels still return `Tensor&`.
         using ReturnType_ = std::decay_t<typename decltype(delay_check)::template type_identity<ReturnType>>;
-        ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes, ParamTypeList>(functor, dispatchKeySet, delay_check(stack));
+        ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, delay_check(stack));
         torch::jit::drop(*stack, num_inputs);
         push_outputs<ReturnType_, AllowDeprecatedTypes>::call(std::move(output), stack);
       }, /* else */ [&] {
-        call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes, ParamTypeList>(functor, dispatchKeySet, stack);
+        call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor, dispatchKeySet, stack);
         torch::jit::drop(*stack, num_inputs);
       });
     }
