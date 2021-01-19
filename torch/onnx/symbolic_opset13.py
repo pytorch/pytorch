@@ -52,8 +52,8 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
         # Convert to multiple slice nodes iff number of splits and number of outputs are statically known.
         if sym_help._is_packed_list(split_size_or_sizes) and \
                 len(sym_help._unpack_list(split_size_or_sizes)) == _outputs:
-            split_sizes = [g.op("Unsqueeze", v, g.op("Constant", value_t=torch.tensor([0])))
-                           for v in sym_help._unpack_list(split_size_or_sizes)]
+            split_sizes = [sym_help._unsqueeze_helper(g, v, [0]) for v in sym_help._unpack_list(split_size_or_sizes)]
+
             start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
             axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
             res = []
