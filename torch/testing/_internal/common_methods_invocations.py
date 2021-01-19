@@ -308,6 +308,23 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad):
                         args=(torch.tensor([1, 2, 3]),),
                         kwargs=dict(dim=1)),)
 
+def sample_inputs_slogdet(op_info, device, dtype, requires_grad):
+    # original test cases from 'method_tests' have too many test_inputs
+    # we don't actually need all of them to check the autograd and jit correctness
+    # sample inputs with shapes 0x0, 0xSxS, 2x0x0 are added
+    test_inputs = (
+        torch.randn(0, 0, dtype=dtype, device=device),  # '0x0'
+        torch.randn(S, S, dtype=dtype, device=device),  # 'SxS'
+        torch.randn(0, S, S, dtype=dtype, device=device),  # 'zero_batched_SxS'
+        torch.randn(2, 0, 0, dtype=dtype, device=device),  # 'batched_0x0'
+        torch.randn(2, S, S, dtype=dtype, device=device),  # 'batched_SxS'
+    )
+    out = []
+    for a in test_inputs:
+        a.requires_grad = requires_grad
+        out.append(SampleInput(a))
+    return out
+
 def sample_inputs_addmm(op_info, device, dtype, requires_grad):
     input = SampleInput((make_tensor((S, S), device, dtype,
                                      low=None, high=None,
@@ -1077,6 +1094,19 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_fliplr_flipud,
            test_inplace_grad=False,
            supports_tensor_out=False),
+    OpInfo('linalg.slogdet',
+           aten_name='linalg_slogdet',
+           op=torch.linalg.slogdet,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           supports_tensor_out=False,
+           sample_inputs_func=sample_inputs_slogdet,
+           output_func=itemgetter(1),
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           skips=(
+               # These tests do not work with output_func=itemgetter(1)
+               # TODO: remove this once https://github.com/pytorch/pytorch/issues/49326 is resolved
+               SkipInfo('TestCommon', 'test_variant_consistency_jit'),)),
     UnaryUfuncInfo('log',
                    ref=np.log,
                    domain=(0, float('inf')),
@@ -2334,7 +2364,7 @@ def method_tests():
             NO_ARGS, 'batched_symmetric_pd', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('det', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S, 3, 3), NO_ARGS,
          'batched_distinct_singular_values', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        # For `logdet` and `slogdet`, the function at det=0 is not smooth.
+        # For `logdet` the function at det=0 is not smooth.
         # We need to exclude tests with det=0 (e.g. dim2_null, rank1, rank2) and use
         # `make_nonzero_det` to make the random matrices have nonzero det. For
         # `logdet`, we also set `make_nonzero_det(matrix, sign=1)` to make the
@@ -2359,30 +2389,6 @@ def method_tests():
          'batched_symmetric_pd', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('logdet', lambda dtype, device: make_nonzero_det(random_fullrank_matrix_distinct_singular_value(S, 3), 1, 0), NO_ARGS,
          'batched_distinct_singular_values', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('slogdet', lambda dtype, device: make_nonzero_det(torch.randn(1, 1), 1), NO_ARGS,
-         '1x1_pos_det', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], itemgetter(1)),
-        ('slogdet', lambda dtype, device: make_nonzero_det(torch.randn(1, 1), -1), NO_ARGS,
-         '1x1_neg_det', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], itemgetter(1)),
-        ('slogdet', lambda dtype, device: make_nonzero_det(torch.randn(S, S), 1), NO_ARGS,
-         'pos_det', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], itemgetter(1)),
-        ('slogdet', lambda dtype, device: make_nonzero_det(torch.randn(S, S), -1), NO_ARGS,
-         'neg_det', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], itemgetter(1)),
-        ('slogdet', lambda dtype, device: make_nonzero_det(random_symmetric_matrix(S)), NO_ARGS,
-         'symmetric', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], itemgetter(1)),
-        ('slogdet', lambda dtype, device: random_symmetric_pd_matrix(S), NO_ARGS,
-         'symmetric_pd', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], itemgetter(1)),
-        ('slogdet', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS,
-         'distinct_singular_values', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], itemgetter(1)),
-        ('slogdet', lambda dtype, device: make_nonzero_det(torch.randn(3, 3, 1, 1), -1), NO_ARGS,
-         'batched_1x1_neg_det', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], itemgetter(1)),
-        ('slogdet', lambda dtype, device: make_nonzero_det(torch.randn(3, 3, S, S), 1), NO_ARGS,
-         'batched_pos_det', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], itemgetter(1)),
-        ('slogdet', lambda dtype, device: make_nonzero_det(random_symmetric_matrix(S, 3)), NO_ARGS,
-         'batched_symmetric', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], itemgetter(1)),
-        ('slogdet', lambda dtype, device: random_symmetric_pd_matrix(S, 3), NO_ARGS,
-         'batched_symmetric_pd', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], itemgetter(1)),
-        ('slogdet', lambda dtype, device: random_fullrank_matrix_distinct_singular_value(S, 3), NO_ARGS,
-         'batched_distinct_singular_values', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma], itemgetter(1)),
         ('qr', (S, S), (False,), 'square_single', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('qr', (S, S - 2), (True,), 'tall_single' , (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('qr', (S - 2, S), (False,), 'wide_single' , (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
@@ -2818,11 +2824,6 @@ EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
     'test_logdet_batched',
     'test_logdet_batched_1x1',
     'test_logdet_batched_symmetric',
-    'test_slogdet_1x1_neg_det',
-    'test_slogdet_neg_det',
-    'test_slogdet_symmetric',
-    'test_slogdet_batched_1x1_neg_det',
-    'test_slogdet_batched_symmetric',
     'test_cdist',
 }
 
