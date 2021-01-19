@@ -87,6 +87,10 @@ constexpr int64_t kBasicChannelPriority = 0;
 constexpr int64_t kCudaIpcChannelPriority = 300;
 #endif
 
+#ifdef USE_CUDA_NOT_ROCM
+constexpr int64_t kCudaXthChannelPriority = 400;
+#endif
+
 std::unique_ptr<TransportRegistration> makeUvTransport() {
   auto context = std::make_shared<tensorpipe::transport::uv::Context>();
   std::string address = TensorPipeAgent::guessUvAddress(*context);
@@ -200,6 +204,23 @@ C10_REGISTER_CREATOR(
     TensorPipeCudaChannelRegistry,
     cuda_ipc,
     makeCudaIpcChannel);
+
+#endif
+
+#ifdef USE_CUDA_NOT_ROCM
+
+std::unique_ptr<CudaChannelRegistration> makeCudaXthChannel() {
+  auto context = std::make_shared<tensorpipe::channel::cuda_xth::Context>();
+  return std::make_unique<CudaChannelRegistration>(
+      CudaChannelRegistration{std::move(context), kCudaXthChannelPriority});
+}
+
+// The cuda_xth channel supports same-process GPU-to-GPU comm
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_REGISTER_CREATOR(
+    TensorPipeCudaChannelRegistry,
+    cuda_xth,
+    makeCudaXthChannel);
 
 #endif
 
