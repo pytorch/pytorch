@@ -203,7 +203,7 @@ Tensor _fw_primal(const Tensor & self, int64_t level) {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     return self_.alias();
   })();
-  c10::optional<std::function<at::Tensor(const at::Tensor&)>> func=c10::nullopt;
+  std::function<at::Tensor(const at::Tensor&)> func=nullptr;
   if (!self.unsafeGetTensorImpl()->support_as_strided()) {
     auto size_vec = self.sizes().vec();
     func = [=](const at::Tensor& input_base) {
@@ -310,7 +310,7 @@ Tensor& resize_as_(
 
 Tensor detach(const Tensor & self) {
   RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
-  c10::optional<std::function<at::Tensor(const at::Tensor&)>> func=c10::nullopt;
+  std::function<at::Tensor(const at::Tensor&)> func=nullptr;
   auto result = as_view(/* base */ self, /* output */ self, /* is_bw_differentiable */ false,
                         /* is_fw_differentiable */ true, /* view_func */ func, /* creation_meta */ CreationMeta::DEFAULT,
                         /*allow_tensor_metadata_change=*/false);

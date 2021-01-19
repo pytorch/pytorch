@@ -227,11 +227,12 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   // register size
   auto register_size = static_cast<int>(code.register_size());
 
-  auto table = Table({{"instructions", Tup(instructions)},
-                      {"operators", Tup(operators)},
-                      {"constants", Tup(constants)},
-                      {"types", Tup(types)},
-                      {"register_size", register_size}});
+  auto table = Table(
+      {{"instructions", Tup(instructions)},
+       {"operators", Tup(operators)},
+       {"constants", Tup(constants)},
+       {"types", Tup(types)},
+       {"register_size", register_size}});
   auto bytecode_vals = Tup({func.qualname().qualifiedName(), table});
 
   c10::optional<IValue> debug_info_vals;
