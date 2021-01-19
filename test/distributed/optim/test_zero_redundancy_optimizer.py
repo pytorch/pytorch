@@ -34,7 +34,7 @@ class TestZeroRedundancyOptimizer(MultiProcessTestCase):
 
     @property
     def device(self):
-        return torch.device(self.rank) if BACKEND == dist.Backend.NCCL else torch.device()
+        return torch.device(self.rank) if BACKEND == dist.Backend.NCCL else torch.device("cpu")
 
     @property
     def world_size(self):
