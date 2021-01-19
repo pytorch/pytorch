@@ -320,9 +320,12 @@ class TestCommon(JitCommonTestCase):
                         self.assertAutodiffNode(traced_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
                         self.assertAutodiffNode(script_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
 
-
-    @ops(op_db)
-    def test_out(self, device, dtype, op):
+    def compute_expected_output(self, device, dtype, op):
+        """
+        This is helper function which checks if the tensor operation
+        supports out= and returns expected output and sample input
+        used to compute output
+        """
         if not op.supports_tensor_out:
             self.skipTest("Skipped! Operator %s does not support out=..." % op.name)
 
@@ -334,12 +337,69 @@ class TestCommon(JitCommonTestCase):
         sample = samples[0]
         # call it normally to get the expected result
         expected = op(*sample.input, *sample.args, **sample.kwargs)
+        return expected, sample
+
+    @ops(op_db)
+    def test_out(self, device, dtype, op):
+        # Compute the expected output of op
+        expected, sample = self.compute_expected_output(device, dtype, op)
         # call it with out=... and check we get the expected result
         out_kwargs = sample.kwargs.copy()
         out_kwargs['out'] = out = torch.empty_like(expected)
         op(*sample.input, *sample.args, **out_kwargs)
         self.assertEqual(expected, out)
 
+    @ops(op_db)
+    def test_out_empty_tensor(self, device, dtype, op):
+        # Compute the expected output of op
+        expected, sample = self.compute_expected_output(device, dtype, op)
+        # call it with out=... and check we get the expected result
+        out_kwargs = sample.kwargs.copy()
+        empty_tensor = torch.tensor((0, 0), dtype=expected.dtype, device=expected.device)
+        out_kwargs['out'] = out = torch.empty_like(empty_tensor)
+        op(*sample.input, *sample.args, **out_kwargs)
+        # Verify if the empty out tensor is resized and restrided to whatever
+        # striding is natural for the op to produce
+        self.assertEqual(expected.shape, out.shape)
+        self.assertEqual(expected, out)
+
+    @ops(op_db)
+    def test_out_different_shape(self, device, dtype, op):
+        # Compute expected output of op
+        expected, sample = self.compute_expected_output(device, dtype, op)
+        # call it with out=... and check we get the expected result
+        out_kwargs = sample.kwargs.copy()
+        # Create tensor of random shape.
+        tensor_of_diff_shape = torch.rand((2, 3),
+                               dtype=expected.dtype, device=expected.device)
+
+        # Create an empty tensor like tensor_of_diff_shape
+        out_kwargs['out'] = out = torch.empty_like(tensor_of_diff_shape)
+        # Verify that using a tensor shape of incorrrect size to out=
+        # raises userwarning.
+        self.assertWarnsRegex(UserWarning,
+                            'An output with one or more elements was resized',
+                            lambda: op(*sample.input, *sample.args, **out_kwargs))
+        # Verify if the out tensor is resized and restrided to whatever
+        # striding is natural for the op to produce
+        self.assertEqual(expected.shape, out.shape)
+        self.assertEqual(expected, out)
+
+    @ops(op_db)
+    def test_out_inplace(self, device, dtype, op):
+        # Compute expected output of op
+        expected, sample = self.compute_expected_output(device, dtype, op)
+        *inp, = sample.input
+        # call it with out=... and check we get the expected result
+        out_kwargs = sample.kwargs.copy()
+        out_kwargs['out'] = out = inp[0]
+        op(*inp, *sample.args, **out_kwargs)
+        # Verify if the out tensor is resized and restrided to whatever
+        # striding is natural for the op to produce
+        self.assertEqual(out, inp[0])
+        self.assertEqual(expected.dtype, out.dtype)
+        self.assertEqual(expected.device, out.device)
+        self.assertEqual(expected, out)
 
 instantiate_device_type_tests(TestOpInfo, globals())
 instantiate_device_type_tests(TestGradients, globals())
