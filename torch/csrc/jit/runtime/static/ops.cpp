@@ -60,6 +60,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::add, aten_add, [](Node* n) -> SROperator {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
+    out_t.resize_({0});
     at::cpu::add_out(out_t, in0_t, in1_t, in2_s);
   };
 });
