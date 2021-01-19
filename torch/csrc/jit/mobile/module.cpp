@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/mobile/module.h>
+
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
@@ -180,7 +181,7 @@ void Method::run(Stack& stack) {
   }
 }
 
-c10::IValue Method::operator()(std::vector<IValue> stack) {
+c10::IValue Method::operator()(std::vector<c10::IValue> stack) {
   run(stack);
   TORCH_INTERNAL_ASSERT(!stack.empty());
   return stack.front();
