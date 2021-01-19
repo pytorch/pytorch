@@ -5723,6 +5723,20 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(6, 4, 3, 3)
         self.run_test(FakeQuantizePerTensorModel(), (x))
 
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_fake_quantize_per_channel(self):
+        class FakeQuantizePerChannelModel(torch.nn.Module):
+            def forward(self, input):
+                amax = torch.reduce_max(input, axis=1)
+                scale = amax / 127
+                zero_point = torch.zeros_like(amax, dtype=torch.long)
+                quant_min = -128
+                quant_max = 127
+                return torch.fake_quantize_per_channel_affine(input, scale, zero_point, quant_min, quant_max)
+
+        x = torch.randn(6, 4, 3, 3)
+        self.run_test(FakeQuantizePerChannelModel(), (x))
+
     def test_batchnorm_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
