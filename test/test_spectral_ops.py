@@ -803,7 +803,7 @@ class TestFFT(TestCase):
             # hop_length
             (None, 10),
             # pad_mode
-            ("constant", "reflect", "circular"),
+            ("constant", "reflect", "replicate", "circular"),
             # normalized
             (True, False),
         ))
