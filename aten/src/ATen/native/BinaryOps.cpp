@@ -850,7 +850,7 @@ Tensor max(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& fmax_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax does not support complex inputs.");
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
 
   auto iter = TensorIterator::binary_op(result, self, other);
   fmax_stub(iter.device_type(), iter);
@@ -858,7 +858,7 @@ Tensor& fmax_out(const Tensor& self, const Tensor& other, Tensor& result) {
 }
 
 Tensor fmax(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax does not support complex inputs.");
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
 
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
@@ -889,7 +889,7 @@ Tensor min(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& fmin_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin does not support complex inputs.");
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
 
   auto iter = TensorIterator::binary_op(result, self, other);
   fmin_stub(iter.device_type(), iter);
@@ -897,7 +897,7 @@ Tensor& fmin_out(const Tensor& self, const Tensor& other, Tensor& result) {
 }
 
 Tensor fmin(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin does not support complex inputs.");
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
 
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
