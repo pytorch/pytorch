@@ -980,8 +980,8 @@
 - name: sinh(Tensor self) -> Tensor
   self: grad * self.cosh().conj()
 
-- name: slice.Tensor(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
-  self: slice_backward(grad, self.sizes(), dim, start, end, step)
+- name: slice.Tensor(Tensor(a) self, int dim=0, int? start=0, int? end=9223372036854775807, int step=1) -> Tensor(a)
+  self: slice_backward_wrapper(grad, self.sizes(), dim, start, end, step)
 
 - name: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   self: slogdet_backward(grad, self, sign, logabsdet)
