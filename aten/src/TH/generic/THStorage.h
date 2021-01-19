@@ -38,9 +38,11 @@
 #define THQUInt8Storage THStorage
 #define THQInt8Storage THStorage
 #define THQInt32Storage THStorage
+#define THQUInt4x2Storage THStorage
+#define THComplexFloatStorage THStorage
+#define THComplexDoubleStorage THStorage
 
 TH_API scalar_t* THStorage_(data)(const THStorage*);
-TH_API ptrdiff_t THStorage_(size)(const THStorage*);
 TH_API size_t THStorage_(elementSize)(void);
 
 /* slow access -- checks everything */
@@ -65,7 +67,7 @@ TH_API void THStorage_(swap)(THStorage *storage1, THStorage *storage2);
 
 /* might differ with other API (like CUDA) */
 TH_API void THStorage_(free)(THStorage *storage);
-TH_API void THStorage_(resize)(THStorage *storage, ptrdiff_t size);
+TH_API void THStorage_(resizeBytes)(THStorage* storage, ptrdiff_t size_bytes);
 TH_API void THStorage_(fill)(THStorage *storage, scalar_t value);
 
 #endif

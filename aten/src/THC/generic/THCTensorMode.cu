@@ -2,6 +2,7 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMode.cu"
 #else
 
+#include <c10/cuda/CUDAException.h>
 #include <thrust/iterator/constant_iterator.h>
 
 void THCTensor_(calculateMode)(THCState *state,
@@ -18,7 +19,7 @@ void THCTensor_(calculateMode)(THCState *state,
   // to calculate the mode for --> we do this by manually doing the stride
   // calculations to get an offset
   scalar_t *data = THCTensor_(data)(state, input);
-  for (int i = 0; i < THLongStorage_size(position); ++i) {
+  for (int i = 0; i < (position->nbytes() / sizeof(int64_t)); ++i) {
     data += THLongStorage_data(position)[i] * THTensor_strideLegacyNoScalars(input, i);
   }
 
@@ -121,7 +122,7 @@ void THCTensor_(calculateMode)(THCState *state,
   ptrdiff_t valuesOffset = THCTensor_(storageOffset)(state, values);
   int64_t indicesOffset = THCudaLongTensor_storageOffset(state, indices);
 
-  for (int i = 0; i < THLongStorage_size(position); ++i) {
+  for (int i = 0; i < (position->nbytes() / sizeof(int64_t)); ++i) {
     int64_t pos = THLongStorage_data(position)[i];
     valuesOffset += THTensor_strideLegacyNoScalars(values, i) * pos;
     indicesOffset += THTensor_strideLegacyNoScalars(indices, i) * pos;
@@ -235,14 +236,14 @@ void THCTensor_(mode)(THCState *state,
 
     // Macro that calls kernel --> note that we set the block dimensions here, and
     // the amount of shared memory
-  #define HANDLE_MODE(SIZE) \
-  { \
-    dim3 blockSize(SIZE / 2); \
-\
-    int memsize = (sizeof(scalar_t) * SIZE) + (2 * SIZE * sizeof(unsigned int)); \
-    computeMode<scalar_t, SIZE> \
-      <<<grid, blockSize, memsize, c10::cuda::getCurrentCUDAStream()>>>( \
-        THCTensor_(data)(state, contiguous), tiValues, tiIndices, sliceSize); \
+  #define HANDLE_MODE(SIZE)                                                             \
+  {                                                                                     \
+    const dim3 blockSize(SIZE / 2);                                                     \
+    const auto memsize = (sizeof(scalar_t) * SIZE) + (2 * SIZE * sizeof(unsigned int)); \
+    computeMode<scalar_t, SIZE>                                                         \
+      <<<grid, blockSize, memsize, c10::cuda::getCurrentCUDAStream()>>>(                \
+        THCTensor_(data)(state, contiguous), tiValues, tiIndices, sliceSize);           \
+    C10_CUDA_KERNEL_LAUNCH_CHECK();                                                     \
   }
 
     // Tradeoff between compilation time and the number of specializations. Ideally we would have
@@ -269,7 +270,7 @@ void THCTensor_(mode)(THCState *state,
         break;
       case 1:
       default:
-        assert(false);
+        TORCH_INTERNAL_ASSERT(false);
     }
     THCudaCheck(cudaGetLastError());
 

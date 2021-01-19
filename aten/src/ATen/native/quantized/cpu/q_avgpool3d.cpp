@@ -5,7 +5,6 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
 #include <c10/util/math_compat.h>
 
 #include <algorithm>
@@ -123,10 +122,10 @@ Tensor q_avg_pool3d(
 
   auto output = at::_empty_affine_quantized(
       output_shape,
-      input_nhwc.options(),
+      input_nhwc.options().memory_format(input_nhwc.suggest_memory_format()),
       input_nhwc.q_scale(),
       input_nhwc.q_zero_point(),
-      input_nhwc.suggest_memory_format());
+      c10::nullopt);
   // fast path for channel last: qavg_pool_2d_nhwc_stub
   if (output_shape.size() == 4) {
     qavg_pool3d_nhwc_stub(
@@ -186,7 +185,7 @@ Tensor q_avg_pool3d(
 
 } // namespace
 
-Tensor quantized_avg_pool3d(
+Tensor avg_pool3d_quantized_cpu(
     const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -195,7 +194,7 @@ Tensor quantized_avg_pool3d(
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
   Tensor output;
-  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "quantized_avg_pool3d", [&]() {
+  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "avg_pool3d_quantized_cpu", [&]() {
     output = q_avg_pool3d<scalar_t>(
         input,
         kernel_size,

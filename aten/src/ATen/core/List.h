@@ -6,6 +6,7 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <vector>
 
 namespace at {
@@ -33,6 +34,7 @@ struct ListImpl final : public c10::intrusive_ptr_target {
   intrusive_ptr<ListImpl> copy() const {
     return make_intrusive<ListImpl>(list, elementType);
   }
+  friend TORCH_API bool operator==(const ListImpl& lhs, const ListImpl& rhs);
 };
 }
 
@@ -44,6 +46,34 @@ template<class T, class Iterator> class ListElementReference;
 
 template<class T, class Iterator>
 void swap(ListElementReference<T, Iterator>&& lhs, ListElementReference<T, Iterator>&& rhs);
+
+template<class T, class Iterator>
+bool operator==(const ListElementReference<T, Iterator>& lhs, const T& rhs);
+
+template<class T, class Iterator>
+bool operator==(const T& lhs, const ListElementReference<T, Iterator>& rhs);
+
+template<class T>
+struct ListElementConstReferenceTraits {
+  // In the general case, we cannot expose a true const reference to
+  // the contents of an IValue, so we copy.
+  using const_reference = T;
+};
+
+template<>
+struct ListElementConstReferenceTraits<std::string> {
+  using const_reference = const std::string&;
+};
+
+template<>
+struct ListElementConstReferenceTraits<c10::optional<std::string>> {
+  using const_reference = c10::optional<std::reference_wrapper<const std::string>>;
+};
+
+template<>
+struct ListElementConstReferenceTraits<at::Tensor> {
+  using const_reference = const at::Tensor&;
+};
 
 template<class T, class Iterator>
 class ListElementReference final {
@@ -139,7 +169,7 @@ public:
   ListElementReference<T, Iterator> operator*() const {
     return {iterator_};
   }
-  
+
   ListElementReference<T, Iterator> operator[](typename List<T>::size_type offset) const {
     return {iterator_ + offset};
   }
@@ -173,7 +203,7 @@ private:
     return lhs.iterator_ >= rhs.iterator_;
   }
 
-  friend class ListIterator<T, typename detail::ListImpl::list_type::iterator>;
+  friend class ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
   friend class List<T>;
 };
 
@@ -204,15 +234,16 @@ private:
   // This is an intrusive_ptr because List is a pointer type.
   // Invariant: This will never be a nullptr, there will always be a valid
   // ListImpl.
-  c10::intrusive_ptr<detail::ListImpl> impl_;
+  c10::intrusive_ptr<c10::detail::ListImpl> impl_;
 
-  using internal_reference_type = impl::ListElementReference<T, typename detail::ListImpl::list_type::iterator>;
+  using internal_reference_type = impl::ListElementReference<T, typename c10::detail::ListImpl::list_type::iterator>;
+  using internal_const_reference_type = typename impl::ListElementConstReferenceTraits<T>::const_reference;
 
 public:
   using value_type = T;
-  using size_type = typename detail::ListImpl::list_type::size_type;
-  using iterator = impl::ListIterator<T, typename detail::ListImpl::list_type::iterator>;
-  using reverse_iterator = impl::ListIterator<T, typename detail::ListImpl::list_type::reverse_iterator>;
+  using size_type = typename c10::detail::ListImpl::list_type::size_type;
+  using iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
+  using reverse_iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::reverse_iterator>;
 
   /**
    * Constructs an empty list.
@@ -224,7 +255,7 @@ public:
    * Example:
    *   List<int> a({2, 3, 4});
    */
-  explicit List(std::initializer_list<T> initial_values);
+  List(std::initializer_list<T> initial_values);
   explicit List(ArrayRef<T> initial_values);
 
   /**
@@ -270,7 +301,9 @@ public:
    *   list[2] = 5;
    *   int64_t v = list[1];
    */
-  internal_reference_type operator[](size_type pos) const;
+  internal_const_reference_type operator[](size_type pos) const;
+
+  internal_reference_type operator[](size_type pos);
 
   /**
    * Assigns a new value to the element at location pos.
@@ -426,7 +459,7 @@ public:
   void unsafeSetElementType(TypePtr t);
 
 private:
-  explicit List(c10::intrusive_ptr<detail::ListImpl>&& elements);
+  explicit List(c10::intrusive_ptr<c10::detail::ListImpl>&& elements);
   friend struct IValue;
   template<class T_> friend List<T_> impl::toTypedList(List<IValue>);
   template<class T_> friend List<IValue> impl::toList(List<T_>);

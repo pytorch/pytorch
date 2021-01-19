@@ -41,7 +41,7 @@
 // file.
 
 #ifndef C10_USING_CUSTOM_GENERATED_MACROS
-#include "c10/macros/cmake_macros.h"
+#include <c10/macros/cmake_macros.h>
 #endif // C10_USING_CUSTOM_GENERATED_MACROS
 
 #ifdef _WIN32
@@ -92,11 +92,10 @@
 #endif
 
 // This one is being used by libtorch.so
-// TODO: rename this to TORCH_API
 #ifdef CAFFE2_BUILD_MAIN_LIB
-#define CAFFE2_API C10_EXPORT
+#define TORCH_API C10_EXPORT
 #else
-#define CAFFE2_API C10_IMPORT
+#define TORCH_API C10_IMPORT
 #endif
 
 // NB: For now, HIP is overloaded to use the same macro, but ideally
@@ -111,6 +110,13 @@
 #define TORCH_HIP_API C10_EXPORT
 #else
 #define TORCH_HIP_API C10_IMPORT
+#endif
+
+// Enums only need to be exported on windows for non-CUDA files
+#if defined(_WIN32) && defined(__CUDACC__)
+#define C10_API_ENUM C10_API
+#else
+#define C10_API_ENUM
 #endif
 
 #endif // C10_MACROS_MACROS_H_

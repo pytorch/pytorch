@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 import argparse
 from caffe2.proto import caffe2_pb2
@@ -27,7 +27,7 @@ _output_context = threading.local()
 
 def given(*given_args, **given_kwargs):
     def wrapper(f):
-        hyp_func = hy.given(*given_args, **given_kwargs)(f)
+        hyp_func = hy.seed(0)(hy.settings(max_examples=1)(hy.given(*given_args, **given_kwargs)(f)))
         fixed_seed_func = hy.seed(0)(hy.settings(max_examples=1)(hy.given(
             *given_args, **given_kwargs)(f)))
 

@@ -2,12 +2,12 @@
 #
 
 # You can set these variables from the command line.
-SPHINXOPTS    =
-SPHINXBUILD   = sphinx-build
-SPHINXPROJ    = PyTorch
-SOURCEDIR     = source
-BUILDDIR      = build
-PYCMD         = python
+SPHINXOPTS    ?= -j auto -WT --keep-going
+SPHINXBUILD   ?= sphinx-build
+SPHINXPROJ    ?= PyTorch
+SOURCEDIR     ?= source
+BUILDDIR      ?= build
+PYCMD         ?= python
 
 # Put it first so that "make" without argument is like "make help".
 help:
@@ -38,5 +38,5 @@ html-stable:
 	@$(SPHINXBUILD) -M $@ "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
 clean:
-	@echo "Removing everything under 'build'.."
-	@rm -rf $(BUILDDIR)/html/ $(BUILDDIR)/doctrees
+	@echo "Removing everything under 'build' and 'source/generated'.."
+	@rm -rf $(BUILDDIR)/html/ $(BUILDDIR)/doctrees $(SOURCEDIR)/generated

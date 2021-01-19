@@ -1,13 +1,16 @@
 import collections
 import copyreg
-from enum import Enum
 import io
 import pickle
+import sys
 import threading
 import traceback
+from enum import Enum
 
 import torch
 import torch.distributed as dist
+
+from torch._C._distributed_rpc import _get_current_rpc_agent
 
 
 # Thread local tensor tables to store tensors while pickling torch.Tensor
@@ -18,7 +21,9 @@ _thread_local_tensor_tables = threading.local()
 class RPCExecMode(Enum):
     SYNC = "sync"
     ASYNC = "async"
+    ASYNC_JIT = "async_jit"
     REMOTE = "remote"
+
 
 class _InternalRPCPickler:
     r"""
@@ -32,12 +37,9 @@ class _InternalRPCPickler:
     """
 
     def __init__(self):
-        # python2 does not have dispatch_table, add "if torch._six.PY3" condition,
-        # as _InternalRPCPickler still got build in python2 even
-        # we skipped python 2 tests for rpc_test
-        if torch._six.PY3:
-            self._dispatch_table = copyreg.dispatch_table.copy()
-            self._dispatch_table[torch.Tensor] = self._tensor_reducer
+        # Ignore type error because dispatch_table is defined in third-party package
+        self._dispatch_table = copyreg.dispatch_table.copy()  # type: ignore[attr-defined]
+        self._dispatch_table[torch.Tensor] = self._tensor_reducer
 
     @classmethod
     def _tensor_receiver(cls, tensor_index):
@@ -51,12 +53,33 @@ class _InternalRPCPickler:
         return (_InternalRPCPickler._tensor_receiver, (tensor_index,))
 
     @classmethod
-    def _rref_receiver(cls, rref_fork_data):
-        return dist.rpc.RRef._deserialize(rref_fork_data)
+    def _py_rref_receiver(cls, rref_fork_data):
+        return dist.rpc.PyRRef._deserialize(rref_fork_data)
+
+    def _py_rref_reducer(self, py_rref):
+        rref_fork_data = py_rref._serialize()
+        return (_InternalRPCPickler._py_rref_receiver, (rref_fork_data,))
 
     def _rref_reducer(self, rref):
-        rref_fork_data = rref._serialize()
-        return (_InternalRPCPickler._rref_receiver, (rref_fork_data, ))
+        return self._py_rref_reducer(rref)
+
+    @classmethod
+    def _script_module_receiver(cls, script_module_serialized):
+        """
+        Given a serialized representation of a ScriptModule created with torch.jit.save,
+        loads and returns the ScriptModule.
+        """
+        f = io.BytesIO(script_module_serialized)
+        m = torch.jit.load(f)
+        return m
+
+    def _script_module_reducer(self, script_module):
+        """
+        Serializes a ScriptModule.
+        """
+        f = io.BytesIO()
+        torch.jit.save(script_module, f)
+        return (_InternalRPCPickler._script_module_receiver, (f.getvalue(),))
 
     def serialize(self, obj):
         r"""
@@ -73,7 +96,18 @@ class _InternalRPCPickler:
         # in python. also, when _internal_rpc_pickler is imported to rpc/api.py, rpc.RRef is not
         # compiled yet, it is not good place to acces rpc.RRef inside _InternalRPCPickler constructor,
         # so puting rref's dispatch table here
-        p.dispatch_table[dist.rpc.RRef] = self._rref_reducer
+        #
+        # The return value of a `rpc.remote(..)` call is type of `rpc.PyRRef`.
+        # The deserialized RRef object on an RPC receiver side is type of `rpc.PyRRef`.
+        # Ignore type error because dispatch_table is defined in third-party package
+        p.dispatch_table[dist.rpc.PyRRef] = self._py_rref_reducer  # type: ignore[index]
+        # An RRef created locally by RRef Python constructor is type of `rpc.RRef`.
+        # Ignore type error because dispatch_table is defined in third-party package
+        p.dispatch_table[dist.rpc.RRef] = self._rref_reducer  # type: ignore[index]
+        # Add dispatch pickling for ScriptModule if needed.
+        if isinstance(obj, torch.jit.ScriptModule):
+            # Ignore type error because dispatch_table is defined in third-party package
+            p.dispatch_table[obj.__class__] = self._script_module_reducer  # type: ignore[index]
 
         # save _thread_local_tensor_tables.send_tables if it is in nested call
         global _thread_local_tensor_tables
@@ -112,9 +146,12 @@ class _InternalRPCPickler:
         except AttributeError as e:
             # Occurs when function is not found on module/class during
             # unpickling.
-            except_str = str(e) + """ Default RPC pickler does not serialize
+            except_str = (
+                str(e)
+                + """ Default RPC pickler does not serialize
             function code. Ensure that UDFs are defined on both caller and
             callee modules."""
+            )
             ret = AttributeError(except_str)
 
         # restore _thread_local_tensor_tables.recv_tables if return
@@ -153,14 +190,43 @@ def _run_function(python_udf):
         result = python_udf.func(*python_udf.args, **python_udf.kwargs)
     except Exception as e:
         # except str = exception info + traceback string
-        except_str = "{}\n{}".format(repr(e), traceback.format_exc())
+        except_str = (
+            f"On {_get_current_rpc_agent().get_worker_info()}:\n"
+            f"{repr(e)}\n{traceback.format_exc()}"
+        )
+        print(except_str, file=sys.stderr)
         result = RemoteException(except_str, type(e))
     return result
 
 
 def _handle_exception(result):
     if isinstance(result, RemoteException):
-        raise result.exception_type(result.msg)
+        raise result.exception_type(result.msg.encode("utf-8").decode("unicode_escape"))
+
+
+def _build_rpc_profiling_key(
+    exec_type, func_name, current_worker_name, dst_worker_name
+):
+    """
+    Builds the key that RPC calls are profiled with using the autograd profiler.
+    This will be the name of the corresponding Event recorded in the profiler.
+
+    Args:
+        exec_type (RPCExecMode): Type of RPC/RRef call
+        func_name (str): Name of function being profiled.
+        current_worker_name (str): Name of current worker.
+        dst_worker_name (str): Name of the destination worker.
+
+    Returns:
+        String representing profiling key
+    """
+    profile_key = "rpc_{rpc_type}#{func_name}({current_worker} -> {dst_worker})".format(
+        rpc_type=exec_type.value,
+        func_name=func_name,
+        current_worker=current_worker_name,
+        dst_worker=dst_worker_name,
+    )
+    return profile_key
 
 
 def _start_record_function(exec_type, func_name, current_worker_name, dest_worker_name):
@@ -170,7 +236,7 @@ def _start_record_function(exec_type, func_name, current_worker_name, dest_worke
     callbacks that start the profiling, though the user is responsible for
     running the appropriate callbacks when the function to be profiled finishes.
 
-    Arguments:
+    Args:
         exec_type (RPCExecMode): Type of RPC/RRef call
         func_name (str): Name of function being profiled.
         current_worker_name (str): Name of current worker.
@@ -183,8 +249,8 @@ def _start_record_function(exec_type, func_name, current_worker_name, dest_worke
     profile_key = "rpc_{}#{}({} -> {})".format(
         exec_type.value, str(func_name), current_worker_name, dest_worker_name
     )
-    rf = torch.autograd._RecordFunction()
-    torch.autograd._run_before_callbacks(rf, profile_key)
+    rf = torch.autograd._RecordFunction()  # type: ignore[attr-defined]
+    torch.autograd._run_before_callbacks(rf, profile_key)  # type: ignore[attr-defined]
     return rf
 
 

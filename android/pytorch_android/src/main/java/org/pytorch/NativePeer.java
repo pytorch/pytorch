@@ -1,5 +1,3 @@
-// (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
-
 package org.pytorch;
 
 import com.facebook.jni.HybridData;
@@ -9,23 +7,29 @@ import com.facebook.soloader.nativeloader.NativeLoader;
 class NativePeer implements INativePeer {
   static {
     NativeLoader.loadLibrary("pytorch_jni");
+    PyTorchCodegenLoader.loadNativeLibs();
   }
 
   private final HybridData mHybridData;
 
   @DoNotStrip
-  private static native HybridData initHybrid(String moduleAbsolutePath);
+  private static native HybridData initHybrid(String moduleAbsolutePath, int deviceJniCode);
 
   @DoNotStrip
   private static native HybridData initHybridAndroidAsset(
-      String assetName, /* android.content.res.AssetManager */ Object androidAssetManager);
+      String assetName, /* android.content.res.AssetManager */
+      Object androidAssetManager,
+      int deviceJniCode);
 
-  NativePeer(String moduleAbsolutePath) {
-    mHybridData = initHybrid(moduleAbsolutePath);
+  NativePeer(String moduleAbsolutePath, Device device) {
+    mHybridData = initHybrid(moduleAbsolutePath, device.jniCode);
   }
 
-  NativePeer(String assetName, /* android.content.res.AssetManager */ Object androidAssetManager) {
-    mHybridData = initHybridAndroidAsset(assetName, androidAssetManager);
+  NativePeer(
+      String assetName, /* android.content.res.AssetManager */
+      Object androidAssetManager,
+      Device device) {
+    mHybridData = initHybridAndroidAsset(assetName, androidAssetManager, device.jniCode);
   }
 
   public void resetNative() {

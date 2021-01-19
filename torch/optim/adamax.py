@@ -7,7 +7,7 @@ class Adamax(Optimizer):
 
     It has been proposed in `Adam: A Method for Stochastic Optimization`__.
 
-    Arguments:
+    Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
         lr (float, optional): learning rate (default: 2e-3)
@@ -40,7 +40,7 @@ class Adamax(Optimizer):
     def step(self, closure=None):
         """Performs a single optimization step.
 
-        Arguments:
+        Args:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
@@ -80,7 +80,7 @@ class Adamax(Optimizer):
                     exp_inf.mul_(beta2).unsqueeze(0),
                     grad.abs().add_(eps).unsqueeze_(0)
                 ], 0)
-                torch.max(norm_buf, 0, keepdim=False, out=(exp_inf, exp_inf.new().long()))
+                torch.amax(norm_buf, 0, keepdim=False, out=exp_inf)
 
                 bias_correction = 1 - beta1 ** state['step']
                 clr = group['lr'] / bias_correction

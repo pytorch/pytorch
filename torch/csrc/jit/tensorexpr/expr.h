@@ -31,7 +31,16 @@ enum IRNodeType {
   kCompareSelect,
   kLet,
   kCast,
-  kNone
+  kBitCast,
+  kBroadcast,
+  kRamp,
+  kPolynomial,
+  kTerm,
+  kRoundOff,
+  kMaxTerm,
+  kMinTerm,
+  kNone,
+  kExtra
 };
 
 // The common base between all expression node.
@@ -156,6 +165,79 @@ class Var : public ExprNode<Var> {
   std::string name_hint_;
 };
 
+class TORCH_API Buf : public ExprNode<Buf> {
+ public:
+  static ExprHandle make(
+      const std::string& name_hint,
+      const std::vector<ExprHandle>& dims,
+      Dtype dtype);
+  static ExprHandle make(const std::vector<ExprHandle>& dims, Dtype dtype);
+
+  // TODO: unique_name
+  const Var* base_handle() const {
+    return base_handle_;
+  }
+  const std::string& name_hint() const {
+    return base_handle_->name_hint();
+  }
+
+  Buf(const std::string& name_hint,
+      const std::vector<const Expr*>& dims,
+      Dtype dtype)
+      : Buf(new Var(name_hint, kHandle), dims, dtype) {}
+
+  Buf(const Var* var, const std::vector<const Expr*>& dims, Dtype dtype)
+      : ExprNodeBase(dtype, kPrimitive), base_handle_(var), dims_(dims) {
+    TORCH_CHECK(var);
+  }
+
+  size_t ndim() const {
+    return dims_.size();
+  }
+  const Expr* dim(size_t index) const {
+    if (index >= ndim()) {
+      throw out_of_range_index();
+    }
+    return dims_[index];
+  }
+  std::vector<const Expr*> dims() const {
+    return dims_;
+  }
+  void set_dims(std::vector<const Expr*> dims) {
+    dims_ = dims;
+  };
+
+ private:
+  const Var* base_handle_;
+  std::vector<const Expr*> dims_;
+};
+
+class TORCH_API BufHandle : public ExprHandle {
+ public:
+  BufHandle(
+      const std::string& name_hint,
+      const std::vector<ExprHandle>& dims,
+      Dtype dtype)
+      : ExprHandle(Buf::make(name_hint, dims, dtype)) {}
+  explicit BufHandle(const Buf* node) : ExprHandle(node) {}
+  const Buf* node() const {
+    return static_cast<const Buf*>(ExprHandle::node());
+  }
+  bool operator==(const BufHandle& other) const {
+    return this->node() == other.node();
+  }
+  bool operator!=(const BufHandle& other) const {
+    return !(*this == other);
+  }
+
+  const std::string& name_hint() const {
+    return this->node()->name_hint();
+  }
+  bool empty() const {
+    return (this->node() == nullptr);
+  }
+};
+
 // An expression to construct the underlying variable node.
 // Note: do not store any info here, since it is often possible to slice this
 // object. For example: VarHandle x('x'); ExprHandle x2 = x;
@@ -203,10 +285,12 @@ TORCH_API ExprHandle atan(const ExprHandle& v);
 TORCH_API ExprHandle sinh(const ExprHandle& v);
 TORCH_API ExprHandle cosh(const ExprHandle& v);
 TORCH_API ExprHandle tanh(const ExprHandle& v);
+TORCH_API ExprHandle sigmoid(const ExprHandle& v);
 TORCH_API ExprHandle exp(const ExprHandle& v);
 TORCH_API ExprHandle expm1(const ExprHandle& v);
-TORCH_API ExprHandle fabs(const ExprHandle& v);
+TORCH_API ExprHandle abs(const ExprHandle& v);
 TORCH_API ExprHandle log(const ExprHandle& v);
+TORCH_API ExprHandle fast_log(const ExprHandle& v);
 TORCH_API ExprHandle log2(const ExprHandle& v);
 TORCH_API ExprHandle log10(const ExprHandle& v);
 TORCH_API ExprHandle log1p(const ExprHandle& v);
@@ -224,9 +308,12 @@ TORCH_API ExprHandle atan2(const ExprHandle& v1, const ExprHandle& v2);
 TORCH_API ExprHandle pow(const ExprHandle& v1, const ExprHandle& v2);
 TORCH_API ExprHandle fmod(const ExprHandle& v1, const ExprHandle& v2);
 TORCH_API ExprHandle remainder(const ExprHandle& v1, const ExprHandle& v2);
+TORCH_API ExprHandle isnan(const ExprHandle& v1);
 
 TORCH_API ExprHandle
 ifThenElse(const ExprHandle& c, const ExprHandle& t, const ExprHandle& f);
+
+TORCH_API ExprHandle expr_to_vec(ExprHandle v, int lanes);
 
 } // namespace tensorexpr
 } // namespace jit

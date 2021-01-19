@@ -24,14 +24,12 @@ class Int8SoftmaxOp final : public Operator<CPUContext> {
     }
   }
 
-
   bool RunOnDevice() override {
     const auto& X = Inputs()[0]->template Get<Int8TensorCPU>();
     auto* Y = Outputs()[0]->template GetMutable<Int8TensorCPU>();
     const int32_t Y_zero_point =
         this->template GetSingleArgument<int>("Y_zero_point", 0);
-    const float Y_scale =
-        this->template GetSingleArgument<float>("Y_scale", 1);
+    const float Y_scale = this->template GetSingleArgument<float>("Y_scale", 1);
     CHECK_EQ(Y_zero_point, 0);
     CHECK_EQ(Y_scale, 1.0f / 256.0f);
 
@@ -51,11 +49,12 @@ class Int8SoftmaxOp final : public Operator<CPUContext> {
 
     if (this->qnnpackOperator_ == nullptr) {
       const qnnp_status createStatus = qnnp_create_softargmax_nc_q8(
-        X.t.numel() / X.t.size(0) /* channels */,
-        X_scale,
-        static_cast<uint8_t>(Y_zero_point), Y_scale,
-        0 /* flags */,
-        &qnnpackOperator_);
+          X.t.numel() / X.t.size(0) /* channels */,
+          X_scale,
+          static_cast<uint8_t>(Y_zero_point),
+          Y_scale,
+          0 /* flags */,
+          &qnnpackOperator_);
       CAFFE_ENFORCE(
           createStatus == qnnp_status_success,
           "failed to create QNNPACK SoftArgMax operator");
@@ -73,7 +72,7 @@ class Int8SoftmaxOp final : public Operator<CPUContext> {
         setupStatus == qnnp_status_success,
         "failed to setup QNNPACK SoftArgMax operator");
 
-#ifdef FBCODE_CAFFE2
+#if defined(FBCODE_CAFFE2) || !defined(USE_INTERNAL_PTHREADPOOL_IMPL)
     const qnnp_status runStatus =
         qnnp_run_operator(this->qnnpackOperator_, nullptr /* thread pool */);
 #else

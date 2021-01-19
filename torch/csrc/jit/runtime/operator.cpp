@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/operator.h>
+
 #include <ATen/ATen.h>
 #include <ATen/core/alias_info.h>
 #include <torch/csrc/jit/frontend/edit_distance.h>
@@ -34,6 +35,14 @@ struct OperatorRegistry {
   std::unordered_map<const char*, std::shared_ptr<Operator>>
       operators_by_sig_literal;
 
+  // Remember all registered operator names to check that they aren't
+  // registered a second time. Registering an op multiple times is
+  // fragile because it might depend on static initialization order
+  // which one is picked at runtime.
+#ifdef C10_MOBILE
+  std::unordered_set<c10::OperatorName> registered_operator_names;
+#endif
+
   // XXX - caller must be holding lock
   void registerPendingOperators() {
     for (const auto& op : to_register) {
@@ -47,6 +56,14 @@ struct OperatorRegistry {
  public:
   void registerOperator(Operator&& op) {
     std::lock_guard<std::mutex> guard(lock);
+#ifdef C10_MOBILE
+    TORCH_INTERNAL_ASSERT(
+        0 == registered_operator_names.count(op.schema().operator_name()),
+        "Tried to register operator \"",
+        op.schema(),
+        "\" to JIT but the operator name was already registered before. Please add or change the overload name.");
+    registered_operator_names.insert(op.schema().operator_name());
+#endif
     to_register.push_back(std::make_shared<Operator>(std::move(op)));
   }
 
@@ -55,6 +72,14 @@ struct OperatorRegistry {
     auto sig = canonicalSchemaString(schema);
 
     std::lock_guard<std::mutex> guard(lock);
+#ifdef C10_MOBILE
+    TORCH_INTERNAL_ASSERT(
+        1 == registered_operator_names.count(schema.operator_name()),
+        "Tried to remove operator ",
+        schema,
+        " from JIT but it wasn't found.");
+    registered_operator_names.erase(schema.operator_name());
+#endif
     // Try removing from pending operators list first
     auto pending_it = to_register.begin();
     while (pending_it != to_register.end() && (*pending_it)->schema() != schema)
@@ -188,8 +213,8 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::TupleIndex,    prim::TupleSlice,    prim::TupleUnpack,
       prim::CreateObject,  prim::GetAttr,       prim::SetAttr,
       prim::CallFunction,  prim::isinstance,    prim::unchecked_cast,
-      prim::tolist,        prim::rpc_async,
-  };
+      prim::tolist,        prim::rpc_async,     prim::rpc_sync,
+      prim::rpc_remote};
 
   // WARNING: by adding a value to this set, you are asserting that your
   // primitive is only ever added during optimization and does not need
@@ -200,21 +225,32 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       c10::onnx::Shape, // only used in onnx
       prim::AutogradZero, // temporarily inserted by autograd
       prim::AutogradAnyNonZero, // temporarily inserted by autograd
+      prim::AutogradAllNonZero, // temporarily inserted by autograd
+      prim::AutogradAllZero, // temporarily inserted by autograd
       prim::AutogradAdd, // temporarily inserted by autograd
       prim::ConstantChunk, // optimization pass adds it
       prim::DifferentiableGraph, // optimization pass adds it,
       prim::FunctionalGraph, // optimization pass adds it,
+      prim::ReductionSizes, // optimization pass (fuser) adds it
       prim::BroadcastSizes, // optimization pass (fuser) adds it
       prim::ChunkSizes, // optimization pass (fuser) adds it
       prim::Drop, // used in interpreter only
       prim::FusedConcat, // optimization pass adds it
       prim::FusionGroup, // optimization pass adds it
       prim::CudaFusionGroup, // optimization pass adds it
+      prim::CudaFusionGuard, // optimization pass adds it
+      prim::TensorExprGroup, // optimization pass adds it
+      prim::StaticSubgraph, // optimization pass adds it
       prim::Load, // used in interpreter only
       prim::MMTreeReduce, // used as an optimization
       prim::MMBatchSide, // used as an optimization
       prim::Store, // used in interpreter only
       prim::profile, // used in interpreter only
+      prim::profile_optional, // used in interpreter only
+      prim::profile_ivalue, // used in interpreter only
+      prim::TypeCheck, // used in interpreter only
+      prim::RequiresGradCheck, // used in interpreter only
+      prim::FallbackGraph, // converted into prim::CallFunction
 
   };
 
@@ -242,6 +278,8 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::FusionGroup,
       prim::CudaFusionGroup,
       prim::DifferentiableGraph,
+      prim::TensorExprGroup,
+      prim::StaticSubgraph,
       prim::FunctionalGraph,
       prim::Constant,
       prim::Uninitialized,
@@ -255,7 +293,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::MMBatchSide,
       prim::BroadcastSizes,
       prim::ChunkSizes,
-      prim::Function,
+      prim::Closure,
       prim::TupleUnpack,
       prim::TupleIndex,
       prim::TupleSlice,
@@ -269,6 +307,10 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::GetAttr,
       prim::SetAttr,
       prim::profile,
+      prim::profile_optional,
+      prim::profile_ivalue,
+      prim::TypeCheck,
+      prim::RequiresGradCheck,
       prim::Print,
       prim::CallFunction,
       prim::CallMethod,
@@ -277,6 +319,11 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::unchecked_cast,
       prim::tolist,
       prim::rpc_async,
+      prim::rpc_sync,
+      prim::rpc_remote,
+      prim::Enter,
+      prim::Exit,
+      prim::FallbackGraph,
   };
 
   // Operators that should not be used by alias analysis
@@ -352,36 +399,38 @@ std::shared_ptr<Operator> getOperatorForLiteral(const char* signature) {
 }
 
 std::string canonicalSchemaString(const FunctionSchema& schema) {
-  std::ostringstream out;
-
-  out << schema.name();
-  out << "(";
+  std::string out = schema.name();
+  out.push_back('(');
 
   bool seen_kwarg_only = false;
   for (size_t i = 0; i < schema.arguments().size(); ++i) {
-    if (i > 0)
-      out << ", ";
+    if (i > 0) {
+      out += ", ";
+    }
     if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
-      out << "*, ";
+      out += "*, ";
       seen_kwarg_only = true;
     }
     const auto& arg = schema.arguments()[i];
-    out << arg.type()->str() << " " << arg.name();
+    out += arg.type()->str();
+    out.push_back(' ');
+    out += arg.name();
   }
 
-  out << ") -> ";
+  out += ") -> ";
   if (schema.returns().size() == 1) {
-    out << schema.returns().at(0).type()->str();
+    out += schema.returns().at(0).type()->str();
   } else if (schema.returns().size() > 1) {
-    out << "(";
+    out.push_back('(');
     for (size_t i = 0; i < schema.returns().size(); ++i) {
-      if (i > 0)
-        out << ", ";
-      out << schema.returns()[i].type()->str();
+      if (i > 0) {
+        out += ", ";
+      }
+      out += schema.returns()[i].type()->str();
     }
-    out << ")";
+    out.push_back(')');
   }
-  return out.str();
+  return out;
 }
 
 } // namespace jit

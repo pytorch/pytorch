@@ -6,7 +6,7 @@ Caffe2 is a lightweight, modular, and scalable deep learning framework. Building
 
 ## Questions and Feedback
 
-Please use Github issues (https://github.com/pytorch/pytorch/issues) to ask questions, report bugs, and request new features.
+Please use GitHub issues (https://github.com/pytorch/pytorch/issues) to ask questions, report bugs, and request new features.
 
 ### Further Resources on [Caffe2.ai](http://caffe2.ai)
 

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "c10/core/impl/InlineEvent.h"
-#include "c10/core/impl/VirtualGuardImpl.h"
+#include <c10/core/impl/InlineEvent.h>
+#include <c10/core/impl/VirtualGuardImpl.h>
 
 namespace c10 {
 

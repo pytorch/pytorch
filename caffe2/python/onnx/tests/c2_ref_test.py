@@ -1,14 +1,12 @@
 # @package onnx
 # Module caffe2.python.onnx.tests.c2_ref_test
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
-import json
+
+
+
+
 import os
-import six
 import unittest
 
 from caffe2.python import core
@@ -18,7 +16,7 @@ import onnx
 from onnx.helper import make_node, make_graph, make_tensor, make_tensor_value_info, make_model
 from caffe2.python.onnx.helper import c2_native_run_net, c2_native_run_op
 
-from onnx import defs, mapping
+from onnx import mapping
 import caffe2.python.onnx.frontend as c2_onnx
 import caffe2.python.onnx.backend as c2
 
@@ -44,9 +42,8 @@ class TestCaffe2Basic(TestCase):
         b2.convert_node(node_def.SerializeToString())
 
         bad_node_def = make_node("Add", inputs=["X", "Y"], outputs=["Z"], foo=42, bar=56)
-        with six.assertRaisesRegex(self,
-                                   RuntimeError,
-                                   "Don't know how to map unexpected argument (foo|bar)"):
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Don't know how to map unexpected argument (foo|bar)"):
             b2.convert_node(bad_node_def.SerializeToString())
 
     def test_dynamicslice_3inputs_graph(self):
@@ -777,9 +774,11 @@ class TestCaffe2End2End(TestCase):
         np.random.seed(seed=0)
         try:
             c2_init_net, c2_predict_net, value_info, debug_str = self.model_downloader.get_c2_model_dbg(net_name)
-        except (OSError, IOError) as e:
+        except Exception as e:
             # catch IOError/OSError that is caused by FileNotFoundError and PermissionError
             # This is helpful because sometimes we get errors due to gfs not available
+            # get_c2_model_dbg wraps URLError/HTTPErrors into generic Exception
+            # Skip the tests if model can not be downloaded due to the any of the above
             print("\n_test_net exception: ", e)
             self.skipTest(str(e))
 
@@ -799,42 +798,69 @@ class TestCaffe2End2End(TestCase):
         onnx_outputs = c2_ir.run(inputs)
         self.assertSameOutputs(c2_outputs, onnx_outputs, decimal=decimal)
 
+    @unittest.skipIf(
+        os.environ.get('SKIP_IN_FB'),
+        'Skip internally!')
     def test_alexnet(self):
         self._test_net('bvlc_alexnet', decimal=4)
 
+    @unittest.skipIf(
+        os.environ.get('SKIP_IN_FB'),
+        'Skip internally!')
     def test_resnet50(self):
         self._test_net('resnet50')
 
     @unittest.skipIf(
-        os.environ.get('JENKINS_URL'),
+        os.environ.get('JENKINS_URL') or os.environ.get('SKIP_IN_FB'),
         'Taking too long to download!')
     def test_vgg16(self):
         self._test_net('vgg16')
 
     @unittest.skipIf(
-        os.environ.get('JENKINS_URL'),
+        os.environ.get('JENKINS_URL') or os.environ.get('SKIP_IN_FB'),
         'Taking too long to download!')
     def test_zfnet(self):
         self._test_net('zfnet')
 
+    @unittest.skipIf(
+        os.environ.get('SKIP_IN_FB'),
+        'Skip internally!')
     def test_inception_v1(self):
         self._test_net('inception_v1', decimal=2)
 
+    @unittest.skipIf(
+        os.environ.get('SKIP_IN_FB'),
+        'Skip internally!')
     def test_inception_v2(self):
         self._test_net('inception_v2')
 
+    @unittest.skipIf(
+        os.environ.get('SKIP_IN_FB'),
+        'Skip internally!')
     def test_squeezenet(self):
         self._test_net('squeezenet')
 
+    @unittest.skipIf(
+        os.environ.get('SKIP_IN_FB'),
+        'Skip internally!')
     def test_densenet121(self):
         self._test_net('densenet121')
 
+    @unittest.skipIf(
+        os.environ.get('SKIP_IN_FB'),
+        'Skip internally!')
     def test_bvlc_googlenet(self):
         self._test_net('bvlc_googlenet')
 
+    @unittest.skipIf(
+        os.environ.get('SKIP_IN_FB'),
+        'Skip internally!')
     def test_bvlc_reference_caffenet(self):
         self._test_net('bvlc_reference_caffenet')
 
+    @unittest.skipIf(
+        os.environ.get('SKIP_IN_FB'),
+        'Skip internally!')
     def test_bvlc_reference_rcnn_ilsvrc13(self):
         self._test_net('bvlc_reference_rcnn_ilsvrc13')
 

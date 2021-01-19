@@ -1,147 +1,85 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import argparse
 import datetime
 import re
 import sys
+from collections import defaultdict
+
 import torch
 from torch._C import parse_schema
 
 
-# The date specifies how long the whitelist exclusion should apply to.
+# The date specifies how long the allowlist exclusion should apply to.
 #
 #   - If we NEVER give BC guarantee for an operator, you can put the
 #     date arbitrarily far in the future.
 #   - Otherwise, pick a date that is far enough in the future that you
 #     believe you can land your diff before then.
 #
-# Whitelist entries can be removed after the date listed on them passes.
-white_list = [
-    ('c10_experimental', datetime.date(2222, 1, 1)),
-    # We export some functions and classes for test_jit.py directly from libtorch.so,
-    # it's not important to have BC for them
-    ('_TorchScriptTesting.*', datetime.date(9999, 1, 1)),
-    ('prim::id*', datetime.date(2020, 4, 1)),
-    ('aten::pop*', datetime.date(2020, 4, 1)),
-    ('aten::insert*', datetime.date(2020, 4, 1)),
-    ('aten::Delete*', datetime.date(2020, 4, 1)),
-    ('aten::clear*', datetime.date(2020, 4, 1)),
-    ('aten::_set_item*', datetime.date(2020, 4, 1)),
-    ('aten::copy*', datetime.date(2020, 4, 1)),
-    ('aten::extend*', datetime.date(2020, 4, 1)),
-    ('aten::reverse*', datetime.date(2020, 4, 1)),
-    ('aten::append*', datetime.date(2020, 4, 1)),
-    ('aten::list*', datetime.date(2020, 4, 1)),
-    ('aten::__getitem__*', datetime.date(2020, 4, 1)),
-    ('aten::len*', datetime.date(2020, 4, 1)),
-    ('aten::mul_*', datetime.date(2020, 4, 1)),
-    ('aten::slice*', datetime.date(2020, 4, 1)),
-    ('aten::add*', datetime.date(2020, 4, 1)),
-    ('aten::mul*', datetime.date(2020, 4, 1)),
-    ('aten::select*', datetime.date(2020, 4, 1)),
-    ('aten::add_*', datetime.date(2020, 4, 1)),
-    # _like default change, see https://github.com/pytorch/pytorch/issues/33580
-    ('aten::randn_like', datetime.date(2020, 3, 15)),
-    ('aten::full_like', datetime.date(2020, 3, 15)),
-    ('aten::empty_like', datetime.date(2020, 3, 15)),
-    ('aten::rand_like', datetime.date(2020, 3, 15)),
-    ('aten::ones_like', datetime.date(2020, 3, 15)),
-    ('aten::randint_like', datetime.date(2020, 3, 15)),
-    ('aten::zeros_like', datetime.date(2020, 3, 15)),
-    ('aten::floor_divide', datetime.date(2020, 4, 1)),
-    ('aten::Bool', datetime.date(2020, 4, 1)),
-    ('aten::Float', datetime.date(2020, 4, 1)),
-    ('aten::to', datetime.date(2020, 4, 1)),
-    ('aten::backward', datetime.date(2020, 4, 1)),
-    ('aten::len', datetime.date(2020, 4, 1)),
-    ('aten::remove', datetime.date(2020, 4, 1)),
-    ('aten::index', datetime.date(2020, 4, 1)),
-    ('aten::count', datetime.date(2020, 4, 1)),
-    ('aten::__contains__', datetime.date(2020, 4, 1)),
-    ('aten::sort', datetime.date(2020, 4, 1)),
-    ('aten::sorted', datetime.date(2020, 4, 1)),
-    ('aten::eq', datetime.date(2020, 4, 1)),
-    ('aten::ne', datetime.date(2020, 4, 1)),
-    ('aten::lt', datetime.date(2020, 4, 1)),
-    ('aten::gt', datetime.date(2020, 4, 1)),
-    ('aten::le', datetime.date(2020, 4, 1)),
-    ('aten::ge', datetime.date(2020, 4, 1)),
-    ('aten::divmod', datetime.date(2020, 4, 1)),
-    ('aten::__upsample_bilinear', datetime.date(2020, 4, 1)),
-    ('aten::__upsample', datetime.date(2020, 4, 1)),
-    ('aten::__upsample_nearest', datetime.date(2020, 4, 1)),
-    ('aten::__interpolate', datetime.date(2020, 4, 1)),
-    ('aten::fabs', datetime.date(2020, 4, 1)),
-    ('aten::gamma', datetime.date(2020, 4, 1)),
-    ('prim::abs', datetime.date(2020, 4, 1)),
-    ('aten::factorial', datetime.date(2020, 4, 1)),
-    ('aten::radians', datetime.date(2020, 4, 1)),
-    ('aten::degrees', datetime.date(2020, 4, 1)),
-    ('prim::acosh', datetime.date(2020, 4, 1)),
-    ('prim::atanh', datetime.date(2020, 4, 1)),
-    ('aten::asinh', datetime.date(2020, 4, 1)),
-    ('aten::floordiv', datetime.date(2020, 4, 1)),
-    ('prim::NumToTensor', datetime.date(2020, 4, 1)),
-    ('aten::sin', datetime.date(2020, 4, 1)),
-    ('aten::round', datetime.date(2020, 4, 1)),
-    ('aten::remainder', datetime.date(2020, 4, 1)),
-    ('aten::isfinite', datetime.date(2020, 4, 1)),
-    ('aten::sub', datetime.date(2020, 4, 1)),
-    ('aten::sqrt', datetime.date(2020, 4, 1)),
-    ('aten::log1p', datetime.date(2020, 4, 1)),
-    ('aten::acos', datetime.date(2020, 4, 1)),
-    ('aten::floor', datetime.date(2020, 4, 1)),
-    ('aten::exp', datetime.date(2020, 4, 1)),
-    ('aten::tan', datetime.date(2020, 4, 1)),
-    ('aten::sinh', datetime.date(2020, 4, 1)),
-    ('aten::ceil', datetime.date(2020, 4, 1)),
-    ('aten::atan', datetime.date(2020, 4, 1)),
-    ('aten::erf', datetime.date(2020, 4, 1)),
-    ('aten::erfc', datetime.date(2020, 4, 1)),
-    ('aten::cosh', datetime.date(2020, 4, 1)),
-    ('aten::expm1', datetime.date(2020, 4, 1)),
-    ('aten::isinf', datetime.date(2020, 4, 1)),
-    ('aten::lgamma', datetime.date(2020, 4, 1)),
-    ('aten::asin', datetime.date(2020, 4, 1)),
-    ('aten::log', datetime.date(2020, 4, 1)),
-    ('aten::log10', datetime.date(2020, 4, 1)),
-    ('aten::cos', datetime.date(2020, 4, 1)),
-    ('aten::tanh', datetime.date(2020, 4, 1)),
-    ('prim::min', datetime.date(2020, 4, 1)),
-    ('prim::max', datetime.date(2020, 4, 1)),
-    ('aten::_linear_packed', datetime.date(2020, 4, 1)),
-    ('aten::_linear_prepack', datetime.date(2020, 4, 1)),
-    ('aten::_conv2d_packed', datetime.date(2020, 4, 1)),
-    ('aten::_conv2d_prepack', datetime.date(2020, 4, 1)),
-    ('aten::dequantize', datetime.date(2020, 4, 1)),
-    ('aten::confirmed_by_owner', datetime.date(2020, 3, 17)),
-    ('aten::owner', datetime.date(2020, 3, 27)),
-    ('aten::owner_name', datetime.date(2020, 3, 27)),
-    ('_aten', datetime.date(2020, 4, 1)),
-    ("prim::shape", datetime.date(2020, 4, 1)),
-    ('_xnnpack::conv2d_packed', datetime.date(2020, 4, 2)),
-    ('_xnnpack::conv2d_prepack', datetime.date(2020, 4, 2)),
-    ('_xnnpack::linear_packed', datetime.date(2020, 4, 2)),
-    ('_xnnpack::linear_prepack', datetime.date(2020, 4, 2)),
-    ('_aten', datetime.date(2020, 4, 15)),
+# Allowlist entries can be removed after the date listed on them passes.
+#
+# Allowlist item format:
+# [
+#   0: function name regex
+#   1: date until which the allowlist entry is valid
+#   2: (optional) function argument regex
+# ]
+#
+# NB: function name DOES NOT include overload name!
+allow_list = [
+    ("c10_experimental", datetime.date(2222, 1, 1)),
+    # Internal
+    ("static", datetime.date(9999, 1, 1)),
+    # Internal, profiler-specific ops
+    ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
+    ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
+    ("aten::_qr_helper", datetime.date(2021, 1, 31)),
+    ("aten::fft", datetime.date(2021, 1, 31)),
+    ("aten::ifft", datetime.date(2021, 1, 31)),
+    ("aten::irfft", datetime.date(2021, 1, 31)),
+    ("aten::rfft", datetime.date(2021, 1, 31)),
+    ("aten::_svd_helper", datetime.date(2021, 1, 31)),
+    ("aten::_cudnn_rnn_flatten_weight", datetime.date(2020, 12, 31)),
+    ("aten::_cudnn_rnn", datetime.date(2020, 12, 31)),
+    ("aten::_cudnn_rnn_backward", datetime.date(2020, 12, 31)),
+    ("aten::quantile", datetime.date(2021, 1, 31)),
+    ("aten::nanquantile", datetime.date(2021, 1, 31)),
+    ("aten::_fft_with_size", datetime.date(2021, 1, 31)),
+    ("aten::thnn_conv_depthwise2d_backward", datetime.date(2021, 1, 31)),
+    ("aten::slow_conv3d_backward", datetime.date(2021, 1, 31)),
+    ("aten::thnn_conv2d_backward", datetime.date(2021, 1, 31)),
+    ("aten::slow_conv_transpose3d_backward", datetime.date(2021, 1, 31)),
+    ("aten::slow_conv_transpose2d_backward", datetime.date(2021, 1, 31)),
+    ("aten::set_", datetime.date(2021, 1, 31)),
+    ("aten::native_layer_norm", datetime.date(2021, 1, 31)),
+    ("aten::native_layer_norm_backward", datetime.date(2021, 1, 31)),
+    ("aten::sort", datetime.date(2021, 1, 31)),
+    ("aten::sort_out", datetime.date(2021, 1, 31)),
+    ("aten::elu_backward", datetime.date(2021, 1, 31)),
+    ("aten::_multinomial_alias_setup", datetime.date(2021, 1, 31)),
+    ("aten::_multinomial_alias_draw", datetime.date(2021, 1, 31)),
 ]
+
+def allow_listed(schema, allow_list):
+    for item in allow_list:
+        if item[1] < datetime.date.today():
+            continue
+        regexp = re.compile(item[0])
+        if regexp.search(schema.name):
+            if len(item) > 2:
+                # if arguments regex is present, use it
+                regexp_args = re.compile(item[2])
+                return bool(regexp_args.search(str(schema)))
+            return True
+    return False
 
 
 # The nightly will fail to parse newly added syntax to schema declarations
 # Add new schemas that will fail the nightly here
 dont_parse_list = [
-    ("prim::id", datetime.date(2020, 4, 1)),
+    ("_TorchScriptTesting.*", datetime.date(2099, 9, 17)),
+    ("test_backend", datetime.date(2099, 9, 17)),
+    ("dist_c10d", datetime.date(2021, 1, 30)),
 ]
-
-
-def white_listed(schema, white_list):
-    for item in white_list:
-        if item[1] < datetime.date.today():
-            continue
-        regexp = re.compile(item[0])
-        if regexp.search(schema.name):
-            return True
-    return False
 
 
 def dont_parse(schema_line):
@@ -154,65 +92,71 @@ def dont_parse(schema_line):
     return False
 
 
-def check_bc(new_schema_dict):
-    existing_schemas = torch._C._jit_get_all_schemas()
+def check_bc(existing_schemas):
+    new_schemas = torch._C._jit_get_all_schemas()
+    new_schemas += torch._C._jit_get_custom_class_schemas()
+    new_schema_dict = defaultdict(list)
+    for s in new_schemas:
+        new_schema_dict[s.name].append(s)
+
     is_bc = True
     broken_ops = []
     for existing_schema in existing_schemas:
-        if white_listed(existing_schema, white_list):
-            print("skipping schema: ", str(existing_schema))
+        if allow_listed(existing_schema, allow_list):
+            print("schema: ", str(existing_schema), " found on allowlist, skipping")
             continue
         print("processing existing schema: ", str(existing_schema))
-        new_schemas = new_schema_dict.get(existing_schema.name, [])
+        matching_new_schemas = new_schema_dict.get(existing_schema.name, [])
         found = False
-        for new_schema in new_schemas:
-            if new_schema.is_backward_compatible_with(existing_schema):
+        for matching_new_schema in matching_new_schemas:
+            if matching_new_schema.is_backward_compatible_with(existing_schema):
                 found = True
                 break
         if not found:
-            print('Can NOT find backward compatible schemas after changes '
-                  'for schema {} from the following candidates:\n[\n{}\n]'
-                  .format(
-                      str(existing_schema),
-                      "\n\t".join(str(s) for s in new_schemas)))
+            print(
+                "Can NOT find backward compatible schemas after changes "
+                "for schema {} from the following candidates:\n[\n{}\n]".format(
+                    str(existing_schema),
+                    "\n\t".join(str(s) for s in matching_new_schemas),
+                )
+            )
             # TODO Print out more details about why candidates don't match.
             broken_ops.append(str(existing_schema))
             is_bc = False
     if is_bc:
-        print('Found backward compatible schemas for all existing schemas')
+        print("Found backward compatible schemas for all existing schemas")
     else:
-        print('The PR is introducing backward incompatible changes to the '
-              'operator library. Please contact PyTorch team to confirm '
-              'whether this change is wanted or not. \n\nBroken ops: '
-              '[\n\t{}\n]'.format("\n\t".join(broken_ops)))
+        print(
+            "The PR is introducing backward incompatible changes to the "
+            "operator library. Please contact PyTorch team to confirm "
+            "whether this change is wanted or not. \n\nBroken ops: "
+            "[\n\t{}\n]".format("\n\t".join(broken_ops))
+        )
     return is_bc
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Process some integers.')
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Process some integers.")
     parser.add_argument(
-        '--new-schemas',
-        help='filename to load new schemas',
+        "--existing-schemas",
+        help="filename to load existing schemas",
         type=str,
-        default='schemas.txt')
+        default="schemas.txt",
+    )
     args = parser.parse_args()
-    new_schema_dict = dict()
-    with open(args.new_schemas, 'r') as f:
+    existing_schema_dict = dict()
+    slist = []
+    with open(args.existing_schemas, "r") as f:
         while True:
             line = f.readline()
             if not line:
                 break
-            if "torch.classes" in line:
-                # TODO Fix type __torch__.torch.classes.xxx
-                continue
 
             if dont_parse(line.strip()):
                 print("Not parsing schema line: ", line.strip())
                 continue
             s = parse_schema(line.strip())
-            slist = new_schema_dict.get(s.name, [])
             slist.append(s)
-            new_schema_dict[s.name] = slist
 
-    if not check_bc(new_schema_dict):
+    if not check_bc(slist):
         sys.exit(1)

@@ -1,22 +1,24 @@
 import os
 import re
 import yaml
-import unittest
 import textwrap
 import torch
+
+from torch.testing._internal.common_utils import TestCase, run_tests
 from collections import namedtuple
 
 
 path = os.path.dirname(os.path.realpath(__file__))
 aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.yaml')
 all_operators_with_namedtuple_return = {
-    'max', 'min', 'median', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
+    'max', 'min', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
     'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'lstsq',
-    'triangular_solve', 'cummax', 'cummin'
+    'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "unpack_dual", 'linalg_qr',
+    '_svd_helper', 'linalg_svd', 'linalg_slogdet',
 }
 
 
-class TestNamedTupleAPI(unittest.TestCase):
+class TestNamedTupleAPI(TestCase):
 
     def test_native_functions_yaml(self):
         operators_found = set()
@@ -39,7 +41,7 @@ class TestNamedTupleAPI(unittest.TestCase):
             for r in ret:
                 r = r.strip()
                 self.assertEqual(len(r.split()), 1,
-                                 'only whitelisted operators are allowed to have named return type, got ' + name)
+                                 'only allowlisted operators are allowed to have named return type, got ' + name)
         file.close()
         self.assertEqual(all_operators_with_namedtuple_return, operators_found, textwrap.dedent("""
         Some elements in the `all_operators_with_namedtuple_return` of test_namedtuple_return_api.py
@@ -52,29 +54,52 @@ class TestNamedTupleAPI(unittest.TestCase):
 
         op = namedtuple('op', ['operators', 'input', 'names', 'hasout'])
         operators = [
-            op(operators=['max', 'min', 'median', 'mode', 'sort', 'topk', 'cummax', 'cummin'], input=(0,),
+            op(operators=['max', 'min', 'median', 'nanmedian', 'mode', 'sort', 'topk', 'cummax', 'cummin'], input=(0,),
                names=('values', 'indices'), hasout=True),
             op(operators=['kthvalue'], input=(1, 0),
                names=('values', 'indices'), hasout=True),
-            op(operators=['svd'], input=(), names=('U', 'S', 'V'), hasout=True),
+            op(operators=['svd', '_svd_helper', 'linalg_svd'], input=(), names=('U', 'S', 'V'), hasout=True),
             op(operators=['slogdet'], input=(), names=('sign', 'logabsdet'), hasout=False),
-            op(operators=['qr'], input=(), names=('Q', 'R'), hasout=True),
+            op(operators=['qr', 'linalg_qr'], input=(), names=('Q', 'R'), hasout=True),
             op(operators=['solve'], input=(a,), names=('solution', 'LU'), hasout=True),
             op(operators=['geqrf'], input=(), names=('a', 'tau'), hasout=True),
             op(operators=['symeig', 'eig'], input=(True,), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['triangular_solve'], input=(a,), names=('solution', 'cloned_coefficient'), hasout=True),
             op(operators=['lstsq'], input=(a,), names=('solution', 'QR'), hasout=True),
+            op(operators=['linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
+            op(operators=['linalg_slogdet'], input=(), names=('sign', 'logabsdet'), hasout=True),
+            op(operators=['unpack_dual'], input=(0,), names=('primal', 'tangent'), hasout=False),
         ]
+
+        def get_func(f):
+            "Return either torch.f or torch.linalg.f, where 'f' is a string"
+            if f.startswith('linalg_'):
+                return getattr(torch.linalg, f[7:])
+            return getattr(torch, f, None)
+
+        def check_namedtuple(tup, names):
+            "Check that the namedtuple 'tup' has the given names"
+            for i, name in enumerate(names):
+                self.assertIs(getattr(tup, name), tup[i])
 
         for op in operators:
             for f in op.operators:
-                ret = getattr(a, f)(*op.input)
-                for i, name in enumerate(op.names):
-                    self.assertIs(getattr(ret, name), ret[i])
-                if op.hasout:
-                    ret1 = getattr(torch, f)(a, *op.input, out=tuple(ret))
-                    for i, name in enumerate(op.names):
-                        self.assertIs(getattr(ret, name), ret[i])
+                # 1. check the namedtuple returned by calling torch.f
+                func = get_func(f)
+                if func:
+                    ret1 = func(a, *op.input)
+                    check_namedtuple(ret1, op.names)
+                #
+                # 2. check the out= variant, if it exists
+                if func and op.hasout:
+                    ret2 = func(a, *op.input, out=tuple(ret1))
+                    check_namedtuple(ret2, op.names)
+                #
+                # 3. check the Tensor.f method, if it exists
+                meth = getattr(a, f, None)
+                if meth:
+                    ret3 = meth(*op.input)
+                    check_namedtuple(ret3, op.names)
 
         all_covered_operators = set([x for y in operators for x in y.operators])
 
@@ -85,4 +110,4 @@ class TestNamedTupleAPI(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

@@ -17,16 +17,18 @@ namespace {
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
-PyObject* faulty_agent_init(PyObject* /* unused */) {
+PyObject* faulty_agent_init(PyObject* _unused, PyObject* noargs) {
   // Add the FaultyProcessGroupAgent and its backend options object to the
-  // python module torch.distributed.rpc._testing
-  auto faulty_agent_module =
-      THPObjectPtr(PyImport_ImportModule("torch.distributed.rpc._testing"));
-  if (!faulty_agent_module) {
+  // python module torch._C._distributed_rpc_testing
+  auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+  if (!torch_C_module) {
     throw python_error();
   }
 
-  auto module = py::handle(faulty_agent_module).cast<py::module>();
+  auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
+  auto m = torch_C_m.def_submodule(
+      "_distributed_rpc_testing", "distributed rpc testing bindings");
+  auto module = py::handle(m).cast<py::module>();
 
   // Import the rpc_module so we can subclass ProcessGroupAgent
   py::module rpc_module = py::module::import("torch.distributed.rpc");
@@ -38,14 +40,16 @@ PyObject* faulty_agent_init(PyObject* /* unused */) {
       .def(
           py::init<
               int,
-              std::chrono::milliseconds,
+              float,
               std::string,
               std::vector<std::string>,
+              std::unordered_map<std::string, float>,
               int>(),
           py::arg("num_send_recv_threads"),
           py::arg("rpc_timeout"),
           py::arg("init_method"),
           py::arg("messages_to_fail"),
+          py::arg("messages_to_delay"),
           py::arg("num_fail_sends"))
       .def_readwrite(
           "num_send_recv_threads",
@@ -54,6 +58,9 @@ PyObject* faulty_agent_init(PyObject* /* unused */) {
           "messages_to_fail",
           &FaultyProcessGroupRpcBackendOptions::messagesToFail)
       .def_readwrite(
+          "messages_to_delay",
+          &FaultyProcessGroupRpcBackendOptions::messagesToDelay)
+      .def_readwrite(
           "num_fail_sends", &FaultyProcessGroupRpcBackendOptions::numFailSends);
 
   shared_ptr_class_<FaultyProcessGroupAgent>(
@@ -61,16 +68,18 @@ PyObject* faulty_agent_init(PyObject* /* unused */) {
       .def(
           py::init<
               std::string,
-              std::shared_ptr<::c10d::ProcessGroup>,
+              c10::intrusive_ptr<::c10d::ProcessGroup>,
               int,
               std::chrono::milliseconds,
-              std::vector<std::string>,
+              const std::vector<std::string>&,
+              const std::unordered_map<std::string, float>&,
               int>(),
           py::arg("name"),
           py::arg("process_group"),
           py::arg("num_send_recv_threads"),
           py::arg("rpc_timeout"),
           py::arg("messages_to_fail"),
+          py::arg("messages_to_delay"),
           py::arg("failNumSends"))
       .def(
           "join",
@@ -82,12 +91,17 @@ PyObject* faulty_agent_init(PyObject* /* unused */) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &
+          (const WorkerInfo& (ProcessGroupAgent::*)(void) const) &
               RpcAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          (const WorkerInfo& (ProcessGroupAgent::*)(const std::string&)const) &
+          (const WorkerInfo& (ProcessGroupAgent::*)(const std::string&) const) &
+              ProcessGroupAgent::getWorkerInfo,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_worker_info",
+          (const WorkerInfo& (ProcessGroupAgent::*)(worker_id_t id) const) &
               ProcessGroupAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
@@ -102,10 +116,7 @@ PyObject* faulty_agent_init(PyObject* /* unused */) {
 } // namespace
 
 static PyMethodDef methods[] = { // NOLINT
-    {"_faulty_agent_init",
-     (PyCFunction)faulty_agent_init,
-     METH_NOARGS,
-     nullptr},
+    {"_faulty_agent_init", faulty_agent_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 PyMethodDef* python_functions() {

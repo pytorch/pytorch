@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
+
 #include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -12,7 +13,7 @@ namespace {
 // operators where we expect to find tuples as inputs/outputs
 // this is to assert we are only doing modifications when we know
 // we can flatten tuples
-std::unordered_set<Symbol> white_list = {
+std::unordered_set<Symbol> supported_ops = {
     prim::If,
     prim::Loop,
     prim::TupleUnpack,
@@ -21,6 +22,8 @@ std::unordered_set<Symbol> white_list = {
     prim::TupleSlice,
     prim::Param,
     prim::Return,
+    prim::PythonOp,
+    aten::format,
 };
 
 void removeTupleNodes(Node* n, bool must_remove_tuples) {
@@ -128,7 +131,7 @@ static void VisitNode(Node* n, Node* insert_point) {
     auto input = n->inputs()[i];
     if (TupleTypePtr tt = input->type()->cast<TupleType>()) {
       TORCH_CHECK(
-          white_list.count(n->kind()) > 0,
+          supported_ops.count(n->kind()) > 0,
           "tuple appears in op that does not forward tuples, ",
           "unsupported kind: ",
           n->kind().toQualString());
@@ -163,7 +166,7 @@ static void VisitNode(Node* n, Node* insert_point) {
     // is placed at the current insertion point
     if (TupleTypePtr tt = output->type()->cast<TupleType>()) {
       TORCH_CHECK(
-          white_list.count(n->kind()) > 0,
+          supported_ops.count(n->kind()) > 0,
           "tuple appears in op that does not forward tuples, ",
           "unsupported kind: ",
           n->kind().toQualString());

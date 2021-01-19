@@ -9,7 +9,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
 
-C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(BucketizeOp);
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(Bucketize);
 
 namespace caffe2 {
 

@@ -3,8 +3,9 @@
 #else
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/Utils.h>
+#include <c10/cuda/CUDAException.h>
 #include <utility>
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
@@ -39,9 +40,14 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
                      THCudaLongTensor_data(state, larger_short),
                      one, inputsize
                      );
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  THCudaLongTensor_nonzero(state, smaller_short, smaller);
-  THCudaLongTensor_nonzero(state, larger_short, larger);
+  at::Tensor smaller_short_wrapped = THTensor_wrap(smaller_short);
+  at::Tensor smaller_wrapped = THTensor_wrap(smaller);
+  at::Tensor larger_short_wrapped = THTensor_wrap(larger_short);
+  at::Tensor larger_wrapped = THTensor_wrap(larger);
+  at::nonzero_out(smaller_short_wrapped, smaller_wrapped);
+  at::nonzero_out(larger_short_wrapped, larger_wrapped);
   int h_large_c = THCudaLongTensor_nElement(state, larger_short);
   THCudaLongTensor_resize1d(state, smaller_short, inputsize);
   THCudaLongTensor_resize1d(state, larger_short, inputsize);
@@ -54,13 +60,16 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
                 THCudaLongTensor_data(state, larger_short),
                 inputsize - h_large_c, h_large_c
                 );
-  scalar_t q_max = THCTensor_(maxall)(state, _q);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  scalar_t q_max = at::max(THTensor_wrap(_q)).item<scalar_t>();
   condDiv<<<
     inputBlockDim, BLOCK_SIZE, 0, c10::cuda::getCurrentCUDAStream()>>>(
                       THCTensor_(data)(state, _q),
                       THCudaLongTensor_data(state, _J),
                       inputsize, q_max
                       );
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   THCudaLongTensor_free(state, smaller);
   THCudaLongTensor_free(state, larger);
@@ -69,7 +78,7 @@ void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCud
   THCTensor_free(state, probs);
 }
 
-void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, THCTensor *_q, THCudaLongTensor *_J, int n_sample, at::Generator gen_){
+void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, THCTensor *_q, THCudaLongTensor *_J, int n_sample, c10::optional<at::Generator> gen_){
   THArgCheck(_q->dim() == 1, 1,
              "expected 1-D probability table, got %d-D probability table instead",
              _q->dim());
@@ -88,8 +97,8 @@ void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, T
 
   auto out_uniform = THTensor_wrap(uniform);
   auto out_bernoulli = THTensor_wrap(bernoulli);
-  at::native::uniform_cuda_(out_uniform, 0, K, gen_);
-  at::native::uniform_cuda_(out_bernoulli, 0, 1, gen_);
+  at::native::uniform_(out_uniform, 0, K, gen_);
+  at::native::uniform_(out_bernoulli, 0, 1, gen_);
 
   multinomialAliasDrawKernel
     <<<THCCeilDiv((int)n_sample+BLOCK_SIZE-1, BLOCK_SIZE), BLOCK_SIZE, 0, c10::cuda::getCurrentCUDAStream()>>>(
@@ -101,6 +110,8 @@ void THCTensor_(multinomialAliasDraw)(THCState *state, THCudaLongTensor *self, T
           THCTensor_(data)(state, uniform),
           THCTensor_(data)(state, bernoulli)
           );
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
   THCTensor_(free)(state, uniform);
   THCTensor_(free)(state, bernoulli);
 }

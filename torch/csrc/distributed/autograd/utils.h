@@ -2,6 +2,8 @@
 
 #include <torch/csrc/distributed/autograd/context/context.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.h>
 
 namespace torch {
 namespace distributed {
@@ -43,14 +45,14 @@ TORCH_API rpc::Message getMessageWithAutograd(
     bool forceGradRecording = false);
 
 // Send message after autograd checking
-TORCH_API std::shared_ptr<torch::distributed::rpc::FutureMessage>
+TORCH_API std::shared_ptr<c10::ivalue::Future>
 sendMessageWithAutograd(
     rpc::RpcAgent& agent,
     const rpc::WorkerInfo& dst,
     rpc::Message&& wrappedRpcMsg,
     bool forceGradRecording = false,
-    const std::shared_ptr<torch::autograd::profiler::RecordFunction>& rf =
-        nullptr);
+    const float rpcTimeoutSeconds = torch::distributed::rpc::kUnsetRpcTimeout,
+    bool forceDisableProfiling = false);
 
 } // namespace autograd
 } // namespace distributed

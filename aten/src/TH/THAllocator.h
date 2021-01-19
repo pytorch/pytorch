@@ -21,7 +21,7 @@ TH_API c10::Allocator* getTHDefaultAllocator(void);
 // the non-file descriptor constructor
 enum WithFd { WITH_FD };
 
-class CAFFE2_API THMapAllocator {
+class TORCH_API THMapAllocator {
  public:
   THMapAllocator(const char *filename, int flags, size_t size);
   THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size);
@@ -53,7 +53,7 @@ class CAFFE2_API THMapAllocator {
 
   // This is very dangerous.  You have to redefine this destructor for each
   // subclass
-  virtual ~THMapAllocator() { close(); }
+  virtual ~THMapAllocator();
 
 protected:
   bool closed_ = false;
@@ -71,11 +71,11 @@ protected:
 };
 
 // Base-from-member idiom
-struct CAFFE2_API THRefcountedMapAllocatorArgCheck {
+struct TORCH_API THRefcountedMapAllocatorArgCheck {
   THRefcountedMapAllocatorArgCheck(int flags);
 };
 
-class CAFFE2_API THRefcountedMapAllocator
+class TORCH_API THRefcountedMapAllocator
     : private THRefcountedMapAllocatorArgCheck,
       public THMapAllocator {
  public:

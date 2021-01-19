@@ -1,5 +1,6 @@
 #include "caffe2/operators/lengths_reducer_fused_nbit_rowwise_ops.h"
 #include "c10/util/Registry.h"
+#include "caffe2/core/export_caffe2_op_to_c10.h"
 
 namespace caffe2 {
 
@@ -59,17 +60,17 @@ but operating on 4-bit rowwise quantized matrices with fused storage
         "operator FloatToFused4BitRowwiseQuantized")
     .Input(
         1,
+        "WEIGHTS",
+        "Vector of weights to scale rows of DATA with before reduction")
+    .Input(
+        2,
         "INDICES",
         "Integer vector containing indices of the first "
         "dimension of DATA for the slices that are being aggregated")
     .Input(
-        2,
+        3,
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
-    .Input(
-        3,
-        "WEIGHTS",
-        "Vector of weights to scale rows of DATA with before reduction")
     .Output(0, "output", "output");
 NO_GRADIENT(SparseLengthsWeightedSumFused4BitRowwise);
 
@@ -165,17 +166,17 @@ but operating on 2-bit rowwise quantized matrices with fused storage
         "operator FloatToFused2BitRowwiseQuantized")
     .Input(
         1,
+        "WEIGHTS",
+        "Vector of weights to scale rows of DATA with before reduction")
+    .Input(
+        2,
         "INDICES",
         "Integer vector containing indices of the first "
         "dimension of DATA for the slices that are being aggregated")
     .Input(
-        2,
+        3,
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
-    .Input(
-        3,
-        "WEIGHTS",
-        "Vector of weights to scale rows of DATA with before reduction")
     .Output(0, "output", "output");
 NO_GRADIENT(SparseLengthsWeightedSumFused2BitRowwise);
 
@@ -214,6 +215,41 @@ operating on 2-bit rowwise quantized matrices with fused storage
         "Vector with the same sum of elements as the first dimension of DATA")
     .Output(0, "output", "output");
 NO_GRADIENT(SparseLengthsMeanFused2BitRowwise);
+
+REGISTER_CPU_OPERATOR(
+    SparseLengthsSumSparseLookup,
+    SparseLengthsSumSparseLookupOp);
+OPERATOR_SCHEMA(SparseLengthsSumSparseLookup)
+    .NumInputs(3, 4)
+    .NumOutputs(2, 3)
+    .SetDoc(R"DOC(
+This op converts compressed indices of SparseLengthsSum*Sparse to
+uncompressed indices of SparseLengthsSum*. For compressed indices that maps
+to -1. It means it will correspond to a zero row in the uncompressed data.
+Therefore we will remove this indices and adjust the lengths.
+)DOC")
+    .Input(
+        0,
+        "INDICES",
+        "Integer vector containing compressed indices of the first "
+        "dimension of DATA for the slices that are being aggregated")
+    .Input(
+        1,
+        "LENGTHS",
+        "Vector with the same sum of elements as the first dimension of INDICES")
+    .Input(
+        2,
+        "COMPRESSED_INDICES_MAPPING",
+        "Integer vector mapping uncompressed indices to compressed indices")
+    .Input(
+        3,
+        "WEIGHTS",
+        "Vector of weights to scale rows of DATA with before reduction. Same size as INDICES.")
+    .Output(0, "output_indices", "Uncompressed indices")
+    .Output(1, "output_lengths", "Adjusted lengths")
+    .Output(2, "output_weights", "Adjusted weights")
+    .InheritOnnxSchema();
+NO_GRADIENT(SparseLengthsSumSparseLookup);
 
 REGISTER_CPU_OPERATOR(
     SparseLengthsSum4BitRowwiseSparse,
@@ -277,17 +313,17 @@ matrices with fused storage (where each row stores quantized values, and then
         "operator FloatToFused4BitRowwiseQuantized")
     .Input(
         1,
+        "WEIGHTS",
+        "Vector of weights to scale rows of DATA with before reduction")
+    .Input(
+        2,
         "INDICES",
         "Integer vector containing indices of the first "
         "dimension of DATA for the slices that are being aggregated")
     .Input(
-        2,
+        3,
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
-    .Input(
-        3,
-        "WEIGHTS",
-        "Vector of weights to scale rows of DATA with before reduction")
     .Input(
         4,
         "COMPRESSED_INDICES_MAPPING",
@@ -397,17 +433,17 @@ matrices with fused storage (where each row stores quantized values, and then
         "operator FloatToFused4BitRowwiseQuantized")
     .Input(
         1,
+        "WEIGHTS",
+        "Vector of weights to scale rows of DATA with before reduction")
+    .Input(
+        2,
         "INDICES",
         "Integer vector containing indices of the first "
         "dimension of DATA for the slices that are being aggregated")
     .Input(
-        2,
+        3,
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
-    .Input(
-        3,
-        "WEIGHTS",
-        "Vector of weights to scale rows of DATA with before reduction")
     .Input(
         4,
         "COMPRESSED_INDICES_MAPPING",
@@ -517,17 +553,17 @@ matrices with fused storage (where each row stores quantized values, and then
         "operator FloatToFused2BitRowwiseQuantized")
     .Input(
         1,
+        "WEIGHTS",
+        "Vector of weights to scale rows of DATA with before reduction")
+    .Input(
+        2,
         "INDICES",
         "Integer vector containing indices of the first "
         "dimension of DATA for the slices that are being aggregated")
     .Input(
-        2,
+        3,
         "LENGTHS",
         "Vector with the same sum of elements as the first dimension of DATA")
-    .Input(
-        3,
-        "WEIGHTS",
-        "Vector of weights to scale rows of DATA with before reduction")
     .Input(
         4,
         "COMPRESSED_INDICES_MAPPING",
@@ -576,3 +612,12 @@ fp16 scale and bias), and where rows are pruned.
 NO_GRADIENT(SparseLengthsMean2BitRowwiseSparse);
 
 } // namespace caffe2
+
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    SparseLengthsSum8BitRowwiseSparse,
+    "_caffe2::SparseLengthsSum8BitRowwiseSparse("
+    "Tensor data, "
+    "Tensor indices, "
+    "Tensor lengths, "
+    "Tensor compressed_indices_mapping) -> Tensor output",
+    caffe2::SparseLengthsNBitRowwiseSparseOp<8>);

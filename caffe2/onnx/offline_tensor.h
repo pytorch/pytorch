@@ -7,7 +7,7 @@
 namespace caffe2 {
 
 #ifndef C10_MOBILE
-struct OfflineTensor {
+struct TORCH_API OfflineTensor {
   // A shell tensor to record shape and dtype
   Tensor shape_tensor{CPU};
 
@@ -15,8 +15,8 @@ struct OfflineTensor {
       const std::vector<int>& sizes,
       at::Device device,
       caffe2::TypeMeta data_type) {
-    shape_tensor.unsafeGetTensorImpl()->set_storage(
-        at::Storage::create_legacy(device, data_type));
+    shape_tensor.unsafeGetTensorImpl()->set_storage_and_dtype(
+        at::Storage::create_legacy(device), data_type);
     shape_tensor.Resize(sizes);
     CHECK(!shape_tensor.storage_initialized());
     CHECK(shape_tensor.dtype_initialized());

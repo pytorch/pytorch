@@ -76,14 +76,18 @@ class SparseLengthsFused8BitRowwiseOp : public Operator<Context> {
             block_size,
             with_weights,
             is_mean,
-            /*prefetch distance*/ 16);
+            /*prefetch distance*/ 16,
+            /*is_weight_positional*/ false,
+            /*use_offsets*/ false);
       } else {
         CAFFE_ENFORCE((std::is_same<IndexType, std::int64_t>::value));
         kernel64_ = fbgemm::GenerateEmbeddingSpMDM<std::uint8_t, std::int64_t>(
             block_size,
             with_weights,
             is_mean,
-            /*prefetch distance*/ 16);
+            /*prefetch distance*/ 16,
+            /*is_weight_positional*/ false,
+            /*use_offsets*/ false);
       }
     }
 

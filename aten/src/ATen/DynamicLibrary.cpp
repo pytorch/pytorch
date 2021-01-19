@@ -1,4 +1,5 @@
 #include <c10/util/Exception.h>
+#include <c10/util/Unicode.h>
 #include <ATen/DynamicLibrary.h>
 #include <ATen/Utils.h>
 
@@ -6,12 +7,13 @@
 #include <dlfcn.h>
 #include <libgen.h>
 #else
-#include <Windows.h>
+#include <c10/util/win32-headers.h>
 #endif
 
 namespace at {
 
 
+#ifndef C10_MOBILE
 #ifndef _WIN32
 
 // Unix
@@ -45,11 +47,33 @@ DynamicLibrary::~DynamicLibrary() {
 
 DynamicLibrary::DynamicLibrary(const char* name) {
   // NOLINTNEXTLINE(hicpp-signed-bitwise)
-  HMODULE theModule = LoadLibraryA(name);
+  HMODULE theModule;
+  bool reload = true;
+  auto wname = c10::u8u16(name);
+  // Check if LOAD_LIBRARY_SEARCH_DEFAULT_DIRS is supported
+  if (GetProcAddress(GetModuleHandleW(L"KERNEL32.DLL"), "AddDllDirectory") != NULL) {
+    theModule = LoadLibraryExW(
+        wname.c_str(),
+        NULL,
+        LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    if (theModule != NULL || (GetLastError() != ERROR_MOD_NOT_FOUND)) {
+      reload = false;
+    }
+  }
+
+  if (reload) {
+    theModule = LoadLibraryW(wname.c_str());
+  }
+
   if (theModule) {
     handle = theModule;
   } else {
-    AT_ERROR("error in LoadLibraryA");
+    char buf[256];
+    DWORD dw = GetLastError();
+    FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                  NULL, dw, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                  buf, (sizeof(buf) / sizeof(char)), NULL);
+    AT_ERROR("error in LoadLibrary for ", name, ". WinError ", dw, ": ", buf);
   }
 }
 
@@ -69,6 +93,7 @@ DynamicLibrary::~DynamicLibrary() {
   FreeLibrary((HMODULE)handle);
 }
 
+#endif
 #endif
 
 } // namespace at

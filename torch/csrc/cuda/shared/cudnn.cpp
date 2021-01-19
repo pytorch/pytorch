@@ -20,15 +20,23 @@ version_tuple getCompileVersion() {
 }
 
 version_tuple getRuntimeVersion() {
+#ifndef USE_STATIC_CUDNN
   auto version = cudnnGetVersion();
   auto major = version / 1000;
   auto minor = (version % 1000) / 100;
   auto patch = version % 10;
   return version_tuple(major, minor, patch);
+#else
+  return getCompileVersion();
+#endif
 }
 
 size_t getVersionInt() {
+#ifndef USE_STATIC_CUDNN
   return cudnnGetVersion();
+#else
+  return CUDNN_VERSION;
+#endif
 }
 
 }

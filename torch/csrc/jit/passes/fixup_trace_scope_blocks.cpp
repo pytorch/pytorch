@@ -144,7 +144,6 @@ struct ConvertTracedAttrReferences {
     // the correctness of CSE over GetAttr Nodes (i think)
     std::unordered_map<Value*, Value*> local_remaps;
 
-    auto prefix_atoms = prefix.atoms();
     for (Node* n : b->nodes()) {
       // The only difference between these two branches is for
       // TracedModuleForward we advance the scope, but for other
@@ -242,7 +241,7 @@ struct ConvertTracedAttrReferences {
 // add block and Node outputs to lift it into a scope in which
 // it dominates the Use.
 struct MakeDefsDominateUses {
-  MakeDefsDominateUses() {}
+  MakeDefsDominateUses() = default;
 
   void run(Block* b) {
     processNode(b->param_node(), b);
@@ -282,7 +281,8 @@ struct MakeDefsDominateUses {
         // the domination condition is met.
         while (b_itr != common_ancestor) {
           b_itr->registerOutput(v_itr);
-          Value* remapped = b_itr->owningNode()->addOutput();
+          Value* remapped =
+              b_itr->owningNode()->addOutput()->setType(v_itr->type());
           v_itr = remapped;
           b_itr = b_itr->owningNode()->owningBlock();
         }
@@ -334,7 +334,7 @@ void convertReturnsToTuples(Block* b) {
         // Make node outputs a single tuple;
         std::vector<TypePtr> types;
         for (size_t i = 0; i < n->outputs().size(); ++i) {
-          types.push_back(n->output(0)->type());
+          types.push_back(n->output(i)->type());
         }
         Value* tup_output = n->addOutput()->setType(TupleType::create(types));
         Node* tup_unpack = g->createTupleUnpack(tup_output)->insertAfter(n);

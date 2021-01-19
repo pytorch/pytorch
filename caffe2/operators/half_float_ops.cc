@@ -123,7 +123,8 @@ bool Float16ConstantFillOp::RunOnDevice() {
   return true;
 }
 
-bool Float16UniformFillOp::RunOnDevice() {
+template <>
+bool Float16UniformFillOp<CPUContext>::RunOnDevice() {
   auto* output = Output(0, shape_, at::dtype<at::Half>());
   at::Half* out = output->template mutable_data<at::Half>();
 
@@ -144,7 +145,7 @@ bool Float16UniformFillOp::RunOnDevice() {
 }
 
 REGISTER_CPU_OPERATOR(Float16ConstantFill, Float16ConstantFillOp);
-REGISTER_CPU_OPERATOR(Float16UniformFill, Float16UniformFillOp);
+REGISTER_CPU_OPERATOR(Float16UniformFill, Float16UniformFillOp<CPUContext>);
 OPERATOR_SCHEMA(Float16UniformFill)
     .NumInputs(0)
     .NumOutputs(1)

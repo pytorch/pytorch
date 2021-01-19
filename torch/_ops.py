@@ -61,7 +61,7 @@ class _OpNamespace(types.ModuleType):
         op = torch._C._jit_get_operation(qualified_op_name)
         # let the script frontend know that op is identical to the builtin op
         # with qualified_op_name
-        torch.jit._register_builtin(op, qualified_op_name)
+        torch.jit._builtins._register_builtin(op, qualified_op_name)
         setattr(self, op_name, op)
         op.__module__ = self.__module__ + "." + self.name
         return op
@@ -94,7 +94,7 @@ class _Ops(types.ModuleType):
         ``torch.ops.loaded_libraries`` attribute, a set that may be inspected
         for the paths of all libraries loaded using this function.
 
-        Arguments:
+        Args:
             path (str): A path to a shared library to load.
         """
         path = torch._utils_internal.resolve_library_path(path)

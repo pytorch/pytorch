@@ -27,7 +27,7 @@ class SumReluOp : public SumOp<Context> {
 
   template <typename T, typename M>
   bool DoRunWithType() {
-    if (!SumOp<Context>::template DoRunWithType<T, M>()) {
+    if (!SumOp<Context>::template DoRunWithType<T>()) {
       return false;
     }
 
@@ -42,11 +42,13 @@ class SumReluOp : public SumOp<Context> {
   bool RunOnDevice() override {
     if (Input(0).template IsType<float>()) {
       return DoRunWithType<float, float>();
+    } else if (Input(0).template IsType<double>()) {
+      return DoRunWithType<double, double>();
     } else if (Input(0).template IsType<int>()) {
       return DoRunWithType<int, int>();
     } else {
       CAFFE_THROW(
-          "Sum operator only supports 32-bit float and ints, but",
+          "Sum operator only supports 32-bit float, 64-bit double and ints, but",
           " input was of type ",
           Input(0).dtype().name());
     }

@@ -19,8 +19,10 @@ GeneratorImpl::GeneratorImpl(Device device_in, DispatchKeySet key_set)
  * Clone this generator. Note that clone() is the only
  * method for copying for Generators in ATen.
  */
-std::shared_ptr<GeneratorImpl> GeneratorImpl::clone() const {
-  return std::shared_ptr<GeneratorImpl>(static_cast<GeneratorImpl*>(this->clone_impl()));
+c10::intrusive_ptr<GeneratorImpl> GeneratorImpl::clone() const {
+  auto res = this->clone_impl();
+  c10::raw::intrusive_ptr::incref(res);
+  return c10::intrusive_ptr<GeneratorImpl>::reclaim(res);
 }
 
 /**

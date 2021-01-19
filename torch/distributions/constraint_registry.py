@@ -140,7 +140,7 @@ class ConstraintRegistry(object):
             factory = self._registry[type(constraint)]
         except KeyError:
             raise NotImplementedError(
-                'Cannot transform {} constraints'.format(type(constraint).__name__))
+                f'Cannot transform {type(constraint).__name__} constraints') from None
         return factory(constraint)
 
 
@@ -213,6 +213,12 @@ def _transform_to_simplex(constraint):
 @transform_to.register(constraints.lower_cholesky)
 def _transform_to_lower_cholesky(constraint):
     return transforms.LowerCholeskyTransform()
+
+
+@biject_to.register(constraints.corr_cholesky)
+@transform_to.register(constraints.corr_cholesky)
+def _transform_to_corr_cholesky(constraint):
+    return transforms.CorrCholeskyTransform()
 
 
 @biject_to.register(constraints.cat)

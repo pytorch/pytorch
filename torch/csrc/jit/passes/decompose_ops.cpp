@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/decompose_ops.h>
+
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -38,7 +39,7 @@ bool isDecomposableNorm(Node* normalize_op) {
   if (!input->type()->isSubtypeOf(TensorType::get())) {
     return false;
   }
-  auto device = input->type()->expect<TensorType>()->device();
+  auto device = input->type()->expectRef<TensorType>().device();
   // As of now, we do the decomposition for batchnorm/layernorm on GPU device
   // only
   if (!device || (*device).is_cpu()) {
@@ -58,19 +59,18 @@ bool isDecomposableNorm(Node* normalize_op) {
 RegisterOperators reg_ops(
     {Operator(
          "aten::_ncf_unsqueeze(Tensor(a) self, int ndim) -> Tensor(a)",
-         [](Stack& stack) {
+         [](Stack* stack) {
            const int64_t ndim = pop(stack).toInt();
            auto self = pop(stack).toTensor();
            c10::SmallVector<int64_t, 8> sizes(ndim, 1);
            AT_ASSERT(self.dim() == 1);
            sizes.at(1) = self.size(0);
            push(stack, self.reshape(sizes));
-           return 0;
          },
          aliasAnalysisFromSchema()),
      Operator(
          "aten::_ncf_view(Tensor(a) self, int[] input_shape, int normalized_ndim) -> Tensor(a)",
-         [](Stack& stack) {
+         [](Stack* stack) {
            const int64_t normalized_ndim = pop(stack).toInt();
            auto input_shape = pop(stack).toIntList();
            auto self = pop(stack).toTensor();
@@ -80,7 +80,6 @@ RegisterOperators reg_ops(
              sizes.at(i) = input_shape.get(i);
            }
            push(stack, self.reshape(sizes));
-           return 0;
          },
          aliasAnalysisFromSchema())});
 
@@ -127,12 +126,13 @@ bool DecomposeOps(Block* block, CompilationUnit& decompose_funcs) {
       Graph* graph = it->owningGraph();
       Value* input = it->namedInput(attr::input);
       Value* input_dim = graph->insert(aten::dim, {input});
-      std::vector<Value*> inputs{input,
-                                 it->namedInput(attr::running_mean),
-                                 it->namedInput(attr::running_var),
-                                 it->namedInput(attr::training),
-                                 it->namedInput(attr::momentum),
-                                 it->namedInput(attr::eps)};
+      std::vector<Value*> inputs{
+          input,
+          it->namedInput(attr::running_mean),
+          it->namedInput(attr::running_var),
+          it->namedInput(attr::training),
+          it->namedInput(attr::momentum),
+          it->namedInput(attr::eps)};
 
       // inline the compiled decomposed batchnorm
       std::shared_ptr<Graph> d_graph =
@@ -163,10 +163,11 @@ bool DecomposeOps(Block* block, CompilationUnit& decompose_funcs) {
       decomposed = true;
       WithInsertPoint insert_guard{*it};
       Graph* graph = it->owningGraph();
-      std::vector<Value*> inputs{it->namedInput(attr::input),
-                                 it->namedInput(attr::normalized_shape),
-                                 it->namedInput(attr::eps),
-                                 it->namedInput(attr::cudnn_enable)};
+      std::vector<Value*> inputs{
+          it->namedInput(attr::input),
+          it->namedInput(attr::normalized_shape),
+          it->namedInput(attr::eps),
+          it->namedInput(attr::cudnn_enable)};
 
       // inline the compiled decomposed layernorm
       std::shared_ptr<Graph> d_graph =

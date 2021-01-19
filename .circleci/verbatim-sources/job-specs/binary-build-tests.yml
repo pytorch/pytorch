@@ -1,0 +1,14 @@
+
+# There is currently no testing for libtorch TODO
+#  binary_linux_libtorch_3.6m_cpu_test:
+#    environment:
+#      BUILD_ENVIRONMENT: "libtorch 3.6m cpu"
+#    resource_class: gpu.medium
+#    <<: *binary_linux_test
+#
+#  binary_linux_libtorch_3.6m_cu90_test:
+#    environment:
+#      BUILD_ENVIRONMENT: "libtorch 3.6m cu90"
+#    resource_class: gpu.medium
+#    <<: *binary_linux_test
+#

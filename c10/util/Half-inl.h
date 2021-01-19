@@ -45,7 +45,8 @@ inline C10_HOST_DEVICE Half::operator __half() const {
 
 // CUDA intrinsics
 
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 350)
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 350)) || \
+    (defined(__clang__) && defined(__CUDA__))
 inline __device__ Half __ldg(const Half* ptr) {
     return __ldg(reinterpret_cast<const __half*>(ptr));
 }
@@ -65,7 +66,7 @@ inline C10_HOST_DEVICE Half operator*(const Half& a, const Half& b) {
   return static_cast<float>(a) * static_cast<float>(b);
 }
 
-inline C10_HOST_DEVICE Half operator/(const Half& a, const Half& b) {
+inline C10_HOST_DEVICE Half operator/(const Half& a, const Half& b) __ubsan_ignore_float_divide_by_zero__ {
   return static_cast<float>(a) / static_cast<float>(b);
 }
 

@@ -12,7 +12,8 @@ void THCTensor_(copy)(THCState* state, THCTensor* dst, THCTensor* src) {
 template <>
 THCTensor *THCTensor_newClone<scalar_t>(THCState *state, THCTensor *self) {
   THCTensor* tensor =
-      THCTensor_new(state, THTensor_getStoragePtr(self)->dtype());
+      // THCTensor_new(state, THTensor_getStoragePtr(self)->dtype());
+      THCTensor_new(state, self->dtype());
   THCTensor_resizeAs(state, tensor, self);
   at::Tensor tensor_wrap = THTensor_wrap(tensor);
   at::Tensor self_wrap = THTensor_wrap(self);

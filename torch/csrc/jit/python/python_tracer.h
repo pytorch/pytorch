@@ -16,7 +16,6 @@ struct Module;
 namespace tracer {
 void initPythonTracerBindings(PyObject* module);
 
-std::string getPythonInterpreterStackTrace();
 SourceRange getPythonInterpreterSourceRange();
 
 Node* preRecordPythonTrace(
@@ -29,6 +28,7 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
     const py::function& func,
     Stack inputs,
     const py::function& var_name_lookup_fn,
+    bool strict,
     bool force_outplace,
     Module* self = nullptr);
 } // namespace tracer

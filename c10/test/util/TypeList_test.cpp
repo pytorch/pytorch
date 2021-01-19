@@ -54,9 +54,18 @@ namespace test_count_if {
 namespace test_true_for_each_type {
     template<class> class Test;
     class MyClass {};
-    static_assert(true_for_each_type<std::is_reference, typelist<int&, const float&&, const MyClass&>>::value, "");
-    static_assert(!true_for_each_type<std::is_reference, typelist<int&, const float, const MyClass&>>::value, "");
-    static_assert(true_for_each_type<std::is_reference, typelist<>>::value, "");
+    static_assert(all<std::is_reference, typelist<int&, const float&&, const MyClass&>>::value, "");
+    static_assert(!all<std::is_reference, typelist<int&, const float, const MyClass&>>::value, "");
+    static_assert(all<std::is_reference, typelist<>>::value, "");
+}
+
+namespace test_true_for_any_type {
+    template<class> class Test;
+    class MyClass {};
+    static_assert(true_for_any_type<std::is_reference, typelist<int&, const float&&, const MyClass&>>::value, "");
+    static_assert(true_for_any_type<std::is_reference, typelist<int&, const float, const MyClass&>>::value, "");
+    static_assert(!true_for_any_type<std::is_reference, typelist<int, const float, const MyClass>>::value, "");
+    static_assert(!true_for_any_type<std::is_reference, typelist<>>::value, "");
 }
 
 namespace test_map {
@@ -115,7 +124,7 @@ namespace test_map_types_to_values {
     struct Class2 {static double func() {return 2.0;}};
 
     struct mapper_call_func {
-      template<class T> auto operator()(T) -> decltype(T::type::func()) { return T::type::func(); }
+      template<class T> decltype(auto) operator()(T) { return T::type::func(); }
     };
 
     TEST(TypeListTest, MapTypesToValues_members) {
@@ -127,7 +136,7 @@ namespace test_map_types_to_values {
     }
 
     struct mapper_call_nonexistent_function {
-      template<class T> auto operator()(T) -> decltype(T::type::this_doesnt_exist()) { return T::type::this_doesnt_exist(); }
+      template<class T> decltype(auto) operator()(T) { return T::type::this_doesnt_exist(); }
     };
 
     TEST(TypeListTest, MapTypesToValues_empty) {
@@ -151,4 +160,22 @@ namespace test_contains {
   static_assert(contains<typelist<int, double>, double>::value, "");
   static_assert(!contains<typelist<int, double>, float>::value, "");
   static_assert(!contains<typelist<>, double>::value, "");
+}
+
+namespace test_take {
+    static_assert(std::is_same<typelist<>, take_t<typelist<>, 0>>::value, "");
+    static_assert(std::is_same<typelist<>, take_t<typelist<int64_t>, 0>>::value, "");
+    static_assert(std::is_same<typelist<int64_t>, take_t<typelist<int64_t>, 1>>::value, "");
+    static_assert(std::is_same<typelist<>, take_t<typelist<int64_t, int32_t>, 0>>::value, "");
+    static_assert(std::is_same<typelist<int64_t>, take_t<typelist<int64_t, int32_t>, 1>>::value, "");
+    static_assert(std::is_same<typelist<int64_t, int32_t>, take_t<typelist<int64_t, int32_t>, 2>>::value, "");
+}
+
+namespace test_drop {
+    static_assert(std::is_same<typelist<>, drop_t<typelist<>, 0>>::value, "");
+    static_assert(std::is_same<typelist<int64_t>, drop_t<typelist<int64_t>, 0>>::value, "");
+    static_assert(std::is_same<typelist<>, drop_t<typelist<int64_t>, 1>>::value, "");
+    static_assert(std::is_same<typelist<int64_t, int32_t>, drop_t<typelist<int64_t, int32_t>, 0>>::value, "");
+    static_assert(std::is_same<typelist<int32_t>, drop_t<typelist<int64_t, int32_t>, 1>>::value, "");
+    static_assert(std::is_same<typelist<>, drop_t<typelist<int64_t, int32_t>, 2>>::value, "");
 }

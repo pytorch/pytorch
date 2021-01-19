@@ -35,6 +35,20 @@ __MATH_FUNCTIONS_DECL__ double exp(double x) {
   return ::exp(x);
 }
 
+__MATH_FUNCTIONS_DECL__ float ceil(float x) {
+  return ::ceilf(x);
+}
+__MATH_FUNCTIONS_DECL__ double ceil(double x) {
+  return ::ceil(x);
+}
+
+__MATH_FUNCTIONS_DECL__ float copysign(float x, float y) {
+  return ::copysignf(x, y);
+}
+__MATH_FUNCTIONS_DECL__ double copysign(double x, double y) {
+  return ::copysign(x, y);
+}
+
 __MATH_FUNCTIONS_DECL__ float floor(float x) {
   return ::floorf(x);
 }
@@ -47,6 +61,14 @@ __MATH_FUNCTIONS_DECL__ float log(float x) {
 }
 __MATH_FUNCTIONS_DECL__ double log(double x) {
   return ::log(x);
+}
+
+__MATH_FUNCTIONS_DECL__ float log1p(float x) {
+  return ::log1pf(x);
+}
+
+__MATH_FUNCTIONS_DECL__ double log1p(double x) {
+  return ::log1p(x);
 }
 
 __MATH_FUNCTIONS_DECL__ float max(float x, float y) {

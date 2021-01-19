@@ -1,6 +1,6 @@
-#include <ATen/core/OpsAlreadyMovedToC10.h>
+#include <ATen/core/ATenOpList.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <torch/csrc/autograd/record_function.h>
+#include <ATen/record_function.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/operator.h>
@@ -11,11 +11,13 @@ namespace jit {
 
 namespace {
 
+// custom ops don't do tracing/autograd in VariableType yet, we need to handle
+// tracing here.
 // TODO This currently only handles tensors with requires_grad==False correctly.
 //      It should also handle autograd.
-Operator createOperatorFromC10(const c10::OperatorHandle& op) {
-  return Operator(op, [op](Stack& stack) {
-    RECORD_FUNCTION(op.schema().name(), stack);
+Operator createOperatorFromC10_withTracingHandledHere(
+    const c10::OperatorHandle& op) {
+  return Operator(op, [op](Stack* stack) {
     const auto input_size = op.schema().arguments().size();
     const auto output_size = op.schema().returns().size();
 
@@ -32,7 +34,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
       tracer::recordSourceLocation(node);
       const auto& args = op.schema().arguments();
       int i = 0;
-      for (auto iter = stack.end() - input_size; iter != stack.end();
+      for (auto iter = stack->end() - input_size; iter != stack->end();
            ++iter, ++i) {
         // TODO we need to refactor graph APIs (e.g., addInputs)
         // appropriately; after that, we can get rid of the giant if-else
@@ -44,7 +46,7 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
             node->addInput(none);
             continue;
           } else {
-            type = type->expect<OptionalType>()->getElementType();
+            type = type->expectRef<OptionalType>().getElementType();
           }
         }
         if (type->isSubtypeOf(TensorType::get())) {
@@ -65,11 +67,20 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
         } else if (type->kind() == TypeKind::NumberType) {
           tracer::addInputs(node, args[i].name().c_str(), iter->toScalar());
         } else if (type->kind() == TypeKind::ListType) {
-          const auto& elem_type = type->expect<ListType>()->getElementType();
+          const auto& elem_type = type->expectRef<ListType>().getElementType();
           if (elem_type->isSubtypeOf(TensorType::get())) {
             AT_ASSERT(iter->isTensorList());
             auto list = iter->toTensorVector();
             tracer::addInputs(node, args[i].name().c_str(), list);
+          } else if (auto class_type = elem_type->cast<ClassType>()) {
+            AT_ASSERT(iter->isList());
+            auto list = iter->toList();
+            std::vector<c10::intrusive_ptr<c10::ivalue::Object>> objects;
+            for (IValue iv : list) {
+              objects.emplace_back(std::move(iv).toObject());
+            }
+            tracer::addInputs(
+                node, args[i].name().c_str(), objects, class_type);
           } else if (elem_type->kind() == TypeKind::FloatType) {
             AT_ASSERT(iter->isDoubleList());
             // NB: now, tracer doesn't support tracing double list. We add
@@ -89,7 +100,9 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
           } else if (elem_type->kind() == TypeKind::IntType) {
             AT_ASSERT(iter->isIntList());
             tracer::addInputs(
-                node, args[i].name().c_str(), iter->toIntVector());
+                node,
+                args[i].name().c_str(),
+                c10::IntArrayRef(iter->toIntVector()));
           } else if (elem_type->kind() == TypeKind::BoolType) {
             AT_ASSERT(iter->isBoolList());
             tracer::addInputs(
@@ -109,26 +122,19 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
       jit::tracer::setTracingState(nullptr);
     }
 
-#ifdef USE_STATIC_DISPATCH
-    {
-      at::AutoNonVariableTypeMode non_var_type_mode(true);
-      c10::Dispatcher::singleton().callBoxed(op, &stack);
-    }
-#else
-      c10::Dispatcher::singleton().callBoxed(op, &stack);
-#endif // USE_STATIC_DISPATCH
+    op.callBoxed(stack);
 
     if (tracer_state) {
       jit::tracer::setTracingState(std::move(tracer_state));
       int i = 0;
-      for (auto iter = stack.end() - output_size; iter != stack.end();
+      for (auto iter = stack->end() - output_size; iter != stack->end();
            ++iter, ++i) {
         const auto& type = op.schema().returns()[i].type();
         if (type->isSubtypeOf(TensorType::get())) {
           AT_ASSERT(iter->isTensor());
           tracer::addOutput(node, iter->toTensor());
         } else if (type->kind() == TypeKind::ListType) {
-          const auto& elem_type = type->expect<ListType>()->getElementType();
+          const auto& elem_type = type->expectRef<ListType>().getElementType();
           if (elem_type->isSubtypeOf(TensorType::get())) {
             AT_ASSERT(iter->isTensorList());
             tracer::addOutput(node, iter->toTensorList());
@@ -136,30 +142,50 @@ Operator createOperatorFromC10(const c10::OperatorHandle& op) {
             throw std::runtime_error(
                 "unsupported ouptut list type: " + elem_type->str());
           }
+        } else if (type->kind() == TypeKind::ClassType) {
+          AT_ASSERT(iter->isObject());
+          tracer::addOutput(node, iter->toObject());
         } else {
           throw std::runtime_error("unsupported output type: " + type->str());
         }
       }
     }
-
-    return 0;
   });
+}
+
+Operator createOperatorFromC10_withTracingNotHandledHere(
+    const c10::OperatorHandle& op) {
+  return Operator(op, [op](Stack* stack) { op.callBoxed(stack); });
 }
 
 class RegistrationListener final : public c10::OpRegistrationListener {
  public:
   void onOperatorRegistered(const c10::OperatorHandle& op) override {
-    if (at::is_aten_op(op.schema().operator_name())) {
-      // Ignore ATen ops for now because they have their own code
-      // to expose them to JIT in register_aten_ops.cpp
-      // TODO Remove register_aten_ops.cpp and also use this registration here
+    if (op.schema().name() == "aten::backward") {
+      // aten::backward has a manual wrapper in register_prim_ops_fulljit.cpp.
+      // We should not additionally export the c10 aten::backward op from
+      // native_functions.yaml to JIT. This special handling is needed because
+      // aten::backward requires AliasAnalysisKind::CONSERVATIVE but all ops
+      // from native_functions.yaml get AliasAnalysisKind::FROM_SCHEMA.
+      // TODO Find a better way to handle this.
       return;
     }
-    torch::jit::registerOperator(createOperatorFromC10(op));
+    if (at::is_custom_op(op.schema().operator_name())) {
+      // custom ops don't do tracing/autograd in VariableType yet, we need to
+      // handle tracing here.
+      torch::jit::registerOperator(
+          createOperatorFromC10_withTracingHandledHere(op));
+    } else {
+      // Ops from native_functions.yaml do tracing/autograd in VariableType,
+      // no need to handle it here
+      torch::jit::registerOperator(
+          createOperatorFromC10_withTracingNotHandledHere(op));
+    }
   }
 
   void onOperatorDeregistered(const c10::OperatorHandle& op) override {
-    if (at::is_aten_op(op.schema().operator_name())) {
+    if (op.schema().name() == "aten::backward") {
+      // see comment in onOperatorRegistered for why aten::backward is excluded
       return;
     }
     torch::jit::deregisterOperator(op.schema());

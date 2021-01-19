@@ -1,4 +1,4 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
@@ -10,7 +10,7 @@ from hypothesis import given
 
 class TestEnsureClipped(hu.HypothesisTestCase):
     @given(
-        X=hu.arrays(dims=[5, 10], elements=st.floats(min_value=-1.0, max_value=1.0)),
+        X=hu.arrays(dims=[5, 10], elements=hu.floats(min_value=-1.0, max_value=1.0)),
         in_place=st.booleans(),
         sparse=st.booleans(),
         indices=hu.arrays(dims=[5], elements=st.booleans()),

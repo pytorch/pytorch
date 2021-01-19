@@ -54,6 +54,83 @@ Below you can find a small example showcasing this::
         f = torch.randn(2).cuda(cuda2)
         # d.device, e.device, and f.device are all device(type='cuda', index=2)
 
+.. _tf32_on_ampere:
+
+TensorFloat-32(TF32) on Ampere devices
+--------------------------------------
+
+Starting in PyTorch 1.7, there is a new flag called `allow_tf32` which defaults to true.
+This flag controls whether PyTorch is allowed to use the TensorFloat32 (TF32) tensor cores,
+available on new NVIDIA GPUs since Ampere, internally to compute matmul (matrix multiplies
+and batched matrix multiplies) and convolutions.
+
+TF32 tensor cores are designed to achieve better performance on matmul and convolutions on
+`torch.float32` tensors by rounding input data to have 10 bits of mantissa, and accumulating
+results with FP32 precision, maintaining FP32 dynamic range.
+
+matmuls and convolutions are controlled separately, and their corresponding flags can be accessed at:
+
+.. code:: python
+
+  # The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
+  torch.backends.cuda.matmul.allow_tf32 = True
+
+  # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
+  torch.backends.cudnn.allow_tf32 = True
+
+Note that besides matmuls and convolutions themselves, functions and nn modules that internally uses
+matmuls or convolutions are also affected. These include `nn.Linear`, `nn.Conv*`, cdist, tensordot,
+affine grid and grid sample, adaptive log softmax, GRU and LSTM.
+
+To get an idea of the precision and speed, see the example code below:
+
+.. code:: python
+
+  a_full = torch.randn(10240, 10240, dtype=torch.double, device='cuda')
+  b_full = torch.randn(10240, 10240, dtype=torch.double, device='cuda')
+  ab_full = a_full @ b_full
+  mean = ab_full.abs().mean()  # 80.7277
+
+  a = a_full.float()
+  b = b_full.float()
+
+  # Do matmul at TF32 mode.
+  ab_tf32 = a @ b  # takes 0.016s on GA100
+  error = (ab_tf32 - ab_full).abs().max()  # 0.1747
+  relative_error = error / mean  # 0.0022
+
+  # Do matmul with TF32 disabled.
+  torch.backends.cuda.matmul.allow_tf32 = False
+  ab_fp32 = a @ b  # takes 0.11s on GA100
+  error = (ab_fp32 - ab_full).abs().max()  # 0.0031
+  relative_error = error / mean  # 0.000039
+
+From the above example, we can see that with TF32 enabled, the speed is ~7x faster, relative error
+compared to double precision is approximately 2 orders of magnitude larger.  If the full FP32 precision
+is needed, users can disable TF32 by:
+
+.. code:: python
+
+  torch.backends.cuda.matmul.allow_tf32 = False
+  torch.backends.cudnn.allow_tf32 = False
+
+To toggle the TF32 flags off in C++, you can do
+
+.. code:: C++
+
+  at::globalContext().setAllowTF32CuBLAS(false);
+  at::globalContext().setAllowTF32CuDNN(false);
+
+For more information about TF32, see:
+
+- `TensorFloat-32`_
+- `CUDA 11`_
+- `Ampere architecture`_
+
+.. _TensorFloat-32: https://blogs.nvidia.com/blog/2020/05/14/tensorfloat-32-precision-format/
+.. _CUDA 11: https://devblogs.nvidia.com/cuda-11-features-revealed/
+.. _Ampere architecture: https://devblogs.nvidia.com/nvidia-ampere-architecture-in-depth/
+
 Asynchronous execution
 ----------------------
 
@@ -119,7 +196,42 @@ necessary synchronization when data is moved around, as explained above.
 However, when using non-default streams, it is the user's responsibility to
 ensure proper synchronization.
 
-.. _CUDA stream: http://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams
+.. _bwd-cuda-stream-semantics:
+
+Stream semantics of backward passes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Internally, each backward CUDA op runs on the same stream that was used for its corresponding forward op.
+
+When manually supplying CUDA tensor(s) as a backward pass's initial gradient(s) (e.g.,
+:func:`autograd.backward(..., grad_tensors=initial_grads)<torch.autograd.backward>`,
+:func:`autograd.grad(..., grad_outputs=initial_grads)<torch.autograd.grad>`, or
+:meth:`tensor.backward(..., gradient=initial_grad)<torch.Tensor.backward>`),
+the acts of
+
+1. populating the initial gradient(s) and
+2. invoking the backward pass
+
+have the same stream-semantics relationship as any pair of ops::
+
+    # Safe, populating initial_grad and invoking backward are in the same stream context
+    with torch.cuda.stream(strm):
+        loss.backward(gradient=torch.ones_like(loss))
+
+    # Unsafe, populating initial_grad and invoking backward are in different stream contexts,
+    # without synchronization
+    initial_grad = torch.ones_like(loss)
+    with torch.cuda.stream(strm):
+        loss.backward(gradient=initial_grad)
+
+    # Safe, with synchronization
+    initial_grad = torch.ones_like(loss)
+    strm.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(strm):
+        initial_grad.record_stream(strm)
+        loss.backward(gradient=initial_grad)
+
+.. _CUDA stream: https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams
 
 .. _cuda-memory-management:
 
@@ -144,13 +256,17 @@ complete snapshot of the memory allocator state via
 :meth:`~torch.cuda.memory_snapshot`, which can help you understand the
 underlying allocation patterns produced by your code.
 
+Use of a caching allocator can interfere with memory checking tools such as
+``cuda-memcheck``.  To debug memory errors using ``cuda-memcheck``, set
+``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` in your environment to disable caching.
+
 .. _cufft-plan-cache:
 
 cuFFT plan cache
 ----------------
 
 For each CUDA device, an LRU cache of cuFFT plans is used to speed up repeatedly
-running FFT methods (e.g., :func:`torch.fft`) on CUDA tensors of same geometry
+running FFT methods (e.g., :func:`torch.fft.fft`) on CUDA tensors of same geometry
 with same configuration. Because some cuFFT plans may allocate GPU memory,
 these caches have a maximum capacity.
 
@@ -329,7 +445,7 @@ The difference between :class:`~torch.nn.parallel.DistributedDataParallel` and
 uses multiprocessing where a process is created for each GPU, while
 :class:`~torch.nn.DataParallel` uses multithreading. By using multiprocessing,
 each GPU has its dedicated process, this avoids the performance overhead caused
-by GIL of Python interpreter. 
+by GIL of Python interpreter.
 
-If you use :class:`~torch.nn.parallel.DistributedDataParallel`, you could use 
+If you use :class:`~torch.nn.parallel.DistributedDataParallel`, you could use
 `torch.distributed.launch` utility to launch your program, see :ref:`distributed-launch`.

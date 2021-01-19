@@ -10,7 +10,12 @@
 //
 
 #include <THC/THCReduceApplyUtils.cuh>
+#include <c10/cuda/CUDAException.h>
 #include <c10/macros/Macros.h>
+
+#ifdef __HIP_PLATFORM_HCC__
+#include <hip/hip_version.h>
+#endif
 
 // Size per each reduction block
 #define THC_REDUCE_ALL_BLOCK_SIZE 1024L
@@ -205,6 +210,7 @@ void callReduceAll(THCState* state,
       <<<grid, block, smemSize, c10::cuda::getCurrentCUDAStream()>>>(
         in, (IndexType) totalElements, init, modifyOp, reduceOp,
         (AccT*) scratchSpace);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     int numPass1Blocks = grid.x;
     getPass2ReduceBlockGrid<AccT>(state, totalElements, grid, block);
@@ -214,6 +220,7 @@ void callReduceAll(THCState* state,
       <<<grid, block, smemSize, c10::cuda::getCurrentCUDAStream()>>>(
         numPass1Blocks, init, reduceOp,
         (AccT*) scratchSpace, devOut);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 
     THCudaFree(state, scratchSpace);
   } else {
@@ -223,6 +230,7 @@ void callReduceAll(THCState* state,
     kernelReduceAll<T, IndexType, AccT, ModifyOp, ReduceOp, ADims>
       <<<grid, block, smemSize, c10::cuda::getCurrentCUDAStream()>>>(
         in, (IndexType) totalElements, init, modifyOp, reduceOp, devOut);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
 
@@ -320,12 +328,20 @@ bool THC_reduceAll(THCState* state,
   // the host (synchronous!)
   if (!outOnDevice) {
     cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
+#if HIP_VERSION >= 301
+    THCudaCheck(hipMemcpyWithStream(out,
+                                    devOut,
+                                    sizeof(AccT),
+                                    cudaMemcpyDeviceToHost,
+                                    stream));
+#else
     THCudaCheck(cudaMemcpyAsync(out,
                                 devOut,
                                 sizeof(AccT),
                                 cudaMemcpyDeviceToHost,
                                 stream));
     THCudaCheck(cudaStreamSynchronize(stream));
+#endif
   }
 
   if (freeDevOut) {

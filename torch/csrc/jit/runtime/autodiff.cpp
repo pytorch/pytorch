@@ -9,9 +9,9 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/symbolic_script.h>
-
 #include <algorithm>
 #include <memory>
 
@@ -45,7 +45,7 @@ bool needTrimGrad(Node* n) {
   return false;
 }
 
-bool isDifferentiable(Node* n) {
+bool isDifferentiable(const Node* n) {
   // TODO: scalar-tensor ops should be canonicalized
   static OperatorSet differentiable_ops = {
       "aten::thnn_conv2d_forward(Tensor self, Tensor weight, int[] kernel_size, Tensor? bias, int[] stride, int[] padding) -> (Tensor, Tensor, Tensor)",
@@ -58,7 +58,8 @@ bool isDifferentiable(Node* n) {
   // Tensor", "aten::min(Tensor self) -> Tensor"
 
   if (n->kind() == prim::Constant || n->kind() == prim::AutogradZero ||
-      n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk)
+      n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk ||
+      n->kind() == prim::profile)
     return true;
 
   if (n->isMemberOf(differentiable_ops))
@@ -88,7 +89,7 @@ bool isDifferentiable(Node* n) {
     return std::all_of(
         body->nodes().begin(),
         body->nodes().end(),
-        static_cast<bool (*)(Node*)>(isDifferentiable));
+        static_cast<bool (*)(const Node*)>(isDifferentiable));
   }
 
   // formulas are only defined with floating point scalars,
@@ -106,7 +107,7 @@ bool isDifferentiable(Graph& g) {
   return std::all_of(
       g.nodes().begin(),
       g.nodes().end(),
-      static_cast<bool (*)(Node*)>(isDifferentiable));
+      static_cast<bool (*)(const Node*)>(isDifferentiable));
 }
 
 // NB: Write gradient using torchscript
@@ -208,6 +209,8 @@ class GradientHelper {
     if (node->kind() == prim::AutogradAdd) {
       // NB: AutogradAdds don't broadcast
       return {grad_values.at(0), grad_values.at(0)};
+    } else if (node->kind() == prim::profile) {
+      return {grad_values.at(0)};
     } else if (node->kind() == prim::ConstantChunk) {
       auto* g = node->owningGraph();
 
@@ -250,12 +253,13 @@ class GradientHelper {
           graph->insertNode(graph->createTupleUnpack(backward_value));
       auto tuple_outputs = tuple_unpack_node->outputs();
       AT_ASSERT(tuple_outputs.size() == size_t(3));
-      return {tuple_outputs[0],
-              tuple_outputs[1],
-              nullptr,
-              tuple_outputs[2],
-              nullptr,
-              nullptr};
+      return {
+          tuple_outputs[0],
+          tuple_outputs[1],
+          nullptr,
+          tuple_outputs[2],
+          nullptr,
+          nullptr};
 
     } else if (
         node->matches(
@@ -279,14 +283,15 @@ class GradientHelper {
           graph->insertNode(graph->createTupleUnpack(backward_value));
       auto tuple_outputs = tuple_unpack_node->outputs();
       AT_ASSERT(tuple_outputs.size() == size_t(3));
-      return {tuple_outputs[0],
-              tuple_outputs[1],
-              tuple_outputs[2],
-              nullptr,
-              nullptr,
-              nullptr,
-              nullptr,
-              nullptr};
+      return {
+          tuple_outputs[0],
+          tuple_outputs[1],
+          tuple_outputs[2],
+          nullptr,
+          nullptr,
+          nullptr,
+          nullptr,
+          nullptr};
     }
 
     throw std::runtime_error(
@@ -838,6 +843,12 @@ Gradient differentiate(std::shared_ptr<Graph>& graph) {
   // modifies df_input_vjps (new vjps are added for temporaries)
   lambdaLiftReverse(grad_desc, rev_info);
   packReturnValuesIntoTuple(grad_desc.df);
+
+  // we have created a differentiable forward graph
+  // which will be run with tensors that have their gradients detached,
+  // so profiled types will have outdated requires_grad=True, update the
+  // requires_grad property
+  UpdateDifferentiableGraphRequiresGrad(grad_desc.f, false);
   return grad_desc;
 }
 } // namespace jit

@@ -3,6 +3,7 @@ import cProfile
 import pstats
 import sys
 import os
+from typing import Dict
 
 import torch
 from torch.autograd import profiler
@@ -35,7 +36,7 @@ def run_env_analysis():
     print('Running environment analysis...')
     info = get_env_info()
 
-    result = []
+    result: Dict[str, str] = dict()
 
     debug_str = ''
     if info.is_debug_build:
@@ -84,10 +85,7 @@ cprof_summary = """
 
 
 def print_cprofile_summary(prof, sortby='tottime', topk=15):
-    result = {}
-
-    print(cprof_summary.format(**result))
-
+    print(cprof_summary)
     cprofile_stats = pstats.Stats(prof).sort_stats(sortby)
     cprofile_stats.print_stats(topk)
 
@@ -124,7 +122,7 @@ def print_autograd_prof_summary(prof, mode, sortby='cpu_time', topk=15):
         warn = ('WARNING: invalid sorting option for autograd profiler results: {}\n'
                 'Expected `cpu_time`, `cpu_time_total`, or `count`. '
                 'Defaulting to `cpu_time`.')
-        print(warn.format(autograd_prof_sortby))
+        print(warn.format(sortby))
         sortby = 'cpu_time'
 
     if mode == 'CUDA':

@@ -12,7 +12,7 @@
 
 namespace c10 {
 
-enum class DeviceType : int16_t {
+enum class DeviceType : int8_t {
   CPU = 0,
   CUDA = 1, // CUDA.
   MKLDNN = 2, // Reserved for explicit MKLDNN
@@ -23,19 +23,23 @@ enum class DeviceType : int16_t {
   FPGA = 7, // FPGA
   MSNPU = 8, // MSNPU
   XLA = 9, // XLA / TPU
+  Vulkan = 10, // Vulkan
+  Metal = 11, //Metal
   // NB: If you add more devices:
   //  - Change the implementations of DeviceTypeName and isValidDeviceType
   //    in DeviceType.cpp
   //  - Change the number below
-  COMPILE_TIME_MAX_DEVICE_TYPES = 10,
-  ONLY_FOR_TEST = 20901, // This device type is only for test.
+  COMPILE_TIME_MAX_DEVICE_TYPES = 12,
 };
 
 constexpr DeviceType kCPU = DeviceType::CPU;
 constexpr DeviceType kCUDA = DeviceType::CUDA;
 constexpr DeviceType kHIP = DeviceType::HIP;
+constexpr DeviceType kFPGA = DeviceType::FPGA;
 constexpr DeviceType kMSNPU = DeviceType::MSNPU;
 constexpr DeviceType kXLA = DeviceType::XLA;
+constexpr DeviceType kVulkan = DeviceType::Vulkan;
+constexpr DeviceType kMetal = DeviceType::Metal;
 
 // define explicit int constant
 constexpr int COMPILE_TIME_MAX_DEVICE_TYPES =
@@ -68,3 +72,7 @@ template <> struct hash<c10::DeviceType> {
   }
 };
 } // namespace std
+
+namespace torch {
+  using c10::DeviceType;
+}

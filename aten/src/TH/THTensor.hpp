@@ -86,6 +86,9 @@ inline int64_t THTensor_sizeLegacyNoScalars(const THTensor *self, int dim)
 #include <TH/THGenerateAllTypes.h>
 
 #include <TH/generic/THTensorFastGetSet.hpp>
+#include <TH/THGenerateComplexTypes.h>
+
+#include <TH/generic/THTensorFastGetSet.hpp>
 #include <TH/THGenerateBFloat16Type.h>
 
 inline std::vector<int64_t> THTensor_sizesLegacyNoScalars(const THTensor *self) {
@@ -115,6 +118,9 @@ TH_CPP_API void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff
 
 #include <TH/generic/THTensor.hpp>
 #include <TH/THGenerateAllTypes.h>
+
+#include <TH/generic/THTensor.hpp>
+#include <TH/THGenerateComplexTypes.h>
 
 #include <TH/generic/THTensor.hpp>
 #include <TH/THGenerateHalfType.h>

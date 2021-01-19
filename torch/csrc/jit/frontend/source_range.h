@@ -14,7 +14,7 @@ struct SourceRange;
 // Source represents a code segment. It keeps track of:
 //  - text : the text of the code segment
 //  - filename (optional) : if present, represents the name of the file from
-//                          which the code semgemnt originated.
+//                          which the code segment originated.
 //  - starting_line_no : represents the line in the original file where the
 //                       code segment started.
 struct Source {
@@ -44,6 +44,11 @@ struct Source {
   // beginning of that line.
   size_t offset_for_line(size_t line) const {
     return line_starting_offsets_.at(line);
+  }
+
+  // Returns number of lines present.
+  size_t num_lines() const {
+    return line_starting_offsets_.size();
   }
 
   // Calculate the line (within the code segment) on which `offset` resides.
@@ -101,7 +106,7 @@ struct Source {
 
 // A SourceRange is a view into a Source, that points to a subset of the source,
 // specified by `start` and `end` byte offsets into the source text.
-struct CAFFE2_API SourceRange {
+struct TORCH_API SourceRange {
   SourceRange(std::shared_ptr<Source> source_, size_t start_, size_t end_)
       : source_(std::move(source_)), start_(start_), end_(end_) {}
   SourceRange() : source_(nullptr), start_(0), end_(0) {}

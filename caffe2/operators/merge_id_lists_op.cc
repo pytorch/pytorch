@@ -30,3 +30,7 @@ within a batch. This can be an issue if ID_LIST are order sensitive.
 NO_GRADIENT(MergeIdLists);
 }
 }
+C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
+    MergeIdLists,
+    "_caffe2::MergeIdLists(Tensor[] lengths_and_values) -> (Tensor merged_lengths, Tensor merged_values)",
+    caffe2::MergeIdListsOp<caffe2::CPUContext>);

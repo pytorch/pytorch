@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/ir/irparser.h>
+
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
@@ -70,9 +71,11 @@ struct ParsedLiteral {
   int64_t i = 0;
   std::string s = "";
   double f = 0.0;
+  TypePtr ty;
   std::vector<int64_t> is;
   std::vector<std::string> ss;
   std::vector<double> fs;
+  std::vector<TypePtr> tys;
 };
 
 struct VarWithType {
@@ -139,6 +142,7 @@ void IRParser::parseOperatorOutputs(std::vector<VarWithType>* outs) {
 ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
   auto token = L.cur();
   std::string str;
+  std::pair<TypePtr, c10::optional<c10::AliasInfo>> type_alias;
   ParsedLiteral r;
   switch (token.kind) {
     case TK_STRINGLITERAL:
@@ -149,7 +153,10 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
     case '-':
       str = "-";
       L.next();
-      L.expect(TK_NUMBER);
+      if (L.cur().kind != TK_NUMBER) {
+        throw ErrorReport(token.range)
+            << "Expected a number after '-' but got:" << token.text();
+      }
       // Fallthrough
     case TK_NUMBER:
       str += L.cur().text();
@@ -163,6 +170,13 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
         r.i = c10::stoll(str);
       }
       L.next();
+      return r;
+    case TK_IDENT:
+      // Type literal
+      r.k = AttributeKind::ty;
+      type_alias = type_parser.parseType();
+      AT_ASSERTM(!type_alias.second, "Parsing IR with Alias Info not handled");
+      r.ty = type_alias.first;
       return r;
     default:
       throw ErrorReport(token.range)
@@ -188,9 +202,10 @@ void IRParser::parseAttr(Node* n) {
   if (L.cur().kind == '[') {
     // list
     AttributeKind k = AttributeKind::ts;
-    std::vector<int64_t> is;
-    std::vector<std::string> ss;
-    std::vector<double> fs;
+    c10::List<int64_t> is;
+    c10::List<std::string> ss;
+    c10::List<double> fs;
+    std::vector<TypePtr> tys;
     int elem_num = 0;
     parseList('[', ',', ']', [&] {
       ParsedLiteral r = parseScalarLiteral(n);
@@ -210,22 +225,30 @@ void IRParser::parseAttr(Node* n) {
           AT_ASSERT(!elem_num++ || k == AttributeKind::fs);
           k = AttributeKind::fs;
           break;
+        case AttributeKind::ty:
+          tys.push_back(r.ty);
+          AT_ASSERT(!elem_num++ || k == AttributeKind::tys);
+          k = AttributeKind::tys;
+          break;
         default:
           throw ErrorReport(L.cur().range) << "Unexpected attr type";
       }
     });
     switch (k) {
       case AttributeKind::ts:
-        n->ts_(Symbol::attr(attrname), {});
+        n->ival_(Symbol::attr(attrname), IValue());
         break;
       case AttributeKind::ss:
-        n->ss_(Symbol::attr(attrname), ss);
+        n->ival_(Symbol::attr(attrname), IValue(ss));
         break;
       case AttributeKind::fs:
-        n->fs_(Symbol::attr(attrname), fs);
+        n->ival_(Symbol::attr(attrname), IValue(fs));
         break;
       case AttributeKind::is:
-        n->is_(Symbol::attr(attrname), is);
+        n->ival_(Symbol::attr(attrname), IValue(is));
+        break;
+      case AttributeKind::tys:
+        n->tys_(Symbol::attr(attrname), tys);
         break;
       default:
         throw ErrorReport(L.cur().range) << "Unexpected attr type";
@@ -242,6 +265,9 @@ void IRParser::parseAttr(Node* n) {
         break;
       case AttributeKind::f:
         n->f_(Symbol::attr(attrname), r.f);
+        break;
+      case AttributeKind::ty:
+        n->ty_(Symbol::attr(attrname), r.ty);
         break;
       default:
         throw ErrorReport(L.cur().range) << "Unexpected attr type";
@@ -368,10 +394,9 @@ void IRParser::parseOperator(Block* b) {
         if (!schema_return_type->hasFreeVariables() &&
             !v.type->isSubtypeOf(schema_return_type)) {
           throw ErrorReport(source_range)
-              << "Annotated type " << v.type->python_str()
+              << "Annotated type " << v.type->repr_str()
               << " does not match schema type "
-              << schema_return_type->python_str() << " for operator "
-              << *schema;
+              << schema_return_type->repr_str() << " for operator " << *schema;
         }
         vmap[v.name]->setType(v.type);
       }

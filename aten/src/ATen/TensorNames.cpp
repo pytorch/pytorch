@@ -61,10 +61,10 @@ TensorNames::TensorNames(ArrayRef<Dimname> names, int64_t start, int64_t end) {
 }
 
 TensorNames& TensorNames::unifyFromRightInplace(const TensorNames& other, const char* op_name) {
-  int64_t size_diff = std::labs(names_.size() - other.names_.size());
+  size_t size_diff = std::labs(names_.size() - other.names_.size());
 
   if (names_.size() > other.names_.size()) {
-    for (int64_t idx = size_diff; idx < names_.size(); ++idx) {
+    for (size_t idx = size_diff; idx < names_.size(); ++idx) {
       names_[idx] = names_[idx].unify(other.names_[idx - size_diff], op_name);
     }
   } else {

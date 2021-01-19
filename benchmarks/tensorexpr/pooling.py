@@ -1,8 +1,8 @@
-import benchmark
+from . import benchmark
 
 
 class PoolingBench(benchmark.Benchmark):
-    def __init__(self, case, mode, device, kernel_size, N, C, H, W):
+    def __init__(self, case, mode, device, dtype, kernel_size, N, C, H, W):
         super().__init__(mode, device)
         self.case = case
         self.kernel_size = kernel_size
@@ -11,7 +11,7 @@ class PoolingBench(benchmark.Benchmark):
         self.H = H
         self.W = W
         self.data = self.rand(
-            [N, C, H, W], device=device, requires_grad=self.requires_grad
+            [N, C, H, W], device=device, dtype=dtype, requires_grad=self.requires_grad
         )
 
     def forward(self):
@@ -32,7 +32,7 @@ class PoolingBench(benchmark.Benchmark):
             sol_count = (1 + 1) + (1 + 1)
             algorithmic_count = (1 + 1) + (2 + 1)
 
-        buffer_size = self.N * self.C * self.H * self.W * 4
+        buffer_size = self.N * self.C * self.H * self.W
         return {
             "sol": buffer_size * sol_count,
             "algorithmic": buffer_size * algorithmic_count,

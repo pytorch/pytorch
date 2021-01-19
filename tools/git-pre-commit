@@ -10,6 +10,9 @@ then
   python tools/clang_tidy.py \
     --paths torch/csrc \
     --diff HEAD \
+    -g"-torch/csrc/jit/passes/onnx/helper.cpp" \
+    -g"-torch/csrc/jit/passes/onnx/shape_type_inference.cpp" \
+    -g"-torch/csrc/jit/serialization/onnx.cpp" \
     -g"-torch/csrc/jit/serialization/export.cpp" \
     -g"-torch/csrc/jit/serialization/import.cpp" \
     -j
@@ -19,4 +22,4 @@ else
 fi
 
 echo "Running pre-commit clang-format"
-python tools/clang_format.py
+tools/git-clang-format HEAD~ --force

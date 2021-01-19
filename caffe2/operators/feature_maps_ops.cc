@@ -42,6 +42,23 @@ const std::string doc = R"DOC(
 )DOC";
 
 REGISTER_CPU_OPERATOR(
+    MergeDenseFeatureTensors,
+    MergeDenseFeatureTensorsOp<CPUContext>);
+OPERATOR_SCHEMA(MergeDenseFeatureTensors)
+    .SetDoc(
+        "Merge given multi-feature dense tensors  into one "
+        "multi-feature tensor." +
+        doc)
+    .NumInputs(2)
+    .NumOutputs(3)
+    .Input(0, "in1", "")
+    .Input(1, "in1_presence", ".presence")
+    .Output(0, "out_lengths", ".lengths")
+    .Output(1, "out_keys", ".keys")
+    .Output(2, "out_values", ".values")
+    .Arg("feature_ids", "feature ids");
+
+REGISTER_CPU_OPERATOR(
     MergeSingleScalarFeatureTensors,
     MergeSingleScalarFeatureTensorsOp<CPUContext>);
 OPERATOR_SCHEMA(MergeSingleScalarFeatureTensors)

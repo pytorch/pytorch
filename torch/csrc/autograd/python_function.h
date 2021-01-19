@@ -89,6 +89,11 @@ struct THPFunction {
     // modified inplace.
     PyObject *dirty_tensors;
 
+    // boolean indicating whether to materialize undefined output grad tensors 
+    // into tensors full of zeros. Set by Python with 'set_materialize_grads'.
+    // Default is true.
+    bool materialize_grads;
+
     std::vector<torch::autograd::VariableInfo> output_info;
     std::vector<torch::autograd::VariableInfo> input_info;
     std::vector<torch::autograd::SavedVariable> saved_variables;

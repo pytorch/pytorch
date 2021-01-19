@@ -8,11 +8,11 @@ namespace at {
 namespace native {
 
 Tensor mkldnn_sigmoid(const Tensor& self) {
-  AT_ERROR("mkldnn_sigmoid: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_sigmoid: ATen not compiled with MKLDNN support");
 }
 
 Tensor& mkldnn_sigmoid_(Tensor& self) {
-  AT_ERROR("mkldnn_sigmoid_: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_sigmoid_: ATen not compiled with MKLDNN support");
 }
 
 } // namespace native
@@ -30,7 +30,8 @@ Tensor mkldnn_sigmoid(const Tensor& self) {
   ideep::tensor y;
   ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_logistic, ideep::prop_kind::forward);
-  return new_with_itensor_mkldnn(std::move(y), self.options());
+  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
+                                 self.options().device_opt());
 }
 
 Tensor& mkldnn_sigmoid_(Tensor& self) {

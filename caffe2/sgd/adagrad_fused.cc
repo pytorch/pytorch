@@ -2,8 +2,6 @@
 
 namespace caffe2 {
 
-namespace {
-
 struct adagrad_update_prefetch_inlined {
   void operator()(
       int N,
@@ -17,9 +15,10 @@ struct adagrad_update_prefetch_inlined {
       float* nh,
       float* nh_n, // prefetch ptr
       float epsilon,
-      float lr) {
+      float lr,
+      float weight_decay) {
     return internal::adagrad_update_prefetch_inlined(
-        N, w, w_n, g, h, h_n, nw, nw_n, nh, nh_n, epsilon, lr);
+        N, w, w_n, g, h, h_n, nw, nw_n, nh, nh_n, epsilon, lr, weight_decay);
   }
 };
 
@@ -61,7 +60,135 @@ REGISTER_CPU_OPERATOR(
         float,
         float,
         int,
-        adagrad_update_prefetch_inlined>);
+        adagrad_update_prefetch_inlined,
+        /*is_mean=*/false>);
+
+// Match the GPU Approx op, here Approx and Exact are the same for
+// SparseAdagradFusedWithSparseLengthsSumGradient op
+OPERATOR_SCHEMA(SparseAdagradFusedWithSparseLengthsSumGradientApprox)
+    .NumInputs(6)
+    .NumOutputs(2)
+    .EnforceOneToOneInplace()
+    .SetDoc(R"DOC(
+
+Fused operator of
+SparseLengthsIndicesInGradientSumGradient (gradient of SparseLengthsSum) +
+SparseAdagrad.
+
+Given inputs (param, moment, indices, grad, lr), runs the sparse AdaGrad
+update on (param, grad, moment[indices], lr), and returns (new_param,
+new_moment) as in the dense case. Additional input (lengths) is for fused
+SparseLengthsIndicesInGradientSumGradient operator.
+
+)DOC")
+    .Input(0, "param", "Parameters to be updated")
+    .Input(1, "moment", "Moment history")
+    .Input(
+        2,
+        "indices",
+        "Integer vector containing indices of the first dimension of param for the slices that are being updated")
+    .Input(3, "grad", "Gradient computed")
+    .Input(4, "lr", "learning rate")
+    .Input(
+        5,
+        "lengths",
+        "Non negative vector with sum of elements equal to indices length")
+    .Output(0, "output_param", "Updated parameters")
+    .Output(1, "output_moment", "Updated moment")
+    .Arg("epsilon", "Default 1e-5");
+
+REGISTER_CPU_OPERATOR(
+    SparseAdagradFusedWithSparseLengthsSumGradientApprox,
+    SparseAdagradFusedWithSparseLengthsSumGradientOp<
+        float,
+        float,
+        int,
+        adagrad_update_prefetch_inlined,
+        /*is_mean=*/false>);
+
+OPERATOR_SCHEMA(SparseAdagradFusedWithSparseLengthsMeanGradient)
+    .NumInputs(6)
+    .NumOutputs(2)
+    .EnforceOneToOneInplace()
+    .SetDoc(R"DOC(
+
+Fused operator of
+SparseLengthsIndicesInGradientMeanGradient (gradient of SparseLengthsMean) +
+SparseAdagrad.
+
+Given inputs (param, moment, indices, grad, lr), runs the sparse AdaGrad
+update on (param, grad, moment[indices], lr), and returns (new_param,
+new_moment) as in the dense case. Additional input (lengths) is for fused
+SparseLengthsIndicesInGradientMeanGradient operator.
+
+)DOC")
+    .Input(0, "param", "Parameters to be updated")
+    .Input(1, "moment", "Moment history")
+    .Input(
+        2,
+        "indices",
+        "Integer vector containing indices of the first dimension of param for the slices that are being updated")
+    .Input(3, "grad", "Gradient computed")
+    .Input(4, "lr", "learning rate")
+    .Input(
+        5,
+        "lengths",
+        "Non negative vector with sum of elements equal to indices length")
+    .Output(0, "output_param", "Updated parameters")
+    .Output(1, "output_moment", "Updated moment")
+    .Arg("epsilon", "Default 1e-5");
+
+REGISTER_CPU_OPERATOR(
+    SparseAdagradFusedWithSparseLengthsMeanGradient,
+    SparseAdagradFusedWithSparseLengthsSumGradientOp<
+        float,
+        float,
+        int,
+        adagrad_update_prefetch_inlined,
+        /*is_mean=*/true>);
+
+// Match the GPU Approx op, here Approx and Exact are the same for
+// SparseAdagradFusedWithSparseLengthsMeanGradient op
+OPERATOR_SCHEMA(SparseAdagradFusedWithSparseLengthsMeanGradientApprox)
+    .NumInputs(6)
+    .NumOutputs(2)
+    .EnforceOneToOneInplace()
+    .SetDoc(R"DOC(
+
+Fused operator of
+SparseLengthsIndicesInGradientMeanGradient (gradient of SparseLengthsMean) +
+SparseAdagrad.
+
+Given inputs (param, moment, indices, grad, lr), runs the sparse AdaGrad
+update on (param, grad, moment[indices], lr), and returns (new_param,
+new_moment) as in the dense case. Additional input (lengths) is for fused
+SparseLengthsIndicesInGradientMeanGradient operator.
+
+)DOC")
+    .Input(0, "param", "Parameters to be updated")
+    .Input(1, "moment", "Moment history")
+    .Input(
+        2,
+        "indices",
+        "Integer vector containing indices of the first dimension of param for the slices that are being updated")
+    .Input(3, "grad", "Gradient computed")
+    .Input(4, "lr", "learning rate")
+    .Input(
+        5,
+        "lengths",
+        "Non negative vector with sum of elements equal to indices length")
+    .Output(0, "output_param", "Updated parameters")
+    .Output(1, "output_moment", "Updated moment")
+    .Arg("epsilon", "Default 1e-5");
+
+REGISTER_CPU_OPERATOR(
+    SparseAdagradFusedWithSparseLengthsMeanGradientApprox,
+    SparseAdagradFusedWithSparseLengthsSumGradientOp<
+        float,
+        float,
+        int,
+        adagrad_update_prefetch_inlined,
+        /*is_mean=*/true>);
 
 OPERATOR_SCHEMA(SparseAdagradFusedWithSparseLengthsWeightedSumGradient)
     .NumInputs(7)
@@ -156,5 +283,4 @@ REGISTER_CPU_OPERATOR(
         int,
         adagrad_update_prefetch_inlined>);
 
-} // namespace
 } // namespace caffe2

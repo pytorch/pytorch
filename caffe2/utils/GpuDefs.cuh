@@ -7,16 +7,9 @@ namespace caffe2 {
 
 // Static definition of GPU warp size for unrolling and code generation
 
-#ifdef __CUDA_ARCH__
-#if __CUDA_ARCH__ <= 750
-constexpr int kWarpSize = 32;
-#else
-#error Unknown __CUDA_ARCH__; please define parameters for compute capability
-#endif // __CUDA_ARCH__ types
-#elif defined(__HIP_PLATFORM_HCC__)
+#if defined(__HIP_PLATFORM_HCC__)
 constexpr int kWarpSize = warpSize;   // = 64 (Defined in hip_runtime.h)
 #else
-// dummy value for host compiler
 constexpr int kWarpSize = 32;
 #endif // __CUDA_ARCH__
 

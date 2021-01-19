@@ -6,6 +6,7 @@
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/cpp_hook.h>
+#include <torch/csrc/autograd/forward_grad.h>
 
 #include <ATen/ATen.h>
 #include <ATen/NamedTensorUtils.h>
@@ -20,6 +21,32 @@
 #include <cstdint>
 
 namespace torch { namespace autograd {
+
+/// `Variable` is exactly the same as `Tensor` (i.e. we have `using Variable = at::Tensor`).
+/// This means you can perform all the usual mathematical and other
+/// operations you can perform on `Tensor`s also on `Variable`s.
+///
+/// The only reason we are keeping the `Variable` class is backward compatibility
+/// with external user's legacy C++ frontend code. Our intention is to eliminate
+/// the `Variable` class in the near future.
+using Variable = at::Tensor;
+
+} // namespace autograd
+} // namespace torch
+
+// The following are all internal APIs and should not be shown in libtorch docs.
+// Therefore, we wrap the following code with `#ifndef DOXYGEN_SHOULD_SKIP_THIS ... #endif`
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+
+namespace torch { namespace autograd {
+
+/// Check if this type is supported by the autograd engine.
+/// If you change this, update the doc at the top of the torch/autograd/__init__.py file
+/// and "test_set_requires_grad_only_for_continuous_types" in test/test_autograd.py
+static inline bool isDifferentiableType(at::ScalarType t) {
+    return isFloatingType(t) || isComplexType(t);
+}
 
 struct Node;
 
@@ -37,7 +64,8 @@ struct Node;
 /// Every Tensor is a Variable, but sometimes we colloquially refer to Variables
 /// that don't require gradients as Tensors (since none of the autograd
 /// machinery for Variables applies).  Historically, Variables and Tensors
-/// were separate concepts, but we've merged them together.
+/// were separate concepts, but now they are exactly the same (i.e. we have
+/// `using Variable = at::Tensor`).
 ///
 ///                              Gradient Edges
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -68,25 +96,10 @@ struct Node;
 /// probing its `is_view()` method. Note that the *view* semantics are only
 /// meaningful for `Variable` relations that are relevant to autograd.
 /// See NOTE [ Autograd View Variables ] for more details.
-///
-///
-///                               Interface
-///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// `Variable` inherits from `Tensor` and thus its API is a superset of that of
-/// `Tensor`. This means you can perform all the usual mathematical and other
-/// operations you can perform on `Tensor`s also on `Variable`s. Furthermore,
-/// `Variable` and `Tensor` actually convert implicitly between each other. You
-/// can thus call functions defined on `Tensor`s also with `Variable`s. For
-/// this, the `Variable` class allows implicit construction from `Tensor`.
-///
-/// Our intention is to eliminate the Variable class in the near future, or make
-/// it so that only internal code uses it to do internal operations.
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 struct AutogradMeta;
 struct DifferentiableViewMeta;
-
-using Variable = at::Tensor;
 
 // Private-ish functions for manipulating variables; we don't want to put them
 // on Tensor proper
@@ -181,6 +194,17 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   std::shared_ptr<Node> grad_fn_;
   std::weak_ptr<Node> grad_accumulator_;
 
+  // This field is used to store all the forward AD gradients
+  // associated with this AutogradMeta (and the Tensor it corresponds to)
+  // There is a semantic 1:1 correspondence between AutogradMeta and
+  // ForwardGrad but:
+  //   - This field is lazily populated.
+  //   - This field is a shared_ptr but it must never be
+  //     shared by multiple Tensors. See Note [ Using ForwardGrad ]
+  // Any transition from not_initialized to initialized
+  // must be protected by mutex_
+  std::shared_ptr<ForwardGrad> fw_grad_;
+
   std::vector<std::shared_ptr<FunctionPreHook>> hooks_;
   std::shared_ptr<hooks_list> cpp_hooks_list;
 
@@ -199,17 +223,19 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   uint32_t output_nr_;
 
   // Mutex to ensure that concurrent read operations that modify internal
-  // state are still thread-safe. Used by grad_fn() and
-  // grad_accumulator().
-  std::mutex mutex_;
+  // state are still thread-safe. Used by grad_fn(), grad_accumulator(),
+  // fw_grad() and set_fw_grad()
+  // This is mutable because we need to be able to acquire this from const
+  // version of this class for the functions above
+  mutable std::mutex mutex_;
 
   /// Sets the `requires_grad` property of `Variable`. This should be true for
   /// leaf variables that want to accumulate gradients, and false for all other
   /// variables.
   void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) override {
     TORCH_CHECK(
-      !requires_grad || at::isFloatingType(at::typeMetaToScalarType(self_impl->dtype())),
-      "Only Tensors of floating point dtype can require gradients");
+      !requires_grad || isDifferentiableType(at::typeMetaToScalarType(self_impl->dtype())),
+      "Only Tensors of floating point and complex dtype can require gradients");
     requires_grad_ = requires_grad;
   }
 
@@ -218,13 +244,17 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   }
 
   /// Accesses the gradient `Variable` of this `Variable`.
-  Variable& grad() override {
+  Variable& mutable_grad() override {
     return grad_;
   }
 
   const Variable& grad() const override {
     return grad_;
   }
+
+  const Variable& fw_grad(uint64_t level, const Variable& self) const override;
+
+  void set_fw_grad(const Variable& new_grad, const Variable& self, uint64_t level, bool is_inplace_op) override;
 
   AutogradMeta(at::TensorImpl* self_impl = nullptr, bool requires_grad = false, Edge gradient_edge = Edge() ) {
     grad_fn_ = std::move(gradient_edge.function);
@@ -241,6 +271,55 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     TORCH_CHECK(
         !grad_fn_ || !requires_grad_,
         "requires_grad should be false if grad_fn is set");
+  }
+
+  ~AutogradMeta() override {
+    // If AutogradMeta is being destroyed, it means that there is no other reference to its
+    // corresponding Tensor. It implies that no other thread can be using this object and so there is
+    // no need to lock mutex_ here to guard the check if fw_grad_ is populated.
+    if (fw_grad_) {
+      // See note [ Using ForwardGrad ]
+      fw_grad_->clear();
+    }
+  }
+};
+
+struct TORCH_API ViewInfo {
+  /// The base `Variable`
+  /// If this ViewInfo represents a forward (respectively backward) AD gradient,
+  /// then this Tensor cannot be a forward (respectively backward) view.
+  Variable base_;
+
+  /// By default we use as_strided to recover views which is more efficient.
+  /// view_fn is only saved when as_strided is not supported.
+  /// If view_fn has value, we use it to recover views in backward.
+  std::function<Variable(const Variable&)> view_fn_;
+
+  /// Accessors for the view function
+  bool has_view_fn() const {
+    return view_fn_ != nullptr;
+  }
+
+  std::function<Variable(const Variable&)> view_fn() const {
+    TORCH_CHECK(has_view_fn(), "Can only access the view function if it exists.");
+    return view_fn_;
+  }
+
+  /// The chain function can be used to build a new ViewInfo for a differentiable view
+  /// function. It will return a new view info that accurately represents how "tensor" is
+  /// a view of this instance's "base_".
+  /// The "base" and "tensor" are respectively the input and output of the differentiable
+  /// view function that happened. They are required to properly set the optional
+  /// view_fn_ when it is not provided.
+  /// The "view_func", if provided, should be a function that allows to re-do the view
+  /// between "base" and "tensor".
+  ViewInfo chain(const Variable & base, const Variable & tensor,
+    std::function<Variable(const Variable&)> view_func=nullptr) const;
+
+  ViewInfo(Variable base, std::function<Variable(const Variable&)> view_fn) :
+    base_(std::move(base)),
+    view_fn_(std::move(view_fn)) {
+    TORCH_CHECK(base_.defined(), "base is undefined");
   }
 };
 
@@ -262,6 +341,27 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 ///
 /// Differentiable Views
 /// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/// This class allows to track both forward and backward AD differentiable views.
+/// These views can have different base as non-differentiable view for forward
+/// and backward mode AD are not the same.
+///
+/// Most function are either both forward and backward differentiable views (for
+/// example: view, select, narrow, transpose, etc) or both not forward and not
+/// backward differentiable views (for example: indices, values, eq, lt, etc).
+/// But there are also functions that are forward but not backward differentiable
+/// views (only detach for now) or functions that are backward but not forward
+/// differentiable view (only make_dual and unpack dual for now).
+///
+/// A concrete example of two views with different bases is as follow:
+///
+///     # Have:
+///     #   dual is a dual Tensor that is neither a forward or backward view
+///     detached_dual = dual.detach()
+///     view = detached_dual.view_as(dual)
+///     # The forward base of view is dual
+///     # The backward base of view is detached_dual
+///
+/// - Backward Mode View
 /// Differentiable views are the view variables where you want gradients to flow
 /// back to the base variables. Out-of-place operations on views are quite
 /// straightforward, but in-place ones are very tricky. Even if the base
@@ -287,6 +387,34 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 ///     torch.autograd.grad(view.sum(), var)  <- should return a tensor with
 ///                                              var[1] filled with all ones and
 ///                                              zeros everywhere else
+///
+/// - Forward Mode View
+/// Forward differentiable views follow the same semantic as backward ones but
+/// show up differently as they are computed along with the forward evaluation.
+/// The hard examples above are thus very similar
+///
+///   (1) in-place operation on view, e.g.,
+///
+///     # Have:
+///     #   base is a regular Tensor
+///     #   var is a dual Tensor whose tangent is all ones
+///     base[1] = var  # i.e., base[1].copy_(var)
+///     # Now, base is a dual Tensor
+///     _, fw_grad = fwAD.unpack_dual(base) <- fw_grad should be a tensor with
+///                                              fw_grad[1] filled with all ones and
+///                                              zeros everywhere else
+///
+///   (2) in-place operation on base after view is created, e.g.,
+///
+///     # Have:
+///     #   base is a regular Tensor
+///     #   var is a dual Tensor whose tangent is all ones
+///     view = base[1]
+///     base.copy_(var)
+///     _, fw_grad = fwAD.unpack_dual(view) <- fw_grad should be an all ones tensor
+///
+/// See Note [Forward Grad View/inplace] for more details on how we handle these hard cases.
+///
 ///
 /// DifferentiableViewMeta is created to support gradient tracking of
 /// such **in-place** operations. In particular,
@@ -323,6 +451,10 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 /// it. For now, it is deprecated by a warning. This is achieved by setting
 /// creation_meta=CreationMeta::NO_GRAD_MODE for all differentiable views created
 /// in no_grad mode.
+///
+/// See Note [View + Inplace update for base tensor]
+/// and Note [View + Inplace update for view tensor] for the details how autograd
+/// handles inplace update with view ops.
 ///
 /// Non-Differentiable Views
 /// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -361,9 +493,14 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 /// - NO_GRAD_MODE should be set when a view in created when GradMode is disabled
 /// - MULTI_OUTPUT_NODE should be set when a Node created by codegen code returns
 ///   multiple differentiable views
+/// - MULTI_OUTPUT_SAFE should be set when a view was returned by a function
+///   that returns multiple views, and unsafe_* version of that function
+///   exists. These are note considered as views for now for the view+inplace
+///   logic! The graph won't be rewritten when an inplace is done, only a
+///   warning will be thrown.
 /// - DEFAULT is for all other cases
 enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NODE,
-                                   NO_GRAD_MODE };
+                                   NO_GRAD_MODE, MULTI_OUTPUT_SAFE };
 
 /// Unified function to handle error checking when rebase happens
 /// indirect=true means that the caller is not doing the inplace, but the inplace happened
@@ -371,23 +508,66 @@ enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NOD
 TORCH_API void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect=false);
 
 struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
-  /// The base `Variable` (never a view).
-  Variable base_;
+private:
+  /// Informations about the views
+  c10::optional<ViewInfo> backward_info_;
+  c10::optional<ViewInfo> forward_info_;
+
+  /// The two following fields are extra information that we track to ensure that
+  /// any operation on this backward view is valid.
 
   /// The value of the version_counter at the time grad_fn was created. The
-  /// grad_fn field is stale if attr_version !=
-  /// version_counter.current_version().
+  /// grad_fn field is stale if attr_version != version_counter.current_version().
   uint32_t attr_version;
-
   CreationMeta creation_meta;
 
+public:
+  /// requires_grad is a backward AD field so we only use the view specific logic
+  /// for backward differentiable views
   bool requires_grad() const override {
-    return requires_grad_ || grad_fn_ || (is_view_ && base_.requires_grad());
+    return requires_grad_ || grad_fn_ || (has_bw_view() && get_backward_view().base_.requires_grad());
   }
 
-  DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base,
-                         CreationMeta creation_meta=CreationMeta::DEFAULT);
-  ~DifferentiableViewMeta();
+  bool has_bw_view() const {
+    return backward_info_.has_value();
+  }
+
+  const ViewInfo& get_backward_view() const {
+    TORCH_CHECK(has_bw_view(), "backward view info can only exist for backward views.");
+    return backward_info_.value();
+  }
+
+  uint32_t get_attr_version() const {
+    TORCH_CHECK(has_bw_view(), "attr_version can only exist for backward views.");
+    return attr_version;
+  }
+
+  void set_attr_version(uint32_t new_attr_version) {
+    TORCH_CHECK(has_bw_view(), "attr_version can only exist for backward views.");
+    attr_version = new_attr_version;
+  }
+
+  CreationMeta get_creation_meta() const {
+    TORCH_CHECK(has_bw_view(), "creation_meta can only exist for backward views.");
+    return creation_meta;
+  }
+
+  void set_creation_meta(CreationMeta new_creation_meta) {
+    TORCH_CHECK(has_bw_view(), "creation_meta can only exist for backward views.");
+    creation_meta = new_creation_meta;
+  }
+
+  bool has_fw_view() const {
+    return forward_info_.has_value();
+  }
+
+  const ViewInfo& get_forward_view() const {
+    TORCH_CHECK(has_fw_view(), "forward view info can only exist for forward views.");
+    return forward_info_.value();
+  }
+
+  DifferentiableViewMeta(at::TensorImpl* self_impl, c10::optional<ViewInfo> backward_info,
+    c10::optional<ViewInfo> forward_info, CreationMeta creation_meta=CreationMeta::DEFAULT);
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -413,18 +593,33 @@ struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
 // See NOTE [ Autograd View Variables ] for details.
 // Differentiable view. Track history with DifferentiableViewMeta.
 inline Variable make_variable_differentiable_view(
-    Variable base,
-    at::Tensor data,
-    CreationMeta creation_meta) {
+    const at::Tensor& data,
+    c10::optional<ViewInfo> backward_info,
+    c10::optional<ViewInfo> forward_info,
+    CreationMeta creation_meta,
+    bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
-    auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
-      /*version_counter=*/0,
-      /*allow_tensor_metadata_change=*/true);
-    data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
-      data_impl_copy.get(), std::move(base),
+    // If we already did a TensorImpl allocation for data, just reuse it.
+    // Otherwise(e.g tensor.swapdim(0, 0) when we return the same tensor as input),
+    // we have to use shallow_copy_and_detach to create a new TensorImpl to avoid
+    // moving leaf node into graph interior. This guarantees only 1 TensorImpl
+    // allocation happens in view ops.
+    if (data.getIntrusivePtr().unique() && data.getIntrusivePtr()->unique_version()) {
+      at::TensorImpl* data_impl = data.unsafeGetTensorImpl();
+      data_impl->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
+      data_impl, std::move(backward_info), std::move(forward_info),
       creation_meta));
-    return Variable(data_impl_copy);
+      return data;
+    } else {
+      c10::intrusive_ptr<at::TensorImpl> data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
+        /*version_counter=*/0,
+        /*allow_tensor_metadata_change=*/true);
+      data_impl_copy->set_autograd_meta(std::make_unique<DifferentiableViewMeta>(
+      data_impl_copy.get(), std::move(backward_info), std::move(forward_info),
+      creation_meta));
+      return Variable(data_impl_copy);
     }
+  }
   return Variable();
 }
 
@@ -432,9 +627,12 @@ inline Variable make_variable_differentiable_view(
 // Non-differentiable view. Just share version counter.
 inline Variable make_variable_non_differentiable_view(
     Variable base,
-    at::Tensor data,
+    const at::Tensor& data,
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
+    // Currently all of non-differentiable view ops(detach/_indices/_values)
+    // share the same TensorImpl as their base Tensor. Thus a new TensorImpl
+    // allocation here is required.
     auto data_impl_copy = data.getIntrusivePtr()->shallow_copy_and_detach(
       /*version_counter=*/impl::version_counter(base),
       /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
@@ -502,17 +700,7 @@ inline Variable make_variable(
   return Variable();
 }
 
-// Tensor Conversion
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-// In the old days, these casts were checked, but now that every Tensor
-// is a Variable this cast is always valid
-inline Variable& as_variable_ref(at::Tensor& tensor) {
-  return static_cast<Variable&>(tensor);
-}
-
-inline const Variable& as_variable_ref(const at::Tensor& tensor) {
-  return static_cast<const Variable&>(tensor);
-}
 
 }} // namespace torch::autograd
+
+#endif /* DOXYGEN_SHOULD_SKIP_THIS */

@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
 
 namespace at {
 namespace native {
@@ -29,7 +30,8 @@ static void adaptive_avg_pool3d_out_frame(
     int64_t istrideT,
     int64_t istrideH,
     int64_t istrideW) {
-  int64_t d;
+  int64_t d = 0;
+  at::internal::lazy_init_num_threads();
 #pragma omp parallel for private(d)
   for (d = 0; d < sizeD; d++) {
     /* loop over output */
@@ -80,6 +82,7 @@ void adaptive_avg_pool3d_out_cpu_template(
     Tensor& output,
     Tensor const& input,
     IntArrayRef output_size) {
+  TORCH_CHECK(output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
   for (int64_t i = 0; i < input.ndimension(); i++) {
     TORCH_CHECK(
         input.size(i) > 0,
@@ -135,7 +138,8 @@ void adaptive_avg_pool3d_out_cpu_template(
         });
   } else {
     output.resize_({input.size(-5), sizeD, osizeT, osizeH, osizeW});
-    int64_t b;
+    at::internal::lazy_init_num_threads();
+    int64_t b = 0;
 #pragma omp parallel for private(b)
     for (b = 0; b < input.size(0); b++) {
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -172,7 +176,8 @@ static void adaptive_avg_pool3d_backward_out_frame(
     int64_t osizeT,
     int64_t osizeH,
     int64_t osizeW) {
-  int64_t d;
+  int64_t d = 0;
+  at::internal::lazy_init_num_threads();
 #pragma omp parallel for private(d)
   for (d = 0; d < sizeD; d++) {
     scalar_t* gradInput_p_d = gradInput_p + d * isizeT * isizeW * isizeH;
@@ -251,7 +256,8 @@ Tensor& adaptive_avg_pool3d_backward_out_cpu_template(
               osizeW);
         });
   } else {
-    int64_t b;
+    at::internal::lazy_init_num_threads();
+    int64_t b = 0;
 #pragma omp parallel for private(b)
     for (b = 0; b < input.size(0); b++) {
       AT_DISPATCH_FLOATING_TYPES_AND_HALF(

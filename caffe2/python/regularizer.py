@@ -1,6 +1,6 @@
 # @package optimizer
 # Module caffe2.python.regularizer
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 from caffe2.python import core, utils
 import numpy as np
@@ -316,6 +316,36 @@ class ConstantNorm(Regularizer):
             raise NotImplementedError(
                 "ConstantNorm is not supported for dense parameters"
             )
+
+
+class SparseLpNorm(Regularizer):
+    def __init__(self, p, reg_lambda):
+        super(SparseLpNorm, self).__init__()
+        assert p in (1.0, 2.0), "Sparse Lp regularization only implemented for p = 1.0 and p = 2.0."
+        assert reg_lambda > 0, "factor ahead of regularization should be greater than 0."
+        self.p = p
+        self.reg_lambda = reg_lambda
+
+    def _run_after_optimizer(self, net, param_init_net, param, grad):
+        if isinstance(grad, core.GradientSlice):
+            net.SparseLpRegularizer(
+                [param, grad.indices],
+                [param],
+                p=self.p,
+                reg_lambda=self.reg_lambda,
+            )
+        else:
+            raise NotImplementedError("SparseLpNorm is not supported for dense parameters")
+
+
+class SparseL1Norm(SparseLpNorm):
+    def __init__(self, reg_lambda):
+        super(SparseL1Norm, self).__init__(p=1.0, reg_lambda=reg_lambda)
+
+
+class SparseL2Norm(SparseLpNorm):
+    def __init__(self, reg_lambda):
+        super(SparseL2Norm, self).__init__(p=2.0, reg_lambda=reg_lambda)
 
 
 class LogBarrier(Regularizer):

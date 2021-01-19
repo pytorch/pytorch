@@ -1,8 +1,10 @@
-#include <torch/csrc/distributed/rpc/rref_impl.h>
-
+#include <ATen/record_function.h>
+#include <fmt/format.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
+#include <torch/csrc/distributed/rpc/rref_impl.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
@@ -20,7 +22,7 @@ std::string getTypeStr(const c10::TypePtr& type) {
     case c10::TypeKind::InterfaceType:
       return type->cast<c10::InterfaceType>()->name()->qualifiedName();
     default:
-      return type->str();
+      return type->annotation_str();
   }
 }
 } // namespace
@@ -63,6 +65,23 @@ RRefForkData RRef::fork() const {
       getTypeStr(type_));
 }
 
+void RRef::handleError(RPCErrorType errorType, const JitFuture& jitFuture) {
+  static std::unordered_map<
+      RPCErrorType,
+      std::function<void(const JitFuture& jitFuture)>,
+      std::hash<int>>
+      errorHandlers = {
+          {RPCErrorType::TIMEOUT,
+           [this](const JitFuture& /* unused */) { setTimedOut(); }},
+          {RPCErrorType::INTENTIONAL_FAILURE,
+           [this](const JitFuture& /* unused */) { setTimedOut(); }},
+          {RPCErrorType::UNKNOWN_ERROR, [](const JitFuture& jitFuture) {
+             // Default error handler
+             RRefContext::handleException(jitFuture);
+           }}};
+  errorHandlers.find(errorType)->second(jitFuture);
+}
+
 //////////////////////////  UserRRef  /////////////////////////////////////
 
 UserRRef::UserRRef(
@@ -87,12 +106,10 @@ void UserRRef::tryDel() {
       RRefContext::getInstance().delUser(ownerId_, rrefId_, forkId_);
       deletedOnOwner_ = true;
     } catch (const std::exception& ex) {
-      LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
-                 << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
+      LOG(ERROR) << "Error occurred when deleting" << *this << " : "
                  << ex.what();
     } catch (...) {
-      LOG(ERROR) << "Error occurred when deleting UserRRef instance, "
-                 << "RRefId = " << rrefId_ << ", ForkId = " << forkId_ << " : "
+      LOG(ERROR) << "Error occurred when deleting" << *this << " : "
                  << "unknown error";
     }
   }
@@ -106,27 +123,33 @@ const ForkId& UserRRef::forkId() const {
   return forkId_;
 }
 
-IValue UserRRef::toHere() {
+IValue UserRRef::toHere(const float timeoutSeconds) const {
+  TORCH_CHECK(
+      !getTimedOut(),
+      "RRef creation via rpc.remote() timed out, and it "
+      "is possible that the RRef on the owner node does not exist.");
   // see Note [Best-Effort Check on Deleted UserRRefs]
   TORCH_CHECK(
       !deletedOnOwner_,
-      "User RRef with RRefId=",
-      rrefId(),
-      " and ForkId=",
-      forkId(),
+      *this,
       " has been deleted. Cannot call to_here() on it after deletion.");
+  auto toHereKey = std::string("");
+  if (torch::autograd::profiler::profilerEnabled()) {
+    toHereKey = fmt::format(
+        "to_here#({})->({})",
+        RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,
+        RpcAgent::getCurrentRpcAgent()->getWorkerInfo(ownerId_).name_);
+  }
+  RECORD_USER_SCOPE(toHereKey);
   TORCH_CHECK(
       !type_->is_module(),
-      "User RRef with RRefId=",
-      rrefId(),
-      " and ForkId=",
-      forkId(),
+      *this,
       " is an RRef to a ScriptModule. "
       "It can't be sent through RPC "
       "from owner, ",
-      ownerName(),
+      ownerWorkerInfo(),
       ", to user, ",
-      RpcAgent::getCurrentRpcAgent()->getWorkerInfo().name_,
+      RpcAgent::getCurrentRpcAgent()->getWorkerInfo(),
       ".");
 
   auto agent = RpcAgent::getCurrentRpcAgent();
@@ -142,15 +165,24 @@ IValue UserRRef::toHere() {
     msgToSend = ScriptRRefFetchCall(ownerId_, rrefId()).toMessage();
   }
 
-  auto futureResponse = autograd::sendMessageWithAutograd(
+  // toHere is profiled as a blocking call, and does not execute operations on
+  // the remote node. Hence, don't wrap it with a profiling message since we
+  // don't need the profiler to be enabled remotely.
+  auto jitFuture = autograd::sendMessageWithAutograd(
       *agent,
       agent->getWorkerInfo(ownerId_),
       std::move(msgToSend),
-      true /* forceGradRecording */);
+      true /* forceGradRecording */,
+      timeoutSeconds,
+      true /* forceDisableProfiling */);
 
-  const Message& message = futureResponse->wait();
-  MessageType msgType = message.type();
-  auto response = deserializeResponse(message, msgType);
+  // TODO: we should ideally be able to interrupt this blocking wait if we check
+  // getTimedOut() and it is true
+  // (https://github.com/pytorch/pytorch/issues/39411).
+  jitFuture->waitAndThrow();
+  auto messagePtr = jitFuture->constValue().toCustomClass<Message>();
+  MessageType msgType = messagePtr->type();
+  auto response = deserializeResponse(*messagePtr, msgType);
   TORCH_INTERNAL_ASSERT(
       msgType == MessageType::SCRIPT_RREF_FETCH_RET ||
           msgType == MessageType::PYTHON_RREF_FETCH_RET,
@@ -191,10 +223,7 @@ RRefForkData UserRRef::fork() const {
   //    worth the complexity.
   TORCH_CHECK(
       !deletedOnOwner_,
-      "User RRef with RRefId=",
-      rrefId(),
-      " and ForkId=",
-      forkId(),
+      *this,
       " has been deleted. Cannot call fork an UserRRef after deletion.");
   return RRef::fork();
 }
@@ -202,39 +231,42 @@ RRefForkData UserRRef::fork() const {
 //////////////////////////  OwnerRRef  /////////////////////////////////////
 
 const IValue& OwnerRRef::getValue() const {
-  std::unique_lock<std::mutex> lock(mutex_);
-  valueCV_.wait(lock, [this] { return value_.has_value(); });
-  return value_.value();
+  TORCH_CHECK(
+      !getTimedOut(),
+      "RRef creation via rpc.remote() timed out, and it "
+      "is possible that the RRef on the owner node does not exist.");
+  future_->wait();
+  if (future_->hasError()) {
+    (void)future_->value(); // Throws the error.
+  }
+  return future_->constValue();
 }
 
 bool OwnerRRef::hasValue() const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  return value_.has_value();
+  return future_->completed();
 }
 
-std::shared_ptr<FutureMessage> OwnerRRef::getFuture() {
-  std::unique_lock<std::mutex> lock(mutex_);
-  if (future_.get()) {
-    return future_;
-  }
-  future_ = std::make_shared<FutureMessage>();
-  std::shared_ptr<FutureMessage> ret = future_;
-  if (value_.has_value()) {
-    lock.unlock();
-    ret->markCompleted(Message());
-  }
-  return ret;
+std::shared_ptr<JitFuture> OwnerRRef::getFuture() {
+  return future_;
 }
 
 void OwnerRRef::setValue(IValue&& value) {
-  std::unique_lock<std::mutex> lock(mutex_);
-  value_ = std::move(value);
-  std::shared_ptr<FutureMessage> future;
-  future.swap(future_);
-  lock.unlock();
-  valueCV_.notify_all();
-  if (future.get() && !future->completed()) {
-    future->markCompleted(Message());
+  future_->markCompleted(value);
+}
+
+void OwnerRRef::setError(std::exception_ptr eptr) {
+  future_->setErrorIfNeeded(std::move(eptr));
+}
+
+std::ostream& operator<<(std::ostream& os, const RRef& rref) {
+  if (rref.isOwner()) {
+    return os << "OwnerRRef("
+              << "rref_id=" << rref.rrefId() << ")";
+  } else {
+    return os << "UserRRef("
+              << "rref_id=" << rref.rrefId()
+              << ", fork_id=" << static_cast<const UserRRef*>(&rref)->forkId()
+              << ")";
   }
 }
 

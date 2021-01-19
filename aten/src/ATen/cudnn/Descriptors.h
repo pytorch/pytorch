@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/Exceptions.h>
 
@@ -11,6 +13,8 @@
 #include <cuda.h>
 
 namespace at { namespace native {
+
+std::string cudnnTypeToString(cudnnDataType_t dtype);
 
 // TODO: Add constructors for all of the descriptors
 
@@ -37,7 +41,7 @@ static inline void fixSizeOneDimStride(int dim, const int *size, int *stride, bo
   int64_t z = 1;
   int index = 0;
   std::vector<int> permutation(dim);
-  
+
   if (nhwc) {
     permutation[index++] = 1;
   }
@@ -153,18 +157,21 @@ class TORCH_CUDA_API FilterDescriptor
 public:
   void set(const at::Tensor &t, int64_t pad = 0, bool force_nhwc = false);
 
+  void print();
 private:
   void set(cudnnDataType_t dataType, int dim, int* size, cudnnTensorFormat_t filter_format) {
     AT_CUDNN_CHECK(cudnnSetFilterNdDescriptor(mut_desc(), dataType, filter_format, dim, size));
   }
 };
 
+std::ostream& operator<<(std::ostream & out, const FilterDescriptor& d);
+
 struct TORCH_CUDA_API ConvolutionDescriptor
   : public Descriptor<cudnnConvolutionStruct,
                       &cudnnCreateConvolutionDescriptor,
                       &cudnnDestroyConvolutionDescriptor>
 {
-  void set(cudnnDataType_t dataType, int dim, int* pad, int* stride, int * upscale /* aka dilation */, int groups) {
+  void set(cudnnDataType_t dataType, int dim, int* pad, int* stride, int * upscale /* aka dilation */, int groups, bool allow_tf32) {
     cudnnDataType_t mathType = dataType;
     if (dataType == CUDNN_DATA_HALF) mathType = CUDNN_DATA_FLOAT;
     AT_CUDNN_CHECK(cudnnSetConvolutionNdDescriptor(mut_desc(), dim, pad, stride, upscale,
@@ -172,9 +179,13 @@ struct TORCH_CUDA_API ConvolutionDescriptor
     AT_CUDNN_CHECK(cudnnSetConvolutionGroupCount(mut_desc(), groups));
     // See Note [behavior of cudnnFind and cudnnGet]
     AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_DEFAULT_MATH));
-    if(dataType == CUDNN_DATA_HALF)
+    if(dataType == CUDNN_DATA_HALF) {
       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_TENSOR_OP_MATH));
-
+    } else if (dataType == CUDNN_DATA_FLOAT && !allow_tf32) {
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
+      AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_FMA_MATH));
+#endif
+    }
   }
 };
 
@@ -233,10 +244,11 @@ struct TORCH_CUDA_API RNNDescriptor
                       &cudnnDestroyRNNDescriptor>
 {
   DropoutDescriptor dropout_desc_;
-  void set(cudnnHandle_t handle, int hidden_size, int num_layers, DropoutDescriptor&& dropout_desc,
+  void set(cudnnHandle_t handle, int hidden_size, int proj_size, int num_layers, DropoutDescriptor&& dropout_desc,
            cudnnRNNInputMode_t input_mode, cudnnDirectionMode_t bidirectional,
-           cudnnRNNMode_t mode, cudnnDataType_t datatype, cudnnDataType_t input_type, cudnnRNNAlgo_t algo) {
+           cudnnRNNMode_t mode, cudnnDataType_t datatype, cudnnDataType_t input_type, cudnnRNNAlgo_t algo, bool allow_tf32) {
     dropout_desc_ = std::move(dropout_desc);
+
     AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v6(
           handle,
           mut_desc(),
@@ -248,11 +260,24 @@ struct TORCH_CUDA_API RNNDescriptor
           mode,
           algo,
           datatype));
+    if (proj_size != 0) {
+      AT_CUDNN_CHECK(cudnnSetRNNProjectionLayers(
+            handle,
+            /*rnnDesc=*/mut_desc(),
+            /*recProjSize=*/proj_size,
+            /*outProjSize=*/0));
+    }
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     if (prop->major >= 7) {
       if (input_type == CUDNN_DATA_HALF) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_TENSOR_OP_MATH);
-      } else {
+      }
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
+      else if (input_type == CUDNN_DATA_FLOAT && !allow_tf32) {
+        cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_FMA_MATH);
+      }
+#endif
+      else {
         // Technically, as the default it's not necessary to explicitly
         // set this.
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_DEFAULT_MATH);

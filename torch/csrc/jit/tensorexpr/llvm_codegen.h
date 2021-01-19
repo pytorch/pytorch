@@ -22,6 +22,7 @@ class TORCH_API LLVMCodeGen : public CodeGen {
       Stmt* stmt,
       const std::vector<BufferArg>& args,
       at::Device device = at::kCPU,
+      const std::string& kernel_func_name = "func",
       Dtype dtype = kInt);
   explicit LLVMCodeGen(Stmt* stmt);
 
@@ -30,16 +31,28 @@ class TORCH_API LLVMCodeGen : public CodeGen {
 
   TORCH_API void call(const std::vector<CallArg>& args) override;
 
+  at::Tensor empty_strided(
+      c10::IntArrayRef size,
+      c10::IntArrayRef stride,
+      c10::optional<c10::ScalarType> dtype_opt,
+      c10::optional<c10::Layout> layout_opt,
+      c10::optional<c10::Device> device_opt,
+      c10::optional<bool> pin_memory_opt) override;
+
   template <typename T>
   T value() {
-    std::vector<void*> args;
-    return value<T>(args);
+    return value<T>(nullptr);
   }
 
   template <typename T>
   T value(std::vector<void*>& args) {
+    return value<T>(args.data());
+  }
+
+  template <typename T>
+  T value(void** args) {
     T (*fp)(void**) = (T(*)(void**))getKernelAddress(impl_.get());
-    T rv = fp(args.data());
+    T rv = fp(args);
     return rv;
   }
 

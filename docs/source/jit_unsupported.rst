@@ -25,8 +25,6 @@ are not bound on `torch` or because Python expects a different schema than
 TorchScript.
 
   * :func:`torch.tensordot`
-  * :func:`torch.unique`
-  * :func:`torch.unique_consecutive`
   * :func:`torch.nn.init.calculate_gain`
   * :func:`torch.nn.init.eye_`
   * :func:`torch.nn.init.dirac_`
@@ -66,6 +64,7 @@ argument, except for `torch.tensor`. This covers the following ops:
   * :func:`torch.randperm`
   * :func:`torch.tril_indices`
   * :func:`torch.triu_indices`
+  * :func:`torch.vander`
   * :func:`torch.zeros`
   * :func:`torch.zeros_like`
 
@@ -88,6 +87,5 @@ we suggest using :meth:`torch.jit.trace`.
   * :class:`torch.nn.RNN`
   * :class:`torch.nn.AdaptiveLogSoftmaxWithLoss`
   * :class:`torch.autograd.Function`
-  * :class:`torch.autograd.no_grad`
   * :class:`torch.autograd.enable_grad`
-  * :class:`torch._C.Generator`
+  * :class:`torch.Generator`
