@@ -9522,6 +9522,8 @@ class TestNNInit(TestCase):
                 self.assertEqual(gain, 1.4142135623730951)
             elif fn == 'leaky_relu':  # sqrt(2 / 1 + slope^2))
                 self.assertEqual(gain, 1.4141428569978354)
+            elif fn == 'selu':
+                self.assertEqual(gain, 0.75)
 
     def test_calculate_gain_leaky_relu(self):
         for param in [None, 0, 0.01, 10]:
