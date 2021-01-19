@@ -516,6 +516,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         torch.quantization.convert(model, inplace=True)
         checkHooksIsPresent(model, False)
 
+    @skipIfNoFBGEMM
     def test_quantized_embedding(self):
         r""" Test the post-training quantization flow, serialization and scripting
         of embedding modules
@@ -537,6 +538,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         self.assertTrue('QuantizedLinear' in str(model))
         self.checkQuantizedLinear(model.fc)
 
+    @skipIfNoFBGEMM
     def test_embedding_linear_dynamic(self):
         class EmbeddingWithLinearDynamic(torch.nn.Module):
             def __init__(self):
