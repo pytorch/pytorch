@@ -9522,6 +9522,8 @@ class TestNNInit(TestCase):
                 self.assertEqual(gain, 1.4142135623730951)
             elif fn == 'leaky_relu':  # sqrt(2 / 1 + slope^2))
                 self.assertEqual(gain, 1.4141428569978354)
+            elif fn == 'selu':
+                self.assertEqual(gain, 0.75)
 
     def test_calculate_gain_leaky_relu(self):
         for param in [None, 0, 0.01, 10]:
@@ -10995,6 +10997,35 @@ class TestNNDeviceType(NNTestCase):
             mod = torch.nn.ReflectionPad2d(2)
             inp = torch.randn(3, 0, 10, 10, device=device)
             mod(inp)
+
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float, torch.double)
+    def test_MarginLoss_empty(self, device, dtype):
+        for mod, x, y in [
+                (torch.nn.MultiMarginLoss().to(device),
+                 torch.randn(0, 10, requires_grad=True, device=device, dtype=dtype),
+                 torch.ones(0, device=device).type(torch.long)),
+                (torch.nn.MultiLabelMarginLoss().to(device),
+                 torch.randn(0, 10, requires_grad=True, device=device, dtype=dtype),
+                 torch.ones(0, 10, device=device).type(torch.long))]:
+
+            out = mod(x, y)
+            out.sum().backward()
+
+            self.assertEqual(x, torch.zeros_like(x))
+            self.assertEqual(x.grad, torch.zeros_like(x))
+
+            with self.assertRaisesRegex(RuntimeError, 'Expected'):
+                x = torch.randn(0, requires_grad=True, device=device, dtype=dtype)
+                y = torch.ones(10, device=device).type(torch.long)
+                mod(x, y)
+
+            with self.assertRaisesRegex(RuntimeError, 'Expected'):
+                x = torch.randn(10, 0, requires_grad=True, device=device, dtype=dtype)
+                y = torch.ones(10, 0, device=device).type(torch.long)
+                mod(x, y)
+
 
     @onlyOnCPUAndCUDA
     def test_Unfold_empty(self, device):
