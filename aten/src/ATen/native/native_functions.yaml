@@ -5994,18 +5994,6 @@
   dispatch:
     CPU, CUDA: multinomial
 
-- func: _multinomial_alias_setup(Tensor probs) -> (Tensor, Tensor)
-  variants: function
-  dispatch:
-    CPU: legacy::cpu::_th_multinomial_alias_setup
-    CUDA: legacy::cuda::_th_multinomial_alias_setup
-
-- func: _multinomial_alias_draw(Tensor J, Tensor q, int num_samples, *, Generator? generator=None) -> Tensor
-  variants: function
-  dispatch:
-    CPU: legacy::cpu::_th_multinomial_alias_draw
-    CUDA: legacy::cuda::_th_multinomial_alias_draw
-
 - func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
