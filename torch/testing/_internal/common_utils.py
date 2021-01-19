@@ -1883,11 +1883,11 @@ class BytesIOContext(io.BytesIO):
     def __exit__(self, *args):
         pass
 
-def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
+def _assertGradAndGradgradChecks(test_case, apply_fn, inputs, check_batched_grad=False):
     # call assert function rather than returning a bool since it's nicer
     # if we get whether this failed on the gradcheck or the gradgradcheck.
-    test_case.assertTrue(gradcheck(apply_fn, inputs))
-    test_case.assertTrue(gradgradcheck(apply_fn, inputs))
+    test_case.assertTrue(gradcheck(apply_fn, inputs, check_batched_grad=check_batched_grad))
+    test_case.assertTrue(gradgradcheck(apply_fn, inputs, check_batched_grad=check_batched_grad))
 
 
 @contextmanager
