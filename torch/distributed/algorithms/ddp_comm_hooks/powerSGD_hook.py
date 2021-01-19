@@ -82,10 +82,7 @@ class PowerSGDState(object):
         self.q_memory_dict = {}
 
 
-def powerSGD_hook(
-    state: PowerSGDState,
-    bucket,
-) -> torch.futures.Future:
+def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     """
     This DDP communication hook implements the original PowerSGD gradient compression
     algorithm described in https://arxiv.org/abs/1905.13727.
@@ -111,7 +108,7 @@ def powerSGD_hook(
     one left multiplication and one right multiplication.
     For warm start, can take one such step at a time, and alternate between them.
 
-    Arguments:
+    Args:
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
         bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode at this time,
@@ -126,9 +123,7 @@ def powerSGD_hook(
     """
     process_group = state.process_group
     group_to_use = process_group if process_group is not None else dist.group.WORLD
-    world_size = (
-        process_group.size() if process_group is not None else dist.get_world_size()
-    )
+    world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
     input_tensor = bucket.get_tensors()[0]
@@ -281,7 +276,7 @@ def powerSGD_hook(
         ]
 
     def compute_qs(fut):
-        state.p_memory_dict[bucket_index] = fut.wait()[0]
+        state.p_memory_dict[bucket_index] = fut.value()[0]
         for p in ps:
             _orthogonalize(p)
 
@@ -299,15 +294,15 @@ def powerSGD_hook(
         ]
 
     def decompress(fut):
-        state.q_memory_dict[bucket_index] = fut.wait()[0].div_(world_size)
+        state.q_memory_dict[bucket_index] = fut.value()[0].div_(world_size)
 
         for p, q, tensor in zip(ps, qs, high_rank_tensors):
             torch.matmul(p, q.t(), out=tensor)
         if torch.cuda.is_available():
-            torch.cuda.synchronize()
+            torch.cuda.synchronize(device)
 
         if state.use_error_feedback:
-            # Memorize the local errors.
+            # memoize the local errors.
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         if not state.warm_start:
             state.p_memory_dict.clear()
@@ -324,10 +319,7 @@ def powerSGD_hook(
     )
 
 
-def batched_powerSGD_hook(
-    state: PowerSGDState,
-    bucket,
-) -> torch.futures.Future:
+def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     """
     This DDP communication hook implements a simplified PowerSGD gradient compression
     algorithm described in https://arxiv.org/abs/1905.13727.
@@ -348,7 +340,7 @@ def batched_powerSGD_hook(
     one left multiplication and one right multiplication.
     For warm start, can take one such step at a time, and alternate between them.
 
-    Arguments:
+    Args:
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
         bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode at this time,
@@ -363,9 +355,7 @@ def batched_powerSGD_hook(
     """
     process_group = state.process_group
     group_to_use = process_group if process_group is not None else dist.group.WORLD
-    world_size = (
-        process_group.size() if process_group is not None else dist.get_world_size()
-    )
+    world_size = group_to_use.size()
 
     # The input tensor is a flattened 1D tensor.
     input_tensor = bucket.get_tensors()[0]
@@ -491,10 +481,10 @@ def batched_powerSGD_hook(
         )
 
         if state.use_error_feedback:
-            # Memorize the local errors.
+            # memoize the local errors.
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         if torch.cuda.is_available():
-            torch.cuda.synchronize()
+            torch.cuda.synchronize(device)
         if not state.warm_start:
             state.p_memory_dict.clear()
             state.q_memory_dict.clear()

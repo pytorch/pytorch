@@ -8,7 +8,7 @@ from ..parameter import Parameter
 import torch.utils.hooks as hooks
 
 from torch import Tensor, device, dtype
-from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict
+from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
 from ...utils.hooks import RemovableHandle
 
 _grad_t = Union[Tuple[Tensor, ...], Tensor]
@@ -26,14 +26,6 @@ class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpec
     __str__ = __repr__
 
 
-class ModuleAttributeError(AttributeError):
-    """ When `__getattr__` raises AttributeError inside a property,
-    AttributeError is raised with the property name instead of the
-    attribute that initially raised AttributeError, making the error
-    message uninformative. Using `ModuleAttributeError` instead
-    fixes this issue."""
-
-
 def _addindent(s_, numSpaces):
     s = s_.split('\n')
     # don't do anything for single-line stuff
@@ -49,10 +41,10 @@ def _addindent(s_, numSpaces):
 r"""This tracks hooks common to all modules that are executed before/after
 calling forward and backward. This is global state used for debugging/profiling
 purposes"""
-_global_backward_hooks = OrderedDict()
-_global_is_full_backward_hook = None
-_global_forward_pre_hooks = OrderedDict()
-_global_forward_hooks = OrderedDict()
+_global_backward_hooks: Dict[int, Callable] = OrderedDict()
+_global_is_full_backward_hook: Optional[bool] = None
+_global_forward_pre_hooks: Dict[int, Callable] = OrderedDict()
+_global_forward_hooks: Dict[int, Callable] = OrderedDict()
 
 
 def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
@@ -489,7 +481,7 @@ class Module:
         it should be called before constructing optimizer if the module will
         live on GPU while being optimized.
 
-        Arguments:
+        Args:
             device (int, optional): if specified, all parameters will be
                 copied to that device
 
@@ -509,7 +501,7 @@ class Module:
     def type(self: T, dst_type: Union[dtype, str]) -> T:
         r"""Casts all parameters and buffers to :attr:`dst_type`.
 
-        Arguments:
+        Args:
             dst_type (type or string): the desired type
 
         Returns:
@@ -732,13 +724,13 @@ class Module:
         It returns two lists, one with the full backward hooks and one with the non-full
         backward hooks.
         """
-        full_backward_hooks = []
+        full_backward_hooks: List[Callable] = []
         if (_global_is_full_backward_hook is True):
             full_backward_hooks += _global_backward_hooks.values()
         if (self._is_full_backward_hook is True):
             full_backward_hooks += self._backward_hooks.values()
 
-        non_full_backward_hooks = []
+        non_full_backward_hooks: List[Callable] = []
         if (_global_is_full_backward_hook is False):
             non_full_backward_hooks += _global_backward_hooks.values()
         if (self._is_full_backward_hook is False):
@@ -841,9 +833,10 @@ class Module:
             return self.forward(*input, **kwargs)
         recording_scopes = torch.jit._trace._trace_module_map is not None
         if recording_scopes:
-            name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None
+            # type ignore was added because at this point one knows that
+            # torch.jit._trace._trace_module_map is not Optional and has type Dict[Any, Any] 
+            name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None  # type: ignore
             if name:
-                cur_scope_name = tracing_state.current_scope()
                 tracing_state.push_scope(name)
             else:
                 recording_scopes = False
@@ -935,7 +928,7 @@ class Module:
             modules = self.__dict__['_modules']
             if name in modules:
                 return modules[name]
-        raise ModuleAttributeError("'{}' object has no attribute '{}'".format(
+        raise AttributeError("'{}' object has no attribute '{}'".format(
             type(self).__name__, name))
 
     def __setattr__(self, name: str, value: Union[Tensor, 'Module']) -> None:
@@ -1015,7 +1008,7 @@ class Module:
         In rare cases, subclasses can achieve class-specific behavior by
         overriding this method with custom logic.
 
-        Arguments:
+        Args:
             destination (dict): a dict where state will be stored
             prefix (str): the prefix for parameters and buffers used in this
                 module
@@ -1096,7 +1089,7 @@ class Module:
             :attr:`state_dict` to :meth:`~torch.nn.Module.load_state_dict`. So
             it can be modified.
 
-        Arguments:
+        Args:
             state_dict (dict): a dict containing parameters and
                 persistent buffers.
             prefix (str): the prefix for parameters and buffers used in this
@@ -1159,14 +1152,14 @@ class Module:
                     if input_name not in self._modules and input_name not in local_state:
                         unexpected_keys.append(key)
 
-    def load_state_dict(self, state_dict: Union[Dict[str, Tensor], Dict[str, Tensor]],
+    def load_state_dict(self, state_dict: 'OrderedDict[str, Tensor]',
                         strict: bool = True):
         r"""Copies parameters and buffers from :attr:`state_dict` into
         this module and its descendants. If :attr:`strict` is ``True``, then
         the keys of :attr:`state_dict` must exactly match the keys returned
         by this module's :meth:`~torch.nn.Module.state_dict` function.
 
-        Arguments:
+        Args:
             state_dict (dict): a dict containing parameters and
                 persistent buffers.
             strict (bool, optional): whether to strictly enforce that the keys
@@ -1178,15 +1171,16 @@ class Module:
                 * **missing_keys** is a list of str containing the missing keys
                 * **unexpected_keys** is a list of str containing the unexpected keys
         """
-        missing_keys = []
-        unexpected_keys = []
-        error_msgs = []
+        missing_keys: List[str] = []
+        unexpected_keys: List[str] = []
+        error_msgs: List[str] = []
 
         # copy state_dict so _load_from_state_dict can modify it
         metadata = getattr(state_dict, '_metadata', None)
         state_dict = state_dict.copy()
         if metadata is not None:
-            state_dict._metadata = metadata
+            # mypy isn't aware that "_metadata" exists in state_dict
+            state_dict._metadata = metadata  # type: ignore[attr-defined]
 
         def load(module, prefix=''):
             local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
@@ -1197,7 +1191,7 @@ class Module:
                     load(child, prefix + name + '.')
 
         load(self)
-        load = None  # break load->load reference cycle
+        del load
 
         if strict:
             if len(unexpected_keys) > 0:
@@ -1251,7 +1245,7 @@ class Module:
         for name, param in self.named_parameters(recurse=recurse):
             yield param
 
-    def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Tensor]]:
+    def named_parameters(self, prefix: str = '', recurse: bool = True) -> Iterator[Tuple[str, Parameter]]:
         r"""Returns an iterator over module parameters, yielding both the
         name of the parameter as well as the parameter itself.
 
@@ -1479,7 +1473,7 @@ class Module:
         r"""Sets gradients of all model parameters to zero. See similar function
         under :class:`torch.optim.Optimizer` for more context.
 
-        Arguments:
+        Args:
             set_to_none (bool): instead of setting to zero, set the grads to None.
                 See :meth:`torch.optim.Optimizer.zero_grad` for details.
         """

@@ -937,10 +937,6 @@ class AbstractTestCases:
                         # index_add calls atomicAdd on cuda.
                         zeros = torch.zeros(size, dtype=dtype, device=device)
 
-                        # index_add is not supported for complex dtypes on cuda yet
-                        if device.startswith('cuda') and dtype.is_complex:
-                            continue
-
                         added = zeros.index_add(0, torch.arange(0, size[0], dtype=idx_dtype, device=device), tensor)
                         self.assertEqual(added, tensor)
 
@@ -5693,7 +5689,8 @@ class TestTorchDeviceType(TestCase):
             x = torch.tensor([], device=device)
             self.assertEqual(x.dtype, x.storage().dtype)
 
-    @dtypes(torch.float, torch.double, torch.half)
+    @dtypesIfCUDA(torch.float, torch.double, torch.half)
+    @dtypes(torch.float, torch.double)
     def test_multinomial(self, device, dtype):
         def make_prob_dist(shape, is_contiguous):
             if is_contiguous:
@@ -5987,41 +5984,60 @@ class TestTorchDeviceType(TestCase):
         # Note: whether PyTorch should support min and max on complex
         # tensors is an open question.
         # See https://github.com/pytorch/pytorch/issues/36374
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             torch.min(t)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             t.min()
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             torch.min(t, dim=0)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             torch.min(t, t)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             torch.min(t, t, out=t)
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             torch.max(t)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             t.max()
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             torch.max(t, dim=0)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             torch.max(t, t)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             torch.max(t, t, out=t)
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             torch.amin(t)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             t.amin()
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             torch.amin(t, dim=0)
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             torch.amax(t)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             t.amax()
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             torch.amax(t, dim=0)
+
+        # Tests _aminmax() variants with complex inputs,
+        # which are currently not supported due to min & max being unsupported
+        # for complex inputs, as per https://github.com/pytorch/pytorch/issues/36374
+        # Test with a single-element tensor t, as well as a multi-element tensor x
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
+            min_val, max_val = torch._aminmax(t)
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
+            min_val = torch._aminmax(t, dim=0)[0]
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
+            max_val = torch._aminmax(t, dim=0)[1]
+        # Test _aminmax() with a multi-element tensor
+        x = torch.tensor([(1 + 1j), (2 + 3j)], device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
+            min_val, max_val = torch._aminmax(x)
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
+            min_val = torch._aminmax(x, dim=0)[0]
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
+            max_val = torch._aminmax(x, dim=0)[1]
 
         # Tests clamp variants with complex inputs
         # Note: whether PyTorch should support clamp on complex
@@ -6030,17 +6046,17 @@ class TestTorchDeviceType(TestCase):
         min_val = 1 + 1j
         max_val = 4 + 4j
         out = torch.empty((0,), device=device, dtype=dtype)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             torch.clamp(t, min=min_val)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             torch.clamp(t, max=max_val)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             torch.clamp(t, min_val, max_val)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             torch.clamp(t, min=min_val, out=out)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             torch.clamp(t, max=max_val, out=out)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             torch.clamp(t, min_val, max_val, out=out)
 
     def test_pickle_gradscaler(self, device):
@@ -6655,7 +6671,6 @@ tensor_op_tests = [
         torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM) + _complex_types_skip_rocm, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addmv_? is deprecated")]),
     ('atan2', '', _medium_2d, lambda t, d: [_medium_2d(t, d)], 1e-2, 1e-5, 1e-5, _types, _types_no_half),
-    ('angle', '', _small_3d, lambda t, d: [], 0, 0, 0, _types_no_half, [torch.bfloat16], False),
     ('fmod', 'value', _small_3d, lambda t, d: [3], 1e-3),
     ('fmod', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-3),
     ('chunk', '', _medium_2d, lambda t, d: [4], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
@@ -6824,10 +6839,24 @@ tensor_op_tests = [
     ('size', 'dim', _new_t((1, 2, 3, 4)), lambda t, d: [1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('size', 'neg_dim', _new_t((1, 2, 3, 4)), lambda t, d: [-2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('sort', '', _small_3d_unique, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('sort', 'dim', _small_3d_unique, lambda t, d: [1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('sort', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('sort', 'dim_descending', _small_3d_unique, lambda t, d: [1, True], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
-    ('sort', 'neg_dim_descending', _small_3d_unique, lambda t, d: [-1, True], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('sort', 'stable', _small_3d_unique, lambda t, d: [0, False, True],
+        1e-5, 1e-5, 1e-5, _types, _cpu_types, False, [onlyCPU]),
+    ('sort', 'dim', _small_3d_unique, lambda t, d: [1],
+        1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('sort', 'dim_stable', _small_3d_unique, lambda t, d: [1, False, True],
+        1e-5, 1e-5, 1e-5, _types, _cpu_types, False, [onlyCPU]),
+    ('sort', 'neg_dim', _small_3d_unique, lambda t, d: [-1],
+        1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('sort', 'neg_dim_stable', _small_3d_unique, lambda t, d: [-1, False, True],
+        1e-5, 1e-5, 1e-5, _types, _cpu_types, False, [onlyCPU]),
+    ('sort', 'dim_descending', _small_3d_unique, lambda t, d: [1, True, False],
+        1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('sort', 'dim_descending_stable', _small_3d_unique, lambda t, d: [1, True, True],
+        1e-5, 1e-5, 1e-5, _types, _cpu_types, False, [onlyCPU]),
+    ('sort', 'neg_dim_descending', _small_3d_unique, lambda t, d: [-1, True, False],
+        1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('sort', 'neg_dim_descending_stable', _small_3d_unique, lambda t, d: [-1, True, True],
+        1e-5, 1e-5, 1e-5, _types, _cpu_types, False, [onlyCPU]),
     ('split', '', _small_3d, lambda t, d: [2], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('split', 'dim', _small_3d, lambda t, d: [2, 1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('split', 'neg_dim', _small_3d, lambda t, d: [2, -3], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
@@ -6871,10 +6900,6 @@ tensor_op_tests = [
     ('rot90', 'k1_d12', _small_3d, lambda t, d: [1, [1, 2]], 1e-5, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
     ('rot90', 'k1_neg_d', _small_3d, lambda t, d: [1, [1, -1]], 1e-5, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
     ('rot90', 'default', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types + _complex_types, _cpu_types, False),
-    ('rsqrt', '', lambda t, d: _small_3d(t, d) + 1, lambda t, d: [], 1e-2, 1e-5, 1e-4, _float_types_no_half),
-    ('sinh', '', lambda t, d: _small_3d(t, d).clamp(-1, 1), lambda t, d: [], 1e-3, 1e-5, 1e-5, _float_types),
-    ('tan', '', lambda t, d: _small_3d(t, d).clamp(-1, 1), lambda t, d: [], 1e-3, 1e-5, 1e-5, _float_types),
-    ('tan', 'complex', lambda t, d: _small_3d(t, d), lambda t, d: [], 1e-3, 1e-5, 1e-5, _complex_types),
     ('__lshift__', '',
         lambda t, d: torch.pow(2, torch.arange(1, 5).to(dtype=_convert_t(t, d), device=d)),
         lambda t, d: [2],
@@ -6899,35 +6924,15 @@ tensor_op_tests = [
     ('abs', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5,
         torch.testing.get_all_dtypes(include_complex=False, include_bool=False), [torch.bfloat16]),
     ('sign', '', _small_3d, lambda t, d: []),
-    ('log', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
-    ('log10', '', _small_3d, lambda t, d: [], 1e-2, 5e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
-    ('log1p', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types_no_half, [torch.bfloat16]),
-    ('log2', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('logit', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
-    ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
-    ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5,
-        torch.testing.get_all_fp_dtypes() + _complex_types, [torch.bfloat16]),
-    ('asin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('atan', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('acosh', '', lambda t, d: _small_3d(t, d) + 1, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
-    ('asinh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
-    ('atanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
-    ('erf', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
-    ('erfc', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('erfinv', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('exp', '', _small_3d, lambda t, d: [], 1e-2, 5e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
-    ('exp', 'small', lambda t, d: _small_3d(t, d).clamp(-1, 1),
-        lambda t, d: [], 1e-2, 5e-2, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('rad2deg', '', _small_3d, lambda t, d: [], 1e-1, 1e-0, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('deg2rad', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
-    ('reciprocal', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('floor', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('frac', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('round', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('trunc', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('ceil', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('lgamma', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, _float_types_no_half, [torch.bfloat16]),
-    ('digamma', 'op', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e0, _float_types_no_half),
 ]
 
 # Creates and decorates a generic test and adds it to the class.

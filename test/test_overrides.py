@@ -1,11 +1,10 @@
 import torch
 import numpy as np
-import unittest
 import inspect
 import functools
 import pprint
 
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -563,6 +562,8 @@ def generate_tensor_like_override_tests(cls):
                     func_args.append(instance_gen())
                 elif t == 'TensorList':
                     func_args.append([instance_gen(), instance_gen()])
+                elif t == 'c10::List<c10::optional<Tensor>>':
+                    func_args.append([instance_gen(), instance_gen()])
                 elif t == 'IntArrayRef':
                     size = arg.get('size', 2)
                     if size == 1:
@@ -878,4 +879,4 @@ class TestWrapTorchFunction(TestCase):
         self.assertEqual(f(A()), -1)
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

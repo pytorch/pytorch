@@ -143,9 +143,10 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
         auto method_name_idx =
             code.constant_table().size() + method_names.size();
         method_names.emplace_back(node->s(attr::name));
-        Instruction new_instr{INTERFACE_CALL,
-                              static_cast<int32_t>(method_name_idx),
-                              static_cast<uint16_t>(node->inputs().size())};
+        Instruction new_instr{
+            INTERFACE_CALL,
+            static_cast<int32_t>(method_name_idx),
+            static_cast<uint16_t>(node->inputs().size())};
         instructions_copy[i] = new_instr;
       } else {
         TORCH_INTERNAL_ASSERT(
@@ -226,11 +227,12 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   // register size
   auto register_size = static_cast<int>(code.register_size());
 
-  auto table = Table({{"instructions", Tup(instructions)},
-                      {"operators", Tup(operators)},
-                      {"constants", Tup(constants)},
-                      {"types", Tup(types)},
-                      {"register_size", register_size}});
+  auto table = Table(
+      {{"instructions", Tup(instructions)},
+       {"operators", Tup(operators)},
+       {"constants", Tup(constants)},
+       {"types", Tup(types)},
+       {"register_size", register_size}});
   auto bytecode_vals = Tup({func.qualname().qualifiedName(), table});
 
   c10::optional<IValue> debug_info_vals;
@@ -354,7 +356,7 @@ class ScriptModuleSerializer {
   void writeArchive(const std::string& archive_name, const IValue& value) {
     std::vector<char> data;
     // Vector to capture the run-time class types during pickling the IValues
-    std::vector<c10::ClassTypePtr> memorizedClassTypes;
+    std::vector<c10::ClassTypePtr> memoizedClassTypes;
     Pickler data_pickle(
         [&](const char* buf, size_t size) {
           data.insert(data.end(), buf, buf + size);
@@ -363,7 +365,7 @@ class ScriptModuleSerializer {
         [&](const c10::ClassTypePtr& t) {
           return type_name_uniquer_.getUniqueName(t);
         },
-        &memorizedClassTypes);
+        &memoizedClassTypes);
     data_pickle.protocol();
     data_pickle.pushIValue(value);
     data_pickle.stop();
@@ -378,7 +380,7 @@ class ScriptModuleSerializer {
     writer_.writeRecord(fname, data.data(), data.size());
 
     // serialize all the captured run-time class types
-    for (const c10::ClassTypePtr& wroteType : memorizedClassTypes) {
+    for (const c10::ClassTypePtr& wroteType : memoizedClassTypes) {
       convertNamedType(wroteType);
     }
   }
