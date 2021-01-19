@@ -4739,21 +4739,25 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypes(*torch.testing.get_all_fp_dtypes(), *torch.testing.get_all_complex_dtypes())
     @tf32_on_and_off(0.05)
     def test_bmm(self, device, dtype):
+        if self.device_type == 'cuda' and dtype is torch.bfloat16 and CUDA11OrLater and not SM53OrLater:
+            # cuBLAS does not guarantee BFloat16 support on SM < 53.
+            # So on PyTorch, we consider BFloat16 support on SM < 53 as
+            # undefined bahavior
+            return
+
         num_batches = 10
         M, N, O = 23, 8, 12
         numpy_dtype = dtype if dtype != torch.bfloat16 else torch.float32
 
         is_supported = True
-        is_cuda_bfloat = False
+        if dtype == torch.bfloat16 and self.device_type == 'cuda':
+            is_supported = TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater)
 
         if not is_supported:
-            if not is_cuda_bfloat:
-                # Bfloat16 on CUDA is partially supported depending on architecture
-                # So we skip asserting "not supported"
-                b1 = torch.randn(num_batches, M, N, device=device).to(dtype)
-                b2 = torch.randn(num_batches, N, O, device=device).to(dtype)
-                self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
-                                       lambda: torch.bmm(b1, b2))
+            b1 = torch.randn(num_batches, M, N, device=device).to(dtype)
+            b2 = torch.randn(num_batches, N, O, device=device).to(dtype)
+            self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
+                                   lambda: torch.bmm(b1, b2))
             return
 
         def invert_perm(p):
@@ -4916,27 +4920,28 @@ else:
     @dtypes(*torch.testing.get_all_fp_dtypes(), *torch.testing.get_all_complex_dtypes())
     @tf32_on_and_off(0.05)
     def test_addbmm(self, device, dtype):
+        if self.device_type == 'cuda' and dtype is torch.bfloat16 and CUDA11OrLater and not SM53OrLater:
+            # cuBLAS does not guarantee BFloat16 support on SM < 53.
+            # So on PyTorch, we consider BFloat16 support on SM < 53 as
+            # undefined bahavior
+            return
+
         num_batches = 2
         M, N, O = 2, 3, 4
 
         is_supported = True
-        is_cuda_bfloat = False
         if dtype == torch.bfloat16:
             if self.device_type == 'cpu':
                 self.precision = 1  # 43 vs 43.75
             else:
-                is_cuda_bfloat = True
                 is_supported = TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater)
 
         if not is_supported:
-            if not is_cuda_bfloat:
-                # Bfloat16 on CUDA is partially supported depending on architecture
-                # So we skip asserting "not supported"
-                b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
-                b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
-                t = make_tensor((M, O), device, dtype, low=-1, high=1)
-                self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
-                                       lambda: torch.addbmm(t, b1, b2))
+            b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
+            b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
+            t = make_tensor((M, O), device, dtype, low=-1, high=1)
+            self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
+                                   lambda: torch.addbmm(t, b1, b2))
             return
 
         def invert_perm(p):
@@ -4988,24 +4993,25 @@ else:
     @dtypes(*torch.testing.get_all_fp_dtypes(), *torch.testing.get_all_complex_dtypes())
     @tf32_on_and_off(0.05)
     def test_baddbmm(self, device, dtype):
+        if self.device_type == 'cuda' and dtype is torch.bfloat16 and CUDA11OrLater and not SM53OrLater:
+            # cuBLAS does not guarantee BFloat16 support on SM < 53.
+            # So on PyTorch, we consider BFloat16 support on SM < 53 as
+            # undefined bahavior
+            return
+
         num_batches = 10
         M, N, O = 12, 8, 5
 
         is_supported = True
-        is_cuda_bfloat = False
         if dtype == torch.bfloat16 and self.device_type == 'cuda':
             is_supported = TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater)
-            is_cuda_bfloat = True
 
         if not is_supported:
-            if not is_cuda_bfloat:
-                # Bfloat16 on CUDA is partially supported depending on architecture
-                # So we skip asserting "not supported"
-                b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
-                b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
-                t = make_tensor((num_batches, M, O), device, dtype, low=-1, high=1)
-                self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
-                                       lambda: torch.baddbmm(t, b1, b2))
+            b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
+            b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
+            t = make_tensor((num_batches, M, O), device, dtype, low=-1, high=1)
+            self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
+                                   lambda: torch.baddbmm(t, b1, b2))
             return
 
         def invert_perm(p):
