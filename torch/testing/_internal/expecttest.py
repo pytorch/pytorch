@@ -217,6 +217,9 @@ class TestCase(unittest.TestCase):
         set the skip argument to how many function calls we should
         skip to find the string literal to update.
         """
+        cpp_stacktrace_header = "\nException raised from"
+        if cpp_stacktrace_header in actual:
+            actual = actual.split(cpp_stacktrace_header)[0]
         if ACCEPT:
             if actual != expect:
                 # current frame and parent frame, plus any requested skip
@@ -247,7 +250,10 @@ class TestCase(unittest.TestCase):
             help_text = ("To accept the new output, re-run test with "
                          "envvar EXPECTTEST_ACCEPT=1 (we recommend "
                          "staging/committing your changes before doing this)")
-            self.assertMultiLineEqualMaybeCppStack(expect, actual, msg=help_text)
+            if hasattr(self, "assertMultiLineEqual"):
+                self.assertMultiLineEqual(expect, actual, msg=help_text)
+            else:
+                self.assertEqual(expect, actual, msg=help_text)
 
     def assertExpectedRaisesInline(self, exc_type, callable, expect, *args, **kwargs):
         """
@@ -262,17 +268,6 @@ class TestCase(unittest.TestCase):
             return
         # Don't put this in the try block; the AssertionError will catch it
         self.fail(msg="Did not raise when expected to")
-
-    def assertMultiLineEqualMaybeCppStack(self, expect, actual, *args, **kwargs):
-        self.assertGreaterEqual(len(actual), len(expect), *args, **kwargs)
-        if hasattr(self, "assertMultiLineEqual"):
-            self.assertMultiLineEqual(expect, actual[:len(expect)], *args, **kwargs)
-        else:
-            self.assertEqual(expect, actual[:len(expect)], *args, **kwargs)
-        if len(actual) > len(expect):
-            cpp_stacktrace_header = "\nException raised from"
-            end_header = len(expect) + len(cpp_stacktrace_header)
-            self.assertEqual(actual[len(expect): end_header], cpp_stacktrace_header)
 
 
 if __name__ == "__main__":
