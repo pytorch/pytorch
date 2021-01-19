@@ -13,6 +13,7 @@ import random
 from random import randrange
 from itertools import product
 from functools import reduce
+from numbers import Number
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
@@ -1327,29 +1328,49 @@ class TestLinalg(TestCase):
             raise RuntimeError(f'dtype not supported in this test: {dtype}')
 
         vector_ords = [None, 0, 1, 2, 3, inf, -1, -2, -3, -inf]
-        matrix_ords = [None, 'fro', 1, inf, -1, -inf]
-
-        # TODO: Fix autograd for matrix orders 'nuc', 2, and -2 by adding complex
-        #       support to svd's backward method. Once this is done, these ords
-        #       should be added to `matrix_ords` above
-        # Update: svd's backward now works with https://github.com/pytorch/pytorch/pull/47761
-        # However run_test_case doesn't work for 'matrix_ords_unsupported' cases
-        # because singular values of 'x' and 'x_real' can be different and so is their norms based on singular values
-        matrix_ords_unsupported = ['nuc', 2, -2]
+        matrix_ords = [None, 'fro', 'nuc', 1, 2, inf, -1, -2, -inf]
 
         def run_test_case(x, ord, keepdim):
+            msg = gen_error_message(x.size(), ord, keepdim)
+
             res = torch.linalg.norm(x, ord, keepdim=keepdim)
             res.backward()
 
-            x_real = x.clone().detach().abs().requires_grad_(True)
-            res_real = torch.linalg.norm(x_real, ord, keepdim=keepdim)
-            res_real.backward()
+            is_nuclear = isinstance(ord, str) and ord == 'nuc'
+            is_matrix_2 = isinstance(ord, Number) and abs(ord) == 2
 
-            msg = gen_error_message(x.size(), ord, keepdim)
+            # Matrix norms order +/-2 and Nuclear can be compared with SVD
+            # followed by max/min/sum
+            if x.dim() == 2 and (is_nuclear or is_matrix_2):
+                x_check = x.clone().detach().requires_grad_(True)
+                if is_matrix_2:
+                    if ord == 2:
+                        res_check = x_check.svd()[1].max()
+                    else:
+                        res_check = x_check.svd()[1].min()
+                else:
+                    res_check = x_check.svd()[1].sum()
 
-            self.assertEqual(res.shape, res_real.shape, msg=msg)
-            self.assertEqual(res, res_real, msg=msg)
-            self.assertEqual(x.grad.abs(), x_real.grad, msg=msg)
+                if keepdim:
+                    res_check = res_check.unsqueeze(-1)
+                    res_check = res_check.unsqueeze(-1)
+
+                res_check.backward()
+
+                self.assertEqual(res.shape, res_check.shape, msg=msg)
+                self.assertEqual(res, res_check, msg=msg)
+                self.assertEqual(x.grad, x_check.grad, msg=msg)
+
+            # All other norm types can be compared with their
+            # real number variants
+            else:
+                x_real = x.clone().detach().abs().requires_grad_(True)
+                res_real = torch.linalg.norm(x_real, ord, keepdim=keepdim)
+                res_real.backward()
+
+                self.assertEqual(res.shape, res_real.shape, msg=msg)
+                self.assertEqual(res, res_real, msg=msg)
+                self.assertEqual(x.grad.abs(), x_real.grad, msg=msg)
 
         # Test supported ords
         for keepdim in [False, True]:
