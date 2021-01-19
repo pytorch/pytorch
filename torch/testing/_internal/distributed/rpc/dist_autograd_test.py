@@ -11,6 +11,7 @@ import torch.distributed.rpc as rpc
 import torch.testing._internal.dist_utils
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
+from torch.distributed.rpc import RRef
 from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.dist_utils import (
     dist_init,
@@ -70,8 +71,7 @@ def create_tensor():
 
 
 @torch.jit.script
-def create_torchscript_tensor():
-    # type: () -> Tensor
+def create_torchscript_tensor() -> torch.Tensor:
     return torch.ones((3, 3)).requires_grad_()
 
 
@@ -94,8 +94,7 @@ def my_script_add(t1, t2):
 
 
 @torch.jit.script
-def my_script_ref_add(ref_t1, t2):
-    # type: (RRef[Tensor], Tensor) -> Tensor
+def my_script_ref_add(ref_t1: RRef[torch.Tensor], t2: torch.Tensor) -> torch.Tensor:
     t1 = ref_t1.to_here()
     return torch.add(t1, t2)
 

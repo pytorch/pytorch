@@ -97,6 +97,8 @@ Indexing, Slicing, Joining, Mutating Ops
     nonzero
     reshape
     row_stack
+    scatter
+    scatter_add
     split
     squeeze
     stack
@@ -362,6 +364,8 @@ Reduction Ops
     argmin
     amax
     amin
+    all
+    any
     max
     min
     dist

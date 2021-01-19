@@ -10,6 +10,10 @@
 #include <torch/csrc/distributed/rpc/tensorpipe_utils.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
+#ifdef USE_CUDA_NOT_ROCM
+#include <ATen/cuda/CUDAMultiStreamGuard.h>
+#endif
+
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -43,6 +47,7 @@ std::vector<c10::DeviceIndex> getDevicesForTensors(
       remoteName);
   std::vector<c10::DeviceIndex> deviceIndices;
   deviceIndices.reserve(tensors.size());
+  bool hasCudaTensor = false;
   for (const auto& t : tensors) {
     if (t.device().is_cpu()) {
       deviceIndices.push_back(-1);
@@ -55,7 +60,11 @@ std::vector<c10::DeviceIndex> getDevicesForTensors(
           t.device(),
           " but received a tensor on that device.");
       deviceIndices.push_back(deviceIter->second);
+      hasCudaTensor = true;
     }
+  }
+  if (!hasCudaTensor) {
+    deviceIndices.clear();
   }
   return deviceIndices;
 }
@@ -229,6 +238,30 @@ C10_REGISTER_CREATOR(
     makeCudaIpcChannel);
 
 #endif
+
+} // namespace
+
+namespace {
+
+// This is a wrapper of CUDAMultiStreamGuard to run in both CUDA-enabled and
+// CPU-only environments. When CUDA is not available, all methods are no-ops.
+struct MultiStreamGuard {
+  MultiStreamGuard(const MultiStreamGuard& other) = delete;
+  MultiStreamGuard(MultiStreamGuard&& other) = delete;
+  MultiStreamGuard& operator=(const MultiStreamGuard& rhs) = delete;
+  MultiStreamGuard& operator=(MultiStreamGuard&& rhs) = delete;
+
+#ifndef USE_CUDA_NOT_ROCM
+  explicit MultiStreamGuard(
+      const std::shared_ptr<LazyStreamContext>& /* unused */) {}
+#else
+  explicit MultiStreamGuard(const std::shared_ptr<LazyStreamContext>& ctx)
+      : guard(ctx->getReservedStreams()) {}
+
+ private:
+  at::cuda::CUDAMultiStreamGuard guard;
+#endif
+};
 
 } // namespace
 
@@ -443,26 +476,31 @@ void TensorPipeAgent::onListenerAccepted(
 
 void TensorPipeAgent::pipeRead(
     const std::shared_ptr<tensorpipe::Pipe>& pipe,
-    std::function<void(const tensorpipe::Error&, Message&&)> fn) noexcept {
+    std::function<void(
+        const tensorpipe::Error&,
+        Message&&,
+        std::shared_ptr<LazyStreamContext>)> fn) noexcept {
   pipe->readDescriptor([fn{std::move(fn)}, pipe](
                            const tensorpipe::Error& error,
                            tensorpipe::Message tpMessage) mutable {
     if (error) {
-      fn(error, Message());
+      fn(error, Message(), nullptr);
       return;
     }
 
-    TensorpipeReadBuffers tpBuffers = tensorpipeAllocate(tpMessage);
+    auto ctx = createLazyStreamContext();
+    TensorpipeReadBuffers tpBuffers = tensorpipeAllocate(tpMessage, ctx);
 
     pipe->read(
         std::move(tpMessage),
         [tpBuffers{
              std::make_shared<TensorpipeReadBuffers>(std::move(tpBuffers))},
-         fn{std::move(fn)}](
+         fn{std::move(fn)},
+         ctx{std::move(ctx)}](
             const tensorpipe::Error& error,
             tensorpipe::Message tpMessage) mutable {
           if (error) {
-            fn(error, Message());
+            fn(error, Message(), nullptr);
             return;
           }
 
@@ -471,7 +509,7 @@ void TensorPipeAgent::pipeRead(
           Message rpcMessage = tensorpipeDeserialize(
               std::move(tpMessage), std::move(*tpBuffers));
 
-          fn(error, std::move(rpcMessage));
+          fn(error, std::move(rpcMessage), std::move(ctx));
         });
   });
 }
@@ -480,6 +518,7 @@ void TensorPipeAgent::pipeWrite(
     const std::shared_ptr<tensorpipe::Pipe>& pipe,
     Message&& rpcMessage,
     std::vector<c10::DeviceIndex>&& devices,
+    std::shared_ptr<LazyStreamContext> ctx,
     std::function<void(const tensorpipe::Error&)> fn,
     const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>&
         deviceMap) noexcept {
@@ -487,13 +526,14 @@ void TensorPipeAgent::pipeWrite(
   TensorpipeWriteBuffers tpBuffers;
 
   std::tie(tpMessage, tpBuffers) =
-      tensorpipeSerialize(std::move(rpcMessage), std::move(devices));
+      tensorpipeSerialize(std::move(rpcMessage), std::move(devices), ctx);
 
   pipe->write(
       std::move(tpMessage),
       [tpBuffers{
            std::make_shared<TensorpipeWriteBuffers>(std::move(tpBuffers))},
-       fn{std::move(fn)}](
+       fn{std::move(fn)},
+       ctx{std::move(ctx)}](
           const tensorpipe::Error& error, tensorpipe::Message /* unused */) {
         fn(error);
       });
@@ -501,8 +541,9 @@ void TensorPipeAgent::pipeWrite(
 
 void TensorPipeAgent::sendCompletedResponseMessage(
     std::shared_ptr<tensorpipe::Pipe>& pipe,
-    std::shared_ptr<FutureMessage>& futureResponseMessage,
-    uint64_t messageId) {
+    std::shared_ptr<JitFuture>& futureResponseMessage,
+    uint64_t messageId,
+    std::shared_ptr<LazyStreamContext> ctx) {
   if (!rpcAgentRunning_.load()) {
     LOG(WARNING) << "RPC agent for " << workerInfo_.name_
                  << " won't send response to request #" << messageId << " to "
@@ -514,23 +555,22 @@ void TensorPipeAgent::sendCompletedResponseMessage(
           << " is sending response to request #" << messageId << " to "
           << pipe->getRemoteName();
 
-  const c10::optional<utils::FutureError> error =
-      futureResponseMessage->error();
-  Message&& responseMessage = std::move(*futureResponseMessage).moveValue();
-  responseMessage.setId(messageId);
-  if (!error) {
+  if (!futureResponseMessage->hasError()) {
+    Message&& responseMessage =
+        std::move(*futureResponseMessage->value().toCustomClass<Message>());
+    responseMessage.setId(messageId);
     std::vector<c10::DeviceIndex> devices;
-
     try {
       devices = getDevicesForRemote(pipe->getRemoteName(), responseMessage);
     } catch (const std::exception& e) {
-      responseMessage = createExceptionResponse(e.what(), responseMessage.id());
+      responseMessage = createExceptionResponse(e.what(), messageId);
     }
 
     pipeWrite(
         pipe,
         std::move(responseMessage),
         std::move(devices),
+        std::move(ctx),
         [this, pipe, messageId](const tensorpipe::Error& error) {
           if (error) {
             LOG(WARNING)
@@ -548,8 +588,10 @@ void TensorPipeAgent::sendCompletedResponseMessage(
   } else {
     pipeWrite(
         pipe,
-        createExceptionResponse(error->what(), responseMessage.id()),
-        {},
+        createExceptionResponse(
+            futureResponseMessage->tryRetrieveErrorMessage(), messageId),
+        /* devices */ {},
+        std::move(ctx),
         [this, pipe, messageId](const tensorpipe::Error& error) {
           if (error) {
             LOG(WARNING)
@@ -571,7 +613,9 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
   pipeRead(
       pipe,
       [this, pipe](
-          const tensorpipe::Error& error, Message&& requestMessage) mutable {
+          const tensorpipe::Error& error,
+          Message&& requestMessage,
+          std::shared_ptr<LazyStreamContext> ctx) mutable {
         if (error) {
           // FIXME This is not a correct way to check whether this error was
           // "intentionally" caused by the remote end shutting down. We should
@@ -604,34 +648,41 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
         threadPool_.run([this,
                          pipe,
                          messageId,
-                         requestMessage{std::move(requestMessage)}]() mutable {
+                         requestMessage{std::move(requestMessage)},
+                         ctx{std::move(ctx)}]() mutable {
+          // create guards again as this function runs on a different thread
+          MultiStreamGuard guard(ctx);
           VLOG(1) << "RPC agent for " << workerInfo_.name_
                   << " is running request #" << messageId << " from "
                   << pipe->getRemoteName() << " in thread pool";
 
-          std::shared_ptr<FutureMessage> futureResponseMessage;
+          std::shared_ptr<JitFuture> futureResponseMessage;
           try {
             futureResponseMessage = cb_->operator()(requestMessage);
-          } catch (const std::exception& e) {
-            futureResponseMessage = std::make_shared<FutureMessage>();
-            futureResponseMessage->setError(e.what());
+          } catch (const std::exception& /* unused */) {
+            futureResponseMessage =
+                std::make_shared<JitFuture>(at::AnyClassType::get());
+            futureResponseMessage->setError(std::current_exception());
           }
 
           // Shortcut if immediately done
           if (futureResponseMessage->completed()) {
             decreaseCallCount(serverActiveCalls_);
             sendCompletedResponseMessage(
-                pipe, futureResponseMessage, messageId);
+                pipe, futureResponseMessage, messageId, std::move(ctx));
           } else {
             // Not complete yet
             increaseCallCount(serverActiveAsyncCalls_);
-            futureResponseMessage->addCallback(
-                [this, pipe, futureResponseMessage, messageId]() mutable {
-                  decreaseCallCount(serverActiveCalls_);
-                  decreaseCallCount(serverActiveAsyncCalls_);
-                  sendCompletedResponseMessage(
-                      pipe, futureResponseMessage, messageId);
-                });
+            futureResponseMessage->addCallback([this,
+                                                pipe,
+                                                futureResponseMessage,
+                                                messageId,
+                                                ctx{std::move(ctx)}]() mutable {
+              decreaseCallCount(serverActiveCalls_);
+              decreaseCallCount(serverActiveAsyncCalls_);
+              sendCompletedResponseMessage(
+                  pipe, futureResponseMessage, messageId, std::move(ctx));
+            });
           }
 
           VLOG(1) << "RPC agent for " << workerInfo_.name_
@@ -641,7 +692,7 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
       });
 }
 
-std::shared_ptr<FutureMessage> TensorPipeAgent::send(
+std::shared_ptr<JitFuture> TensorPipeAgent::send(
     const WorkerInfo& toWorkerInfo,
     Message&& requestMessage,
     const float rpcTimeoutSeconds,
@@ -675,7 +726,8 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   ClientPipe& clientPipe = it->second;
   auto& pendingResponseMessage = clientPipe.pendingResponseMessage_;
 
-  auto futureResponseMessage = std::make_shared<AtomicFutureMessage>();
+  auto futureResponseMessage = std::make_shared<AtomicJitFuture>(
+      reverseDeviceMaps_.empty() && opts_.deviceMaps.empty());
   uint64_t messageId = nextMessageID_++;
   requestMessage.setId(messageId);
   pendingResponseMessage[messageId] = futureResponseMessage;
@@ -694,7 +746,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
         requestMessage.tensors(), deviceMap, clientPipe.pipe_->getRemoteName());
   }
 
-  futureResponseMessage->futMsg.addCallback([this]() {
+  futureResponseMessage->jitFuture->addCallback([this]() {
     TORCH_INTERNAL_ASSERT(
         this->threadPool_.inThreadPool(),
         "Future marked complete from outside the thread pool");
@@ -727,10 +779,13 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
   VLOG(1) << "RPC agent for " << workerInfo_.name_ << " is sending request #"
           << messageId << " to " << clientPipe.pipe_->getRemoteName();
 
+  auto ctx = createLazyStreamContext();
+  ctx->waitForCurrentStreams(requestMessage.tensors());
   pipeWrite(
       clientPipe.pipe_,
       std::move(requestMessage),
       std::move(devices),
+      std::move(ctx),
       [this, &clientPipe, messageId](const tensorpipe::Error& error) mutable {
         if (error) {
           if (error.isOfType<tensorpipe::PipeClosedError>() &&
@@ -757,7 +812,9 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
         pipeRead(
             clientPipe.pipe_,
             [this, &clientPipe](
-                const tensorpipe::Error& error, Message&& responseMessage) {
+                const tensorpipe::Error& error,
+                Message&& responseMessage,
+                std::shared_ptr<LazyStreamContext> ctx) {
               if (error) {
                 if (error.isOfType<tensorpipe::PipeClosedError>() &&
                     !rpcAgentRunning_.load()) {
@@ -792,7 +849,7 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
                       << " received response #" << messageId << " from "
                       << clientPipe.pipe_->getRemoteName();
 
-              std::shared_ptr<AtomicFutureMessage> futureResponseMessage;
+              std::shared_ptr<AtomicJitFuture> futureResponseMessage;
               {
                 std::lock_guard<std::mutex> lock(mutex_);
                 // A read error will lead all following callbacks to be
@@ -818,14 +875,14 @@ std::shared_ptr<FutureMessage> TensorPipeAgent::send(
               } else {
                 markFutureAsComplete(
                     std::move(futureResponseMessage),
-                    std::move(responseMessage));
+                    std::move(responseMessage),
+                    std::move(ctx));
               }
             });
       },
       deviceMap);
 
-  return std::shared_ptr<FutureMessage>(
-      futureResponseMessage, &futureResponseMessage->futMsg);
+  return futureResponseMessage->jitFuture;
 }
 
 void TensorPipeAgent::pollTimeoutRpcs() {
@@ -853,9 +910,8 @@ void TensorPipeAgent::pollTimeoutRpcs() {
 
     // Move all these futures to a separate vector so we can process them
     // outside the lock.
-    std::vector<std::pair<
-        std::shared_ptr<AtomicFutureMessage>,
-        std::chrono::milliseconds>>
+    std::vector<
+        std::pair<std::shared_ptr<AtomicJitFuture>, std::chrono::milliseconds>>
         timedOutFutures = std::move(timeoutMap_.begin()->second);
     // We can safely remove this key from the timeoutMap_ since all these
     // futures will be processed.
@@ -1072,16 +1128,20 @@ void TensorPipeAgent::decreaseCallCount(int32_t& count) {
 }
 
 void TensorPipeAgent::markFutureAsComplete(
-    std::shared_ptr<AtomicFutureMessage> futureMessage,
-    Message message) {
-  if (!futureMessage->isComplete.test_and_set()) {
+    std::shared_ptr<AtomicJitFuture> atomicFuture,
+    Message message,
+    std::shared_ptr<LazyStreamContext> ctx) {
+  if (!atomicFuture->isComplete.test_and_set()) {
     // Completing the future will run its callbacks, which could execute
     // arbitrary user code. To prevent blocking or stalling the TensorPipe event
     // loops, we defer this to a worker thread.
     threadPool_.run([this,
-                     futureMessage{std::move(futureMessage)},
-                     message{std::move(message)}]() mutable {
-      futureMessage->futMsg.markCompleted(std::move(message));
+                     atomicFuture{std::move(atomicFuture)},
+                     message{std::move(message)},
+                     ctx{std::move(ctx)}]() mutable {
+      MultiStreamGuard guard(ctx);
+      atomicFuture->jitFuture->markCompleted(
+          IValue(c10::make_intrusive<Message>(std::move(message))));
       // The future's callbacks may schedule further RPCs, increasing the count.
       // Thus we must decrease it after completing the future, otherwise it may
       // briefly dip to zero and trick join into thinking all work is done.
@@ -1091,16 +1151,17 @@ void TensorPipeAgent::markFutureAsComplete(
 }
 
 void TensorPipeAgent::markFutureWithError(
-    std::shared_ptr<AtomicFutureMessage> futureMessage,
+    std::shared_ptr<AtomicJitFuture> atomicFuture,
     std::string errorMsg) {
-  if (!futureMessage->isComplete.test_and_set()) {
+  if (!atomicFuture->isComplete.test_and_set()) {
     // Completing the future will run its callbacks, which could execute
     // arbitrary user code. To prevent blocking or stalling the TensorPipe event
     // loops, we defer this to a worker thread.
     threadPool_.run([this,
-                     futureMessage{std::move(futureMessage)},
+                     atomicFuture{std::move(atomicFuture)},
                      errorMsg{std::move(errorMsg)}]() mutable {
-      futureMessage->futMsg.setError(std::move(errorMsg));
+      atomicFuture->jitFuture->setError(
+          std::make_exception_ptr(std::runtime_error(errorMsg)));
       // The future's callbacks may schedule further RPCs, increasing the count.
       // Thus we must decrease it after completing the future, otherwise it may
       // briefly dip to zero and trick join into thinking all work is done.
