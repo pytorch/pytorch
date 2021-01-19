@@ -161,17 +161,8 @@ __device__ scalar_t reduce(Op op, PTA tensor, int plane) {
 #define MAX_H_BLOCK 128
 #define MAX_BLOCK_SIZE 512
 
-__host__ __forceinline__ int h_last_pow2(unsigned int n) {
-    n |= (n >>  1);
-    n |= (n >>  2);
-    n |= (n >>  4);
-    n |= (n >>  8);
-    n |= (n >> 16);
-    return n - (n >> 1);
-}
-
 __host__ int div_ru(int x, int y) {
-  return h_last_pow2(1 + (x-1)/y);
+  return lastPow2(1 + (x-1)/y);
 }
 
 __host__ void flexible_launch_configs(
@@ -180,11 +171,11 @@ __host__ void flexible_launch_configs(
       dim3 &block,
       dim3 &grid,
       const bool coop_flag = false) {
-  int block_x = std::min(h_last_pow2(stride), OPTIMAL_TILE_W);
-  int block_y = std::min(h_last_pow2(div_ru(reduction , ELEMENTS_PER_THREAD)),
+  int block_x = std::min(lastPow2(stride), OPTIMAL_TILE_W);
+  int block_y = std::min(lastPow2(div_ru(reduction , ELEMENTS_PER_THREAD)),
                          MAX_BLOCK_SIZE / block_x);
   if (block_x * block_y != MAX_BLOCK_SIZE) {
-    block_x = std::min(h_last_pow2(stride), MAX_BLOCK_SIZE / block_y);
+    block_x = std::min(lastPow2(stride), MAX_BLOCK_SIZE / block_y);
   }
 
   int grid_x = div_ru(stride, block_x);
@@ -206,14 +197,14 @@ template<typename T, typename C>
 __device__ __forceinline__ void welford_merge_element(C& count,
                                                       T& mean,
                                                       T& m2n,
-                                                      const C& num_new,
+                                                      const C& count_new,
                                                       const T& mean_new,
                                                       const T& m2n_new) {
-      T factor = T(1.0) / ::max(1, (count + num_new));
+      T factor = T(1.0) / ::max(1, (count + count_new));
       T delta0 = mean - mean_new;
-      mean = (mean_new * num_new + mean * count) * factor;
-      m2n += m2n_new + delta0 * delta0 * num_new * count * factor;
-      count += num_new;
+      mean = (mean_new * count_new + mean * count) * factor;
+      m2n += m2n_new + delta0 * delta0 * count_new * count * factor;
+      count += count_new;
 }
 
 template<typename T, typename C>
@@ -235,11 +226,11 @@ __device__ __forceinline__ void welford_merge_block_vertical(C& count,
     if (threadIdx.y < offset && threadIdx.y + offset < blockDim.y) {
       auto address = address_base + offset * blockDim.x;
       // read shared memory back to register for reduction
-      auto num_new = shmem_count[address];
+      auto count_new = shmem_count[address];
       auto mean_new = shmem_mean[address];
       auto m2n_new = shmem_m2n[address];
 
-      welford_merge_element(count, mean, m2n, num_new, mean_new, m2n_new);
+      welford_merge_element(count, mean, m2n, count_new, mean_new, m2n_new);
 
       // last write is not necessary
       shmem_mean[address_base] = mean;
@@ -1084,11 +1075,11 @@ batch_norm_collect_statistics_channels_last_kernel(
 
       for (int y = threadIdx.y; y < gridDim.y; y += blockDim.y) {
         address_base = c_offset + y * stride;
-        int num_new = c_offset < stride ? staging_count[address_base] : 0;
+        int count_new = c_offset < stride ? staging_count[address_base] : 0;
         accscalar_t mean_new = c_offset < stride ? staging_mean[address_base] : accscalar_t(0.0);
         accscalar_t m2n_new = c_offset < stride ? staging_m2n[address_base] : accscalar_t(0.0);
 
-        welford_merge_element(count_th, mean_th, m2_th, num_new, mean_new, m2n_new);
+        welford_merge_element(count_th, mean_th, m2_th, count_new, mean_new, m2n_new);
       }
 
       welford_merge_block_vertical(count_th, mean_th, m2_th, shmem_count, shmem_mean, shmem_m2n);
