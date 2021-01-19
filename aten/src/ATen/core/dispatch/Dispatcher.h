@@ -478,7 +478,8 @@ C10_ALWAYS_INLINE Return Dispatcher::callWithDispatchKeySet(const TypedOperatorH
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
+// Note: benchmarks showed that this function wasn't getting inlined during calls to at::empty
+C10_ALWAYS_INLINE Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   auto dispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
     .template getDispatchKeySetUnboxed<Args...>(
