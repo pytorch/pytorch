@@ -132,9 +132,14 @@ def parse_args(*arg_descriptors):
         def wrapper(g, *args, **kwargs):
             # some args may be optional, so the length may be smaller
             assert len(arg_descriptors) >= len(args)
-            sig = inspect.signature(fn)
-            arg_names = list(sig.parameters.keys())[1:]
-            args = [_parse_arg(arg, arg_desc, arg_name, fn.__name__)  # type: ignore
+            try:
+                sig = inspect.signature(fn)
+                arg_names = list(sig.parameters.keys())[1:]
+                fn_name = fn.__name__
+            except:
+                arg_names = [None] * len(args)
+                fn_name = None
+            args = [_parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore
                     for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)]  # type: ignore
             # only support _outputs in kwargs
             assert len(kwargs) <= 1
