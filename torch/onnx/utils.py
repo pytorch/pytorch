@@ -437,7 +437,7 @@ def _model_to_graph(model, args, verbose=False,
         args = (args, )
 
     if isinstance(example_outputs, torch.Tensor):
-        example_outputs = (example_outputs)
+        example_outputs = (example_outputs,)
 
     graph, params, torch_out = _create_jit_graph(model, args,
                                                  _retain_param_name,
