@@ -455,27 +455,15 @@ Tensor& add_(Tensor& self, Scalar other, Scalar alpha) {
 }
 
 Tensor remainder(const Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  return native::remainder(self, other_tensor.toType(self.scalar_type()));
+  return native::remainder(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_(Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  return native::remainder_(self, other_tensor.toType(self.scalar_type()));
+  return native::remainder_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& remainder_out(Tensor& result, const Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  return native::remainder_out(result, self, other_tensor.toType(self.scalar_type()));
+  return native::remainder_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
@@ -832,16 +820,12 @@ Tensor logical_xor(const Tensor& self, Scalar other) { return comparison_op(self
 Tensor& logical_xor_(Tensor& self, Scalar other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 
 Tensor& maximum_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum does not support complex inputs.");
-
   auto iter = TensorIterator::binary_op(result, self, other);
   maximum_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor maximum(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum does not support complex inputs.");
-
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
   maximum_stub(iter.device_type(), iter);
@@ -858,16 +842,12 @@ Tensor max(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum does not support complex inputs.");
-
   auto iter = TensorIterator::binary_op(result, self, other);
   minimum_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor minimum(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum does not support complex inputs.");
-
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
   minimum_stub(iter.device_type(), iter);
@@ -898,13 +878,7 @@ Tensor& fmod_out(Tensor & result, const Tensor& self, const Tensor& other) {
 }
 
 Tensor& fmod_out(Tensor & result, const Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  // Issue #47779: https://github.com/pytorch/pytorch/issues/47779
-  at::fmod_out(result, self, other_tensor.to(self.dtype()));
-  return result;
+  return native::fmod_out(result, self, wrapped_scalar_tensor(other));
 }
 
 Tensor fmod(const Tensor& self, const Tensor & other) {
@@ -915,12 +889,7 @@ Tensor fmod(const Tensor& self, const Tensor & other) {
 }
 
 Tensor fmod(const Tensor& self, Scalar other) {
-  Tensor other_tensor = wrapped_scalar_tensor(other);
-  // FIXME: 'other' is converted to match the dtype of 'self' to retain
-  //   BC with TH, but in the future, we should use normal type promotion,
-  //   like in numpy
-  // Issue #47779: https://github.com/pytorch/pytorch/issues/47779
-  return native::fmod(self, other_tensor.to(self.dtype()));
+  return native::fmod(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& fmod_(Tensor& self, const Tensor& other) {
@@ -928,7 +897,7 @@ Tensor& fmod_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& fmod_(Tensor& self, Scalar other) {
-  return native::fmod_out(self, self, other);
+  return native::fmod_(self, wrapped_scalar_tensor(other));
 }
 
 Tensor& logaddexp_out(Tensor& result, const Tensor& self, const Tensor& other) {

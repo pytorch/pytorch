@@ -68,6 +68,7 @@ void BatchTranspose2DCUDAImpl(
   BatchTranspose2DCUDAKernel<TIndex, TData>
       <<<N * dh * dw, dim3(kTileDim, kBlockRows), 0, context->cuda_stream()>>>(
           N, H, W, dh, dw, X, Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 #define DELEGATE_TRANSPOSE_2D_CUDA_IMPL(TIndex, TData, CuBLASFunc) \
@@ -106,6 +107,7 @@ void BatchTranspose2DCUDAImpl(
              dim3(kTileDim, kBlockRows),                           \
              0,                                                    \
              context->cuda_stream()>>>(N, H, W, dh, dw, X, Y);     \
+      C10_CUDA_KERNEL_LAUNCH_CHECK();                              \
     }                                                              \
   }
 DELEGATE_TRANSPOSE_2D_CUDA_IMPL(std::int32_t, float, cublasSgeam)
@@ -157,6 +159,7 @@ void TransposeCUDAImpl(
   TransposeCUDAKernel<TIndex, TData, D>
       <<<M, CAFFE_CUDA_NUM_THREADS, 0, context->cuda_stream()>>>(
           size, X_strides, Y_dims, X, Y);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 } // namespace

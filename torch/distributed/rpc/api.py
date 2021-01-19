@@ -365,11 +365,12 @@ def _rref_typeof_on_owner(rref):
     return type(rref.local_value())
 
 
-def _rref_typeof_on_user(rref):
+def _rref_typeof_on_user(rref, timeout=UNSET_RPC_TIMEOUT):
     return rpc_sync(
         rref.owner(),
         _rref_typeof_on_owner,
-        args=(rref,)
+        args=(rref,),
+        timeout=timeout
     )
 
 
@@ -381,7 +382,7 @@ try:
     # Combine the implementation class and the type class.
     class RRef(PyRRef, Generic[T]):
         pass
-except TypeError as exc:
+except TypeError:
     # TypeError: metaclass conflict: the metaclass of a derived class
     # must be a (non-strict) subclass of the metaclasses of all its bases
     # Mypy doesn't understand __class__ (mypy bug #4177)
