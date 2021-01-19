@@ -744,8 +744,9 @@ struct CodeImpl {
 
     // Emit the expected type.
     size_t types_start = type_table_.size();
+    auto types = node->tys(attr::types);
     for (size_t i = 0; i < num_inputs; i++) {
-      emitType(node->outputs()[i]->type());
+      emitType(types[i]);
     }
     insertInstruction(TYPECHECK, types_start, num_inputs);
   }
@@ -846,7 +847,7 @@ struct CodeImpl {
 
   void emitTupleConstruct(Node* node) {
     bool named =
-        node->output()->type()->expect<TupleType>()->name().has_value();
+        node->output()->type()->expectRef<TupleType>().name().has_value();
     if (named) {
       emitContainerConstruct(NAMED_TUPLE_CONSTRUCT, node);
     } else {
@@ -937,7 +938,7 @@ struct CodeImpl {
         break;
       case prim::CallFunction:
         emitCall(
-            node->inputs().at(0)->type()->expect<FunctionType>()->function(),
+            node->inputs().at(0)->type()->expectRef<FunctionType>().function(),
             node->inputs().slice(1));
         break;
       case prim::CallMethod:
