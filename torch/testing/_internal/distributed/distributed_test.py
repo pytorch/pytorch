@@ -21,6 +21,7 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributed.algorithms.ddp_comm_hooks import default_hooks as default
 from torch.distributed.distributed_c10d import _get_default_group, AllreduceOptions, GroupMember
 from torch.testing._internal.common_utils import FILE_SCHEMA
 from torch.testing._internal.common_distributed import (
@@ -2826,47 +2827,44 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
-        def test_DistributedDataParallel_powerSGD_ddp_comm_hook(self):
-            stream = torch.cuda.Stream(self.rank)
+        def test_ddp_hook_parity(self):
             rank = self.rank
             rank_to_GPU = self._init_multigpu_helper()
-            gpus = list(rank_to_GPU[rank])
-            with torch.cuda.stream(stream):
-                net = torch.nn.parallel.DistributedDataParallel(
-                    torch.nn.Linear(1, 5).to(rank), device_ids=[rank]
+            gpus = [rank_to_GPU[int(r)][0] for r in range(dist.get_world_size())]
+            m = torch.nn.Linear(1, 5)
+            net_with_hook = torch.nn.parallel.DistributedDataParallel(
+                copy.deepcopy(m).to(rank), device_ids=[rank]
+            )
+            process_group = torch.distributed.new_group(gpus)
+            net_with_hook.register_comm_hook(state=process_group, hook=default.allreduce_hook)
+            net_without_hook = torch.nn.parallel.DistributedDataParallel(
+                copy.deepcopy(m).to(rank), device_ids=[rank]
+            )
+            for i in range(10):
+                # Clear gradients manually.
+                for g in [net_without_hook.module.weight.grad, net_with_hook.module.weight.grad]:
+                    if g is not None:
+                        g.requires_grad_(False)
+                        g.zero_()
+                # Forward + BW
+                batch = torch.tensor([rank]).float().cuda(rank)
+                loss = net_without_hook(batch).sum()
+                loss.backward()
+                # For each worker, the gradient on the weight should be worker_rank.
+                grad = net_without_hook.module.weight.grad
+                avg = grad.clone()
+                expected_grad = sum(i for i in range(dist.get_world_size())) / dist.get_world_size()
+                self.assertEqual(
+                    avg[0, 0],
+                    expected_grad,
+                    msg=f"Expected gradient of {expected_grad} but got {avg} on rank {self.rank}",
                 )
-                process_group = torch.distributed.new_group(gpus)
-                state = powerSGD.PowerSGDState(
-                    process_group=process_group, matrix_approximation_rank=1
-                )
-                net.register_comm_hook(state=state, hook=powerSGD.powerSGD_hook)
-                # NOTE: batched_powerSGD_hook cannot pass the following test, because it has a lower accuracy.
-                for i in range(1000):
-                    # Clear gradients manually.
-                    grad = net.module.weight.grad
-                    if grad is not None:
-                        grad.requires_grad_(False)
-                        grad.zero_()
-                    # Forward + BW
-                    batch = torch.tensor([rank]).float().cuda(rank)
-                    loss = net(batch).sum()
-                    loss.backward()
-                    # For each worker, the gradient on the weight should be worker_rank.
-                    grad = net.module.weight.grad
-                    avg = grad.clone()
-                    # All-reducing the gradient averages should give us the gradient
-                    # average. If not, then one of the workers has not correctly
-                    # written back the averaged gradient before this all-reduce call.
-                    dist.all_reduce(avg)
-                    world_size = int(os.environ["WORLD_SIZE"])
-                    avg.div_(world_size)
-                    expected_grad = sum(i for i in range(world_size)) / world_size
-                    self.assertEqual(
-                        avg[0, 0],
-                        expected_grad,
-                        msg=f"Expected gradient of {expected_grad} but got {avg} on rank {self.rank}",
-                    )
-
+                loss_hook = net_with_hook(batch).sum()
+                loss_hook.backward()
+                grad_hook = net_with_hook.module.weight.grad
+                avg_hook = grad_hook.clone()
+                # If below fails, it means that allreduce hook differed from vanilla DDP allreduce.
+                self.assertEqual(avg_hook[0, 0], avg[0, 0])
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
