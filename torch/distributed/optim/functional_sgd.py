@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict
 import torch
 import torch.optim.functional as F
 
@@ -7,10 +7,10 @@ from torch import Tensor
 # Define a TorchScript compatible Functional SGD Optimizer
 # where we use these optimizer in a functional way.
 # Instead of using the `param.grad` when updating parameters,
-# we explicitly let the user pass gradients to the `step` function
-# this is so that we could separate the gradients and parameters
-# and allow multithreaded trainer to update the parameters
-# without data traces on accumulating to the same .grad.
+# we explicitly allow the distributed optimizer pass gradients to
+# the `step` function. In this way, we could separate the gradients
+# and parameters and allow multithreaded trainer to update the
+# parameters without data traces on accumulating to the same .grad.
 # NOTE: This should be only used by distributed optimizer internals
 # and not meant to expose to the user.
 @torch.jit.script
@@ -31,6 +31,7 @@ class _FunctionalSGD(object):
             "weight_decay": weight_decay,
         }
         self.nesterov = nesterov
+        self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
         if len(params) == 0:
             raise ValueError("optimizer got an empty parameter list")
@@ -58,7 +59,15 @@ class _FunctionalSGD(object):
         for param, gradient in zip(params, gradients):
             if gradient is not None:
                 grads.append(gradient)
-                momentum_buffer_list.append(None)
+
+                if param not in self.state:
+                    self.state[param] = {}
+
+                state = self.state[param]
+                if 'momentum_buffer' not in state:
+                    momentum_buffer_list.append(None)
+                else:
+                    momentum_buffer_list.append(state['momentum_buffer'])
 
         with torch.no_grad():
             F.sgd(params,
@@ -69,3 +78,10 @@ class _FunctionalSGD(object):
                   lr,
                   dampening,
                   self.nesterov)
+
+        # update momentum_buffers in state
+        for i, p in enumerate(params):
+            state = self.state[p]
+            momentum_buffer = momentum_buffer_list[i]
+            if momentum_buffer is not None:
+                state['momentum_buffer'] = momentum_buffer
