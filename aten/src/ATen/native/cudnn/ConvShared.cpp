@@ -131,18 +131,10 @@ std::string repro_from_args(const ConvolutionParams& params) {
   ss << "torch.backends.cudnn.benchmark = " << pybool(at::globalContext().benchmarkCuDNN()) << "\n";
   ss << "torch.backends.cudnn.deterministic = " << pybool(params.deterministic) << "\n";
   ss << "torch.backends.cudnn.allow_tf32 = " << pybool(params.allow_tf32) << "\n";
-  ss << "data = torch.randn(";
-  for (int i = 0; i < dim; i++) {
-    ss << params.input_size[i] << ", ";
-  }
-  ss << "dtype=" << full_dtype << ", ";
+  ss << "data = torch.randn(" << ArrayRef<int>(params.input_size, dim) << ", dtype=" << full_dtype << ", ";
   ss <<   "device='cuda', requires_grad=True)" << to_channels_last << "\n";
   ss << "net = torch.nn.Conv" << dim-2 << "d(" << in_channels << ", " << out_channels << ", ";
-  ss <<   "kernel_size=(";
-  for (int i = 2; i < dim; i++) {
-    ss << params.weight_size[i] << ", ";
-  }
-  ss << "), ";
+  ss <<   "kernel_size=" << ArrayRef<int>(&params.weight_size[2], dim - 2) << ", ";
   ss <<   "padding=" << ArrayRef<int>(params.padding, dim-2) << ", ";
   ss <<   "stride=" << ArrayRef<int>(params.stride, dim-2) << ", ";
   ss <<   "dilation=" << ArrayRef<int>(params.dilation, dim-2) << ", ";
