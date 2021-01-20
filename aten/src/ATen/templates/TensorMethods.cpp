@@ -81,6 +81,16 @@ bool Tensor::is_cuda() const {
   return impl_->is_cuda();
 }
 
+bool Tensor::is_xpu() const {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return impl_->is_xpu();
+}
+
+bool is_xpu(Tensor self) {
+  // NB: this is not a native function to avoid dispatching overhead.
+  return self.is_xpu();
+}
+
 NamedTensorMeta* Tensor::get_named_tensor_meta() {
   return static_cast<NamedTensorMeta*>(impl_->named_tensor_meta());
 }
