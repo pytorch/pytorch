@@ -519,6 +519,66 @@ class TestObserver(QuantizationTestCase):
             # verify no crash
             x = obs(x)
 
+    def test_per_channel_observer_no_inplace(self):
+
+        # Same as FakeQuantize, but clones scale+zp during torch.fake_quantize_per_channel_affine.
+        # This prevents in-place modifications to scale+zp if a layer is used multiple times.
+        class FakeQuantizeNoInplace(torch.quantization.FakeQuantize):
+            def forward(self, X):
+                if self.observer_enabled[0] == 1:
+                    self.activation_post_process(X.detach())
+                    _scale, _zero_point = self.calculate_qparams()
+                    _scale, _zero_point = _scale.to(self.scale.device), _zero_point.to(self.zero_point.device)
+                    self.scale.resize_(_scale.shape)
+                    self.scale.copy_(_scale)
+                    self.zero_point.resize_(_zero_point.shape)
+                    self.zero_point.copy_(_zero_point)
+
+                if self.fake_quant_enabled[0] == 1:
+                    if self.is_per_channel:
+                        X = torch.fake_quantize_per_channel_affine(X, self.scale.clone(), self.zero_point.clone(),
+                                                                   self.ch_axis, self.quant_min, self.quant_max)
+                    else:
+                        X = torch.fake_quantize_per_tensor_affine(X, float(self.scale),
+                                                                  int(self.zero_point), self.quant_min,
+                                                                  self.quant_max)
+                return X
+
+
+        no_inplace_per_channel_weight_fake_quant = FakeQuantizeNoInplace.with_args(
+            observer=MovingAveragePerChannelMinMaxObserver,
+            quant_min=-128,
+            quant_max=127,
+            dtype=torch.qint8,
+            qscheme=torch.per_channel_symmetric,
+            reduce_range=False,
+            ch_axis=0)
+
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x0):
+                x1 = self.conv(x0)
+                x2 = self.conv(x1)
+                return x2
+
+        m = M()
+        if False:
+            m.qconfig = torch.quantization.QConfig(
+                activation=FakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                  quant_min=0,
+                                                  quant_max=255,
+                                                  reduce_range=True),
+                weight=no_inplace_per_channel_weight_fake_quant)
+        m.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+        m = torch.quantization.prepare_qat(m)
+        x = torch.randn(4, 1, 4, 4).requires_grad_()
+        y = m(x)
+        # this line fails if there are illegal inplace operations
+        y.backward(torch.randn(4, 1, 4, 4))
+
 
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
