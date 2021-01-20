@@ -376,7 +376,6 @@ static PyObject * THPVariable_index_scalar(PyObject* self, PyObject* args) {
   if (check_has_torch_function(self)) {
     return handle_torch_function(self, "__index__", args);
   }
-  jit::tracer::warn("Converting a tensor to a Python index", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   // TODO: change the condition to `self_.dim() != 0` once we expose scalars
   // in PyTorch.
