@@ -24,9 +24,9 @@ limitations.
 Dynamic Control Flow
 ^^^^^^^^^^^^^^^^^^^^
 
-The main limitation of symbolic tracing is it does not support *dynamic
-control flow*. That is, loops or ``if`` statements where the condition
-may depend on the input values of the program.
+The main limitation of symbolic tracing is it does not currently support
+*dynamic control flow*. That is, loops or ``if`` statements where the
+condition may depend on the input values of the program.
 
 For example, let’s examine the following program:
 
@@ -60,7 +60,7 @@ through your code to show you where this situation happens.
 Static Control Flow
 ~~~~~~~~~~~~~~~~~~~
 
-On the other hand, so called *static control flow* is supported. Static
+On the other hand, so-called *static control flow* is supported. Static
 control flow is loops or ``if`` statements whose value cannot change
 across invocations. Typically, in PyTorch programs, this control flow
 arises for code making decisions about a model’s architecture based on
