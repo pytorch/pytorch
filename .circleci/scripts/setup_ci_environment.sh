@@ -19,7 +19,8 @@ echo "APT::Acquire::Retries \"3\";" | sudo tee /etc/apt/apt.conf.d/80-retries
 retry sudo apt-get update -qq
 retry sudo apt-get -y install \
   moreutils \
-  expect-dev
+  expect-dev \
+  libssl-dev # Install OpenSSL on linux for Gloo TCP-TLS transport
 
 echo "== DOCKER VERSION =="
 docker version
