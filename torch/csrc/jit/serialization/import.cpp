@@ -4,6 +4,7 @@
 #include <ATen/core/ivalue_inl.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
+#include "xplat/caffe2/torch/csrc/jit/api/module.h"
 #if !defined(C10_MOBILE) && !defined(C10_DISABLE_LEGACY_IMPORT)
 #include <torch/csrc/jit/serialization/import_legacy.h>
 #endif
@@ -275,11 +276,35 @@ Module ScriptModuleDeserializer::deserialize(
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::istream& in,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return import_ir_module(cu, in, device, extra_files);
+}
+
+Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
+    std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
   auto reader = torch::make_unique<PyTorchStreamReader>(&in);
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
   return deserializer.deserialize(device, extra_files);
+}
+
+Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
+    const std::string& filename,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return import_ir_module(cu, filename, device, extra_files);
+}
+
+Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
+    const std::string& filename,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return import_ir_module(cu, filename, device, extra_files);
 }
 
 Module import_ir_module(
@@ -295,11 +320,26 @@ Module import_ir_module(
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return import_ir_module(cu, std::move(rai), device, extra_files);
+}
+
+Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
+    std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
   return deserializer.deserialize(device, extra_files);
+}
+
+Module load(
+    std::istream& in,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return load(in, device, extra_files);
 }
 
 Module load(
@@ -313,11 +353,25 @@ Module load(
 
 Module load(
     const std::string& filename,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return load(filename, device, extra_files);
+}
+
+Module load(
+    const std::string& filename,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   auto module = load(std::move(rai), device, extra_files);
   return module;
+}
+
+Module load(
+    std::shared_ptr<ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device) {
+  ExtraFilesMap extra_files;
+  return load(std::move(rai), device, extra_files);
 }
 
 Module load(
