@@ -1419,7 +1419,7 @@ std::tuple<Tensor, Tensor> batch_norm_stats_channels_last_cuda_template(const Te
       reduction_size,
       stride,
       epsilon);
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return std::make_tuple(out_mean, out_invstd);
 }
@@ -1480,7 +1480,7 @@ void batch_norm_elemt_channels_last_cuda_template(
           fuse_relu);
     });
   }
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor>
@@ -1564,7 +1564,7 @@ batch_norm_backward_reduce_cuda_channels_last_template(const at::Tensor& grad_ou
           stride);
     });
   }
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return std::make_tuple(sumn_dy, sum_dy_xmu, grad_weight, grad_bias);
 }
@@ -1630,7 +1630,7 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
           stride);
     });
   }
-  AT_CUDA_CHECK(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
  
   return grad_input;
 }
