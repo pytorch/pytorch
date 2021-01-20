@@ -5032,7 +5032,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'mean', 'inverse', 'triangular_solve', 'solve', 'addcmul',
                 'addcdiv', 'linalg.tensorinv', 'matrix_exp', 'qr',
                 'narrow', 'swapaxes', 'swapdims', 'tensor_split', 'tile',
-                'baddbmm', 'addbmm', 'addmv', 'index_fill'] + separate_complex_tests
+                'baddbmm', 'addbmm', 'addmv'] + separate_complex_tests
 
 # deny list for batched grad computation
 EXCLUDE_BATCHED_GRAD_TESTS = set([
