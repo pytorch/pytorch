@@ -151,13 +151,8 @@ class ZeroRedundancyOptimizer(Optimizer):
         # Current default device is set by the parameters allocated to this rank
         self._device = list(self.per_device_params.keys())[0]
         self.buckets: Dict[torch.device, List[torch.Tensor]] = {}
+        self.bucket_max_size = bucket_cap_kb
 
-        self.bucket_size = bucket_cap_kb
-        for device, per_device in self.per_device_params.items():
-            # Allocate one buffer per rank and per device to group the small parameters
-            self.buckets[device] = [
-                torch.zeros(bucket_cap_kb, dtype=per_device[0][0].dtype, device=device) for _ in range(len(per_device))
-            ]
         self.should_bucket_param: List[bool] = []
         self.work_handles: Deque[Any] = deque()
         self._setup_bucket_strategy()
@@ -223,7 +218,6 @@ class ZeroRedundancyOptimizer(Optimizer):
                     )
                 else:
                     # Fetch the optim state from the other replicas
-                    logging.warning(f"{self.rank} broadcast - pull from {global_rank}:{self.group}")
                     replica_state = _broadcast_object(
                         empty_messenger, src_rank=global_rank, group=self.group, dist_device=self._device
                     )
@@ -236,19 +230,15 @@ class ZeroRedundancyOptimizer(Optimizer):
                 # Default to CPU space to gain some memory headroom
                 if rank == self.rank:
                     # Send the state to the reference replica
-                    logging.warning(f"{self.rank} broadcast - push from {global_rank}:{self.group}")
                     _ = _broadcast_object(
                         self.local_state_dict(), src_rank=self.global_rank, group=self.group, dist_device=self._device
                     )
 
                 elif rank != recipient_rank:
                     # Discard this tensor/rank, broadcast was being use for compatibility reasons
-                    logging.warning(f"{self.rank} broadcast - pull from {global_rank}:{self.group} - discard")
                     _ = _broadcast_object(
                         empty_messenger, src_rank=global_rank, group=self.group, dist_device=self._device
                     )
-
-            logging.warning(f"{self.rank} done")
 
     def partition_parameters(self) -> List[List[Dict]]:
         """Partitions parameters across distributed data parallel ranks.
@@ -508,6 +498,14 @@ class ZeroRedundancyOptimizer(Optimizer):
         network requests have been issued. The parameters which are part of a bucket become tensor views.
         """
 
+        # Allocate one buffer per rank and per device to group the small parameters
+        for device, per_device in self.per_device_params.items():
+            self.buckets[device] = [
+                torch.zeros(self.bucket_max_size, dtype=per_device[0][0].dtype, device=device)
+                for _ in range(len(per_device))
+            ]
+
+        # Pack the smallest elements in a bucket, depending on their owner shard-wise
         for device, per_rank_params in self.per_device_params.items():
             for dst_rank, params in enumerate(per_rank_params):
                 offset = 0
@@ -515,7 +513,7 @@ class ZeroRedundancyOptimizer(Optimizer):
                 for param in params:
                     # Criteria to decide whether this parameter is to be bucketed or not:
                     # - enough room in the bucket
-                    if param.requires_grad and (offset + param.numel()) < self.bucket_size:
+                    if param.requires_grad and (offset + param.numel()) < self.bucket_max_size:
                         self.should_bucket_param.append(True)
 
                         # This parameter becomes a view of the bucket

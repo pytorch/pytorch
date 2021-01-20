@@ -51,8 +51,8 @@ class TestZeroRedundancyOptimizer(MultiProcessTestCase):
         except OSError:
             pass
 
-    def dist_init(self, rank):
-        store = dist.FileStore(self.file_name, self.world_size)
+    def dist_init(self, rank, world_size=-1):
+        store = dist.FileStore(self.file_name, self.world_size if world_size < 1 else world_size)
         return dist.init_process_group(backend=BACKEND, store=store, rank=rank, world_size=self.world_size)
 
 
@@ -236,7 +236,11 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
     def test_step(self):
         """ Check that the ZeroRedundancyOptimizer wrapper properly exposes the `.step()` interface"""
-        self.dist_init(self.rank)
+        if self.rank > 1 or (BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < 2):
+            return
+
+        self.dist_init(self.rank, world_size=2)
+
         context = suppress() if not torch.cuda.is_available() else torch.cuda.device(self.rank)
 
         with context:
@@ -258,7 +262,12 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
     def test_step_with_closure(self):
         """ Check that the ZeroRedundancyOptimizer wrapper properly exposes the `.step(closure)` interface"""
-        self.dist_init(self.rank)
+
+        if self.rank > 1 or (BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < 2):
+            return
+
+        self.dist_init(self.rank, world_size=2)
+
         context = suppress() if not torch.cuda.is_available() else torch.cuda.device(self.rank)
 
         with context:
@@ -471,7 +480,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             check(optimizer)
 
     @skip_if_no_gpu
-    def test_parity(self):
+    def test_pytorch_parity(self):
         """When combined with DDP, check that ZeroRedundancyOptimizer(optimizer) and the same monolithic optimizer
         give the exact same results
         """
