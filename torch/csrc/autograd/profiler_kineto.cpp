@@ -2,12 +2,12 @@
 
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/cuda.h>
 
 #include <sstream>
 
 #ifdef USE_KINETO
 #include <pthread.h>
+#include <torch/cuda.h>
 #include <libkineto.h>
 #endif
 
