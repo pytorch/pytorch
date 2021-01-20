@@ -342,8 +342,8 @@ class TestForeach(TestCase):
                 tensors = self._get_test_data(device, dtype, N)
                 scalar = 3
 
-                if dtype == torch.bool and foreach_bin_op == foreach_bin_op == torch._foreach_sub:
-                    if foreach_bin_op == foreach_bin_op == torch._foreach_sub:
+                if dtype == torch.bool:
+                    if foreach_bin_op == torch._foreach_sub:
                         with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator,"):
                             res = foreach_bin_op(tensors, scalar)
                         with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator,"):
@@ -382,7 +382,7 @@ class TestForeach(TestCase):
                 res = foreach_bin_op(tensors, scalar)
 
                 # In case of In-place division with integers, we can't change the dtype
-                if foreach_bin_op_ == torch._foreach_div_ and dtype in torch.testing.integral_types() and self.device_type == "cpu":
+                if foreach_bin_op_ == torch._foreach_div_ and dtype in torch.testing.integral_types():
                     with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
                         [t.div_(scalar) for t in tensors]
 
@@ -393,13 +393,8 @@ class TestForeach(TestCase):
                 self.assertEqual(res, expected)
 
                 # In case of In-place op, we can't change the dtype
-                if (expected[0].dtype == dtype):
-                    foreach_bin_op_(tensors, scalar)
-                    self.assertEqual(tensors, expected)
-                else:
-                    with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
-                        foreach_bin_op_(tensors, scalar)
-
+                foreach_bin_op_(tensors, scalar)
+                self.assertEqual(tensors, expected)
 
     # TODO[Fix scalar list]:
     # We need to update codegen to correctly handle function overloads with float[] and int[].
@@ -629,7 +624,7 @@ class TestForeach(TestCase):
                 res = foreach_bin_op(tensors, scalar)
                 self.assertEqual(expected, res)
 
-                if dtype in torch.testing.integral_types_and(torch.bool) and foreach_bin_op == foreach_bin_op == torch._foreach_div:
+                if dtype in torch.testing.integral_types_and(torch.bool) and foreach_bin_op == torch._foreach_div:
                     with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output"):
                         foreach_bin_op_(tensors, scalar)
                 else:

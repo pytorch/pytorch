@@ -214,6 +214,14 @@ class TORCH_CUDA_API CudaCodeGen : public CodeGen {
     call(std::vector<CallArg>({CallArg(ts)...}));
   }
 
+  at::Tensor empty_strided(
+      c10::IntArrayRef size,
+      c10::IntArrayRef stride,
+      c10::optional<c10::ScalarType> dtype_opt,
+      c10::optional<c10::Layout> layout_opt,
+      c10::optional<c10::Device> device_opt,
+      c10::optional<bool> pin_memory_opt) override;
+
   const std::vector<const Expr*>& gpu_block_extents() const {
     return cuda_analysis_->gpu_block_extents();
   }
