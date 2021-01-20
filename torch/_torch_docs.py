@@ -5105,6 +5105,35 @@ Example::
     tensor([3, 2, 4])
 """.format(**common_args))
 
+add_docstr(torch.fmax, r"""
+fmax(input, other, *, out=None) -> Tensor
+
+Computes the element-wise maximum of :attr:`input` and :attr:`other`. 
+
+This is like :func:`torch.maximum` except it handles NaNs differently: 
+if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the maximum. 
+Only if both elements are NaN is NaN propagated.
+
+This function is a wrapper around C++'s ``std::fmax`` and is similar to NumPy's ``fmax`` function.
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer and floating-point inputs.
+
+Args:
+    {input}
+    other (Tensor): the second input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([9.7, float('nan'), 3.1, float('nan')])
+    >>> b = torch.tensor([-2.2, 0.5, float('nan'), float('nan')])
+    >>> torch.fmax(a, b)
+    tensor([9.7000, 0.5000, 3.1000,    nan])
+""".format(**common_args))
+
 add_docstr(torch.amax,
            r"""
 amax(input, dim, keepdim=False, *, out=None) -> Tensor
@@ -5549,6 +5578,35 @@ Example::
     >>> b = torch.tensor((3, 0, 4))
     >>> torch.minimum(a, b)
     tensor([1, 0, -1])
+""".format(**common_args))
+
+add_docstr(torch.fmin, r"""
+fmin(input, other, *, out=None) -> Tensor
+
+Computes the element-wise minimum of :attr:`input` and :attr:`other`. 
+
+This is like :func:`torch.minimum` except it handles NaNs differently: 
+if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the minimum. 
+Only if both elements are NaN is NaN propagated.
+
+This function is a wrapper around C++'s ``std::fmin`` and is similar to NumPy's ``fmin`` function.
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer and floating-point inputs.
+
+Args:
+    {input}
+    other (Tensor): the second input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([2.2, float('nan'), 2.1, float('nan')])
+    >>> b = torch.tensor([-9.3, 0.1, float('nan'), float('nan')])
+    >>> torch.fmin(a, b)
+    tensor([-9.3000, 0.1000, 2.1000,    nan])
 """.format(**common_args))
 
 add_docstr(torch.amin,

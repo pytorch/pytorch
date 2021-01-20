@@ -416,6 +416,56 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad):
     else:
         return (input, )
 
+def sample_inputs_addr(op_info, device, dtype, requires_grad):
+    input1 = SampleInput((make_tensor((S, M), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((S, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((M, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad)))
+
+    input2 = SampleInput((make_tensor((), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((S, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((M, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad)))
+    if dtype.is_complex:
+        alpha, beta = 0.1 + 0.3j, 0.4 + 0.6j
+    elif dtype.is_floating_point:
+        alpha, beta = 0.2, 0.6
+    else:
+        alpha, beta = 2, 3
+
+    input3 = SampleInput((make_tensor((S, M), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((S, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((M, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad)),
+                         kwargs=dict(beta=beta, alpha=alpha))
+
+    input4 = SampleInput((make_tensor((), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((S, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((M, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad)),
+                         kwargs=dict(beta=beta, alpha=alpha))
+
+    return (input1, input2, input3, input4)
 
 def sample_inputs_xlogy(self, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S), device, dtype,
@@ -958,6 +1008,18 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=[torch.bfloat16, torch.float16, torch.cfloat, torch.cdouble]),),
            sample_inputs_func=sample_inputs_addmm),
+    OpInfo('addr',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           # Reference: https://github.com/pytorch/pytorch/issues/50747
+           test_inplace_grad=False,
+           skips=(
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.float16, torch.cfloat, torch.cdouble]),
+               # Reference: https://github.com/pytorch/pytorch/issues/50747
+               SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),),
+           sample_inputs_func=sample_inputs_addr),
+
     UnaryUfuncInfo('asin',
                    ref=np.arcsin,
                    domain=(-1, 1),
@@ -1430,6 +1492,7 @@ op_db: List[OpInfo] = [
                    handles_complex_extremals=False),
     UnaryUfuncInfo('sqrt',
                    ref=np.sqrt,
+                   supports_sparse=True,
                    domain=(0, float('inf')),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -2266,10 +2329,6 @@ def method_tests():
         ('addmv', (1,), ((S, M), (M,)), 'broadcast_lhs_coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
         ('addmv', (), ((S, M), (M,)), 'scalar_broadcast_lhs'),
         ('addmv', (), ((S, M), (M,)), 'scalar_broadcast_lhs_coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('addr', (S, M), ((S,), (M,)),),
-        ('addr', (), ((S,), (M,)), 'broadcast_lhs'),
-        ('addr', (S, M), ((S,), (M,)), 'coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('addr', (), ((S,), (M,)), 'broadcast_lhs_coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
         ('dot', (L,), ((L,),), '', (True,)),
         ('vdot', (L,), ((L,),),),
         ('mm', (S, M), ((M, S),), '', (True,)),
@@ -2633,6 +2692,8 @@ def method_tests():
          'scalar_broadcast_rhs'),
         ('maximum', (S, S), ((S, S),)),
         ('minimum', (S, S), ((S, S),)),
+        ('fmax', (S, S), ((S, S),)),
+        ('fmin', (S, S), ((S, S),)),
         ('resize_', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
         ('resize_', (), (dont_convert(()),), 'scalar'),
         ('resize_', (), (torch.Size([1, 1, 1])), 'scalar_to_dims'),

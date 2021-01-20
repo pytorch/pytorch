@@ -15,6 +15,8 @@ const char* toString(DispatchKey t) {
       return "HIP";
     case DispatchKey::FPGA:
       return "FPGA";
+    case DispatchKey::XPU:
+      return "XPU";
     case DispatchKey::MSNPU:
       return "MSNPU";
     case DispatchKey::XLA:
@@ -35,6 +37,8 @@ const char* toString(DispatchKey t) {
       return "QuantizedCPU";
     case DispatchKey::QuantizedCUDA:
       return "QuantizedCUDA";
+    case DispatchKey::QuantizedXPU:
+      return "QuantizedXPU";
 
     case DispatchKey::ComplexCPU:
       return "ComplexCPU";
@@ -52,6 +56,8 @@ const char* toString(DispatchKey t) {
       return "SparseCUDA";
     case DispatchKey::SparseHIP:
       return "SparseHIP";
+    case DispatchKey::SparseXPU:
+      return "SparseXPU";
 
     case DispatchKey::NestedTensor:
       return "NestedTensor";
