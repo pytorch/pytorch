@@ -85,6 +85,7 @@ Features described in this documentation are classified by release status:
    torch.utils.mobile_optimizer <mobile_optimizer>
    torch.utils.model_zoo <model_zoo>
    torch.utils.tensorboard <tensorboard>
+   torch.distributed.optim.ZeroRedundancyOptimizer <zero_redundancy_optimizer>
    type_info
    named_tensor
    name_inference
