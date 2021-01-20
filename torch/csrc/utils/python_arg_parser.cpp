@@ -262,6 +262,28 @@ auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyOb
   return handle_torch_function(r, nullptr, args, kwargs, torch_api, module_name);
 }
 
+auto handle_torch_function_indexing(PyObject* self, PyObject* index, PyObject* val) -> PyObject* {
+  const char *func_name = (val == nullptr) ? "__getitem__" : "__setitem__";
+  py::object index_tup;
+  if (PyTuple_Check(index)) {
+    index_tup = py::reinterpret_borrow<py::object>(index);
+  }
+  else {
+    index_tup = py::make_tuple(py::handle(index));
+  }
+  std::vector<py::handle> overridable_args;
+  is_tensor_and_append_overloaded(self, &overridable_args);
+  Py_ssize_t size = PyTuple_GET_SIZE(index_tup.ptr());
+  for (Py_ssize_t i = 0; i < size; i++) {
+    PyObject *obj = PyTuple_GetItem(index_tup.ptr(), i);
+    is_tensor_and_append_overloaded(obj, &overridable_args);
+  }
+  if (val != nullptr) is_tensor_and_append_overloaded(val, &overridable_args);
+  py::object func = PyObject_FastGetAttrString(THPVariableClass, (char *)func_name);
+  py::object args = (val == nullptr) ? py::make_tuple(py::handle(self), py::handle(index)) : py::make_tuple(py::handle(self), py::handle(index), py::handle(val));
+  return handle_torch_function_no_python_arg_parser(overridable_args, args.ptr(), nullptr, func_name, func.ptr(), "torch.Tensor");
+}
+
 /*
  *  obj has a __torch_function__ implementation and may either be a
  *  subclass of Tensor or a Tensor-like duck type. We may need to
