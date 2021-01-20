@@ -331,6 +331,8 @@ _(aten, flipud) \
 _(aten, floor) \
 _(aten, fmod) \
 _(aten, fmod_) \
+_(aten, fmax) \
+_(aten, fmin) \
 _(aten, frac) \
 _(aten, fractional_max_pool2d) \
 _(aten, fractional_max_pool2d_backward) \
