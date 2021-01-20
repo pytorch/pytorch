@@ -155,11 +155,10 @@ __device__ scalar_t reduce(Op op, PTA tensor, int plane) {
   return shared[0];
 }
 
-#define ELEMENTS_PER_ITER 4 // enables concurrency within each thread to hide latency
-#define ELEMENTS_PER_THREAD 16
-#define OPTIMAL_TILE_W 32
-#define MAX_H_BLOCK 128
-#define MAX_BLOCK_SIZE 512
+constexpr int ELEMENTS_PER_ITER = 4; // enables concurrency within each thread to hide latency
+constexpr int ELEMENTS_PER_THREAD = 16;
+constexpr int OPTIMAL_TILE_W = 32;
+constexpr int MAX_H_BLOCK = 128;
 
 __host__ int div_ru(int x, int y) {
   return lastPow2(1 + (x-1)/y);
