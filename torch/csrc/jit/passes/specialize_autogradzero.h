@@ -13,7 +13,7 @@ namespace jit {
 // marked Unknown and not optimized.
 TORCH_API void specializeAutogradZero(std::shared_ptr<Graph> g);
 
-class ProfilingRecord;
+struct ProfilingRecord;
 
 TORCH_API void InsertProfileNodesForSpecializeAutogradZero(ProfilingRecord* pr);
 
