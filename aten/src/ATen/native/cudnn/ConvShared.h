@@ -19,7 +19,7 @@ struct ConvolutionParams
 {
   cudnnDataType_t dataType;
   int input_size[2 + max_dim];
-  int input_dim;
+  uint8_t input_dim;
   at::MemoryFormat memory_format;
   int weight_size[2 + max_dim];
   int padding[max_dim];
