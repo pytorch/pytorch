@@ -37,7 +37,7 @@ def split_module(
         if def_partition_name != use_partition_name:
             if def_partition_name is not None:
                 def_partition = partitions[def_partition_name]
-                def_partition.outputs[def_node.name] = None
+                def_partition.outputs.setdefault(def_node.name)
                 if use_partition_name is not None:
                     def_partition.partition_dependents[use_partition_name] = None
 

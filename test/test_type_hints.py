@@ -149,32 +149,12 @@ class TestTypeHints(TestCase):
             except OSError:
                 raise unittest.SkipTest('cannot symlink') from None
             (stdout, stderr, result) = mypy.api.run([
-                '--follow-imports', 'silent',
-                '--check-untyped-defs',
+                '--cache-dir=.mypy_cache/doc',
                 '--no-strict-optional',  # needed because of torch.lu_unpack, see gh-36584
                 os.path.abspath(fn),
             ])
             if result != 0:
                 self.fail(f"mypy failed:\n{stdout}")
-
-    @unittest.skipIf(not HAVE_MYPY, "need mypy")
-    def test_type_hint_examples(self):
-        """
-        Runs mypy over all the test examples present in
-        `type_hint_tests` directory.
-        """
-        test_path = os.path.dirname(os.path.realpath(__file__))
-        examples_folder = os.path.join(test_path, "type_hint_tests")
-        examples = os.listdir(examples_folder)
-        for example in examples:
-            example_path = os.path.join(examples_folder, example)
-            (stdout, stderr, result) = mypy.api.run([
-                '--follow-imports', 'silent',
-                '--check-untyped-defs',
-                example_path,
-            ])
-            if result != 0:
-                self.fail(f"mypy failed for example {example}\n{stdout}")
 
     @unittest.skipIf(not HAVE_MYPY, "need mypy")
     def test_run_mypy(self):
@@ -205,10 +185,7 @@ class TestTypeHints(TestCase):
         # TODO: Would be better not to chdir here, this affects the entire
         # process!
         with set_cwd(repo_rootdir):
-            (stdout, stderr, result) = mypy.api.run([
-                '--check-untyped-defs',
-                '--follow-imports', 'silent',
-            ])
+            (stdout, stderr, result) = mypy.api.run([])
 
         if result != 0:
             self.fail(f"mypy failed: {stdout} {stderr}")

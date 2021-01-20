@@ -163,6 +163,21 @@ class TestTEFuser(JitTestCase):
     def test_abs_cuda(self):
         self._test_fused_abs(device="cuda")
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_unsqueeze_size_calculation(self):
+
+        def foo(b, d):
+            x = d.unsqueeze(1)
+            y = x * 42.
+            z = b + y
+            r = z / 42.
+            return r
+
+        inputs = (torch.rand(20, 28, device='cuda', requires_grad=True), torch.rand(20, device='cuda'))
+
+        scripted = self.checkScript(foo, inputs)
+        self.assertAllFused(scripted.graph_for(*inputs))
+
     def _test_zero_element_tensors(self, device="cpu"):
         def decode(sin_t, cos_t):
             theta = torch.atan2(sin_t.float(), cos_t.float())
@@ -763,8 +778,7 @@ class TestTEFuser(JitTestCase):
 
     def test_scalar_arg(self):
         for device in self.devices:
-            def fn_test_scalar_arg(x, p):
-                # type: (Tensor, float) -> Tensor
+            def fn_test_scalar_arg(x: torch.Tensor, p: float) -> torch.Tensor:
                 return p * (x * x + x)
 
             x = torch.randn(4, 4, dtype=torch.float, device=device)
@@ -776,8 +790,7 @@ class TestTEFuser(JitTestCase):
 
             # use another function otherwise we will bailout
             # and won't be able to do fused checks
-            def fn_test_scalar_arg_requires_grad(x, p):
-                # type: (Tensor, float) -> Tensor
+            def fn_test_scalar_arg_requires_grad(x: torch.Tensor, p: float) -> torch.Tensor:
                 return p * (x * x + x)
 
             scripted = torch.jit.script(fn_test_scalar_arg_requires_grad)

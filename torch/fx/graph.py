@@ -8,7 +8,7 @@ import keyword
 import re
 
 def _shadows_builtin_name(name: str) -> bool:
-    return name in builtins.__dict__ or name in keyword.kwlist or name in {'inf', 'nan'}
+    return name in builtins.__dict__ or name in keyword.kwlist or name in {'inf', 'nan', 'NoneType'}
 
 def _is_magic(x: str) -> bool:
     return x.startswith('__') and x.endswith('__')
@@ -141,11 +141,11 @@ class Graph:
 
         graph(x):
             %linear_weight : [#users=1] = self.linear.weight
-            %add_1 : [#users=1] = call_function[target=<built-in function add>](args = (%x, %linear_weight), kwargs = {})
+            %add_1 : [#users=1] = call_function[target=operator.add](args = (%x, %linear_weight), kwargs = {})
             %linear_1 : [#users=1] = call_module[target=linear](args = (%add_1,), kwargs = {})
             %relu_1 : [#users=1] = call_method[target=relu](args = (%linear_1,), kwargs = {})
-            %sum_1 : [#users=1] = call_function[target=<built-in method sum of type object at 0x7ff2da9dc300>](args = (%relu_1,), kwargs = {dim: -1}) # noqa: B950
-            %topk_1 : [#users=1] = call_function[target=<built-in method topk of type object at 0x7ff2da9dc300>](args = (%sum_1, 3), kwargs = {}) # noqa: B950
+            %sum_1 : [#users=1] = call_function[target=torch.sum](args = (%relu_1,), kwargs = {dim: -1})
+            %topk_1 : [#users=1] = call_function[target=torch.topk](args = (%sum_1, 3), kwargs = {})
             return topk_1
 
     For the semantics of operations represented in the ``Graph``, please see :class:`Node`.

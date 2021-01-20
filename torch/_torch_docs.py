@@ -3137,12 +3137,18 @@ Computes the element-wise remainder of division.
 The dividend and divisor may contain both for integer and floating point
 numbers. The remainder has the same sign as the dividend :attr:`input`.
 
-When :attr:`other` is a tensor, the shapes of :attr:`input` and
-:attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
+
+.. note::
+
+    When the divisor is zero, returns ``NaN`` for floating point dtypes
+    on both CPU and GPU; raises ``RuntimeError`` for integer division by
+    zero on CPU; Integer division by zero on GPU may return any value.
 
 Args:
     input (Tensor): the dividend
-    other (Tensor or float): the divisor, which may be either a number or a tensor of the same shape as the dividend
+    other (Tensor or Scalar): the divisor
 
 Keyword args:
     {out}
@@ -3151,9 +3157,8 @@ Example::
 
     >>> torch.fmod(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
     tensor([-1., -0., -1.,  1.,  0.,  1.])
-    >>> torch.fmod(torch.tensor([1., 2, 3, 4, 5]), 1.5)
-    tensor([ 1.0000,  0.5000,  0.0000,  1.0000,  0.5000])
-
+    >>> torch.fmod(torch.tensor([1, 2, 3, 4, 5]), 1.5)
+    tensor([1.0000, 0.5000, 0.0000, 1.0000, 0.5000])
 
 """.format(**common_args))
 
@@ -5100,6 +5105,35 @@ Example::
     tensor([3, 2, 4])
 """.format(**common_args))
 
+add_docstr(torch.fmax, r"""
+fmax(input, other, *, out=None) -> Tensor
+
+Computes the element-wise maximum of :attr:`input` and :attr:`other`. 
+
+This is like :func:`torch.maximum` except it handles NaNs differently: 
+if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the maximum. 
+Only if both elements are NaN is NaN propagated.
+
+This function is a wrapper around C++'s ``std::fmax`` and is similar to NumPy's ``fmax`` function.
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer and floating-point inputs.
+
+Args:
+    {input}
+    other (Tensor): the second input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([9.7, float('nan'), 3.1, float('nan')])
+    >>> b = torch.tensor([-2.2, 0.5, float('nan'), float('nan')])
+    >>> torch.fmax(a, b)
+    tensor([9.7000, 0.5000, 3.1000,    nan])
+""".format(**common_args))
+
 add_docstr(torch.amax,
            r"""
 amax(input, dim, keepdim=False, *, out=None) -> Tensor
@@ -5544,6 +5578,35 @@ Example::
     >>> b = torch.tensor((3, 0, 4))
     >>> torch.minimum(a, b)
     tensor([1, 0, -1])
+""".format(**common_args))
+
+add_docstr(torch.fmin, r"""
+fmin(input, other, *, out=None) -> Tensor
+
+Computes the element-wise minimum of :attr:`input` and :attr:`other`. 
+
+This is like :func:`torch.minimum` except it handles NaNs differently: 
+if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the minimum. 
+Only if both elements are NaN is NaN propagated.
+
+This function is a wrapper around C++'s ``std::fmin`` and is similar to NumPy's ``fmin`` function.
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer and floating-point inputs.
+
+Args:
+    {input}
+    other (Tensor): the second input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([2.2, float('nan'), 2.1, float('nan')])
+    >>> b = torch.tensor([-9.3, 0.1, float('nan'), float('nan')])
+    >>> torch.fmin(a, b)
+    tensor([-9.3000, 0.1000, 2.1000,    nan])
 """.format(**common_args))
 
 add_docstr(torch.amin,
@@ -7291,17 +7354,17 @@ Computes the element-wise remainder of division.
 The dividend and divisor may contain both for integer and floating point
 numbers. The remainder has the same sign as the divisor :attr:`other`.
 
-When :attr:`other` is a tensor, the shapes of :attr:`input` and
-:attr:`other` must be :ref:`broadcastable <broadcasting-semantics>`.
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
 
-Note:
+.. note::
     Complex inputs are not supported. In some cases, it is not mathematically
     possible to satisfy the definition of a modulo operation with complex numbers.
+    See :func:`torch.fmod` for how division by zero is handled.
 
 Args:
     input (Tensor): the dividend
-    other (Tensor or float): the divisor that may be either a number or a
-                               Tensor of the same shape as the dividend
+    other (Tensor or Scalar): the divisor
 
 Keyword args:
     {out}
@@ -7310,7 +7373,7 @@ Example::
 
     >>> torch.remainder(torch.tensor([-3., -2, -1, 1, 2, 3]), 2)
     tensor([ 1.,  0.,  1.,  1.,  0.,  1.])
-    >>> torch.remainder(torch.tensor([1., 2, 3, 4, 5]), 1.5)
+    >>> torch.remainder(torch.tensor([1, 2, 3, 4, 5]), 1.5)
     tensor([ 1.0000,  0.5000,  0.0000,  1.0000,  0.5000])
 
 .. seealso::
@@ -8472,6 +8535,11 @@ flip(input, dims) -> Tensor
 
 Reverse the order of a n-D tensor along given axis in dims.
 
+.. note::
+    `torch.flip` makes a copy of :attr:`input`'s data. This is different from NumPy's `np.flip`,
+    which returns a view in constant time. Since copying a tensor's data is more work than viewing that data,
+    `torch.flip` is expected to be slower than `np.flip`.
+
 Args:
     {input}
     dims (a list or tuple): axis to flip on
@@ -8497,13 +8565,18 @@ add_docstr(torch.fliplr,
            r"""
 fliplr(input) -> Tensor
 
-Flip array in the left/right direction, returning a new tensor.
+Flip tensor in the left/right direction, returning a new tensor.
 
 Flip the entries in each row in the left/right direction.
 Columns are preserved, but appear in a different order than before.
 
 Note:
-    Equivalent to input[:,::-1]. Requires the array to be at least 2-D.
+    Requires the tensor to be at least 2-D.
+
+.. note::
+    `torch.fliplr` makes a copy of :attr:`input`'s data. This is different from NumPy's `np.fliplr`,
+    which returns a view in constant time. Since copying a tensor's data is more work than viewing that data,
+    `torch.fliplr` is expected to be slower than `np.fliplr`.
 
 Args:
     input (Tensor): Must be at least 2-dimensional.
@@ -8523,13 +8596,18 @@ add_docstr(torch.flipud,
            r"""
 flipud(input) -> Tensor
 
-Flip array in the up/down direction, returning a new tensor.
+Flip tensor in the up/down direction, returning a new tensor.
 
 Flip the entries in each column in the up/down direction.
 Rows are preserved, but appear in a different order than before.
 
 Note:
-    Equivalent to input[::-1,...]. Requires the array to be at least 1-D.
+    Requires the tensor to be at least 1-D.
+
+.. note::
+    `torch.flipud` makes a copy of :attr:`input`'s data. This is different from NumPy's `np.flipud`,
+    which returns a view in constant time. Since copying a tensor's data is more work than viewing that data,
+    `torch.flipud` is expected to be slower than `np.flipud`.
 
 Args:
     input (Tensor): Must be at least 1-dimensional.
