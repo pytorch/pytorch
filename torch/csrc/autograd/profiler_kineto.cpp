@@ -7,6 +7,7 @@
 
 #ifdef USE_KINETO
 #include <pthread.h>
+#include <torch/cuda.h>
 #include <libkineto.h>
 #endif
 
@@ -360,6 +361,10 @@ void ProfilerResult::save(const std::string& path) {
 
 bool kinetoAvailable() {
 #ifdef USE_KINETO
+  // TODO: enable Kineto profiler for non-CUDA systems
+  if (!torch::cuda::is_available()) {
+    return false;
+  }
   return true;
 #else
   return false;
