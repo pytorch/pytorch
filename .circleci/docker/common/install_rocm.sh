@@ -55,7 +55,6 @@ install_centos() {
   yum install -y kmod
   yum install -y wget
   yum install -y openblas-devel
-#  yum install -y openssl-devel # Install OpenSSL on linux for Gloo TCP-TLS transport
 
   yum install -y epel-release
   yum install -y dkms kernel-headers-`uname -r` kernel-devel-`uname -r`
