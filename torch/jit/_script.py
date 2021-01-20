@@ -684,6 +684,8 @@ if _enabled:
         "forward",
         "register_buffer",
         "register_parameter",
+        "register_forward_pre_hook",
+        "register_forward_hook",
         "add_module",
         "_apply",
         "apply",
