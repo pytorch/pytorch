@@ -361,9 +361,8 @@ void ProfilerResult::save(const std::string& path) {
 
 bool kinetoAvailable() {
 #ifdef USE_KINETO
-  // TODO: enable Kineto profiler for CPU only systems
+  // TODO: enable Kineto profiler for non-CUDA systems
   if (!torch::cuda::is_available()) {
-    LOG(WARNING) << "Not using Kineto: CUDA is not available";
     return false;
   }
   return true;
