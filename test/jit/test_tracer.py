@@ -149,6 +149,28 @@ class TestTracer(JitTestCase):
         traced = torch.jit.trace(f, (p,))
         self.assertEqual(f(p), traced(p))
 
+    def test_trace_topk(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x.topk(y, dim=1)[1]
+
+        mod = M()
+        inputs = (torch.randint(0, 10, (20, 20)), torch.tensor(17))
+        traced_func = torch.jit.trace(mod, inputs)
+
+        test_inputs = (torch.randint(0, 9, (9, 9)), torch.tensor(8))
+        eager_out = mod(*test_inputs)
+        traced_out = traced_func(*test_inputs)
+        self.assertNotWarn(lambda: traced_func(*test_inputs), "Shouldn't throw slicing related warn here")
+        self.assertTrue(torch.allclose(eager_out, traced_out))
+
+        test_inputs = (torch.randint(0, 50, (50, 50)), torch.tensor(12))
+        eager_out = mod(*test_inputs)
+        traced_out = traced_func(*test_inputs)
+        self.assertNotWarn(lambda: traced_func(*test_inputs), "Shouldn't throw slicing related warn here")
+        self.assertTrue(torch.allclose(eager_out, traced_out))
+
+
     def test_typeas_trace_check(self):
         a = torch.tensor([0.4], requires_grad=True)
         b = torch.tensor([0.7], requires_grad=True)
@@ -482,11 +504,11 @@ class TestTracer(JitTestCase):
             if y:   # Warning 2.
                 pass
             q = [x, x * 4]
-            z = q[y]  # Warning 3.
-            float(z)  # Warning 4.
-            z.tolist()  # Warning 5.
-            z.numpy()  # Warning 6.
-            for _ in torch.ones(4, 4):  # Warning 7.
+            z = q[y]
+            float(z)  # Warning 3.
+            z.tolist()  # Warning 4.
+            z.numpy()  # Warning 5.
+            for _ in torch.ones(4, 4):  # Warning 6.
                 pass
             return z + 4
 
@@ -495,11 +517,10 @@ class TestTracer(JitTestCase):
         warns = [str(w.message) for w in warns]
         self.assertIn('a Python integer', warns[0])
         self.assertIn('a Python boolean', warns[1])
-        self.assertIn('a Python index', warns[2])
-        self.assertIn('a Python float', warns[3])
-        self.assertIn('a Python list', warns[4])
-        self.assertIn('a NumPy array', warns[5])
-        self.assertIn('Iterating over', warns[6])
+        self.assertIn('a Python float', warns[2])
+        self.assertIn('a Python list', warns[3])
+        self.assertIn('a NumPy array', warns[4])
+        self.assertIn('Iterating over', warns[5])
 
     def test_trace_tuple(self):
         def fn(x, y):
