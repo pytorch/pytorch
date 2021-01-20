@@ -1151,6 +1151,54 @@ class IrParser {
             value_map.emplace(node->output()->unique(), out);
           });
     }
+
+    {
+      // We are not fusing `linear` yet, because we can't codegen efficient gemm
+      // However, we still need this here, so PE would insert profile node for
+      // this node.
+      // During fusion pass, We decompose linear into gemm + elementwise.
+      auto ptr_op = getOperatorForLiteral(
+          "aten::linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor");
+      registerParseRule(
+          ptr_op,
+          [](const Node* node,
+             std::unordered_map<size_t, CgValue>& value_map) -> void {
+            // this entry is created so we do profile input tensors;
+            TORCH_INTERNAL_ASSERT(false, "not implemented yet");
+          },
+          [](const Node* node) -> bool {
+            // We only profile `linear` layer with bias.
+            if (node->input(2)->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              return false;
+            }
+            return true;
+          });
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "prim::add_optional(Tensor(a) input, Tensor? bias) -> Tensor(a)");
+      registerParseRule(
+          ptr_op,
+          [](const Node* node,
+             std::unordered_map<size_t, CgValue>& value_map) -> void {
+            // this entry is created so we do profile input tensors;
+            if (node->input(1)->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              // forwarding the value;
+              value_map.emplace(
+                  node->output()->unique(),
+                  value_map[node->inputs()[0]->unique()]);
+            } else {
+              auto lhs = value_map[node->inputs()[0]->unique()];
+              auto rhs = value_map[node->inputs()[1]->unique()];
+
+              auto out = binaryOp(BinaryOpType::Add, lhs, rhs);
+              value_map.emplace(node->output()->unique(), out);
+            }
+          });
+    }
   }
 
   void processJitNode(const JitOp* node) {

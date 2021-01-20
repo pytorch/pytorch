@@ -1640,7 +1640,6 @@ def hardsigmoid(input, inplace=False):
         return torch._C._nn.hardsigmoid_(input)
     return torch._C._nn.hardsigmoid(input)
 
-
 def linear(input, weight, bias=None):
     # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
     r"""
@@ -1660,16 +1659,7 @@ def linear(input, weight, bias=None):
     if not torch.jit.is_scripting():
         if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
             return handle_torch_function(linear, tens_ops, input, weight, bias=bias)
-    if input.dim() == 2 and bias is not None:
-        # fused op is marginally faster
-        ret = torch.addmm(bias, input, weight.t())
-    else:
-        output = input.matmul(weight.t())
-        if bias is not None:
-            output += bias
-        ret = output
-    return ret
-
+    return torch._C._nn.linear(input, weight, bias)
 
 def bilinear(input1, input2, weight, bias=None):
     # type: (Tensor, Tensor, Tensor, Optional[Tensor]) -> Tensor

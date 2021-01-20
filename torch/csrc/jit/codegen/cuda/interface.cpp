@@ -288,6 +288,24 @@ RegisterOperators reg_guard({
         },
         aliasAnalysisFromSchema()),
 });
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+RegisterOperators reg_add_optional({
+    Operator(
+        "prim::add_optional(Tensor(a) input, Tensor? bias) -> Tensor(a)",
+        [](const Node* node) -> Operation {
+          return [](Stack* stack) {
+            IValue input, bias;
+            pop(stack, input, bias);
+            if (bias.isNone()) {
+              push(stack, std::move(input));
+            } else {
+              push(stack, at::add(input.toTensor(), bias.toTensor(), 1.0));
+            }
+          };
+        },
+        aliasAnalysisFromSchema()),
+});
 } // namespace
 
 } // namespace jit

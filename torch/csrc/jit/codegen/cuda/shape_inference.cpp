@@ -282,10 +282,23 @@ class NaiveTypePropagator {
         node->output()->setType(type0->withScalarType(type1->scalarType()));
         break;
       }
+      case prim::add_optional: {
+        const auto type0 = node->input(0)->type()->cast<TensorType>();
+        const auto type1 = node->input(1)->type()->cast<TensorType>();
+        TORCH_CHECK(type0 != nullptr);
+        if (type1 != nullptr) {
+          node->output()->setType(type0);
+        } else {
+          const auto promoted_type = binary_broadcast_type(type0, type1);
+          node->output()->setType(promoted_type);
+        }
+        break;
+      }
       default:
         TORCH_CHECK(
             false,
-            "type inference failed, unrecognized operation encountered.");
+            "type inference failed, unrecognized operation encountered:",
+            node->kind().toDisplayString());
         // TODO: generate a proper error log, as this probably means something
         //       went unexpected.
         break;
