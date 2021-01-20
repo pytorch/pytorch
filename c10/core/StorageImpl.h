@@ -23,7 +23,7 @@ struct C10_API StorageImpl final : public c10::intrusive_ptr_target {
         received_cuda_(false),
         allocator_(allocator) {
     if (resizable) {
-      AT_ASSERTM(
+      TORCH_INTERNAL_ASSERT(
           allocator_, "For resizable storage, allocator must be provided");
     }
   }
