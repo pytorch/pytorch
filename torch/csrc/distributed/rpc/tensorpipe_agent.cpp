@@ -14,6 +14,12 @@
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
 #endif
 
+#if TENSORPIPE_HAS_SHM_TRANSPORT
+// Needed for ::getpid(), which is used to create a unique address.
+#include <sys/types.h>
+#include <unistd.h>
+#endif
+
 namespace torch {
 namespace distributed {
 namespace rpc {
