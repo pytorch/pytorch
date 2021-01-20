@@ -49,6 +49,7 @@ namespace jit {
 using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
+ExtraFilesMap default_extra_files_mobile;
 
 OpCode parseOpCode(const char* str);
 

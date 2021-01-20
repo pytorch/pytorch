@@ -12,7 +12,7 @@ using caffe2::serialize::FileAdapter;
 using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::ReadAdapterInterface;
 using ExtraFilesMap = std::unordered_map<std::string, std::string>;
-static ExtraFilesMap default_extra_files_mobile;
+extern ExtraFilesMap default_extra_files_mobile;
 
 // The family of methods below convery a serialized Mobile Module
 // into a mobile::Module object.
