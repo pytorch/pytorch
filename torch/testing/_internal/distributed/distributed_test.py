@@ -2630,13 +2630,13 @@ class DistributedTest:
             return global_bs, input_cpu, target, loss
 
         # END TO END TEST FOR DISTRIBUTEDDATAPARALLEL
-        def _test_DDP_helper(self, model, input_var, target, loss, scale_factor=1.0, check_memory_format=None):
+        def _test_DDP_helper(self, model, input_var, target, loss, scale_factor=1.0, memory_format=None):
             model.train()
             output = model(input_var)
             l = loss(output, target) * scale_factor
             l.backward()
-            if check_memory_format is not None:
-                self.assertTrue(output.is_contiguous(memory_format=check_memory_format))
+            if memory_format is not None:
+                self.assertTrue(output.is_contiguous(memory_format=memory_format))
 
         def _assert_equal_param(self, param_gpu, param_DDP):
             self.assertEqual(len(param_gpu), len(param_DDP))
@@ -2645,11 +2645,11 @@ class DistributedTest:
 
         def _test_DDP_5iter(
             self, model_base, model_DDP, input, target, loss, local_bs, rank, batch_size, test_save,
-            offset=None, world_size=0, zero_grad=False, check_memory_format=None
+            offset=None, world_size=0, zero_grad=False, memory_format=None
         ):
             for idx in range(5):
                 # single cpu/gpu training
-                self._test_DDP_helper(model_base, input, target, loss, check_memory_format=check_memory_format)
+                self._test_DDP_helper(model_base, input, target, loss, memory_format=memory_format)
 
                 if offset is None:
                     offset = rank * local_bs
@@ -2661,7 +2661,7 @@ class DistributedTest:
                     target[offset: offset + local_bs],
                     loss,
                     world_size * local_bs / batch_size if world_size != 0 else 1,
-                    check_memory_format=check_memory_format
+                    memory_format=memory_format
                 )
 
                 # Update weights and run a second iteration to shake out errors
@@ -2990,7 +2990,7 @@ class DistributedTest:
                 True,
                 bs_offset,
                 dist.get_world_size(),
-                check_memory_format=memory_format
+                memory_format=memory_format
             )
             self._barrier()
 
