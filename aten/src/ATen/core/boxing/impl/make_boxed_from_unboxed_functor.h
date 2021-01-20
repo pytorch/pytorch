@@ -323,7 +323,7 @@ namespace impl {
     static_assert(std::is_same<guts::typelist::typelist<ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value,
       "Parameter types mismatch");
 
-    static ReturnType call(OperatorKernel* functor, DispatchKeySet, ParameterTypes... args) {
+    static inline ReturnType call(OperatorKernel* functor, DispatchKeySet, ParameterTypes... args) {
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
       // Note [Plumbing Keys Through The Dispatcher 2]
       // See Note [Plumbing Keys Through The Dispatcher] for the background.
@@ -345,7 +345,7 @@ namespace impl {
     static_assert(std::is_same<guts::typelist::typelist<DispatchKeySet, ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value,
       "Parameter types mismatch");
 
-    static ReturnType call(OperatorKernel* functor, DispatchKeySet dispatchKeySet, ParameterTypes... args) {
+    static inline ReturnType call(OperatorKernel* functor, DispatchKeySet dispatchKeySet, ParameterTypes... args) {
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
       // We're explicitly taking in a dispatchKeySet and forwarding it to the registered kernel.
       // See Note [Plumbing Keys Through The Dispatcher 2] for details.
