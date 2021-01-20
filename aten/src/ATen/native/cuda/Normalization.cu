@@ -103,8 +103,7 @@ Tensor batch_norm_elemt_cuda(const Tensor& self, const Tensor& weight, const Ten
 Tensor& batch_norm_elemt_cuda_out(Tensor& output, const Tensor& self, const Tensor& weight, const Tensor& bias,
                              const Tensor& mean, const Tensor& invstd, double epsilon) {
   if (at::cuda::detail::canUse32BitIndexMath(self) && batch_norm_use_channels_last_kernels(self)){
-    batch_norm_elemt_channels_last_cuda_template(output, self, weight, bias, mean, invstd, epsilon,
-      /* (bias after BN) z = */ c10::nullopt, /* fuse_relu = */ false);
+    batch_norm_elemt_channels_last_cuda_template(output, self, weight, bias, mean, invstd, epsilon);
     return output;
   }
 

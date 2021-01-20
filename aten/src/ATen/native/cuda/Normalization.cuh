@@ -1432,8 +1432,8 @@ void batch_norm_elemt_channels_last_cuda_template(
     const at::Tensor& mean,
     const at::Tensor& inv_std,
     double epsilon,
-    const at::optional<at::Tensor>& z,  // bias after BN
-    const bool fuse_relu) {
+    const at::optional<at::Tensor>& z = c10::nullopt,  // bias after BN
+    const bool fuse_relu = false) {
   const auto stride = input.size(1);
   const auto reduction_size = input.numel() / stride;
 
