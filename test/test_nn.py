@@ -10607,6 +10607,31 @@ class TestNNDeviceType(NNTestCase):
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(output.transpose(0, 1).reshape(c, -1).mean(1), torch.arange(c))
 
+    def _test_InstanceNorm_nhwc(self, cls, input, device, dtype=torch.float):
+        input = input.to(device=device, dtype=dtype)
+        input = input.contiguous(memory_format=torch.channels_last).requires_grad_(True)
+        grad = torch.randn(input.size()).to(device=device, dtype=dtype)
+        m = cls(input.size(1), affine=True).to(device, dtype)
+        m.weight.data.uniform_()
+        m.bias.data.uniform_()
+
+        ref_input = input.detach().clone().contiguous().requires_grad_(True)
+        ref_grad = grad.detach().clone().contiguous()
+        ref_m = cls(input.size(1), affine=True).to(device, dtype)
+        ref_m.load_state_dict(m.state_dict())
+
+        out = m(input)
+        out.backward(grad)
+        ref_out = ref_m(ref_input)
+        ref_out.backward(ref_grad)
+
+        self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+        self.assertTrue(ref_out.is_contiguous())
+        self.assertEqual(out, ref_out)
+        self.assertEqual(m.weight.grad, ref_m.weight.grad)
+        self.assertEqual(m.bias.grad, ref_m.bias.grad)
+        self.assertEqual(input.grad, ref_input.grad)
+
     def _test_InstanceNorm_cuda_half(self, cls, input, device):
         # THNN
         input = input.to(device=device, dtype=torch.half).random_(1, 10).requires_grad_(True)
@@ -11042,6 +11067,7 @@ class TestNNDeviceType(NNTestCase):
 
         input = torch.rand(b, c, h, w)
         self._test_InstanceNorm_general(nn.InstanceNorm2d, input, device)
+        self._test_InstanceNorm_nhwc(nn.InstanceNorm2d, input, device)
 
         if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm2d, input, device)

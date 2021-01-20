@@ -475,7 +475,12 @@ Tensor instance_norm(
     at::alias(running_var).copy_(running_var_.view({ b, c }).mean(0, false));
   }
 
-  return out.view(input.sizes());
+  auto out_contig = out.view(input.sizes());
+  if (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
+    return out_contig.contiguous(at::MemoryFormat::ChannelsLast);
+  } else {
+    return out_contig;
+  }
 }
 
 std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
