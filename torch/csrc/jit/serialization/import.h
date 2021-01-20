@@ -16,8 +16,6 @@ class ReadAdapterInterface;
 namespace torch {
 namespace jit {
 
-static ExtraFilesMap default_extra_files;
-
 TORCH_API Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     const std::string& filename,
@@ -55,9 +53,8 @@ TORCH_API Module import_ir_module(
 ///
 /// The istream must contain a serialized `Module`, exported via
 /// `torch::jit::ExportModule` in C++.
-TORCH_API Module load(
-    std::istream& in,
-    c10::optional<c10::Device> device = c10::nullopt);
+TORCH_API Module
+load(std::istream& in, c10::optional<c10::Device> device = c10::nullopt);
 
 TORCH_API Module load(
     std::istream& in,
