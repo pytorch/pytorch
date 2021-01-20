@@ -5727,7 +5727,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_fake_quantize_per_channel(self):
         class FakeQuantizePerChannelModel(torch.nn.Module):
             def forward(self, input):
-                amax = torch.reduce_max(input, axis=1)
+                amax = torch.max(input, axis=1)
                 scale = amax / 127
                 zero_point = torch.zeros_like(amax, dtype=torch.long)
                 quant_min = -128
