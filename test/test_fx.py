@@ -54,6 +54,11 @@ wrap(a_lifted_leaf2)
 
 wrap('len')
 
+
+@wrap
+def wrapped_via_decorator(a):
+    return a + 1
+
 class Pair(NamedTuple):
     x : torch.Tensor
     y : torch.Tensor
@@ -243,6 +248,16 @@ class TestFX(JitTestCase):
         m = symbolic_trace(to_trace)
         self.assertIn('a_lifted_leaf2', m.code)
         self.assertEqual(27, m(2))
+
+    def test_wrapped_via_decorator(self):
+        self.assertEqual(wrapped_via_decorator(0), 1)
+
+        def to_trace(y):
+            return wrapped_via_decorator(y)
+
+        m = symbolic_trace(to_trace)
+        self.assertIn('wrapped_via_decorator', m.code)
+        self.assertEqual(m(0), 1)
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
