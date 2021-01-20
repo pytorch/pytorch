@@ -93,7 +93,6 @@ class OpInfo(object):
                                             # with the dtypes support on the tested device
                  test_inplace_grad=True,  # whether to gradcheck and gradgradcheck the inplace variant
                  test_complex_grad=True,  # whether to gradcheck and gradgradcheck for complex dtypes
-                 test_scripted_jit=True,  # whether to test with scripted forward, grad, and grad grad
                  skip_bfloat16_grad=False,  # whether to skip grad and gradgradcheck for bfloat16 dtype
                  assert_autodiffed=False,  # if a op's aten::node is expected to be symbolically autodiffed
                  autodiff_nonfusible_nodes=None,  # a list of strings with node names that are expected to be in a
@@ -137,7 +136,6 @@ class OpInfo(object):
 
         self.test_inplace_grad = test_inplace_grad
         self.test_complex_grad = test_complex_grad
-        self.test_scripted_jit = test_scripted_jit
         self.supports_tensor_out = supports_tensor_out
         self.promotes_integers_to_float = promotes_integers_to_float
 
@@ -933,14 +931,15 @@ op_db: List[OpInfo] = [
                      # TODO: RuntimeError: cholesky_inverse does not support automatic differentiation for outputs with complex dtype.
                      test_complex_grad=False,
                      test_inplace_grad=False,
-                     test_scripted_jit=False,
                      supports_tensor_out=True,
                      decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
                      skips=(
-                         SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                  dtypes=[torch.complex64, torch.complex128]),
+                         # These tests do not take into account custom op.get_op()
+                         # TODO: implement op.input_func instead of modifying op.get_op()
+                         # See https://github.com/pytorch/pytorch/issues/50837
+                         SkipInfo('TestCommon', 'test_variant_consistency_jit'),
                          SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                                  dtypes=[torch.complex64, torch.complex128]))),
+                                  dtypes=[torch.complex64, torch.complex128]),)),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),

@@ -88,15 +88,19 @@ class TestGradients(TestCase):
                     return out_fn(variant(*args, **kwargs))
             else:
                 variant_out_fn = variant
-            partial_fn = partial(variant_out_fn, **sample.kwargs)
+
+            def fn(*inputs):
+                output = variant_out_fn(*inputs, **sample.kwargs)
+                return op.output_func(output)
+
             if check == 'gradcheck':
-                self.assertTrue(gradcheck(partial_fn, (*sample.input,) + sample.args,
+                self.assertTrue(gradcheck(fn, (*sample.input,) + sample.args,
                                           check_grad_dtypes=True))
             elif check == 'gradgradcheck':
-                self.assertTrue(gradgradcheck(partial_fn, (*sample.input,) + sample.args,
+                self.assertTrue(gradgradcheck(fn, (*sample.input,) + sample.args,
                                               gen_non_contig_grad_outputs=False,
                                               check_grad_dtypes=True))
-                self.assertTrue(gradgradcheck(partial_fn, (*sample.input,) + sample.args,
+                self.assertTrue(gradgradcheck(fn, (*sample.input,) + sample.args,
                                               gen_non_contig_grad_outputs=True,
                                               check_grad_dtypes=True))
             else:
@@ -279,15 +283,14 @@ class TestCommon(JitCommonTestCase):
                         if op.skip_bfloat16_grad else floating_and_complex_types_and(torch.half, torch.bfloat16)
 
                     # Check scripted forward, grad, and grad grad
-                    if op.test_scripted_jit:
-                        script_fn = create_script_fn(self, name, func_type, op.output_func)
+                    script_fn = create_script_fn(self, name, func_type, op.output_func)
 
-                        check_against_reference(self,
-                                                script_fn,
-                                                fn,
-                                                (*sample.input,) + sample.args,
-                                                sample.kwargs,
-                                                no_grad=(dtype not in dtypes_to_grad_check))
+                    check_against_reference(self,
+                                            script_fn,
+                                            fn,
+                                            (*sample.input,) + sample.args,
+                                            sample.kwargs,
+                                            no_grad=(dtype not in dtypes_to_grad_check))
 
                     # Check traced forward, grad, and grad grad
                     traced_fn = create_traced_fn(self, variant)
@@ -318,8 +321,7 @@ class TestCommon(JitCommonTestCase):
                             fusible_nodes = op.autodiff_fusible_nodes
 
                         self.assertAutodiffNode(traced_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
-                        if op.test_scripted_jit:
-                            self.assertAutodiffNode(script_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
+                        self.assertAutodiffNode(script_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
 
 
     @ops(op_db)
