@@ -507,7 +507,7 @@ always be real-valued, even if :attr:`input` is complex.
 .. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is True.
 
 .. note:: Since `U` and `V` of an SVD is not unique, each vector can be multiplied by
-          an arbitrary phase factor `e^{i phi}` while the SVD result is still correct.
+          an arbitrary phase factor :math:`e^{i \phi}` while the SVD result is still correct.
           Different platforms, like Numpy, or inputs on different device types, may produce different
           `U` and `V` tensors.
 
