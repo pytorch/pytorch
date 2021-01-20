@@ -815,6 +815,9 @@ class TestFX(JitTestCase):
 
         self.assertTrue(neg not in relu.users)
 
+    def test_nonetype_annotation(self):
+        eb = torch.nn.EmbeddingBag(3, 4)
+        symbolic_trace(eb)
 
     def test_construct_root_dict(self):
         graph : torch.fx.Graph = torch.fx.Graph()

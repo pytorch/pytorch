@@ -183,7 +183,12 @@ else
   ( ! get_exit_code python setup.py clean] )
   ( ! get_exit_code python setup.py clean bad_argument )
 
-  if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then\
+    # Install OpenSSL on linux for Gloo TCP-TLS transport
+    if [[ "${BUILD_ENVIRONMENT}" == *linux* ]]; then
+      sudo apt-get -qq update
+      sudo apt-get -qq install libssl-dev
+    fi
 
     # ppc64le build fails when WERROR=1
     # set only when building other architectures
@@ -219,6 +224,18 @@ else
     mkdir "$CUSTOM_OP_BUILD"
     pushd "$CUSTOM_OP_BUILD"
     cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+    make VERBOSE=1
+    popd
+    assert_git_not_dirty
+
+    # Build jit hook tests
+    JIT_HOOK_BUILD="$PWD/../jit-hook-build"
+    JIT_HOOK_TEST="$PWD/test/jit_hooks"
+    python --version
+    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+    mkdir "$JIT_HOOK_BUILD"
+    pushd "$JIT_HOOK_BUILD"
+    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
     make VERBOSE=1
     popd
     assert_git_not_dirty
@@ -287,10 +304,4 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   python setup.py install
   popd
   assert_git_not_dirty
-fi
-
-# Install OpenSSL on linux for Gloo TCP-TLS transport
-if [[ "${BUILD_ENVIRONMENT}" == *linux* ]]; then
-  sudo apt-get -qq update
-  sudo apt-get -qq install libssl-dev
 fi
