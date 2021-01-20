@@ -36,7 +36,8 @@ def patched_getline(*args, **kwargs):
 linecache.getlines = patched_getline
 
 def _forward_from_src(src : str):
-    gbls: Dict[str, Any] = {'inf': math.inf, 'nan': math.nan}
+    # If you add more globals here, remember to add their names to fx.graph._shadows_builtin_name!
+    gbls: Dict[str, Any] = {'inf': math.inf, 'nan': math.nan, 'NoneType' : type(None)}
     exec_with_source(src, gbls)
     return gbls['forward']
 
