@@ -436,7 +436,7 @@ class _Patcher(object):
         """
         Replace frame_dict[name] with new_fn until we exit the context manager.
         """
-        setattr(new_fn, "__fx_already_patched", deduplicate)
+        new_fn.__fx_already_patched = deduplicate  # type: ignore
         if name not in frame_dict and hasattr(builtins, name):
             self.patches_made.append(_PatchedFnDel(frame_dict, name, None))
         elif getattr(frame_dict[name], "__fx_already_patched", False):
@@ -450,7 +450,7 @@ class _Patcher(object):
         """
         Replace object_or_dict.name with new_fn until we exit the context manager.
         """
-        setattr(new_fn, "__fx_already_patched", deduplicate)
+        new_fn.__fx_already_patched = deduplicate  # type: ignore
         orig_fn = getattr(cls, name)
         if getattr(orig_fn, "__fx_already_patched", False):
             return  # already patched, no need to do it again
