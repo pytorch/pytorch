@@ -2651,8 +2651,7 @@ def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwarg
                 arg = arg.double()
             if arg.dtype == torch.cfloat:
                 arg = arg.to(torch.cdouble)
-            # enable torch.int64 argument representing indices
-            if (arg.is_complex() != dtype.is_complex) and (arg.dtype != torch.int64):
+            if arg.is_complex() != dtype.is_complex:
                 raise RuntimeError("User provided tensor is real for a test that runs with complex dtype, ",
                                    "which is not supported for now")
             # NOTE: We do clone() after detach() here because we need to be able to change size/storage of v afterwards
