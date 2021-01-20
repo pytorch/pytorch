@@ -288,3 +288,9 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   popd
   assert_git_not_dirty
 fi
+
+# Install OpenSSL on linux for Gloo TCP-TLS transport
+if [[ "${BUILD_ENVIRONMENT}" == *linux* ]]; then
+  sudo apt-get -qq update
+  sudo apt-get -qq install libssl-dev
+fi
