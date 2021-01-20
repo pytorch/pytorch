@@ -89,7 +89,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(TensorList tensors1
 
 FOREACH_BINARY_OP_LIST_ALPHA(add, std::plus);
 FOREACH_BINARY_OP_LIST_ALPHA(sub, std::minus);
-FOREACH_BINARY_OP_LIST(mul, std::multiplies, false);
-FOREACH_BINARY_OP_LIST(div, std::divides, true);
+FOREACH_BINARY_OP_LIST(mul, std::multiplies, /*division_op*/ false);
+FOREACH_BINARY_OP_LIST(div, std::divides, /*division_op*/ true);
 
 }} // namespace at::native
