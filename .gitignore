@@ -42,6 +42,7 @@ test/.coverage
 test/.hypothesis/
 test/cpp/api/mnist
 test/custom_operator/model.pt
+test/jit_hooks/*.pt
 test/data/legacy_modules.t7
 test/data/*.pt
 test/backward_compatibility/nightly_schemas.txt

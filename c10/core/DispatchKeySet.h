@@ -191,14 +191,15 @@ C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 // Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
 // NB: keys in this set also get associated with Math
 constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
-  DispatchKey::AutogradCPU,
-  DispatchKey::AutogradCUDA,
-  DispatchKey::AutogradXLA,
-  DispatchKey::AutogradNestedTensor,
-  DispatchKey::AutogradPrivateUse1,
-  DispatchKey::AutogradPrivateUse2,
-  DispatchKey::AutogradPrivateUse3,
-  DispatchKey::AutogradOther,
+    DispatchKey::AutogradCPU,
+    DispatchKey::AutogradCUDA,
+    DispatchKey::AutogradXLA,
+    DispatchKey::AutogradNestedTensor,
+    DispatchKey::AutogradXPU,
+    DispatchKey::AutogradPrivateUse1,
+    DispatchKey::AutogradPrivateUse2,
+    DispatchKey::AutogradPrivateUse3,
+    DispatchKey::AutogradOther,
 });
 
 // backend dispatch keys that map to DispatchKey::AutogradOther
@@ -224,13 +225,6 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet({
   DispatchKey::SparseHIP,
   DispatchKey::Meta,
 });
-//
-// The set of dispatch keys that come after tracing
-// n.b. this relies on the fact that AutogradOther is currently the lowest Autograd key
-constexpr DispatchKeySet after_tracing_keyset = DispatchKeySet(
-        DispatchKeySet::FULL_AFTER,
-        c10::DispatchKey::Tracer
-);
 
 // The set of dispatch keys that come after autograd
 // n.b. this relies on the fact that AutogradOther is currently the lowest Autograd key
