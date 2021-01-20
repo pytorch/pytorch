@@ -64,30 +64,6 @@ void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2, Te
 // - All tensors must be non-overlapping and dense
 // - Resulting tensor must have the same dtype as the input one
 
-// Check if all tensors have the same device, layout, strides and are not overlapping and dense
-bool has_same_attributes(Device expected_device, TensorList tensors) {
-  auto expected_strides = tensors[0].strides();
-  for (const auto& t : tensors) {
-    if (t.device() != expected_device) {
-      return false;
-    }
-
-    if (t.layout() != at::kStrided) {
-      return false;
-    }
-
-    if (!t.is_non_overlapping_and_dense()) {
-      return false;
-    }
-
-    if (t.strides() != expected_strides) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
 bool will_promote_tensor(const Tensor& tensor, Scalar scalar, bool promote_integer_inputs_to_float = false) {
   // In case of division, integer inputs will result in float
   if (promote_integer_inputs_to_float) {
@@ -99,28 +75,61 @@ bool will_promote_tensor(const Tensor& tensor, Scalar scalar, bool promote_integ
   return result_dtype != tensor.scalar_type();
 }
 
-bool can_use_fast_route(TensorList tensors, ArrayRef<Scalar> scalars, bool promote_integer_inputs_to_float = false) {
+bool check_fast_path_restrictions(
+        ArrayRef<TensorList> tensorLists, 
+        ArrayRef<Scalar> scalarList = {}, 
+        bool promote_integer_inputs_to_float = false) {
+    auto expected_device = tensorLists[0][0].device();
+    auto expected_strides = tensorLists[0][0].strides();
+
+    auto is_tensor_okay = [&](const Tensor& tensor) {
+        return tensor.device() == expected_device &&
+               tensor.layout() == at::kStrided &&
+               tensor.strides() == expected_strides &&
+               tensor.is_non_overlapping_and_dense();
+    };
+
+    for (const auto& tensorList : tensorLists) {
+      for (const auto& tensor : tensorList) {
+        if (!is_tensor_okay(tensor)) {
+          return false;
+        }
+      }
+    }
+
+    // We check only tensorLists at index 0 as there no use cases for other indexes yet.
+    for (int i=0; i < tensorLists[0].size(); i++) {
+      if (promote_integer_inputs_to_float) {
+        if (at::isIntegralType(tensorLists[0][i].scalar_type(), /*includeBool*/ true)) {
+          return false;
+        }
+      }
+
+      if (scalarList.size() == 1) {
+        if (will_promote_tensor(tensorLists[0][i], scalarList[0])) {
+          return false;
+        }
+      } else if (scalarList.size() > 1) {
+        // Complex scalar list is not supported.
+        if (scalarList[i].isComplex() || at::isComplexType(tensorLists[0][i].scalar_type())) {
+          return false;
+        }
+
+        if (will_promote_tensor(tensorLists[0][i], scalarList[i])) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+}
+
+bool can_use_fast_route(ArrayRef<TensorList> tensorLists, ArrayRef<Scalar> scalarList = {}, bool promote_integer_inputs_to_float = false) {
 #ifdef __HIP_PLATFORM_HCC__
   return false;
 #else
-  auto expected_device = tensors[0].device();
-
-  for (int i = 0; i < tensors.size(); i++) {
-    if (!has_same_attributes(expected_device, tensors[i])) {
-      return false;
-    }
-
-    auto scalarsIndex = scalars.size() == 1 ? 0 : i;
-    if (will_promote_tensor(tensors[i], scalars[scalarsIndex], promote_integer_inputs_to_float)) {
-      return false;
-    }
-
-    // Complex scalar list is not supported.
-    if (scalars.size() > 1) {
-      if (scalars[i].isComplex() || at::isComplexType(tensors[i].scalar_type())) {
-        return false;
-      }
-    }
+  if (!check_fast_path_restrictions(tensorLists, scalarList, promote_integer_inputs_to_float)) {
+    return false;
   }
 
   return true;
@@ -131,58 +140,10 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, bool promote_i
 #ifdef __HIP_PLATFORM_HCC__
   return false;
 #else
-  auto expected_device = tensors1[0].device();
-  for (int64_t i = 0; i < tensors1.size(); i++) {
-    if (!has_same_attributes(expected_device, {tensors1[i], tensors2[i]})) {
-      return false;
-    }
-
-    // In case of division, integer inputs will result in float
-    if (promote_integer_inputs_to_float) {
-      if (at::isIntegralType(tensors1[i].scalar_type(), /*includeBool*/ true)) {
-        return false;
-      }
-    }
-  }
-
-  return true;
-#endif
-}
-
-bool can_use_fast_route(std::vector<TensorList> tensorLists, ArrayRef<Scalar> scalars = {}) {
-#ifdef __HIP_PLATFORM_HCC__
-  return false;
-#else
-  if (tensorLists.size() == 0) {
-    return false;
-  }
-
-  auto expected_device = tensorLists[0][0].device();
-  for (int i=0; i < tensorLists[0].size(); i++) {
-    std::vector<Tensor> tempTensors; 
-    for (int j=0; j < tensorLists.size(); j++) {
-      tempTensors.push_back(tensorLists[j][i]);
-    }
-    
-    if (!has_same_attributes(expected_device, tempTensors)) {
-      return false;
-    }
-
-    // We check only tensorLists at index 0 as there no use cases for other indexes yet.
-    if (scalars.size() == 1) {
-      if (will_promote_tensor(tensorLists[0][i], scalars[0])) {
-        return false;
-      }
-    } else if (scalars.size() > 1) {
-      if (will_promote_tensor(tensorLists[0][i], scalars[i])) {
-        return false;
-      }
-    }
-  }
-
-  return true;
+  return can_use_fast_route({tensors1, tensors2}, {}, promote_integer_inputs_to_float);
 #endif
 }
 
 }
 }} // at::native
+

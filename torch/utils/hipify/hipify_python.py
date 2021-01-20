@@ -459,7 +459,7 @@ def replace_math_functions(input_string):
     return output_string
 
 
-RE_SYNCTHREADS = re.compile(r"[:]?[:]?\b(__syncthreads)\b(\w*\()")
+RE_SYNCTHREADS = re.compile(r":?:?\b(__syncthreads)\b(\w*\()")
 
 
 def hip_header_magic(input_string):
