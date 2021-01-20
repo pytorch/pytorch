@@ -1,4 +1,4 @@
-.. _distributed-rpc-framework:
+.. _pipeline-parallelism:
 
 Pipeline Parallelism
 ====================
