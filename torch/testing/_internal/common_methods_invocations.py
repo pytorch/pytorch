@@ -1807,6 +1807,9 @@ NO_ARGS = NoArgsClass()
 def ident(x):
     return x
 
+# Do NOT add to this list. Method tests are being DEPRECATED and replaced by OpInfos.
+# See https://github.com/pytorch/pytorch/wiki/Writing-tests-in-PyTorch-1.8
+#
 # (
 #   method name,
 #   input size/constructing fn,

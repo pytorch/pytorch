@@ -450,10 +450,10 @@ static inline Tensor diff_helper(const Tensor& self, int64_t n, int64_t dim) {
 
 Tensor diff_tensor_tensor(const Tensor& self, int64_t n, int64_t dim, const Tensor& prepend, const Tensor& append) {
   if (!prepend.defined() && !append.defined()) {
-    return diff_helper(self, _n, _dim);
+    return diff_helper(self, n, dim);
   } else {
-    auto a = prepend_append_on_dim(self, prepend, append, _dim);
-    return diff_helper(a, _n, _dim);
+    auto a = prepend_append_on_dim(self, prepend, append, dim);
+    return diff_helper(a, n, dim);
   }
 }
 
@@ -467,10 +467,10 @@ static inline Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim
 
 Tensor& diff_tensor_tensor_out(Tensor& result, const Tensor& self, int64_t n, int64_t dim, const Tensor& prepend, const Tensor& append) {
   if (!prepend.defined() && !append.defined()) {
-    return diff_out_helper(self, _n, _dim, result);
+    return diff_out_helper(self, n, dim, result);
   } else {
-    auto a = prepend_append_on_dim(self, prepend, append, _dim);
-    return diff_out_helper(a, _n, _dim, result);
+    auto a = prepend_append_on_dim(self, prepend, append, dim);
+    return diff_out_helper(a, n, dim, result);
   }
 }
 
