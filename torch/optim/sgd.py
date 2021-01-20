@@ -99,8 +99,7 @@ class SGD(Optimizer):
             for p in group['params']:
                 if p.grad is not None:
                     params_with_grad.append(p)
-                    d_p = p.grad
-                    d_p_list.append(d_p)
+                    d_p_list.append(p.grad)
 
                     state = self.state[p]
                     if 'momentum_buffer' not in state:

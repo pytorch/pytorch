@@ -10981,6 +10981,94 @@ class TestNNDeviceType(NNTestCase):
             inp = torch.randn(3, 0, 10, 10, 10, device=device)
             mod(inp)
 
+    def test_ReplicationPad1d_large(self, device):
+        shapes = ([2, 65736, 4], [65736, 2, 4])
+        pl, pr = 3, 4
+        for shape in shapes:
+            x = torch.randn(shape, device=device, requires_grad=True)
+            model = torch.nn.ReplicationPad1d((pl, pr))
+
+            # forward
+            out = model(x)
+            self.assertEqual(out[:, :, pl : -pr], x)
+
+            left_padding = out[:, :, : pl]
+            self.assertEqual(left_padding, x[:, :, :1].expand_as(left_padding))
+            right_padding = out[:, :, -pr :]
+            self.assertEqual(right_padding, x[:, :, -1:].expand_as(right_padding))
+
+            # backward
+            g = torch.randn_like(out)
+            out.backward(g)
+            self.assertEqual(x.grad[:, :, 1 : -1], g[:, :, pl + 1 : -pr - 1])
+
+            self.assertEqual(x.grad[:, :, 0], g[:, :, : pl + 1].sum(-1))
+            self.assertEqual(x.grad[:, :, -1], g[:, :, -pr - 1:].sum(-1))
+
+    def test_ReplicationPad2d_large(self, device):
+        shapes = ([2, 65736, 4, 4], [65736, 2, 4, 4])
+        pl, pr, pt, pb = 3, 4, 5, 6
+        for shape in shapes:
+            x = torch.randn(shape, device=device, requires_grad=True)
+            model = torch.nn.ReplicationPad2d((pl, pr, pt, pb))
+
+            # forward center, edge
+            out = model(x)
+            self.assertEqual(out[:, :, pt : -pb, pl : -pr], x)
+
+            left_padding = out[:, :, pt : -pb, : pl]
+            self.assertEqual(left_padding, x[:, :, :, :1].expand_as(left_padding))
+            right_padding = out[:, :, pt : -pb, -pr :]
+            self.assertEqual(right_padding, x[:, :, :, -1:].expand_as(right_padding))
+            top_padding = out[:, :, : pt, pl : -pr]
+            self.assertEqual(top_padding, x[:, :, :1, :].expand_as(top_padding))
+            bottom_padding = out[:, :, -pb : , pl : -pr]
+            self.assertEqual(bottom_padding, x[:, :, -1:, :].expand_as(bottom_padding))
+
+            # forward corner
+            tl_padding = out[:, :, : pt + 1, : pl + 1]
+            self.assertEqual(tl_padding, x[:, :, :1, :1].expand_as(tl_padding))
+            tr_padding = out[:, :, : pt + 1, -pr - 1:]
+            self.assertEqual(tr_padding, x[:, :, :1, -1:].expand_as(tr_padding))
+            bl_padding = out[:, :, -pb - 1:, : pl + 1]
+            self.assertEqual(bl_padding, x[:, :, -1:, :1].expand_as(bl_padding))
+            br_padding = out[:, :, -pb - 1:, -pr - 1:]
+            self.assertEqual(br_padding, x[:, :, -1:, -1:].expand_as(br_padding))
+
+            # backward center, edge
+            g = torch.randn_like(out)
+            out.backward(g)
+            self.assertEqual(x.grad[:, :, 1:-1, 1:-1], g[:, :, pt + 1 : -pb - 1, pl + 1 : -pr - 1])
+
+            self.assertEqual(x.grad[:, :, 1:-1, 0], g[:, :, pt + 1 : -pb - 1, : pl + 1].sum(-1))
+            self.assertEqual(x.grad[:, :, 1:-1, -1], g[:, :, pt + 1 : -pb - 1, -pr - 1 :].sum(-1))
+            self.assertEqual(x.grad[:, :, 0, 1:-1], g[:, :, : pt + 1, pl + 1 : -pr - 1].sum(-2))
+            self.assertEqual(x.grad[:, :, -1, 1:-1], g[:, :, -pb - 1 :, pl + 1 : -pr - 1].sum(-2))
+
+            # backward corner
+            self.assertEqual(x.grad[:, :, 0, 0], g[:, :, : pt + 1, : pl + 1].sum((-2, -1)))
+            self.assertEqual(x.grad[:, :, 0, -1], g[:, :, : pt + 1, -pr - 1 :].sum((-2, -1)))
+            self.assertEqual(x.grad[:, :, -1, 0], g[:, :, -pb - 1 :, : pl + 1].sum((-2, -1)))
+            self.assertEqual(x.grad[:, :, -1, -1], g[:, :, -pb - 1 :, -pr - 1 :].sum((-2, -1)))
+
+    @largeTensorTest("6GB")
+    def test_ReplicationPad3d_large(self, device):
+        shapes = ([1, 65736, 2, 2, 2], [65736, 1, 2, 2, 2])
+        pl, pr, pt, pbt, pf, pbk = 3, 4, 5, 6, 7, 8
+
+        for shape in shapes:
+            x = torch.randn(shape, device=device, requires_grad=True)
+            model = torch.nn.ReplicationPad3d((pl, pr, pt, pbt, pf, pbk))
+
+            # forward center
+            out = model(x)
+            self.assertEqual(out[:, :, pf : -pbk, pt : -pbt, pl : -pr], x)
+
+            # backward center
+            g = torch.randn_like(out)
+            out.backward(g)
+            self.assertEqual(x.grad[:, :, 1:-1, 1:-1, 1:-1], g[:, :, pf + 1 : -pbk - 1, pt + 1 : -pbt - 1, pl + 1 : -pr - 1])
+
     @onlyOnCPUAndCUDA
     def test_ReflectionPad_empty(self, device):
         for mod, inp in [
