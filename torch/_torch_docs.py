@@ -7663,6 +7663,8 @@ Args:
     {input}
 
 Keyword args:
+    dtype (:class:`torch.dtype`, optional): the data type the computation is performed in.
+    If out is not given, this will also be the return type.
     {out}
 
 Example::
