@@ -480,7 +480,7 @@ def sample_inputs_index_fill(op_info, device, dtype, requires_grad):
     t02 = t.transpose(0, 2)
     t12 = t.transpose(1, 2)
     idx = index_variable(1, S, device=device)
-    # non-contigous index
+    # non-contiguous index
     idx_nonctg = torch.empty_strided((S,), (2,), device=device, dtype=dtype).long()
     idx_nonctg.copy_(idx)
     for d in range(t.dim()):
