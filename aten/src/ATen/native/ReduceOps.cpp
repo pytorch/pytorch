@@ -507,48 +507,29 @@ Tensor trace_cpu(const Tensor& self) {
   // is set to true
   ScalarType dtype = get_dtype(result, self, c10::nullopt, true);
   result = at::empty({}, self.options().dtype(dtype));
-  if (dtype == at::kLong) {
-    AT_DISPATCH_INTEGRAL_TYPES(self.scalar_type(), "trace", [&] {
-      using accscalar_t = at::acc_type<scalar_t, false>;
-      accscalar_t sum = 0;
-      const auto* t_data = self.data_ptr<scalar_t>();
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(self.scalar_type(), "trace", [&] {
+    using accscalar_t = at::acc_type<scalar_t, false>;
+    accscalar_t sum = 0;
+    const auto* t_data = self.data_ptr<scalar_t>();
 
-      int64_t t_stride_0, t_stride_1, t_diag_size;
+    int64_t t_stride_0, t_stride_1, t_diag_size;
 
-      TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim ", self.dim());
+    TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim ", self.dim());
 
-      t_stride_0 = self.stride(0);
-      t_stride_1 = self.stride(1);
+    t_stride_0 = self.stride(0);
+    t_stride_1 = self.stride(1);
 
-      t_diag_size = std::min(self.size(0), self.size(1));
-      for (int64_t i = 0; i < t_diag_size; i++) {
-        sum += t_data[i * (t_stride_0 + t_stride_1)];
-      }
+    t_diag_size = std::min(self.size(0), self.size(1));
+    for (int64_t i = 0; i < t_diag_size; i++) {
+      sum += t_data[i * (t_stride_0 + t_stride_1)];
+    }
 
+    c10::guts::if_constexpr<std::is_integral<accscalar_t>::value>(
       // all integer types get promoted to kLong
-      *result.data_ptr<int64_t>() = sum;
-    });
-  } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "trace", [&] {
-      using accscalar_t = at::acc_type<scalar_t, false>;
-      accscalar_t sum = 0;
-      const auto* t_data = self.data_ptr<scalar_t>();
-
-      int64_t t_stride_0, t_stride_1, t_diag_size;
-
-      TORCH_CHECK(self.dim() == 2, "trace: expected a matrix, but got tensor with dim ", self.dim());
-
-      t_stride_0 = self.stride(0);
-      t_stride_1 = self.stride(1);
-
-      t_diag_size = std::min(self.size(0), self.size(1));
-      for (int64_t i = 0; i < t_diag_size; i++) {
-        sum += t_data[i * (t_stride_0 + t_stride_1)];
-      }
-
-      *result.data_ptr<scalar_t>() = sum;
-    });
-  }
+      [&] (auto _) { *result.data_ptr<int64_t>() = sum; },  // then-case, invalid for non-integral types
+      [&] (auto _) { *result.data_ptr<scalar_t>() = sum; }  // else-case, invalid for integral types
+    );
+  });
 
   return result;
 }
