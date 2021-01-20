@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/cuda.h>
 
 #include <sstream>
 
@@ -360,6 +361,10 @@ void ProfilerResult::save(const std::string& path) {
 
 bool kinetoAvailable() {
 #ifdef USE_KINETO
+  // TODO: enable Kineto profiler for non-CUDA systems
+  if (!torch::cuda::is_available()) {
+    return false;
+  }
   return true;
 #else
   return false;
