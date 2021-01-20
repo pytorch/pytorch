@@ -106,6 +106,11 @@ factory_data_common_args = parse_kwargs("""
         the pinned memory. Works only for CPU tensors. Default: ``False``.
 """)
 
+unary_ufuncs_common_args = merge_dicts(common_args, parse_kwargs("""
+    dtype (:class:`torch.dtype`, optional): The data type the computation is performed in.
+        If out is not given, this will also be the return type.
+"""))
+
 tf32_notes = {
     "tf32_note": """This operator supports :ref:`TensorFloat32<tf32_on_ampere>`."""
 }
@@ -7663,8 +7668,7 @@ Args:
     {input}
 
 Keyword args:
-    dtype (:class:`torch.dtype`, optional): the data type the computation is performed in.
-    If out is not given, this will also be the return type.
+    {dtype}
     {out}
 
 Example::
@@ -7674,7 +7678,7 @@ Example::
     tensor([-0.5461,  0.1347, -2.7266, -0.2746])
     >>> torch.sin(a)
     tensor([-0.5194,  0.1343, -0.4032, -0.2711])
-""".format(**common_args))
+""".format(**unary_ufuncs_common_args))
 
 add_docstr(torch.sinc,
            r"""
