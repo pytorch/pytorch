@@ -82,19 +82,47 @@ Tensor logdet(const Tensor& self) {
   return logdet_vals;
 }
 
-std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
+std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
   squareCheckInputs(self);
-  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
-              "Expected a floating point tensor as input");
+  ScalarType t = self.scalar_type();
+  TORCH_CHECK(t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble,
+              "linalg_slogdet: expected a tensor of float, double, cfloat or cdouble types but got ", t);
 
   Tensor det_P, diag_U;
   std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
-  auto det_sign = diag_U.sign().prod(-1).mul_(det_P);
+  auto det_sign = diag_U.sgn().prod(-1).mul_(det_P);
   // abslogdet_val is -inf if U is singular, in which case diag_U.abs_().log_().sum(-1) will return -inf.
   // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
   // Since abslogdet_val cannot take nan, no special case handling is required.
-  auto abslogdet_val = diag_U.abs_().log_().sum(-1);
+  // in-place abs is not supported for complex tensors
+  auto abslogdet_val = isComplexType(t) ? diag_U.abs().log_().sum(-1) : diag_U.abs_().log_().sum(-1);
   return std::make_tuple(det_sign, abslogdet_val);
+}
+
+// TODO: implement _out variant avoiding copy and using already allocated storage directly
+std::tuple<Tensor&, Tensor&> linalg_slogdet_out(const Tensor& input, Tensor& sign, Tensor& logabsdet) {
+  TORCH_CHECK(sign.scalar_type() == input.scalar_type(),
+    "sign dtype ", sign.scalar_type(), " does not match input dtype ", input.scalar_type());
+  ScalarType real_dtype = toValueType(typeMetaToScalarType(input.dtype()));
+  TORCH_CHECK(logabsdet.scalar_type() == real_dtype,
+    "logabsdet dtype ", logabsdet.scalar_type(), " does not match the expected dtype ", real_dtype);
+  TORCH_CHECK(sign.device() == input.device() && logabsdet.device() == input.device(),
+              "Expected sign, logabsdet and input to be on the same device, but found sign on ",
+              sign.device(), ", logabsdet on ", logabsdet.device(), " and input on ", input.device(), " instead.");
+
+  Tensor sign_tmp, logabsdet_tmp;
+  std::tie(sign_tmp, logabsdet_tmp) = at::linalg_slogdet(input);
+
+  at::native::resize_output(sign, sign_tmp.sizes());
+  sign.copy_(sign_tmp);
+  at::native::resize_output(logabsdet, logabsdet_tmp.sizes());
+  logabsdet.copy_(logabsdet_tmp);
+
+  return std::tuple<Tensor&, Tensor&>(sign, logabsdet);
+}
+
+std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
+  return at::linalg_slogdet(self);
 }
 
 Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {

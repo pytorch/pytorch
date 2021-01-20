@@ -393,7 +393,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Return a reference to the sizes of this tensor.  This reference remains
    * valid as long as the tensor is live and not resized.
    */
-  virtual IntArrayRef sizes() const;
+  TENSORIMPL_MAYBE_VIRTUAL IntArrayRef sizes() const
+#ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
+  {
+    return sizes_and_strides_.sizes_arrayref();
+  }
+#else
+  ;
+#endif
 
   /**
    * Return a reference to the strides of this tensor.  This reference remains
@@ -405,7 +412,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * Return the number of dimensions of this tensor.  Note that 0-dimension
    * represents a Tensor that is a Scalar, e.g., one that has a single element.
    */
-  virtual int64_t dim() const;
+  TENSORIMPL_MAYBE_VIRTUAL int64_t dim() const
+#ifdef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
+  {
+    return sizes_and_strides_.size();
+  }
+#else
+  ;
+#endif
 
   /**
    * True if this tensor has storage. See storage() for details.
@@ -1423,7 +1437,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * WARNING: This function doesn't rearrange data and assumes tensor is a memory
    * contiguous
    */
-  virtual void empty_tensor_restride(MemoryFormat memory_format) {
+  void empty_tensor_restride(MemoryFormat memory_format) {
     #ifdef DEBUG
         TORCH_INTERNAL_ASSERT(compute_numel() == numel_,
         "If you are seeing this error, that means empty_tensor_restride was "
