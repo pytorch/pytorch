@@ -930,16 +930,13 @@ op_db: List[OpInfo] = [
     TriangularOpInfo('cholesky_inverse',
                      op=torch.cholesky_inverse,
                      dtypes=floating_and_complex_types(),
+                     # TODO: RuntimeError: cholesky_inverse does not support automatic differentiation for outputs with complex dtype.
+                     test_complex_grad=False,
                      test_inplace_grad=False,
                      test_scripted_jit=False,
                      supports_tensor_out=True,
                      decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
                      skips=(
-                         # RuntimeError: cholesky_inverse does not support automatic differentiation for outputs with complex dtype.
-                         SkipInfo('TestGradients', 'test_fn_grad',
-                                  dtypes=[torch.complex64, torch.complex128]),
-                         SkipInfo('TestGradients', 'test_fn_gradgrad',
-                                  dtypes=[torch.complex64, torch.complex128]),
                          SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                   dtypes=[torch.complex64, torch.complex128]),
                          SkipInfo('TestCommon', 'test_variant_consistency_eager',
