@@ -264,7 +264,7 @@ class ReadAfterWriteSyncs : public kir::MutableIrVisitor {
       return;
     }
 
-    if (sync_after_.front() == expr) {
+    if (sync_after_.size() > 0 && sync_after_.front() == expr) {
       sync_after_.pop_front();
       // Found that a sync is needed
       TORCH_INTERNAL_ASSERT(expr->outputs()[0]->isA<kir::TensorView>());
