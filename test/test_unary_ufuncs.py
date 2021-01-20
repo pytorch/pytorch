@@ -450,8 +450,33 @@ class TestUnaryUfuncs(TestCase):
             else:
                 self._test_out_arg(op, input, out)
 
+    def _dtype_out_arg_helper(self, op, input, np_kwarg, torch_kwarg):
+        dtype = input.dtype
+        computation_dtype = torch_kwarg['dtype']
+        try:
+            expected = op.ref(input.cpu().numpy(), **np_kwarg)
+        except TypeError:
+            expected = None
+
+        if expected is None:
+            # Verify that torch variant raises an error.
+            if dtype.is_complex and computation_dtype.is_floating_point:
+                # Pytorch doesn't raise an error for
+                # complex -> float casting
+                # Raises a warning only once.
+                # continue
+                return
+
+            with self.assertRaises(RuntimeError):
+                op(input, **torch_kwarg)
+        else:
+            # Verify the output.
+            actual = op(input, **torch_kwarg)
+            self.assertEqual(actual, expected)
+
     @ops(list(filter(lambda op: op.supports_dtype_kwarg, unary_ufuncs)), dtypes=OpDTypes.supported)
     def test_dtype_arg(self, device, dtype, op):
+        # Test behavior when `dtype` both are passed.
         input = make_tensor((32, 32), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])
 
@@ -461,30 +486,13 @@ class TestUnaryUfuncs(TestCase):
                 continue
 
             np_computation_dtype = torch_to_numpy_dtype_dict[computation_dtype]
-            try:
-                expected = op.ref(input.cpu().numpy(), dtype=np_computation_dtype)
-            except TypeError:
-                expected = None
-
-            if expected is None:
-                # Verify that torch variant raises an error.
-                if dtype.is_complex and computation_dtype.is_floating_point:
-                    # Pytorch doesn't raise an error for
-                    # complex -> float casting
-                    # Raises a warning only once.
-                    continue
-
-                with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                    op(input, dtype=computation_dtype)
-            else:
-                # Verify the output.
-                actual = op(input, dtype=computation_dtype)
-                self.assertEqual(actual, expected)
+            self._dtype_out_arg_helper(op, input,
+                                       {"dtype": np_computation_dtype},
+                                       {"dtype": computation_dtype})
 
     @ops(list(filter(lambda op: op.supports_dtype_kwarg, unary_ufuncs)), dtypes=OpDTypes.supported)
     def test_dtype_and_out_arg(self, device, dtype, op):
-        # TODO: See if the common code can be nicely merged with
-        #       `test_dtype_arg`
+        # Test behavior when `dtype` and `out` both are passed.
         input = make_tensor((32, 32), dtype=dtype, device=device,
                             low=op.domain[0], high=op.domain[1])
 
@@ -496,26 +504,9 @@ class TestUnaryUfuncs(TestCase):
             np_computation_dtype = torch_to_numpy_dtype_dict[computation_dtype]
             out = torch.empty(input.shape, dtype=out_dtype, device=device)
             out_np = out.cpu().numpy()
-
-            try:
-                expected = op.ref(input.cpu().numpy(), dtype=np_computation_dtype, out=out_np)
-            except TypeError:
-                expected = None
-
-            if expected is None:
-                # Verify that torch variant raises an error.
-                if dtype.is_complex and computation_dtype.is_floating_point:
-                    # Pytorch doesn't raise an error for
-                    # complex -> float casting
-                    # Raises a warning only once.
-                    continue
-
-                with self.assertRaises(RuntimeError):
-                    op(input, dtype=computation_dtype, out=out)
-            else:
-                # Verify the output.
-                actual = op(input, dtype=computation_dtype, out=out)
-                self.assertEqual(out, out_np)
+            self._dtype_out_arg_helper(op, input,
+                                       {"dtype": np_computation_dtype, "out": out_np},
+                                       {"dtype": computation_dtype, "out": out})
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool] +
               torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
