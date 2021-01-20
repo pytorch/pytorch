@@ -53,6 +53,8 @@ class L1Loss(_Loss):
 
     The division by :math:`n` can be avoided if one sets ``reduction = 'sum'``.
 
+    Supports real-valued and complex-valued inputs.
+
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
