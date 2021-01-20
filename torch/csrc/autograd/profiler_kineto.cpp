@@ -240,16 +240,25 @@ void prepareProfiler(
     k_activities.insert(cudaTypes.begin(), cudaTypes.end());
   }
 
+  std::cerr << "DEBUG: 1" << std::endl;
   if (!libkineto::api().isProfilerRegistered()) {
+    std::cerr << "DEBUG: 2" << std::endl;
     libkineto_init();
+    std::cerr << "DEBUG: 3" << std::endl;
     libkineto::api().suppressLogMessages();
   }
 
+  std::cerr << "DEBUG: 4" << std::endl;
   if (!libkineto::api().isProfilerInitialized()) {
+    std::cerr << "DEBUG: 5" << std::endl;
     libkineto::api().initProfilerIfRegistered();
   }
 
-  libkineto::api().activityProfiler().prepareTrace(k_activities);
+  std::cerr << "DEBUG: 6" << std::endl;
+  auto& r = libkineto::api().activityProfiler();
+  std::cerr << "DEBUG: 7" << std::endl;
+  r.prepareTrace(k_activities);
+  std::cerr << "DEBUG: 8" << std::endl;
 }
 
 void enableProfiler(
