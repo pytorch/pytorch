@@ -160,7 +160,7 @@ constexpr int ELEMENTS_PER_THREAD = 16;
 constexpr int OPTIMAL_TILE_W = 32;
 constexpr int MAX_H_BLOCK = 128;
 
-__host__ int div_ru(int x, int y) {
+__host__ int div_roundup(int x, int y) {
   return lastPow2(1 + (x-1)/y);
 }
 
@@ -171,14 +171,14 @@ __host__ void flexible_launch_configs(
       dim3 &grid,
       const bool coop_flag = false) {
   int block_x = std::min(lastPow2(stride), OPTIMAL_TILE_W);
-  int block_y = std::min(lastPow2(div_ru(reduction , ELEMENTS_PER_THREAD)),
+  int block_y = std::min(lastPow2(div_roundup(reduction , ELEMENTS_PER_THREAD)),
                          MAX_BLOCK_SIZE / block_x);
   if (block_x * block_y != MAX_BLOCK_SIZE) {
     block_x = std::min(lastPow2(stride), MAX_BLOCK_SIZE / block_y);
   }
 
-  int grid_x = div_ru(stride, block_x);
-  int grid_y = std::min(div_ru(reduction, block_y * ELEMENTS_PER_THREAD), MAX_H_BLOCK);
+  int grid_x = div_roundup(stride, block_x);
+  int grid_y = std::min(div_roundup(reduction, block_y * ELEMENTS_PER_THREAD), MAX_H_BLOCK);
   if (coop_flag) {
     // it's not worth having a grid reduction if the reduction dimension is not big enough
     grid_y = grid_y < 8 ? 1 : grid_y;
@@ -206,6 +206,7 @@ __device__ __forceinline__ void welford_merge_element(C& count,
       count += count_new;
 }
 
+// merge mean/m2n among threadIdx.y within block
 template<typename T, typename C>
 __device__ __forceinline__ void welford_merge_block_vertical(C& count,
                                                              T& mean,
@@ -215,12 +216,14 @@ __device__ __forceinline__ void welford_merge_block_vertical(C& count,
                                                              T* shmem_m2n) {
   // write to shared memory
   auto address_base = threadIdx.x + threadIdx.y * blockDim.x;
-  shmem_mean[address_base] = mean;
-  shmem_m2n[address_base] = m2n;
-  shmem_count[address_base] = count;
 
 #pragma unroll
   for (int offset = blockDim.y/2; offset > 0; offset >>= 1) {
+    if (threadIdx.y < offset*2) {
+      shmem_mean[address_base] = mean;
+      shmem_m2n[address_base] = m2n;
+      shmem_count[address_base] = count;
+    }
     __syncthreads();
     if (threadIdx.y < offset && threadIdx.y + offset < blockDim.y) {
       auto address = address_base + offset * blockDim.x;
@@ -230,11 +233,6 @@ __device__ __forceinline__ void welford_merge_block_vertical(C& count,
       auto m2n_new = shmem_m2n[address];
 
       welford_merge_element(count, mean, m2n, count_new, mean_new, m2n_new);
-
-      // last write is not necessary
-      shmem_mean[address_base] = mean;
-      shmem_m2n[address_base] = m2n;
-      shmem_count[address_base] = count;
     }
   }
 }
@@ -1040,7 +1038,6 @@ batch_norm_collect_statistics_channels_last_kernel(
 
   welford_merge_block_vertical(count_th, mean_th, m2_th, shmem_count, shmem_mean, shmem_m2n);
 
-  // grid reduction if needed (coop launch used at the first place)
   if (gridDim.y > 1) {
     volatile accscalar_t* staging_mean = staging_data;
     volatile accscalar_t* staging_m2n = &staging_data[stride*gridDim.y];
@@ -1153,21 +1150,19 @@ __device__ __forceinline__ void merge_block_vertical_backward(T& sum_dy,
     T* shmem_sum_dy_xmu) {
   // write to shared memory
   auto address_base = threadIdx.x + threadIdx.y * blockDim.x;
-  shmem_sum_dy[address_base] = sum_dy;
-  shmem_sum_dy_xmu[address_base] = sum_dy_xmu;
 
 #pragma unroll
   for (int offset = blockDim.y/2; offset > 0; offset >>= 1) {
+    if (threadIdx.y < offset*2) {
+      shmem_sum_dy[address_base] = sum_dy;
+      shmem_sum_dy_xmu[address_base] = sum_dy_xmu;
+    }
     __syncthreads();
     if (threadIdx.y < offset && threadIdx.y + offset < blockDim.y) {
       auto address = address_base + offset * blockDim.x;
 
       sum_dy += shmem_sum_dy[address];
       sum_dy_xmu += shmem_sum_dy_xmu[address];
-
-      // last write is not necessary
-      shmem_sum_dy[address_base] = sum_dy;
-      shmem_sum_dy_xmu[address_base] = sum_dy_xmu;
     }
   }
 }
@@ -1261,7 +1256,6 @@ __global__ void batch_norm_backward_reduce_channels_last_kernel(
 
   merge_block_vertical_backward(sum_dy_th, sum_dy_xmu_th, shmem_sum_dy, shmem_sum_dy_xmu);
 
-  // grid reduction if needed (coop launch used at the first place)
   if (gridDim.y > 1) {
     volatile accscalar_t* staging_sum_dy = staging_data;
     volatile accscalar_t* staging_sum_dy_xmu = &staging_data[stride*gridDim.y];
