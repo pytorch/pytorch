@@ -717,6 +717,10 @@
   self: grad.clone().masked_fill_(self <= other, 0)
   other: grad.clone().masked_fill_(self > other, 0)
 
+- name: fmax(Tensor self, Tensor other) -> Tensor
+  self: grad.clone().masked_fill_((self >= other).logical_or_(other.isnan()).logical_not_(), 0)
+  other: grad.clone().masked_fill_((self >= other).logical_or_(other.isnan()), 0)
+
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   self: grad.expand(self.sizes()).to(self.scalar_type()) / self.numel()
 
@@ -758,6 +762,10 @@
 - name: minimum(Tensor self, Tensor other) -> Tensor
   self: grad.clone().masked_fill_(self >= other, 0)
   other: grad.clone().masked_fill_(self < other, 0)
+
+- name: fmin(Tensor self, Tensor other) -> Tensor
+  self: grad.clone().masked_fill_((self <= other).logical_or_(other.isnan()).logical_not_(), 0)
+  other: grad.clone().masked_fill_((self <= other).logical_or_(other.isnan()), 0)
 
 - name: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
