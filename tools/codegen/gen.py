@@ -376,10 +376,10 @@ struct {class_name} final : public {parent_class} {{
             assert self.dispatch_key not in g.out.dispatch, \
                 "Do not explicitly specify Meta dispatch key on structured " \
                 "functions, they will be automatically generated for you"
-        elif self.dispatch_key not in g.out.dispatch:
-            return []
         elif not is_structured_dispatch_key(self.dispatch_key):
             return list(mapMaybe(self.gen_unstructured, g.functions()))
+        elif self.dispatch_key not in g.out.dispatch:
+            return []
 
         # Inner helper function to close over g
         # TODO: This function has a lot of similarity with gen_unstructured.  If
