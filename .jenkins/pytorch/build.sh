@@ -126,7 +126,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 
   python tools/amd_build/build_amd.py
-  python setup.py install --user
+  python setup.py install
 
   # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
   sudo rm -f /opt/cache/bin/cc
@@ -287,4 +287,10 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   python setup.py install
   popd
   assert_git_not_dirty
+fi
+
+# Install OpenSSL on linux for Gloo TCP-TLS transport
+if [[ "${BUILD_ENVIRONMENT}" == *linux* ]]; then
+  sudo apt-get -qq update
+  sudo apt-get -qq install libssl-dev
 fi

@@ -52,6 +52,13 @@ def a_lifted_leaf2(a, b):
 
 wrap(a_lifted_leaf2)
 
+wrap('len')
+
+
+@wrap
+def wrapped_via_decorator(a):
+    return a + 1
+
 class Pair(NamedTuple):
     x : torch.Tensor
     y : torch.Tensor
@@ -241,6 +248,16 @@ class TestFX(JitTestCase):
         m = symbolic_trace(to_trace)
         self.assertIn('a_lifted_leaf2', m.code)
         self.assertEqual(27, m(2))
+
+    def test_wrapped_via_decorator(self):
+        self.assertEqual(wrapped_via_decorator(0), 1)
+
+        def to_trace(y):
+            return wrapped_via_decorator(y)
+
+        m = symbolic_trace(to_trace)
+        self.assertIn('wrapped_via_decorator', m.code)
+        self.assertEqual(m(0), 1)
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
@@ -707,21 +724,33 @@ class TestFX(JitTestCase):
         traced = torch.fx.symbolic_trace(IHaveATensorConstant())
         torch.jit.script(traced)
 
-    def test_len(self):
-        class LenTest(torch.nn.Module):
-            def forward(self, x):
-                return len(x)
-
-        lt = LenTest()
-        with self.assertRaisesRegex(RuntimeError, "'len' is not supported. Replace it with 'torch.fx.len'."):
-            symbolic_trace(lt)
-
     def test_torch_fx_len(self):
         class FXLenTest(torch.nn.Module):
             def forward(self, x):
-                return torch.fx.len(x)
+                return len(x)
 
         traced = symbolic_trace(FXLenTest())
+        self.assertEqual(traced(torch.rand(3, 4)), 3)
+
+        # Test scriptability
+        scripted = torch.jit.script(FXLenTest())
+        self.assertEqual(scripted(torch.rand(3)), 3)
+
+        traced_scripted = torch.jit.script(traced)
+        self.assertEqual(traced_scripted(torch.rand(3)), 3)
+
+        # Test non-proxy len
+        class FXLenTest2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = [3, 4, 5]
+
+            def forward(self, x):
+                return x + len(self.l)
+
+        traced2 = symbolic_trace(FXLenTest2())
+        inp = torch.rand(3, 4)
+        self.assertEqual(traced2(inp), inp + 3.0)
 
     def test_torch_custom_ops(self):
         class M(torch.nn.Module):
