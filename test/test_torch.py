@@ -4120,8 +4120,8 @@ class TestTorchDeviceType(TestCase):
                 expected = torch.from_numpy(np.diff(np_t, axis=dim, prepend=np_t, append=np_t))
                 self.assertEqual(actual, expected.to(t.dtype))
 
-                scalar = t[(0,)*t.dim()]
-                scalar_np = np_t[(0,)*t.dim()]
+                scalar = t[(0,) * t.dim()]
+                scalar_np = np_t[(0,) * t.dim()]
 
                 # test when both prepend and append are scalars
                 actual = torch.diff(t, dim=dim, prepend=scalar, append=scalar)
