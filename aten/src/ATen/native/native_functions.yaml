@@ -3618,17 +3618,19 @@
 - func: sqrt(Tensor self) -> Tensor
   variants: function, method
   dispatch:
-    DefaultBackend: sqrt
+    CPU, CUDA: sqrt
+    SparseCPU, SparseCUDA: sqrt_sparse
 
 - func: sqrt_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
-    DefaultBackend: sqrt_
+    CPU, CUDA: sqrt_
 
 - func: sqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU, CUDA: sqrt_out
+    SparseCPU, SparseCUDA: sqrt_out_sparse
 
 - func: square(Tensor self) -> Tensor
   variants: function, method
