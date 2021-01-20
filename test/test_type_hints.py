@@ -8,7 +8,7 @@ import os
 import inspect
 
 try:
-    import mypy.api  # type: ignore
+    import mypy.api
     HAVE_MYPY = True
 except ImportError:
     HAVE_MYPY = False

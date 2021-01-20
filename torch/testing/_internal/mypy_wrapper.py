@@ -6,7 +6,11 @@ from configparser import ConfigParser
 from pathlib import Path
 from typing import List, Set
 
-import mypy.api  # type: ignore
+try:
+    import mypy.api
+except ImportError:
+    # let test/test_type_hints.py import this even if mypy is absent
+    pass
 
 
 def config_files() -> Set[str]:
