@@ -3220,7 +3220,6 @@ class TestQuantizedEmbeddingOps(TestCase):
 
 
     """ Tests the correctness of the embedding_bag_8bit quantized operator """
-    @skipIfNoFBGEMM
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            num_offsets=st.integers(1, 20),
@@ -3275,7 +3274,6 @@ class TestQuantizedEmbeddingOps(TestCase):
     """ Tests the correctness of the quantized embedding lookup operator """
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0))
-    @skipIfNoFBGEMM
     def test_embedding_byte(self, num_embeddings, embedding_dim):
         quant_op = torch.ops.quantized.embedding_byte
         prepack_op = torch.ops.quantized.embedding_bag_prepack
@@ -3306,7 +3304,6 @@ class TestQuantizedEmbeddingOps(TestCase):
         torch.testing.assert_allclose(ref, qresult, atol=0.005, rtol=1e-3)
 
 
-    @skipIfNoFBGEMM
     def test_embedding_2d_indices(self):
         """
         Tests the case where 2D indices are passed into the operator
@@ -3329,7 +3326,6 @@ class TestQuantizedEmbeddingOps(TestCase):
         qresult = quant_op(packed_weight, indices, pruned_weights=False)
         torch.testing.assert_allclose(ref, qresult, atol=0.05, rtol=1e-3)
 
-    @skipIfNoFBGEMM
     def test_embedding_bag_2d_indices(self):
         """
         Tests the case where 2D indices are passed into the operator

@@ -263,9 +263,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               )")
           .def(
               "rpc_sync",
-              [](const PyRRef& self) {
-                return self.createRRefProxy(RRefProxyType::RPC_SYNC);
+              [](const PyRRef& self, float timeoutSeconds) {
+                return self.createRRefProxy(
+                    RRefProxyType::RPC_SYNC, timeoutSeconds);
               },
+              py::arg("timeout") = kUnsetRpcTimeout,
               py::call_guard<py::gil_scoped_release>(),
               R"(
                   Create a helper proxy to easily launch an ``rpc_sync`` using
@@ -279,6 +281,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   >>>
                   >>> rpc.rpc_sync(rref.owner(), run, args=(rref, func_name, args, kwargs))
 
+                  Args:
+                      timeout (float, optional): Timeout for ``rref.rpc_sync()``.
+                          If the call does not complete within this timeframe, an
+                          exception indicating so will be raised. If this argument
+                          is not provided, the default RPC timeout will be used.
+
                   Example::
                       >>> from torch.distributed import rpc
                       >>> rref = rpc.remote("worker1", torch.add, args=(torch.zeros(2, 2), 1))
@@ -287,9 +295,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               )")
           .def(
               "rpc_async",
-              [](const PyRRef& self) {
-                return self.createRRefProxy(RRefProxyType::RPC_ASYNC);
+              [](const PyRRef& self, float timeoutSeconds) {
+                return self.createRRefProxy(
+                    RRefProxyType::RPC_ASYNC, timeoutSeconds);
               },
+              py::arg("timeout") = kUnsetRpcTimeout,
               py::call_guard<py::gil_scoped_release>(),
               R"(
                   Create a helper proxy to easily launch an ``rpc_async`` using
@@ -303,6 +313,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   >>>
                   >>> rpc.rpc_async(rref.owner(), run, args=(rref, func_name, args, kwargs))
 
+                  Args:
+                      timeout (float, optional): Timeout for ``rref.rpc_async()``.
+                          If the call does not complete within this timeframe, an
+                          exception indicating so will be raised. If this argument
+                          is not provided, the default RPC timeout will be used.
+
                   Example::
                       >>> from torch.distributed import rpc
                       >>> rref = rpc.remote("worker1", torch.add, args=(torch.zeros(2, 2), 1))
@@ -311,9 +327,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               )")
           .def(
               "remote",
-              [](const PyRRef& self) {
-                return self.createRRefProxy(RRefProxyType::REMOTE);
+              [](const PyRRef& self, float timeoutSeconds) {
+                return self.createRRefProxy(
+                    RRefProxyType::REMOTE, timeoutSeconds);
               },
+              py::arg("timeout") = kUnsetRpcTimeout,
               py::call_guard<py::gil_scoped_release>(),
               R"(
                   Create a helper proxy to easily launch a ``remote`` using
@@ -326,6 +344,16 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   >>>   return getattr(rref.local_value(), func_name)(*args, **kwargs)
                   >>>
                   >>> rpc.remote(rref.owner(), run, args=(rref, func_name, args, kwargs))
+
+                  Args:
+                      timeout (float, optional): Timeout for ``rref.remote()``. If
+                          the creation of this :class:`~torch.distributed.rpc.RRef`
+                          is not successfully completed within the timeout, then the
+                          next time there is an attempt to use the RRef
+                          (such as ``to_here``), a timeout will be raised. If not
+                          provided, the default RPC timeout will be used. Please see
+                          ``rpc.remote()`` for specific timeout semantics for
+                          :class:`~torch.distributed.rpc.RRef`.
 
                   Example::
                       >>> from torch.distributed import rpc
@@ -373,6 +401,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               // Intentionally not releasing GIL, as most accesses just
               // retrieve cached type py::object
               &PyRRef::getRRefType,
+              py::arg("timeout") = kUnsetRpcTimeout,
               R"(
                   Returns the type of the data object referenced by this
                   ``RRef``. On the owner, this is same as
@@ -380,6 +409,14 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   RPC to fetch the ``type`` object from the owner. After this
                   function is run once, the ``type`` object is cached by the
                   ``RRef``, and subsequent invocations no longer trigger RPC.
+
+                  Args:
+                    rref (torch.distributed.rpc.RRef): The RRef to get type of.
+                    timeout (float, optional): Timeout, in seconds for
+                          ``_get_type``. If the call does not complete within
+                          this timeframe, an exception indicating so will be
+                          raised. If this argument is not provided, the default
+                          RPC timeout will be used.
               )")
           .def(
               "_get_future",
