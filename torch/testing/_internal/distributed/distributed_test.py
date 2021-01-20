@@ -302,7 +302,7 @@ class TestDistBackend(MultiProcessTestCase):
         self.rank = rank
         self.file_name = file_name
 
-        if torch.cuda.device_count() < int(self.world_size):
+        if torch.cuda.is_available() and torch.cuda.device_count() < int(self.world_size):
             sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
         try:
             timeout = timedelta(seconds=60)
@@ -2827,20 +2827,18 @@ class DistributedTest:
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
         def test_DistributedDataParallel_powerSGD_ddp_comm_hook(self):
-            stream = torch.cuda.Stream(self.rank)
             rank = self.rank
-            rank_to_GPU = self._init_multigpu_helper()
-            gpus = list(rank_to_GPU[rank])
-            with torch.cuda.stream(stream):
+            for warm_start in [True, False]:
                 net = torch.nn.parallel.DistributedDataParallel(
                     torch.nn.Linear(1, 5).to(rank), device_ids=[rank]
                 )
-                process_group = torch.distributed.new_group(gpus)
                 state = powerSGD.PowerSGDState(
-                    process_group=process_group, matrix_approximation_rank=1
+                    # Use the default process group (dist.group.WORLD) instead of creating a new one.
+                    process_group=None, matrix_approximation_rank=1, warm_start=warm_start
                 )
                 net.register_comm_hook(state=state, hook=powerSGD.powerSGD_hook)
-                # NOTE: batched_powerSGD_hook cannot pass the following test, because it has a lower accuracy.
+                # NOTE: batched_powerSGD_hook cannot pass the following test, because it has a much lower accuracy.
+                # E.g., after the compression of batched_powerSGD_hook, a gradient of 0.5 can become 0.8335.
                 for i in range(1000):
                     # Clear gradients manually.
                     grad = net.module.weight.grad
@@ -2861,11 +2859,10 @@ class DistributedTest:
                     world_size = int(os.environ["WORLD_SIZE"])
                     avg.div_(world_size)
                     expected_grad = sum(i for i in range(world_size)) / world_size
-                    self.assertEqual(
-                        avg[0, 0],
-                        expected_grad,
-                        msg=f"Expected gradient of {expected_grad} but got {avg} on rank {self.rank}",
-                    )
+                    # Cannot use exact match here due to a very small accuracy loss, e.g., 1e-05.
+                    torch.testing.assert_allclose(
+                        avg[0, 0], expected_grad,
+                        msg=f"Expected gradient of {expected_grad} but got {avg} on rank {self.rank}")
 
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',

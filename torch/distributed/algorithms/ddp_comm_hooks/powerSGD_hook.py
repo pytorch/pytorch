@@ -245,14 +245,16 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
             # The seed makes sure that the initial random values are the same across all the DDP replicas.
             # Such seed should differ at every step.
             # Since it is very slow to fork RNG state across all the CUDA devices,
-            # only fork on CPU and then move the generated tensor to the CUDA device.
+            # only fork on CPU and then move the generated tensor to the CUDA device (by overwriting q).
             torch.manual_seed(state.rng.randint(1_000_000_000))
             for q in qs:
-                q.data = torch.randn(
-                    *q.shape,
-                    device="cpu",
-                    dtype=dtype,
-                ).to(device)
+                q.copy_(
+                    torch.randn(
+                        *q.shape,
+                        device="cpu",
+                        dtype=dtype,
+                    )
+                )
                 _orthogonalize(q)
 
     # Compute Ps.

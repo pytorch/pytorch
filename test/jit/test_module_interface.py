@@ -127,6 +127,32 @@ class TestModuleInterface(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, "Tried to access nonexistent attribute or method"):
             self.checkScript(call_module_interface_on_other_method, (scripted_bar_mod, torch.rand(3, 4),))
 
+    def test_module_doc_string(self):
+        @torch.jit.interface
+        class TestInterface(nn.Module):
+            def one(self, inp1, inp2):
+                # type: (Tensor, Tensor) -> Tensor
+                pass
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                r"""stuff 1"""
+                r"""stuff 2"""
+                pass
+                r"""stuff 3"""
+
+        class TestModule(nn.Module):
+            proxy_mod : TestInterface
+
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.proxy_mod = OrigModule()
+
+            def forward(self, input):
+                # type: (Tensor) -> Tensor
+                return self.proxy_mod.forward(input)
+
+        input = torch.randn(3, 4)
+        self.checkModule(TestModule(), (input,))
 
     def test_module_interface_subtype(self):
         global OneTwoModule
@@ -345,8 +371,8 @@ class TestModuleInterface(JitTestCase):
         scripted_no_module_interface.proxy_mod = torch.jit.script(OrigModule())
         # proxy_mod is neither a module interface or have the same JIT type, should fail
         with self.assertRaisesRegex(RuntimeError,
-                                    "Expected a value of type '__torch__.jit.test_module_interface.OrigModule' " +
-                                    "for field 'proxy_mod', but found '__torch__.jit.test_module_interface.NewModule'"):
+                                    "Expected a value of type '__torch__.jit.test_module_interface.OrigModule \(.*\)' " +
+                                    "for field 'proxy_mod', but found '__torch__.jit.test_module_interface.NewModule \(.*\)'"):
             scripted_no_module_interface.proxy_mod = torch.jit.script(NewModule())
 
     def test_script_module_as_interface_swap(self):
