@@ -20,6 +20,14 @@ inline Tensor det(const Tensor& self) {
   return torch::linalg_det(self);
 }
 
+inline std::tuple<Tensor, Tensor> slogdet(const Tensor& input) {
+  return torch::linalg_slogdet(input);
+}
+
+inline std::tuple<Tensor&, Tensor&> slogdet_out(Tensor& sign, Tensor& logabsdet, const Tensor& input) {
+  return torch::linalg_slogdet_out(sign, logabsdet, input);
+}
+
 inline std::tuple<Tensor, Tensor> eigh(const Tensor& self, std::string uplo) {
   return torch::linalg_eigh(self, uplo);
 }
@@ -125,6 +133,17 @@ inline Tensor cholesky_out(Tensor& result, const Tensor& self) {
 /// See the documentation of torch.linalg.det
 inline Tensor linalg_det(const Tensor& self) {
   return detail::det(self);
+}
+
+/// Computes the sign and (natural) logarithm of the determinant
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.slogdet
+inline std::tuple<Tensor, Tensor> slogdet(const Tensor& input) {
+  return detail::slogdet(input);
+}
+
+inline std::tuple<Tensor&, Tensor&> slogdet_out(Tensor& sign, Tensor& logabsdet, const Tensor& input) {
+  return detail::slogdet_out(sign, logabsdet, input);
 }
 
 /// Computes eigenvalues and eigenvectors

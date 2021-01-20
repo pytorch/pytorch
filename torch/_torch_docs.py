@@ -4665,10 +4665,10 @@ logspace(start, end, steps, base=10.0, *, \
          out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 """ + r"""
 
-Creates a one-dimensional tensor of size ``steps`` whose values are evenly
+Creates a one-dimensional tensor of size :attr:`steps` whose values are evenly
 spaced from :math:`{{\text{{base}}}}^{{\text{{start}}}}` to
 :math:`{{\text{{base}}}}^{{\text{{end}}}}`, inclusive, on a logarithmic scale
-with base ``base``. That is, the values are:
+with base :attr:`base`. That is, the values are:
 
 .. math::
     (\text{base}^{\text{start}},
@@ -4678,15 +4678,12 @@ with base ``base``. That is, the values are:
     \text{base}^{\text{end}})
 """ + """
 
-If ``dtype`` is an integral type, ``start`` and ``end`` are cast as integers first and the returned tensor is the floor
-of the returned tensor as if ``dtype`` were a floating-point type.
-
 .. warning::
-    Not providing a value for ``steps`` is deprecated. For backwards
-    compatibility, not providing a value for ``steps`` will create a tensor
+    Not providing a value for :attr:`steps` is deprecated. For backwards
+    compatibility, not providing a value for :attr:`steps` will create a tensor
     with 100 elements. Note that this behavior is not reflected in the
     documented function signature and should not be relied on. In a future
-    PyTorch release, failing to provide a value for ``steps`` will throw a
+    PyTorch release, failing to provide a value for :attr:`steps` will throw a
     runtime error.
 
 Args:
@@ -4708,10 +4705,6 @@ Example::
     tensor([ 1.0000e-10,  1.0000e-05,  1.0000e+00,  1.0000e+05,  1.0000e+10])
     >>> torch.logspace(start=0.1, end=1.0, steps=5)
     tensor([  1.2589,   2.1135,   3.5481,   5.9566,  10.0000])
-    >>> torch.logspace(start=0.0, end=1.0, steps=5)
-    tensor([ 1.0000,  1.7783,  3.1623,  5.6234, 10.0000])
-    >>> torch.logspace(start=0.0, end=1.0, steps=5, dtype=torch.int)
-    tensor([1, 1, 3, 5, 10])
     >>> torch.logspace(start=0.1, end=1.0, steps=1)
     tensor([1.2589])
     >>> torch.logspace(start=2, end=2, steps=1, base=2)
@@ -5110,6 +5103,35 @@ Example::
     >>> b = torch.tensor((3, 0, 4))
     >>> torch.maximum(a, b)
     tensor([3, 2, 4])
+""".format(**common_args))
+
+add_docstr(torch.fmax, r"""
+fmax(input, other, *, out=None) -> Tensor
+
+Computes the element-wise maximum of :attr:`input` and :attr:`other`. 
+
+This is like :func:`torch.maximum` except it handles NaNs differently: 
+if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the maximum. 
+Only if both elements are NaN is NaN propagated.
+
+This function is a wrapper around C++'s ``std::fmax`` and is similar to NumPy's ``fmax`` function.
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer and floating-point inputs.
+
+Args:
+    {input}
+    other (Tensor): the second input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([9.7, float('nan'), 3.1, float('nan')])
+    >>> b = torch.tensor([-2.2, 0.5, float('nan'), float('nan')])
+    >>> torch.fmax(a, b)
+    tensor([9.7000, 0.5000, 3.1000,    nan])
 """.format(**common_args))
 
 add_docstr(torch.amax,
@@ -5556,6 +5578,35 @@ Example::
     >>> b = torch.tensor((3, 0, 4))
     >>> torch.minimum(a, b)
     tensor([1, 0, -1])
+""".format(**common_args))
+
+add_docstr(torch.fmin, r"""
+fmin(input, other, *, out=None) -> Tensor
+
+Computes the element-wise minimum of :attr:`input` and :attr:`other`. 
+
+This is like :func:`torch.minimum` except it handles NaNs differently: 
+if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the minimum. 
+Only if both elements are NaN is NaN propagated.
+
+This function is a wrapper around C++'s ``std::fmin`` and is similar to NumPy's ``fmin`` function.
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer and floating-point inputs.
+
+Args:
+    {input}
+    other (Tensor): the second input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([2.2, float('nan'), 2.1, float('nan')])
+    >>> b = torch.tensor([-9.3, 0.1, float('nan'), float('nan')])
+    >>> torch.fmin(a, b)
+    tensor([-9.3000, 0.1000, 2.1000,    nan])
 """.format(**common_args))
 
 add_docstr(torch.amin,

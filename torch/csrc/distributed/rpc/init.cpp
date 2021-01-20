@@ -283,9 +283,9 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
 
                   Args:
                       timeout (float, optional): Timeout for ``rref.rpc_sync()``.
-                      If the call does not complete within this timeframe, an
-                      exception indicating so will be raised. If this argument
-                      is not provided, the default RPC timeout will be used.
+                          If the call does not complete within this timeframe, an
+                          exception indicating so will be raised. If this argument
+                          is not provided, the default RPC timeout will be used.
 
                   Example::
                       >>> from torch.distributed import rpc
@@ -315,9 +315,9 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
 
                   Args:
                       timeout (float, optional): Timeout for ``rref.rpc_async()``.
-                      If the call does not complete within this timeframe, an
-                      exception indicating so will be raised. If this argument
-                      is not provided, the default RPC timeout will be used.
+                          If the call does not complete within this timeframe, an
+                          exception indicating so will be raised. If this argument
+                          is not provided, the default RPC timeout will be used.
 
                   Example::
                       >>> from torch.distributed import rpc
@@ -347,14 +347,13 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
 
                   Args:
                       timeout (float, optional): Timeout for ``rref.remote()``. If
-                      the creation of this :class:`~torch.distributed.rpc.RRef`
-                      is not successfully completed within the timeout, then the
-                      next time there is an attempt to use the RRef
-                      (such as ``to_here``), a timeout will be raised. If not
-                      provided, the default RPC timeout will be used. Please see
-                      ``rpc.remote()`` for specific timeout semantics for
-                      :class:`~torch.distributed.rpc.RRef`.
-
+                          the creation of this :class:`~torch.distributed.rpc.RRef`
+                          is not successfully completed within the timeout, then the
+                          next time there is an attempt to use the RRef
+                          (such as ``to_here``), a timeout will be raised. If not
+                          provided, the default RPC timeout will be used. Please see
+                          ``rpc.remote()`` for specific timeout semantics for
+                          :class:`~torch.distributed.rpc.RRef`.
 
                   Example::
                       >>> from torch.distributed import rpc
