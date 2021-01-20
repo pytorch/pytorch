@@ -627,7 +627,7 @@ class TestFreezing(JitTestCase):
         self.assertFalse(mf.hasattr('sub'))
         self.assertFalse(mf.hasattr('a'))
         self.assertTrue(mf.hasattr('b'))
-        with self.assertRaisesRegex(AttributeError, "TestModule does not have a field with name '_forward'"):
+        with self.assertRaisesRegex(AttributeError, "TestModule \(.*\) does not have a field with name '_forward'"):  # noqa: W605
             mf._forward(x)
 
     def test_freeze_module_with_inplace_mutable(self):

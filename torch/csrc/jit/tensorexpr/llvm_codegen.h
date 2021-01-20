@@ -31,6 +31,14 @@ class TORCH_API LLVMCodeGen : public CodeGen {
 
   TORCH_API void call(const std::vector<CallArg>& args) override;
 
+  at::Tensor empty_strided(
+      c10::IntArrayRef size,
+      c10::IntArrayRef stride,
+      c10::optional<c10::ScalarType> dtype_opt,
+      c10::optional<c10::Layout> layout_opt,
+      c10::optional<c10::Device> device_opt,
+      c10::optional<bool> pin_memory_opt) override;
+
   template <typename T>
   T value() {
     return value<T>(nullptr);
