@@ -17,6 +17,8 @@ namespace autograd {
 namespace generated {
 namespace details {
 
+extern const char* kCudnnDoubleBackwardMsg;
+
 // A simple way to imperatively compute index ranges for slots
 // that have been flattened
 struct IndexRangeGenerator {
@@ -37,7 +39,8 @@ bool any_variable_defined(variable_list& variables);
 void copy_range(variable_list& out, IndexRange range, const at::Tensor & t);
 void copy_range(variable_list& out, IndexRange range, at::ArrayRef<at::Tensor> t);
 at::Tensor copysign_tensor_self_backward(const Tensor & grad, const Tensor & self, const Tensor & result);
-at::Tensor not_implemented(const char* name);
+at::Tensor not_implemented(const char* name, const char* reason="");
+std::vector<Tensor> not_implemented_list(const char* name, const char* reason="");
 at::Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result);
 at::Tensor maybe_multiply(const at::Tensor & t, const at::Scalar & s);
 int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim);
@@ -111,7 +114,8 @@ at::Tensor softmax_double_backward(const at::Tensor & grad, const at::Tensor & g
 at::Tensor log_softmax_double_backward(const at::Tensor & grad, const at::Tensor & grad_output, int dim, const at::Tensor & output);
 at::Tensor binary_cross_entropy_double_backward(const at::Tensor & grad_output, const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, const c10::optional<at::Tensor>& weight, int64_t reduction);
 at::Tensor binary_cross_entropy_double_backward_grad_output(const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, const c10::optional<at::Tensor>& weight, int64_t reduction);
-at::Tensor l1_loss_double_backward_grad_output(const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, int64_t reduction);
+at::Tensor l1_loss_double_backward(const at::Tensor & grad, const at::Tensor & grad_output, const at::Tensor & input, const at::Tensor & target, int64_t reduction);
+at::Tensor l1_loss_double_backward_grad_output(const at::Tensor & grad, const at::Tensor & grad_output, const at::Tensor & input, const at::Tensor & target, int64_t reduction);
 at::Tensor smooth_l1_loss_double_backward(const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, int64_t reduction, double beta);
 at::Tensor smooth_l1_loss_double_backward_grad_output(const at::Tensor & grad, const at::Tensor & grad_output, const at::Tensor & input, const at::Tensor & target, int64_t reduction, double beta);
 at::Tensor mse_loss_double_backward(const at::Tensor & grad, const at::Tensor & input, int64_t reduction);
@@ -130,6 +134,13 @@ at::Tensor elu_double_backward(const Tensor& grad, const Tensor& grad_output, Sc
 
 Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
           bool some, bool compute_uv, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v);
+Tensor slice_backward_wrapper(
+    const at::Tensor& grad,
+    const c10::IntArrayRef& input_sizes,
+    int64_t dim,
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
+    int64_t step);
 Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                     bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v);
 std::tuple<Tensor, Tensor> triangular_solve_backward(
