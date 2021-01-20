@@ -1085,14 +1085,35 @@ TEST(ListTest_NonIValueBasedList, sameValueDifferentStorage_thenIsReturnsFalse) 
 
 TEST(ListTest, canAccessStringByReference) {
   List<std::string> list({"one", "two"});
-  const std::string& str = list[1].toStringRef();
+  const auto& listRef = list;
+  static_assert(std::is_same<decltype(listRef[1]), const std::string&>::value,
+                "const List<std::string> acccess should be by const reference");
+  std::string str = list[1];
+  const std::string& strRef = listRef[1];
   EXPECT_EQ("two", str);
+  EXPECT_EQ("two", strRef);
 }
 
 TEST(ListTest, canAccessOptionalStringByReference) {
   List<c10::optional<std::string>> list({"one", "two", c10::nullopt});
-  c10::optional<std::reference_wrapper<const std::string>> str1 = list[1].toOptionalStringRef();
-  c10::optional<std::reference_wrapper<const std::string>> str2 = list[2].toOptionalStringRef();
-  EXPECT_EQ("two", str1.value().get());
+  const auto& listRef = list;
+  static_assert(
+      std::is_same<decltype(listRef[1]), c10::optional<std::reference_wrapper<const std::string>>>::value,
+      "List<c10::optional<std::string>> acccess should be by const reference");
+  c10::optional<std::string> str1 = list[1];
+  c10::optional<std::string> str2 = list[2];
+  decltype(auto) strRef1 = listRef[1];
+  decltype(auto) strRef2 = listRef[2];
+  EXPECT_EQ("two", str1.value());
   EXPECT_FALSE(str2.has_value());
+  EXPECT_EQ("two", strRef1.value().get());
+  EXPECT_FALSE(strRef2.has_value());
+}
+
+TEST(ListTest, canAccessTensorByReference) {
+  List<at::Tensor> list;
+  const auto& listRef = list;
+  static_assert(
+      std::is_same<decltype(listRef[0]), const at::Tensor&>::value,
+      "List<at::Tensor> access should be by const reference");
 }

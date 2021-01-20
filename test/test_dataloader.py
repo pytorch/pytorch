@@ -2031,15 +2031,19 @@ except RuntimeError as e:
 
     def test_dataset_not_reset(self):
         dataset = DummyDataset()
-        dataloader = self._get_data_loader(dataset, num_workers=2)
-        dataset.start = 0
-        for i in range(10):
-            for x in dataloader:
-                pass
-            # Changing the start value here doesn't have any effect in the dataset
-            # cached by the workers. since they are not recreated between epochs
-            # and can cache values safely
-            dataset.start = i
+        pin_memory_configs = [False]
+        if TEST_CUDA:
+            pin_memory_configs.append(True)
+        for pin_memory in pin_memory_configs:
+            dataloader = self._get_data_loader(dataset, num_workers=2, pin_memory=pin_memory)
+            dataset.start = 0
+            for i in range(10):
+                for x in dataloader:
+                    pass
+                # Changing the start value here doesn't have any effect in the dataset
+                # cached by the workers. since they are not recreated between epochs
+                # and can cache values safely
+                dataset.start = i
 
 
 
