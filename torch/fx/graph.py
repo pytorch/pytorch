@@ -8,7 +8,7 @@ import keyword
 import re
 
 def _shadows_builtin_name(name: str) -> bool:
-    return name in builtins.__dict__ or name in keyword.kwlist or name in {'inf', 'nan'}
+    return name in builtins.__dict__ or name in keyword.kwlist or name in {'inf', 'nan', 'NoneType'}
 
 def _is_magic(x: str) -> bool:
     return x.startswith('__') and x.endswith('__')

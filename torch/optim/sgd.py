@@ -101,7 +101,12 @@ class SGD(Optimizer):
                     params_with_grad.append(p)
                     d_p = p.grad
                     d_p_list.append(d_p)
-                    momentum_buffer_list.append(None)
+
+                    state = self.state[p]
+                    if 'momentum_buffer' not in state:
+                        momentum_buffer_list.append(None)
+                    else:
+                        momentum_buffer_list.append(state['momentum_buffer'])
 
             F.sgd(params_with_grad,
                   d_p_list,
@@ -111,5 +116,10 @@ class SGD(Optimizer):
                   lr,
                   dampening,
                   nesterov)
+
+            # update momentum_buffers in state
+            for p, momentum_buffer in zip(params_with_grad, momentum_buffer_list):
+                state = self.state[p]
+                state['momentum_buffer'] = momentum_buffer
 
         return loss
