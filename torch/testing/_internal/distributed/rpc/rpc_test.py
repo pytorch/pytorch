@@ -5270,7 +5270,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         dst = worker_name((self.rank + 1) % self.world_size)
         options.set_device_map(dst, {0: 1})
 
-        n = 1
+        n = 10
         xs = [torch.ones(sizes, device="cuda:0") for _ in range(n)]
 
         rpc.init_rpc(
@@ -5300,7 +5300,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
     @skip_if_lt_x_gpu(2)
     def test_stress_cuda_heavy(self):
-        self._test_stress_cuda([10000, 10000])
+        self._test_stress_cuda([5000, 5000])
 
     @dist_init
     def test_rref_get_type_timeout(self):
