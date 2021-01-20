@@ -1348,6 +1348,7 @@ op_db: List[OpInfo] = [
                    handles_complex_extremals=False),
     UnaryUfuncInfo('sqrt',
                    ref=np.sqrt,
+                   supports_sparse=True,
                    domain=(0, float('inf')),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
