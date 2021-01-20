@@ -54,7 +54,7 @@ namespace at { namespace native {
 
 // ---------------------------------------------------------------------
 //
-// ConvolutionParams and ConvolutionArgs
+// ConvolutionParams
 //
 // ---------------------------------------------------------------------
 
@@ -86,9 +86,10 @@ void setConvolutionParams(
   memset(params, 0, sizeof(ConvolutionParams));
   params->dataType = dataType;
   // ASSERT(weight.dim() == input.dim())
-  for (int i = 0; i != input.dim(); ++i) {
+  params->input_dim = input.dim();
+  params->memory_format = input.suggest_memory_format();
+  for (int i = 0; i != params->input_dim; ++i) {
     params->input_size[i] = (int) input.sizes()[i];
-    params->input_stride[i] = (int) input.strides()[i];
     params->weight_size[i] = (int) weight.sizes()[i];
   }
   // ASSERT(padding.size() == stride.size())
@@ -105,21 +106,21 @@ void setConvolutionParams(
   params->allow_tf32 = allow_tf32;
 }
 
-std::string repro_from_args(const ConvolutionArgs& args) {
+std::string repro_from_args(const ConvolutionParams& params) {
   auto pybool = [](bool b) -> const char* { return b ? "True" : "False"; };
   std::string partial_dtype;
-  switch (args.params.dataType) {
+  switch (params.dataType) {
     case CUDNN_DATA_FLOAT: partial_dtype = "float"; break;
     case CUDNN_DATA_DOUBLE: partial_dtype = "double"; break;
     case CUDNN_DATA_HALF: partial_dtype = "half"; break;
     default: partial_dtype = "unsupported";
   }
   const std::string full_dtype = "torch." + partial_dtype;
-  const int out_channels = args.weight.sizes()[0];
-  const int in_channels = args.weight.sizes()[1] * args.params.groups;
-  const size_t dim = args.input.sizes().size();
+  const int out_channels = params.weight_size[0];
+  const int in_channels = params.weight_size[1] * params.groups;
+  const size_t dim = params.input_dim;
   const std::string channels_last_xd = dim == 4 ? "channels_last" : "channels_last_3d";
-  const std::string to_channels_last = args.input.suggest_memory_format() == at::MemoryFormat::ChannelsLast \
+  const std::string to_channels_last = params.memory_format == at::MemoryFormat::ChannelsLast \
     ? ".to(memory_format=torch." + channels_last_xd + ")" : "";
 
   std::ostringstream ss;
@@ -128,36 +129,30 @@ std::string repro_from_args(const ConvolutionArgs& args) {
   ss << "import torch\n";
   ss << "torch.backends.cuda.matmul.allow_tf32 = " << pybool(at::globalContext().allowTF32CuBLAS()) << "\n";
   ss << "torch.backends.cudnn.benchmark = " << pybool(at::globalContext().benchmarkCuDNN()) << "\n";
-  ss << "torch.backends.cudnn.deterministic = " << pybool(args.params.deterministic) << "\n";
-  ss << "torch.backends.cudnn.allow_tf32 = " << pybool(args.params.allow_tf32) << "\n";
-  ss << "data = torch.randn(" << args.input.sizes() << ", dtype=" << full_dtype << ", ";
+  ss << "torch.backends.cudnn.deterministic = " << pybool(params.deterministic) << "\n";
+  ss << "torch.backends.cudnn.allow_tf32 = " << pybool(params.allow_tf32) << "\n";
+  ss << "data = torch.randn(";
+  for (int i = 0; i < dim; i++) {
+    ss << params.input_size[i] << ", ";
+  }
+  ss << "dtype=" << full_dtype << ", ";
   ss <<   "device='cuda', requires_grad=True)" << to_channels_last << "\n";
   ss << "net = torch.nn.Conv" << dim-2 << "d(" << in_channels << ", " << out_channels << ", ";
-  ss <<   "kernel_size=" << args.weight.sizes().slice(2) << ", ";
-  ss <<   "padding=" << ArrayRef<int>(args.params.padding, dim-2) << ", ";
-  ss <<   "stride=" << ArrayRef<int>(args.params.stride, dim-2) << ", ";
-  ss <<   "dilation=" << ArrayRef<int>(args.params.dilation, dim-2) << ", ";
-  ss <<   "groups=" << args.params.groups << ")\n";
+  ss <<   "kernel_size=(";
+  for (int i = 2; i < dim; i++) {
+    ss << params.weight_size[i] << ", ";
+  }
+  ss << "), ";
+  ss <<   "padding=" << ArrayRef<int>(params.padding, dim-2) << ", ";
+  ss <<   "stride=" << ArrayRef<int>(params.stride, dim-2) << ", ";
+  ss <<   "dilation=" << ArrayRef<int>(params.dilation, dim-2) << ", ";
+  ss <<   "groups=" << params.groups << ")\n";
   ss << "net = net.cuda()." << partial_dtype << "()" << to_channels_last << "\n";
   ss << "out = net(data)\n";
   ss << "out.backward(torch.randn_like(out))\n";
   ss << "torch.cuda.synchronize()\n\n";
-  
+
   return ss.str();
-}
-
-std::ostream& operator<<(std::ostream & out, const ConvolutionArgs& args) {
-  out << repro_from_args(args)         // already has a trailing newline
-    << args.params                     // already has a trailing newline
-    << "input: " << args.idesc         // already has a trailing newline
-    << "output: " << args.odesc        // already has a trailing newline
-    << "weight: " << args.wdesc        // already has a trailing newline
-    << "Pointer addresses: " << "\n"
-    << "    input: " << args.input.data_ptr() << "\n"
-    << "    output: " << args.output.data_ptr() << "\n"
-    << "    weight: " << args.weight.data_ptr() << "\n";
-
-  return out;
 }
 
 // ---------------------------------------------------------------------
