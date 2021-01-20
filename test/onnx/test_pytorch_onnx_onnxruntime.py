@@ -3216,8 +3216,20 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x, y):
                 return torch.logical_and(x, y)
 
-        x = torch.randint(0, 2, (5, 5), dtype=bool)
-        y = torch.randint(0, 2, (5, 5), dtype=bool)
+        x = torch.randint(0, 2, (5, 5), dtype=torch.bool)
+        y = torch.randint(0, 2, (5, 5), dtype=torch.bool)
+        self.run_test(AndModel(), input=(x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.int32)
+        y = torch.randint(10, (5, 5), dtype=torch.int32)
+        self.run_test(AndModel(), input=(x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.double)
+        y = torch.randint(10, (5, 5), dtype=torch.double)
+        self.run_test(AndModel(), input=(x, y))
+
+        x = torch.randint(10, (2, 3, 5), dtype=torch.float32)
+        y = torch.randint(10, (2, 3, 5), dtype=torch.long)
         self.run_test(AndModel(), input=(x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -3226,8 +3238,20 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x, y):
                 return torch.logical_or(x, y)
 
-        x = torch.randint(0, 2, (5, 5), dtype=bool)
-        y = torch.randint(0, 2, (5, 5), dtype=bool)
+        x = torch.randint(0, 2, (5, 5), dtype=torch.bool)
+        y = torch.randint(0, 2, (5, 5), dtype=torch.bool)
+        self.run_test(OrModel(), input=(x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.int32)
+        y = torch.randint(10, (5, 5), dtype=torch.int32)
+        self.run_test(OrModel(), input=(x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.double)
+        y = torch.randint(10, (5, 5), dtype=torch.double)
+        self.run_test(OrModel(), input=(x, y))
+
+        x = torch.randint(10, (2, 3, 5), dtype=torch.float32)
+        y = torch.randint(10, (2, 3, 5), dtype=torch.long)
         self.run_test(OrModel(), input=(x, y))
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -3236,8 +3260,20 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x, y):
                 return torch.logical_xor(x, y)
 
-        x = torch.randint(0, 2, (5, 5), dtype=bool)
-        y = torch.randint(0, 2, (5, 5), dtype=bool)
+        x = torch.randint(0, 2, (5, 5), dtype=torch.bool)
+        y = torch.randint(0, 2, (5, 5), dtype=torch.bool)
+        self.run_test(XorModel(), input=(x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.int32)
+        y = torch.randint(10, (5, 5), dtype=torch.int32)
+        self.run_test(XorModel(), input=(x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.double)
+        y = torch.randint(10, (5, 5), dtype=torch.double)
+        self.run_test(XorModel(), input=(x, y))
+
+        x = torch.randint(10, (2, 3, 5), dtype=torch.float32)
+        y = torch.randint(10, (2, 3, 5), dtype=torch.long)
         self.run_test(XorModel(), input=(x, y))
 
     def test_gt(self):
