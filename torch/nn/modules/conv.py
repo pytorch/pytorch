@@ -1031,6 +1031,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
             self.in_channels = input.shape[1]
             if self.in_channels % self.groups != 0:
                 raise ValueError('in_channels must be divisible by groups')
+            assert isinstance(self.weight, UninitializedParameter)
             if self.transposed:
                 self.weight.materialize((
                     self.in_channels, self.out_channels // self.groups, *self.kernel_size))
