@@ -7,10 +7,10 @@ from torch import Tensor
 # Define a TorchScript compatible Functional Adadelta Optimizer
 # where we use these optimizer in a functional way.
 # Instead of using the `param.grad` when updating parameters,
-# we explicitly let the user pass gradients to the `step` function
-# this is so that we could separate the gradients and parameters
-# and allow multithreaded trainer to update the parameters
-# without data traces on accumulating to the same .grad.
+# we explicitly allow the distributed optimizer pass gradients to
+# the `step` function. In this way, we could separate the gradients
+# and parameters and allow multithreaded trainer to update the
+# parameters without data traces on accumulating to the same .grad.
 # NOTE: This should be only used by distributed optimizer internals
 # and not meant to expose to the user.
 @torch.jit.script
