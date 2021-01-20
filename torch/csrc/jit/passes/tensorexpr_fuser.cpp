@@ -1154,6 +1154,7 @@ Operation createTensorExprOp(const Node* node) {
   };
 }
 
+
 Operation createConv2dRelu(const Node* node) {
 
 /*
@@ -1174,9 +1175,9 @@ Operation createConv2dRelu(const Node* node) {
     //   input = at::native::dense_to_mkldnn(input);
     // }
     auto weight = peek(stack, 1, ARG_COUNT).toTensor();
-    // if (!weight.is_mkldnn()) {
-    //   weight = at::native::dense_to_mkldnn(weight);  
-    // }
+    if (!weight.is_mkldnn()) {
+      weight = at::native::dense_to_mkldnn(weight);  
+    }
     auto bias = peek(stack, 2, ARG_COUNT).toOptional<at::Tensor>();
     auto stride = peek(stack, 3, ARG_COUNT).toIntVector();
     auto padding = peek(stack, 4, ARG_COUNT).toIntVector();
@@ -1218,15 +1219,18 @@ Operation createConv2dRelu(const Node* node) {
           groups, ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), attr);
     }
 
-    at::Tensor result;
-    if (input.is_mkldnn()) {
-      result = at::native::new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
-                                    input.options().device_opt());
-    } else {
-      result = at::native::mkldnn_to_dense(
-        at::native::new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
-                                input.options().device_opt()));
-    }
+    auto result = at::native::new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
+          input.options().device_opt());
+
+    // at::Tensor result;
+    // if (input.is_mkldnn()) {
+    //   result = at::native::new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
+    //                                 input.options().device_opt());
+    // } else {
+    //   result = at::native::mkldnn_to_dense(
+    //     at::native::new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(input.options().dtype_opt()),
+    //                             input.options().device_opt()));
+    // }
       
     drop(stack, ARG_COUNT);
     stack->push_back(result);

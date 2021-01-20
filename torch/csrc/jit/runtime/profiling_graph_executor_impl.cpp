@@ -545,20 +545,73 @@ ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
     : GraphExecutorImplBase(graph, std::move(function_name)) {}
 
 static void replaceWithConv2dRelu(Block* block) {
+
+  const static std::unordered_set<Symbol> mkldnn_ops = {
+      aten::max_pool2d,
+      Symbol::prim("_conv2d_relu"),
+      aten::conv2d,
+  };
+
+
   for (auto n: block->nodes()) {
 
     if (n->kind() == Symbol::aten("relu_")) {
       if (n->input(0)->node()->kind() == aten::conv2d) {
         WithInsertPoint wip {n->input(0)->node()};
+        auto conv_input = n->input(0)->node()->input(0);
+        //auto weight_input = n->input(0)->node()->input(1);
+        bool is_mkldnn_input = mkldnn_ops.count(conv_input->node()->kind()) == 0;
+        //bool is_mkldnn_weight = mkldnn_ops.count(weight_input->node()->kind()) == 0;
+        if (is_mkldnn_input) {
+          conv_input = n->owningGraph()->insert(Symbol::aten("to_mkldnn"), {conv_input});
+        }
+        //weight_input = n->owningGraph()->insert(Symbol::aten("to_mkldnn"), {weight_input});
+        // if (is_mkldnn_weight) {
+        //   weight_input = n->owningGraph()->insert(Symbol::aten("to_mkldnn"), {weight_input});
+        // }
         std::vector<NamedValue> fused_inputs (n->input(0)->node()->inputs().begin(), n->input(0)->node()->inputs().end());
         auto fused = n->owningGraph()->insert(Symbol::prim("_conv2d_relu"), fused_inputs);
+        if (is_mkldnn_input) {
+                  fused->node()->replaceInput(0, conv_input);
+        }
+        // if (is_mkldnn_weight) {
+        //   fused->node()->replaceInput(1, weight_input);
+        // }
+        //fused->node()->replaceInput(1, weight_input);
+        bool has_non_mkldnn = std::any_of(n->output()->uses().begin(), n->output()->uses().end(), [&](const Use& u) {
+          return mkldnn_ops.count(u.user->kind()) == 0;
+        });
+        if (has_non_mkldnn) {
+          fused = n->owningGraph()->insert(aten::to_dense, {fused});
+        }
+        GRAPH_DEBUG("@#$ Replacing ", getHeader(n), " with ", getHeader(fused->node()));
         n->output()->replaceAllUsesWith(fused);
       }
+    } else if (n->kind() == aten::max_pool2d) {
+
+        auto pool_input = n->input(0);
+        bool is_mkldnn_input = mkldnn_ops.count(pool_input->node()->kind()) == 0;
+        //bool is_mkldnn_weight = mkldnn_ops.count(weight_input->node()->kind()) == 0;
+        if (is_mkldnn_input) {
+          pool_input = n->owningGraph()->insert(Symbol::aten("to_mkldnn"), {pool_input});
+          n->replaceInput(0, pool_input);
+        }
+
+        bool has_non_mkldnn = std::any_of(n->output()->uses().begin(), n->output()->uses().end(), [&](const Use& u) {
+          return mkldnn_ops.count(u.user->kind()) == 0;
+        });
+        if (has_non_mkldnn) {
+          WithInsertPoint wip {n->next()};
+          auto to_dense = n->owningGraph()->insert(aten::to_dense, {n->output()});
+          GRAPH_DEBUG("@#$ Replacing ", getHeader(n), " with ", getHeader(to_dense->node()));
+          n->output()->replaceAllUsesAfterNodeWith(to_dense->node(), to_dense);
+        }
     }
 
     for (auto ib : n->blocks()) {
       replaceWithConv2dRelu(ib);
     }
+
   }
 }
 
