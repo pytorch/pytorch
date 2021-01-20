@@ -17,7 +17,7 @@ from torch.testing import \
      all_types_and_complex_and, all_types_and)
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm,
-     expectedAlertNondeterministic, precisionOverride, onlyCPU)
+     expectedAlertNondeterministic, precisionOverride)
 from torch.testing._internal.common_cuda import tf32_is_not_fp32
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
@@ -1348,6 +1348,7 @@ op_db: List[OpInfo] = [
                    handles_complex_extremals=False),
     UnaryUfuncInfo('sqrt',
                    ref=np.sqrt,
+                   supports_sparse=True,
                    domain=(0, float('inf')),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -2551,25 +2552,20 @@ def method_tests():
          'scalar_broadcast_rhs'),
         ('maximum', (S, S), ((S, S),)),
         ('minimum', (S, S), ((S, S),)),
+        ('fmax', (S, S), ((S, S),)),
+        ('fmin', (S, S), ((S, S),)),
         ('resize_', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
         ('resize_', (), (dont_convert(()),), 'scalar'),
         ('resize_', (), (torch.Size([1, 1, 1])), 'scalar_to_dims'),
         ('resize_as_', (), (non_differentiable(torch.tensor(5.)),), 'scalar'),
         ('resize_as_', (), (non_differentiable(torch.randn((1, 1, 1))),), 'scalar_to_dims'),
         ('resize_as_', (S, S, S), (non_differentiable(torch.randn(S * S, S)),)),
-        # TODO(@nikitaved) enable stable sort tests for CUDA once they are implemented
         ('sort', (S, M, S), NO_ARGS),
-        ('sort', (S, M, S), (0, False, True), 'stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (S, M, S), (1,), 'dim'),
-        ('sort', (S, M, S), (1, False, True), 'dim_stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (S, M, S), (1, True), 'dim_desc'),
-        ('sort', (S, M, S), (1, True, True), 'dim_desc_stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (), NO_ARGS, 'scalar'),
-        ('sort', (), (0, False, True), 'scalar_stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (), (0,), 'dim_scalar'),
-        ('sort', (), (0, False, True), 'dim_scalar_stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (), (0, True), 'dim_desc_scalar'),
-        ('sort', (), (0, True, True), 'dim_desc_scalar_stable', (), NO_ARGS, [onlyCPU]),
         ('msort', (S, M, S), NO_ARGS),
         ('topk', (S, M, S), (3,)),
         ('topk', (S, M, S), (3, 1), 'dim', (), [1]),
