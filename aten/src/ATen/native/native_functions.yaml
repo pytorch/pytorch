@@ -697,7 +697,6 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: quantized_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
