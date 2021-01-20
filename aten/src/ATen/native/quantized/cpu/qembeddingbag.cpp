@@ -286,7 +286,6 @@ at::Tensor& embedding_bag_byte_impl(
 
   const auto weight_sizes = weight.sizes();
   const int64_t N = weight_sizes[0];
-  const int64_t weight_size = weight_sizes[1];
   const int64_t D = weight_sizes[1] - 8; // NB: -8 to account for scale and bias
   const int64_t M = offsets.sizes()[0];
 
