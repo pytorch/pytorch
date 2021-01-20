@@ -10,7 +10,7 @@ class SyncBatchNorm(Function):
         if not input.is_contiguous(memory_format=torch.channels_last):
             input = input.contiguous()
 
-        size = int(input.numel() / input.size(1))
+        size = int(input.numel() // input.size(1))
         if size == 1 and world_size < 2:
             raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
 
