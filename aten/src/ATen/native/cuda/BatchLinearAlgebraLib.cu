@@ -78,13 +78,13 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
   } else {
     // cublas batched kernels require input be "device array of device pointers"
     Tensor self_array = at::arange(
-      reinterpret_cast<long>(self_data),
-      reinterpret_cast<long>(&self_data[(batch_size-1) * self_mat_stride]) + 1,
-      static_cast<long>(self_mat_stride * sizeof(scalar_t)), self.options().dtype(at::kLong));
+      reinterpret_cast<int64_t>(self_data),
+      reinterpret_cast<int64_t>(&self_data[(batch_size-1) * self_mat_stride]) + 1,
+      static_cast<int64_t>(self_mat_stride * sizeof(scalar_t)), self.options().dtype(at::kLong));
     Tensor self_inv_array = at::arange(
-      reinterpret_cast<long>(self_inv_data),
-      reinterpret_cast<long>(&self_inv_data[(batch_size-1) * self_inv_mat_stride]) + 1,
-      static_cast<long>(self_inv_mat_stride * sizeof(scalar_t)), self.options().dtype(at::kLong));
+      reinterpret_cast<int64_t>(self_inv_data),
+      reinterpret_cast<int64_t>(&self_inv_data[(batch_size-1) * self_inv_mat_stride]) + 1,
+      static_cast<int64_t>(self_inv_mat_stride * sizeof(scalar_t)), self.options().dtype(at::kLong));
 
     auto dataPtr = allocator.allocate(sizeof(int)*batch_size*lda);
     int* ipiv_array = reinterpret_cast<int*>(dataPtr.get());
