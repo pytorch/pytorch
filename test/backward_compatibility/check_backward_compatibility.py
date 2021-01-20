@@ -55,6 +55,8 @@ allow_list = [
     ("aten::sort", datetime.date(2021, 1, 31)),
     ("aten::sort_out", datetime.date(2021, 1, 31)),
     ("aten::elu_backward", datetime.date(2021, 1, 31)),
+    ("aten::_multinomial_alias_setup", datetime.date(2021, 1, 31)),
+    ("aten::_multinomial_alias_draw", datetime.date(2021, 1, 31)),
 ]
 
 def allow_listed(schema, allow_list):
