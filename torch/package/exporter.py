@@ -8,7 +8,8 @@ from ._importlib import _normalize_path
 from ._mangling import is_mangled
 import types
 import importlib
-from typing import List, Any, Callable, Dict, Tuple, Union, Iterable
+from os import PathLike
+from typing import List, Any, Callable, Dict, Tuple, Union, Iterable, BinaryIO, IO, Optional
 from distutils.sysconfig import get_python_lib
 from pathlib import Path
 import linecache
@@ -58,16 +59,23 @@ class PackageExporter:
     """
 
 
-    def __init__(self, filename: str, verbose: bool = True):
+    def __init__(self, f: Union[str, PathLike, BinaryIO, IO[bytes]], verbose: bool = True):
         """
         Create an exporter.
 
         Args:
-            filename: e.g. my_package.zip
+            f: a file-like object (has to implement write and flush) or a string or
+                os.PathLike object containing a file name.
             verbose: Print information about dependency resolution to stdout.
                 Useful for tracking down why certain files get included.
         """
-        self.zip_file = torch._C.PyTorchFileWriter(filename)
+        if isinstance(f, (PathLike, str)):
+            f = str(f)
+            self.buffer = None
+        else:  # is a byte buffer
+            self.buffer: Optional[Union[BinaryIO, IO[bytes]]] = f
+
+        self.zip_file = torch._C.PyTorchFileWriter(f)
         self.serialized_storages : Dict[str, Any] = {}
         self.external : List[str] = []
         self.provided : Dict[str, bool] = {}
@@ -432,6 +440,8 @@ node [shape=box];
         contents = ('\n'.join(self.external) + '\n')
         self._write('extern_modules', contents)
         del self.zip_file
+        if self.buffer:
+            self.buffer.flush()
 
     def _filename(self, package, resource):
         package_path = package.replace('.', '/')
