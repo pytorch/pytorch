@@ -30,6 +30,7 @@ jobs:
     env:
       DESIRED_PYTHON: ${{ matrix.python_version }}
       DESIRED_CUDA: ${{ matrix.gpu_arch }}
+      SKIP_ALL_TESTS: 1
     steps:
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
@@ -41,6 +42,7 @@ jobs:
         with:
           repository: pytorch/builder
           path: builder
+      # TODO: Add version generation here from binary_populate_env.sh
       # TODO: Remove this once we remove the need for the directories to be
       #       in specific locations
       - name: Symlink repositories to root directory (for legacy scripts purposes)
