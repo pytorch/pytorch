@@ -32,10 +32,12 @@ allow_list = [
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
+    ("aten::_qr_helper", datetime.date(2021, 1, 31)),
     ("aten::fft", datetime.date(2021, 1, 31)),
     ("aten::ifft", datetime.date(2021, 1, 31)),
     ("aten::irfft", datetime.date(2021, 1, 31)),
     ("aten::rfft", datetime.date(2021, 1, 31)),
+    ("aten::_svd_helper", datetime.date(2021, 1, 31)),
     ("aten::_cudnn_rnn_flatten_weight", datetime.date(2020, 12, 31)),
     ("aten::_cudnn_rnn", datetime.date(2020, 12, 31)),
     ("aten::_cudnn_rnn_backward", datetime.date(2020, 12, 31)),
@@ -50,6 +52,9 @@ allow_list = [
     ("aten::set_", datetime.date(2021, 1, 31)),
     ("aten::native_layer_norm", datetime.date(2021, 1, 31)),
     ("aten::native_layer_norm_backward", datetime.date(2021, 1, 31)),
+    ("aten::elu_backward", datetime.date(2021, 1, 31)),
+    ("aten::_multinomial_alias_setup", datetime.date(2021, 1, 31)),
+    ("aten::_multinomial_alias_draw", datetime.date(2021, 1, 31)),
 ]
 
 def allow_listed(schema, allow_list):
@@ -71,7 +76,7 @@ def allow_listed(schema, allow_list):
 dont_parse_list = [
     ("_TorchScriptTesting.*", datetime.date(2099, 9, 17)),
     ("test_backend", datetime.date(2099, 9, 17)),
-    ("c10d.frontend", datetime.date(2020, 12, 30)),
+    ("dist_c10d", datetime.date(2021, 1, 30)),
 ]
 
 

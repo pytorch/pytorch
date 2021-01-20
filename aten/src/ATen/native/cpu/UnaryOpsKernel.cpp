@@ -336,7 +336,7 @@ static void cosh_kernel(TensorIterator& iter) {
 }
 
 static void acosh_kernel(TensorIterator& iter) {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "acosh_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "acosh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::acosh(a); });
@@ -344,7 +344,7 @@ static void acosh_kernel(TensorIterator& iter) {
 }
 
 static void asinh_kernel(TensorIterator& iter) {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "asinh_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "asinh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::asinh(a); });
@@ -352,7 +352,7 @@ static void asinh_kernel(TensorIterator& iter) {
 }
 
 static void atanh_kernel(TensorIterator& iter) {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "atanh_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "atanh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::atanh(a); });
@@ -587,10 +587,10 @@ static void random_full_64_bits_range_kernel(TensorIterator& iter, c10::optional
 }
 
 static void rsqrt_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "rsqrt_cpu", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "rsqrt_cpu", [&] {
     cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t {
+        [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
           return (static_cast<scalar_t>(1)) / std::sqrt(a);
         },
         [=](Vec256<scalar_t> a) { return a.rsqrt(); });

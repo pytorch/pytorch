@@ -303,11 +303,16 @@ IS_PPC = platform.machine() == "ppc64le"
 
 if IS_WINDOWS:
     @contextmanager
-    def TemporaryFileName(dir=None):
+    def TemporaryFileName(*args, **kwargs):
         # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
         # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
         # close the file after creation and try to remove it manually
-        f = tempfile.NamedTemporaryFile(delete=False, dir=dir)
+        if 'delete' in kwargs:
+            if kwargs['delete'] is not False:
+                raise UserWarning("only TemporaryFileName with delete=False is supported on Windows.")
+        else:
+            kwargs['delete'] = False
+        f = tempfile.NamedTemporaryFile(*args, **kwargs)
         try:
             f.close()
             yield f.name
@@ -315,8 +320,8 @@ if IS_WINDOWS:
             os.unlink(f.name)
 else:
     @contextmanager  # noqa: T484
-    def TemporaryFileName(dir=None):
-        with tempfile.NamedTemporaryFile(dir=dir) as f:
+    def TemporaryFileName(*args, **kwargs):
+        with tempfile.NamedTemporaryFile(*args, **kwargs) as f:
             yield f.name
 
 if IS_WINDOWS:
@@ -344,7 +349,6 @@ def _check_module_exists(name):
     our tests, e.g., setting multiprocessing start method when imported
     (see librosa/#747, torchvision/#544).
     """
-    import importlib
     import importlib.util
     spec = importlib.util.find_spec(name)
     return spec is not None
@@ -592,28 +596,14 @@ def suppress_warnings(fn):
     return wrapper
 
 
-def get_cpu_type(type_name):
-    module, name = type_name.rsplit('.', 1)
-    assert module == 'torch.cuda'
-    return getattr(torch, name)
-
-
-def get_gpu_type(type_name):
-    if isinstance(type_name, type):
-        type_name = '{}.{}'.format(type_name.__module__, type_name.__name__)
-    module, name = type_name.rsplit('.', 1)
-    assert module == 'torch'
-    return getattr(torch.cuda, name)
-
-
 def to_gpu(obj, type_map=None):
     if type_map is None:
         type_map = {}
     if isinstance(obj, torch.Tensor):
         assert obj.is_leaf
-        t = type_map.get(obj.type(), get_gpu_type(obj.type()))
+        t = type_map.get(obj.dtype, obj.dtype)
         with torch.no_grad():
-            res = obj.clone().type(t)
+            res = obj.clone().to(dtype=t, device="cuda")
             res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):
@@ -1381,19 +1371,30 @@ class TestCase(expecttest.TestCase):
         s = re.sub(r'__torch__[^ ]+', '', s)
         self.assertExpected(s, subname)
 
-    # returns captured stderr
+    # run code in subprocess and capture exceptions.
     @staticmethod
-    def runWithPytorchAPIUsageStderr(code):
+    def run_process_no_exception(code, env=None):
         import subprocess
 
-        env = os.environ.copy()
-        env["PYTORCH_API_USAGE_STDERR"] = "1"
-        pipes = subprocess.Popen(
+        popen = subprocess.Popen(
             [sys.executable, '-c', code],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=env)
-        return pipes.communicate()[1].decode('ascii')
+        (stdout, stderr) = popen.communicate()
+        return (stdout, stderr)
+
+    # returns captured stderr
+    @staticmethod
+    def runWithPytorchAPIUsageStderr(code):
+        env = os.environ.copy()
+        env["PYTORCH_API_USAGE_STDERR"] = "1"
+        # remove IN_CI flag since this is a wrapped test process.
+        # IN_CI flag should be set in the parent process only.
+        if "IN_CI" in env.keys():
+            del env["IN_CI"]
+        (stdout, stderr) = TestCase.run_process_no_exception(code, env=env)
+        return stderr.decode('ascii')
 
 
 def download_file(url, binary=True):
@@ -1541,7 +1542,7 @@ def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
             s[i] = 0
         elif s[i] == 0:
             s[i] = 1
-    return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
+    return u.mm(torch.diag(s).to(dtype)).mm(v.transpose(0, 1))
 
 
 def random_symmetric_matrix(l, *batches, **kwargs):
@@ -1565,6 +1566,17 @@ def random_symmetric_psd_matrix(l, *batches, **kwargs):
     device = kwargs.get('device', 'cpu')
     A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
     return torch.matmul(A, A.transpose(-2, -1))
+
+
+def random_hermitian_psd_matrix(matrix_size, *batch_dims, dtype=torch.double, device='cpu'):
+    """
+    Returns a batch of random Hermitian semi-positive-definite matrices.
+    The shape of the result is batch_dims + (matrix_size, matrix_size)
+    The following example creates a tensor of size 2 x 4 x 3 x 3
+    >>> matrices = random_hermitian_psd_matrix(3, 2, 4, dtype=dtype, device=device)
+    """
+    A = torch.randn(*(batch_dims + (matrix_size, matrix_size)), dtype=dtype, device=device)
+    return torch.matmul(A, A.conj().transpose(-2, -1))
 
 
 def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):

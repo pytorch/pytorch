@@ -82,10 +82,7 @@ class PowerSGDState(object):
         self.q_memory_dict = {}
 
 
-def powerSGD_hook(
-    state: PowerSGDState,
-    bucket,
-) -> torch.futures.Future:
+def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     """
     This DDP communication hook implements the original PowerSGD gradient compression
     algorithm described in https://arxiv.org/abs/1905.13727.
@@ -305,7 +302,7 @@ def powerSGD_hook(
             torch.cuda.synchronize(device)
 
         if state.use_error_feedback:
-            # Memorize the local errors.
+            # memoize the local errors.
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         if not state.warm_start:
             state.p_memory_dict.clear()
@@ -322,10 +319,7 @@ def powerSGD_hook(
     )
 
 
-def batched_powerSGD_hook(
-    state: PowerSGDState,
-    bucket,
-) -> torch.futures.Future:
+def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     """
     This DDP communication hook implements a simplified PowerSGD gradient compression
     algorithm described in https://arxiv.org/abs/1905.13727.
@@ -487,7 +481,7 @@ def batched_powerSGD_hook(
         )
 
         if state.use_error_feedback:
-            # Memorize the local errors.
+            # memoize the local errors.
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         if torch.cuda.is_available():
             torch.cuda.synchronize(device)
