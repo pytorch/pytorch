@@ -1062,6 +1062,40 @@ void ClassType::addMethod(torch::jit::Function* method) {
   methods_.push_back(method);
 }
 
+const std::vector<torch::jit::Function*>& ClassType::getForwardHooks() const {
+    return forward_hooks_;
+}
+
+const std::vector<torch::jit::Function*>& ClassType::getForwardPreHooks() const {
+    return forward_pre_hooks_;
+}
+
+void ClassType::addForwardPreHook(torch::jit::Function* pre_hook_ptr) {
+    forward_pre_hooks_.emplace_back(pre_hook_ptr);
+}
+
+void ClassType::addForwardHook(torch::jit::Function* hook_ptr) {
+    forward_hooks_.emplace_back(hook_ptr);
+}
+
+torch::jit::Function* ClassType::findForwardPreHook(const std::string& name) const {
+  for (const auto& pre_hook : forward_pre_hooks_) {
+    if (name == pre_hook->name()) {
+      return pre_hook;
+    }
+  }
+  return nullptr;
+}
+
+torch::jit::Function* ClassType::findForwardHook(const std::string& name) const {
+  for (const auto& hook : forward_hooks_) {
+    if (name == hook->name()) {
+      return hook;
+    }
+  }
+  return nullptr;
+}
+
 torch::jit::Function* ClassType::findMethod(const std::string& name) const {
   for (auto method : methods_) {
     if (name == method->name()) {
@@ -1081,6 +1115,27 @@ torch::jit::Function& ClassType::getMethod(const std::string& name) const {
       "'");
   return *method;
 }
+
+torch::jit::Function* ClassType::findHook(const std::string& name) const {
+  auto hook = findForwardHook(name);
+  if (hook == nullptr) {
+    hook = findForwardPreHook(name); 
+  } 
+  return hook;
+}
+
+torch::jit::Function& ClassType::getHook(const std::string& name) const {
+  torch::jit::Function* function = findHook(name);
+  TORCH_CHECK(
+      function != nullptr,
+      "Couldn't find: '",
+      name,
+      "' on class: '",
+      repr_str(),
+      "'as forward hook or forward pre_hook.");
+  return *function;
+}
+
 bool ClassType::hasMethod(const std::string& name) const {
   return findMethod(name) != nullptr;
 }
