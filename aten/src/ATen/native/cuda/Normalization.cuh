@@ -1387,7 +1387,7 @@ template<typename scalar_t>
 std::tuple<Tensor, Tensor> batch_norm_stats_channels_last_cuda_template(const Tensor& input, double epsilon) {
   using accscalar_t = at::acc_type<scalar_t, true>;
 
-  const auto stride = input.size(1);
+  const auto stride = input.sizes()[1];
   const auto reduction_size = input.numel() / stride;
 
   auto scalar_type = input.scalar_type() == at::kHalf ? at::kFloat : input.scalar_type();
@@ -1434,7 +1434,7 @@ void batch_norm_elemt_channels_last_cuda_template(
     double epsilon,
     const at::optional<at::Tensor>& z = c10::nullopt,  // bias after BN
     const bool fuse_relu = false) {
-  const auto stride = input.size(1);
+  const auto stride = input.sizes()[1];
   const auto reduction_size = input.numel() / stride;
 
   dim3 block;
@@ -1490,7 +1490,7 @@ batch_norm_backward_reduce_cuda_channels_last_template(const at::Tensor& grad_ou
     const at::Tensor& inv_std,
     const at::Tensor& weight,
     const bool input_g, const bool weight_g, const bool bias_g) {
-  const auto stride = input.size(1);
+  const auto stride = input.sizes()[1];
   const auto reduction_size = input.numel() / stride;
 
   at::Tensor sumn_dy = at::empty({stride}, mean.options());
@@ -1578,7 +1578,7 @@ at::Tensor batch_norm_backward_elemt_channels_last_cuda_template(
     const at::Tensor& sum_dy,
     const at::Tensor& sum_dy_xmu,
     const at::Tensor& count) {
-  const auto stride = input.size(1);
+  const auto stride = input.sizes()[1];
   const auto reduction_size = input.numel() / stride;
 
   at::Tensor grad_input = at::empty_like(input, input.suggest_memory_format());
