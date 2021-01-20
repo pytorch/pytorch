@@ -264,7 +264,7 @@ static inline std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& in
   // VT should be a column-major or a batch of column-major matrices
   sizes[input.dim() - 2] = n;
   sizes[input.dim() - 1] = n;
-  // VT should be a row-major or a batch of row-major matrices
+  // VT should be a column-major or a batch of column-major matrices
   Tensor VT_empty = at::zeros(sizes, input.options().device(usvt_device));
   VT_empty.transpose_(-2, -1);
 
