@@ -8,9 +8,13 @@
 #include <type_traits>
 #include <c10/util/math_compat.h>
 
-#ifndef M_PIf
-#define M_PIf 3.1415926535f
-#endif  // M_PIf
+namespace at {
+namespace native {
+//TODO: Replace me with std::numbers::pi when C++20 becomes available
+template <typename T>
+static  constexpr T pi = 3.14159265358979323846L;
+}
+}
 
 /* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
 Below is the copyright.
@@ -105,8 +109,8 @@ Date:  February 1996
 #endif
   }
   /* Two steps of Newton-Raphson correction */
-  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)/static_cast<T>(std::sqrt(M_PI)))*std::exp(-x*x));
-  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)/static_cast<T>(std::sqrt(M_PI)))*std::exp(-x*x));
+  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)/static_cast<T>(std::sqrt(at::native::pi<double>)))*std::exp(-x*x));
+  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)/static_cast<T>(std::sqrt(at::native::pi<double>)))*std::exp(-x*x));
 
   return(x);
 }
@@ -241,8 +245,8 @@ static inline double trigamma(double x) {
   double result = 0;
   if (x < 0.5) {
     sign = -1;
-    const double sin_pi_x = sin(M_PI * x);
-    result -= (M_PI * M_PI) / (sin_pi_x * sin_pi_x);
+    const double sin_pi_x = sin(at::native::pi<double> * x);
+    result -= (at::native::pi<double> * at::native::pi<double>) / (sin_pi_x * sin_pi_x);
     x = 1 - x;
   }
   for (int i = 0; i < 6; ++i) {
@@ -259,8 +263,8 @@ static inline float trigamma(float x) {
   float result = 0;
   if (x < 0.5f) {
     sign = -1;
-    const float sin_pi_x = sinf(M_PIf * x);
-    result -= (M_PIf * M_PIf) / (sin_pi_x * sin_pi_x);
+    const float sin_pi_x = sinf(at::native::pi<float> * x);
+    result -= (at::native::pi<float> * at::native::pi<float>) / (sin_pi_x * sin_pi_x);
     x = 1 - x;
   }
   for (int i = 0; i < 6; ++i) {
@@ -292,7 +296,7 @@ static inline double calc_digamma(double x) {
       // If the argument is a negative integer, NaN is returned
       return NAN;
     }
-    return calc_digamma(1 - x) - M_PI / tan(M_PI * x);
+    return calc_digamma(1 - x) - at::native::pi<double> / tan(at::native::pi<double> * x);
   }
 
   // Push x to be >= 10
@@ -346,7 +350,7 @@ static inline float calc_digamma(float x) {
     }
     // Avoid rounding errors for `tan`'s input.
     // Those make a big difference at extreme values.
-    float pi_over_tan_pi_x = (float)(M_PI / tan(M_PI * (double)x));
+    float pi_over_tan_pi_x = (float)(at::native::pi<double> / tan(at::native::pi<double> * (double)x));
     return calc_digamma(1 - x) - pi_over_tan_pi_x;
   }
 
@@ -883,7 +887,7 @@ static scalar_t _igam_helper_asymptotic_series(scalar_t a, scalar_t x, bool igam
     absoldterm = absterm;
     afac /= a;
   }
-  res += sgn * std::exp(-0.5 * a * eta * eta) * sum / std::sqrt(2 * M_PIf * a);
+  res += sgn * std::exp(-0.5 * a * eta * eta) * sum / std::sqrt(2 * at::native::pi<float> * a);
 
   return res;
 }

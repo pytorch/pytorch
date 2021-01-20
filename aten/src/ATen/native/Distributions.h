@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/native/Math.h>
 #include <c10/macros/Macros.h>
 
 // ROCM hcc doesn't work well with using std:: in kernel functions
@@ -276,8 +277,8 @@ C10_DEVICE static inline scalar_t digamma_one(scalar_t x) {
     }
     // it is more standard to write this as recursion, but
     // nvcc does not like that
-    additional_summand = -static_cast<accscalar_t>(M_PI) /
-        compat_tan(static_cast<accscalar_t>(M_PI) * x);
+    additional_summand = -static_cast<accscalar_t>(at::native::pi<double>) /
+        compat_tan(static_cast<accscalar_t>(at::native::pi<double>) * x);
     x = 1 - x;
   }
 

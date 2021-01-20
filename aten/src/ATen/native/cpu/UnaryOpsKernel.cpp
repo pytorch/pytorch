@@ -310,7 +310,8 @@ static void sinc_kernel(TensorIterator& iter) {
           if (a == scalar_t(0)) {
             return scalar_t(1);
           } else {
-            scalar_t product = scalar_t(M_PI) * a;
+            constexpr auto pi_ = at::native::pi<double>;
+            scalar_t product = scalar_t(pi_) * a;
             return std::sin(product) / product;
           }
         });
