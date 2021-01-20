@@ -286,6 +286,32 @@ In addition to the backends above, we also support the keywords:
     registered to `Math` key should be plain mathematical composition of other
     `at::` functions and support training and inference for any backend.
 
+Note the kernels registered to `DefaultBackend` and `Math` might look identical,
+they only differ in whether it's also used to compute backward as well.
+
+For example, suppose `my_op` can be decomposed in the following way:
+```
+at::Tensor my_op(const Tensor& self, const Tensor& other) {
+  return self + 2 * other;
+}
+```
+
+If we already know inference kernels and derivative formulas for operators `+` and `*` in our system,
+you can just register `my_op` to `Math` and both inference & autograd will just work.
+Although it seems we only write down the inference formula here, PyTorch autograd system would correctly
+set up the backward for `my_op` using the chain formula and derivatives of `+` & `-` operators.
+In other words `d_out/d_self = 1; d_out/d_other = 2` can be derived automatically from
+`my_op` inference kernel. Of course if we don't have derivative formula defined for any of `+` or `-`,
+backward of `my_op` can no longer be derived automatically.
+
+Whether to use `Math` or `DefaultBackend` for your kernel can be decided by the following steps:
+1. Always start with a `Math` kernel that's composable of other existing operators.
+2. If you don't want to use the derived gradient formula from `Math` kernel for autograd, either to
+   get better performance or better numerical stability, you should put the kernel in `DefaultBackend`
+   so that it's only used in inference.
+   Later for autograd, depending on whether your autograd kernel works for all backends or not,
+   you can put them in alias `Autograd` or specific keys like `AutogradCPU`.
+
 If you add `dispatch` section to any API that didn't have it before, you **have to** move
 the old implementation to `Math` field so that it's still available for other backends to use.
 
@@ -477,14 +503,25 @@ Here're steps to follow to decide the right dispatch keyword:
 
       Note: current plan on record for ops using this boilerplate is to replace `at::` with `at::native` in
       the implementations and add dispatch section with device keywords instead.
+3. Validate the computed dispatch table matches what you want. You can use `PythonDispatcher` provided in
+[tools/python_dispatcher.py](https://github.com/pytorch/pytorch/blob/master/tools/python_dispacher.py).
+It shows for a certain operator, how the computed dispatch table looks like after your registrations.
 
-3. TODO: AutogradCPUOrCUDA
+    ```
+    toy = PythonDispatcher()
+    toy.register(["CPU", "XLA", "AutogradCPU", "Math"])
+    print(toy.dispatchTable()) # Tells you exactly which kernel is used for certain backend.
+    ```
+
+4. TODO: AutogradCPUOrCUDA
 
 Note that in native_functions.yaml you can mix using backend keywords and alias keywords above for one op:
   - direct registration to backend always has higher precendence than alias
   - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `DefaultBackend > Math`,
     e.g. adding both `Math` and `DefaultBackend` kernels for one op will completely ignore `Math` kernel for
     both inference and training. Thus this will trigger an error when native_functions.yaml is parsed.
+
+
 
 ### Will this function be exposed to python? What are the namespaces?
 
