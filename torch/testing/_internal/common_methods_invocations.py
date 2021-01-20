@@ -17,7 +17,7 @@ from torch.testing import \
      all_types_and_complex_and, all_types_and)
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm,
-     expectedAlertNondeterministic, precisionOverride, onlyCPU)
+     expectedAlertNondeterministic, precisionOverride)
 from torch.testing._internal.common_cuda import tf32_is_not_fp32
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
@@ -2557,19 +2557,12 @@ def method_tests():
         ('resize_as_', (), (non_differentiable(torch.tensor(5.)),), 'scalar'),
         ('resize_as_', (), (non_differentiable(torch.randn((1, 1, 1))),), 'scalar_to_dims'),
         ('resize_as_', (S, S, S), (non_differentiable(torch.randn(S * S, S)),)),
-        # TODO(@nikitaved) enable stable sort tests for CUDA once they are implemented
         ('sort', (S, M, S), NO_ARGS),
-        ('sort', (S, M, S), (0, False, True), 'stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (S, M, S), (1,), 'dim'),
-        ('sort', (S, M, S), (1, False, True), 'dim_stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (S, M, S), (1, True), 'dim_desc'),
-        ('sort', (S, M, S), (1, True, True), 'dim_desc_stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (), NO_ARGS, 'scalar'),
-        ('sort', (), (0, False, True), 'scalar_stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (), (0,), 'dim_scalar'),
-        ('sort', (), (0, False, True), 'dim_scalar_stable', (), NO_ARGS, [onlyCPU]),
         ('sort', (), (0, True), 'dim_desc_scalar'),
-        ('sort', (), (0, True, True), 'dim_desc_scalar_stable', (), NO_ARGS, [onlyCPU]),
         ('msort', (S, M, S), NO_ARGS),
         ('topk', (S, M, S), (3,)),
         ('topk', (S, M, S), (3, 1), 'dim', (), [1]),
