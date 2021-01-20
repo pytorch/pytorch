@@ -72,6 +72,13 @@ private:
   friend class OperatorHandle;
   template<class> friend class TypedOperatorHandle;
 
+  // Helper utility function for internal use only.
+  template<class Return, class... Args>
+  Return _callWithDispatchKeySet(const TypedOperatorHandle<Return(Args...)>& op, const KernelFunction& kernel, DispatchKeySet dispatchKeySet, Args... args) const;
+
+  // Helper utility function for internal use only.
+  void _callBoxed(const OperatorHandle& op, const impl::OperatorEntry& entry, const KernelFunction& kernel, DispatchKeySet dispatchKeySet, Stack* stack) const;
+
 public:
   ~Dispatcher();
 
@@ -141,8 +148,10 @@ public:
   Return redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey currentDispatchKey, Args... args) const;
 
 
+  // Like call, but intended for use in a redispatch in kernels that have explicitly performed the DispatchKey update calculatulation.
+  // This will take the DispatchKeySet completely as is and dispatch to the kernel of the corresponding highest priority key in the set.
   template<class Return, class... Args>
-  Return redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const;
+  Return callWithPrecomputedDispatchKeySet(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const;
 
   // Invoke an operator via the boxed calling convention using an IValue stack
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
@@ -150,6 +159,7 @@ public:
   // TODO: This will only be useful if we write a backend fallback that plumbs dispatch keys (currently there are none)
   // See Note [Plumbing Keys Through The Dispatcher]
   void callBoxed(const OperatorHandle& op, DispatchKeySet dispatchKeySet, Stack* stack) const;
+
 
   // ------------------------------------------------------------------------
   //
@@ -390,44 +400,7 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
       args...
     );
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
-
-#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  // By default, when there're no high-frequency or non-sampled callbacks,
-  // RecordFunction is pre-sampled as a perf optimization;
-  // shouldRunRecordFunction checks whether RecordFunction should be executed,
-  // and sets pre_sampled boolean argument value to whether pre-sampling was used -
-  // this boolean is passed into RecordFunction to adjust the sampling rates of
-  // the callbacks
-  bool pre_sampled = false;
-  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
-    // Check if we need to run callbacks registered with RecordFunction
-    // If true and callbacks need inputs, we box the arguments and pass
-    // them into the callbacks and also into the kernel call
-
-    // Note: for perf reasons we wouldn't want to pass arguments into
-    // the function call or prematurely box them
-    at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
-    if (C10_UNLIKELY(guard.isActive())) {
-      if (shouldRecord(dispatchKey) && op.operatorIterator_->op.isObserved()) {
-        int64_t seq_num = -1;
-        // Setting sequence number in the Autograd case to associate
-        // the forward range with the coresponding Autograd's node
-        if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
-          seq_num = at::sequence_number::peek();
-        }
-        if (guard.needsInputs()) {
-          torch::jit::Stack stack = impl::boxArgs(args...);
-          guard.before(op, stack, seq_num);
-        } else {
-          guard.before(op, seq_num);
-        }
-      }
-    }
-    // keeping the guard alive while executing the kernel
-    return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
-  }
-#endif  // PYTORCH_DISABLE_PER_OP_PROFILING
-  return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
+  return _callWithDispatchKeySet<Return, Args...>(op, kernel, dispatchKeySet, args...);
 }
 
 template<class Return, class... Args>
@@ -437,7 +410,12 @@ C10_ALWAYS_INLINE Return Dispatcher::callWithDispatchKeySet(const TypedOperatorH
   // No alias dispatch key is allowed at runtime.
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKeySet.highestPriorityTypeId()));
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKeySet.highestPriorityTypeId());
+  return _callWithDispatchKeySet<Return, Args...>(op, kernel, dispatchKeySet, args...);
+}
 
+// We always want to inline this helper, since it was originally part of callBoxed().
+template<class Return, class... Args>
+C10_ALWAYS_INLINE Return Dispatcher::_callWithDispatchKeySet(const TypedOperatorHandle<Return(Args...)>& op, const KernelFunction& kernel, DispatchKeySet dispatchKeySet, Args... args) const {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   // By default, when there're no high-frequency or non-sampled callbacks,
   // RecordFunction is pre-sampled as a perf optimization;
@@ -503,9 +481,8 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
   return kernel.template call<Return, Args...>(op, currentDispatchKeySet, std::forward<Args>(args)...);
 }
 
-// TODO: temp
 template<class Return, class... Args>
-inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const {
+inline Return Dispatcher::callWithPrecomputedDispatchKeySet(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   // do not use RecordFunction on redispatch
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(currentDispatchKeySet.highestPriorityTypeId());
@@ -517,39 +494,18 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   const auto& entry = op.operatorIterator_->op;
   auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
   const auto& kernel = entry.lookup(dispatchKeySet.highestPriorityTypeId());
-
-#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  bool pre_sampled = false;
-  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
-    // using already existing stack to record function execution in observers
-    at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
-    if (C10_UNLIKELY(guard.isActive())) {
-      auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
-      if (shouldRecord(dispatchKey) && entry.isObserved()) {
-        int64_t seq_num = -1;
-        if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
-          seq_num = at::sequence_number::peek();
-        }
-        if (guard.needsInputs()) {
-          guard.before(op, *stack, seq_num);
-        } else {
-          guard.before(op, seq_num);
-        }
-      }
-    }
-    // keeping the guard alive while executing the kernel
-    kernel.callBoxed(op, dispatchKeySet, stack);
-    return;
-  }
-#endif  // PYTORCH_DISABLE_PER_OP_PROFILING
-  kernel.callBoxed(op, dispatchKeySet, stack);
+  return _callBoxed(op, entry, kernel, dispatchKeySet, stack);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, DispatchKeySet dispatchKeySet, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorIterator_->op;
   const auto& kernel = entry.lookup(dispatchKeySet.highestPriorityTypeId());
+  return _callBoxed(op, entry, kernel, dispatchKeySet, stack);
+}
 
+// We always want to inline this helper, since it was originally part of callBoxed().
+C10_ALWAYS_INLINE void Dispatcher::_callBoxed(const OperatorHandle& op, const impl::OperatorEntry& entry, const KernelFunction& kernel, DispatchKeySet dispatchKeySet, Stack* stack) const {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   bool pre_sampled = false;
   if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {

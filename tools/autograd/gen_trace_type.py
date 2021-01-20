@@ -314,7 +314,7 @@ static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
     .typed<${arg_types}>();
 ${assign_return_values}c10::Dispatcher::singleton()
-    .redispatch<${ret_and_arg_types}>(${redispatch_args});
+    .callWithPrecomputedDispatchKeySet<${ret_and_arg_types}>(${redispatch_args});
 """)
 
 def emit_trace_body(f: NativeFunction) -> List[str]:

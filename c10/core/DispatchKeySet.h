@@ -274,6 +274,9 @@ template<class T>
 using is_not_DispatchKeySet = guts::negation<std::is_same<DispatchKeySet, T>>;
 
 // Given a function type, constructs a function_traits type that removes any DispatchKeySet arguments.
+// NB: DispatchKeySet is currently explicitly hidden from JIT (mainly to avoid pushing unnecessary
+// arguments on the stack - see Note [ Plumbing Keys Through the Dispatcher] for details).
+// If at any point in the future we need to expose this type to JIT, revisit the usage of this type alias.
 template<class FuncType>
 using remove_DispatchKeySet_arg_from_func = guts::make_function_traits_t<
   typename guts::infer_function_traits_t<FuncType>::return_type,
