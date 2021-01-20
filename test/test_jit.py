@@ -765,6 +765,38 @@ class TestJit(JitTestCase):
         element_size = get_element_size_script(x)
         self.assertEqual(element_size, x.element_size())
 
+    def test_Sequential(self):
+        class Seq(nn.Module):
+            def __init__(self):
+                super(Seq, self).__init__()
+                self.seq = nn.Sequential(nn.Linear(10, 20), nn.Linear(20, 30))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                for l in self.seq:
+                    x = l(x)
+                return x
+
+        m = torch.jit.script(Seq())
+        assert m.graph  # ensure jit was able to compile
+
+    def test_ModuleList(self):
+        class Mod(nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.model = nn.ModuleList([nn.Linear(10, 10) for _ in range(10)])
+                self.model += (nn.Linear(10, 20),)
+                self.model.append(nn.Linear(20, 30)) 
+                self.model.extend([nn.Linear(30, 40), nn.Linear(40, 50)])
+
+            def forward(self, v):
+                for m in self.model:
+                    v = m(v)
+                return v
+
+        m = torch.jit.script(Mod())
+        assert m.graph  # ensure jit was able to compile
+
     def test_disabled(self):
         torch.jit._state.disable()
         try:

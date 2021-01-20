@@ -980,10 +980,14 @@
 - name: sinh(Tensor self) -> Tensor
   self: grad * self.cosh().conj()
 
-- name: slice.Tensor(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
-  self: slice_backward(grad, self.sizes(), dim, start, end, step)
+- name: slice.Tensor(Tensor(a) self, int dim=0, int? start=0, int? end=9223372036854775807, int step=1) -> Tensor(a)
+  self: slice_backward_wrapper(grad, self.sizes(), dim, start, end, step)
 
 - name: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
+  self: slogdet_backward(grad, self, sign, logabsdet)
+  output_differentiability: [false, true]
+
+- name: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   self: slogdet_backward(grad, self, sign, logabsdet)
   output_differentiability: [false, true]
 
@@ -995,7 +999,7 @@
   input: solve_backward_A(grad, other, input, result)
   other: solve_backward_self(grad, other, input)
 
-- name: sort(Tensor self, int dim=-1, bool descending=False, bool stable=False) -> (Tensor values, Tensor indices)
+- name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
   output_differentiability: [True, False]
 
@@ -1817,6 +1821,14 @@
 
 - name: _cudnn_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, int hidden_size, int proj_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state, Tensor reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
   dropout_state: non_differentiable
+  input: not_implemented("_cudnn_rnn_backward", kCudnnDoubleBackwardMsg)
+  weight: not_implemented_list("_cudnn_rnn_backward", kCudnnDoubleBackwardMsg)
+  hx: not_implemented("_cudnn_rnn_backward", kCudnnDoubleBackwardMsg)
+  cx: not_implemented("_cudnn_rnn_backward", kCudnnDoubleBackwardMsg)
+  output: not_implemented("_cudnn_rnn_backward", kCudnnDoubleBackwardMsg)
+  grad_output: not_implemented("_cudnn_rnn_backward", kCudnnDoubleBackwardMsg)
+  grad_hy: not_implemented("_cudnn_rnn_backward", kCudnnDoubleBackwardMsg)
+  grad_cy: not_implemented("_cudnn_rnn_backward", kCudnnDoubleBackwardMsg)
 
 # miopen
 
