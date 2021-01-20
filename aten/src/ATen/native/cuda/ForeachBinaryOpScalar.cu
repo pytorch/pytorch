@@ -1,7 +1,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
-
+#include <ATen/native/BinaryOps.h>
 namespace at { namespace native {
 
 template<template<class> class Op>
@@ -75,13 +75,7 @@ FOREACH_BINARY_OP_SCALAR(div, std::divides, true);
 // In the case of subtraction, we dont allow scalar to be boolean following the torch.sub logic
 void foreach_tensor_sub_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
     check_foreach_api_restrictions(tensors);
-
-    TORCH_CHECK(tensors[0].scalar_type() != kBool || !scalar.isBoolean(),
-              "Subtraction, the `-` operator, with two bool tensors is not supported."
-              "Use the `^` or `logical_xor()` operator instead.")
-    TORCH_CHECK(tensors[0].scalar_type() != kBool && !scalar.isBoolean(),
-              "Subtraction, the `-` operator, with a bool tensor is not supported. "
-              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
+    at::native::sub_check(tensors[0], scalar);
 
     if (!can_use_fast_route(tensors, scalar)) {
         return at::native::foreach_tensor_sub_scalar_kernel_slow_(tensors, scalar);
@@ -92,13 +86,7 @@ void foreach_tensor_sub_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
 
 std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
     check_foreach_api_restrictions(tensors);
-
-    TORCH_CHECK(tensors[0].scalar_type() != kBool || !scalar.isBoolean(),
-              "Subtraction, the `-` operator, with two bool tensors is not supported. "
-              "Use the `^` or `logical_xor()` operator instead.")
-    TORCH_CHECK(tensors[0].scalar_type() != kBool && !scalar.isBoolean(),
-              "Subtraction, the `-` operator, with a bool tensor is not supported. "
-              "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
+    at::native::sub_check(tensors[0], scalar);
 
     if (!can_use_fast_route(tensors, scalar)) {
         return at::native::foreach_tensor_sub_scalar_kernel_slow(tensors, scalar);

@@ -3231,8 +3231,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(halfcauchy.sample().size(), torch.Size())
         self.assertEqual(halfcauchy.sample(torch.Size((3, 2))).size(),
                          torch.Size((3, 2)))
-        self.assertEqual(halfcauchy.log_prob(self.scalar_sample).size(),
-                         torch.Size())
+        self.assertRaises(ValueError, halfcauchy.log_prob, self.scalar_sample)
         self.assertEqual(halfcauchy.log_prob(self.tensor_sample_1).size(),
                          torch.Size((3, 2)))
         self.assertEqual(halfcauchy.log_prob(self.tensor_sample_2).size(),
