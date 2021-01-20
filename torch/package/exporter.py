@@ -8,8 +8,7 @@ from ._importlib import _normalize_path
 from ._mangling import is_mangled
 import types
 import importlib
-from os import PathLike
-from typing import List, Any, Callable, Dict, Tuple, Union, Iterable, BinaryIO, IO, Optional
+from typing import List, Any, Callable, Dict, Tuple, Union, Iterable, BinaryIO, Optional
 from distutils.sysconfig import get_python_lib
 from pathlib import Path
 import linecache
@@ -59,21 +58,21 @@ class PackageExporter:
     """
 
 
-    def __init__(self, f: Union[str, PathLike, BinaryIO, IO[bytes]], verbose: bool = True):
+    def __init__(self, f: Union[str, Path, BinaryIO], verbose: bool = True):
         """
         Create an exporter.
 
         Args:
-            f: a file-like object (has to implement write and flush) or a string or
-                os.PathLike object containing a file name.
+            f: The location to export to. Can be a  string/Path object containing a filename,
+                or a Binary I/O object.
             verbose: Print information about dependency resolution to stdout.
                 Useful for tracking down why certain files get included.
         """
-        if isinstance(f, (PathLike, str)):
+        if isinstance(f, (Path, str)):
             f = str(f)
-            self.buffer = None
+            self.buffer: Optional[BinaryIO] = None
         else:  # is a byte buffer
-            self.buffer: Optional[Union[BinaryIO, IO[bytes]]] = f
+            self.buffer = f
 
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.serialized_storages : Dict[str, Any] = {}

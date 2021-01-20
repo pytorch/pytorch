@@ -1,4 +1,4 @@
-from typing import List, Callable, Dict, Optional, Any, Union, BinaryIO, IO
+from typing import List, Callable, Dict, Optional, Any, Union, BinaryIO
 import builtins
 import importlib
 import linecache
@@ -8,7 +8,7 @@ import torch
 import _compat_pickle  # type: ignore
 import types
 import os.path
-from os import PathLike
+from pathlib import Path
 
 from ._importlib import _normalize_line_endings, _resolve_name, _sanity_check, _calc___package__, \
     _normalize_path
@@ -34,7 +34,7 @@ class PackageImporter:
     """
     modules : Dict[str, Optional[types.ModuleType]]
 
-    def __init__(self, file_or_buffer: Union[str, torch._C.PyTorchFileReader, PathLike, BinaryIO, IO[bytes]],
+    def __init__(self, file_or_buffer: Union[str, torch._C.PyTorchFileReader, Path, BinaryIO],
                  module_allowed: Callable[[str], bool] = lambda module_name: True):
         """Open `file_or_buffer` for importing. This checks that the imported package only requires modules
         allowed by `module_allowed`
@@ -53,7 +53,7 @@ class PackageImporter:
         if isinstance(file_or_buffer, torch._C.PyTorchFileReader):
             self.filename = '<pytorch_file_reader>'
             self.zip_reader = file_or_buffer
-        elif isinstance(file_or_buffer, (PathLike, str)):
+        elif isinstance(file_or_buffer, (Path, str)):
             self.filename = str(file_or_buffer)
             if not os.path.isdir(self.filename):
                 self.zip_reader = torch._C.PyTorchFileReader(self.filename)
