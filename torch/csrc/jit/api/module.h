@@ -242,6 +242,8 @@ struct TORCH_API Module : public Object {
 
   void clone_method(const Module& orig, const std::string& name);
 
+  IValue operator()(std::vector<IValue> inputs);
+
   template <typename... Types>
   IValue create_class(const c10::QualifiedName& name, Types&&... args) const {
     return create_class(name, {IValue(std::forward<Types>(args))...});
