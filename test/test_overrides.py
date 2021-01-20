@@ -898,7 +898,7 @@ class TestIndexing(TestCase):
 
         t = torch.tensor([5])
         self.assertEqual(t[A()], -1)
-        self.assertEqual(t[A(), A()], -1)
+        self.assertEqual(t[5, A()], -1)
         self.assertEqual(t, torch.tensor([5]))
 
     def test_setitem(self):
@@ -912,7 +912,7 @@ class TestIndexing(TestCase):
 
         t = torch.tensor([5])
         t[A()] = 1
-        t[A(), A()] = 1
+        t[5, A()] = 1
         self.assertIn(Tensor.__setitem__, triggered)
         self.assertEqual(t, torch.tensor([5]))
 
@@ -941,7 +941,7 @@ class TestIndexing(TestCase):
 
         t = torch.tensor([5])
         t[A()] = 1
-        t[A(), A()] = 1
+        t[5, A()] = 1
         self.assertIn(Tensor.__setitem__, triggered)
         self.assertEqual(t, torch.tensor([5]))
 
