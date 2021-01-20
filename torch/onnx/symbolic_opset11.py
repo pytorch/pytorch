@@ -208,7 +208,7 @@ def pixel_shuffle(g, self, upscale_factor):
 
 
 def _interpolate(name, dim, interpolate_mode):
-    return sym_help._interpolate_common(name, dim, interpolate_mode)
+    return sym_help._interpolate_helper(name, dim, interpolate_mode)
 
 
 upsample_nearest1d = _interpolate('upsample_nearest1d', 3, "nearest")
@@ -221,7 +221,7 @@ upsample_bicubic2d = _interpolate('upsample_bicubic2d', 4, "cubic")
 
 
 def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor):
-    return sym_help.__interpolate_common(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor)
+    return sym_help.__interpolate_helper(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor)
 
 @parse_args('v', 'i', 'v', 'v')
 def gather(g, self, dim, index, sparse_grad=False):

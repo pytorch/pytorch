@@ -420,7 +420,7 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_
     return scale_factor, mode
 
 
-def _interpolate_common(name, dim, interpolate_mode):
+def _interpolate_helper(name, dim, interpolate_mode):
     def symbolic_fn(g, input, output_size, *args):
         scales, align_corners = _get_interpolate_attributes(g, interpolate_mode, args)
         align_corners = _maybe_get_scalar(align_corners)
@@ -433,7 +433,7 @@ def _interpolate_common(name, dim, interpolate_mode):
             output_size = g.op("Cast", output_size, to_i=cast_pytorch_to_onnx['Long'])
             output_size = g.op("Concat", input_size_beg, output_size, axis_i=0)
 
-            if _has_more_optional_parameters():
+            if _export_onnx_opset_version >= 13:
                 empty_roi = _optional_input_placeholder_tensor(g)
                 empty_scales = _optional_input_placeholder_tensor(g)
             else:
@@ -450,7 +450,7 @@ def _interpolate_common(name, dim, interpolate_mode):
                         mode_s=interpolate_mode,  # nearest, linear, or cubic
                         nearest_mode_s="floor")  # only valid when mode="nearest"
         else:
-            if _has_more_optional_parameters():
+            if _export_onnx_opset_version >= 13:
                 empty_roi = _optional_input_placeholder_tensor(g)
             else:
                 empty_roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
@@ -466,7 +466,7 @@ def _interpolate_common(name, dim, interpolate_mode):
     return symbolic_fn
 
 
-def __interpolate_common(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor):
+def __interpolate_helper(g, input, size, scale_factor, mode, align_corners, recompute_scale_factor):
     mode = _maybe_get_const(mode, 's')
     if 'linear' in mode:
         mode = 'linear'
@@ -503,7 +503,7 @@ def __interpolate_common(g, input, size, scale_factor, mode, align_corners, reco
         size = g.op("Cast", size, to_i=cast_pytorch_to_onnx['Long'])
         size = g.op("Concat", input_size, size, axis_i=0)
 
-        if _has_more_optional_parameters():
+        if _export_onnx_opset_version >= 13:
             empty_roi = _optional_input_placeholder_tensor(g)
             empty_scales = _optional_input_placeholder_tensor(g)
         else:
@@ -524,7 +524,7 @@ def __interpolate_common(g, input, size, scale_factor, mode, align_corners, reco
         if rank is None:
             return _unimplemented("interpolate (with scales)", "missing input shape")
 
-        if _has_more_optional_parameters():
+        if _export_onnx_opset_version >= 13:
             empty_roi = _optional_input_placeholder_tensor(g)
         else:
             empty_roi = g.op("Constant", value_t=torch.tensor([], dtype=torch.float32))
@@ -661,8 +661,6 @@ def _optional_input_placeholder_tensor(g):
     n.setType(OptionalType.ofTensor())
     return n
 
-def _has_more_optional_parameters():
-    return _export_onnx_opset_version >= 13
 
 # ---------------------------------------------------------------------
 # ONNX operator version
