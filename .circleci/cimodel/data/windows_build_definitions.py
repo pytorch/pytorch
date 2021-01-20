@@ -85,6 +85,7 @@ class WindowsJob:
             if is_running_on_cuda:
                 props_dict["executor"] = "windows-with-nvidia-gpu"
             elif numbered_phase == "test2":
+                # fix the issue of https://github.com/pytorch/pytorch/issues/50662
                 props_dict["executor"] = "windows-xlarge-cpu-with-nvidia-cuda"
 
         props_dict["cuda_version"] = (
