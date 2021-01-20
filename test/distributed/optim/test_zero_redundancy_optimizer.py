@@ -16,6 +16,7 @@ from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.optim import SGD
 from torch.testing._internal.common_distributed import skip_if_no_gpu, MultiProcessTestCase
 from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
+from torch.testing._internal.common_distributed import skip_if_rocm
 
 import copy
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -234,6 +235,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     def world_size(self):
         return max(2, torch.cuda.device_count())
 
+    @skip_if_rocm
     def test_step(self):
         """ Check that the ZeroRedundancyOptimizer wrapper properly exposes the `.step()` interface"""
         if self.rank > 1 or (BACKEND == dist.Backend.NCCL and torch.cuda.device_count() < 2):
@@ -260,6 +262,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             self.assertEqual(m.weight, torch.tensor([[0.75]], device=self.device))
             self.assertEqual(m.bias, torch.tensor([1.85], device=self.device))
 
+    @skip_if_rocm
     def test_step_with_closure(self):
         """ Check that the ZeroRedundancyOptimizer wrapper properly exposes the `.step(closure)` interface"""
 

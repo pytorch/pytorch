@@ -283,12 +283,13 @@ and start to collect SWA averages of the parameters at epoch 160:
 
 Zero redundancy optimizer
 ^^^^^^^^^^^^^^^^^^^^^^^^^
-[Experimental]
+[Experimental, subject to change]
 Distributed training enables several work distribution strategies, among which a sharding of the optimizing process.
 In that case, the trainable parameters will be partitionned, and each rank will optimize a shard, instead of optimizing the
 whole model for a classical PyTorch training loop. :class:`torch.distributed.optim.ZeroRedundancyOptimizer` is provided as
 an optimizer wrapper, which you can use to benefit from optimizer state sharding.
 
+Example:
 >>> # optimizer specific arguments e.g. LR, momentum, etc...
 >>> base_optimizer = torch.optim.SGD  # any pytorch compliant optimizer
 >>> base_optimizer_arguments = { "lr": 1e-4}
@@ -296,3 +297,7 @@ an optimizer wrapper, which you can use to benefit from optimizer state sharding
 >>>        params=model.parameters(),
 >>>        optim=base_optimizer,
 >>>        **base_optimizer_arguments)
+
+Due to the state sharding, saving the training state requires an extra step when compared to typical PyTorch usage,
+one needs to call `optimizer.consolidate_state_dict(recipient_rank: int)` on all ranks prior to
+requesting the `.state_dict()` on the recipient rank.
