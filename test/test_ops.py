@@ -274,20 +274,18 @@ class TestCommon(JitCommonTestCase):
                 #   autodiff support. Context manager forces the graph to contain
                 #   DifferentiableGraph nodes if they are present
                 with disable_autodiff_subgraph_inlining():
-                    def fn(*inputs, **kwargs):
-                        output = func(*inputs, **kwargs)
-                        return op.output_func(output)
 
                     # bfloat16 grad doesn't work for some operators
                     dtypes_to_grad_check = floating_and_complex_types_and(torch.half) \
                         if op.skip_bfloat16_grad else floating_and_complex_types_and(torch.half, torch.bfloat16)
 
                     # Check scripted forward, grad, and grad grad
-                    script_fn = create_script_fn(self, name, func_type, op.output_func)
+                    script_fn = create_script_fn(self, name, func_type)
 
                     check_against_reference(self,
                                             script_fn,
-                                            fn,
+                                            func,
+                                            op.output_func,
                                             (*sample.input,) + sample.args,
                                             sample.kwargs,
                                             no_grad=(dtype not in dtypes_to_grad_check))
@@ -296,7 +294,8 @@ class TestCommon(JitCommonTestCase):
                     traced_fn = create_traced_fn(self, variant)
                     check_against_reference(self,
                                             traced_fn,
-                                            fn,
+                                            func,
+                                            op.output_func,
                                             (*sample.input,) + sample.args,
                                             sample.kwargs,
                                             no_grad=(dtype not in dtypes_to_grad_check))

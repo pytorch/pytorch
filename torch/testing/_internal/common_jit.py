@@ -36,7 +36,7 @@ nn_functional_single_grad = frozenset('test_nn_' + name for name in [
     'grid_sample',
 ])
 
-def check_against_reference(self, func, reference_func, args, kwargs=None,
+def check_against_reference(self, func, reference_func, output_func, args, kwargs=None,
                             allow_unused=True, check_types=True, no_grad=False):
     kwargs = kwargs if kwargs else {}
 
@@ -72,10 +72,10 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
 
     with enable_profiling_mode_for_profiling_tests():
         # test single grad case
-        outputs = self.runAndSaveRNG(reference_func, recording_inputs, kwargs)
+        outputs = output_func(self.runAndSaveRNG(reference_func, recording_inputs, kwargs))
         grads = torch.autograd.grad(allSum(outputs), recording_tensors,
                                     allow_unused=allow_unused)
-        outputs_test = self.runAndSaveRNG(func, recording_inputs, kwargs)
+        outputs_test = output_func(self.runAndSaveRNG(func, recording_inputs, kwargs))
         grads_test = torch.autograd.grad(allSum(outputs_test), recording_tensors,
                                          allow_unused=allow_unused)
         self.assertEqual(outputs, outputs_test)
@@ -84,7 +84,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
         if self._testMethodName in nn_functional_single_grad:
             return
 
-        outputs = self.runAndSaveRNG(reference_func, recording_inputs, kwargs)
+        outputs = output_func(self.runAndSaveRNG(reference_func, recording_inputs, kwargs))
         l1 = allSum(outputs)
         grads = torch.autograd.grad(l1, recording_tensors, create_graph=True,
                                     allow_unused=allow_unused)
@@ -92,7 +92,7 @@ def check_against_reference(self, func, reference_func, args, kwargs=None,
         l2 = (allSum(grads) * l1)
         grads2 = torch.autograd.grad(l2, recording_tensors, allow_unused=allow_unused)
         recording_inputs, recording_tensors = clone_inputs(True)
-        outputs_test = self.runAndSaveRNG(func, recording_inputs, kwargs)
+        outputs_test = output_func(self.runAndSaveRNG(func, recording_inputs, kwargs))
         l1_test = allSum(outputs_test)
         grads_test = torch.autograd.grad(
             l1_test, recording_tensors, create_graph=True, allow_unused=allow_unused)
