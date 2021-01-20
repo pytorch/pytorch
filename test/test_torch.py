@@ -3821,8 +3821,8 @@ class TestTorchDeviceType(TestCase):
 
     @onlyCUDA
     def test_cdist_cuda_backward(self, device):
-        for l1 in [1, 511, 512, 1024]:
-            for l2 in [1, 511, 512, 1024]:
+        for l1 in [1, 511, 513]:
+            for l2 in [1, 511, 513]:
                 for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
                     x1 = torch.randn(4, l1, 32, device=device, requires_grad=True)
                     x2 = x1.clone().detach_().requires_grad_()
