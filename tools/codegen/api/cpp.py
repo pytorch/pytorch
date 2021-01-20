@@ -268,7 +268,7 @@ def argument(
             elif a.dtype.default == "long":
                 default = 'at::kLong'  # TODO: this is wrong
             return [Binding(
-                ctype=ConstRefCType(BaseCType('TensorOptions', 'options')),
+                ctype=BaseCType('TensorOptions', 'options'),
                 name='options',
                 default=default,
                 argument=a,
