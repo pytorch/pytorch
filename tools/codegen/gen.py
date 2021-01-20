@@ -192,7 +192,7 @@ def is_cuda_dispatch_key(dk: str) -> bool:
 # Structured kernel generation is only supported for certain key types;
 # otherwise use old-style
 def is_structured_dispatch_key(dk: str) -> bool:
-    return dk in {'CUDA', 'CPU'}
+    return dk in STRUCTURED_DISPATCH_KEYS
 
 # Generates RegisterSchema.cpp.  Depending on the selector, either
 # all schemas are registered, or only some are (in the case of
