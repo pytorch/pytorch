@@ -21,12 +21,15 @@ namespace kir {
 //! This class is intended for debug printing, so it attempts
 //! to handle invalid IR states as much as possible.
 //!
+//! implicit_definition_ = true will recurisvely print the definition of all
+//! inputs to an expression if they haven't been printed.
 class TORCH_CUDA_API IrPrinter : private kir::IrVisitor {
   static constexpr char* kTab = "  ";
 
  public:
   //! Constructs a new IrPrinter which outputs to the specified stream
-  explicit IrPrinter(std::ostream& os) : os_(os) {}
+  explicit IrPrinter(std::ostream& os, bool implicit_definition = true)
+      : os_(os), implicit_definition_(implicit_definition) {}
 
   //! Print a single Kernel IR node
   void printNode(const kir::Node* node);
@@ -91,10 +94,26 @@ class TORCH_CUDA_API IrPrinter : private kir::IrVisitor {
 
   // The set of values used by the current top-level IR node
   std::unordered_set<const kir::Val*> uses_;
+
+  // If the definition of all inputs to an expression haven't been printed
+  // already implicit_definition_ = true will print them before printing the
+  // requested node.
+  bool implicit_definition_ = true;
 };
 
-//! Returns the string representation of a Kernel IR node
-std::string toString(const kir::Node* stmt);
+//! Returns the string representation of a Kernel IR node. If the definition of
+//! all inputs to an expression haven't been printed already
+//! implicit_definition_ = true will print them before printing the requested
+//! node.
+std::string toString(const kir::Node* stmt, bool implicit_definitions = true);
+
+//! Returns the string representation of a vector of kir::Expr, convenient
+//! debugm echanism during lowering. If the definition of all inputs to an
+//! expression haven't been printed already implicit_definition_ = true will
+//! print them before printing the requested node.
+std::string toString(
+    const std::vector<kir::Expr*>& exprs,
+    bool implicit_definitions = true);
 
 } // namespace kir
 } // namespace cuda
