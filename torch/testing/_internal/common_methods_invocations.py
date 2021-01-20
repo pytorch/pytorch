@@ -111,7 +111,9 @@ class OpInfo(object):
                  sample_inputs_func=None,  # function to generate sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
                  variant_test_name='',  # additional string to include in the test name
-                 supports_sparse=False  # supported for sparse
+                 supports_sparse=False,  # supported for sparse
+                 check_batched_grad=True,  # check batched grad when doing gradcheck
+                 check_batched_gradgrad=True,  # check batched grad grad when doing gradgradcheck
                  ):
 
         # Validates the dtypes are generated from the dispatch-related functions
@@ -153,6 +155,8 @@ class OpInfo(object):
         else:
             self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes
         self.supports_sparse = supports_sparse
+        self.check_batched_grad = check_batched_grad
+        self.check_batched_gradgrad = check_batched_gradgrad
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -1040,6 +1044,7 @@ op_db: List[OpInfo] = [
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=True,
+                     check_batched_gradgrad=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.rfft',
                      aten_name='fft_rfft',
@@ -1048,6 +1053,8 @@ op_db: List[OpInfo] = [
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=True,
+                     check_batched_grad=False,
+                     check_batched_gradgrad=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.rfftn',
                      aten_name='fft_rfftn',
@@ -1057,6 +1064,8 @@ op_db: List[OpInfo] = [
                      default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=True,
                      test_inplace_grad=False,
+                     check_batched_grad=False,
+                     check_batched_gradgrad=False,
                      decorators=[precisionOverride({torch.float: 1e-4})],),
     SpectralFuncInfo('fft.ifft',
                      aten_name='fft_ifft',
@@ -1081,6 +1090,7 @@ op_db: List[OpInfo] = [
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_types(),
                      supports_tensor_out=True,
+                     check_batched_grad=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.irfft',
                      aten_name='fft_irfft',
@@ -1089,6 +1099,7 @@ op_db: List[OpInfo] = [
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=True,
+                     check_batched_gradgrad=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.irfftn',
                      aten_name='fft_irfftn',
@@ -1097,6 +1108,7 @@ op_db: List[OpInfo] = [
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=True,
+                     check_batched_gradgrad=False,
                      test_inplace_grad=False,),
     OpInfo('flip',
            op=torch.flip,
@@ -1373,6 +1385,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            supports_tensor_out=True,
            sample_inputs_func=sample_inputs_linalg_inv,
+           check_batched_gradgrad=False,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     UnaryUfuncInfo('angle',
                    ref=np.angle,
@@ -1392,6 +1405,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            supports_tensor_out=True,
            sample_inputs_func=sample_inputs_linalg_solve,
+           check_batched_gradgrad=False,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     OpInfo('linalg.pinv',
            aten_name='linalg_pinv',
