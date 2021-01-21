@@ -416,6 +416,8 @@ Comparison Ops
     less
     maximum
     minimum
+    fmax
+    fmin
     ne
     not_equal
     sort
