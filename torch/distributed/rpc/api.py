@@ -365,11 +365,12 @@ def _rref_typeof_on_owner(rref):
     return type(rref.local_value())
 
 
-def _rref_typeof_on_user(rref):
+def _rref_typeof_on_user(rref, timeout=UNSET_RPC_TIMEOUT):
     return rpc_sync(
         rref.owner(),
         _rref_typeof_on_owner,
-        args=(rref,)
+        args=(rref,),
+        timeout=timeout
     )
 
 

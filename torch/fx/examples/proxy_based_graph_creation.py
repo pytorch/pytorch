@@ -30,11 +30,6 @@ empty ``nn.Module`` class.
 '''
 
 
-# Create an empty ``nn.Module`` class. We'll add the Graph to this
-# later
-class Empty(torch.nn.Module):
-    pass
-
 # Create a graph independently of symbolic tracing
 graph = Graph()
 
@@ -58,4 +53,4 @@ graph.output(c.node)
 
 # Wrap our created Graph in a GraphModule to get a final, runnable
 # `nn.Module` instance
-mod = GraphModule(Empty(), graph)
+mod = GraphModule(torch.nn.Module(), graph)
