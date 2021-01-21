@@ -26,10 +26,10 @@ if TYPE_CHECKING:
     # imports using the public namespace. (Due to an exclusion rule in
     # mypy-strict.ini)
     from torch.utils.benchmark.utils.common import Measurement
-    from torch.utils.benchmark.utils.timer import Language, Timer
+    from torch.utils.benchmark.utils.timer import Language
     from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import CallgrindStats
 else:
-    from torch.utils.benchmark import CallgrindStats, Language, Measurement, Timer
+    from torch.utils.benchmark import CallgrindStats, Language, Measurement
 
 
 WORKER_PATH = os.path.abspath(__file__)
@@ -38,54 +38,27 @@ WORKER_PATH = os.path.abspath(__file__)
 # =============================================================================
 # == Interfaces ===============================================================
 # =============================================================================
-class CostEstimate(enum.Enum):
-    """Hint for how expensive a benchmark is expected to be.
-
-    Timer supports adaptive timing for wall times, but not instruction counts.
-    Generally this is desired since we want deterministic instruction counts,
-    however it can be tedious to choose sensible numbers when defining a slew
-    of benchmarks.
-    """
-    AUTO = 0
-    LESS_THAN_10_US = 1
-    LESS_THAN_50_US = 2
-    LESS_THAN_100_US = 3
-    LESS_THAN_250_US = 4
-    LESS_THAN_1000_US = 5
-    GIANT = 6
-
-
-# While the point of this is mainly to collect instruction counts, we're going
-# to have to compile C++ timers anyway (as they're used as a check before
-# calling Valgrind), so we may as well grab wall times for reference. They
-# are comparatively inexpensive, and also useful for enabling CostEstimate.AUTO.
-MIN_RUN_TIME = 5
-
-
 @dataclasses.dataclass(frozen=True)
 class WorkerTimerArgs:
-    """Mirrors core.api.TimerArgs
+    """Container for Timer constructor arguments.
 
-    Note that `num_threads` is narrowed from `Union[int, Tuple[int, ...]]` to
-    `int`. `core.api` will assert that `WorkerTimerArgs` matches `TimerArgs`.
+    This dataclass serves two roles. First, it is a simple interface for
+    defining benchmarks. (See core.api.GroupedStmts and core.api.GroupedModules
+    for the advanced interfaces.) Second, it provides serialization for
+    controlling workers. `Timer` is not pickleable, so instead the main process
+    will pass `WorkerTimerArgs` instances to workers for processing.
     """
     stmt: str
-    setup: str
-    global_setup: Optional[str]
-    num_threads: int
-    language: Language
-    cost: CostEstimate
-
-    @classmethod
-    def keys(cls) -> Tuple[str, ...]:
-        return tuple(f.name for f in dataclasses.fields(cls))
+    setup: Optional[str] = None
+    global_setup: Optional[str] = None
+    num_threads: int = 1
+    language: Language = Language.PYTHON
 
 
 @dataclasses.dataclass(frozen=True)
 class WorkerOutput:
     wall_time: Measurement
     instructions: CallgrindStats
-    cost: CostEstimate  # Emperical cost. (If AUTO.)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -108,7 +81,6 @@ class WorkerUnpickler(pickle.Unpickler):
         """
         return {
             # Only blessed interface Enums and dataclasses need to be mapped.
-            "CostEstimate": CostEstimate,
             "WorkerTimerArgs": WorkerTimerArgs,
             "WorkerOutput": WorkerOutput,
             "WorkerFailure": WorkerFailure,
