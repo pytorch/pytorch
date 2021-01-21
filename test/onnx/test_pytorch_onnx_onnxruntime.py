@@ -5154,6 +5154,52 @@ class TestONNXRuntime(unittest.TestCase):
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
+
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_binary_cross_entropy_with_logits(self):
+        x = torch.randn(5)
+        y = torch.empty(5).random_(2)
+        self._bce_logits_loss(x, y)
+
+        x = torch.randn(2, 3, 5, 7)
+        y = torch.empty(2, 3, 5, 7).random_(2)
+        weight = torch.tensor([2])
+        self._bce_logits_loss(x, y, weight)
+
+        x = torch.FloatTensor([[-0.4089, -1.2471, 0.5907], [-0.4897, -0.8267, -0.7349], [0.5241, -0.1246, -0.4751]])
+        y = torch.FloatTensor([[0, 1, 1], [0, 0, 1], [1, 0, 1]])
+        pos_weight = torch.empty([3]).random_(2)
+        self._bce_logits_loss(x, y, pos_weight)
+
+        x = torch.randn(3, 3, 4)
+        y = torch.empty(3, 3, 4).random_(2)
+        weight = torch.tensor([3])
+        pos_weight = torch.empty([3, 4]).random_(2)
+        self._bce_logits_loss(x, y, weight, pos_weight)
+
+    def _bce_logits_loss(self, x, y, weight=None, pos_weight=None):
+        class BCEWithLogitsLossNoneWeights(torch.nn.Module):
+            def forward(self, input, target, weight, pos_weight):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, weight=weight,
+                                                                            pos_weight=pos_weight, reduction='none')
+
+        self.run_test(BCEWithLogitsLossNoneWeights(), input=(x, y, weight, pos_weight))
+
+        class BCEWithLogitsLossMeanWeights(torch.nn.Module):
+            def forward(self, input, target, weight, pos_weight):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, weight=weight,
+                                                                            pos_weight=pos_weight, reduction='mean')
+
+        self.run_test(BCEWithLogitsLossMeanWeights(), input=(x, y, weight, pos_weight))
+
+        class BCEWithLogitsLossSumWeights(torch.nn.Module):
+            def forward(self, input, target, weight, pos_weight):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, weight=weight,
+                                                                            pos_weight=pos_weight, reduction='sum')
+
+        self.run_test(BCEWithLogitsLossSumWeights(), input=(x, y, weight, pos_weight))
+
+
     def test_torch_mm(self):
         class M(torch.nn.Module):
             def forward(self, mat1, mat2):
