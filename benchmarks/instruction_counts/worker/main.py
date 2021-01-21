@@ -21,6 +21,7 @@ import io
 import os
 import pickle
 import re
+import timeit
 import traceback
 from typing import Any, Optional, Union, TYPE_CHECKING
 import sys
@@ -150,6 +151,9 @@ def _run(timer_args: WorkerTimerArgs) -> WorkerOutput:
         stmt=timer_args.stmt,
         setup=timer_args.setup or "pass",
         global_setup=timer_args.global_setup,
+
+        # Prevent NotImplementedError on GPU builds and C++ snippets.
+        timer=timeit.default_timer,
         num_threads=timer_args.num_threads,
         language=timer_args.language,
     )
