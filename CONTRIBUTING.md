@@ -1078,3 +1078,7 @@ following steps:
 4. Now you can find the pytorch working directory, which could be
    `~/workspace` or `~/project`, and run commands locally to debug
    the failure.
+
+For certain Windows failures, it may be useful to have a full [Remote
+Desktop](https://docs.microsoft.com/en-us/windows-server/remote/remote-desktop-services/clients/remote-desktop-clients) connection. See detailed instructions [here](https://github.com/pytorch/pytorch/wiki/Debugging-Windows-with-Remote-Desktop-or-CDB-(CLI-windbg)-on-CircleCI)
+for how to set that up after rerunning the job.

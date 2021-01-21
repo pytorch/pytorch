@@ -186,16 +186,13 @@ struct VISIBILITY_HIDDEN ModuleValue : public SugaredValue {
   bool hasAttr(const SourceRange& loc, Function& m, const std::string& field)
       override;
 
-  // call module.forward
+  // call module.forward with pre_hooks and hooks
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       Function& caller,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
-      size_t n_binders) override {
-    return attr(loc, caller, "forward")
-        ->call(loc, caller, args, kwargs, n_binders);
-  }
+      size_t n_binders) override;
 
   std::shared_ptr<SugaredDict> getSugaredDict(
       const SourceRange& loc,

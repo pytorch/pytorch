@@ -505,6 +505,32 @@ void minimum_kernel(TensorIterator& iter) {
   }
 }
 
+void fmax_kernel(TensorIterator& iter) {
+  if (isFloatingType(iter.common_dtype())) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmax_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return std::fmax(a, b);
+        });
+    });
+  } else {
+    maximum_kernel(iter);
+  }
+}
+
+void fmin_kernel(TensorIterator& iter) {
+  if (isFloatingType(iter.common_dtype())) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmin_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return std::fmin(a, b);
+        });
+    });
+  } else {
+    minimum_kernel(iter);
+  }
+}
+
 void smooth_l1_kernel(TensorIterator& iter, double beta) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
         kBFloat16, kHalf, iter.dtype(), "smooth_l1_cpu", [&]() {
@@ -854,6 +880,8 @@ REGISTER_DISPATCH(eq_stub, &eq_kernel);
 REGISTER_DISPATCH(ne_stub, &ne_kernel);
 REGISTER_DISPATCH(maximum_stub, &maximum_kernel);
 REGISTER_DISPATCH(minimum_stub, &minimum_kernel);
+REGISTER_DISPATCH(fmax_stub, &fmax_kernel);
+REGISTER_DISPATCH(fmin_stub, &fmin_kernel);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
 REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);
 REGISTER_DISPATCH(logit_backward_stub, &logit_backward_kernel);
