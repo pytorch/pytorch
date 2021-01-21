@@ -95,13 +95,16 @@ class TestGradients(TestCase):
 
             if check == 'gradcheck':
                 self.assertTrue(gradcheck(fn, (*sample.input,) + sample.args,
+                                          check_batched_grad=op.check_batched_grad,
                                           check_grad_dtypes=True))
             elif check == 'gradgradcheck':
                 self.assertTrue(gradgradcheck(fn, (*sample.input,) + sample.args,
                                               gen_non_contig_grad_outputs=False,
+                                              check_batched_grad=op.check_batched_gradgrad,
                                               check_grad_dtypes=True))
                 self.assertTrue(gradgradcheck(fn, (*sample.input,) + sample.args,
                                               gen_non_contig_grad_outputs=True,
+                                              check_batched_grad=op.check_batched_gradgrad,
                                               check_grad_dtypes=True))
             else:
                 self.assertTrue(False, msg="Unknown check requested!")
