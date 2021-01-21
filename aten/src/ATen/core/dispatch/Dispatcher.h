@@ -133,12 +133,6 @@ public:
   template<class Return, class... Args>
   Return callWithDispatchKey(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey dispatchKey, Args... args) const;
 
-  // Like callWithDispatchKey, but provides the dispatch key as a set of keys.
-  // The dispatch key with highest priority is used.
-  // See Note [Plumbing Keys Through The Dispatcher]
-  template<class Return, class... Args>
-  Return callWithDispatchKeySet(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet dispatchKeySet, Args... args) const;
-
   // Like call, but intended for use in a redispatch: you are currently
   // in some currentDispatchKey, you have finished processing the key and
   // you now want to redispatch to the next dispatch key in the chain.
@@ -338,6 +332,10 @@ public:
     c10::Dispatcher::singleton().callBoxed(*this, stack);
   }
 
+  void callBoxed(DispatchKeySet ks, Stack* stack) const {
+    c10::Dispatcher::singleton().callBoxed(*this, ks, stack);
+  }
+
 private:
   explicit OperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
   : operatorIterator_(std::move(operatorIterator)) {}
@@ -375,8 +373,8 @@ public:
   }
 
   // Note: benchmarks showed that this function wasn't getting inlined during calls to at::empty
-  C10_ALWAYS_INLINE Return callWithDispatchKeySet(DispatchKeySet dispatchKeySet, Args... args) const {
-    return c10::Dispatcher::singleton().callWithDispatchKeySet<Return, Args...>(*this, dispatchKeySet, std::forward<Args>(args)...);
+  C10_ALWAYS_INLINE Return callWithPrecomputedDispatchKeySet(DispatchKeySet currentDispatchKeySet, Args... args) const {
+    return c10::Dispatcher::singleton().callWithPrecomputedDispatchKeySet<Return, Args...>(*this, currentDispatchKeySet, std::forward<Args>(args)...);
   }
 
 private:
@@ -400,16 +398,6 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
       args...
     );
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
-  return _callWithDispatchKeySet<Return, Args...>(op, kernel, dispatchKeySet, args...);
-}
-
-template<class Return, class... Args>
-// Note: benchmarks showed that this function wasn't getting inlined during calls to at::empty
-C10_ALWAYS_INLINE Return Dispatcher::callWithDispatchKeySet(const TypedOperatorHandle<Return(Args...)>& op, DispatchKeySet dispatchKeySet, Args... args) const {
-  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  // No alias dispatch key is allowed at runtime.
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKeySet.highestPriorityTypeId()));
-  const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKeySet.highestPriorityTypeId());
   return _callWithDispatchKeySet<Return, Args...>(op, kernel, dispatchKeySet, args...);
 }
 
@@ -465,7 +453,9 @@ C10_ALWAYS_INLINE Return Dispatcher::call(const TypedOperatorHandle<Return(Args.
       DispatchKeySet::FULL,
       args...
     );
-  return callWithDispatchKeySet<Return, Args...>(op, dispatchKeySet, args...);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKeySet.highestPriorityTypeId()));
+  const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKeySet.highestPriorityTypeId());
+  return _callWithDispatchKeySet<Return, Args...>(op, kernel, dispatchKeySet, args...);
 }
 
 template<class Return, class... Args>

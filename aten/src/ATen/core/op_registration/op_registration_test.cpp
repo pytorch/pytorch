@@ -1961,6 +1961,136 @@ TEST(NewOperatorRegistrationTest, testImplNoDefGetsCaught) {
   ASSERT_EQ(danglingImpls.size(), 0) << error_str;
 }
 
+bool called_kernel_cpu = false;
+bool called_kernel_autograd = false;
+bool called_kernel_tracing = false;
+
+void cpu_kernel(Tensor a) {
+  called_kernel_cpu = true;
+}
+
+// autograd kernel that redispatches. Explicitly takes in and updates the DispatchKeySet
+void autograd_kernel_redispatching_with_DispatchKeySet(c10::DispatchKeySet ks, Tensor a) {
+  called_kernel_autograd = true;
+  auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
+  auto updatedDispatchKeySet = ks & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther);
+  callOpUnboxedWithPrecomputedDispatchKeySet<void, Tensor>(*op, updatedDispatchKeySet, a);
+}
+
+// autograd kernel that redispatches. Does not take in a DispatchKeySet
+void autograd_kernel_redispatching_without_DispatchKeySet(c10::DispatchKeySet ks, Tensor a) {
+  called_kernel_autograd = true;
+  auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
+  auto updatedDispatchKeySet = ks & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther);
+  callOpUnboxedWithPrecomputedDispatchKeySet<void, Tensor>(*op, updatedDispatchKeySet, a);
+}
+
+// tracing kernel that redispatches. Explicitly takes in and updates the DispatchKeySet
+void tracing_kernel_redispatching_with_DispatchKeySet(c10::DispatchKeySet ks, Tensor a) {
+  called_kernel_tracing = true;
+  auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
+  auto updatedDispatchKeySet = ks & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::Tracer);
+  callOpUnboxedWithPrecomputedDispatchKeySet<void, Tensor>(*op, updatedDispatchKeySet, a);
+}
+
+TEST(OperatorRegistrationTest, callKernelsWithDispatchKeySetConvention_call_redispatchesToLowerPriorityKernels) {
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("fn(Tensor dummy) -> ()");
+  m.impl("fn", c10::DispatchKey::CPU, cpu_kernel);
+  m.impl("fn", c10::DispatchKey::AutogradCPU, autograd_kernel_redispatching_with_DispatchKeySet);
+  m.impl("fn", c10::DispatchKey::Tracer, tracing_kernel_redispatching_with_DispatchKeySet);
+
+  auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
+  ASSERT_TRUE(op.has_value());
+
+  called_kernel_cpu = called_kernel_autograd = called_kernel_tracing = false;
+  auto tracing_autograd_cpu_set = c10::DispatchKeySet()
+                                    .add(c10::DispatchKey::Tracer)
+                                    .add(c10::DispatchKey::AutogradCPU)
+                                    .add(c10::DispatchKey::CPU);
+
+  // call Tracing -> call Autograd -> call CPU
+  callOpUnboxed<void, Tensor>(*op, dummyTensor(tracing_autograd_cpu_set, true));
+  EXPECT_TRUE(called_kernel_tracing);
+  EXPECT_TRUE(called_kernel_autograd);
+  EXPECT_TRUE(called_kernel_cpu);
+}
+
+TEST(OperatorRegistrationTest, callKernelsWithDispatchKeySetConvention_callWithDispatchKey_redispatchesToLowerPriorityKernels) {
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("fn(Tensor dummy) -> ()");
+  m.impl("fn", c10::DispatchKey::CPU, cpu_kernel);
+  m.impl("fn", c10::DispatchKey::AutogradCPU, autograd_kernel_redispatching_with_DispatchKeySet);
+  m.impl("fn", c10::DispatchKey::Tracer, tracing_kernel_redispatching_with_DispatchKeySet);
+
+  auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
+  ASSERT_TRUE(op.has_value());
+
+  called_kernel_cpu = called_kernel_autograd = called_kernel_tracing = false;
+
+  // call Autograd -> call CPU
+  callOpUnboxedWithDispatchKey<void, Tensor>(*op, c10::DispatchKey::AutogradCPU, dummyTensor(c10::DispatchKey::CPU, true));
+  EXPECT_FALSE(called_kernel_tracing);
+  EXPECT_TRUE(called_kernel_autograd);
+  EXPECT_TRUE(called_kernel_cpu);
+
+  called_kernel_cpu = called_kernel_autograd = called_kernel_tracing = false;
+
+  // call Tracing -> call Autograd -> call CPU
+  callOpUnboxedWithDispatchKey<void, Tensor>(*op, c10::DispatchKey::Tracer, dummyTensor(c10::DispatchKey::CPU, true));
+  EXPECT_TRUE(called_kernel_tracing);
+  EXPECT_TRUE(called_kernel_autograd);
+  EXPECT_TRUE(called_kernel_cpu);
+}
+
+TEST(OperatorRegistrationTest, callKernelsWithDispatchKeySetConvention_callBoxed_redispatchesToLowerPriorityKernels) {
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("fn(Tensor dummy) -> ()");
+  m.impl("fn", c10::DispatchKey::CPU, cpu_kernel);
+  m.impl("fn", c10::DispatchKey::AutogradCPU, autograd_kernel_redispatching_with_DispatchKeySet);
+  m.impl("fn", c10::DispatchKey::Tracer, tracing_kernel_redispatching_with_DispatchKeySet);
+
+  auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
+  ASSERT_TRUE(op.has_value());
+
+  called_kernel_cpu = called_kernel_autograd = called_kernel_tracing = false;
+  auto tracing_autograd_cpu_set = c10::DispatchKeySet()
+                                    .add(c10::DispatchKey::Tracer)
+                                    .add(c10::DispatchKey::AutogradCPU)
+                                    .add(c10::DispatchKey::CPU);
+
+  // call Tracing -> call Autograd -> call CPU
+  callOp<Tensor>(*op, dummyTensor(tracing_autograd_cpu_set, true));
+  EXPECT_TRUE(called_kernel_tracing);
+  EXPECT_TRUE(called_kernel_autograd);
+  EXPECT_TRUE(called_kernel_cpu);
+}
+
+TEST(OperatorRegistrationTest, callKernelsWithDispatchKeySetConvention_mixedCallingConventions_redispatchesToLowerPriorityKernels) {
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("fn(Tensor dummy) -> ()");
+  m.impl("fn", c10::DispatchKey::CPU, cpu_kernel);
+  // the tracing kernel takes in a DispatchKeySet, but the autograd kernel does not
+  // the dispatcher should handle correctly plumbing its DispatchKeySet to tracing and not autograd.
+  m.impl("fn", c10::DispatchKey::AutogradCPU, autograd_kernel_redispatching_without_DispatchKeySet);
+  m.impl("fn", c10::DispatchKey::Tracer, tracing_kernel_redispatching_with_DispatchKeySet);
+
+  auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
+  ASSERT_TRUE(op.has_value());
+
+  called_kernel_cpu = called_kernel_autograd = called_kernel_tracing = false;
+  auto tracing_autograd_cpu_set = c10::DispatchKeySet()
+                                    .add(c10::DispatchKey::Tracer)
+                                    .add(c10::DispatchKey::AutogradCPU)
+                                    .add(c10::DispatchKey::CPU);
+
+  // call Tracing -> call Autograd -> call CPU
+  callOpUnboxed<void, Tensor>(*op, dummyTensor(tracing_autograd_cpu_set, true));
+  EXPECT_TRUE(called_kernel_tracing);
+  EXPECT_TRUE(called_kernel_autograd);
+  EXPECT_TRUE(called_kernel_cpu);
+}
+
 }
 
 #pragma GCC diagnostic pop
