@@ -486,6 +486,7 @@ def sample_inputs_index_fill(op_info, device, dtype, requires_grad):
     for d in range(t.dim()):
         for tensor in [t, t01, t02, t12]:
             samples.append(SampleInput((tensor, d, idx, -1)))
+            samples.append(SampleInput((tensor, d, -idx - 1, -1)))
             samples.append(SampleInput((tensor, d, idx_nonctg, -1)))
     return samples
 

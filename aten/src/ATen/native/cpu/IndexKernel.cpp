@@ -146,7 +146,9 @@ void index_fill_kernel(
       for (int64_t elem = 0; elem < n; ++elem) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
-
+        if (idx < 0) {
+          idx += self_dim_size;
+        }
         if (idx < -self_dim_size || idx >= self_dim_size) {
           TORCH_CHECK_INDEX(false,
             "index ", idx, " is out of bounds for dimension ",
@@ -163,6 +165,9 @@ void index_fill_kernel(
       auto* self_data_bytes = data[0];
       auto* index_data_bytes = data[1];
       auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
+      if (idx < 0) {
+        idx += self_dim_size;
+      }
       if (idx < -self_dim_size || idx >= self_dim_size) {
         TORCH_CHECK_INDEX(false,
           "index ", idx, " is out of bounds for dimension ",
