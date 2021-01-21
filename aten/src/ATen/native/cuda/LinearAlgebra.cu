@@ -435,6 +435,120 @@ Tensor vdot_cuda(const Tensor& self, const Tensor& other) {
 }
 
 namespace {
+  template<typename T, typename AccT>
+__global__ void kernel_renorm(T *data,
+                              const AccT value,
+                              const ptrdiff_t size,
+                              const AccT maxnorm) {
+  __shared__ AccT buffer[32];
+  int64_t tx = threadIdx.x;
+  int64_t bx = blockIdx.x;
+  int64_t step = blockDim.x;
+  T *row = data + size * bx;
+
+  buffer[tx] = static_cast<AccT>(0);
+  AccT norm;
+
+  if (value == static_cast<AccT>(INFINITY)) {
+    // get norm of axis
+    for (ptrdiff_t i = tx; i < size; i += step) {
+      const AccT val = static_cast<AccT>(row[i]);
+      buffer[tx] = std::max(buffer[tx], static_cast<AccT>(std::abs(val)));
+    }
+    // add (reduce)
+    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1) {
+      __syncthreads();
+      if (tx < stride)
+        buffer[tx] = std::max(buffer[tx], buffer[tx+stride]);
+    }
+    // clip norms
+    __syncthreads();
+    norm = buffer[0];
+  } else {
+    // get norm of axis
+    for (ptrdiff_t i = tx; i < size; i += step) {
+      const AccT val = static_cast<AccT>(row[i]);
+      buffer[tx] = buffer[tx] + std::pow(static_cast<AccT>(std::abs(val)), value);
+    }
+    // add (reduce)
+    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1) {
+      __syncthreads();
+      if (tx < stride)
+        buffer[tx] = buffer[tx] + buffer[tx+stride];
+    }
+    // clip norms
+    __syncthreads();
+    norm = std::pow(buffer[0], static_cast<AccT>(1) / value);
+  }
+
+  if (norm > maxnorm) {
+    norm = maxnorm / (norm + static_cast<AccT>(1e-7));
+    // renormalize
+    for (ptrdiff_t i = tx; i < size; i += step) {
+      const AccT val = static_cast<AccT>(row[i]);
+      row[i] = static_cast<T>(val * norm);
+    }
+  }
+}
+
+} // anonymous namespace
+
+Tensor& renorm_out_cuda(Tensor& result, const Tensor& self, Scalar p, int64_t dim, Scalar maxnorm) {
+  // THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, self));
+  dim = at::maybe_wrap_dim(dim, self);
+  TORCH_CHECK(p.toDouble() > 0, "non-positive-norm not supported")
+  TORCH_CHECK(self.dim() > 1, "need at least 2 dimensions")
+
+  auto self_t = self.transpose(dim, 0);
+  auto data = self_t.contiguous();
+  auto numel = data.numel();
+
+  if (numel > 0) {
+    auto size_zero = data.size(0);
+    const ptrdiff_t size = numel / size_zero;
+
+    dim3 grid(size_zero);
+    // NOTE: only with this specific number of threads can this work on GPUs with a warp size != 32 (such as AMD).
+    // Do not alter w/o changing buffer size in kernel.
+    dim3 threads(32);
+
+    AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "renorm", [&]() {
+      using acc_t = std::conditional <
+          std::is_same<scalar_t,
+                       c10::impl::ScalarTypeToCPPType<kHalf>>::value,
+                       float,
+                       scalar_t>::type;
+
+      auto p_scalar = p.to<acc_t>();
+      auto maxnorm_scalar = maxnorm.to<acc_t>();
+
+      kernel_renorm<scalar_t, acc_t>
+          <<<grid, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
+              data.data_ptr<scalar_t>(),
+              p_scalar,
+              size,
+              maxnorm_scalar);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    });
+  }
+
+  auto result_ = data.transpose(dim, 0);
+  result.resize_as_(result_);
+  result.copy_(result_);
+
+  return result;
+}
+
+Tensor& renorm__cuda(Tensor& self, Scalar p, int64_t dim, Scalar maxnorm) {
+  return renorm_out_cuda(self, self, p, dim, maxnorm);
+}
+
+Tensor renorm_cuda(const Tensor& self, Scalar p, int64_t dim, Scalar maxnorm) {
+  auto result = at::empty({0}, self.options());
+  return renorm_out_cuda(result, self, p, dim, maxnorm);
+}
+
+namespace {
 
 void addr_kernel_cuda(TensorIterator &iter, Scalar beta, Scalar alpha) {
   if (iter.dtype() == ScalarType::Bool) {

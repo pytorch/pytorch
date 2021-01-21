@@ -5202,7 +5202,7 @@
   variants: method
   dispatch:
     CPU: legacy::cpu::_th_renorm_
-    CUDA: legacy::cuda::_th_renorm_
+    CUDA: renorm__cuda
 
 - func: lerp_.Scalar(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
   variants: method
@@ -6391,13 +6391,13 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     CPU: legacy::cpu::_th_renorm_out
-    CUDA: legacy::cuda::_th_renorm_out
+    CUDA: renorm_out_cuda
 
 - func: renorm(Tensor self, Scalar p, int dim, Scalar maxnorm) -> Tensor
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_renorm
-    CUDA: legacy::cuda::_th_renorm
+    CUDA: renorm_cuda
 
 - func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
   variants: method
