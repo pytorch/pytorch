@@ -13,7 +13,6 @@ struct TORCH_API CompressedSparseTensorImpl : public TensorImpl {
   Tensor crow_indices_;
   Tensor col_indices_;
   Tensor values_;
-  Tensor reduction_;
 
  public:
   explicit CompressedSparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);

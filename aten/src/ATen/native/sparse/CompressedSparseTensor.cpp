@@ -36,7 +36,7 @@ SparseTensor new_csr_tensor(const TensorOptions& options) {
 Tensor sparse_csr_tensor(const Tensor& crow_indices, const Tensor& col_indices, 
                          const Tensor& values, IntArrayRef size,
                          const TensorOptions& options) {
-  TORCH_CHECK(!options.has_layout() || options.layout() == kCompressedSparse, "expected sparse GCS layout, but got layout ", options.layout());
+  TORCH_CHECK(!options.has_layout() || options.layout() == kCompressedSparse, "expected sparse CSR layout, but got layout ", options.layout());
   
   SparseTensor self = new_csr_tensor(options);
   int64_t nnz_size = values.numel();
@@ -54,7 +54,7 @@ int64_t _nnz_sparse_csr(const SparseTensor& self) {
 }
 
 Tensor values_sparse_csr(const Tensor& self) {
-  return get_sparse_csr_impl(self)->values().alias();      
+  return get_sparse_csr_impl(self)->values().alias(); 
 }
 
 Tensor crow_indices_sparse_csr(const Tensor& self) {
@@ -62,7 +62,7 @@ Tensor crow_indices_sparse_csr(const Tensor& self) {
 }
 
 Tensor col_indices_sparse_csr(const Tensor& self) {
-  return get_sparse_csr_impl(self)->col_indices().alias();      
+  return get_sparse_csr_impl(self)->col_indices().alias(); 
 }
 
 bool _is_same_size_as_sparse_csr(const SparseTensor& self, const SparseTensor& src) {

@@ -48,7 +48,6 @@ void CompressedSparseTensorImpl::resize_and_clear_(int64_t nnz_size, int64_t cro
   TORCH_CHECK(empty_crow_indices.scalar_type() == kInt,
     "empty_crow_indices must be int32 type, but got: ",   empty_crow_indices.dtype());
 
-  // directly set to the member variables. there should be lots of error checking here.
   crow_indices_ = empty_crow_indices;
   col_indices_ = empty_col_indices;
   values_ = empty_values;
@@ -65,13 +64,13 @@ void CompressedSparseTensorImpl::resize_as_(const Tensor& src) {
   
 void CompressedSparseTensorImpl::set_member_tensors_unsafe(const Tensor& crow_indices, const Tensor& col_indices,
                                                       const Tensor& values) {
-  TORCH_CHECK(!col_indices.is_sparse(), 
+  TORCH_CHECK(col_indices.layout() == kStrided, 
               "expected col_indices to be a dense tensor, but got indices of layout ", 
               col_indices.layout());
-  TORCH_CHECK(!crow_indices.is_sparse(), 
+  TORCH_CHECK(crow_indices.layout() == kStrided, 
               "expected crow_indices to be a dense tensor, but got crow_indices of layout ", 
               crow_indices.layout());
-  TORCH_CHECK(!values.is_sparse(), 
+  TORCH_CHECK(values.layout() == kStrided, 
               "expected values to be a dense tensor, but got values of layout ", 
               values.layout());
 

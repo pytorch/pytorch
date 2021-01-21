@@ -903,7 +903,7 @@ class Tensor(torch._C._TensorBase):
             co.extend(selection.nonzero().flatten().tolist())
             vals.extend(select_nums.flatten().tolist())
 
-        return torch.sparse_csr_tensor(torch.IntTensor(ro), torch.IntTensor(co),
+        return torch.sparse_csr_tensor(torch.tensor(ro, dtype=torch.int32), torch.tensor(co, dtype=torch.int32),
                                        torch.tensor(vals, dtype=self.dtype),
                                        shape, dtype=self.dtype)
 
