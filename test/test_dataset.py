@@ -6,7 +6,8 @@ from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.utils.data import IterableDataset, RandomSampler
 from torch.utils.data.datasets import \
     (CollateIterableDataset, BatchIterableDataset, ListDirFilesIterableDataset,
-     LoadFilesFromDiskIterableDataset, SamplerIterableDataset)
+     LoadFilesFromDiskIterableDataset, SamplerIterableDataset, PaddedBatchIterableDataset)
+from typing import Sequence, List, Dict, Union
 
 
 def create_temp_dir_and_files():
@@ -139,6 +140,134 @@ class TestFunctionalIterableDataset(TestCase):
         batch_ds_nolen = BatchIterableDataset(ds_nolen, batch_size=5)
         with self.assertRaises(NotImplementedError):
             len(batch_ds_nolen)
+
+    def test_padded_batch_dataset(self):
+        arrs = range(10)
+        ds_nolen = IterDatasetWithoutLen(arrs)
+        # Check valid batch size
+        with self.assertRaises(AssertionError):
+            PaddedBatchIterableDataset(ds_nolen, batch_size=0)
+        # Check __len__ function 
+        with self.assertRaises(NotImplementedError):
+            len(PaddedBatchIterableDataset(ds_nolen, batch_size=2))
+        # Check same type
+        ds_len = IterDatasetWithLen([3, '123', torch.randn(3, 3)])
+        with self.assertRaises(RuntimeError):
+            pb = PaddedBatchIterableDataset(ds_len, batch_size=2)
+            temp = [data for data in pb]
+
+        def _helper(input_sizes, bs, output_sizes, *, ps=None, pv=0, dl=False):
+            ds = IterDatasetWithLen([torch.randn(*s) for s in input_sizes])
+            pb = PaddedBatchIterableDataset(ds, batch_size=bs, padded_shapes=ps, padded_values=pv, drop_last=dl)
+            self.assertEqual(len(pb), len(output_sizes))
+            it = iter(ds)
+            if isinstance(pv, Sequence):
+                pv = pv[0]
+            for i, (output_batch, output_data_size) in enumerate(zip(pb, output_sizes)):
+                # Verify Batch Size
+                if i + 1 == len(pb) and not dl and len(ds) % bs > 0:
+                    self.assertEqual(len(output_batch), len(ds) % bs)
+                else:
+                    self.assertEqual(len(output_batch), bs)
+                for output_data in output_batch:
+                    # Verify Original Data
+                    input_data = next(it)
+                    slices = [slice(0, n) for n in input_data.shape]
+                    self.assertEqual(output_data[slices], input_data)
+                    # Verify Padded Shape
+                    self.assertEqual(output_data_size, list(output_data.shape))
+                    # Verify Padded Value
+                    mask = torch.ones_like(output_data, dtype=torch.bool)
+                    mask[slices] = 0
+                    self.assertEqual(output_data[mask].sum(), mask.sum() * pv, exact_dtype=False)
+
+        input_sizes_0 = [(5, 5), (3, 7), (5, 3, 7), (7, 5, 5)]
+        output_sizes_0 = [[5, 7], [7, 5, 7]]
+        _helper(input_sizes_0, 2, output_sizes_0)
+        _helper(input_sizes_0, 2, output_sizes_0, dl=True)
+        # Each element should have same dimensions
+        with self.assertRaises(RuntimeError):
+            _helper(input_sizes_0, 3, output_sizes_0)
+
+        input_sizes_1 = [(3, 5), (5, 7), (7, 3), (7, 5)]
+        # Not specify padded shape and value
+        _helper(input_sizes_1, 2, [(5, 7), (7, 5)])
+        _helper(input_sizes_1, 3, [(7, 7), (7, 5)])
+        # Specify padded value, and drop last batch
+        _helper(input_sizes_1, 2, [(5, 7), (7, 5)], pv=1, dl=True)
+        _helper(input_sizes_1, 3, [(7, 7)], pv=1, dl=True)
+        # Specify padded shape and value
+        _helper(input_sizes_1, 3, [(8, 8), (8, 8)], ps=torch.Size([8, 8]), pv=1)
+        _helper(input_sizes_1, 3, [(8, 8), (8, 8)], ps=[8, 8], pv=[1])
+        with self.assertRaises(RuntimeError):
+            _helper(input_sizes_1, 2, [(6, 6), (6, 6)], ps=torch.Size([6, 6]))
+
+        # Create Nested Tensor List/Map Dataset
+        def _create_nested_ds(input_sizes):
+            is_list = True if isinstance(input_sizes[0], Sequence) else False
+            nested_lists: List[Union[List, Dict]] = []
+            for sizes in input_sizes:
+                if is_list:
+                    lists = [torch.randn(*s) for s in sizes]
+                    nested_lists.append(lists)
+                else:
+                    maps = {key: [torch.randn(*s) for s in v]
+                            if isinstance(v, list)
+                            else torch.randn(*v)
+                            for key, v in sizes.items()}
+                    nested_lists.append(maps)
+            ds = IterDatasetWithLen(nested_lists)
+            # Flag for determine the element is list or dict
+            ds.is_list = is_list  # type: ignore
+            return ds
+
+        def _nested_helper(ds, bs, output_sizes, *, ps=None, pv=0, dl=False):
+            pb = PaddedBatchIterableDataset(ds, batch_size=bs, padded_shapes=ps, padded_values=pv, drop_last=dl)
+            self.assertEqual(len(pb), len(output_sizes))
+            it = iter(ds)
+            for i, (output_lists, output_batch_sizes) in enumerate(zip(pb, output_sizes)):
+                transposed = zip(*output_lists) if ds.is_list else zip(*output_lists.values())  # type: ignore
+                for output_list in transposed:
+                    input_list = next(it) if ds.is_list else next(it).values()
+                    for output_data, input_data, output_data_size in zip(output_list, input_list, output_batch_sizes):
+                        # Verify Original Data
+                        slices = [slice(0, n) for n in input_data.shape]
+                        self.assertEqual(output_data[slices], input_data)
+                        # Verify Padded Shape
+                        self.assertEqual(output_data_size, list(output_data.shape))
+                        # Verify Padded Value
+                        mask = torch.ones_like(output_data, dtype=torch.bool)
+                        mask[slices] = 0
+                        self.assertEqual(output_data[mask].sum(), mask.sum() * pv, exact_dtype=False)
+
+        # Nested List
+        list_ds = _create_nested_ds([[(3, 5), (7, 9)],
+                                     [(3, 3), (11, 5)],
+                                     [(5, 1), (7, 11)],
+                                     [(1, 3), (9, 5)]])
+        # Not specify padded shape
+        _nested_helper(list_ds, 2, [[(3, 5), (11, 9)], [(5, 3), (9, 11)]])
+        _nested_helper(list_ds, 3, [[(5, 5), (11, 11)], [(1, 3), (9, 5)]])
+        # Specify padded shape
+        _nested_helper(list_ds, 2, [[(8, 8), (11, 11)], [(8, 8), (11, 11)]], ps=[torch.Size([8, 8]), torch.Size([11, 11])])
+        _nested_helper(list_ds, 2, [[(8, 8), (11, 11)], [(8, 8), (11, 11)]], ps=[[8, 8], [11, 11]])
+        # Broadcast padded shape
+        _nested_helper(list_ds, 2, [[(11, 11), (11, 11)], [(11, 11), (11, 11)]], ps=[[11, 11]])
+
+        # Nested Map
+        map_ds = _create_nested_ds([{'k1': (3, 5), 'k2': (7, 9)},
+                                    {'k1': (3, 3), 'k2': (11, 5)},
+                                    {'k1': (5, 1), 'k2': (7, 11)},
+                                    {'k1': (1, 3), 'k2': (9, 5)}])
+
+        # Not specify padded shape
+        _nested_helper(map_ds, 2, [[(3, 5), (11, 9)], [(5, 3), (9, 11)]])
+        _nested_helper(map_ds, 3, [[(5, 5), (11, 11)], [(1, 3), (9, 5)]])
+        _nested_helper(map_ds, 3, [[(5, 5), (11, 11)]], dl=True)
+        #  Specify padded shape
+        _nested_helper(map_ds, 2, [[(8, 8), (11, 11)], [(8, 8), (11, 11)]], ps=[torch.Size([8, 8]), torch.Size([11, 11])])
+        # Broadcast padded shape
+        _nested_helper(map_ds, 2, [[(11, 11), (11, 11)], [(11, 11), (11, 11)]], ps=[[11, 11]])
 
     def test_sampler_dataset(self):
         arrs = range(10)
