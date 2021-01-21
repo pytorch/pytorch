@@ -152,4 +152,3 @@ class PythonDispatcher:
                 entry = regex.sub('[', line)
                 output += self._format_line(k, entry.split(": ")[1])
         return output
-
