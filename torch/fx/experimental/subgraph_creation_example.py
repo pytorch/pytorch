@@ -39,13 +39,13 @@ def split_module(
                 def_partition = partitions[def_partition_name]
                 def_partition.outputs.setdefault(def_node.name)
                 if use_partition_name is not None:
-                    def_partition.partition_dependents[use_partition_name] = None
+                    def_partition.partition_dependents.setdefault(use_partition_name)
 
             if use_partition_name is not None:
                 use_partition = partitions[use_partition_name]
-                use_partition.inputs[def_node.name] = None
+                use_partition.inputs.setdefault(def_node.name)
                 if def_partition_name is not None:
-                    use_partition.partitions_dependent_on[def_partition_name] = None
+                    use_partition.partitions_dependent_on.setdefault(def_partition_name)
 
     # split nodes into parititons
     for node in m.graph.nodes:
