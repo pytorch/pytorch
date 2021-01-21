@@ -1,5 +1,4 @@
 import dataclasses
-import json
 import os
 import pickle
 import signal
@@ -8,17 +7,14 @@ import time
 from typing import List, Optional, Union, TYPE_CHECKING
 import uuid
 
-from core.api import Mode
+from core.api import AutoLabels
 from core.types import Label
 from core.utils import get_temp_dir
 from worker.main import WORKER_PATH, WorkerFailure, WorkerOutput, WorkerTimerArgs, WorkerUnpickler
 
 if TYPE_CHECKING:
-    # See core.api for an explanation of Language import.
-    from torch.utils.benchmark.utils.timer import Language
     PopenType = subprocess.Popen[bytes]
 else:
-    from torch.utils.benchmark import Language
     PopenType = subprocess.Popen
 
 
@@ -31,7 +27,7 @@ PYTHON_CMD = f"{_ENV} {_PYTHON}"
 class WorkOrder:
     """Struct for scheduling work with the benchmark runner."""
     label: Label
-    mode: Mode
+    auto_labels: AutoLabels
     timer_args: WorkerTimerArgs
     source_cmd: Optional[str] = None
     timeout: Optional[float] = None
@@ -199,7 +195,7 @@ class InProgress:
         attempts = (self._work_order.retries or 0) + 1
         if self._timeouts < attempts:
             print(
-                f"\nTimeout: {self._work_order.label}, {self._work_order.mode} "
+                f"\nTimeout: {self._work_order.label}, {self._work_order.auto_labels} "
                 f"(Attempt {self._timeouts} / {attempts})")
             self._proc.interrupt()
             self._proc = self._proc.clone()

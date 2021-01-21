@@ -8,9 +8,10 @@ import random
 from torch._six import nan
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, make_tensor, torch_to_numpy_dtype_dict)
+from torch.testing._internal.common_methods_invocations import shape_funcs
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCPU, dtypes, onlyOnCPUAndCUDA,
-    dtypesIfCPU, dtypesIfCUDA)
+    dtypesIfCPU, dtypesIfCUDA, ops)
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
@@ -599,7 +600,21 @@ class TestShapeOps(TestCase):
         nz = x.nonzero()
         self.assertFalse(nz.requires_grad)
 
+class TestShapeFuncs(TestCase):
+    """Test suite for Shape manipulating operators using the ShapeFuncInfo."""
+
+    @dtypes(*(torch.uint8, torch.int64, torch.double, torch.complex128))
+    @ops([op for op in shape_funcs if op.name in ['tile', 'repeat']])
+    def test_repeat_tile_vs_numpy(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample in samples:
+            (t, dims) = sample.input
+            expected = op.ref(t.cpu().numpy(), dims, **sample.kwargs)
+            result = op(t, dims, **sample.kwargs).cpu().numpy()
+            self.assertEqual(expected, result)
+
 instantiate_device_type_tests(TestShapeOps, globals())
+instantiate_device_type_tests(TestShapeFuncs, globals())
 
 if __name__ == '__main__':
     run_tests()

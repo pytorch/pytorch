@@ -1,15 +1,13 @@
 """Orchestrates benchmark collection across many cores."""
-import itertools as it
 import statistics
 import subprocess
 import textwrap
 import time
 from typing import Dict, Iterable, List, Optional, Set, Tuple, Union, TYPE_CHECKING
 
-from core.api import Mode
 from execution.cores import CorePool, CPU_COUNT, SLACK
 from execution.work import PYTHON_CMD, InProgress, WorkOrder
-from worker.main import MIN_RUN_TIME, WorkerFailure, WorkerOutput, WorkerTimerArgs
+from worker.main import MIN_RUN_TIME, WorkerFailure, WorkerOutput
 
 if TYPE_CHECKING:
     # See core.api for an explanation.
@@ -78,7 +76,7 @@ class Runner:
                 print('Unknown failure. (Worker did not report exception contents.)')
             raise
 
-        except:
+        except BaseException:
             print("\n\nUnknown exception. Shutting down jobs before re-raising.")
             self._force_shutdown(verbose=True)
             raise
@@ -165,10 +163,7 @@ class Runner:
 
             # C++ compilation takes about 20 seconds, and there are two
             # of them. (One for wall time and one for callgrind.)
-            (2 * 20.0 if w.timer_args.language == Language.CPP else 0.0) +
-
-            # Assume ~10 seconds to load the model and warm it up.
-            (10.0 if w.mode in (Mode.PY_TS, Mode.CPP_TS) else 0.0)
+            (2 * 20.0 if w.timer_args.language == Language.CPP else 0.0)
         )
 
     def _print_progress(self) -> None:
@@ -210,7 +205,7 @@ class Runner:
             overall_remaining = max(core_times)
 
         if not overall_remaining:
-            eta_str = f"ETA: Soon"
+            eta_str = "ETA: Soon"
         else:
             eta_str = (
                 f"ETA{' (approximate)' if approximate_estimate else ''}: "
@@ -243,7 +238,7 @@ class Runner:
             print(textwrap.dedent(f"""
                 Failed when processing the following Job:
                   Label:      {self._currently_processed.label}
-                  Mode:       {self._currently_processed.mode}
+                  AutoLabels: {self._currently_processed.auto_labels}
                   Source cmd: {self._currently_processed.source_cmd}
             """).strip() + "\n")
 
