@@ -676,7 +676,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             # See Note [Plumbing Keys Through The Dispatcher] for details.
             dispatch_key_set = 'ks & c10::after_autograd_keyset'
             ret_and_arg_types = ', '.join([dispatcher_sig.returns_type()] + [a.type.cpp_type() for a in dispatcher_exprs])
-            redispatch_args = ', '.join(['op', dispatch_key_set] + unpacked_args)
+            redispatch_args = ', '.join(['op', dispatch_key_set] + list(unpacked_args))
             call = CALL_DISPATCH_VIA_PRECOMPUTED_DISPATCH_KEYS.substitute(
                 ret_and_arg_types=ret_and_arg_types,
                 redispatch_args=redispatch_args)
