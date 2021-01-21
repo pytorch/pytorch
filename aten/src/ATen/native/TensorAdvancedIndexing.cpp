@@ -731,6 +731,10 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
       "This also applies to advanced indexing e.g. tensor[mask] = scalar");
   }
 
+  if (!self.is_complex() && source.isComplex()) {
+    TORCH_CHECK(false, "Converting complex Scalar to non-complex type is forbidden");
+  }
+
   // Handle the case when `self` is 0-dim
   self = (0 == self.dim()) ? self.unsqueeze(-1) : self;
 
