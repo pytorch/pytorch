@@ -203,7 +203,7 @@ Tensor _fw_primal(const Tensor & self, int64_t level) {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     return self_.alias();
   })();
-  c10::optional<std::function<at::Tensor(const at::Tensor&)>> func=c10::nullopt;
+  std::function<at::Tensor(const at::Tensor&)> func=nullptr;
   if (!self.unsafeGetTensorImpl()->support_as_strided()) {
     auto size_vec = self.sizes().vec();
     func = [=](const at::Tensor& input_base) {
@@ -310,7 +310,7 @@ Tensor& resize_as_(
 
 Tensor detach(const Tensor & self) {
   RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
-  c10::optional<std::function<at::Tensor(const at::Tensor&)>> func=c10::nullopt;
+  std::function<at::Tensor(const at::Tensor&)> func=nullptr;
   auto result = as_view(/* base */ self, /* output */ self, /* is_bw_differentiable */ false,
                         /* is_fw_differentiable */ true, /* view_func */ func, /* creation_meta */ CreationMeta::DEFAULT,
                         /*allow_tensor_metadata_change=*/false);
@@ -387,14 +387,6 @@ TORCH_LIBRARY_IMPL(aten, Autograd, m) {
   m.impl("detach", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach)));
   m.impl("detach_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::detach_)));
   m.impl("copy_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::copy_)));
-  // For backward() and requires_grad_(), we need the DefaultBackend kernel, but we also need the Autograd backend
-  // kernel, because when called with a VariableTensorId tensor, it goes through the variable fallback kernel,
-  // which calls callBoxed(), which doesn't support optional tensor arguments yet and backward() has an optional
-  // tensor argument.
-  // TODO Once callBoxed() supports optional tensor arguments, we can enable `use_c10_dispatcher: full` for backward()
-  //      and requires_grad_(), then remove the backend Autograd kernel here, only leaving the Math kernel.
-  m.impl("_backward", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_backward)));
-  m.impl("requires_grad_", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::requires_grad_)));
   m.impl("_fw_primal", torch::dispatch(DispatchKey::Autograd, TORCH_FN(VariableType::_fw_primal)));
 }
 

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
+
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
@@ -45,7 +46,9 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     } break;
     case prim::ListConstruct: {
       listConstruct(
-          stack, n->output()->type()->expect<ListType>(), n->inputs().size());
+          stack,
+          n->output()->type()->expectRef<ListType>(),
+          n->inputs().size());
     } break;
     case prim::DictConstruct: {
       dictConstruct(
