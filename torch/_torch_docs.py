@@ -2639,7 +2639,7 @@ Examples::
 """.format(**common_args))
 
 add_docstr(torch.diff, r"""
-diff(input, *, n=1, dim=-1) -> Tensor
+diff(input, n=1, dim=-1, prepend=None, append=None) -> Tensor
 
 Computes the n-th forward difference along the given dimension.
 
