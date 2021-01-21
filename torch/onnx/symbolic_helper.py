@@ -519,7 +519,7 @@ def __interpolate_helper(g, input, size, scale_factor, mode, align_corners, reco
                     cubic_coeff_a_f=-0.75,  # only valid when mode="cubic"
                     mode_s=mode,  # nearest, linear, or cubic
                     nearest_mode_s="floor")
-    else:  # if not _is_none(scales)
+    else:   # if not _is_none(scales)
         rank = _get_tensor_rank(input)
         if rank is None:
             return _unimplemented("interpolate (with scales)", "missing input shape")
