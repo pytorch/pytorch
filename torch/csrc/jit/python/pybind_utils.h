@@ -345,6 +345,17 @@ inline InferredType tryToInferType(py::handle input) {
 #endif
   }
 
+  if (as_module(py::cast<py::object>(input))) {
+    // if obj is already a ScriptModule, just return its ivalue
+    return InferredType("Cannot infer type of ScriptModule");
+  }
+
+  auto module_type = py::module::import("torch.nn").attr("Module");
+  py::bool_ is_module = py::isinstance(input, module_type);
+  if (py::cast<bool>(is_module)) {
+    return InferredType("Cannot infer type of torch.nn.Module");
+  }
+
   // Try container types
   return tryToInferContainerType(input);
 }

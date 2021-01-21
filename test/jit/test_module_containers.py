@@ -405,6 +405,22 @@ class TestModuleContainers(JitTestCase):
             b = AnotherBadModule()
             torch.jit.script(b)
 
+    def test_normal_list_attribute_with_modules_error(self):
+        """
+        Test that an attempt to script a module with a regular list attribute
+        containing other modules fails with a relevant error message.
+        """
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = [torch.nn.ReLU(), torch.nn.ReLU()]
+
+            def forward(self):
+                return len(self.a)
+
+        with self.assertRaisesRegex(RuntimeError, "Could not infer type of list element: Cannot infer type of torch.nn.Module"):
+            torch.jit.script(Mod())
+
     def test_empty_dict_override_contains(self):
         class CustomModuleInterface(torch.nn.Module):
             def __init__(self):

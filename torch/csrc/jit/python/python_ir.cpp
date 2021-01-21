@@ -867,6 +867,23 @@ void initPythonIRBindings(PyObject* module_) {
         }
         return names;
       });
+  using ::c10::InferredType;
+  py::class_<InferredType, std::shared_ptr<InferredType>>(m, "InferredType")
+      .def(py::init([](std::shared_ptr<Type> type) {
+        return std::make_shared<InferredType>(std::move(type));
+      }))
+      .def(py::init([](std::string reason) {
+        return std::make_shared<InferredType>(std::move(reason));
+      }))
+      .def(
+          "type",
+          [](std::shared_ptr<InferredType> self) { return self->type(); })
+      .def(
+          "success",
+          [](std::shared_ptr<InferredType> self) { return self->success(); })
+      .def("reason", [](std::shared_ptr<InferredType> self) {
+        return self->reason();
+      });
 
   py::class_<Use>(m, "Use")
       .def_readonly("user", &Use::user)

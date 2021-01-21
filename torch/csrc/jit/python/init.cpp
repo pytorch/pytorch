@@ -562,12 +562,8 @@ void initJITBindings(PyObject* module) {
           []() { return getInlineEverythingMode(); })
       .def(
           "_jit_try_infer_type",
-          [](py::object obj) -> TypePtr {
-            auto match = tryToInferType(std::move(obj));
-            if (match.success()) {
-              return match.type();
-            }
-            return nullptr;
+          [](py::object obj) -> InferredType {
+            return tryToInferType(std::move(obj));
           })
       .def(
           "_jit_get_trigger_value",
