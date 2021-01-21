@@ -6994,6 +6994,9 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
         s.grad = torch.ones(10).to_sparse()
         self.assertEqual(s.grad, deepcopy(s).grad)
 
+        # ensure sharing is not broken
+        c = deepcopy([a, a.grad])
+        self.assertTrue(c[0].grad is c[1])
 
 # TODO: this empy class is temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
