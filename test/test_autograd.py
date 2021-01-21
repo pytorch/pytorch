@@ -5041,13 +5041,6 @@ EXCLUDE_BATCHED_GRAD_TESTS = set([
     'test_to_sparse',
 ])
 
-# deny list for batched grad computation
-EXCLUDE_BATCHED_GRAD_TESTS = set([
-    'test_unfold_scalar',
-    'test_unfold_scalar_neg0',
-    'test_to_sparse',
-])
-
 def add_test(
         name,
         self_size,
