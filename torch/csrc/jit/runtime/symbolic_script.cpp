@@ -391,7 +391,8 @@ const std::vector<std::string> functions = {
                 dims[-2] = dim - 1
                 out = mat.permute(dims)
             return out
-
+    )",
+    R"(
         # In matmul backward case of [b, m, n] * [b, n, p] => [m, p],
         # instead of doing [b, m, p] and then reduce to [m, p]
         # whice potentially uses large intermediate of size b*m*p,
@@ -439,8 +440,6 @@ const std::vector<std::string> functions = {
                 return grad_self, grad_other
 
             return torch.matmul(self, other), backward
-    )",
-    R"(
         def addcmul(self,
                     tensor1,
                     tensor2,

@@ -1117,7 +1117,7 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
       at::sqrt_out(result1, result1);
     }
     at::complex_out(result2, real_out_mean, imag_out_mean);
-    return {result1, result2};
+    return std::tuple<Tensor&, Tensor&>(result1, result2);
   }
 
   const auto correction = correction_opt.value_or(1);
@@ -1132,7 +1132,7 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
   } else {
     std_var_stub(iter.device_type(), iter, correction, take_sqrt);
   }
-  return {result1, result2};
+  return std::tuple<Tensor&, Tensor&>(result1, result2);
 }
 
 std::tuple<Tensor, Tensor> var_mean(
