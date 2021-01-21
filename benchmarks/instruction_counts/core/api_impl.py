@@ -71,7 +71,7 @@ def _make_invocation(
         cpp_invocation = f"{cpp_prefix}{model_name}->forward({', '.join(signature_args)});"
     else:
         assert runtime == RuntimeMode.JIT
-        cpp_invocation =  textwrap.dedent(f"""\
+        cpp_invocation = textwrap.dedent(f"""\
             std::vector<torch::jit::IValue> ivalue_inputs({{
                 {', '.join([f'torch::jit::IValue({a})' for a in signature_args])}
             }});
