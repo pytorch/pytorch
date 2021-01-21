@@ -12,7 +12,7 @@ namespace {
 
 void pow_tensor_tensor_kernel(TensorIterator& iter) {
   if (isFloatingType(iter.dtype()) || isComplexType(iter.dtype())) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "pow", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "pow", [&]() {
       using Vec = Vec256<scalar_t>;
       cpu_kernel_vec(iter,
         [=](scalar_t base, scalar_t exp) -> scalar_t {
