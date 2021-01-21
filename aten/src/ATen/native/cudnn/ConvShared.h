@@ -17,6 +17,7 @@ namespace at { namespace native {
 // parameters
 struct ConvolutionParams
 {
+  c10::DeviceIndex device_id;
   cudnnDataType_t dataType;
   int input_size[2 + max_dim];
   int input_stride[2 + max_dim];
