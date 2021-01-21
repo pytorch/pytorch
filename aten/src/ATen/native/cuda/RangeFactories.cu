@@ -133,11 +133,10 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optiona
     r.fill_(std::pow(base, start.to<double>()));
   } else if (isIntegralType(r.scalar_type(), 0)) {
     AT_DISPATCH_INTEGRAL_TYPES(r.scalar_type(), "logspace_cuda", [&]() {
-      // We use double here to be consistent with CPU implementation
-      double scalar_base = static_cast<double>(base);
+      float scalar_base = static_cast<float>(base); // Use float to avoid promotion to double
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      double step = static_cast<double>(scalar_end - scalar_start) / (steps - 1);
+      float step = static_cast<float>(scalar_end - scalar_start) / (steps - 1);
       const int64_t halfway = steps / 2;
       gpu_kernel_with_index(r, [scalar_start, scalar_end, scalar_base, steps, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
         if (ind < halfway) {

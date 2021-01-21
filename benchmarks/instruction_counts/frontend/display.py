@@ -5,19 +5,19 @@ TODO:
     general and robust, but for now it is a standalone implementation.
 """
 import abc
+import collections
 import dataclasses
 import enum
 import itertools as it
 import re
-import statistics
 import textwrap
-from typing import cast, Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union, TYPE_CHECKING
+from typing import (
+    cast, Any, Callable, DefaultDict, Dict, Iterable, List, Optional, Set,
+    Tuple, Union, TYPE_CHECKING
+)
 
-import numpy as np
-
-from core.api import Mode
+from core.api import AutogradMode, AutoLabels, RuntimeMode
 from core.types import Label
-from worker.main import WorkerOutput
 
 if TYPE_CHECKING:
     # See core.api for an explanation why this is necessary.
@@ -29,7 +29,7 @@ else:
 
 
 ValueType = Tuple[CallgrindStats, Measurement]
-ResultType = Tuple[Tuple[Label, int, Mode, ValueType], ...]
+ResultType = Tuple[Tuple[Label, int, AutoLabels, ValueType], ...]
 
 
 class Alignment(enum.Enum):
@@ -122,7 +122,7 @@ class Table:
                 cell.set_context(r)
 
         n_cols = set(len(r) for r in self._rows)
-        assert len(n_cols) == 1
+        assert len(n_cols) == 1, f"{n_cols}"
         self._n_cols: int = n_cols.pop()
         assert self._n_cols > 0
 
@@ -219,16 +219,17 @@ class ColHeader_Cell(Cell):
 
 
 class Label_Cell(Cell):
-    def __init__(self, label: Label) -> None:
+    def __init__(self, label: Label, autograd: AutogradMode) -> None:
         self._label: Label = label
+        self._autograd: AutogradMode = autograd
 
     def render(self) -> Tuple[str, int]:
         masks, i = self.col_reduce(Label_Cell.gather_masks)
         mask = masks[i]
-        assert len(mask) == len(self._label)
+        assert len(mask) == len(self.label)
         result = "\n".join([
             "  " * i + li
-            for i, (mi, li) in enumerate(zip(mask, self._label))
+            for i, (mi, li) in enumerate(zip(mask, self.label))
             if mi
         ]) or ""
 
@@ -241,6 +242,16 @@ class Label_Cell(Cell):
     def alignment(self) -> Alignment:
         return Alignment.LEFT
 
+    @property
+    def label(self) -> Label:
+        render_autograd, i = self.col_reduce(self.should_render_autograd)
+        autograd_repr = {
+            AutogradMode.FORWARD: "Mode: Forward",
+            AutogradMode.FORWARD_BACKWARD: "Mode: Forward + Backward",
+        }
+        return self._label + (
+            (autograd_repr[self._autograd],) if render_autograd[i] else ())
+
     @staticmethod
     def gather_masks(col: Tuple[Cell, ...]) -> Tuple[Tuple[bool, ...], ...]:
         masks: List[Tuple[bool, ...]] = []
@@ -251,7 +262,7 @@ class Label_Cell(Cell):
                 masks.append(())
                 continue
 
-            l: Label = c._label
+            l: Label = c.label
             i: int = 0
             for i, (l_i, pl_i) in enumerate(zip(l, prior_l)):
                 if l_i != pl_i:
@@ -261,6 +272,18 @@ class Label_Cell(Cell):
             masks.append((False,) * i + (True,) * (len(l) - i))
 
         return tuple(masks)
+
+    @staticmethod
+    def should_render_autograd(col: Tuple[Cell, ...]) -> Tuple[bool, ...]:
+        autograd_set: DefaultDict[Label, Set[AutogradMode]] = collections.defaultdict(set)
+        for c in col:
+            if isinstance(c, Label_Cell):
+                autograd_set[c._label].add(c._autograd)
+
+        return tuple(
+            len(autograd_set[c._label]) > 1 if isinstance(c, Label_Cell) else False
+            for c in col
+        )
 
 class NumThreads_Cell(Cell):
     def __init__(self, num_threads: int) -> None:
@@ -288,7 +311,7 @@ class AB_Cell(Cell):
         self._significant_figures = significant_figures
 
         a_t, b_t = a[1].median, b[1].median
-        delta_t = abs(b_t - a_t) / statistics.mean([a_t, b_t])
+        delta_t = abs(b_t - a_t) / b_t
         self._zero_within_noise: bool = (delta_t < 1.0 / (significant_figures or 1))
         self._robust_time = (
             display_time and significant_figures and not self._zero_within_noise
@@ -324,7 +347,7 @@ class AB_Cell(Cell):
         return (
             template.format(sign_str, abs(b - a)),
             template.format("", b),
-            "{}{:.1f}%".format(sign_str, 100 * abs(b - a) / statistics.mean([a, b]))
+            "{}{:.1f}%".format(sign_str, 100 * abs(b - a) / b)
         )
 
     @property
@@ -358,33 +381,45 @@ class AB_Cell(Cell):
 
 def render_ab(a_results: ResultType, b_results: ResultType, display_time: bool = False) -> None:
     packed_results: Dict[
-        Tuple[Label, int],
-        Dict[Mode, Tuple[ValueType, ValueType]]
+        Tuple[Label, int, AutogradMode],
+        Dict[Tuple[Language, RuntimeMode], Tuple[ValueType, ValueType]]
     ] = {}
 
     assert len(a_results) == len(b_results)
     for a_result, b_result in zip(a_results, b_results):
         assert a_result[:3] == b_result[:3]
 
-        label, num_threads, mode, a_value = a_result
+        label, num_threads, auto_labels, a_value = a_result
         b_value = b_result[3]
 
-        packed_results.setdefault((label, num_threads), {})
-        assert mode not in packed_results[(label, num_threads)]
-        packed_results[(label, num_threads)][mode] = (a_value, b_value)
+        primary_key = (label, num_threads, auto_labels.autograd)
+        secondary_key = (auto_labels.language, auto_labels.runtime)
+        packed_results.setdefault(primary_key, {})
+        assert secondary_key not in packed_results[primary_key]
+        packed_results[primary_key][secondary_key] = (a_value, b_value)
 
+    col_titles = {
+        (Language.PYTHON, RuntimeMode.EAGER): "Python (Eager)",
+        (Language.PYTHON, RuntimeMode.JIT): "Python (TorchScript)",
+        (Language.PYTHON, RuntimeMode.EXPLICIT): "Python",
+        (Language.CPP, RuntimeMode.EAGER): "C++ (Eager)",
+        (Language.CPP, RuntimeMode.JIT): "C++ (TorchScript)",
+        (Language.CPP, RuntimeMode.EXPLICIT): "C++",
+    }
+
+    column_keys = tuple((lang, rt) for lang in Language for rt in RuntimeMode)
     rows: List[Tuple[Cell, ...]] = [
         (Null_Cell(), ColHeader_Cell(header="num  \nthreads")) +
-        tuple(ColHeader_Cell(header=m.value) for m in Mode)
+        tuple(ColHeader_Cell(header=col_titles[lang_rt]) for lang_rt in column_keys)
     ]
 
-    for (label, num_threads), r in packed_results.items():
+    for (label, num_threads, autograd), r in packed_results.items():
         rows.append((
-            Label_Cell(label=label),
+            Label_Cell(label=label, autograd=autograd),
             NumThreads_Cell(num_threads=num_threads),
         ) + tuple(
-            AB_Cell(*r[mode], display_time) if mode in r else Null_Cell()
-            for mode in Mode
+            AB_Cell(*r[lang_rt], display_time) if lang_rt in r else Null_Cell()
+            for lang_rt in column_keys
         ))
 
     table = Table(rows)

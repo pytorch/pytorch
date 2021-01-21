@@ -16,15 +16,18 @@ def single(source_cmd: Optional[str], output_file: Optional[str]) -> None:
         backtesting=False,
     )[0]
 
-    simple_results: List[Tuple[Label, int, str, int, float]] = []
+    simple_results: List[Tuple[Label, int, int, float]] = []
     label_width = 0
-    mode_width = 0
 
-    for label, num_threads, mode, (stats, times) in results:
+    for label, num_threads, auto_labels, (stats, times) in results:
+        label = label + (
+            auto_labels.runtime.value,
+            auto_labels.autograd.value,
+            auto_labels.language.value,
+        )
         label_width = max(label_width, len(str(label)))
-        mode_width = max(mode_width, len(str(mode.value)))
         simple_results.append((
-            label, num_threads, mode.value,
+            label, num_threads,
             int(stats.counts(denoise=True) / stats.number_per_run),
             times.median
         ))
@@ -36,11 +39,10 @@ def single(source_cmd: Optional[str], output_file: Optional[str]) -> None:
 
     else:
         # Mostly for debugging.
-        for label, num_threads, mode_str, count, t in simple_results:
+        for label, num_threads, count, t in simple_results:
             label_str = str(label).ljust(label_width)
-            mode_str = mode_str.ljust(mode_width)
             print(
-                f"{label_str} {num_threads:>3}{'':>8}{mode_str}{'':>8}"
+                f"{label_str} {num_threads:>3}{'':>8}"
                 f"{count:>9}{'':>8}{t * 1e6:>6.2f}"
             )
 

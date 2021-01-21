@@ -1,168 +1,162 @@
 """Key enums and structs used to handle data flow within the benchmark."""
+import abc
 import dataclasses
 import enum
-import re
-import textwrap
-from typing import List, Optional, Tuple, Union, TYPE_CHECKING
+from typing import Optional, Tuple, Union, TYPE_CHECKING
 
-from worker.main import CostEstimate, WorkerTimerArgs
+from worker.main import WorkerTimerArgs
 
 if TYPE_CHECKING:
     # Benchmark utils are only partially strict compliant, so MyPy won't follow
     # imports using the public namespace. (Due to an exclusion rule in
     # mypy-strict.ini)
-    from torch.utils.benchmark.utils.common import Measurement
     from torch.utils.benchmark.utils.timer import Language
-    from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import CallgrindStats
 else:
-    from torch.utils.benchmark import CallgrindStats, Language, Measurement
+    from torch.utils.benchmark import Language
 
 
-class Setup(enum.Enum):
-    """Defines the class of setup that a stmt requires.
-
-    Because a GroupedTimerArgs may (and generally will) represent both Python
-    and C++ code, we chunk setup into broad groups which are resolved into
-    language specific strings. This also results in more compact and readable
-    definitions.
-    """
-    NONE = 0
-    TRIVIAL = 1
-    GENERIC = 2
-    INDEXING = 3
-    MESOSCALE = 4
-    AUTOGRAD = 5
-    EXAMPLE_FOR_ADHOC = 6
+# Note:
+#   WorkerTimerArgs is defined in worker.main so that the worker does not
+#   depend on any files, including core.api. We mirror it with a public symbol
+#   `TimerArgs` for API consistency.
+TimerArgs = WorkerTimerArgs
 
 
-class Mode(enum.Enum):
-    # Generated from GroupedTimerArgs
-    PY = "Python"
-    CPP = "C++"
-    PY_TS = "Python (TorchScript)"
-    CPP_TS = "C++ (TorchScript)"
+class RuntimeMode(enum.Enum):
+    EAGER = "Eager"
+    JIT = "TorchScript"
+    EXPLICIT = ""
 
-    # TimerArgs was explicitly provided.
-    EXPLICIT_PY = "Explicit (Py)"
-    EXPLICIT_CPP = "Explicit (C++)"
 
-    @property
-    def language(self) -> Language:
-        py_values = (Mode.PY, Mode.PY_TS, Mode.EXPLICIT_PY)
-        return Language.PYTHON if self in py_values else Language.CPP
+class AutogradMode(enum.Enum):
+    FORWARD = "Forward"
+    FORWARD_BACKWARD = "Forward + Backward"
+    EXPLICIT = ""
 
 
 @dataclasses.dataclass(frozen=True)
-class TimerArgs:
-    """Container for Timer constructor arguments.
+class AutoLabels:
+    runtime: RuntimeMode
+    autograd: AutogradMode
+    language: Language
 
-    This dataclass serves two roles. First, it is a simple interface for
-    defining benchmarks. (See GroupedTimerArgs for the advanced interface.)
-    Second, it provides serialization for controlling workers. `Timer` is not
-    pickleable, so instead the parent process will pass `WorkerTimerArgs`
-    (which map closely to `TimerArgs`) instances to workers for processing.
-    """
 
-    # Timer constructor arguments.
-    stmt: str
-    setup: str
+@dataclasses.dataclass(frozen=True)
+class GroupedSetup:
+    py_setup: Optional[str] = None
+    cpp_setup: Optional[str] = None
     global_setup: Optional[str] = None
-    num_threads: Union[int, Tuple[int, ...]] = 1
-    language: Language = Language.PYTHON
-
-    # Unlike `adaptive_autorange`, `collect_callgrind` does not dynamically
-    # adjust based on the cost of a stmt, so we must either provide a cost
-    # estimate or tell workers to determine a sensible value.
-    cost: CostEstimate = CostEstimate.AUTO
-
-    def flatten(self) -> Tuple[WorkerTimerArgs, ...]:
-        self_dict = dataclasses.asdict(self)
-        assert tuple(self_dict.keys()) == WorkerTimerArgs.keys()
-        if isinstance(self.num_threads, int):
-            return WorkerTimerArgs(**self_dict),
-
-        num_threads: Tuple[int, ...] = self_dict.pop("num_threads")
-        return tuple(WorkerTimerArgs(num_threads=n, **self_dict) for n in num_threads)
 
 
-@dataclasses.dataclass(frozen=True)
-class GroupedTimerArgs:
-    """Defines a set of related benchmarks which are semantically equivalent.
+class GroupedBenchmark(abc.ABC):
+    """Base class for defining groups of benchmarks.
 
-    There are four ways one might reasonably wish to run a PyTorch snippet:
-      - Using the Python eager API
-      - Using the C++ eager frontend
-      - Running a TorchScript model eagerly from Python
-      - Running a TorchScript model which has been loaded into C++
+    Implementation: `core.api_impl._GroupedBenchmarkImpl`
+    Concrete interfaces:
+     - `core.api_impl.GroupedStmts`     (init_from_stmts)
+     - `core.api_impl.GroupedModules`   (init_from_model)
 
-    It is useful to define them together, both for clairity when reading
-    benchmark definitions and for later processing and analysis.
+    There are a variety of dimensions along which one might wish to measure
+    PyTorch performance:
+      - Python, C++
+      - Eager, TorchScript
+      - Single threaded, multi threaded
+      - Training, inference
+
+    It is useful to define them together, both for clear and concise benchmark
+    definition and more intelligent post processing and analysis.
 
     We may, of course, only be interested in a subset of cases. For instance we
     may be benchmarking Python code which does not have a C++ analog, or a
-    statement which is not TorchScript-able. This is supported by simply
-    omitting arguments.
+    statement which is not TorchScript-able.
 
-    In order to measure TorchScript performance, `py_stmt` must be specified
-    and must be scriptable. (It will be scripted, not traced.) Secondly,
-    `signature` must be specified and take the form `f(args) -> output`. e.g.
+    There are also two programming idioms in PyTorch. One is to write free form
+    code (so called "NumPy with gradients"), and the other is to organize code
+    using `torch.nn.Module`s. (This is how common neural network layers are
+    exposed through the PyTorch API.) To support easy definition two
+    initialization methods are provided:
+     - `init_from_stmts`
+     - `init_from_model`
 
-        "f(a, b, c) -> d"
-        "f(x) -> None"
+    Those methods will document their unique constructor arguments, however
+    most are shared and are defined here:
 
-    This is used to build both the model and invocation. Note that the return
-    is a literal variable, not a type. TorchScript will optimize away
-    computation which does not have observable side effects, so some functions
-    need to return a result to actually benchmark the task of interest.
+        setup: Defines how to initialize a benchmark in both Python and C++.
+        signature:
+            A string of the form:
+            ```
+                f(a, b, ...) -> c
+            ```
 
-    Example:
-    ```
-    GroupedTimerArgs(
-        setup=Setup.GENERIC,  # Creates a float Tensor `x`
-        py_stmt="y = x + x.t()",
-        cpp_stmt="auto y = x + x.t();",
+            For instance, if Python setup is:
+            ```
+                x = torch.ones((2,), requires_grad=True)
+                y = torch.ones((2,))
+            ```
+            and the corresponding stmt is:
+            ```
+                z = torch.dot(x, y)
+            ```
+            Then the signature is `f(x, y) -> z`. `signature` is required any
+            time we need to generate part of a snippet:
+             - When calling an opaque model provided by `init_from_models`
+             - When `torchscript=True`
+             - When `autograd=True`
 
-        # Optional. If present, we can make a TorchScript function as well.
-        signature="f(x) -> y",
-    )
-    ```
+            If a return value is not needed (e.g. because of in place mutation)
+            then `-> None` is valid, but a non-None return must be provided if
+            `autograd=True`
 
-    GroupedTimerArgs will ultimately be parsed down to one or more
-    WorkerTimerArgs for evaluation.
+        torchscript:
+            If True, also JIT the stmt or model and generate benchmarks which
+            call the scripted version. Requires that `signature` is defined.
+
+        autograd:
+            If True, generate both forward and forward + backward benchmarks.
+            Requires that `signature` is defined, and return value is not None.
+
+        num_threads:
+            Maps to the Timer arg. If a tuple of ints is provided, benchmarks
+            will be generated for each value.
     """
-    py_stmt: Optional[str] = None
-    cpp_stmt: Optional[str] = None
-    setup: Setup = Setup.NONE
-    global_setup: Optional[str] = None
-    signature: Optional[str] = None
-    num_threads: Union[int, Tuple[int, ...]] = 1
-    cost: CostEstimate = CostEstimate.AUTO
 
-    def __post_init__(self) -> None:
-        # This is done purely to improve readability.
-        if self.py_stmt is not None:
-            object.__setattr__(self, "py_stmt", textwrap.dedent(self.py_stmt).strip())
+    @staticmethod
+    @abc.abstractmethod
+    def init_from_stmts(
+        py_stmt: Optional[str] = None,
+        cpp_stmt: Optional[str] = None,
 
-        if self.cpp_stmt is not None:
-            object.__setattr__(self, "cpp_stmt", textwrap.dedent(self.cpp_stmt).strip())
+        # Generic constructor arguments
+        setup: GroupedSetup = GroupedSetup(),
+        signature: Optional[str] = None,
+        torchscript: bool = False,
+        autograd: bool = False,
+        num_threads: Union[int, Tuple[int, ...]] = 1,
+    ) -> "GroupedBenchmark":
+        ...
 
-        if self.py_stmt is None and self.cpp_stmt is None:
-            raise ValueError("You must specify at least one of `py_stmt`, `cpp_stmt`")
+    @staticmethod
+    @abc.abstractmethod
+    def init_from_model(
+        py_model_setup: Optional[str] = None,
+        cpp_model_setup: Optional[str] = None,
 
-        # Check that signature is valid.
-        self.torchscript_signature
+        # Generic constructor arguments
+        setup: GroupedSetup = GroupedSetup(),
+        signature: Optional[str] = None,
+        torchscript: bool = False,
+        autograd: bool = False,
+        num_threads: Union[int, Tuple[int, ...]] = 1,
+    ) -> "GroupedBenchmark":
+        ...
 
-    @property
-    def torchscript_signature(self) -> Optional[Tuple[Tuple[str, ...], str]]:
-        if self.signature is None:
-            return None
+    @abc.abstractproperty
+    def ts_model_setup(self) -> Optional[str]:
+        ...
 
-        if self.py_stmt is None:
-            # `py_stmt` populates the body of the function.
-            raise ValueError("signature provided, but `py_stmt` is None.")
-
-        match = re.search(r"^f\((.*)\) -> (.*)$", self.signature)
-        if match is None:
-            raise ValueError(f"Invalid signature: `{self.signature}`")
-
-        return tuple(match.groups()[0].split(", ")), match.groups()[1].strip()
+    @abc.abstractmethod
+    def flatten(
+        self,
+        model_path: Optional[str]
+    ) -> Tuple[Tuple[AutoLabels, TimerArgs], ...]:
+        ...

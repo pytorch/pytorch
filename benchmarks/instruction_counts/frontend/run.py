@@ -2,29 +2,28 @@ import itertools as it
 import os
 import subprocess
 import textwrap
-from typing import cast, Dict, Iterable, Mapping, List, Optional, Tuple, TYPE_CHECKING
+from typing import List, Optional, Set, Tuple, TYPE_CHECKING
 
-from core.api import Mode
+from core.api import AutogradMode, AutoLabels, RuntimeMode
 from core.types import Label
-from core.unpack_groups import unpack
+from core.utils import unpack
 from definitions.ad_hoc import ADHOC_BENCHMARKS
 from definitions.standard import BENCHMARKS
 from execution.runner import Runner
 from execution.work import PYTHON_CMD, WorkOrder
-from frontend.display import render_ab, ResultType, ValueType
-from worker.main import CostEstimate, WorkerTimerArgs, WorkerOutput
+from frontend.display import ResultType, ValueType
+from worker.main import WorkerTimerArgs
 
 if TYPE_CHECKING:
     # See core.api for an explanation why this is necessary.
-    from torch.utils.benchmark.utils.common import Measurement
     from torch.utils.benchmark.utils.timer import Language
 else:
-    from torch.utils.benchmark import Language, Measurement
+    from torch.utils.benchmark import Language
 
 from torch.utils.benchmark.utils.historic.patch import backport, clean_backport
 
 
-_BACKTEST_EXCLUDE = {
+_BACKTEST_EXCLUDE: Set[Label] = {
     ('Pointwise', 'Math', 'add', 'Tensor-Tensor (type promotion)'),
     ('Reduction', 'Variance'),
     ('Indexing',),  # All indexing ops
@@ -75,12 +74,15 @@ def _make_sentry(source_cmd: Optional[str]) -> WorkOrder:
         global_setup=None,
         num_threads=1,
         language=Language.CPP,
-        cost=CostEstimate.LESS_THAN_10_US,
     )
 
     return WorkOrder(
         label=("Impl", "Sentry"),
-        mode=Mode.EXPLICIT_CPP,
+        auto_labels=AutoLabels(
+            RuntimeMode.EAGER,
+            AutogradMode.FORWARD,
+            language=Language.CPP
+        ),
         timer_args=timer_args,
         source_cmd=source_cmd,
         timeout=180.0,
@@ -99,21 +101,21 @@ def collect(
 
     # Set up normal benchmarks
     benchmarks = ADHOC_BENCHMARKS if ad_hoc else BENCHMARKS
-    for label, mode, timer_args in unpack(benchmarks):
-        if no_cpp and mode.language == Language.CPP:
+    for label, auto_labels, timer_args in unpack(benchmarks):
+        if no_cpp and auto_labels.language == Language.CPP:
             continue
 
         if backtesting:
-            if mode in (Mode.PY_TS, Mode.CPP_TS):
+            if auto_labels.runtime == RuntimeMode.JIT:
                 continue
 
-            if any(label[:i+1] in _BACKTEST_EXCLUDE for i in range(len(label))):
+            if any(label[:i + 1] in _BACKTEST_EXCLUDE for i in range(len(label))):
                 continue
 
         orders: Tuple[WorkOrder, ...] = tuple(
             WorkOrder(
                 label=label,
-                mode=mode,
+                auto_labels=auto_labels,
                 timer_args=timer_args,
                 source_cmd=source_cmd,
                 timeout=180.0,
@@ -152,13 +154,13 @@ def collect(
     # Organize normal benchmark results.
     output: List[ResultType] = []
     for work_items in zip(*work_items_by_source_cmd):
-        output_i: List[Tuple[Label, int, Mode, ValueType]] = []
+        output_i: List[Tuple[Label, int, AutoLabels, ValueType]] = []
         for w in work_items:
             r = results[w]
             output_i.append((
                 w.label,
                 w.timer_args.num_threads,
-                w.mode,
+                w.auto_labels,
                 (r.instructions, r.wall_time)
             ))
         output.append(tuple(output_i))

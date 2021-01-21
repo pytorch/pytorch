@@ -41,7 +41,8 @@ else:
         COMPAT_TIMER = True
 
     except ImportError:
-        from torch.utils.benchmark import CallgrindStats, Language, Measurement, TaskSpec, Timer
+        from torch.utils.benchmark import CallgrindStats, Language, Measurement, Timer
+
 
 WORKER_PATH = os.path.abspath(__file__)
 
@@ -49,54 +50,54 @@ WORKER_PATH = os.path.abspath(__file__)
 # =============================================================================
 # == Interfaces ===============================================================
 # =============================================================================
-class CostEstimate(enum.Enum):
-    """Hint for how expensive a benchmark is expected to be.
-
-    Timer supports adaptive timing for wall times, but not instruction counts.
-    Generally this is desired since we want deterministic instruction counts,
-    however it can be tedious to choose sensible numbers when defining a slew
-    of benchmarks.
-    """
-    AUTO = 0
-    LESS_THAN_10_US = 1
-    LESS_THAN_50_US = 2
-    LESS_THAN_100_US = 3
-    LESS_THAN_250_US = 4
-    LESS_THAN_1000_US = 5
-    GIANT = 6
-
 
 # While the point of this is mainly to collect instruction counts, we're going
 # to have to compile C++ timers anyway (as they're used as a check before
 # calling Valgrind), so we may as well grab wall times for reference. They
-# are comparatively inexpensive, and also useful for enabling CostEstimate.AUTO.
+# are comparatively inexpensive, and also useful for determining how many
+# Callgrind iterations to run.
 MIN_RUN_TIME = 5
+
+def callgrind_iters(t: float, language: Language) -> int:
+    # Fill ~30 seconds, factoring in the ~50x slowdown from Callgrind.
+    n = int(30 / 50 / t)
+    assert n, "Callgrind should not be used for very large expressions."
+
+    if language == Language.CPP:
+        # C++ is quite stable, so we always run 500 iterations unless t is
+        # quite large. This helps keep measurements consistent, since the
+        # determinism means that we don't need to increase number to increase
+        # signal quality.
+        return min(500, n)
+
+    else:
+        # There is some noise from the CPython interpreter, so we run for the
+        # full ~30 seconds. (Or at least 10 iterations.)
+        assert language == Language.PYTHON
+        return max(10, n)
 
 
 @dataclasses.dataclass(frozen=True)
 class WorkerTimerArgs:
-    """Mirrors core.api.TimerArgs
+    """Container for Timer constructor arguments.
 
-    Note that `num_threads` is narrowed from `Union[int, Tuple[int, ...]]` to
-    `int`. `core.api` will assert that `WorkerTimerArgs` matches `TimerArgs`.
+    This dataclass serves two roles. First, it is a simple interface for
+    defining benchmarks. (See core.api.GroupedStmts and core.api.GroupedModules
+    for the advanced interfaces.) Second, it provides serialization for
+    controlling workers. `Timer` is not pickleable, so instead the main process
+    will pass `WorkerTimerArgs` instances to workers for processing.
     """
     stmt: str
-    setup: str
-    global_setup: Optional[str]
-    num_threads: int
-    language: Language
-    cost: CostEstimate
-
-    @classmethod
-    def keys(cls) -> Tuple[str, ...]:
-        return tuple(f.name for f in dataclasses.fields(cls))
+    setup: Optional[str] = None
+    global_setup: Optional[str] = None
+    num_threads: int = 1
+    language: Language = Language.PYTHON
 
 
 @dataclasses.dataclass(frozen=True)
 class WorkerOutput:
     wall_time: Measurement
     instructions: CallgrindStats
-    cost: CostEstimate  # Emperical cost. (If AUTO.)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -119,7 +120,6 @@ class WorkerUnpickler(pickle.Unpickler):
         """
         symbol_map = {
             # Only blessed interface Enums and dataclasses need to be mapped.
-            "CostEstimate": CostEstimate,
             "WorkerTimerArgs": WorkerTimerArgs,
             "WorkerOutput": WorkerOutput,
             "WorkerFailure": WorkerFailure,
@@ -146,49 +146,23 @@ class WorkerUnpickler(pickle.Unpickler):
 # =============================================================================
 # == Execution ================================================================
 # =============================================================================
-CALLGRIND_COST_GUIDE: Dict[CostEstimate, Tuple[float, int]] = {
-    # (max wall time, callgrind number)
-    CostEstimate.LESS_THAN_10_US: (10e-6, 50_000),
-    CostEstimate.LESS_THAN_50_US: (50e-6, 10_000),
-    CostEstimate.LESS_THAN_100_US: (100e-6, 5_000),
-    CostEstimate.LESS_THAN_250_US: (250e-6, 2_000),
-    CostEstimate.LESS_THAN_1000_US: (1e-3, 500),
-    CostEstimate.GIANT: (1e9, 10),  # Catch all
-}
-
-# Ensure map is complete.
-assert tuple(CostEstimate) == (CostEstimate.AUTO,) + tuple(CALLGRIND_COST_GUIDE.keys())
-
-# Ensure map is strictly increasing.
-assert all(c1 > c0 for (c0, _), (c1, _) in
-    zip(CALLGRIND_COST_GUIDE.values(), list(CALLGRIND_COST_GUIDE.values())[1:]))
-
-
 def _run(timer_args: WorkerTimerArgs) -> WorkerOutput:
     timer = Timer(
         stmt=timer_args.stmt,
-        setup=timer_args.setup,
+        setup=timer_args.setup or "pass",
         global_setup=timer_args.global_setup,
         num_threads=timer_args.num_threads,
         language=timer_args.language,
     )
 
     m = timer.blocked_autorange(min_run_time=MIN_RUN_TIME)
-    cost: CostEstimate = timer_args.cost
-    n: int
-    if cost == CostEstimate.AUTO:
-        t: float = m.median
-        for cost, (t_max, n) in CALLGRIND_COST_GUIDE.items():
-            if t <= t_max:
-                break
-    else:
-        n = CALLGRIND_COST_GUIDE[cost][1]
-
-    stats = timer.collect_callgrind(number=n, collect_baseline=False)
+    stats = timer.collect_callgrind(
+        number=callgrind_iters(m.median, timer_args.language),
+        collect_baseline=False,
+    )
     return WorkerOutput(
         wall_time=m,
         instructions=stats,
-        cost=cost
     )
 
 
@@ -204,7 +178,7 @@ def main(communication_file: str) -> None:
         # Runner process sent SIGINT.
         sys.exit()
 
-    except:
+    except BaseException:
         trace_f = io.StringIO()
         traceback.print_exc(file=trace_f)
         result = WorkerFailure(failure_trace=trace_f.getvalue())
