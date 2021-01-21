@@ -1,3 +1,4 @@
+import pickle
 import tempfile
 import warnings
 
@@ -5,9 +6,10 @@ import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.utils.data import IterableDataset, RandomSampler
 from torch.utils.data.datasets import \
-    (CollateIterableDataset, BatchIterableDataset, ListDirFilesIterableDataset,
-     LoadFilesFromDiskIterableDataset, SamplerIterableDataset, PaddedBatchIterableDataset)
-from typing import Sequence, List, Dict, Union
+    (CallableIterableDataset, CollateIterableDataset, BatchIterableDataset,
+     ListDirFilesIterableDataset, LoadFilesFromDiskIterableDataset, SamplerIterableDataset,
+     PaddedBatchIterableDataset)
+from typing import List, Tuple, Dict, Any, Type, Sequence, Mapping, Union
 
 
 def create_temp_dir_and_files():
@@ -76,6 +78,46 @@ class IterDatasetWithLen(IterableDataset):
 
 
 class TestFunctionalIterableDataset(TestCase):
+    def test_picklable(self):
+        arr = range(10)
+        picklable_datasets: List[Tuple[Type[IterableDataset], IterableDataset, Dict[str, Any]]] = [
+            (CallableIterableDataset, IterDatasetWithLen(arr), {}),
+            (CollateIterableDataset, IterDatasetWithLen(arr), {}),
+        ]
+        for ds, d, kargs in picklable_datasets:
+            p = pickle.dumps(ds(d, **kargs))  # type: ignore
+
+        unpicklable_datasets: List[Tuple[Type[IterableDataset], IterableDataset, Dict[str, Any]]] = [
+            (CallableIterableDataset, IterDatasetWithLen(arr), {'fn': lambda x: x}),
+            (CollateIterableDataset, IterDatasetWithLen(arr), {'collate_fn': lambda x: x}),
+        ]
+        for ds, d, kargs in unpicklable_datasets:
+            with self.assertRaises(AttributeError):
+                p = pickle.dumps(ds(d, **kargs))  # type: ignore
+
+    def test_callable_dataset(self):
+        arr = range(10)
+        ds_len = IterDatasetWithLen(arr)
+        ds_nolen = IterDatasetWithoutLen(arr)
+
+        def fn(item):
+            return torch.tensor(item, dtype=torch.float)
+
+        callable_ds = CallableIterableDataset(ds_len, fn=fn)  # type: ignore
+        self.assertEqual(len(ds_len), len(callable_ds))
+        ds_iter = iter(ds_len)
+        for x in callable_ds:
+            y = next(ds_iter)
+            self.assertEqual(x, torch.tensor(y, dtype=torch.float))
+
+        callable_ds_nolen = CallableIterableDataset(ds_nolen)  # type: ignore
+        with self.assertRaises(NotImplementedError):
+            len(callable_ds_nolen)
+        ds_nolen_iter = iter(ds_nolen)
+        for x in callable_ds_nolen:
+            y = next(ds_nolen_iter)
+            self.assertEqual(x, torch.tensor(y, dtype=torch.float))
+
     def test_collate_dataset(self):
         arrs = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
         ds_len = IterDatasetWithLen(arrs)
@@ -154,120 +196,250 @@ class TestFunctionalIterableDataset(TestCase):
         ds_len = IterDatasetWithLen([3, '123', torch.randn(3, 3)])
         with self.assertRaises(RuntimeError):
             pb = PaddedBatchIterableDataset(ds_len, batch_size=2)
-            temp = [data for data in pb]
+            for data in pb:
+                pass
 
-        def _helper(input_sizes, bs, output_sizes, *, ps=None, pv=0, dl=False):
-            ds = IterDatasetWithLen([torch.randn(*s) for s in input_sizes])
-            pb = PaddedBatchIterableDataset(ds, batch_size=bs, padded_shapes=ps, padded_values=pv, drop_last=dl)
-            self.assertEqual(len(pb), len(output_sizes))
-            it = iter(ds)
-            if isinstance(pv, Sequence):
-                pv = pv[0]
-            for i, (output_batch, output_data_size) in enumerate(zip(pb, output_sizes)):
-                # Verify Batch Size
-                if i + 1 == len(pb) and not dl and len(ds) % bs > 0:
-                    self.assertEqual(len(output_batch), len(ds) % bs)
+        def _create_ds(input_sizes):
+
+            # Recursive create Tensors
+            def _helper(size_list):
+                if isinstance(size_list, tuple):
+                    return torch.randn(*size_list)
+                data: List[Union[torch.Tensor, List, Dict]] = []
+                for s in size_list:
+                    if isinstance(s, tuple):
+                        data.append(torch.randn(*s))
+                    elif isinstance(s, list):
+                        data.append(_helper(s))
+                    elif isinstance(s, dict):
+                        data.append({k: _helper(s[k]) for k in s})
+                return data
+
+            return IterDatasetWithLen(_helper(input_sizes))
+
+        def _test_batch_padded(ds, batch_size, exp_pshapes, exp_pvalues, **kwargs):
+            pb_ds = PaddedBatchIterableDataset(ds, batch_size=batch_size, **kwargs)
+            self.assertEqual(len(pb_ds), len(exp_pshapes))
+
+            # Mimic PaddedBatch
+            def _collate_fn(batch):
+                elem = batch[0]
+                if isinstance(elem, (torch.Tensor, float, int, complex, str)):
+                    return batch
+                elif isinstance(elem, Mapping):
+                    return {key: _collate_fn([d[key] for d in batch]) for key in elem}
+                elif isinstance(elem, Sequence):
+                    return [_collate_fn(d) for d in zip(*batch)]
                 else:
-                    self.assertEqual(len(output_batch), bs)
-                for output_data in output_batch:
-                    # Verify Original Data
-                    input_data = next(it)
-                    slices = [slice(0, n) for n in input_data.shape]
-                    self.assertEqual(output_data[slices], input_data)
-                    # Verify Padded Shape
-                    self.assertEqual(output_data_size, list(output_data.shape))
-                    # Verify Padded Value
-                    mask = torch.ones_like(output_data, dtype=torch.bool)
-                    mask[slices] = 0
-                    self.assertEqual(output_data[mask].sum(), mask.sum() * pv, exact_dtype=False)
+                    return batch
 
-        input_sizes_0 = [(5, 5), (3, 7), (5, 3, 7), (7, 5, 5)]
-        output_sizes_0 = [[5, 7], [7, 5, 7]]
-        _helper(input_sizes_0, 2, output_sizes_0)
-        _helper(input_sizes_0, 2, output_sizes_0, dl=True)
-        # Each element should have same dimensions
-        with self.assertRaises(RuntimeError):
-            _helper(input_sizes_0, 3, output_sizes_0)
+            # Use Batch + Callable as input reference
+            dl = kwargs['drop_last'] if 'drop_last' in kwargs else False
+            b_ds = CallableIterableDataset(BatchIterableDataset(ds, batch_size=batch_size, drop_last=dl),
+                                           fn=_collate_fn)  # type: ignore
 
-        input_sizes_1 = [(3, 5), (5, 7), (7, 3), (7, 5)]
-        # Not specify padded shape and value
-        _helper(input_sizes_1, 2, [(5, 7), (7, 5)])
-        _helper(input_sizes_1, 3, [(7, 7), (7, 5)])
-        # Specify padded value, and drop last batch
-        _helper(input_sizes_1, 2, [(5, 7), (7, 5)], pv=1, dl=True)
-        _helper(input_sizes_1, 3, [(7, 7)], pv=1, dl=True)
-        # Specify padded shape and value
-        _helper(input_sizes_1, 3, [(8, 8), (8, 8)], ps=torch.Size([8, 8]), pv=1)
-        _helper(input_sizes_1, 3, [(8, 8), (8, 8)], ps=[8, 8], pv=[1])
-        with self.assertRaises(RuntimeError):
-            _helper(input_sizes_1, 2, [(6, 6), (6, 6)], ps=torch.Size([6, 6]))
-
-        # Create Nested Tensor List/Map Dataset
-        def _create_nested_ds(input_sizes):
-            is_list = True if isinstance(input_sizes[0], Sequence) else False
-            nested_lists: List[Union[List, Dict]] = []
-            for sizes in input_sizes:
-                if is_list:
-                    lists = [torch.randn(*s) for s in sizes]
-                    nested_lists.append(lists)
+            # Helper function to check batch recursively
+            def _helper(ref_batch, output_batch, exp_padded_shape, output_padded_value):
+                # Batch is a list
+                if isinstance(output_batch, Sequence):
+                    elem = output_batch[0]
+                    # Batch of Tensors -> Check shape/value
+                    if isinstance(elem, torch.Tensor):
+                        # Check Batch Size
+                        self.assertEqual(len(ref_batch), len(output_batch))
+                        for ref_data, output_data in zip(ref_batch, output_batch):
+                            # Verify Original Data
+                            slices = [slice(0, n) for n in ref_data.shape]
+                            self.assertEqual(output_data[slices], ref_data)
+                            # Verify Padded Shape
+                            self.assertEqual(exp_padded_shape, tuple(output_data.shape))
+                            # Verify Padded Shape
+                            mask = torch.ones_like(output_data, dtype=torch.bool)
+                            mask[slices] = 0
+                            self.assertTrue(torch.eq(output_data[mask], output_padded_value).all())
+                    # Nested List
+                    else:
+                        for rb, ob, ps, pv in zip(ref_batch, output_batch, exp_padded_shape, output_padded_value):
+                            _helper(rb, ob, ps, pv)
+                # Batch is a dict
+                elif isinstance(output_batch, Mapping):
+                    for rb, ob, ps, pv in zip(ref_batch.values(), output_batch.values(), exp_padded_shape, output_padded_value):
+                        _helper(rb, ob, ps, pv)
                 else:
-                    maps = {key: [torch.randn(*s) for s in v]
-                            if isinstance(v, list)
-                            else torch.randn(*v)
-                            for key, v in sizes.items()}
-                    nested_lists.append(maps)
-            ds = IterDatasetWithLen(nested_lists)
-            # Flag for determine the element is list or dict
-            ds.is_list = is_list  # type: ignore
-            return ds
+                    self.assertTrue(False, msg="Type is not supported.")
 
-        def _nested_helper(ds, bs, output_sizes, *, ps=None, pv=0, dl=False):
-            pb = PaddedBatchIterableDataset(ds, batch_size=bs, padded_shapes=ps, padded_values=pv, drop_last=dl)
-            self.assertEqual(len(pb), len(output_sizes))
-            it = iter(ds)
-            for i, (output_lists, output_batch_sizes) in enumerate(zip(pb, output_sizes)):
-                transposed = zip(*output_lists) if ds.is_list else zip(*output_lists.values())  # type: ignore
-                for output_list in transposed:
-                    input_list = next(it) if ds.is_list else next(it).values()
-                    for output_data, input_data, output_data_size in zip(output_list, input_list, output_batch_sizes):
-                        # Verify Original Data
-                        slices = [slice(0, n) for n in input_data.shape]
-                        self.assertEqual(output_data[slices], input_data)
-                        # Verify Padded Shape
-                        self.assertEqual(output_data_size, list(output_data.shape))
-                        # Verify Padded Value
-                        mask = torch.ones_like(output_data, dtype=torch.bool)
-                        mask[slices] = 0
-                        self.assertEqual(output_data[mask].sum(), mask.sum() * pv, exact_dtype=False)
+            for ref_batch, output_batch, exp_padded_shape in zip(b_ds, pb_ds, exp_pshapes):
+                _helper(ref_batch, output_batch, exp_padded_shape, exp_pvalues)
 
-        # Nested List
-        list_ds = _create_nested_ds([[(3, 5), (7, 9)],
-                                     [(3, 3), (11, 5)],
-                                     [(5, 1), (7, 11)],
-                                     [(1, 3), (9, 5)]])
-        # Not specify padded shape
-        _nested_helper(list_ds, 2, [[(3, 5), (11, 9)], [(5, 3), (9, 11)]])
-        _nested_helper(list_ds, 3, [[(5, 5), (11, 11)], [(1, 3), (9, 5)]])
-        # Specify padded shape
-        _nested_helper(list_ds, 2, [[(8, 8), (11, 11)], [(8, 8), (11, 11)]], ps=[torch.Size([8, 8]), torch.Size([11, 11])])
-        _nested_helper(list_ds, 2, [[(8, 8), (11, 11)], [(8, 8), (11, 11)]], ps=[[8, 8], [11, 11]])
-        # Broadcast padded shape
-        _nested_helper(list_ds, 2, [[(11, 11), (11, 11)], [(11, 11), (11, 11)]], ps=[[11, 11]])
+        # Tensor
+        tensor_shapes_0 = [(3, 5), (5, 7), (7, 3), (5, 5)]
+        tensor_shapes_1 = [(5, 5), (3, 7), (5, 3, 7), (7, 5, 5)]
+        # List of Tensor
+        list_tensor_shapes = [[(3, 5), (7, 9)],
+                              [(3, 3), (11, 5)],
+                              [(5, 1), (7, 11)],
+                              [(1, 3), (9, 5)]]
+        map_tensor_shapes = [{'k1': (3, 5), 'k2': (7, 9)},
+                             {'k1': (3, 3), 'k2': (11, 5)},
+                             {'k1': (5, 1), 'k2': (7, 11)},
+                             {'k1': (1, 3), 'k2': (9, 5)}]
+        nested_ll_shapes = [[(3, 5), [(7, 9), (1, 2)]],
+                            [(3, 3), [(11, 5), (3, 2)]],
+                            [(5, 1), [(7, 11), (5, 3)]],
+                            [(1, 3), [(9, 5), (2, 2)]]]
+        nested_ml_shapes = [{'k1': (3, 5), 'k2': [(7, 9), (1, 2)]},
+                            {'k1': (3, 3), 'k2': [(11, 5), (3, 2)]},
+                            {'k1': (5, 1), 'k2': [(7, 11), (5, 3)]},
+                            {'k1': (1, 3), 'k2': [(9, 5), (2, 2)]}]
 
-        # Nested Map
-        map_ds = _create_nested_ds([{'k1': (3, 5), 'k2': (7, 9)},
-                                    {'k1': (3, 3), 'k2': (11, 5)},
-                                    {'k1': (5, 1), 'k2': (7, 11)},
-                                    {'k1': (1, 3), 'k2': (9, 5)}])
+        # input_shape, exp_shape, exp_value, batch_size, {padded_shape, padded_value, drop_last}, Error
+        test_cases: List[Tuple[List, List, Union[int, List], int, Dict, Any]] = [
+            # ===== Tensor =====
+            (
+                tensor_shapes_0,
+                [(5, 7), (7, 5)],  # expected output shape
+                0,  # expected output value
+                2, {}, None,
+            ),
+            (
+                tensor_shapes_0,
+                [(7, 7), (5, 5)],  # expected output shape
+                0,  # expected output value
+                3, {}, None,
+            ),
+            (
+                tensor_shapes_0,
+                [(8, 8), (8, 8)],  # expected output shape
+                1,  # expected output value
+                2, {'padded_shapes': torch.Size([8, 8]), 'padded_values': 1}, None,
+            ),
+            (
+                tensor_shapes_0,
+                [(8, 8)],  # expected output shape
+                0,  # expected output value
+                3, {'padded_shapes': [8, 8], 'drop_last': True}, None,
+            ),
+            (
+                tensor_shapes_0,
+                [(7, 7), (5, 5)],  # expected output shape
+                0,  # expected output value
+                2, {'padded_shapes': [6, 6]}, RuntimeError,  # Tensor bigger than padded shape
 
-        # Not specify padded shape
-        _nested_helper(map_ds, 2, [[(3, 5), (11, 9)], [(5, 3), (9, 11)]])
-        _nested_helper(map_ds, 3, [[(5, 5), (11, 11)], [(1, 3), (9, 5)]])
-        _nested_helper(map_ds, 3, [[(5, 5), (11, 11)]], dl=True)
-        #  Specify padded shape
-        _nested_helper(map_ds, 2, [[(8, 8), (11, 11)], [(8, 8), (11, 11)]], ps=[torch.Size([8, 8]), torch.Size([11, 11])])
-        # Broadcast padded shape
-        _nested_helper(map_ds, 2, [[(11, 11), (11, 11)], [(11, 11), (11, 11)]], ps=[[11, 11]])
+            ),
+            (
+                tensor_shapes_1,
+                [(), ()],  # output_shapeexpected output shape
+                0,  # expected output value
+                3, {}, RuntimeError,  # Inequal shape dimensions within batch
+            ),
+            # ===== List of tensors =====
+            (
+                list_tensor_shapes,
+                [[(3, 5), (11, 9)],
+                 [(5, 3), (9, 11)]],  # expected output shape
+                [1, 0],  # expected output value
+                2, {'padded_values': [1, 0], 'drop_last': False}, None,
+            ),
+            # Specify Shape and Value
+            (
+                list_tensor_shapes,
+                [[(8, 8), (11, 11)],
+                 [(8, 8), (11, 11)]],  # expected output shape
+                [0, 1],  # expected output value
+                2, {'padded_shapes': [torch.Size([8, 8]), torch.Size([11, 11])], 'padded_values': [0, 1]}, None,
+            ),
+            # Broadcast Shape and Value
+            (
+                list_tensor_shapes,
+                [[(11, 11), (11, 11)],
+                 [(11, 11), (11, 11)]],  # expected output shape
+                [1, 1],  # expected output value
+                2, {'padded_shapes': [(11, 11)], 'padded_values': 1}, None,
+            ),
+            # ===== Map of tensors =====
+            (
+                map_tensor_shapes,
+                [[(3, 5), (11, 9)],
+                 [(5, 3), (9, 11)]],  # expected output shape
+                [0, 0],  # expected output value
+                2, {}, None,
+            ),
+            # Specify Shape and Value
+            (
+                map_tensor_shapes,
+                [[(8, 8), (11, 11)],
+                 [(8, 8), (11, 11)]],  # expected output shape
+                [0, 1],  # expected output value
+                2, {'padded_shapes': [[8, 8], [11, 11]], 'padded_values': [0, 1]}, None,
+            ),
+            # Broadcast Shape and Value
+            (
+                map_tensor_shapes,
+                [[(11, 11), (11, 11)],
+                 [(11, 11), (11, 11)]],  # expected output shape
+                [1, 1],  # expected output value
+                2, {'padded_shapes': [[11, 11]], 'padded_values': [1]}, None,
+            ),
+            # ===== Nested List of List =====
+            (
+                nested_ll_shapes,
+                [[(3, 5), [(11, 9), (3, 2)]],
+                 [(5, 3), [(9, 11), (5, 3)]]],  # expected output shape
+                [0, [0, 0]],  # expected output value
+                2, {}, None,
+            ),
+            # Specify Nested Shape and Value
+            (
+                nested_ll_shapes,
+                [[(8, 8), [(11, 11), (5, 5)]],
+                 [(8, 8), [(11, 11), (5, 5)]]],  # expected output shape
+                [0, [1, 0]],  # expected output value
+                2, {'padded_shapes': [[8, 8], [[11, 11], [5, 5]]], 'padded_values': [0, [1, 0]]}, None,
+            ),
+            # Broadcast Shape and Value
+            (
+                nested_ll_shapes,
+                [[(8, 8), [(11, 11), (11, 11)]],
+                 [(8, 8), [(11, 11), (11, 11)]]],  # expected output shape
+                [1, [1, 1]],  # expected output value
+                2, {'padded_shapes': [[8, 8], [[11, 11]]], 'padded_values': [1]}, None,
+            ),
+            # ===== Nested Map of List ======
+            (
+                nested_ml_shapes,
+                [[(3, 5), [(11, 9), (3, 2)]],
+                 [(5, 3), [(9, 11), (5, 3)]]],  # expected output shape
+                [0, [0, 0]],  # expected output value
+                2, {}, None,
+            ),
+            # Specify Nested Shape and Value
+            (
+                nested_ml_shapes,
+                [[(8, 8), [(11, 11), (5, 5)]],
+                 [(8, 8), [(11, 11), (5, 5)]]],  # expected output shape
+                [0, [1, 0]],  # expected output value
+                2, {'padded_shapes': [[8, 8], [[11, 11], [5, 5]]], 'padded_values': [0, [1, 0]]}, None,
+            ),
+            # Broadcast Shape and Value
+            (
+                nested_ml_shapes,
+                [[(8, 8), [(11, 11), (11, 11)]],
+                 [(8, 8), [(11, 11), (11, 11)]]],  # expected output shape
+                [1, [1, 1]],  # expected output value
+                2, {'padded_shapes': [[8, 8], [[11, 11]]], 'padded_values': [1]}, None,
+            ),
+        ]
+
+        # Run through all test cases
+        for input_shape, exp_shapes, exp_values, batch_size, kwargs, error in test_cases:
+            ds = _create_ds(input_shape)
+            if error:
+                with self.assertRaises(error):
+                    pb_ds = PaddedBatchIterableDataset(ds, batch_size=batch_size, **kwargs)
+                    for data in pb_ds:
+                        pass
+            else:
+                _test_batch_padded(ds, batch_size, exp_shapes, exp_values, **kwargs)
 
     def test_sampler_dataset(self):
         arrs = range(10)

@@ -184,7 +184,7 @@ class PaddedBatchIterableDataset(IterableDataset[List[T_co]]):
             if elem.shape != torch.Size([]) and len(elem.shape) != len(shape):
                 raise RuntimeError("The padded shape {} should have same number of "
                                    "dimensions as the shape of the element {}."
-                                   .format(shape, elem.shape))
+                                   .format(list(shape), list(elem.shape)))
 
             if elem.shape == shape:
                 new_batch.append(elem)
@@ -198,7 +198,12 @@ class PaddedBatchIterableDataset(IterableDataset[List[T_co]]):
                     slices = [slice(0, n) for n in elem.shape]
                 # Raises RuntimeError for the shape of element larger than
                 # the padded shape on any dimension
-                new_elem[slices] = elem
+                try:
+                    new_elem[slices] = elem
+                except RuntimeError:
+                    raise RuntimeError("Tensor can not be padded to the target shape. "
+                                       "Target: {}; Tensor: {}"
+                                       .format(list(shape), list(elem.shape)))
                 # As in-place operation can not be used for leaf variable,
                 # convert new element to requires_grad after the operation
                 if elem.requires_grad:

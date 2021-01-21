@@ -1,11 +1,51 @@
+import warnings
 from torch.utils.data import IterableDataset, _utils
 from typing import TypeVar, Callable, Iterator, Sized
 
 T_co = TypeVar('T_co', covariant=True)
-S_co = TypeVar('S_co', covariant=True)
 
 
-class CollateIterableDataset(IterableDataset[T_co]):
+# Default function to return each item directly
+# In order to keep dataset picklable, eliminates the usage
+# of python lambda function
+def default_fn(data):
+    return data
+
+
+class CallableIterableDataset(IterableDataset[T_co]):
+    r""" :class:`CallablIterableeDataset`.
+
+    IterableDataset to run a function over each item from the source dataset.
+    args:
+        dataset: Source IterableDataset
+        fn: Function called over each item
+    """
+    dataset: IterableDataset
+    fn: Callable
+
+    def __init__(self,
+                 dataset: IterableDataset,
+                 *,
+                 fn: Callable = default_fn,
+                 ) -> None:
+        super(CallableIterableDataset, self).__init__()
+        self.dataset = dataset
+        if fn.__name__ == '<lambda>':
+            warnings.warn("Lambda function is not supported for pickle, "
+                          "please use regular python function instead.")
+        self.fn = fn  # type: ignore
+
+    def __iter__(self) -> Iterator[T_co]:
+        for data in self.dataset:
+            yield self.fn(data)
+
+    def __len__(self) -> int:
+        if isinstance(self.dataset, Sized) and len(self.dataset) >= 0:
+            return len(self.dataset)
+        raise NotImplementedError
+
+
+class CollateIterableDataset(CallableIterableDataset):
     r""" :class:`CollateIterableDataset`.
 
     IterableDataset to collate samples from dataset to Tensor(s) by `util_.collate.default_collate`,
@@ -41,21 +81,8 @@ class CollateIterableDataset(IterableDataset[T_co]):
         [tensor(3.), tensor(4.), tensor(5.), tensor(6.)]
     """
     def __init__(self,
-                 dataset: IterableDataset[S_co],
+                 dataset: IterableDataset,
                  *,
-                 collate_fn: Callable[[S_co], T_co] = _utils.collate.default_collate,
+                 collate_fn: Callable = _utils.collate.default_collate,
                  ) -> None:
-        super(CollateIterableDataset, self).__init__()
-        self.dataset = dataset
-        self.collate_fn = collate_fn
-
-    def __iter__(self) -> Iterator[T_co]:
-        for data in self.dataset:
-            yield self.collate_fn(data)
-
-    # `__len__` is attached to class not instance
-    # Assume dataset has implemented `__len__` or raise NotImplementedError
-    def __len__(self) -> int:
-        if isinstance(self.dataset, Sized) and len(self.dataset) >= 0:
-            return len(self.dataset)
-        raise NotImplementedError
+        super(CollateIterableDataset, self).__init__(dataset, fn=collate_fn)
