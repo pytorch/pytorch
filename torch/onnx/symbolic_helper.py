@@ -546,6 +546,7 @@ def _is_split_static(split_size_or_sizes, _outputs):
         return False
     return True
 
+
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------
