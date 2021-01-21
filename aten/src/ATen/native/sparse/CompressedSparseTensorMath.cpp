@@ -87,9 +87,9 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
         auto crow_indices_accessor = crow_indices.accessor<int32_t, 1>();
         auto values_accessor = values.accessor<scalar_t, 1>();
 
-        for (int iptr = 0; iptr < crow_indices.size(0)-1; ++iptr) {
-          int start_index = crow_indices_accessor[iptr];
-          int end_index = crow_indices_accessor[iptr+1];
+        for (int irow = 0; irow < crow_indices.size(0)-1; ++irow) {
+          int start_index = crow_indices_accessor[irow];
+          int end_index = crow_indices_accessor[irow+1];
 
           for (int i = start_index; i < end_index; ++i) {
             auto val = values_accessor[i];
@@ -97,7 +97,7 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
 
             THBlas_axpy<scalar_t>(dim_k,
               cast_alpha * val, dense_ptr + icol * dense_stride0, dense_stride1,
-              out_ptr + iptr * out_stride0, out_stride1);
+              out_ptr + irow * out_stride0, out_stride1);
           }
         }
     });
@@ -150,18 +150,20 @@ Tensor& add_sparse_csr_(Tensor& self, const Tensor& other, Scalar alpha) {
   return at::add_out(self, self, other, alpha);  // redispatch!
 }
 
-int32_t csr_to_strided_index_convert(int32_t iptr, int32_t icol, Tensor& out,
+int32_t csr_to_strided_index_convert(int32_t irow, int32_t icol, Tensor& out,
                                      const SparseTensor& src) {
   int32_t index = out.storage_offset();
   auto src_impl = get_sparse_csr_impl(src);
+  auto lda = out.strides()[0];
 
+  index += irow + icol * lda;
   return index;
 }
 
 Tensor& add_out_dense_sparse_csr_cpu(Tensor& out, const Tensor& dense,
                                      const SparseTensor& src, Scalar alpha) {
-  AT_ASSERT(!out.is_sparse_csr());
-  AT_ASSERT(!dense.is_sparse_csr());
+  AT_ASSERT(out.layout() == kStrided);
+  AT_ASSERT(dense.layout() == kStrided);
   AT_ASSERT(src.is_sparse_csr());
 
   AT_ASSERT(!dense.is_cuda());
@@ -198,13 +200,14 @@ Tensor& add_out_dense_sparse_csr_cpu(Tensor& out, const Tensor& dense,
     scalar_t *out_ptr = out.data_ptr<scalar_t>();
     scalar_t cast_value = alpha.to<scalar_t>();
 
-    for (int32_t iptr = 0; iptr < src_crow_indices.size(0)-1; ++iptr) {
-      int32_t start_index = crow_indices_accessor[iptr];
-      int32_t end_index = crow_indices_accessor[iptr + 1];
+    for (int32_t irow = 0; irow < src_crow_indices.size(0)-1; ++irow) {
+      int32_t start_index = crow_indices_accessor[irow];
+      int32_t end_index = crow_indices_accessor[irow + 1];
 
       for (int i = start_index; i < end_index; ++i) {
         auto icol = col_indices_accessor[i];
-        auto index = csr_to_strided_index_convert(iptr, icol, out, src);
+        auto index = csr_to_strided_index_convert(irow, icol, out, src);
+        std::cout << "index:: " << index << std::endl;
         out_ptr[index] += cast_value * values_accessor[i];
       }
     }
