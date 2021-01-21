@@ -16,10 +16,9 @@ Because this file only expects to run in a child context, error handling means
 plumbing failures up to the caller, not raising in this process.
 """
 import dataclasses
-import enum
 import os
 import pickle
-from typing import Any, Optional, Tuple, Union, TYPE_CHECKING
+from typing import Any, Optional, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
     # Benchmark utils are only partially strict compliant, so MyPy won't follow
