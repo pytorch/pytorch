@@ -566,37 +566,35 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
 
       if (it != node->inputs().end()) {
         int index = std::distance(node->inputs().begin(), it);
-
         std::string input_name = input->debugName();
+
         std::cerr
             << "Warning: ONNX Preprocess - Removing mutation on block inputs. "
             << "This changes graph semantics." << std::endl;
 
+        Node* newNode;
         if (input->type()->kind() == TypeKind::ListType) {
           // Create an aten::list to clone the list in graph inputs
-          auto newNode = node->owningGraph()->create(aten::list, 1);
+          newNode = node->owningGraph()->create(aten::list, 1);
           newNode->output()->copyMetadata(input);
           newNode->addInput(input);
-          newNode->insertBefore(node);
-          node->replaceInput(index, newNode->output());
-          input->replaceAllUsesAfterNodeWith(node, newNode->output());
-          input->setDebugName(input_name);
+          b->prependNode(newNode);
         } else {
           // Create an aten::clone to clone the tensor in graph inputs
-          auto newNode = node->owningGraph()->create(aten::clone, 1);
+          newNode = node->owningGraph()->create(aten::clone, 1);
           newNode->output()->copyMetadata(input);
           newNode->addInput(input);
 
           auto* noneNode = node->owningGraph()->create(prim::Constant);
           noneNode->output()->setType(NoneType::get());
           newNode->addInput(noneNode->output());
-
-          newNode->insertBefore(node);
+          b->prependNode(newNode);
           noneNode->insertBefore(newNode);
-          node->replaceInput(index, newNode->output());
-          input->replaceAllUsesAfterNodeWith(node, newNode->output());
-          input->setDebugName(input_name);
         }
+        node->replaceInput(index, newNode->output());
+        input->replaceAllUsesAfterNodeWith(node, newNode->output());
+        if (input->debugName() != input_name)
+          input->setDebugName(input_name);
       }
     }
   }
