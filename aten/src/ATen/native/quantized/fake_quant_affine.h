@@ -11,29 +11,13 @@ namespace native {
 
 using fake_quant_tensor_fn = void (*)(
     Tensor& output,
-    const Tensor& input,
-    float sc,
-    int64_t z_point,
-    int64_t quant_min,
-    int64_t quant_max);
-
-using fake_quant_grad_tensor_fn = void (*)(
-    Tensor& input_grad,
-    const Tensor& input,
-    const Tensor& output_grad,
-    float sc,
-    int64_t z_point,
-    int64_t quant_min,
-    int64_t quant_max);
-
-using fake_quant_tensor_cachemask_fn = void (*)(
-    Tensor& output,
     Tensor& mask,
     const Tensor& input,
     float sc,
     int64_t z_point,
     int64_t quant_min,
-    int64_t quant_max);
+    int64_t quant_max,
+    bool compute_mask);
 
 using fake_quant_learnable_grad_tensor_fn = void (*)(
     TensorIterator& iter,
@@ -44,8 +28,6 @@ using fake_quant_learnable_grad_tensor_fn = void (*)(
     int64_t quant_max);
 
 DECLARE_DISPATCH(fake_quant_tensor_fn, fake_quant_tensor_stub);
-DECLARE_DISPATCH(fake_quant_grad_tensor_fn, fake_quant_grad_tensor_stub);
-DECLARE_DISPATCH(fake_quant_tensor_cachemask_fn, fake_quant_tensor_cachemask_stub);
 DECLARE_DISPATCH(fake_quant_learnable_grad_tensor_fn, fake_quant_grad_learnable_tensor_stub);
 
 using fake_quant_per_channel_fn = void (*)(

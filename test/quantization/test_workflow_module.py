@@ -796,47 +796,7 @@ class TestRecordHistogramObserver(QuantizationTestCase):
 
 
 class TestFakeQuantize(TestCase):
-    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           X=hu.tensor(shapes=hu.array_shapes(1, 5,),
-                       qparams=hu.qparams(dtypes=torch.quint8)))
-    def test_forward_per_tensor(self, device, X):
-        r"""Tests the forward path of the FakeQuantizePerTensorAffine op.
-        """
-        np.random.seed(NP_RANDOM_SEED)
-        X, (scale, zero_point, torch_type) = X
-        quant_min = torch.iinfo(torch_type).min
-        quant_max = torch.iinfo(torch_type).max
-
-        X = to_tensor(X, device)
-        Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), scale, zero_point, quant_min, quant_max)
-        Y_prime = torch.fake_quantize_per_tensor_affine(
-            X, scale, zero_point, quant_min, quant_max)
-        np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
-
-    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
-           X=hu.tensor(shapes=hu.array_shapes(1, 5,),
-                       qparams=hu.qparams(dtypes=torch.quint8)))
-    @unittest.skip("temporarily disable the test")
-    def test_backward_per_tensor(self, device, X):
-        r"""Tests the backward method.
-        """
-        np.random.seed(NP_RANDOM_SEED)
-        X, (scale, zero_point, torch_type) = X
-        quant_min = torch.iinfo(torch_type).min
-        quant_max = torch.iinfo(torch_type).max
-
-        X = to_tensor(X, device)
-        X.requires_grad_()
-        Y = _fake_quantize_per_tensor_affine_reference(X.cpu(), scale, zero_point, quant_min, quant_max)
-        Y_prime = torch.fake_quantize_per_tensor_affine(
-            X, scale, zero_point, quant_min, quant_max)
-        dout = torch.rand(X.shape, dtype=torch.float).to(device)
-        dX = _fake_quantize_per_tensor_affine_grad_reference(
-            dout, X, scale, zero_point, quant_min, quant_max)
-        Y_prime.backward(dout)
-        np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
-
-    def _test_forward_per_tensor_cachemask_impl(self, device):
+    def _test_forward_per_tensor_impl(self, device, compute_mask):
         for torch_type in (torch.qint8, torch.quint8):
             X = torch.randn(4, 8).to(device)
             # pick the scale + zp so that some values get clipped
@@ -846,22 +806,24 @@ class TestFakeQuantize(TestCase):
             scale, zero_point = float(scale), int(zero_point)
             quant_min, quant_max = obs._calculate_qmin_qmax()
 
-            Y_test, _mask = torch.fake_quantize_per_tensor_affine_cachemask(
-                X, scale, zero_point, quant_min, quant_max)
+            Y_test, _mask = torch.fake_quantize_per_tensor_affine(
+                X, scale, zero_point, quant_min, quant_max, compute_mask)
             Y_ref = _fake_quantize_per_tensor_affine_reference(
                 X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
             self.assertTrue(torch.allclose(Y_test, Y_ref, rtol=tolerance, atol=tolerance))
 
-    def test_forward_per_tensor_cachemask_cpu(self):
+    def test_forward_per_tensor_cpu(self):
         device = torch.device('cpu')
-        self._test_forward_per_tensor_cachemask_impl(device)
+        for compute_mask in (True, False):
+            self._test_forward_per_tensor_impl(device, compute_mask)
 
     @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
-    def test_forward_per_tensor_cachemask_cuda(self):
+    def test_forward_per_tensor_cuda(self):
         device = torch.device('cuda')
-        self._test_forward_per_tensor_cachemask_impl(device)
+        for compute_mask in (True, False):
+            self._test_forward_per_tensor_impl(device, compute_mask)
 
-    def _test_backward_per_tensor_cachemask_impl(self, device):
+    def _test_backward_per_tensor_impl(self, device):
         for torch_type in (torch.qint8, torch.quint8):
             X = torch.randn(4, 8).to(device)
             X.requires_grad_()
@@ -873,8 +835,8 @@ class TestFakeQuantize(TestCase):
             quant_min, quant_max = obs._calculate_qmin_qmax()
 
             # forward pass
-            Y_test, mask = torch.fake_quantize_per_tensor_affine_cachemask(
-                X, scale, zero_point, quant_min, quant_max)
+            Y_test, mask = torch.fake_quantize_per_tensor_affine(
+                X, scale, zero_point, quant_min, quant_max, True)
             Y_ref = _fake_quantize_per_tensor_affine_reference(
                 X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
             self.assertTrue(torch.allclose(Y_test, Y_ref, rtol=tolerance, atol=tolerance))
@@ -886,14 +848,14 @@ class TestFakeQuantize(TestCase):
             Y_test.backward(dout)
             self.assertTrue(torch.allclose(dX, X.grad))
 
-    def test_backward_per_tensor_cachemask_cpu(self):
+    def test_backward_per_tensor_cpu(self):
         device = torch.device('cpu')
-        self._test_backward_per_tensor_cachemask_impl(device)
+        self._test_backward_per_tensor_impl(device)
 
     @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
-    def test_backward_per_tensor_cachemask_cuda(self):
+    def test_backward_per_tensor_cuda(self):
         device = torch.device('cuda')
-        self._test_backward_per_tensor_cachemask_impl(device)
+        self._test_backward_per_tensor_impl(device)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
