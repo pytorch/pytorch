@@ -436,7 +436,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         return [image], [image2]
 
-    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()  # Faster RCNN model is not scriptable
     def test_faster_rcnn(self):
@@ -552,7 +551,6 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={"images_tensors": [0, 1, 2]},
                       rtol=5e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
     def test_shufflenet_v2_dynamic_axes(self):
@@ -1239,6 +1237,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(FloatingPoint(), x)
 
+    # If operator rank mismatch between outputs of two branches for opsets below 11;.
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipIfONNXShapeInference(False)
     def test_floating_point_infer_dtype(self):
