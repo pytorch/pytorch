@@ -133,8 +133,8 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
     const Module& module,
     const Function& func,
     const std::
-    unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
-    constants_from_jit,
+        unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
+            constants_from_jit,
     bool save_mobile_debug_info = false) {
   auto graph = func.graph()->copy();
 
@@ -169,9 +169,10 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
         auto method_name_idx =
             code.constant_table().size() + method_names.size();
         method_names.emplace_back(node->s(attr::name));
-        Instruction new_instr{INTERFACE_CALL,
-                              static_cast<int32_t>(method_name_idx),
-                              static_cast<uint16_t>(node->inputs().size())};
+        Instruction new_instr{
+            INTERFACE_CALL,
+            static_cast<int32_t>(method_name_idx),
+            static_cast<uint16_t>(node->inputs().size())};
         instructions_copy[i] = new_instr;
       } else {
         TORCH_INTERNAL_ASSERT(
@@ -183,7 +184,7 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
         const auto& input_type = input->type();
         if (input_type->kind() == TypeKind::TupleType) {
           if (const auto& name_typed_input =
-              input_type->cast<at::NamedType>()) {
+                  input_type->cast<at::NamedType>()) {
             TORCH_CHECK(
                 !name_typed_input->name(),
                 "A named tuple type is not supported in mobile module. ",
@@ -271,11 +272,12 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   // register size
   auto register_size = static_cast<int>(code.register_size());
 
-  auto table = Table({{"instructions", Tup(instructions)},
-                      {"operators", Tup(operators)},
-                      {"constants", Tup(deduplicated_constants)},
-                      {"types", Tup(types)},
-                      {"register_size", register_size}});
+  auto table = Table(
+      {{"instructions", Tup(instructions)},
+       {"operators", Tup(operators)},
+       {"constants", Tup(deduplicated_constants)},
+       {"types", Tup(types)},
+       {"register_size", register_size}});
   auto bytecode_vals = Tup({func.qualname().qualifiedName(), table});
 
   c10::optional<IValue> debug_info_vals;
@@ -332,8 +334,8 @@ void moduleMethodsTuple(
     std::vector<c10::IValue>& elements,
     c10::optional<std::vector<c10::IValue>>& debug_info_elements,
     const std::
-    unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
-    constants_from_jit,
+        unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
+            constants_from_jit,
     bool save_mobile_debug_info) {
   auto methods = module.get_methods();
   // top level methods
@@ -395,7 +397,7 @@ class ScriptModuleSerializer {
     for (size_t i = 0; i < ivalue_constants.size(); i++) {
       if (ivalue_constants[i].isTensor() &&
           constants_from_jit.find(ivalue_constants[i].toTensor()) ==
-          constants_from_jit.end()) {
+              constants_from_jit.end()) {
         constants_from_jit[ivalue_constants[i].toTensor()] = i;
       }
     }
@@ -534,8 +536,8 @@ class ScriptModuleSerializer {
       const Module& module,
       bool save_mobile_debug_info,
       const std::
-      unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
-      constants_from_jit) {
+          unordered_map<at::Tensor, int, tensor_value_hash, tensor_value_equal>&
+              constants_from_jit) {
     std::vector<c10::IValue> elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
@@ -572,12 +574,12 @@ class ScriptModuleSerializer {
 
     auto type_printer =
         [&](const c10::ConstTypePtr& t) -> c10::optional<std::string> {
-          auto namedType = t->cast<c10::NamedType>();
-          if (namedType && namedType->name()) {
-            return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
-          }
-          return c10::nullopt;
-        };
+      auto namedType = t->cast<c10::NamedType>();
+      if (namedType && namedType->name()) {
+        return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
+      }
+      return c10::nullopt;
+    };
     if (!pp) {
       pp = &file_streams_.insert(
           std::move(qualifier),

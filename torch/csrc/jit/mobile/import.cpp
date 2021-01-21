@@ -1,8 +1,8 @@
-#include <torch/csrc/jit/mobile/import.h>
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/common_const.h>
+#include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
@@ -109,7 +109,7 @@ void parseMethods(
   }
   TORCH_CHECK(
       caffe2::serialize::kMinSupportedBytecodeVersion <= model_version &&
-      model_version <= caffe2::serialize::kProducedBytecodeVersion,
+          model_version <= caffe2::serialize::kProducedBytecodeVersion,
       "Lite Interpreter verson number does not match. ",
       "The model version must be between ",
       caffe2::serialize::kMinSupportedBytecodeVersion,
@@ -166,7 +166,7 @@ void parseMethods(
           const auto& tensor_jit_index = tensor_jit[1];
           if (tensor_jit_index_key.isString() &&
               tensor_jit_index_key.toString().get()->string() ==
-              mobile::kTensorJitIndex) {
+                  mobile::kTensorJitIndex) {
             updated_constant_vals.push_back(
                 constant_vals_from_jit[tensor_jit_index.toInt()]);
           }
@@ -187,11 +187,11 @@ void parseMethods(
           "The function names in the bytecode table and the debug info table do not match.");
       IValue debug_info_table = debug_info_m_tuple[1];
       module_debug_info_list = expect_field(
-          debug_info_table,
-          "module_debug_info",
-          BYTECODE_INDEX_MODULE_DEBUG_INFO)
-          .toTuple()
-          ->elements();
+                                   debug_info_table,
+                                   "module_debug_info",
+                                   BYTECODE_INDEX_MODULE_DEBUG_INFO)
+                                   .toTuple()
+                                   ->elements();
       TORCH_CHECK(
           module_debug_info_list.size() == ops_list.size(),
           "The numbers of operators and module info strings do not match.");
@@ -210,8 +210,8 @@ void parseMethods(
       function->append_instruction(op_code, X, N);
       if (op_code == OP) {
         std::string module_debug_info = (has_debug_info)
-                                        ? module_debug_info_list[X].toString()->string()
-                                        : "";
+            ? module_debug_info_list[X].toString()->string()
+            : "";
         function->set_module_info(module_debug_info, i);
       }
     }
@@ -234,6 +234,10 @@ void parseMethods(
       }
     }
 
+    //    for (const auto& constant : consts_list) {
+    //      function->append_constant(constant);
+    //    }
+
     for (const auto& constant : updated_constant_vals) {
       function->append_constant(constant);
     }
@@ -245,10 +249,9 @@ void parseMethods(
     function->set_register_size(register_size);
 
     mcu.register_function(std::move(function));
-//    if (!unsupported_op_names.empty()) {
-//      print_unsupported_ops_and_throw(unsupported_op_names);
-//    };
-
+    if (!unsupported_op_names.empty()) {
+      print_unsupported_ops_and_throw(unsupported_op_names);
+    };
   }
 }
 
@@ -387,7 +390,7 @@ BytecodeDeserializer::BytecodeDeserializer(
       reader_(std::move(reader)) {}
 
 std::unordered_map<std::string, std::string> BytecodeDeserializer::
-deserializeMetadata(c10::optional<at::Device> device) {
+    deserializeMetadata(c10::optional<at::Device> device) {
   device_ = device;
   auto mcu = std::make_shared<mobile::CompilationUnit>();
   return readMobileMetadata(mcu);
@@ -440,16 +443,17 @@ mobile::Module BytecodeDeserializer::deserialize(
 }
 
 std::unordered_map<std::string, std::string> BytecodeDeserializer::
-readMobileMetadata(std::shared_ptr<mobile::CompilationUnit> mcu) {
+    readMobileMetadata(std::shared_ptr<mobile::CompilationUnit> mcu) {
   std::unordered_map<std::string, std::string> res;
   if (!reader_->hasRecord("metadata.pkl")) {
     return res;
   }
   auto it = readArchive("metadata", mcu);
+  std::cout << "it ivalue dump" << std::endl;
+  it.dump();
   auto ivalue_dict = it.toGenericDict();
 
-
-//  auto ivalue_dict = readArchive("metadata", mcu).toGenericDict();
+  //  auto ivalue_dict = readArchive("metadata", mcu).toGenericDict();
   for (auto it = ivalue_dict.begin(); it != ivalue_dict.end(); ++it) {
     auto key = it->key().toString()->string();
     auto value = it->value().toString()->string();
