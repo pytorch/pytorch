@@ -236,7 +236,7 @@ class TestCommon(JitCommonTestCase):
                 self.assertEqual(variant_forward, expected_forward)
 
                 # Compares variant's backward
-                if test_backward and variant is not inplace or op.test_inplace_grad:
+                if test_backward and (variant is not inplace or op.test_inplace_grad):
                     self.check_variant_backward(sample.input, variant_forward,
                                                 expected_grad, exception_during_backwards)
 
