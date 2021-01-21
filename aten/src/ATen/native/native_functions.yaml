@@ -6241,11 +6241,33 @@
     CPU, CUDA: min
     QuantizedCPU: min_quantized_cpu
 
+- func: fmin(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+  dispatch:
+    CPU, CUDA: fmin
+
+- func: fmin.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: full
+  dispatch:
+    CPU, CUDA: fmin_out
+
 - func: max(Tensor self) -> Tensor
   variants: method, function
   dispatch:
     CPU, CUDA: max
     QuantizedCPU: max_quantized_cpu
+
+- func: fmax(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+  dispatch:
+    CPU, CUDA: fmax
+
+- func: fmax.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  use_c10_dispatcher: full
+  dispatch:
+    CPU, CUDA: fmax_out
 
 - func: maximum(Tensor self, Tensor other) -> Tensor
   variants: method, function
