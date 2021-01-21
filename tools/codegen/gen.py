@@ -795,9 +795,9 @@ class ComputeBackendSelect:
                 compute_dk = f"""\
 DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::multi_dispatch_key_set({tensor_args});
   DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);
-  DispatchKey _dk = c10::impl::computeDispatchKeySet(_dk_set, _dk_mask).highestPriorityTypeId();"""
+  DispatchKeySet _dk = c10::impl::computeDispatchKeySet(_dk_set, _dk_mask);"""
             else:
-                compute_dk = f"DispatchKey _dk = {dispatch_key};"
+                compute_dk = f"DispatchKeySet _dk = c10::DispatchKeySet({dispatch_key});"
             return f"""\
 // aten::{f.func}
 {sig.defn(name)} {{
@@ -805,7 +805,7 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
     .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
     .typed<{dispatcher_sig.type()}>();
   {compute_dk}
-  return op.callWithDispatchKey(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
+  return op.callWithPrecomputedDispatchKeySet(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
 }}
 """
         elif self.target is Target.REGISTRATION:
