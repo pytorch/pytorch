@@ -552,6 +552,27 @@ PyMethodDef* THCPModule_methods() {
   return _THCPModule_methods;
 }
 
+namespace c10 {
+namespace {
+class RunGCCallback : public FreeMemoryCallback {
+ public:
+  ~RunGCCallback() {};
+  bool Execute() override {
+    py::gil_scoped_acquire gil;
+    py::object gc = py::module::import("gc");
+    py::object collect = gc.attr("collect");
+    collect();
+    return true;
+  }
+
+  static void init() {
+    REGISTER_EXPENSIVE_FREE_MEMORY_CALLBACK("run_gc", c10::RunGCCallback);
+  }
+};
+
+} // namespace
+} // namespace c10
+
 namespace torch { namespace cuda {
 
 namespace shared {
@@ -574,25 +595,8 @@ void initModule(PyObject *module) {
   shared::initCudnnBindings(module);
 #endif
   registerCudaDeviceProperties(module);
+
+  c10::RunGCCallback::init();
 }
 
 }}
-
-namespace c10 {
-namespace {
-class RunGCCallback : public FreeMemoryCallback {
- public:
-  ~RunGCCallback() {};
-  bool Execute() override {
-    py::gil_scoped_acquire gil;
-    py::object gc = py::module::import("gc");
-    py::object collect = gc.attr("collect");
-    collect();
-    return true;
-  }
-};
-
-REGISTER_EXPENSIVE_FREE_MEMORY_CALLBACK("run_gc", RunGCCallback);
-
-} // namespace
-} // namespace c10
