@@ -337,10 +337,13 @@ class StreamContext(object):
     current device, this function will also change the current device to
     match the stream.
     """
-    cur_stream : Optional['torch.classes.cuda.Stream'] #type: ignore
+    if torch.jit.is_scripting():
+        cur_stream : Optional['torch.classes.cuda.Stream']  # type: ignore
+    else:
+        cur_stream : Optional[stream]
     cur_stream_device: Optional[_device]
 
-    def __init__(self, stream: Optional['torch.classes.cuda.Stream']): #type: ignore
+    def __init__(self, stream: Optional['torch.classes.cuda.Stream']):  # type: ignore
         self.idx = -1
         self.stream = stream
         self.prev_stream_device_index = -1
@@ -367,7 +370,7 @@ class StreamContext(object):
         # if we are in scripting mode or eager mode. Depending on the mode
         # we can call the corresponding API's to get the device index.
         if torch.jit.is_scripting():
-            self.prev_stream_device_index = self.src_prev_stream.device_index() #type: ignore
+            self.prev_stream_device_index = self.src_prev_stream.device_index()  # type: ignore
             self.cur_stream_device_index = cur_stream.device_index()
         else:
             self.prev_stream_device_index = _get_device_index(self.src_prev_stream.device, optional=True)
@@ -414,7 +417,7 @@ class StreamContext(object):
             # Restore the destination previous stream object to either
             # script or eager mode stream on the device.
             if torch.jit.is_scripting():
-                torch.cuda._setStream(self.dst_prev_stream) #type: ignore
+                torch.cuda._setStream(self.dst_prev_stream)  # type: ignore
                 torch.cuda._setDevice(self.idx)
             else:
                 torch._C._cuda_setStream(self.dst_prev_stream._cdata)
@@ -423,11 +426,11 @@ class StreamContext(object):
         # Restore the previous stream object on the current device to either
         # script or eager mode stream object.
         if torch.jit.is_scripting():
-            torch.cuda._setStream(self.src_prev_stream) #type: ignore
+            torch.cuda._setStream(self.src_prev_stream)  # type: ignore
         else:
             torch._C._cuda_setStream(self.src_prev_stream._cdata)
 
-def stream(stream: Optional['torch.classes.cuda.Stream']) -> StreamContext: #type: ignore
+def stream(stream: Optional['torch.classes.cuda.Stream']) -> StreamContext:  # type: ignore
     r"""Wrapper around the Context-manager that selects a given stream.
     All CUDA kernels queued within its context will be enqueued on a selected
     stream.
