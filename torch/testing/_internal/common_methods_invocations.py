@@ -525,19 +525,20 @@ def sample_inputs_index_fill(op_info, device, dtype, requires_grad):
     t = make_tensor((S, S, S), device, dtype,
                     low=None, high=None,
                     requires_grad=requires_grad)
+    fill_val = torch.tensor(-1+1j if t.is_complex() else -1)
     # non-contiguous input
     t01 = t.transpose(0, 1)
     t02 = t.transpose(0, 2)
     t12 = t.transpose(1, 2)
     idx = index_variable(1, S, device=device)
     # non-contiguous index
-    idx_nonctg = torch.empty_strided((S,), (2,), device=device, dtype=dtype).long()
+    idx_nonctg = torch.empty_strided((S,), (2,), device=device, dtype=torch.int64)
     idx_nonctg.copy_(idx)
     for d in range(t.dim()):
         for tensor in [t, t01, t02, t12]:
-            samples.append(SampleInput((tensor, d, idx, -1)))
-            samples.append(SampleInput((tensor, d, -idx - 1, -1)))
-            samples.append(SampleInput((tensor, d, idx_nonctg, -1)))
+            samples.append(SampleInput((tensor, d, idx, fill_val)))
+            samples.append(SampleInput((tensor, d, -idx - 1, fill_val)))
+            samples.append(SampleInput((tensor, d, idx_nonctg, fill_val)))
     return samples
 
 def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
