@@ -3227,9 +3227,9 @@ Args:
 Example::
 
     >>> t = torch.tensor([[[1, 2],
-                           [3, 4]],
-                          [[5, 6],
-                           [7, 8]]])
+    ...                    [3, 4]],
+    ...                   [[5, 6],
+    ...                    [7, 8]]])
     >>> torch.flatten(t)
     tensor([1, 2, 3, 4, 5, 6, 7, 8])
     >>> torch.flatten(t, start_dim=1)
@@ -3491,13 +3491,13 @@ Keyword args:
 Example::
 
     >>> A = torch.tensor([[6.80, -2.11,  5.66,  5.97,  8.23],
-                          [-6.05, -3.30,  5.36, -4.44,  1.08],
-                          [-0.45,  2.58, -2.70,  0.27,  9.04],
-                          [8.32,  2.71,  4.35,  -7.17,  2.14],
-                          [-9.67, -5.14, -7.26,  6.08, -6.87]]).t()
+    ...                   [-6.05, -3.30,  5.36, -4.44,  1.08],
+    ...                   [-0.45,  2.58, -2.70,  0.27,  9.04],
+    ...                   [8.32,  2.71,  4.35,  -7.17,  2.14],
+    ...                   [-9.67, -5.14, -7.26,  6.08, -6.87]]).t()
     >>> B = torch.tensor([[4.02,  6.19, -8.22, -7.57, -3.03],
-                          [-1.56,  4.00, -8.67,  1.75,  2.86],
-                          [9.81, -4.09, -4.57, -8.61,  8.99]]).t()
+    ...                   [-1.56,  4.00, -8.67,  1.75,  2.86],
+    ...                   [9.81, -4.09, -4.57, -8.61,  8.99]]).t()
     >>> X, LU = torch.solve(B, A)
     >>> torch.dist(B, torch.mm(A, X))
     tensor(1.00000e-06 *
@@ -4795,15 +4795,15 @@ Returns:
 Example::
 
     >>> A = torch.tensor([[1., 1, 1],
-                          [2, 3, 4],
-                          [3, 5, 2],
-                          [4, 2, 5],
-                          [5, 4, 3]])
+    ...                   [2, 3, 4],
+    ...                   [3, 5, 2],
+    ...                   [4, 2, 5],
+    ...                   [5, 4, 3]])
     >>> B = torch.tensor([[-10., -3],
-                          [ 12, 14],
-                          [ 14, 12],
-                          [ 16, 16],
-                          [ 18, 16]])
+    ...                   [ 12, 14],
+    ...                   [ 14, 12],
+    ...                   [ 16, 16],
+    ...                   [ 18, 16]])
     >>> X, _ = torch.lstsq(B, A)
     >>> X
     tensor([[  2.0000,   1.0000],
@@ -6372,9 +6372,9 @@ Example::
             [ 2],
             [ 4]])
     >>> torch.nonzero(torch.tensor([[0.6, 0.0, 0.0, 0.0],
-                                    [0.0, 0.4, 0.0, 0.0],
-                                    [0.0, 0.0, 1.2, 0.0],
-                                    [0.0, 0.0, 0.0,-0.4]]))
+    ...                             [0.0, 0.4, 0.0, 0.0],
+    ...                             [0.0, 0.0, 1.2, 0.0],
+    ...                             [0.0, 0.0, 0.0,-0.4]]))
     tensor([[ 0,  0],
             [ 1,  1],
             [ 2,  2],
@@ -6382,9 +6382,9 @@ Example::
     >>> torch.nonzero(torch.tensor([1, 1, 1, 0, 1]), as_tuple=True)
     (tensor([0, 1, 2, 4]),)
     >>> torch.nonzero(torch.tensor([[0.6, 0.0, 0.0, 0.0],
-                                    [0.0, 0.4, 0.0, 0.0],
-                                    [0.0, 0.0, 1.2, 0.0],
-                                    [0.0, 0.0, 0.0,-0.4]]), as_tuple=True)
+    ...                             [0.0, 0.4, 0.0, 0.0],
+    ...                             [0.0, 0.0, 1.2, 0.0],
+    ...                             [0.0, 0.0, 0.0,-0.4]]), as_tuple=True)
     (tensor([0, 1, 2, 3]), tensor([0, 1, 2, 3]))
     >>> torch.nonzero(torch.tensor(5), as_tuple=True)
     (tensor([0]),)
@@ -6828,7 +6828,7 @@ Args:
 
 Example::
 
-    >>> torch.promote_types(torch.int32, torch.float32))
+    >>> torch.promote_types(torch.int32, torch.float32)
     torch.float32
     >>> torch.promote_types(torch.uint8, torch.long)
     torch.long
@@ -7235,8 +7235,8 @@ Example::
     tensor([ 0,  1])
 
     >>> torch.tensor([[0.11111, 0.222222, 0.3333333]],
-                     dtype=torch.float64,
-                     device=torch.device('cuda:0'))  # creates a torch.cuda.DoubleTensor
+    ...              dtype=torch.float64,
+    ...              device=torch.device('cuda:0'))  # creates a torch.cuda.DoubleTensor
     tensor([[ 0.1111,  0.2222,  0.3333]], dtype=torch.float64, device='cuda:0')
 
     >>> torch.tensor(3.14159)  # Create a scalar (zero-dimensional tensor)
@@ -7937,7 +7937,7 @@ Keyword args:
 Example::
 
     >>> i = torch.tensor([[0, 1, 1],
-                          [2, 0, 2]])
+    ...                   [2, 0, 2]])
     >>> v = torch.tensor([3, 4, 5], dtype=torch.float32)
     >>> torch.sparse_coo_tensor(i, v, [2, 4])
     tensor(indices=tensor([[0, 1, 1],
@@ -7952,8 +7952,8 @@ Example::
            size=(2, 3), nnz=3, layout=torch.sparse_coo)
 
     >>> torch.sparse_coo_tensor(i, v, [2, 4],
-                                dtype=torch.float64,
-                                device=torch.device('cuda:0'))
+    ...                         dtype=torch.float64,
+    ...                         device=torch.device('cuda:0'))
     tensor(indices=tensor([[0, 1, 1],
                            [2, 0, 2]]),
            values=tensor([3., 4., 5.]),
@@ -8717,7 +8717,7 @@ Args:
 Example::
 
     >>> src = torch.tensor([[4, 3, 5],
-                            [6, 7, 8]])
+    ...                     [6, 7, 8]])
     >>> torch.take(src, torch.tensor([0, 2, 5]))
     tensor([ 4,  5,  8])
 """.format(**common_args))
