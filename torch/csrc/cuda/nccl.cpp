@@ -71,11 +71,8 @@ torch::cuda::nccl::ncclResult from_nccl_result(ncclResult_t var) {
   }
 }
 
-ncclDataType_t to_nccl_data_type(const at::Tensor& t) {
-  if (!t.is_cuda()) {
-    throw std::runtime_error("Unconvertible NCCL type");
-  }
-  switch (t.scalar_type()) {
+ncclDataType_t to_nccl_data_type(c10::ScalarType type) {
+  switch (type) {
     case at::kFloat:
       return ncclDataType_t::ncclFloat;
     case at::kHalf:
@@ -89,14 +86,23 @@ ncclDataType_t to_nccl_data_type(const at::Tensor& t) {
     case at::kChar:
       return ncclDataType_t::ncclChar;
     case at::kByte:
-      return ncclDataType_t::ncclChar;
+      return ncclDataType_t::ncclUint8;
+    case at::kBool:
+      return ncclDataType_t::ncclUint8;
 #if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 301
     case at::kBFloat16:
       return ncclDataType_t::ncclBfloat16;
 #endif
     default:
-      throw std::runtime_error("Unconvertible NCCL type");
+      TORCH_CHECK(false, "Unconvertible NCCL type ", type);
   }
+}
+
+ncclDataType_t to_nccl_data_type(const at::Tensor& t) {
+  if (!t.is_cuda()) {
+    TORCH_CHECK(false, "NCCL only supports CUDA tensors, but got a tensor on ", t.device());
+  }
+  return to_nccl_data_type(t.scalar_type());
 }
 
 ncclRedOp_t to_nccl_red_op(int var) {
@@ -625,7 +631,7 @@ void all_gather(
 #endif
 }
 
-void all2all(at::Tensor& input,
+void all2all_single_equal_split(at::Tensor& input,
              at::Tensor& output,
              int size,
              ncclComm_t _comm,
@@ -649,6 +655,98 @@ void all2all(at::Tensor& input,
     if (count != 0) {
       NCCL_CHECK(ncclSend(sendbuff + r * rankdiff, count, type, r, comm, stream));
       NCCL_CHECK(ncclRecv(recvbuff + r * rankdiff, count, type, r, comm, stream));
+    }
+  }
+  NCCL_CHECK(ncclGroupEnd());
+#else
+  AT_ERROR("all2all is only supported for NCCL lib version >= 2.7.0");
+#endif
+#else
+  AT_ERROR("PyTorch built without NCCL support");
+#endif
+}
+
+void all2all_single_unequal_split(
+    void* sendbuff,
+    const size_t* sendcounts,
+    const size_t* senddispls,
+    void* recvbuff,
+    const size_t* recvcounts,
+    const size_t* recvdispls,
+    size_t size,
+    c10::ScalarType _type,
+    ncclComm_t _comm,
+    at::cuda::CUDAStream& stream) {
+#ifdef USE_NCCL
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
+  using namespace torch::cuda::nccl::detail;
+
+  auto type = to_nccl_data_type(_type);
+  auto comm = to_nccl_comm(_comm);
+  int numranks;
+  NCCL_CHECK(ncclCommCount(comm, &numranks));
+  NCCL_CHECK(ncclGroupStart());
+  for (int r = 0; r < numranks; r++) {
+    // NCCL uses 0 byte message for synchronization
+    // Avoid send/recv when message size is zero
+    if (sendcounts[r] != 0) {
+      NCCL_CHECK(ncclSend(
+          ((char*)sendbuff) + senddispls[r] * size,
+          sendcounts[r],
+          type,
+          r,
+          comm,
+          stream));
+    }
+    if (recvcounts[r] != 0) {
+      NCCL_CHECK(ncclRecv(
+          ((char*)recvbuff) + recvdispls[r] * size,
+          recvcounts[r],
+          type,
+          r,
+          comm,
+          stream));
+    }
+  }
+  NCCL_CHECK(ncclGroupEnd());
+#else
+  AT_ERROR("all2all is only supported for NCCL lib version >= 2.7.0");
+#endif
+#else
+  AT_ERROR("PyTorch built without NCCL support");
+#endif
+}
+
+void all2all(std::vector<at::Tensor>& outputTensors,
+             std::vector<at::Tensor>& inputTensors,
+             ncclComm_t _comm,
+             at::cuda::CUDAStream& stream) {
+#ifdef USE_NCCL
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
+  using namespace torch::cuda::nccl::detail;
+  auto comm = to_nccl_comm(_comm);
+
+  NCCL_CHECK(ncclGroupStart());
+  for (size_t r = 0; r < outputTensors.size(); r++) {
+    at::Tensor &input = inputTensors[r];
+    at::Tensor &output = outputTensors[r];
+    if (input.numel() != 0) {
+      NCCL_CHECK(ncclSend(
+          input.data_ptr(),
+          input.numel(),
+          to_nccl_data_type(input),
+          r,
+          comm,
+          stream.stream()));
+    }
+    if (output.numel() != 0) {
+      NCCL_CHECK(ncclRecv(
+          output.data_ptr(),
+          output.numel(),
+          to_nccl_data_type(output),
+          r,
+          comm,
+          stream.stream()));
     }
   }
   NCCL_CHECK(ncclGroupEnd());

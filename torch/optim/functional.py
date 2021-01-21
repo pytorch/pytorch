@@ -195,7 +195,7 @@ def adadelta(params: List[Tensor],
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
-        square_avg.mul_(rho).addcmul_(grad, grad, value=1)
+        square_avg.mul_(rho).addcmul_(grad, grad, value=1 - rho)
         std = square_avg.add(eps).sqrt_()
         delta = acc_delta.add(eps).sqrt_().div_(std).mul_(grad)
         param.add_(delta, alpha=-lr)
