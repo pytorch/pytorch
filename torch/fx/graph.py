@@ -1,6 +1,7 @@
 from .node import Node, Argument, Target, map_arg
 
 from typing import Callable, Any, List, Dict, Optional, Tuple, Set
+from tabulate import tabulate
 import builtins
 import torch
 import types
@@ -784,6 +785,16 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
             if node_str:
                 s += '\n    ' + node_str
         return s
+
+    def print_tabular(graph):
+        """
+        Prints the intermediate representation of the graph in tabular
+        format.
+        """
+        node_specs = [[n.op, n.name, n.target, n.args, n.kwargs]
+                    for n in self.nodes]
+        print(tabulate(node_specs,
+                    headers=['opcode', 'name', 'target', 'args', 'kwargs']))
 
     def lint(self, root : Optional[torch.nn.Module] = None):
         """
