@@ -786,15 +786,15 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
                 s += '\n    ' + node_str
         return s
 
-    def print_tabular(graph):
+    def print_tabular(self):
         """
         Prints the intermediate representation of the graph in tabular
         format.
         """
         node_specs = [[n.op, n.name, n.target, n.args, n.kwargs]
-                    for n in self.nodes]
+                      for n in self.nodes]
         print(tabulate(node_specs,
-                    headers=['opcode', 'name', 'target', 'args', 'kwargs']))
+              headers=['opcode', 'name', 'target', 'args', 'kwargs']))
 
     def lint(self, root : Optional[torch.nn.Module] = None):
         """
