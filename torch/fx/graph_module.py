@@ -140,7 +140,7 @@ class GraphModule(torch.nn.Module):
             pass
         return super().__new__(GraphModuleImpl)
 
-    def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph):
+    def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph, class_name: str = 'GraphModule'):
         """
         Construct a GraphModule.
 
@@ -157,8 +157,13 @@ class GraphModule(torch.nn.Module):
 
             graph (Graph): ``graph`` contains the nodes this GraphModule should use for code generation
 
+            name (str): ``name`` denotes the name of this GraphModule for debugging purposes. If it's unset, all
+                error messages will report as originating from ``GraphModule``. It may be helpful to set this
+                to ``root``'s original name or a name that makes sense within the context of your transform.
+
         """
         super().__init__()
+        self.__class__.__name__ = class_name
         if isinstance(root, torch.nn.Module):
             if hasattr(root, 'training'):
                 self.training = root.training
