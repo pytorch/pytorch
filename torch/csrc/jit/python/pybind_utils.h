@@ -636,6 +636,9 @@ inline py::object toPyObject(IValue ivalue) {
     return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
+  } else if (ivalue.isComplexDouble()) {
+    return py::cast(
+      static_cast<std::complex<double>>(std::move(ivalue).toComplexDouble()));
   } else if (ivalue.isInt()) {
     return py::cast(std::move(ivalue).toInt());
   } else if (ivalue.isBool()) {

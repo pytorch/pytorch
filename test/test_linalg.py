@@ -12,7 +12,7 @@ from math import inf, nan, isnan
 import random
 from random import randrange
 from itertools import product
-from functools import reduce
+from functools import reduce, partial
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
@@ -38,6 +38,10 @@ if TEST_SCIPY:
 
 # TODO: make this common and import it
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
+
+# See #49409, we should remove these if we end up with a global gradcheck setting
+gradcheck = partial(gradcheck, check_batched_grad=True)
+gradgradcheck = partial(gradgradcheck, check_batched_grad=True)
 
 class TestLinalg(TestCase):
     exact_dtype = True
@@ -2255,7 +2259,8 @@ class TestLinalg(TestCase):
                 return torch.cholesky_solve(b, A, upper)
 
             gradcheck(func, [root, b, upper])
-            gradgradcheck(func, [root, b, upper], atol=1e-3)
+            # TODO(#50743): the following fails with batched grad testing
+            gradgradcheck(func, [root, b, upper], atol=1e-3, check_batched_grad=False)
 
         for (a_size, b_size), upper in itertools.product([((3, 3), (3, 4)), ((3, 3), (3, 2)),
                                                           ((2, 3, 3), (2, 3, 4)), ((2, 3, 3), (2, 3, 2))],
