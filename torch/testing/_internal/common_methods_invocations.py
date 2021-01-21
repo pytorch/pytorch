@@ -945,7 +945,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            skips=(
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                        dtypes=[torch.float16, torch.cfloat, torch.cdouble]),
+                        dtypes=[torch.float16, torch.cfloat, torch.cdouble, torch.bfloat16]),
                # Reference: https://github.com/pytorch/pytorch/issues/50747
                SkipInfo('TestCommon', 'test_variant_consistency_eager',
                         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),),
