@@ -32,10 +32,15 @@ Note we only allow registrations to alias keys inside pytorch core library. E.g 
 a Math kernel from torch-xla extension, instead you should upstream the kernel into pytorch/pytorch repo.
 
 Usage:
-  toy = PythonDispatcher()
-  toy.register(["CPU", "XLA", "Math"])
-  print(toy.dispatchTable())
-
+  dispatcher = PythonDispatcher()
+  dispatcher.register(["CPU", "XLA", "Math"])
+  print(dispatcher.dispatchTable()) # This tells you exactly which kernel is used for certain backend.
+  # For more debugging information
+  # print(dispatcher.keys())
+  # print(dispatcher.registrations())
+  # print(dispatcher.rawRegistrations())
+  # print(dispatcher.rawDispatchTable())
+PythonDispatcher calls C++ dispatcher under the hood for to precompute dispatch table.
 This file only provides the simplified API for developers, revelant test code is located in
 test/test_dispatch.py
 """
@@ -89,7 +94,7 @@ class PythonDispatcher:
     Helper function to format (key, kernel).
     """
     def _format_line(self, key, kernel):
-        return "{:<15} {:<15}\n".format(key, kernel)
+        return "{:<15} {}\n".format(key, kernel)
 
     """
     Helper function to print a table header.
@@ -117,7 +122,7 @@ class PythonDispatcher:
         return C._dispatch_dump_table("{}::{}".format(self.namespace, self.name))
 
     """
-    Return a table(str) including all the registrations from users.
+    Returns a table(str) including all the registrations from users.
     Note this includes registrations to both runtime keys and alias keys.
     """
     def registrations(self):
@@ -148,14 +153,3 @@ class PythonDispatcher:
                 output += self._format_line(k, entry.split(": ")[1])
         return output
 
-
-# Example Usage
-toy = PythonDispatcher()
-toy.register(["CPU", "Math", "AutogradCPU"])
-# This tells you exactly which kernel is used for certain backend.
-print(toy.dispatchTable())
-# For more debugging information
-# print(toy.keys())
-# print(toy.registrations())
-# print(toy.rawRegistrations())
-# print(toy.rawDispatchTable())

@@ -504,13 +504,13 @@ Here're steps to follow to decide the right dispatch keyword:
       Note: current plan on record for ops using this boilerplate is to replace `at::` with `at::native` in
       the implementations and add dispatch section with device keywords instead.
 3. Validate the computed dispatch table matches what you want. You can use `PythonDispatcher` provided in
-[tools/python_dispatcher.py](https://github.com/pytorch/pytorch/blob/master/tools/python_dispacher.py).
+[torch/_python_dispatcher.py](https://github.com/pytorch/pytorch/blob/master/torch/_python_dispacher.py).
 It shows for a certain operator, how the computed dispatch table looks like after your registrations.
 
     ```
-    toy = PythonDispatcher()
-    toy.register(["CPU", "XLA", "AutogradCPU", "Math"])
-    print(toy.dispatchTable()) # Tells you exactly which kernel is used for certain backend.
+    dispatcher = PythonDispatcher()
+    dispatcher.register(["CPU", "XLA", "AutogradCPU", "Math"])
+    print(dispatcher.dispatchTable()) # Tells you exactly which kernel is used for certain backend.
     ```
 
 4. TODO: AutogradCPUOrCUDA
