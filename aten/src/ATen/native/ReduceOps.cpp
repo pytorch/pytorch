@@ -1004,9 +1004,9 @@ Tensor argmin(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
 }
 
 static Tensor& std_var_out(
-	const char* fname, Tensor& result, const Tensor& self,
-	c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction_opt,
-	bool keepdim, bool take_sqrt) {
+    const char* fname, Tensor& result, const Tensor& self,
+    c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction_opt,
+    bool keepdim, bool take_sqrt) {
   TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
               "std and var only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -1116,7 +1116,7 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
     if (take_sqrt) {
       at::sqrt_out(result1, result1);
     }
-	at::complex_out(result2, real_out_mean, imag_out_mean);
+    at::complex_out(result2, real_out_mean, imag_out_mean);
     return {result1, result2};
   }
 
@@ -1138,13 +1138,13 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
 std::tuple<Tensor, Tensor> var_mean(
     const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
   return at::var_mean(self, /*dim=*/c10::optional<IntArrayRef>(dim),
-					  /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
+                      /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
 }
 
 std::tuple<Tensor, Tensor> std_mean(
     const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
   return at::std_mean(self, /*dim=*/c10::optional<IntArrayRef>(dim),
-					  /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
+                      /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
 }
 
 std::tuple<Tensor, Tensor> std_mean(const Tensor& self, bool unbiased) {
@@ -1159,7 +1159,7 @@ std::tuple<Tensor, Tensor> var_mean(const Tensor& self, bool unbiased) {
 
 std::tuple<Tensor, Tensor> var_mean(
     const Tensor& self, c10::optional<IntArrayRef> dim,
-	c10::optional<int64_t> correction, bool keepdim) {
+    c10::optional<int64_t> correction, bool keepdim) {
   Tensor result1 = at::empty({0}, self.options());
   Tensor result2 = at::empty({0}, self.options());
   return std_var_mean_out(
@@ -1182,12 +1182,12 @@ Tensor var(const Tensor& self, bool unbiased) {
 
 Tensor var(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
   return at::var(self, /*dim=*/c10::optional<IntArrayRef>(dim),
-				 /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
+                 /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
 }
 
 Tensor& var_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
   return at::var_out(result, self, /*dim=*/c10::optional<IntArrayRef>(dim),
-					 /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
+                     /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
 }
 
 Tensor std(const Tensor& self, bool unbiased) {
@@ -1197,17 +1197,17 @@ Tensor std(const Tensor& self, bool unbiased) {
 
 Tensor std(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
   return at::std(self, /*dim=*/c10::optional<IntArrayRef>(dim),
-				 /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
+                 /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
 }
 
 Tensor& std_out(Tensor& result, const Tensor& self, IntArrayRef dim,
-				bool unbiased, bool keepdim) {
+                bool unbiased, bool keepdim) {
   return at::std_out(result, self, /*dim=*/c10::optional<IntArrayRef>(dim),
-					 /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
+                     /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
 }
 
 Tensor std(const Tensor& self, c10::optional<IntArrayRef> dim,
-		   c10::optional<int64_t> correction, bool keepdim) {
+           c10::optional<int64_t> correction, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
   return std_var_out("std", result, self, dim, correction, keepdim, true);
 }
@@ -1226,7 +1226,7 @@ Tensor& var_out(
 
 Tensor var(
     const Tensor& self, c10::optional<IntArrayRef> dim,
-	c10::optional<int64_t> correction, bool keepdim) {
+    c10::optional<int64_t> correction, bool keepdim) {
   Tensor result = at::empty({0}, self.options());
   return std_var_out("var", result, self, dim, correction, keepdim, false);
 }

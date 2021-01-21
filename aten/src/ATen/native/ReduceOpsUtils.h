@@ -172,7 +172,7 @@ static Tensor review_reduce_result(const Tensor& result, int ndim, DimMask mask,
 
 static TensorIterator make_reduction(
     const char* name, Tensor& result, const Tensor& self,
-	c10::optional<IntArrayRef> dim_opt,
+    c10::optional<IntArrayRef> dim_opt,
     bool keepdim, ScalarType in_dtype, ScalarType out_dtype) {
   // check that result type and dtype match if provided
   TORCH_CHECK(
@@ -211,7 +211,7 @@ static TensorIterator make_reduction(
 static TensorIterator make_reduction(
     const char* name, Tensor& result1, Tensor& result2, const Tensor& self,
     c10::optional<IntArrayRef> dim_opt, bool keepdim, ScalarType dtype1,
-	ScalarType dtype2) {
+    ScalarType dtype2) {
   // check that result type and dtype match if provided
   TORCH_CHECK(
     (!result1.defined() || result1.scalar_type() == dtype1) && (!result2.defined() || result2.scalar_type() == dtype2),
