@@ -5,7 +5,7 @@ r'''
 FX is a toolkit for developers to use to transform ``nn.Module``
 instances. FX consists of three main components: a **symbolic tracer,**
 an **intermediate representation**, and **Python code generation**. A
-demonstration of these two components in action:
+demonstration of these components in action:
 
 ::
 
