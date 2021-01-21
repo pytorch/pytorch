@@ -1829,7 +1829,7 @@ Example::
     >>> nse = 5
     >>> dims = (5, 5, 2, 2)
     >>> I = torch.cat([torch.randint(0, dims[0], size=(nse,)),
-                       torch.randint(0, dims[1], size=(nse,))], 0).reshape(2, nse)
+    ...                torch.randint(0, dims[1], size=(nse,))], 0).reshape(2, nse)
     >>> V = torch.randn(nse, dims[2], dims[3])
     >>> S = torch.sparse_coo_tensor(I, V, dims).coalesce()
     >>> D = torch.randn(dims)
@@ -2696,7 +2696,7 @@ Args:
 Example::
 
     >>> src = torch.tensor([[4, 3, 5],
-                            [6, 7, 8]])
+    ...                     [6, 7, 8]])
     >>> src.put_(torch.tensor([1, 3]), torch.tensor([9, 10]))
     tensor([[  4,   9,   5],
             [ 10,   7,   8]])
@@ -3556,7 +3556,7 @@ Example::
     >>> x = torch.tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]])
     >>> x.stride()
     (5, 1)
-    >>>x.stride(0)
+    >>> x.stride(0)
     5
     >>> x.stride(-1)
     1
@@ -3912,10 +3912,10 @@ Creates a strided copy of :attr:`self`.
 Example::
 
     >>> s = torch.sparse_coo_tensor(
-               torch.tensor([[1, 1],
-                             [0, 2]]),
-               torch.tensor([9, 10]),
-               size=(3, 3))
+    ...        torch.tensor([[1, 1],
+    ...                      [0, 2]]),
+    ...        torch.tensor([9, 10]),
+    ...        size=(3, 3))
     >>> s.to_dense()
     tensor([[ 0,  0,  0],
             [ 9,  0, 10],
