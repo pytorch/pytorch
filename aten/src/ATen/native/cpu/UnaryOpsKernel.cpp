@@ -336,7 +336,7 @@ static void cosh_kernel(TensorIterator& iter) {
 }
 
 static void acosh_kernel(TensorIterator& iter) {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "acosh_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "acosh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::acosh(a); });
@@ -344,7 +344,7 @@ static void acosh_kernel(TensorIterator& iter) {
 }
 
 static void asinh_kernel(TensorIterator& iter) {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "asinh_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "asinh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::asinh(a); });
@@ -352,7 +352,7 @@ static void asinh_kernel(TensorIterator& iter) {
 }
 
 static void atanh_kernel(TensorIterator& iter) {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "atanh_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "atanh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::atanh(a); });
