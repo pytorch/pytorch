@@ -10,7 +10,7 @@ Overview
 Limitations of Symbolic Tracing
 -------------------------------
 
-FX uses a system of **symbolic tracing** \*\* (a.k.a `abstract
+FX uses a system of **symbolic tracing** (a.k.a `abstract
 interpretation <https://en.wikipedia.org/wiki/Abstract_interpretation>`__)
 to capture the semantics of programs in a transformable/analyzable form.
 The system is **tracing** in that it executes the program (really an
@@ -134,8 +134,8 @@ symbolic tracing:
 
 In the case of truly dynamic control flow, the sections of the program
 that contain this code can be traced as calls to the Method (see
-Customizing Tracing with the ``Tracer`` class) or function (see
-wrap\ **TODO: link**) rather than tracing through them.
+:ref:`Customizing Tracing`) or function (see
+:func:`wrap`) rather than tracing through them.
 
 Non-\ ``torch`` Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -191,6 +191,8 @@ direct calls using the :func:`wrap` API:
         truediv = x / sqrt_1;  x = sqrt_1 = None
         return truediv
     """
+
+.. _Customizing Tracing:
 
 Customizing Tracing with the ``Tracer`` class
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -262,7 +264,8 @@ Miscellanea
 ^^^^^^^^^^^
 
 -  Tensor constructors (e.g. ``torch.zeros``, ``torch.ones``,
-   ``torch.rand``, ``torch.randn``) are currently not traceable.
+   ``torch.rand``, ``torch.randn``, ``torch.sparse_coo_tensor``)
+   are currently not traceable.
 
    -  The deterministic constructors (``zeros``, ``ones``) can be used
       and the value they produce will be embedded in the trace as a
