@@ -235,11 +235,11 @@ class TestFunctionalIterableDataset(TestCase):
 
             # Use Batch + Callable as input reference
             dl = kwargs['drop_last'] if 'drop_last' in kwargs else False
-            b_ds = CallableIterableDataset(BatchIterableDataset(ds, batch_size=batch_size, drop_last=dl),
-                                           fn=_collate_fn)  # type: ignore
+            b_ds = CallableIterableDataset(BatchIterableDataset(ds, batch_size=batch_size, drop_last=dl),  # type: ignore
+                                           fn=_collate_fn)
 
             # Helper function to check batch recursively
-            def _helper(ref_batch, output_batch, exp_padded_shape, output_padded_value):
+            def _helper(ref_batch, output_batch, exp_padded_shape, exp_padded_value):
                 # Batch is a list
                 if isinstance(output_batch, Sequence):
                     elem = output_batch[0]
@@ -256,14 +256,14 @@ class TestFunctionalIterableDataset(TestCase):
                             # Verify Padded Shape
                             mask = torch.ones_like(output_data, dtype=torch.bool)
                             mask[slices] = 0
-                            self.assertTrue(torch.eq(output_data[mask], output_padded_value).all())
+                            self.assertTrue(torch.eq(output_data[mask], exp_padded_value).all())
                     # Nested List
                     else:
-                        for rb, ob, ps, pv in zip(ref_batch, output_batch, exp_padded_shape, output_padded_value):
+                        for rb, ob, ps, pv in zip(ref_batch, output_batch, exp_padded_shape, exp_padded_value):
                             _helper(rb, ob, ps, pv)
                 # Batch is a dict
                 elif isinstance(output_batch, Mapping):
-                    for rb, ob, ps, pv in zip(ref_batch.values(), output_batch.values(), exp_padded_shape, output_padded_value):
+                    for rb, ob, ps, pv in zip(ref_batch.values(), output_batch.values(), exp_padded_shape, exp_padded_value):
                         _helper(rb, ob, ps, pv)
                 else:
                     self.assertTrue(False, msg="Type is not supported.")
@@ -279,18 +279,26 @@ class TestFunctionalIterableDataset(TestCase):
                               [(3, 3), (11, 5)],
                               [(5, 1), (7, 11)],
                               [(1, 3), (9, 5)]]
+        # dict of Tensor
         map_tensor_shapes = [{'k1': (3, 5), 'k2': (7, 9)},
                              {'k1': (3, 3), 'k2': (11, 5)},
                              {'k1': (5, 1), 'k2': (7, 11)},
                              {'k1': (1, 3), 'k2': (9, 5)}]
+        # Nested List of List
         nested_ll_shapes = [[(3, 5), [(7, 9), (1, 2)]],
                             [(3, 3), [(11, 5), (3, 2)]],
                             [(5, 1), [(7, 11), (5, 3)]],
                             [(1, 3), [(9, 5), (2, 2)]]]
+        # Nested Map of List
         nested_ml_shapes = [{'k1': (3, 5), 'k2': [(7, 9), (1, 2)]},
                             {'k1': (3, 3), 'k2': [(11, 5), (3, 2)]},
                             {'k1': (5, 1), 'k2': [(7, 11), (5, 3)]},
                             {'k1': (1, 3), 'k2': [(9, 5), (2, 2)]}]
+        # Nested different types
+        nested_dt_shapes = [[{'k': (3, 5)}, [(7, 9), (1, 2)]],
+                            [{'k': (3, 3)}, [(11, 5), (3, 2)]],
+                            [{'k': (5, 1)}, [(7, 11), (5, 3)]],
+                            [{'k': (1, 3)}, [(9, 5), (2, 2)]]]
 
         # input_shape, exp_shape, exp_value, batch_size, {padded_shape, padded_value, drop_last}, Error
         test_cases: List[Tuple[List, List, Union[int, List], int, Dict, Any]] = [
@@ -427,6 +435,14 @@ class TestFunctionalIterableDataset(TestCase):
                  [(8, 8), [(11, 11), (11, 11)]]],  # expected output shape
                 [1, [1, 1]],  # expected output value
                 2, {'padded_shapes': [[8, 8], [[11, 11]]], 'padded_values': [1]}, None,
+            ),
+            # ===== Nested Different Types ======
+            (
+                nested_dt_shapes,
+                [[[(3, 5)], [(11, 9), (3, 2)]],
+                 [[(5, 3)], [(9, 11), (5, 3)]]],  # expected output shape
+                [[0], [0, 0]],  # expected output value
+                2, {}, None,
             ),
         ]
 
