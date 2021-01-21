@@ -22,8 +22,8 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::FloatType:
       return py::cast<double>(obj);
     case TypeKind::ComplexDoubleType: {
-      Py_complex c_obj = PyComplex_AsCComplex(obj.ptr());
-      return c10::complex<double>(c_obj.real, c_obj.imag);
+      auto c_obj = py::cast<std::complex<double>>(obj.ptr());
+      return static_cast<c10::complex<double>>(c_obj);
     }
     case TypeKind::IntType:
     // TODO(xintchen): Handling LayoutType and ScalarTypeType correctly.
