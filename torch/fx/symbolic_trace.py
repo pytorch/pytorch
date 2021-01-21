@@ -342,7 +342,7 @@ class Tracer(TracerBase):
 _wrapped_fns_to_patch : List[Tuple[dict, str]] = []
 
 # List of methods on classes to wrap (class type, function name)
-# this is not exposed via the wrap() API yet
+# this currently only works for Tensor.* methods that aren't traced properly
 _wrapped_methods_to_patch : List[Tuple[type, str]] = []
 
 if os.environ.get("FX_PATCH_GETITEM") == "1":
@@ -436,7 +436,7 @@ class _Patcher(object):
         self.patches_made : List[_PatchedFn] = []
         self.visited : Set[int] = set()
 
-    def patch(self, frame_dict : dict, name : str, new_fn : Callable,
+    def patch(self, frame_dict : Dict[str, Any], name : str, new_fn : Callable,
               deduplicate : bool = True):
         """
         Replace frame_dict[name] with new_fn until we exit the context manager.
@@ -502,7 +502,7 @@ def _patch_wrapped_functions(patcher : _Patcher):
         _autowrap_check(patcher, frame_dict)
 
 
-def _autowrap_check(patcher : _Patcher, frame_dict : dict):
+def _autowrap_check(patcher : _Patcher, frame_dict : Dict[str, Any]):
     """
     Some methods, like `math.sqrt` are common enough we want to automatically wrap them as we see them.
     This method searches a scope for them and patches them if found.
