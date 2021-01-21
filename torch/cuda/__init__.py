@@ -337,10 +337,7 @@ class StreamContext(object):
     current device, this function will also change the current device to
     match the stream.
     """
-    if torch.jit.is_scripting():
-        cur_stream : Optional['torch.classes.cuda.Stream']  # type: ignore
-    else:
-        cur_stream : Optional[stream]
+    cur_stream : Optional['torch.classes.cuda.Stream']  # type: ignore
     cur_stream_device: Optional[_device]
 
     def __init__(self, stream: Optional['torch.classes.cuda.Stream']):  # type: ignore
@@ -366,7 +363,7 @@ class StreamContext(object):
             return
         self.src_prev_stream = torch.cuda.current_stream(self.idx)
 
-        # Eager mode and script mode API's differ a bit. Hence, we need to check
+        # Eager mode and script mode APIs differ a bit. Hence, we need to check
         # if we are in scripting mode or eager mode. Depending on the mode
         # we can call the corresponding API's to get the device index.
         if torch.jit.is_scripting():
