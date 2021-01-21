@@ -40,6 +40,7 @@ def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
                     fixed_batch_size=False, training=None,
                     onnx_shape_inference=False,
                     use_new_jit_passes=False):
+
     # export the model to ONNX
     f = io.BytesIO()
     input_copy = copy.deepcopy(input)
