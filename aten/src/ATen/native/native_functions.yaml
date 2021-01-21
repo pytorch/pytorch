@@ -337,7 +337,7 @@
   dispatch:
     CPU, CUDA: add
     SparseCPU, SparseCUDA: add_sparse
-    CompressedSparseCPU: add_sparse_gcs
+    CompressedSparseCPU: add_sparse_csr
     MkldnnCPU: mkldnn_add
 
 - func: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
@@ -346,7 +346,7 @@
   dispatch:
     CPU, CUDA: add_
     SparseCPU, SparseCUDA: add_sparse_
-    CompressedSparseCPU: add_sparse_gcs_
+    CompressedSparseCPU: add_sparse_csr_
     MkldnnCPU: mkldnn_add_
 
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
@@ -357,7 +357,7 @@
     CPU, CUDA: add_out
     SparseCPU: add_out_sparse_cpu
     SparseCUDA: add_out_sparse_cuda
-    CompressedSparseCPU: add_out_sparse_gcs_cpu
+    CompressedSparseCPU: add_out_sparse_csr_cpu
     MkldnnCPU: mkldnn_add_out
 
 - func: _add_relu.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
@@ -2684,7 +2684,7 @@
     CPU: mm_cpu_out
     CUDA: mm_out_cuda
     SparseCPU, SparseCUDA: _sparse_mm_out
-    CompressedSparseCPU: _sparse_gcs_mm_out
+    CompressedSparseCPU: _sparse_csr_mm_out
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
 
@@ -4201,7 +4201,7 @@
   variants: function
   dispatch:
     SparseCPU, SparseCUDA: resize_as_sparse_
-    CompressedSparseCPU: resize_as_sparse_gcs_
+    CompressedSparseCPU: resize_as_sparse_csr_
 
 - func: zero_(Tensor(a!) self) -> Tensor(a!)
   variants: method, function
@@ -4292,7 +4292,7 @@
     CUDA: addmm_out_cuda
     SparseCPU: addmm_out_sparse_dense_cpu
     SparseCUDA: addmm_out_sparse_dense_cuda
-    CompressedSparseCPU: addmm_out_sparse_gcs_dense_cpu
+    CompressedSparseCPU: addmm_out_sparse_csr_dense_cpu
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function, method
@@ -4301,7 +4301,7 @@
     CUDA: addmm_cuda
     SparseCPU: addmm_sparse_dense_cpu
     SparseCUDA: addmm_sparse_dense_cuda
-    CompressedSparseCPU: addmm_sparse_gcs_dense_cpu
+    CompressedSparseCPU: addmm_sparse_csr_dense_cpu
 
 - func: addmm_(Tensor(a!) self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
@@ -4501,7 +4501,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: _nnz_sparse
-    CompressedSparseCPU: _nnz_sparse_gcs
+    CompressedSparseCPU: _nnz_sparse_csr
   device_guard: False
 
 - func: coalesce(Tensor self) -> Tensor
@@ -4547,28 +4547,21 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: values_sparse
-    CompressedSparseCPU: values_sparse_gcs
+    CompressedSparseCPU: values_sparse_csr
   device_guard: False
 
 - func: crow_indices(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    CompressedSparseCPU: crow_indices_sparse_gcs
+    CompressedSparseCPU: crow_indices_sparse_csr
   device_guard: False
 
 - func: col_indices(Tensor(a) self) -> Tensor(a)
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    CompressedSparseCPU: col_indices_sparse_gcs
-  device_guard: False
-
-- func: reduction(Tensor(a) self) -> Tensor(a)
-  use_c10_dispatcher: full
-  variants: method
-  dispatch:
-    CompressedSparseCPU: reduction_sparse_gcs
+    CompressedSparseCPU: col_indices_sparse_csr
   device_guard: False
 
 - func: hspmm.out(Tensor mat1, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)

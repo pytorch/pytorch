@@ -97,7 +97,7 @@ namespace at { namespace native {
   Tensor _sparse_mm_mkl_(Tensor& self, const SparseTensor& sparse_, const Tensor& dense,
                         const Tensor& t, Scalar alpha, Scalar beta) {
     AT_DISPATCH_FLOATING_TYPES(
-      dense.scalar_type(), "addmm_sparse_gcs_dense", [&] {
+      dense.scalar_type(), "addmm_sparse_csr_dense", [&] {
         sparse_mm_mkl_template<scalar_t>(self, sparse_.col_indices(),
                                          sparse_.crow_indices(), sparse_.values(), dense, t,
                                          alpha, beta, sparse_.sizes(), dense.sizes());

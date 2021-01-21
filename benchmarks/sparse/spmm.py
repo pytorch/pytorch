@@ -1,13 +1,13 @@
 import argparse
 import sys
 import torch
-from .utils import gen_sparse_gcs, gen_sparse_coo, Event
+from .utils import gen_sparse_csr, gen_sparse_coo, Event
 
-def test_sparse_gcs(m, n, k, nnz, test_count):
+def test_sparse_csr(m, n, k, nnz, test_count):
     start_timer = Event(enable_timing=True)
     stop_timer = Event(enable_timing=True)
 
-    gcs = gen_sparse_gcs((m, k), nnz)
+    gcs = gen_sparse_csr((m, k), nnz)
     mat = torch.randn(k, n, dtype=torch.double)
 
     times = []
@@ -91,7 +91,7 @@ if __name__ == "__main__":
 
     nnz = int(nnz_ratio * m * k)
     if args.format == 'gcs':
-        time = test_sparse_gcs(m, n, k, nnz, test_count)
+        time = test_sparse_csr(m, n, k, nnz, test_count)
     elif args.format == 'coo':
         time = test_sparse_coo(m, n, k, nnz, test_count)
     elif args.format == 'both':

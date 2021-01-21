@@ -888,10 +888,14 @@ class Tensor(torch._C._TensorBase):
             3125
         """
         shape = self.size()
+        if len(shape) != 2:
+            raise RuntimeError("Only 2D tensors can be converted to the CSR format but got shape: ", shape)
 
         ro = [0]
         co = []
         vals: List[Any] = []
+
+        
 
         return torch.sparse_csr_tensor(torch.IntTensor(ro), torch.IntTensor(co),
                                        torch.tensor(vals, dtype=self.dtype),

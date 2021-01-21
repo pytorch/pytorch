@@ -18,7 +18,7 @@ namespace at { namespace native {
 // Functions for matrix multiplication.
 using namespace at::sparse;
 
-Tensor& addmm_out_sparse_gcs_dense_cpu(
+Tensor& addmm_out_sparse_csr_dense_cpu(
     Tensor& out,
     const Tensor& self,
     const SparseTensor& op1,
@@ -27,7 +27,7 @@ Tensor& addmm_out_sparse_gcs_dense_cpu(
     Scalar alpha) {
   Tensor expand_self;
   std::tie(expand_self) = expand_size(self, {op1.size(0), op2.size(1)}, 
-    "addmm_out_sparse_gcs");
+    "addmm_out_sparse_csr");
 
   AT_ASSERT(expand_self.device().type() == kCPU);
   TORCH_CHECK(out.device().type() == kCPU, "addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
@@ -55,7 +55,7 @@ Tensor& addmm_out_sparse_gcs_dense_cpu(
   auto values   = op1.values();
     
   AT_DISPATCH_FLOATING_TYPES(
-    values.scalar_type(), "addmm_sparse_gcs_dense", [&] {
+    values.scalar_type(), "addmm_sparse_csr_dense", [&] {
       scalar_t cast_beta = beta.to<scalar_t>();
         if (!is_same_tensor(out, expand_self)) {
           out.copy_(expand_self);
@@ -77,7 +77,7 @@ Tensor& addmm_out_sparse_gcs_dense_cpu(
     int64_t out_stride1 = out.stride(1);
     
     AT_DISPATCH_FLOATING_TYPES(
-      values.scalar_type(), "sparse_gcs_mm_cpu", [&] {
+      values.scalar_type(), "sparse_csr_mm_cpu", [&] {
         scalar_t cast_alpha = alpha.to<scalar_t>();
         scalar_t cast_beta = beta.to<scalar_t>();
         scalar_t* dense_ptr = op1.data_ptr<scalar_t>();
@@ -105,7 +105,7 @@ Tensor& addmm_out_sparse_gcs_dense_cpu(
   return out;
 }
 
-Tensor addmm_sparse_gcs_dense_cpu(
+Tensor addmm_sparse_csr_dense_cpu(
     const Tensor& self,
     const SparseTensor& sparse,
     const Tensor& dense,
@@ -116,7 +116,7 @@ Tensor addmm_sparse_gcs_dense_cpu(
    return r;
 }
 
-SparseTensor& _sparse_gcs_mm_out(
+SparseTensor& _sparse_csr_mm_out(
   SparseTensor& result,
   const SparseTensor& sparse,
   const Tensor& dense
@@ -125,7 +125,7 @@ SparseTensor& _sparse_gcs_mm_out(
   return at::addmm_out(result, t, sparse, dense, 0.0, 1.0);  // redispatch!
 }
 
-Tensor _sparse_gcs_addmm(
+Tensor _sparse_csr_addmm(
   const Tensor& t,
   const SparseTensor& sparse,
   const Tensor& dense,
@@ -139,44 +139,30 @@ Tensor _sparse_gcs_addmm(
 }
 
 // Functions for element-wise addition.
-Tensor add_sparse_gcs(const Tensor& self, const Tensor& other, Scalar alpha) {
+Tensor add_sparse_csr(const Tensor& self, const Tensor& other, Scalar alpha) {
   auto commonDtype = at::result_type(self, other);
   alpha_check(commonDtype, alpha);
   Tensor result = at::empty({0}, self.options().dtype(commonDtype));
   return at::add_out(result, self, other, alpha);  // redispatch!
 }
 
-Tensor& add_sparse_gcs_(Tensor& self, const Tensor& other, Scalar alpha) {
+Tensor& add_sparse_csr_(Tensor& self, const Tensor& other, Scalar alpha) {
   return at::add_out(self, self, other, alpha);  // redispatch!
 }
 
-int32_t gcs_to_dense_convert(int32_t iptr, int32_t icol, Tensor& out,
-                             const SparseTensor& src) {
+int32_t csr_to_strided_index_convert(int32_t iptr, int32_t icol, Tensor& out,
+                                     const SparseTensor& src) {
   int32_t index = out.storage_offset();
-  auto src_impl = get_sparse_gcs_impl(src);
-  
-  auto strides0 = src_impl->strides0();
-  auto strides1 = src_impl->strides1();
-  auto dims0 = src_impl->dims0();
-  auto dims1 = src_impl->dims1();
-  
-  for (int i = 0; i < dims0.size(); ++i) {
-    index += out.stride(i) * (int(iptr/strides0[i]) % src.size(i));
-  }
-
-  for (int i = 0; i < dims1.size(); ++i) {
-    index += out.stride(src_impl->rsplit_dim() + i) *
-      (int(icol/strides1[i]) % src.size(src_impl->rsplit_dim() + i));
-  }
+  auto src_impl = get_sparse_csr_impl(src);
 
   return index;
 }
 
-Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
+Tensor& add_out_dense_sparse_csr_cpu(Tensor& out, const Tensor& dense,
                                      const SparseTensor& src, Scalar alpha) {
-  AT_ASSERT(!out.is_sparse_gcs());
-  AT_ASSERT(!dense.is_sparse_gcs());
-  AT_ASSERT(src.is_sparse_gcs());
+  AT_ASSERT(!out.is_sparse_csr());
+  AT_ASSERT(!dense.is_sparse_csr());
+  AT_ASSERT(src.is_sparse_csr());
 
   AT_ASSERT(!dense.is_cuda());
   TORCH_CHECK(!out.is_cuda(), "add: expected 'out' to be CPU tensor, but got CUDA tensor");
@@ -204,7 +190,7 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
     resultBuffer.copy_(dense);
   }
 
-  AT_DISPATCH_ALL_TYPES(commonDtype, "add_out_op2_sparse_gcs", [&] {
+  AT_DISPATCH_ALL_TYPES(commonDtype, "add_out_op2_sparse_csr", [&] {
     auto values_accessor = src_values.accessor<scalar_t, 1>();
     auto crow_indices_accessor = src_crow_indices.accessor<int32_t, 1>();
     auto col_indices_accessor = src_col_indices.accessor<int32_t, 1>();
@@ -218,7 +204,7 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
 
       for (int i = start_index; i < end_index; ++i) {
         auto icol = col_indices_accessor[i];
-        auto index = gcs_to_dense_convert(iptr, icol, out, src);
+        auto index = csr_to_strided_index_convert(iptr, icol, out, src);
         out_ptr[index] += cast_value * values_accessor[i];
       }
     }
@@ -226,10 +212,10 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense,
   return out;
 }
 
-Tensor& add_out_sparse_gcs_cpu(const Tensor& self, const SparseTensor& other, 
+Tensor& add_out_sparse_csr_cpu(const Tensor& self, const SparseTensor& other, 
                                     Scalar alpha, SparseTensor& out) {
-  if (!self.is_sparse_gcs()) {
-    return add_out_dense_sparse_gcs_cpu(out, self, other, alpha);
+  if (!self.is_sparse_csr()) {
+    return add_out_dense_sparse_csr_cpu(out, self, other, alpha);
   }
   else {
     TORCH_CHECK(false, "NotImplementedError: Addition of sparse GCS tensors is not yet implemented.")

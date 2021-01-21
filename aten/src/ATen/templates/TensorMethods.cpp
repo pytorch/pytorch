@@ -130,12 +130,12 @@ bool is_sparse(Tensor self) {
   return self.is_sparse();
 }
 
-bool Tensor::is_sparse_gcs() const {
-  return impl_->is_sparse_gcs();
+bool Tensor::is_sparse_csr() const {
+  return impl_->is_sparse_csr();
 }
 
-bool is_sparse_gcs(Tensor self) {
-  return self.is_sparse_gcs();
+bool is_sparse_csr(Tensor self) {
+  return self.is_sparse_csr();
 }
 
 bool Tensor::is_mkldnn() const {

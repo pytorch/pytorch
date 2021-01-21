@@ -211,7 +211,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._make_subclass,
         Tensor.stride,
         Tensor.unflatten,
-        Tensor.to_sparse_gcs,
+        Tensor.to_sparse_csr,
     }
 
 

@@ -64,6 +64,31 @@ class TestSparseCSR(TestCase):
         sparse = dense.to_sparse_csr(-999)
         self.assertEqual(sparse.to_dense(), dense)
 
+        dense = torch.tensor([[4, 5, 0], [0, 0, 0], [1, 0, 0]])
+        sparse = dense.to_sparse_csr()
+        self.assertEqual(torch.tensor([]), sparse.crow_indices())
+        self.assertEqual(torch.tensor([]), sparse.col_indices())
+        self.assertEqual(torch.tensor([]), sparse.values())
+
+        dense = torch.tensor([[0, 0, 0], [0, 0, 1], [1, 0, 0]])
+        sparse = dense.to_sparse_csr()
+        self.assertEqual(torch.tensor([]), sparse.crow_indices())
+        self.assertEqual(torch.tensor([]), sparse.col_indices())
+        self.assertEqual(torch.tensor([]), sparse.values())
+
+        dense = torch.tensor([[2, 2, 2], [2, 2, 2], [2, 2, 2]])
+        sparse = dense.to_sparse_csr()
+        self.assertEqual(torch.tensor([]), sparse.crow_indices())
+        self.assertEqual(torch.tensor([0, 1, 2] * 3), sparse.col_indices())
+        self.assertEqual(torch.tensor([2] * 9), sparse.values())
+
+    def test_dense_convert_fill_value(self):
+        dense = torch.tensor([[1, 2, 3], [2, 2, 2], [4, 5, 2]])
+        sparse = dense.to_sparse_csr(2)
+        self.assertEqual(torch.tensor([]), sparse.crow_indices())
+        self.assertEqual(torch.tensor([]), sparse.col_indices())
+        self.assertEqual(torch.tensor([]), sparse.values())
+
     def test_dense_convert_error(self):
         size = (4, 2, 4)
         dense = torch.randn(size)
