@@ -3426,7 +3426,8 @@
   variants: function, method
   device_guard: False
 
-- func: slice.Tensor(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
+- func: slice.Tensor(Tensor(a) self, int dim=0, int? start=0, int? end=9223372036854775807, int step=1) -> Tensor(a)
+  use_c10_dispatcher: full
   variants: function, method
   device_guard: False
   dispatch:

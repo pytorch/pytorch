@@ -39,14 +39,17 @@ struct FooGetterSetter : torch::CustomClassHolder {
   FooGetterSetter(int64_t x_, int64_t y_) : x(x_), y(y_) {}
 
   int64_t getX() {
-    return x;
+    // to make sure this is not just attribute lookup
+    return x + 2;
   }
   void setX(int64_t z) {
-    x = z;
+    // to make sure this is not just attribute lookup
+    x = z + 2;
   }
 
   int64_t getY() {
-    return y;
+    // to make sure this is not just attribute lookup
+    return y + 4;
   }
 
   ~FooGetterSetter() {
@@ -233,7 +236,8 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
 
   m.class_<FooGetterSetter>("_FooGetterSetter")
       .def(torch::init<int64_t, int64_t>())
-      .def_property("x", &FooGetterSetter::getX, &FooGetterSetter::setX);
+      .def_property("x", &FooGetterSetter::getX, &FooGetterSetter::setX)
+      .def_property("y", &FooGetterSetter::getY);
 
   m.class_<LambdaInit>("_LambdaInit")
       .def(torch::init([](int64_t x, int64_t y, bool swap) {

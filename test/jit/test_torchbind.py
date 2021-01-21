@@ -131,16 +131,26 @@ class TestTorchbind(JitTestCase):
         self.assertEqual(out[1].pop(), "hi")
 
     def test_torchbind_def_property(self):
-        def foo():
+        def foo_getter_setter_full():
             fooGetterSetter = torch.classes._TorchScriptTesting._FooGetterSetter(5, 6)
+            # getX method intentionally adds 2 to x
             old = fooGetterSetter.x
+            # setX method intentionally adds 2 to x
             fooGetterSetter.x = old + 4
             new = fooGetterSetter.x
             return fooGetterSetter, old, new
-        scripted = torch.jit.script(foo)
+        scripted = torch.jit.script(foo_getter_setter_full)
         out, old, new = scripted()
-        self.assertEqual(old, 5)
-        self.assertEqual(new, 9)
+        self.assertEqual(old, 7)
+        self.assertEqual(new, 15)
+
+        def foo_just_getter():
+            fooGetterSetter = torch.classes._TorchScriptTesting._FooGetterSetter(5, 6)
+            # getY method intentionally adds 4 to x
+            return fooGetterSetter, fooGetterSetter.y
+        scripted = torch.jit.script(foo_just_getter)
+        out, result = scripted()
+        self.assertEqual(result, 10)
 
     def test_torchbind_take_instance_as_method_arg(self):
         def foo():

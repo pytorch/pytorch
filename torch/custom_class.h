@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/core/stack.h>
 #include <ATen/core/builtin_function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
@@ -11,8 +10,9 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/util/TypeList.h>
 #include <c10/util/TypeTraits.h>
-#include <torch/library.h>
 #include <torch/custom_class_detail.h>
+#include <torch/library.h>
+#include <cstddef>
 #include <iostream>
 #include <sstream>
 
@@ -153,23 +153,31 @@ class class_ {
     return *this;
   }
 
-  template <typename GetterFunc, typename SetterFunc>
+  // TODO this is a hack, but it works
+  template <typename GetterFunc, typename SetterFunc = GetterFunc>
   class_& def_property(
       std::string name,
       GetterFunc getterFunc,
-      SetterFunc setterFunc,
-      std::string getter_doc_string = "",
-      std::string setter_doc_string = "") {
+      SetterFunc setterFunc = nullptr,
+      std::string doc_string = "") {
+    torch::jit::Function* getter;
+    torch::jit::Function* setter;
+
+    auto getterName = name + "_getter";
     auto wrapped_getter =
         detail::wrap_func<CurClass, GetterFunc>(std::move(getterFunc));
-    auto wrapped_setter =
-        detail::wrap_func<CurClass, SetterFunc>(std::move(setterFunc));
-    defineProperty(
-        std::move(name),
-        std::move(wrapped_getter),
-        std::move(wrapped_setter),
-        std::move(getter_doc_string),
-        std::move(setter_doc_string));
+    getter = process_and_register_property_method(
+        getterName, wrapped_getter, doc_string);
+
+    if (!std::is_same<SetterFunc, GetterFunc>::value) {
+      auto setterName = name + "_setter";
+      auto wrapped_setter =
+          detail::wrap_func<CurClass, SetterFunc>(std::move(setterFunc));
+      setter = process_and_register_property_method(
+          setterName, wrapped_setter, doc_string);
+    }
+
+    classTypePtr->addProperty(name, getter, setter);
     return *this;
   }
 
@@ -306,57 +314,32 @@ class class_ {
     registerCustomClassMethod(std::move(method));
   }
 
-  template <typename GetterFunc, typename SetterFunc>
-  void defineProperty(
+  template <typename Func>
+  torch::jit::Function* process_and_register_property_method(
       std::string name,
-      GetterFunc getterFunc,
-      SetterFunc setterFunc,
-      std::string getter_doc_string = "",
-      std::string setter_doc_string = "") {
-    // TODO do we even need this?
-    auto getterName = qualClassName + "." + name + "_getter";
-    auto setterName = qualClassName + "." + name + "_setter";
-
-    auto qualifiedGetterName = qualClassName + "." + getterName;
-    auto qualifiedSetterName = qualClassName + "." + setterName;
-
-    auto getNameSchema = c10::inferFunctionSchemaSingleReturn<GetterFunc>(
-        std::move(getterName), "");
-    auto setNameSchema = c10::inferFunctionSchemaSingleReturn<SetterFunc>(
-        std::move(setterName), "");
-
-    auto wrapped_getter =
-        [func = std::move(getterFunc)](jit::Stack& stack) mutable -> void {
+      Func func,
+      std::string doc_string = "") {
+    auto wrapped_func =
+        [func = std::move(func)](jit::Stack& stack) mutable -> void {
       using RetType =
-          typename c10::guts::infer_function_traits_t<GetterFunc>::return_type;
-      detail::BoxedProxy<RetType, GetterFunc>()(stack, func);
+          typename c10::guts::infer_function_traits_t<Func>::return_type;
+      detail::BoxedProxy<RetType, Func>()(stack, func);
     };
 
-    auto wrapped_setter =
-        [func = std::move(setterFunc)](jit::Stack& stack) mutable -> void {
-      using RetType =
-          typename c10::guts::infer_function_traits_t<SetterFunc>::return_type;
-      detail::BoxedProxy<RetType, SetterFunc>()(stack, func);
-    };
+    auto qualifiedName = qualClassName + "." + name;
+    auto nameSchema =
+        c10::inferFunctionSchemaSingleReturn<Func>(std::move(name), "");
 
-    auto getterMethod = std::make_unique<jit::BuiltinOpFunction>(
-        qualifiedGetterName,
-        std::move(getNameSchema),
-        std::move(wrapped_getter),
-        std::move(getter_doc_string));
+    auto method = std::make_unique<jit::BuiltinOpFunction>(
+        qualifiedName,
+        std::move(nameSchema),
+        std::move(wrapped_func),
+        doc_string);
 
-    auto setterMethod = std::make_unique<jit::BuiltinOpFunction>(
-        qualifiedSetterName,
-        std::move(setNameSchema),
-        std::move(wrapped_setter),
-        std::move(setter_doc_string));
-
-    classTypePtr->addProperty(name, getterMethod.get(), setterMethod.get());
-    classTypePtr->addMethod(getterMethod.get());
-    classTypePtr->addMethod(setterMethod.get());
-
-    registerCustomClassMethod(std::move(getterMethod));
-    registerCustomClassMethod(std::move(setterMethod));
+    auto method_val = method.get();
+    registerCustomClassMethod(std::move(method));
+    classTypePtr->addMethod(method_val);
+    return method_val;
   }
 
   std::string qualClassName;
