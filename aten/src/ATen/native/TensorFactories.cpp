@@ -650,7 +650,13 @@ Tensor& randn_out(Tensor& result, IntArrayRef size, c10::optional<Generator> gen
 }
 
 Tensor normal(double mean, double std, IntArrayRef size,
-              c10::optional<Generator> generator, const TensorOptions& options) {
+              c10::optional<Generator> generator, c10::optional<ScalarType> dtype, c10::optional<Layout> layout,
+              c10::optional<Device> device, c10::optional<bool> pinned_memory) {
+  const TensorOptions options = TensorOptions()
+    .dtype(dtype)
+    .layout(layout)
+    .device(device)
+    .pinned_memory(pinned_memory);
   auto result = at::empty(size, options);
   return result.normal_(mean, std, generator);
 }
