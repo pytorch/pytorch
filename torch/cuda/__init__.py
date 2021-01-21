@@ -366,7 +366,7 @@ class StreamContext(object):
             return
         self.src_prev_stream = torch.cuda.current_stream(self.idx)
 
-        # Eager mode and script mode API's differ a bit. Hence, we need to check
+        # Eager mode and script mode APIs differ a bit. Hence, we need to check
         # if we are in scripting mode or eager mode. Depending on the mode
         # we can call the corresponding API's to get the device index.
         if torch.jit.is_scripting():
