@@ -180,12 +180,10 @@ std::string get_backtrace(
   auto number_of_frames =
       ::backtrace(callstack.data(), static_cast<int>(callstack.size()));
 
-  // Skip as many frames as requested. This is not efficient, but the sizes here
-  // are small and it makes the code nicer and safer.
-  for (; frames_to_skip > 0 && number_of_frames > 0;
-       --frames_to_skip, --number_of_frames) {
-    callstack.erase(callstack.begin());
+  if (frames_to_skip >= number_of_frames) {
+    return {};
   }
+  callstack.erase(callstack.begin(), std::next(callstack.begin(), frames_to_skip));
 
   // `number_of_frames` is strictly less than the current capacity of
   // `callstack`, so this is just a pointer subtraction and makes the subsequent
