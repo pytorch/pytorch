@@ -1317,7 +1317,7 @@ class TestFX(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, "'wrapper_fn' is "
                                     "being compiled since it was called"
-                                    " from 'function.forward'"):
+                                    " from 'fn.forward'"):
             scripted = torch.jit.script(traced)
 
     def test_user_friendly_call_provenance_with_module(self):
