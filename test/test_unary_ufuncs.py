@@ -954,7 +954,6 @@ class TestUnaryUfuncs(TestCase):
         self._helper_test_igamma(loglo, loghi, device, dtype,
                                  torch.igamma, scipy.special.gammainc)
 
-    @skipCUDAIfRocm
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
