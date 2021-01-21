@@ -12,7 +12,7 @@ python -m tools.code_analyzer.op_deps_processor \
 import argparse
 import yaml
 
-from ..autograd.utils import CodeTemplate
+from tools.codegen.code_template import CodeTemplate
 
 BAZEL_OUTPUT = CodeTemplate("""\
 TORCH_DEPS = {

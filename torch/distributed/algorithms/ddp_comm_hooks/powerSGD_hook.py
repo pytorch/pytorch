@@ -187,15 +187,17 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         matrix_approximation_rank = min(n, m, state.matrix_approximation_rank)
         total_Ps_size += n * matrix_approximation_rank
         total_Qs_size += m * matrix_approximation_rank
-    # Reuse Ps and Qs from the previous iteration if possible.
+    # If warm-start is enabled, reuse Ps and Qs from the previous iteration if possible.
     # The memory spaces of Ps and Qs need to be (re)allocated at the beginning,
     # as well as later whenever the buckets are rebuilt during training.
+    need_randomize_qs = False
     if (
         not state.warm_start
         or bucket_index not in state.p_memory_dict
         or state.p_memory_dict[bucket_index].shape[0] != total_Ps_size
         or state.q_memory_dict[bucket_index].shape[0] != total_Qs_size
     ):
+        need_randomize_qs = True
         # If warm-start is disabled, low-rank tensors will be initialized at every step.
         # Only log this if warm-start to avoid spamming.
         if state.warm_start:
@@ -232,21 +234,28 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         p_idx += n * matrix_approximation_rank
         q_idx += m * matrix_approximation_rank
 
-    # Initialize and then orthogonalize Qs.
-    with torch.random.fork_rng(devices=[]):
-        # Fork this RNG to avoid changing the seed globally and affecting the random sampling anywhere else in the training.
-        # The seed makes sure that the initial random values are the same across all the DDP replicas.
-        # Such seed should differ at every step.
-        # Since it is very slow to fork RNG state across all the CUDA devices,
-        # only fork on CPU and then move the generated tensor to the CUDA device.
-        torch.manual_seed(state.rng.randint(1_000_000_000))
+    # If warm-start is enabled, reuse Qs from the previous iteration if possible and skip filling random values.
+    # The exceptions are the first time and when the buckets are rebuilt.
+    if not need_randomize_qs:
         for q in qs:
-            q.data = torch.randn(
-                *q.shape,
-                device="cpu",
-                dtype=dtype,
-            ).to(device)
             _orthogonalize(q)
+    else:
+        with torch.random.fork_rng(devices=[]):
+            # Fork this RNG to avoid changing the seed globally and affecting the random sampling anywhere else in the training.
+            # The seed makes sure that the initial random values are the same across all the DDP replicas.
+            # Such seed should differ at every step.
+            # Since it is very slow to fork RNG state across all the CUDA devices,
+            # only fork on CPU and then move the generated tensor to the CUDA device (by overwriting q).
+            torch.manual_seed(state.rng.randint(1_000_000_000))
+            for q in qs:
+                q.copy_(
+                    torch.randn(
+                        *q.shape,
+                        device="cpu",
+                        dtype=dtype,
+                    )
+                )
+                _orthogonalize(q)
 
     # Compute Ps.
     for tensor, q, p in zip(high_rank_tensors, qs, ps):
