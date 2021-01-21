@@ -1,29 +1,41 @@
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.testing import check_cuda_kernel_launches, check_code_for_cuda_kernel_launches
+from torch.testing import (
+    check_cuda_kernel_launches,
+    check_code_for_cuda_kernel_launches,
+    check_code_for_cuda_kernel_launch_checks_without_launches
+)
 
 
 class AlwaysCheckCudaLaunchTest(TestCase):
     def test_check_code(self):
         """Verifies that the regex works for a few different situations"""
 
-        # Try some different spacings
-        self.assertEqual(2, check_code_for_cuda_kernel_launches("""
+        test_input1 = """
 some_function_call<TemplateArg><<<1,2,0,stream>>>(arg1,arg2,arg3);
 C10_CUDA_KERNEL_LAUNCH_CHECK();
 some_function_call<TemplateArg><<<1,2,0,stream>>>(arg1,arg2,arg3);
 
 some_function_call<TemplateArg><<<1,2,0,stream>>>(arg1,arg2,arg3);
 C10_CUDA_KERNEL_LAUNCH_CHECK();
+if(x>3){
+    some_other_functions();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
 some_function_call<TemplateArg><<<1,2,0,stream>>>(arg1,arg2,arg3);
 some_other_stuff;
 some_function_call<TemplateArg><<<1,2,0,stream>>>(arg1,arg2,arg3);
 C10_CUDA_KERNEL_LAUNCH_CHECK();
 some_function_call<TemplateArg><<<1,2,0,stream>>> (arg1,arg2,arg3);
 C10_CUDA_KERNEL_LAUNCH_CHECK();
+C10_CUDA_KERNEL_LAUNCH_CHECK();
 some_function_call<TemplateArg><<<1,2,0,stream>>> ( arg1 , arg2 , arg3 ) ;
 
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-        """))
+        """
+
+        # Try some different spacings
+        self.assertEqual(2, check_code_for_cuda_kernel_launches(test_input1))
+        self.assertEqual(2, check_code_for_cuda_kernel_launch_checks_without_launches(test_input1))
 
         # Does it work for macros?
         self.assertEqual(0, check_code_for_cuda_kernel_launches(r"""
@@ -42,7 +54,7 @@ some_function_call<TemplateArg><<<1,2,0,stream>>> ( arg1 , arg2 , arg3 ) ;
         check_cuda_kernel_launches()
         # TODO: Enable this after warning messages have been dealt with.
         self.assertTrue(True)
-        # self.assertTrue(check_cuda_kernel_launches() == 0)
+        # self.assertTrue(check_cuda_kernel_launches() == (0, 0))
 
 
 if __name__ == '__main__':
