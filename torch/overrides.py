@@ -1118,7 +1118,7 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
     """
     # Runtime is O(num_arguments * num_unique_types)
     overloaded_types: Set[Type] = set()
-    overloaded_args: List[Tuple[int, Type]] = []
+    overloaded_args: List[Any] = []
     for arg in relevant_args:
         arg_type = type(arg)
         # We only collect arguments if they have a unique type, which ensures
