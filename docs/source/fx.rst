@@ -10,7 +10,7 @@ Overview
 Limitations of Symbolic Tracing
 -------------------------------
 
-FX uses a system of **symbolic tracing** (a.k.a `abstract
+FX uses a system of **symbolic tracing** \*\* (a.k.a `abstract
 interpretation <https://en.wikipedia.org/wiki/Abstract_interpretation>`__)
 to capture the semantics of programs in a transformable/analyzable form.
 The system is **tracing** in that it executes the program (really an
@@ -115,7 +115,27 @@ code. This is a valid pattern that is supported by symbolic tracing.
 Many instances of dynamic control flow are semantically static control
 flow. These instances can be made to support symbolic tracing by
 removing the data dependencies on input values, for example by moving
-values to ``Module`` attributes.
+values to ``Module`` attributes or by passing constant values during
+symbolic tracing:
+
+::
+
+        def f(x, flag):
+            if flag: return x
+            else: return x*2
+
+        fx.symbolic_trace(f) # Fails!
+
+        def g(flag):
+            return lambda x: f(x, flag)
+
+        new_f = g(flag=True)
+        fx.symbolic_trace(new_f)
+
+In the case of truly dynamic control flow, the sections of the program
+that contain this code can be traced as calls to the Method (see
+Customizing Tracing with the ``Tracer`` class) or function (see
+wrap\ **TODO: link**) rather than tracing through them.
 
 Non-\ ``torch`` Functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -264,7 +284,6 @@ Miscellanea
       supported.
    -  Annotations on local names within a function are not currently
       supported.
-
 
 Writing Transformations
 -----------------------
