@@ -101,7 +101,8 @@ binary_ops = [
 
 def nnc_relu(A, B):
     def f(i, j):
-        return torch._C.te.ifThenElse(A.load([i, j]) < torch._C.te.ExprHandle.float(0), torch._C.te.ExprHandle.float(0), A.load([i, j]))
+        return torch._C.te.ifThenElse(A.load([i, j]) < torch._C.te.ExprHandle.float(0),
+                                      torch._C.te.ExprHandle.float(0), A.load([i, j]))
     return f
 
 custom_ops = [
@@ -205,9 +206,10 @@ def run_benchmarks(benchmarks, sizes):
                             fn()
                         time2 = time.time() - start
 
-
-                        df = df.append({'name': name, 'N': N, 'M': M, 'nnc_time': time1, 'torch_time': time2, 'ratio': time2 / time1}, ignore_index=True)
+                        df = df.append({'name': name, 'N': N, 'M': M, 'nnc_time': time1,
+                                        'torch_time': time2, 'ratio': time2 / time1}, ignore_index=True)
                         print(name, N, M)
+
                         print(time2 / time1, time1, time2)
                         print()
 
