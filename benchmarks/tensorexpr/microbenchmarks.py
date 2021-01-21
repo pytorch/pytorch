@@ -1,4 +1,5 @@
 import torch
+import torch._C.te as te
 import time
 import numpy as np
 import pandas as pd
@@ -8,7 +9,7 @@ import argparse
 
 class kernel_arena_scope(object):
     def __enter__(self):
-        self.scope = torch._C.te.KernelScope()
+        self.scope = te.KernelScope()
 
     def __exit__(self, typ, val, traceback):
         self.scope = None
@@ -76,22 +77,23 @@ def gen_binary_torch_fun(fn):
     return pt_fun
 
 def gen_int_comparison_tensors(N, M):
-    return (torch.randint(0, 3, (N, M)), torch.randint(0, 3, (N, M)), torch.empty((N, M), dtype=torch.int))
+    return (torch.randint(0, 3, (N, M)), torch.randint(0, 3, (N, M)), torch.empty((N, M), dtype=torch.bool))
 
 def gen_float_comparison_tensors(N, M):
-    return (torch.rand(N, M), torch.rand(N, M), torch.empty((N, M), dtype=torch.int))
+    return (torch.rand(N, M), torch.rand(N, M), torch.empty((N, M), dtype=torch.bool))
 
 
+te_bool = te.Dtype.Bool
 binary_ops = [
     ('add', (lambda a, b: a + b), torch.add),
     ('mul', (lambda a, b: a * b), torch.mul),
     ('sub', (lambda a, b: a - b), torch.sub),
     ('div', (lambda a, b: a / b), torch.div),
-    ('eq', (lambda a, b: a == b), torch.eq, gen_int_comparison_tensors),
-    ('gt', (lambda a, b: a > b), torch.gt, gen_float_comparison_tensors),
-    ('lt', (lambda a, b: a < b), torch.lt, gen_float_comparison_tensors),
-    ('gte', (lambda a, b: a >= b), torch.greater_equal, gen_float_comparison_tensors),
-    ('lte', (lambda a, b: a <= b), torch.less_equal, gen_float_comparison_tensors),
+    ('eq', (lambda a, b: te.Cast.make(te_bool, a == b)), torch.eq, gen_int_comparison_tensors),
+    ('gt', (lambda a, b: te.Cast.make(te_bool, a > b)), torch.gt, gen_float_comparison_tensors),
+    ('lt', (lambda a, b: te.Cast.make(te_bool, a < b)), torch.lt, gen_float_comparison_tensors),
+    ('gte', (lambda a, b: te.Cast.make(te_bool, a >= b)), torch.greater_equal, gen_float_comparison_tensors),
+    ('lte', (lambda a, b: te.Cast.make(te_bool, a <= b)), torch.less_equal, gen_float_comparison_tensors),
     # ('neq', (lambda a, b: a != b), None)), # no one-op equivalent
     # ('&', (lambda a, b: a & b), torch.bitwise_and), # requires more work to test
 ]
@@ -150,7 +152,7 @@ def run_benchmarks(benchmarks, sizes):
         for name, nnc_fun, torch_fun, shape_fn in benchmarks:
             for N in sizes:
                 for M in sizes:
-                    iters = int(1e5 / (N + M))
+                    iters = int(1e6 / (N + M))
                     with kernel_arena_scope():
                         if shape_fn is None:
                             tA = torch.rand(M, N).clamp(0.01, 0.99)
@@ -211,7 +213,7 @@ def run_benchmarks(benchmarks, sizes):
 
                         def check_correctness(a, b):
                             if not np.allclose(a, b):
-                                print(name, diff)
+                                print(name)
                                 assert(np.allclose(a, b))
                         check_correctness(tX, tR)
     return df
@@ -225,7 +227,7 @@ def dump_plot(df, sizes):
         vals.append(row['ratio'])
 
     keys = keys[::len(sizes)]
-    sns.set(rc={'figure.figsize' : (5.0, 20.0)})
+    sns.set(rc={'figure.figsize' : (5.0, len(keys) * 0.5)})
 
     cmap = sns.diverging_palette(10, 120, n=9, as_cmap=True)
     np_vals = np.array([vals]).reshape(-1, len(sizes))
@@ -235,7 +237,7 @@ def dump_plot(df, sizes):
     plt.xlabel('Size of NxN matrix')
     plt.ylabel('Operation')
     g.set_yticklabels(keys)
-    g.set_xticklabels([1, 16, 64, 256, 1024])
+    g.set_xticklabels(sizes)
 
     plt.savefig('nnc.png')
 

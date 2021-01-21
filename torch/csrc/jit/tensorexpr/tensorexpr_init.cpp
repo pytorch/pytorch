@@ -241,6 +241,9 @@ void initTensorExprBindings(PyObject* module) {
              const std::vector<tensorexpr::ExprHandle>& v) {
             return self.call(v);
           });
+  py::class_<tensorexpr::Cast>(te, "Cast")
+      .def_static("make", &tensorexpr::Cast::make);
+
   py::class_<tensorexpr::DimArg>(te, "DimArg")
       .def(py::init<const tensorexpr::ExprHandle&>())
       .def(py::init<const tensorexpr::ExprHandle&, const std::string&>());
@@ -405,6 +408,15 @@ void initTensorExprBindings(PyObject* module) {
             }
             auto r = st->value();
             self.rfactor(r, v.node(), &ins_point);
+          },
+          py::return_value_policy::reference)
+      .def(
+          "flatten",
+          [](const tensorexpr::LoopNest& self,
+             const std::vector<tensorexpr::For*>& loops) {
+            tensorexpr::For* flattened;
+            self.flatten(loops, &flattened);
+            return flattened;
           },
           py::return_value_policy::reference)
       .def(
