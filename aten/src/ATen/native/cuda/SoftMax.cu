@@ -9,7 +9,7 @@
 #include <c10/macros/Macros.h>
 
 #include <ATen/AccumulateType.h>
-#include <ATen/cuda/NumericLimits.cuh>
+#include <ATen/NumericLimits.h>
 #include <type_traits>
 
 #include <ATen/native/cuda/Loops.cuh>

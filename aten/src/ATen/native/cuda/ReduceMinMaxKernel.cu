@@ -3,7 +3,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/Dispatch.h>
-#include <ATen/cuda/NumericLimits.cuh>
+#include <ATen/NumericLimits.h>
 #include <THC/THCNumerics.cuh>
 #include <ATen/native/ReduceOps.h>
 #include<ATen/native/ReduceAllOps.h>

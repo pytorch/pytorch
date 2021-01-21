@@ -1,6 +1,6 @@
 #include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/cuda/NumericLimits.cuh>
+#include <ATen/NumericLimits.h>
 #include <THC/THCNumerics.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <THC/THCGeneral.h>

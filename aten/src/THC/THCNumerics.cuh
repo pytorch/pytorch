@@ -7,14 +7,14 @@
 #include <assert.h>
 #include <TH/THHalf.h>
 #include <ATen/ATen.h>
-#include <ATen/cuda/NumericLimits.cuh>
+#include <ATen/NumericLimits.h>
 
 // WARNING: THCNumerics is being deprecated. Please follow the comments
 // in this file to learn about new usages.
 // Comments on usage:
 //      - lt,le,gt,ge,eq,neg,add,mul,sub,div and other binary ops can
 //        be implemented using CUDA_apply_utils or binary cuda kernel
-//      - Check NumericLimits.cuh for specialized math functions.
+//      - Check NumericLimits.h for specialized math functions.
 //      - Note how __half and at::Half can be casted. for instance:
 //        static_cast<at::Half>(std::sin(static_cast<at::Half>(a)));
 
@@ -36,7 +36,7 @@ static inline __host__ __device__ T powi(T a, T b) {
   return result;
 }
 
-// DEPRECATED: For integral types, use math functions from std and NumericLimits.cuh.
+// DEPRECATED: For integral types, use math functions from std and NumericLimits.h.
 //             Use binary_kernel or CUDA_apply_utils for arithmetic
 template <>
 struct THCNumerics<uint8_t> {
@@ -185,7 +185,7 @@ struct THCNumerics<int64_t> {
   static inline __host__ __device__  bool isinf(int64_t a) { return false; }
 };
 
-// DEPRECATED: use math functions from std and NumericLimits.cuh
+// DEPRECATED: use math functions from std and NumericLimits.h
 template <>
 struct THCNumerics<at::Half> {
   static inline __host__ __device__ at::Half min() { return at::numeric_limits<at::Half>::lowest(); }
