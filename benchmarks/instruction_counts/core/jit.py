@@ -6,12 +6,11 @@ from typing import cast, Optional
 
 import torch
 
-from core.utils import get_temp_dir
-
 
 def generate_torchscript_file(
     model_src: str,
     name: str,
+    temp_dir: str,
 ) -> Optional[str]:
     """Returns the path a saved model if one can be constructed from `spec`.
 
@@ -27,7 +26,7 @@ def generate_torchscript_file(
     assert "jit_model = " in model_src, model_src
     model_src = f"import torch\n{model_src}"
 
-    model_root = os.path.join(get_temp_dir(), "TorchScript_models")
+    model_root = os.path.join(temp_dir, "TorchScript_models")
     os.makedirs(model_root, exist_ok=True)
     module_path = os.path.join(model_root, f"ts_{name}.py")
     artifact_path = os.path.join(model_root, f"ts_{name}.pt")
