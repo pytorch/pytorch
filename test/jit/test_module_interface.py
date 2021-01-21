@@ -371,8 +371,8 @@ class TestModuleInterface(JitTestCase):
         scripted_no_module_interface.proxy_mod = torch.jit.script(OrigModule())
         # proxy_mod is neither a module interface or have the same JIT type, should fail
         with self.assertRaisesRegex(RuntimeError,
-                                    "Expected a value of type '__torch__.jit.test_module_interface.OrigModule' " +
-                                    "for field 'proxy_mod', but found '__torch__.jit.test_module_interface.NewModule'"):
+                                    "Expected a value of type '__torch__.jit.test_module_interface.OrigModule \(.*\)' " +
+                                    "for field 'proxy_mod', but found '__torch__.jit.test_module_interface.NewModule \(.*\)'"):
             scripted_no_module_interface.proxy_mod = torch.jit.script(NewModule())
 
     def test_script_module_as_interface_swap(self):

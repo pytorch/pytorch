@@ -702,27 +702,6 @@ class TestTensorCreation(TestCase):
                                     "input tensors must be on the same device"):
             torch.cat((cpu, cuda0))
 
-    @onlyOnCPUAndCUDA
-    def test_tile(self, device):
-        shapes = ((6, 4, 3),
-                  (1,),
-                  ())
-        reps = ((1, 10, 10, 99),
-                (25, 1, 1),
-                (3, 3, 3),
-                (1, 2, 0),
-                (2, 2),
-                (2,),
-                (1,),
-                ())
-        for shape in shapes:
-            tensor = torch.randn(shape, device=device)
-            for t in (tensor, tensor.T):
-                for dims in reps:
-                    expected = np.tile(t.cpu().numpy(), dims)
-                    result = torch.tile(t, dims).cpu().numpy()
-                    self.assertEqual(expected, result)
-
     # TODO: reconcile with other cat tests
     # TODO: Compare with a NumPy reference instead of CPU
     @onlyCUDA
@@ -1127,25 +1106,6 @@ class TestTensorCreation(TestCase):
                 self.assertEqual(res_out.select(dim, 1), y, atol=0, rtol=0)
                 self.assertEqual(res_out.select(dim, 2), z, atol=0, rtol=0)
 
-    def test_repeat(self, device):
-        initial_shape = (8, 4)
-        tensor = torch.rand(*initial_shape, device=device)
-
-        size = (3, 1, 1)
-        torchSize = torch.Size(size)
-        target = [3, 8, 4]
-        self.assertEqual(tensor.repeat(*size).size(), target, msg='Error in repeat')
-        self.assertEqual(tensor.repeat(torchSize).size(), target,
-                         msg='Error in repeat using LongStorage')
-        result = tensor.repeat(*size)
-        self.assertEqual(result.size(), target, msg='Error in repeat using result')
-        result = tensor.repeat(torchSize)
-        self.assertEqual(result.size(), target, msg='Error in repeat using result and LongStorage')
-        self.assertEqual(result.mean(0).view(8, 4), tensor, msg='Error in repeat (not equal)')
-
-        zeroDimTarget = torch.Size([24, 0])
-        self.assertEqual(tensor.repeat((3, 0)).size(), zeroDimTarget, msg="Error when calling with 0 repeats")
-
     def test_repeat_interleave(self, device):
         x = torch.tensor([0, 1, 2, 3], device=device)
         expected = torch.tensor([1, 2, 2, 3, 3, 3], device=device)
@@ -1195,26 +1155,6 @@ class TestTensorCreation(TestCase):
         x = torch.tensor([], dtype=torch.int64, device=device)
         y = torch.repeat_interleave(x, x)
         self.assertEqual(y, x)
-
-    def test_repeat_tile(self, device):
-        initial_shape = (8, 4)
-
-        repeats = ((3, 1, 1),
-                   (3, 3, 3),
-                   (1, 2, 1),
-                   (2, 2, 2, 2))
-
-        def _generate_noncontiguous_input():
-            out = np.broadcast_to(np.random.random((1, 4)), initial_shape)
-            # Note: non-writeable NumPy arrays will warn if converted to tensors
-            out.setflags(write=True)
-            assert not (out.flags.c_contiguous or out.flags.f_contiguous)
-            return out
-
-        for repeat in repeats:
-            for tensor in (torch.from_numpy(np.random.random(initial_shape)).to(device),
-                           torch.from_numpy(_generate_noncontiguous_input()).to(device)):
-                self.assertEqual(tensor.repeat(*repeat).cpu().numpy(), np.tile(tensor.cpu().numpy(), repeat))
 
     # TODO: udpate to work on CUDA, too
     @onlyCPU
@@ -2807,23 +2747,6 @@ class TestTensorCreation(TestCase):
         x = torch.zeros(2, 3, device=device, dtype=dtype)
         y = torch.logspace(0, 3, 4, base=2, device=device, dtype=dtype, out=x.narrow(1, 1, 2))
         self.assertEqual(x, torch.tensor(((0, 1, 2), (0, 4, 8)), device=device, dtype=dtype), atol=0, rtol=0)
-
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_logspace_integral(self, device, dtype):
-        "Check logspace with integer."
-        for from_, to in ((1, 5),
-                          (1.2, 2),
-                          (1.7, 4),
-                          (2, 2.5)):
-            res1 = torch.logspace(from_, to, steps=10, device=device, dtype=dtype)
-            res2 = torch.logspace(int(from_), int(to), steps=10,
-                                  device=device, dtype=torch.double).floor().type(dtype)
-            self.assertEqual(res1, res2)
-            if not device.startswith('cpu'):
-                # Compare with CPU output
-                res2_cpu = torch.logspace(int(from_), int(to), steps=10,
-                                          device='cpu', dtype=torch.double).floor().type(dtype)
-                self.assertEqual(res1, res2_cpu)
 
     @onlyOnCPUAndCUDA
     @dtypes(torch.half, torch.float, torch.double)
