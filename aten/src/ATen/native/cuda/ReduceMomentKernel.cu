@@ -2,35 +2,33 @@
 #include <ATen/native/cuda/Reduce.cuh>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/SharedReduceOps.h>
+#include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/ReduceOps.h>
 
 namespace at { namespace native {
 
 template <typename scalar_t>
-void std_var_kernel_impl(TensorIterator& iter, bool unbiased, bool take_sqrt) {
+void std_var_kernel_impl(TensorIterator& iter, int32_t correction, bool take_sqrt) {
   // reducing unrolling factor to 2 for welford kernel
   // This is necessary to lower register usage that leads to register spills.
-  gpu_reduce_kernel<scalar_t, scalar_t, 2>(iter, WelfordOps<scalar_t, scalar_t, int32_t, float, thrust::pair<scalar_t, scalar_t>> { unbiased, take_sqrt }, WelfordData<scalar_t, int32_t, float> {});
+  using accscalar_t = at::acc_type<scalar_t, true>;
+  gpu_reduce_kernel<scalar_t, scalar_t, 2>(
+      iter,
+      WelfordOps<
+          scalar_t, accscalar_t, int32_t, float,
+          thrust::pair<scalar_t, scalar_t>>{correction, take_sqrt},
+      WelfordData<accscalar_t, int32_t, float>{});
 }
 
-template <>
-void std_var_kernel_impl<at::Half>(TensorIterator& iter, bool unbiased, bool take_sqrt) {
-  // reducing unrolling factor to 2 for welford kernel
-  // This is necessary to lower register usage that leads to register spills.
-  gpu_reduce_kernel<at::Half, at::Half, 2>(iter, WelfordOps<at::Half, float, int32_t, float, thrust::pair<at::Half, at::Half>> { unbiased, take_sqrt }, WelfordData<float, int32_t, float> {});
-}
-
-template <>
-void std_var_kernel_impl<at::BFloat16>(TensorIterator& iter, bool unbiased, bool take_sqrt) {
-  // reducing unrolling factor to 2 for welford kernel
-  // This is necessary to lower register usage that leads to register spills.
-  gpu_reduce_kernel<at::BFloat16, at::BFloat16, 2>(iter, WelfordOps<at::BFloat16, float, int32_t, float, thrust::pair<at::BFloat16, at::BFloat16>> { unbiased, take_sqrt }, WelfordData<float, int32_t, float> {});
-}
-
-static void std_var_kernel_cuda(TensorIterator& iter, bool unbiased, bool take_sqrt) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "std_cuda", [&]() {
-    std_var_kernel_impl<scalar_t>(iter, unbiased, take_sqrt);
+static void std_var_kernel_cuda(TensorIterator& iter, int64_t correction, bool take_sqrt) {
+  using limits = std::numeric_limits<int32_t>;
+  TORCH_CHECK(
+      correction < limits::max() && correction > limits::min(),
+      "Correction must fit in 32-bit on CUDA, but got ",
+      correction);
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "std_var_cuda", [&]() {
+    std_var_kernel_impl<scalar_t>(iter, correction, take_sqrt);
   });
 }
 

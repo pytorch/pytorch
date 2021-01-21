@@ -6,6 +6,7 @@
 #include <complex>
 #include <c10/macros/Macros.h>
 #include <ATen/detail/FunctionTraits.h>
+#include <ATen/NumericLimits.h>
 #include <ATen/NumericUtils.h>
 #if defined(__CUDACC__)
 #include <THC/THCDeviceUtils.cuh>
@@ -64,7 +65,7 @@ struct WelfordData {
 
 template <typename scalar_t, typename acc_scalar_t, typename index_t, typename combine_t, typename res_t>
 struct WelfordOps {
-  bool unbiased;
+  index_t correction;
   bool take_sqrt;
  public:
   using acc_t = WelfordData<acc_scalar_t, index_t, combine_t>;
@@ -102,11 +103,12 @@ struct WelfordOps {
   }
   inline C10_DEVICE res_t project(acc_t acc) const {
     auto mean = acc.mean;
-    combine_t divisor = unbiased ? (acc.nf - 1) : acc.nf;
-    auto ret = (divisor > 0) ?
-      (take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor))
-      : NAN;
-    detail::pair<scalar_t, scalar_t> results{(scalar_t) ret, (scalar_t) mean};
+    combine_t divisor = acc.nf - correction;
+    scalar_t ret = at::numeric_limits<scalar_t>::upper_bound();
+    if (divisor > 0) {
+      ret = take_sqrt ? device_sqrt(acc.m2 / divisor) : (acc.m2 / divisor);
+    }
+    detail::pair<scalar_t, scalar_t> results{ret, (scalar_t)mean};
     return results;
   }
 
@@ -124,9 +126,8 @@ struct WelfordOps {
     };
   }
 #endif
-  WelfordOps(bool unbiased, bool take_sqrt)
-    : unbiased(unbiased), take_sqrt(take_sqrt) {
-  }
+  WelfordOps(index_t correction, bool take_sqrt)
+      : correction(correction), take_sqrt(take_sqrt) {}
 };
 
 template <typename acc_t, typename factor_t>

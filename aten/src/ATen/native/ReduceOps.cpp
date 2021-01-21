@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/LegacyTHFunctionsCPU.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
@@ -1002,7 +1003,10 @@ Tensor argmin(const Tensor& self, c10::optional<int64_t> dim, bool keepdims) {
   return at::native::argmin_out(result, self, dim, keepdims);
 }
 
-static Tensor& std_var_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
+static Tensor& std_var_out(
+	const char* fname, Tensor& result, const Tensor& self,
+	c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction_opt,
+	bool keepdim, bool take_sqrt) {
   TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
               "std and var only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
@@ -1010,39 +1014,63 @@ static Tensor& std_var_out(Tensor& result, const Tensor& self, IntArrayRef dim, 
   TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
               "std and var only support floating-point dtypes");
 
-  if (at::isComplexType(self.scalar_type())){
+  if (at::isComplexType(self.scalar_type())) {
     ScalarType dtype = c10::toValueType(get_dtype(result, self, {}, true));
     Tensor real_in = at::real(self);
     Tensor real_out = at::empty({0}, self.options().dtype(dtype));
-    auto iter = make_reduction("std or var", real_out, real_in, dim, keepdim, dtype);
-    if (iter.numel() == 0) {
-      real_out.fill_(NAN);
-    } else {
-      std_var_stub(iter.device_type(), iter, unbiased, false);
-    }
+    std_var_out(
+        fname,
+        real_out,
+        real_in,
+        dim,
+        correction_opt,
+        keepdim,
+        /*take_sqrt=*/false);
+
     Tensor imag_in = at::imag(self);
     Tensor imag_out = at::empty({0}, self.options().dtype(dtype));
-    iter = make_reduction("std or var", imag_out, imag_in, dim, keepdim, dtype);
-    if (iter.numel() == 0) {
-      imag_out.fill_(NAN);
-    } else {
-      std_var_stub(iter.device_type(), iter, unbiased, false);
-    }
+    std_var_out(
+        fname,
+        imag_out,
+        imag_in,
+        dim,
+        correction_opt,
+        keepdim,
+        /*take_sqrt=*/false);
+
     at::add_out(result, real_out, imag_out);
-    take_sqrt ? at::sqrt_out(result, result) : result;
-  } else{
-    ScalarType dtype = get_dtype(result, self, {}, true);
-    auto iter = make_reduction("std or var", result, self, dim, keepdim, dtype);
-    if (iter.numel() == 0) {
-      result.fill_(NAN);
-    } else {
-      std_var_stub(iter.device_type(), iter, unbiased, take_sqrt);
+    if (take_sqrt) {
+      at::sqrt_out(result, result);
     }
+    return result;
+  }
+
+  const auto correction = correction_opt.value_or(1);
+  ScalarType dtype = get_dtype(result, self, {}, true);
+  auto iter = make_reduction(fname, result, self, dim, keepdim, dtype);
+
+  if (iter.numel() == 0) {
+    // Trivial reduction
+    result.fill_(std::numeric_limits<double>::quiet_NaN());
+    return result;
+  } else if (
+      result.numel() == 1 && iter.device_type() == kCPU &&
+      iter.common_dtype() != kBFloat16 && iter.common_dtype() != kHalf) {
+    // NOTE: CPU performance significantly regressed when attempting to port to
+    // ATen,
+    //   so all-reduce is still implemented in TH.
+    //   See https://github.com/pytorch/pytorch/pull/43858.
+    result.fill_(legacy::cpu::_th_std_var(self, correction, take_sqrt));
+  } else {
+    std_var_stub(iter.device_type(), iter, correction, take_sqrt);
   }
   return result;
 }
 
-static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim, bool take_sqrt) {
+static std::tuple<Tensor&, Tensor&> std_var_mean_out(
+    const char* fname, Tensor& result1, Tensor& result2, const Tensor& self,
+    c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction_opt,
+    bool keepdim, bool take_sqrt) {
   AT_ASSERT(result1.defined() && result2.defined());
   TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
               fname, " only supports CPU AND CUDA device type, got: ", self.device().type());
@@ -1056,150 +1084,155 @@ static std::tuple<Tensor&,Tensor&> std_var_mean_out(const char* fname, Tensor &r
            " and ",
            toString(result2.scalar_type()),
            ".");
-  if (at::isComplexType(self.scalar_type())){
+  if (at::isComplexType(self.scalar_type())) {
     ScalarType dtype = c10::toValueType(get_dtype(result1, self, {}, true));
     Tensor real_in = at::real(self);
     Tensor real_out_var = at::empty({0}, self.options().dtype(dtype));
     Tensor real_out_mean = at::empty({0}, self.options().dtype(dtype));
-    auto iter = make_reduction(fname, real_out_var, real_out_mean, real_in, dim, keepdim, dtype);
-    if (iter.numel() == 0) {
-      real_out_var.fill_(NAN);
-      real_out_mean.fill_(NAN);
-    } else {
-      std_var_stub(iter.device_type(), iter, unbiased, false);
-    }
+    std_var_mean_out(
+        fname,
+        real_out_var,
+        real_out_mean,
+        real_in,
+        dim,
+        correction_opt,
+        keepdim,
+        take_sqrt);
+
     Tensor imag_in = at::imag(self);
     Tensor imag_out_var = at::empty({0}, self.options().dtype(dtype));
     Tensor imag_out_mean = at::empty({0}, self.options().dtype(dtype));
-    iter = make_reduction(fname, imag_out_var, imag_out_mean, imag_in, dim, keepdim, dtype);
-    if (iter.numel() == 0) {
-      imag_out_var.fill_(NAN);
-      imag_out_mean.fill_(NAN);
-    } else {
-      std_var_stub(iter.device_type(), iter, unbiased, false);
-    }
+    std_var_mean_out(
+        fname,
+        imag_out_var,
+        imag_out_mean,
+        imag_in,
+        dim,
+        correction_opt,
+        keepdim,
+        take_sqrt);
+
     at::add_out(result1, real_out_var, imag_out_var);
-    take_sqrt ? at::sqrt_out(result1, result1) : result1;
-    at::add_out(result2, real_out_mean, at::mul(imag_out_mean, c10::complex<double>{0.0, 1.0}));
-  } else {
-    ScalarType dtype = get_dtype(result1, self, {}, true);
-    auto iter = make_reduction(fname, result1, result2, self, dim, keepdim, dtype);
-    if (iter.numel() == 0) {
-      result1.fill_(NAN);
-      result2.fill_(NAN);
-    } else {
-      std_var_stub(iter.device_type(), iter, unbiased, take_sqrt);
+    if (take_sqrt) {
+      at::sqrt_out(result1, result1);
     }
+	at::complex_out(result2, real_out_mean, imag_out_mean);
+    return {result1, result2};
   }
-  return std::tuple<Tensor&, Tensor&>(result1, result2);
+
+  const auto correction = correction_opt.value_or(1);
+  ScalarType dtype = get_dtype(result1, self, {}, true);
+  auto iter =
+      make_reduction(fname, result1, result2, self, dim, keepdim, dtype);
+
+  if (iter.numel() == 0) {
+    // Trivial reduction
+    result1.fill_(std::numeric_limits<double>::quiet_NaN());
+    result2.fill_(std::numeric_limits<double>::quiet_NaN());
+  } else {
+    std_var_stub(iter.device_type(), iter, correction, take_sqrt);
+  }
+  return {result1, result2};
 }
 
-std::tuple<Tensor&,Tensor&> var_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  return std_var_mean_out("var_mean", result1, result2, self, dim, unbiased, keepdim, false);
+std::tuple<Tensor, Tensor> var_mean(
+    const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
+  return at::var_mean(self, /*dim=*/c10::optional<IntArrayRef>(dim),
+					  /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
 }
 
-std::tuple<Tensor&,Tensor&> std_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  return std_var_mean_out("std_mean", result1, result2, self, dim, unbiased, keepdim, true);
+std::tuple<Tensor, Tensor> std_mean(
+    const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
+  return at::std_mean(self, /*dim=*/c10::optional<IntArrayRef>(dim),
+					  /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
 }
 
-std::tuple<Tensor&,Tensor&> var_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, bool unbiased) {
-  return std_var_mean_out("var_mean", result1, result2, self, {}, unbiased, false, false);
+std::tuple<Tensor, Tensor> std_mean(const Tensor& self, bool unbiased) {
+  return at::std_mean(
+      self, /*dim=*/c10::nullopt, /*correction=*/int64_t{unbiased ? 1 : 0});
 }
 
-std::tuple<Tensor&,Tensor&> std_mean_out(Tensor &result1, Tensor &result2, const Tensor &self, bool unbiased) {
-  return std_var_mean_out("std_mean", result1, result2, self, {}, unbiased, false, true);
+std::tuple<Tensor, Tensor> var_mean(const Tensor& self, bool unbiased) {
+  return at::var_mean(
+      self, /*dim=*/c10::nullopt, /*correction=*/int64_t{unbiased ? 1 : 0});
 }
 
-std::tuple<Tensor,Tensor> var_mean(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
+std::tuple<Tensor, Tensor> var_mean(
+    const Tensor& self, c10::optional<IntArrayRef> dim,
+	c10::optional<int64_t> correction, bool keepdim) {
   Tensor result1 = at::empty({0}, self.options());
   Tensor result2 = at::empty({0}, self.options());
-  return at::native::var_mean_out(result1, result2, self, dim, unbiased, keepdim);
+  return std_var_mean_out(
+      "var_mean", result1, result2, self, dim, correction, keepdim, false);
 }
 
-std::tuple<Tensor,Tensor> std_mean(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
+std::tuple<Tensor, Tensor> std_mean(
+    const Tensor& self, c10::optional<IntArrayRef> dim,
+    c10::optional<int64_t> correction, bool keepdim) {
   Tensor result1 = at::empty({0}, self.options());
   Tensor result2 = at::empty({0}, self.options());
-  return at::native::std_mean_out(result1, result2, self, dim, unbiased, keepdim);
-}
-
-std::tuple<Tensor,Tensor> std_mean(const Tensor& self, bool unbiased) {
-  Tensor result1 = at::empty({0}, self.options());
-  Tensor result2 = at::empty({0}, self.options());
-  return at::native::std_mean_out(result1, result2, self, unbiased);
-}
-
-std::tuple<Tensor,Tensor> var_mean(const Tensor& self, bool unbiased) {
-  Tensor result1 = at::empty({0}, self.options());
-  Tensor result2 = at::empty({0}, self.options());
-  return at::native::var_mean_out(result1, result2, self, unbiased);
+  return std_var_mean_out(
+      "std_mean", result1, result2, self, dim, correction, keepdim, true);
 }
 
 Tensor var(const Tensor& self, bool unbiased) {
-  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
-              "var only supports CPU AND CUDA device type, got: ", self.device().type());
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "var only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
-              "var only supports floating-point dtypes");
-  auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
-  if (trivial_return.has_value()) {
-    return trivial_return.value();
-  }
-
-  // NOTE: CPU performance significantly regressed when attempting to port to ATen,
-  //   so this dispatches differently based on device type.
-  //   See https://github.com/pytorch/pytorch/pull/43858.
-  if (self.device().type() == kCPU) {
-    return at::_var(self, unbiased);
-  }
-
-  Tensor result = at::empty({0}, self.options());
-  return std_var_out(result, self, std::vector<int64_t>{}, unbiased, false, false);
+  return at::var(
+      self, /*dim=*/c10::nullopt, /*correction=*/int64_t{unbiased ? 1 : 0});
 }
 
 Tensor var(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  Tensor result = at::empty({0}, self.options());
-  return at::native::var_out(result, self, dim, unbiased, keepdim);
+  return at::var(self, /*dim=*/c10::optional<IntArrayRef>(dim),
+				 /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
 }
 
 Tensor& var_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  return std_var_out(result, self, dim, unbiased, keepdim, false);
+  return at::var_out(result, self, /*dim=*/c10::optional<IntArrayRef>(dim),
+					 /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
 }
 
 Tensor std(const Tensor& self, bool unbiased) {
-  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
-              "std only supports CPU AND CUDA device type, got: ", self.device().type());
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "std only supports strided layout, got: ", self.layout());
-  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
-              "std only supports floating-point dtypes");
-  auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
-  if (trivial_return.has_value()) {
-    return trivial_return.value();
-  }
-
-  // NOTE: CPU performance significantly regressed when attempting to port to ATen,
-  //   so this dispatches differently based on device type.
-  //   See https://github.com/pytorch/pytorch/pull/43858.
-  if (self.device().type() == kCPU) {
-    return at::_std(self, unbiased);
-  }
-
-  Tensor result = at::empty({0}, self.options());
-  return std_var_out(result, self, std::vector<int64_t>{}, unbiased, false, true);
+  return at::std(
+      self, /*dim=*/c10::nullopt, /*correction=*/int64_t{unbiased ? 1 : 0});
 }
 
 Tensor std(const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  Tensor result = at::empty({0}, self.options());
-  return at::native::std_out(result, self, dim, unbiased, keepdim);
+  return at::std(self, /*dim=*/c10::optional<IntArrayRef>(dim),
+				 /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
 }
 
-Tensor& std_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool unbiased, bool keepdim) {
-  return std_var_out(result, self, dim, unbiased, keepdim, true);
+Tensor& std_out(Tensor& result, const Tensor& self, IntArrayRef dim,
+				bool unbiased, bool keepdim) {
+  return at::std_out(result, self, /*dim=*/c10::optional<IntArrayRef>(dim),
+					 /*correction=*/int64_t{unbiased ? 1 : 0}, keepdim);
+}
+
+Tensor std(const Tensor& self, c10::optional<IntArrayRef> dim,
+		   c10::optional<int64_t> correction, bool keepdim) {
+  Tensor result = at::empty({0}, self.options());
+  return std_var_out("std", result, self, dim, correction, keepdim, true);
+}
+
+Tensor& std_out(
+    Tensor& result, const Tensor& self, c10::optional<IntArrayRef> dim,
+    c10::optional<int64_t> correction, bool keepdim) {
+  return std_var_out("std", result, self, dim, correction, keepdim, true);
+}
+
+Tensor& var_out(
+    Tensor& result, const Tensor& self, c10::optional<IntArrayRef> dim,
+    c10::optional<int64_t> correction, bool keepdim) {
+  return std_var_out("var", result, self, dim, correction, keepdim, false);
+}
+
+Tensor var(
+    const Tensor& self, c10::optional<IntArrayRef> dim,
+	c10::optional<int64_t> correction, bool keepdim) {
+  Tensor result = at::empty({0}, self.options());
+  return std_var_out("var", result, self, dim, correction, keepdim, false);
 }
 
 Tensor std(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
-  return  at::std(self, dimnames_to_positions(self, dim), unbiased, keepdim);
+  return at::std(self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
 Tensor& std_out(Tensor& result, const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
@@ -1211,7 +1244,8 @@ Tensor var(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
 }
 
 Tensor& var_out(Tensor& result, const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
-  return at::std_out(result, self, dimnames_to_positions(self, dim), unbiased, keepdim);
+  return at::var_out(
+      result, self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
 std::tuple<Tensor,Tensor> var_mean(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {

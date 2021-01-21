@@ -622,6 +622,9 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad):
         SampleInput(tensor_nd, kwargs=dict(dim=1, unbiased=True, keepdim=True)),
         SampleInput(tensor_1d, kwargs=dict(dim=0, unbiased=True, keepdim=True)),
         SampleInput(tensor_1d, kwargs=dict(dim=0, unbiased=False, keepdim=False)),
+
+        SampleInput(tensor_nd, kwargs=dict(dim=(1,), correction=S // 2)),
+        SampleInput(tensor_nd, kwargs=dict(correction=0, keepdim=True)),
     ]
 
 

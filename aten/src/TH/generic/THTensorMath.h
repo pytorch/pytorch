@@ -37,8 +37,7 @@ TH_API void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor 
 TH_API void THTensor_(renorm)(THTensor *r_, THTensor *t, scalar_t value, int dimension, scalar_t maxnorm);
 TH_API void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, scalar_t minvalue, scalar_t maxvalue);
 
-TH_API accreal THTensor_(var_all)(THTensor *self, bool unbiased);
-TH_API accreal THTensor_(std_all)(THTensor *self, bool unbiased);
+TH_API accreal THTensor_(std_var_all)(THTensor* self, int64_t correction, bool take_sqrt);
 
 #endif
 #endif

@@ -29,8 +29,7 @@ Tensor & _th_put_(Tensor & self, const Tensor & index, const Tensor & source, bo
 Tensor & _th_index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar value);
 std::tuple<Tensor &,Tensor &> _th_mode_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool keepdim);
 std::tuple<Tensor,Tensor> _th_mode(const Tensor & self, int64_t dim, bool keepdim);
-Tensor _th_var(const Tensor & self, bool unbiased);
-Tensor _th_std(const Tensor & self, bool unbiased);
+Scalar _th_std_var(const Tensor& self, int64_t unbiased, bool take_sqrt);
 Tensor & _th_renorm_out(Tensor & result, const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm);
 Tensor _th_renorm(const Tensor & self, Scalar p, int64_t dim, Scalar maxnorm);
 Tensor & _th_renorm_(Tensor & self, Scalar p, int64_t dim, Scalar maxnorm);

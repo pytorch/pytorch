@@ -24,7 +24,7 @@ DECLARE_DISPATCH(reduce_fn, argmax_stub);
 DECLARE_DISPATCH(reduce_fn, argmin_stub);
 
 using reduce_std_var_function =
-  void (*)(TensorIterator&, bool unbiased, bool take_sqrt);
+    void (*)(TensorIterator&, int64_t correction, bool take_sqrt);
 DECLARE_DISPATCH(reduce_std_var_function, std_var_stub);
 
 using reduce_norm_fn =
