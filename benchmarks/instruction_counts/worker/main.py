@@ -19,7 +19,7 @@ import dataclasses
 import enum
 import os
 import pickle
-from typing import Any, Dict, Optional, Tuple, Union, TYPE_CHECKING
+from typing import Any, Optional, Tuple, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
     # Benchmark utils are only partially strict compliant, so MyPy won't follow
@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import CallgrindStats
 else:
     from torch.utils.benchmark import CallgrindStats, Language, Measurement, Timer
+
 
 WORKER_PATH = os.path.abspath(__file__)
 

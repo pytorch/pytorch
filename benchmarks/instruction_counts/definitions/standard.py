@@ -1,42 +1,34 @@
 """Default set of benchmarks."""
-import functools
-
-from core.api import Setup, TimerArgs, GroupedTimerArgs
+from core.api_impl import GroupedStmts
 from core.types import FlatIntermediateDefinition
 from core.utils import flatten
-from worker.main import CostEstimate
+from definitions.setup import Setup
 
 
 BENCHMARKS: FlatIntermediateDefinition = flatten({
     "empty": {
-        "no allocation": GroupedTimerArgs(
+        "no allocation": GroupedStmts(
             r"torch.empty(())",
             r"torch::empty({0});",
-            Setup.NONE,
-            cost=CostEstimate.LESS_THAN_10_US,
         ),
 
-        "with allocation": GroupedTimerArgs(
+        "with allocation": GroupedStmts(
             r"torch.empty((1,))",
             r"torch::empty({1});",
-            Setup.NONE,
-            cost=CostEstimate.LESS_THAN_10_US,
         ),
     },
 
     ("Pointwise", "Data movement"): {
-        "contiguous (trivial)": GroupedTimerArgs(
+        "contiguous (trivial)": GroupedStmts(
             r"x.contiguous()",
             r"x.contiguous();",
-            Setup.TRIVIAL,
-            cost=CostEstimate.LESS_THAN_10_US
+            Setup.TRIVIAL_2D.value,
         ),
 
-        "contiguous (non-trivial)": GroupedTimerArgs(
+        "contiguous (non-trivial)": GroupedStmts(
             r"x.t().contiguous()",
             r"x.t().contiguous();",
-            Setup.TRIVIAL,
-            cost=CostEstimate.LESS_THAN_10_US
+            Setup.TRIVIAL_2D.value,
         ),
     },
 })
