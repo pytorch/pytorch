@@ -50,6 +50,10 @@ struct GenericDict;
 struct Object;
 struct PyObjectHolder;
 struct EnumHolder;
+// We need a ComplexHolder because currently the payloads in the Union
+// only take 64 bits. Since ComplexDouble takes up 128 bits, and is too big
+// to fit in the IValue directly, we indirect complex numbers through an intrusive
+// pointer to ComplexHolder (which contains a c10::complex).
 struct ComplexHolder : c10::intrusive_ptr_target {
   public:
     template <typename T>
