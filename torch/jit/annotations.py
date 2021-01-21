@@ -8,7 +8,7 @@ from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optio
 from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore
 from ._state import _get_script_class
 
-from torch._C import TensorType, TupleType, FloatType, IntType, \
+from torch._C import TensorType, TupleType, FloatType, IntType, ComplexDoubleType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
     DeviceObjType, StreamObjType, FutureType, EnumType
 
@@ -364,6 +364,7 @@ __all__ = [
     'TensorType',
     'TupleType',
     'FloatType',
+    'ComplexDoubleType',
     'IntType',
     'ListType',
     'StringType',
