@@ -63,6 +63,7 @@ class ReduceBench(benchmark.Benchmark):
         }
 
     def _set_skip_input_transform(self, input_str):
+        # In the test setting, s1 will skip the input transformation, and s0 will not.
         if input_str == "s0":
             self.skip_input_transform = False
         elif input_str == "s1":
