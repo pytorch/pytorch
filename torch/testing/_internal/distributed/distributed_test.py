@@ -2851,18 +2851,12 @@ class DistributedTest:
                     loss.backward()
                     # For each worker, the gradient on the weight should be worker_rank.
                     grad = net.module.weight.grad
-                    avg = grad.clone()
-                    # All-reducing the gradient averages should give us the gradient
-                    # average. If not, then one of the workers has not correctly
-                    # written back the averaged gradient before this all-reduce call.
-                    dist.all_reduce(avg)
                     world_size = int(os.environ["WORLD_SIZE"])
-                    avg.div_(world_size)
                     expected_grad = sum(i for i in range(world_size)) / world_size
                     # Cannot use exact match here due to a very small accuracy loss, e.g., 1e-05.
                     torch.testing.assert_allclose(
-                        avg[0, 0], expected_grad,
-                        msg=f"Expected gradient of {expected_grad} but got {avg} on rank {self.rank}")
+                        grad[0, 0], expected_grad,
+                        msg=f"Expected gradient of {expected_grad} but got {grad} on rank {self.rank}")
 
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
