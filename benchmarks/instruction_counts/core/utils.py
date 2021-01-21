@@ -7,6 +7,16 @@ from core.api import AutogradMode, AutoLabels, RuntimeMode, TimerArgs, GroupedBe
 from core.types import Definition, FlatDefinition, FlatIntermediateDefinition, Label
 
 
+_TEMPDIR: Optional[str] = None
+def get_temp_dir() -> str:
+    global _TEMPDIR
+    if _TEMPDIR is None:
+        temp_dir = tempfile.mkdtemp()
+        atexit.register(shutil.rmtree, path=temp_dir)
+        _TEMPDIR = temp_dir
+    return _TEMPDIR
+
+
 def _flatten(
     key_prefix: Label,
     sub_schema: Definition,
@@ -65,13 +75,3 @@ def unpack(definitions: FlatIntermediateDefinition) -> FlatDefinition:
                 results.append((label, auto_labels, timer_args))
 
     return tuple(results)
-
-
-_TEMPDIR: Optional[str] = None
-def get_temp_dir() -> str:
-    global _TEMPDIR
-    if _TEMPDIR is None:
-        temp_dir = tempfile.mkdtemp()
-        atexit.register(shutil.rmtree, path=temp_dir)
-        _TEMPDIR = temp_dir
-    return _TEMPDIR

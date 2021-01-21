@@ -2,6 +2,7 @@
 import abc
 import dataclasses
 import enum
+import textwrap
 from typing import Optional, Tuple, Union, TYPE_CHECKING
 
 from worker.main import WorkerTimerArgs
@@ -46,6 +47,14 @@ class GroupedSetup:
     py_setup: Optional[str] = None
     cpp_setup: Optional[str] = None
     global_setup: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        # dedent all populated entries.
+        for field in dataclasses.fields(self):
+            assert field.type == Optional[str]
+            value: Optional[str] = getattr(self, field.name)
+            if value is not None:
+                object.__setattr__(self, field.name, textwrap.dedent(value))
 
 
 class GroupedBenchmark(abc.ABC):
