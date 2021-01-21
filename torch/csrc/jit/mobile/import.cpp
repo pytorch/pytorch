@@ -234,6 +234,10 @@ void parseMethods(
       }
     }
 
+    if (!unsupported_op_names.empty()) {
+      print_unsupported_ops_and_throw(unsupported_op_names);
+    };
+
     //    for (const auto& constant : consts_list) {
     //      function->append_constant(constant);
     //    }
@@ -249,9 +253,6 @@ void parseMethods(
     function->set_register_size(register_size);
 
     mcu.register_function(std::move(function));
-    if (!unsupported_op_names.empty()) {
-      print_unsupported_ops_and_throw(unsupported_op_names);
-    };
   }
 }
 
