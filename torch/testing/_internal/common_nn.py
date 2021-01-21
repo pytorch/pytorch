@@ -1322,6 +1322,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine',
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -1340,6 +1341,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine_simple_average',
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -1359,6 +1361,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -3265,6 +3268,7 @@ new_module_tests = [
         input_size=(2, 128, 2, 2),  # trigger special case of spatial CUDA algo
         fullname='softmax_spatial_special',
         pickle=False,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=1),
@@ -3318,6 +3322,7 @@ new_module_tests = [
         input_size=(2, 128, 2, 2),  # trigger special case of spatial CUDA algo
         fullname='log_softmax_spatial_special',
         pickle=False,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.log_softmax, dim=1),
