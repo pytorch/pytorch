@@ -4037,11 +4037,10 @@ class TestLinalg(TestCase):
 
         self.assertEqual(torch.mv(nm, _m), torch.mv(nm, _m, out=_m_out))
 
-    @onlyCPU
     def test_renorm_ps(self, device):
         # full reduction
         x = torch.randn(5, 5)
-        xn = x.numpy()
+
         for p in [1, 2, 3, 4, inf]:
             res = x.renorm(p, 1, 1)
             expected = x / x.norm(p, 0, keepdim=True).clamp(min=1)
