@@ -4112,9 +4112,9 @@ class TestTorchDeviceType(TestCase):
                 actual = torch.diff(t, dim=dim, prepend=t, append=t)
 
                 if t.dtype == torch.bfloat16:
-                    np_t = t.to(torch.float).numpy()
+                    np_t = t.to(dtype=torch.float, device="cpu").numpy()
                 else:
-                    np_t = t.numpy()
+                    np_t = t.cpu().numpy()
 
                 # test when both prepend and append are tensors
                 expected = torch.from_numpy(np.diff(np_t, axis=dim, prepend=np_t, append=np_t))
