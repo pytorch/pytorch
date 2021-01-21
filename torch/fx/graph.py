@@ -1,7 +1,6 @@
 from .node import Node, Argument, Target, map_arg
 
 from typing import Callable, Any, List, Dict, Optional, Tuple, Set
-from tabulate import tabulate
 import builtins
 import torch
 import types
@@ -791,6 +790,12 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
         Prints the intermediate representation of the graph in tabular
         format.
         """
+        try:
+            from tabulate import tabulate
+        except ImportError:
+            print("`print_tabular` relies on the library `tabulate`, "
+                  "which could not be found on this machine. Run `pip "
+                  "install tabulate` to install the library.")
         node_specs = [[n.op, n.name, n.target, n.args, n.kwargs]
                       for n in self.nodes]
         print(tabulate(node_specs,
