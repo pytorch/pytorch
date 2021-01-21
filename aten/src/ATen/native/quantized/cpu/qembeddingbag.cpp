@@ -13,6 +13,106 @@
 torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
 
 namespace {
+
+// Fallback implementation when FBGEMM is not available.
+template <
+    typename IndexType,
+    typename OffsetType,
+    int BIT_RATE,
+    int NUM_ELEM_PER_BYTE>
+at::Tensor& embedding_lookup_fallback_impl(
+    const at::Tensor& weight,
+    const at::Tensor& indices,
+    const at::Tensor& offsets,
+    const c10::optional<at::Tensor>& per_sample_weights_,
+    const c10::optional<at::Tensor>& compressed_indices_mapping,
+    at::Tensor& output,
+    const int64_t block_size,
+    const int64_t output_size,
+    bool include_last_offset,
+    bool pruned) {
+  auto* output_data = output.data_ptr<float>();
+  const auto weight_data = weight.data_ptr<uint8_t>();
+  const auto indices_data = indices.data_ptr<IndexType>();
+  int32_t* compressed_indices_mapping_data = nullptr;
+  const auto weight_sizes = weight.sizes();
+  const int64_t N = weight_sizes[0];
+  const int64_t weight_size = weight_sizes[1];
+  const int index_size = indices.numel();
+
+  auto accessor = offsets.accessor<OffsetType, 1>();
+  std::vector<OffsetType> lengths_data;
+
+  int64_t lower = accessor[0];
+  for (int64_t i = 1; i < offsets.numel(); ++i) {
+    lengths_data.push_back(accessor[i] - lower);
+    lower = accessor[i];
+  }
+  if (!include_last_offset) {
+    lengths_data.push_back(indices.numel() - lower);
+  }
+
+  int64_t current = 0;
+  float* per_sample_weights_data;
+  if (per_sample_weights_.has_value()) {
+    per_sample_weights_data = per_sample_weights_.value().data_ptr<float>();
+  }
+  for (int m = 0; m < output_size; ++m) {
+    memset(output_data, 0, block_size * sizeof(float));
+    TORCH_CHECK(
+        current + lengths_data[m] <= index_size,
+        "Expect the lengths data to be less than indices size");
+
+    for (int i = 0; i < lengths_data[m]; ++i, ++current) {
+      int64_t idx;
+      if (!pruned) {
+        idx = indices_data[current];
+        TORCH_CHECK((idx >= 0 && idx < N), "Invalid indices data");
+      } else {
+        int64_t uncompressed_idx = indices_data[current];
+        int compressed_index_size = compressed_indices_mapping.value().numel();
+        compressed_indices_mapping_data =
+            compressed_indices_mapping.value().data_ptr<int32_t>();
+        TORCH_CHECK(
+            uncompressed_idx >= 0 && uncompressed_idx < compressed_index_size,
+            "Invalid indices data for Sparse Op.")
+        idx = compressed_indices_mapping_data[uncompressed_idx];
+        if (idx == -1) {
+          continue;
+        }
+      }
+
+      float weight_val = 1.0f;
+      if (per_sample_weights_.has_value()) {
+        weight_val = per_sample_weights_data[current];
+      }
+      float scale, bias;
+      if (BIT_RATE == 8) {
+        const uint8_t* scale_bias =
+            weight_data + (idx + 1) * weight_size - 2 * sizeof(float);
+        scale = weight_val * reinterpret_cast<const float*>(scale_bias)[0];
+        bias = weight_val * reinterpret_cast<const float*>(scale_bias)[1];
+      } else {
+        const at::Half* scale_bias = reinterpret_cast<const at::Half*>(
+            weight_data + (idx + 1) * weight_size - 2 * sizeof(at::Half));
+        scale = weight_val * (scale_bias)[0];
+        bias = weight_val * (scale_bias)[1];
+      }
+
+      for (int j = 0; j < block_size; ++j) {
+        uint8_t quantized =
+            weight_data[idx * weight_size + j / NUM_ELEM_PER_BYTE];
+        quantized >>= (j % NUM_ELEM_PER_BYTE) * BIT_RATE;
+        quantized &= (1 << BIT_RATE) - 1;
+
+        output_data[j] = fma(scale, quantized, output_data[j] + bias);
+      }
+    } // for each i
+    output_data += block_size;
+  } // for each m
+  return output;
+}
+
 template <typename IndexType, typename OffsetType>
 at::Tensor embedding_bag_4bit_impl(
     const at::Tensor& weight,
@@ -133,70 +233,20 @@ at::Tensor embedding_bag_4bit_impl(
         success,
         "FBGEMM GenerateEmbeddingSpMDMNBitRowWiseSparse kernel failed for 4-bit input");
   }
-#else
-
-  auto accessor = offsets.accessor<OffsetType, 1>();
-  std::vector<OffsetType> lengths_data;
-
-  int64_t lower = accessor[0];
-  for (int64_t i = 1; i < offsets.numel(); ++i) {
-    lengths_data.push_back(accessor[i] - lower);
-    lower = accessor[i];
-  }
-  if (!include_last_offset) {
-    lengths_data.push_back(indices.numel() - lower);
-  }
-
-  int64_t current = 0;
-  float* per_sample_weights_data;
-  if (per_sample_weights_.has_value()) {
-    per_sample_weights_data = per_sample_weights_.value().data_ptr<float>();
-  }
-  for (int m = 0; m < output_size; ++m) {
-    memset(output_data, 0, block_size * sizeof(float));
-    TORCH_CHECK(
-        current + lengths_data[m] <= index_size,
-        "Expect the lengths data to be less than indices size");
-
-    for (int i = 0; i < lengths_data[m]; ++i, ++current) {
-      int64_t idx;
-      if (!pruned_weights) {
-        idx = indices_data[current];
-        TORCH_CHECK((idx >= 0 && idx < N), "Invalid indices data");
-      } else {
-        int64_t uncompressed_idx = indices_data[current];
-        TORCH_CHECK(
-            uncompressed_idx >= 0 && uncompressed_idx < compressed_index_size,
-            "Invalid indices data for Sparse Op.")
-        idx = compressed_indices_mapping_data[uncompressed_idx];
-        if (idx == -1) {
-          continue;
-        }
-      }
-      const at::Half* scale_bias = reinterpret_cast<const at::Half*>(
-          weight_data + (idx + 1) * weight_size - 2 * sizeof(at::Half));
-
-      float weight_val = 1.0f;
-      if (per_sample_weights_.has_value()) {
-        weight_val = per_sample_weights_data[current];
-      }
-      const float scale = weight_val * scale_bias[0];
-      const float bias = weight_val * scale_bias[1];
-
-      for (int j = 0; j < block_size; ++j) {
-        uint8_t quantized =
-            weight_data[idx * weight_size + j / /*NUM_ELEM_PER_BYTE*/ 2];
-        quantized >>= (j % 2) * 4;
-        quantized &= (1 << 4) - 1;
-
-        output_data[j] = fma(scale, quantized, output_data[j] + bias);
-      }
-    } // for each i
-    output_data += block_size;
-  } // for each m
-
-#endif
   return output;
+#else
+  return embedding_lookup_fallback_impl<IndexType, OffsetType, 4, 2>(
+      weight,
+      indices,
+      offsets,
+      per_sample_weights_,
+      compressed_indices_mapping,
+      output,
+      D,
+      output_size,
+      include_last_offset,
+      (pruned_weights && !fallback_to_no_sparse));
+#endif
 }
 
 template <typename IndexType, typename OffsetType>
@@ -327,11 +377,19 @@ at::Tensor& embedding_bag_byte_impl(
         "FBGEMM GenerateEmbeddingSpMDMRowWiseSparse kernel failed for 8-bit input");
   }
   return output;
+#else
+  return embedding_lookup_fallback_impl<IndexType, OffsetType, 8, 1>(
+      weight,
+      indices,
+      offsets,
+      per_sample_weights_,
+      compressed_indices_mapping,
+      output,
+      D,
+      output_size,
+      include_last_offset,
+      (pruned_weights && !fallback_to_no_sparse));
 #endif
-  // TODO add default (non-FBGEMM) implementation.
-  TORCH_CHECK(
-      false,
-      "embedding_bag_byte expects FBGEMM support. This PyTorch installation was not built with FBGEMM operators");
 }
 
 at::Tensor& embedding_bag_byte_helper(

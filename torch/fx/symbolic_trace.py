@@ -244,6 +244,11 @@ class Tracer(TracerBase):
         Trace ``root`` and return the corresponding FX ``Graph`` representation. ``root``
         can either be an ``nn.Module`` instance or a Python callable.
 
+        Note that after this call, ``self.root`` may be different from the ``root`` passed
+        in here. For example, when a free function is passed to ``trace()``, we will
+        create an ``nn.Module`` instance to use as the root and add embedded constants
+        to.
+
 
         Args:
 
@@ -476,4 +481,6 @@ def symbolic_trace(root : Union[torch.nn.Module, Callable]) -> GraphModule:
         GraphModule: a Module created from the recorded operations from ``root``.
 
     """
-    return GraphModule(root if isinstance(root, torch.nn.Module) else torch.nn.Module(), Tracer().trace(root))
+    tracer = Tracer()
+    graph = tracer.trace(root)
+    return GraphModule(tracer.root, graph)
