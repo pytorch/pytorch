@@ -1,77 +1,74 @@
 """Default set of benchmarks."""
 import functools
 
-from core.api import Setup, TimerArgs, GroupedTimerArgs
+from core.api_impl import GroupedModules, GroupedStmts
 from core.types import FlatIntermediateDefinition
 from core.utils import flatten, iter_parsed_lines, parse_stmts
-from worker.main import CostEstimate
+from definitions.setup import Setup
 
 
 # Convenience methods for small, simple benchmarks to reduce boilerplate.
-_small_trivial = functools.partial(
-    GroupedTimerArgs,
-    setup=Setup.TRIVIAL,
-    cost=CostEstimate.LESS_THAN_10_US)
+TrivialSetup_GroupedStmts = functools.partial(
+    GroupedStmts,
+    setup=Setup.TRIVIAL_2D.value,
+)
 
-_small_generic = functools.partial(
-    GroupedTimerArgs,
-    setup=Setup.GENERIC,
-    cost=CostEstimate.LESS_THAN_10_US)
+GenericSetup_GroupedStmts = functools.partial(
+    GroupedStmts,
+    setup=Setup.GENERIC.value,
+)
 
 
 BENCHMARKS: FlatIntermediateDefinition = flatten({
     "empty": {
-        "no allocation": GroupedTimerArgs(
+        "no allocation": GroupedStmts(
             r"torch.empty(())",
             r"torch::empty({0});",
-            Setup.NONE,
-            cost=CostEstimate.LESS_THAN_10_US,
         ),
 
-        "with allocation": GroupedTimerArgs(
+        "with allocation": GroupedStmts(
             r"torch.empty((1,))",
             r"torch::empty({1});",
-            Setup.NONE,
-            cost=CostEstimate.LESS_THAN_10_US,
         ),
     },
 
     ("Pointwise", "Math"): {
         "add": {
-            "Tensor-Scalar": _small_generic(
+            "Tensor-Scalar": GenericSetup_GroupedStmts(
                 r"x += 1.0",
                 r"x += 1.0;",
             ),
 
-            "Tensor-Tensor": _small_generic(
+            "Tensor-Tensor": GenericSetup_GroupedStmts(
                 r"x += y_float",
                 r"x += y_float;",
                 signature=r"f(x, y_float) -> None",
+                torchscript=True,
             ),
 
-            "Tensor-Tensor (type promotion)": _small_generic(
+            "Tensor-Tensor (type promotion)": GenericSetup_GroupedStmts(
                 r"x += y_int",
                 r"x += y_int;",
             ),
 
-            "Tensor-Tensor (out of place)": _small_generic(
+            "Tensor-Tensor (out of place)": GenericSetup_GroupedStmts(
                 r"x + y_float",
                 r"x + y_float;",
             ),
         },
 
-        "multiply": _small_generic(
+        "multiply": GenericSetup_GroupedStmts(
             r"x * y_float",
             r"x * y_float;",
         ),
 
         "equality": {
-            "Tensor-Tensor": _small_generic(
+            "Tensor-Tensor": GenericSetup_GroupedStmts(
                 r"x == y_float",
                 r"x == y_float;",
             ),
 
-            "Tensor-Scalar": _small_generic(
+            "Tensor-Scalar": GenericSetup_GroupedStmts(
                 r"x == 1.0",
                 r"x == 1.0;",
             ),
@@ -79,56 +76,56 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
     },
 
     ("Pointwise", "Data movement"): {
-        "contiguous (trivial)": _small_trivial(
+        "contiguous (trivial)": TrivialSetup_GroupedStmts(
             r"x.contiguous()",
             r"x.contiguous();",
         ),
 
-        "contiguous (non-trivial)": _small_trivial(
+        "contiguous (non-trivial)": TrivialSetup_GroupedStmts(
             r"x.t().contiguous()",
             r"x.t().contiguous();",
         ),
 
-        "clone": _small_trivial(
+        "clone": TrivialSetup_GroupedStmts(
             r"x.clone()",
             r"x.clone();",
         ),
 
-        "copy_": _small_generic(
+        "copy_": GenericSetup_GroupedStmts(
             r"x.copy_(y_float)",
             r"x.copy_(y_float);",
         ),
 
-        "zero_": _small_trivial(
+        "zero_": TrivialSetup_GroupedStmts(
             r"x.zero_()",
             r"x.zero_();",
         ),
 
-        "RNG": _small_trivial(
+        "RNG": TrivialSetup_GroupedStmts(
             r"x.uniform_()",
             r"x.uniform_();",
         ),
     },
 
     "Reduction": {
-        "Max": _small_generic(
+        "Max": GenericSetup_GroupedStmts(
             r"x.max()",
             r"x.max();"
         ),
 
-        "Sum": _small_generic(
+        "Sum": GenericSetup_GroupedStmts(
             r"x.sum()",
             r"x.sum();",
         ),
 
-        "Variance": _small_generic(
+        "Variance": GenericSetup_GroupedStmts(
             r"x.var(0)",
             r"x.var(0);",
         ),
     },
 
     "Indexing": {
-        py_index: GroupedTimerArgs(
+        py_index: GroupedStmts(
             f"""
                 x{py_index} = 1
                 x{py_index} = y{py_index}
@@ -137,8 +134,7 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
                 x.index_put_({cpp_index}, 1);
                 x.index_put_({cpp_index}, y.index({cpp_index}));
             """,
-            Setup.INDEXING,
-            cost=CostEstimate.LESS_THAN_50_US,
+            Setup.INDEXING.value,
         )
 
         for py_index, cpp_index in iter_parsed_lines(r"""
@@ -155,48 +151,48 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
         """)
     },
 
-    ("Indexing", "Tensor index"): GroupedTimerArgs(
+    ("Indexing", "Tensor index"): GroupedStmts(
         r"a[b, None, ...] = 1",
         r"a.index_put_({b, None, Ellipsis}, 1);",
-        Setup.INDEXING,
+        Setup.INDEXING.value,
         signature=r"f(a, b) -> None",
-        cost=CostEstimate.LESS_THAN_50_US,
+        torchscript=True,
     ),
 
     "Metadata and views": {
-        "size": _small_trivial(
+        "size": TrivialSetup_GroupedStmts(
             r"x.size()[0]",
             r"x.sizes()[0];",
         ),
 
-        "stride": _small_trivial(
+        "stride": TrivialSetup_GroupedStmts(
             r"x.stride(0)",
             r"x.stride(0);",
         ),
 
-        "as_strided": _small_generic(
+        "as_strided": GenericSetup_GroupedStmts(
             r"torch.as_strided(x, (2, 3), (4, 1), 2)",
             r"torch::as_strided(x, {2, 3}, {4, 1}, 2);",
         ),
 
-        "select": _small_trivial(
+        "select": TrivialSetup_GroupedStmts(
             r"x.select(1, 1)",
             r"x.select(1, 1);",
         ),
 
-        "unsqueeze": _small_trivial(
+        "unsqueeze": TrivialSetup_GroupedStmts(
             r"x.unsqueeze(0)",
             r"x.unsqueeze(0);",
         ),
 
-        "view": _small_trivial(
+        "view": TrivialSetup_GroupedStmts(
             r"x.view(-1, 1)",
             r"x.view({-1, 1});",
         ),
     },
 
     "Misc": {
-        "resize_": _small_trivial(
+        "resize_": TrivialSetup_GroupedStmts(
             r"""
                 x.resize_(0)
                 x.resize_((4, 4))
@@ -207,70 +203,94 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
             """,
         ),
 
-        "Sort": GroupedTimerArgs(
+        "Sort": GenericSetup_GroupedStmts(
             r"torch.sort(x)",
             r"torch::sort(x);",
-            Setup.GENERIC,
-            cost=CostEstimate.LESS_THAN_50_US,
         ),
     },
 
     "MatMul": {
-        "Broadcasting (matmul)": GroupedTimerArgs(
+        "Broadcasting (matmul)": GenericSetup_GroupedStmts(
             r"z = torch.matmul(x, y_float)",
             r"auto z = torch::matmul(x, y_float);",
-            Setup.GENERIC,
-            cost=CostEstimate.LESS_THAN_50_US,
         ),
 
-        "Non-broadcasting (mm)": _small_generic(
+        "Non-broadcasting (mm)": GenericSetup_GroupedStmts(
             r"z = torch.mm(x, y_float)",
             r"auto z = torch::mm(x, y_float);",
         ),
     },
 
+    "nn Modules": {
+        py_constructor.split("(")[0]: GroupedModules(
+            f"model = torch.nn.{py_constructor}",
+            f"auto model = torch::nn::{cpp_constructor};",
+            setup=setup.value,
+            signature="f(x) -> y",
+            torchscript=torchscript,
+        )
+
+        for setup, torchscript, (py_constructor, cpp_constructor) in (
+            (Setup.TRIVIAL_4D, True, ("BatchNorm2d(4)",) * 2),
+            (Setup.TRIVIAL_4D, True, ("GroupNorm(2, 4)",) * 2),
+            (Setup.TRIVIAL_4D, True, (
+                "LayerNorm(4)",
+                "LayerNorm(torch::nn::LayerNormOptions({4}))"
+            )),
+            (Setup.TRIVIAL_3D, True, ("Conv1d(4, 4, 1)",) * 2),
+            (Setup.TRIVIAL_4D, True, ("Conv2d(4, 4, 1)",) * 2),
+            (Setup.TRIVIAL_4D, True, ("MaxPool2d(2)",) * 2),
+            (Setup.TRIVIAL_2D, True, ("ReLU()",) * 2),
+            (Setup.TRIVIAL_2D, True, ("Sigmoid()",) * 2),
+            (Setup.TRIVIAL_4D, True, ("Linear(4, 2)",) * 2),
+
+            # TODO: LSTM can't be TorchScript'd
+            (Setup.TRIVIAL_3D, False, ("LSTM(4, 2)",) * 2),
+        )
+    },
+
     "Mesoscale": {
-        "MatMul-Bias-ReLU": GroupedTimerArgs(
+        "MatMul-Bias-ReLU": GroupedStmts(
             *parse_stmts(r"""
                 Python                                   | C++
                 ---------------------------------------- | ----------------------------------------
                 z0 = torch.mm(x, y) + bias               | auto z0 = torch::mm(x, y) + bias;
                 z1 = torch.nn.functional.relu(z0)        | auto z1 = torch::nn::functional::relu(z0);
             """),
-            Setup.MESOSCALE,
+            Setup.MESOSCALE.value,
             signature=r"f(x, y, bias) -> z1",
-            cost=CostEstimate.LESS_THAN_50_US,
+            torchscript=True,
         ),
 
-        "Off diagonal indices": GroupedTimerArgs(
+        "Off diagonal indices": GroupedStmts(
             *parse_stmts(r"""
                 Python                                   | C++
                 ---------------------------------------- | ----------------------------------------
                 indices = torch.arange(eye_4.numel())    | auto indices = torch::arange(eye_4.numel());
                 z = indices[eye_4.flatten() == 0]        | auto z = indices.index({eye_4.flatten() == 0});
             """),
-            Setup.MESOSCALE,
+            Setup.MESOSCALE.value,
             signature=r"f(eye_4) -> z",
-            cost=CostEstimate.LESS_THAN_100_US,
+            torchscript=True,
         ),
     },
 
-    "AutoGrad": {
-        "simple": GroupedTimerArgs(
+    "training": {
+        "simple": GroupedStmts(
             *parse_stmts(r"""
                 Python                                   | C++
                 ---------------------------------------- | ----------------------------------------
                 a0 = torch.nn.functional.relu(x * w0)    | auto a0 = torch::nn::functional::relu(x * w0);
                 y = a0 * w1                              | auto y = a0 * w1;
-                y.backward()                             | y.backward();
             """),
-            Setup.AUTOGRAD,
+            Setup.TRAINING.value,
             num_threads=(1, 2),
-            signature=r"f(x, w0, w1) -> None",
-            cost=CostEstimate.LESS_THAN_250_US,
+            signature=r"f(x, w0, w1) -> y",
+            torchscript=True,
+            autograd=True,
         ),
 
-        "intermediate": GroupedTimerArgs(
+        "ensemble": GroupedStmts(
             *parse_stmts(r"""
                 Python                                   | C++
                 ---------------------------------------- | ----------------------------------------
@@ -280,12 +300,12 @@ BENCHMARKS: FlatIntermediateDefinition = flatten({
                     torch.cat([a0, a1]),                 |     torch::cat({a0, a1}),
                     p=2.0, dim=0,                        |     torch::nn::functional::NormalizeFuncOptions().p(2).dim(0)
                 ).dot(w2)                                | ).dot(w2);
-                z.backward()                             | z.backward();
             """),
-            Setup.AUTOGRAD,
+            Setup.TRAINING.value,
             num_threads=(1, 2),
-            signature=r"f(x, y, w0, w1, w2) -> None",
-            cost=CostEstimate.LESS_THAN_1000_US,
+            signature=r"f(x, y, w0, w1, w2) -> z",
+            torchscript=True,
+            autograd=True,
         ),
     },
 })

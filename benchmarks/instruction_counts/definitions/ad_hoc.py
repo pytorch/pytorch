@@ -4,11 +4,11 @@ This file also goes into more detail how to define a benchmark.
 """
 from torch.utils.benchmark import Language
 
-from core.api import Setup, TimerArgs, GroupedTimerArgs
+from core.api import TimerArgs, GroupedSetup
+from core.api_impl import GroupedStmts
 from core.types import FlatIntermediateDefinition
 from core.utils import flatten
 from definitions.standard import BENCHMARKS as STANDARD_BENCHMARKS
-from worker.main import CostEstimate
 
 
 ADHOC_BENCHMARKS: FlatIntermediateDefinition = flatten({
@@ -24,7 +24,7 @@ ADHOC_BENCHMARKS: FlatIntermediateDefinition = flatten({
         language=Language.PYTHON,
     ),
 
-    "group definition": GroupedTimerArgs(
+    "group definition": GroupedStmts(
         py_stmt="""
             y = x.clone()
             y += 5
@@ -34,17 +34,15 @@ ADHOC_BENCHMARKS: FlatIntermediateDefinition = flatten({
             y += 5;
         """,
 
-        # Need to add entry to Setup Enum so grouping code knows how to
-        # set up in both Python and C++.
-        setup=Setup.EXAMPLE_FOR_ADHOC,
+        setup=GroupedSetup(
+            "x = torch.ones((1, 1))",
+            "auto x = torch::ones({1, 1});"
+        ),
 
         # Optional. This will allow the testing infrastructure to measure
         # TorchScript performance as well.
         signature="f(x) -> y",
-
-        # Optional. Defaults to `CostEstimate.AUTO` Used to determine how many
-        # Callgrind iterations to run.
-        cost=CostEstimate.AUTO,
+        torchscript=True,
     ),
 
     # Borrow example from the standard set. (e.g. for debugging a known regression.)

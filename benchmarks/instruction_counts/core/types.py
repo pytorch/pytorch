@@ -1,7 +1,7 @@
 """Type annotations for various benchmark objects."""
 from typing import Any, Dict, Optional, Tuple, Union
 
-from core.api import Mode, TimerArgs, GroupedTimerArgs
+from core.api import AutoLabels, TimerArgs, GroupedBenchmark
 from worker.main import WorkerTimerArgs
 
 
@@ -15,7 +15,7 @@ The end state for representing a benchmark is:
   Tuple[
       Tuple[
           Tuple[str, ...],      # Primary key
-          core.api.Mode,        # Secondary key
+          core.api.AutoLabels,  # Secondary key
           core.api.TimerArgs,   # Value
       ],
       ...
@@ -25,15 +25,8 @@ The end state for representing a benchmark is:
 For example:
   ```
   [
-      (("pointwise", "add"), Mode.PY, TimerArgs(...)),
-      (("pointwise", "add"), Mode.CPP, TimerArgs(...)),
-      (("pointwise", "add", "with alpha"), Mode.PY, TimerArgs(...)),
-      (("pointwise", "add", "with alpha"), Mode.CPP, TimerArgs(...)),
-      (("pointwise", "mul"), Mode.PY, TimerArgs(...)),
-      (("pointwise", "mul"), Mode.PY_TS, TimerArgs(...)),
-      (("pointwise", "mul"), Mode.CPP, TimerArgs(...)),
-      (("pointwise", "mul"), Mode.CPP_TS, TimerArgs(...)),
-      (("matmul",), Mode.PY, TimerArgs(...)),
+      (("pointwise", "add"), AutoLabels(..., Language.PYTHON), TimerArgs(...)),
+      (("pointwise", "add"), AutoLabels(..., Language.CPP), TimerArgs(...)),
       ...
   ]
   ```
@@ -45,12 +38,12 @@ like to define something like:
   {
       "pointwise" : {
           "add": {
-              None: GroupedTimerArgs(...),
-              "with alpha": GroupedTimerArgs(...),
+              None: GroupedStmts(...),
+              "with alpha": GroupedStmts(...),
           },
-          "mul": GroupedTimerArgs(...),
+          "mul": GroupedStmts(...),
       },
-      "matmul": GroupedTimerArgs(...),
+      "matmul": GroupedStmts(...),
   }
   ```
 and then parse out the flat representation. The type declarations below are
@@ -65,7 +58,7 @@ TL;DR
     {
         "case 0": TimerArgs(...),
         "case 1": TimerArgs(...),
-        "case 2": GroupedTimerArgs(...),
+        "case 2": GroupedStmts(...),
         ...
     }
     ```
@@ -82,14 +75,14 @@ _Label = Union[Label, Optional[str]]
 # So while the correct type definition would be:
 #   _Value = Union[
 #       # Base case:
-#       Union[TimerArgs, GroupedTimerArgs],
+#       Union[TimerArgs, GroupedBenchmark],
 #
 #       # Recursive case:
 #       Dict[Label, "_Value"],
 #   ]
 # we instead have to use Any and rely on runtime asserts in the parser.
 _Value = Union[
-    Union[TimerArgs, GroupedTimerArgs],
+    Union[TimerArgs, GroupedBenchmark],
     Dict[_Label, Any],
 ]
 
@@ -97,7 +90,7 @@ Definition = Dict[_Label, _Value]
 
 # We initially have to parse (flatten) to an intermediate state in order to
 # build TorchScript models.
-FlatIntermediateDefinition = Dict[Label, Union[TimerArgs, GroupedTimerArgs]]
+FlatIntermediateDefinition = Dict[Label, Union[TimerArgs, GroupedBenchmark]]
 
 # Final parsed schema.
-FlatDefinition = Tuple[Tuple[Label, Mode, WorkerTimerArgs], ...]
+FlatDefinition = Tuple[Tuple[Label, AutoLabels, WorkerTimerArgs], ...]
