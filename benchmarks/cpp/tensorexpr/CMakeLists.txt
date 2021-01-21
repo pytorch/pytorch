@@ -1,11 +1,5 @@
 find_package(AVX)
 
-if(C_AVX2_FOUND)
-  message(STATUS "AVX2 compiler support found")
-  add_compile_options(-DUSE_AVX2)
-  add_compile_options(-mavx2)
-endif()
-
 add_executable(
   tensorexpr_bench
   bench_approx.cpp
@@ -14,5 +8,11 @@ add_executable(
   bench_gemm.cpp
   bench_reduce.cpp
   main.cpp)
+
+if(C_AVX2_FOUND)
+  message(STATUS "AVX2 compiler support found")
+  target_compile_options(tensorexpr_bench PUBLIC -mavx2)
+  target_compile_definitions(tensorexpr_bench PUBLIC USE_AVX2)
+endif()
 
 target_link_libraries(tensorexpr_bench PRIVATE torch_library benchmark)
