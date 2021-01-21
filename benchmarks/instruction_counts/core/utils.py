@@ -1,14 +1,11 @@
 import atexit
-import re
 import shutil
 import tempfile
-import textwrap
-from typing import Iterator, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from core.api import AutogradMode, AutoLabels, RuntimeMode, TimerArgs, GroupedBenchmark
 from core.jit import generate_torchscript_file
 from core.types import Definition, FlatDefinition, FlatIntermediateDefinition, Label
-from worker.main import WorkerTimerArgs
 
 
 def _flatten(
