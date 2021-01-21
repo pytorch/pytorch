@@ -11,6 +11,16 @@ from core.jit import generate_torchscript_file
 from core.types import Definition, FlatDefinition, FlatIntermediateDefinition, Label
 
 
+_TEMPDIR: Optional[str] = None
+def get_temp_dir() -> str:
+    global _TEMPDIR
+    if _TEMPDIR is None:
+        temp_dir = tempfile.mkdtemp()
+        atexit.register(shutil.rmtree, path=temp_dir)
+        _TEMPDIR = temp_dir
+    return _TEMPDIR
+
+
 def _flatten(
     key_prefix: Label,
     sub_schema: Definition,
@@ -67,7 +77,7 @@ def unpack(definitions: FlatIntermediateDefinition) -> FlatDefinition:
             if ts_model_setup is not None:
                 name: str = re.sub(r'[^a-z0-9_]', '_', '_'.join(label).lower())
                 name = f"{name}_{uuid.uuid4()}"
-                model_path = generate_torchscript_file(ts_model_setup, name=name)
+                model_path = generate_torchscript_file(ts_model_setup, name=name, temp_dir=get_temp_dir())
 
             for auto_labels, timer_args in args.flatten(model_path):
                 results.append((label, auto_labels, timer_args))
@@ -124,13 +134,3 @@ def iter_parsed_lines(stmts: str) -> Iterator[Tuple[str, str]]:
     cpp_lines = [l.rstrip() for l in cpp_stmt.splitlines(keepends=False)]
     assert len(py_lines) == len(cpp_lines)
     return zip(py_lines, cpp_lines)
-
-
-_TEMPDIR: Optional[str] = None
-def get_temp_dir() -> str:
-    global _TEMPDIR
-    if _TEMPDIR is None:
-        temp_dir = tempfile.mkdtemp()
-        atexit.register(shutil.rmtree, path=temp_dir)
-        _TEMPDIR = temp_dir
-    return _TEMPDIR
