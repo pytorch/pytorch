@@ -82,7 +82,7 @@ def check_cuda_kernel_launches():
     torch_dir = os.path.dirname(os.path.realpath(__file__))
     torch_dir = os.path.dirname(torch_dir)  # Go up to parent torch
     torch_dir = os.path.dirname(torch_dir)  # Go up to parent caffe2
-
+    torch_dir += "/caffe2/share/fb/mask_rcnn/"
     kernels_without_checks = 0
     files_without_checks = []
     for root, dirnames, filenames in os.walk(torch_dir):
