@@ -1305,5 +1305,40 @@ class TestFX(JitTestCase):
         scripted = torch.jit.script(traced)
         self.assertIn("-> List[str]", scripted.code)
 
+    def test_snake_case(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.activations = torch.nn.ModuleDict([
+                    ["snake_case", torch.nn.ReLU()],
+                    ["PascalCase", torch.nn.LeakyReLU()],
+                    ["ALL_CAPS", torch.nn.PReLU()]
+                ])
+
+            def forward(self, x):
+                a = self.activations["snake_case"](x)
+                b = self.activations["PascalCase"](x)
+                c = self.activations["ALL_CAPS"](x)
+                return a, b, c
+
+        traced = symbolic_trace(M())
+
+        check = [
+            ("activations_snake_case", "activations.snake_case"),
+            ("activations_pascal_case", "activations.PascalCase"),
+            ("activations_all_caps", "activations.ALL_CAPS")
+        ]
+
+        i = 0
+        for node in traced.graph.nodes:
+            if node.op == "placeholder" or node.op == "output":
+                continue
+            name = check[i][0]
+            target = check[i][1]
+            self.assertEqual(name, node.name)
+            self.assertEqual(target, node.target)
+            i += 1
+        self.assertEqual(i, 3)
+
 if __name__ == '__main__':
     run_tests()

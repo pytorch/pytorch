@@ -14,7 +14,23 @@ def _is_magic(x: str) -> bool:
     return x.startswith('__') and x.endswith('__')
 
 def _snake_case(s: str) -> str:
-    return ''.join(['_' + i.lower() if i.isupper() else i for i in s]).lstrip('_')
+    """
+    Transforms the given string ``s`` to a Python-style variable name
+
+    Examples:
+        ``mod.snake_case`` -> ``mod.snake_case``
+        ``mod.pascalCase``-> ``mod.pascal_case``
+        ``mod.ALL_CAPS`` -> ``mod.all_caps``
+    """
+    res = []
+    res.append(s[0].lower())
+    for i in range(1, len(s) - 1):
+        if s[i].isupper() and s[i + 1].islower() and s[i - 1] != ".":
+            res.append("_")
+        res.append(s[i].lower())
+    if len(s) > 1:
+        res.append(s[-1].lower())
+    return ''.join(res)
 
 def get_qualified_name(func: Callable[..., Any]) -> str:
     # things like getattr just appear in builtins
