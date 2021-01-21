@@ -31,17 +31,20 @@ enum class Backend {
   CUDA,
   HIP,
   FPGA,
+  XPU,
   SparseCPU,
   SparseCUDA,
   CompressedSparseCPU,
   CompressedSparseCUDA,
   SparseHIP,
+  SparseXPU,
   MSNPU,
   XLA,
   Vulkan,
   Metal,
   QuantizedCPU,
   QuantizedCUDA,
+  QuantizedXPU,
   Undefined,
   MkldnnCPU,
   NumOptions
@@ -51,6 +54,8 @@ static inline Backend toSparse(Backend b) {
   switch (b) {
     case Backend::CPU:
       return Backend::SparseCPU;
+    case Backend::XPU:
+      return Backend::SparseXPU;
     case Backend::CUDA:
       return Backend::SparseCUDA;
     case Backend::HIP:
@@ -80,6 +85,10 @@ static inline Backend toDense(Backend b) {
       return Backend::MSNPU;
     case Backend::XLA:
       return Backend::XLA;
+    case Backend::XPU:
+      return Backend::XPU;
+    case Backend::SparseXPU:
+      return Backend::XPU;
     case Backend::SparseCPU:
       return Backend::CPU;
     case Backend::SparseCUDA:
@@ -90,6 +99,8 @@ static inline Backend toDense(Backend b) {
       return Backend::QuantizedCPU;
     case Backend::QuantizedCUDA:
       return Backend::QuantizedCUDA;
+    case Backend::QuantizedXPU:
+      return Backend::QuantizedXPU;
     default:
       throw std::runtime_error("Unknown backend");
   }
@@ -128,6 +139,12 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::QuantizedCPU;
   } else if (t == DispatchKey::QuantizedCUDA) {
     return Backend::QuantizedCUDA;
+  } else if (t == DispatchKey::XPU) {
+    return Backend::XPU;
+  } else if (t == DispatchKey::SparseXPU) {
+    return Backend::SparseXPU;
+  } else if (t == DispatchKey::QuantizedXPU) {
+    return Backend::QuantizedXPU;
   } else if (t == DispatchKey::Undefined) {
     return Backend::Undefined;
   } else {
@@ -149,6 +166,10 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::MSNPU;
     case Backend::XLA:
       return DispatchKey::XLA;
+    case Backend::XPU:
+      return DispatchKey::XPU;
+    case Backend::SparseXPU:
+      return DispatchKey::SparseXPU;
     case Backend::SparseCPU:
       return DispatchKey::SparseCPU;
     case Backend::SparseCUDA:
@@ -200,6 +221,10 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::CPU;
     case Backend::CompressedSparseCUDA:
       return DeviceType::CUDA;
+    case Backend::XPU:
+    case Backend::SparseXPU:
+    case Backend::QuantizedXPU:
+      return DeviceType::XPU;
     case Backend::MkldnnCPU:
     case Backend::QuantizedCPU:
       return DeviceType::CPU;
@@ -226,11 +251,15 @@ static inline Backend backendToCPU(Backend b) {
       return Backend::CPU;
     case Backend::FPGA:
       return Backend::CPU;
+    case Backend::XPU:
+      return Backend::CPU;
     case Backend::SparseCPU:
       return Backend::SparseCPU;
     case Backend::SparseCUDA:
       return Backend::SparseCPU;
     case Backend::SparseHIP:
+      return Backend::SparseCPU;
+    case Backend::SparseXPU:
       return Backend::SparseCPU;
     case Backend::MSNPU:
     case Backend::XLA:
@@ -241,6 +270,36 @@ static inline Backend backendToCPU(Backend b) {
       return Backend::QuantizedCPU;
     case Backend::QuantizedCUDA:
       return Backend::QuantizedCPU;
+    case Backend::QuantizedXPU:
+      return Backend::QuantizedCPU;
+    case Backend::Undefined:
+      return Backend::Undefined;
+    default:
+      AT_ERROR("Unknown backend");
+  }
+}
+
+static inline Backend backendToXPU(Backend b) {
+  switch (b) {
+    case Backend::CPU:
+    case Backend::CUDA:
+    case Backend::HIP:
+    case Backend::FPGA:
+    case Backend::XPU:
+    case Backend::MSNPU:
+    case Backend::XLA:
+    case Backend::MkldnnCPU:
+    case Backend::Vulkan:
+      return Backend::XPU;
+    case Backend::SparseCPU:
+    case Backend::SparseCUDA:
+    case Backend::SparseXPU:
+    case Backend::SparseHIP:
+      return Backend::SparseXPU;
+    case Backend::QuantizedCPU:
+    case Backend::QuantizedCUDA:
+    case Backend::QuantizedXPU:
+      return Backend::QuantizedXPU;
     case Backend::Undefined:
       return Backend::Undefined;
     default:
@@ -250,6 +309,7 @@ static inline Backend backendToCPU(Backend b) {
 
 static inline Backend backendToCUDA(Backend b) {
   switch (b) {
+    case Backend::XPU:
     case Backend::CPU:
     case Backend::CUDA:
     case Backend::HIP:
@@ -257,6 +317,7 @@ static inline Backend backendToCUDA(Backend b) {
     case Backend::MSNPU:
     case Backend::XLA:
       return Backend::CUDA;
+    case Backend::SparseXPU:
     case Backend::SparseCPU:
     case Backend::SparseCUDA:
     case Backend::SparseHIP:
@@ -270,6 +331,7 @@ static inline Backend backendToCUDA(Backend b) {
 
 static inline Backend backendToHIP(Backend b) {
   switch (b) {
+    case Backend::XPU:
     case Backend::CPU:
     case Backend::CUDA:
     case Backend::HIP:
@@ -277,6 +339,7 @@ static inline Backend backendToHIP(Backend b) {
     case Backend::MSNPU:
     case Backend::XLA:
       return Backend::HIP;
+    case Backend::SparseXPU:
     case Backend::SparseCPU:
     case Backend::SparseCUDA:
     case Backend::SparseHIP:
@@ -299,6 +362,8 @@ static inline const char* toString(Backend b) {
       return "HIP";
     case Backend::FPGA:
       return "FPGA";
+    case Backend::XPU:
+      return "XPU";
     case Backend::MSNPU:
       return "MSNPU";
     case Backend::XLA:
@@ -309,6 +374,8 @@ static inline const char* toString(Backend b) {
       return "SparseCUDA";
     case Backend::SparseHIP:
       return "SparseHIP";
+    case Backend::SparseXPU:
+      return "SparseXPU";
     case Backend::MkldnnCPU:
       return "MkldnnCPU";
     case Backend::Vulkan:
@@ -319,6 +386,8 @@ static inline const char* toString(Backend b) {
       return "QuantizedCPU";
     case Backend::QuantizedCUDA:
       return "QuantizedCUDA";
+    case Backend::QuantizedXPU:
+      return "QuantizedXPU";
     default:
       return "UNKNOWN_BACKEND";
   }
@@ -326,6 +395,7 @@ static inline const char* toString(Backend b) {
 
 static inline bool isSparse(Backend b) {
   switch (b) {
+    case Backend::SparseXPU:
     case Backend::SparseCPU:
     case Backend::SparseCUDA:
     case Backend::SparseHIP:
