@@ -2826,7 +2826,6 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
         @skip_if_rocm
-        @skip_if_small_worldsize
         def test_DistributedDataParallel_powerSGD_ddp_comm_hook(self):
             rank = self.rank
             for warm_start in [True, False]:
