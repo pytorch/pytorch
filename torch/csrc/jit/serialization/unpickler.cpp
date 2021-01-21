@@ -57,6 +57,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case StorageType::Kind:
       case NumberType::Kind:
       case FloatType::Kind:
+      case ComplexDoubleType::Kind:
       case IntType::Kind:
       case NoneType::Kind:
       case GeneratorType::Kind:
@@ -519,6 +520,8 @@ void Unpickler::readGlobal(
         elem_type = TensorType::get();
       } else if (class_name == "build_doublelist") {
         elem_type = FloatType::get();
+      } else if (class_name == "build_complexdoublelist") {
+        elem_type = ComplexDoubleType::get();
       } else if (class_name == "build_boollist") {
         elem_type = BoolType::get();
       } else {
@@ -540,6 +543,14 @@ void Unpickler::readGlobal(
     // Unpickle a tensor
     bool quantized = class_name == "_rebuild_qtensor";
     rebuildTensor(quantized);
+  } else if (module_name == "builtins" && class_name == "complex") {
+    globals_.emplace_back([this] {
+      auto elems = pop(stack_).toTuple()->elements();
+      auto complex =
+          c10::complex<double>(elems.at(0).toDouble(), elems.at(1).toDouble());
+      stack_.emplace_back(complex);
+    });
+
   } else if (module_name == "collections" && class_name == "OrderedDict") {
     // collections.OrderedDict is used in tensor serialization for a tensor's
     // backward hooks (but they are not actually saved with this Pickler)
