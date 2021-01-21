@@ -895,7 +895,13 @@ class Tensor(torch._C._TensorBase):
         co = []
         vals: List[Any] = []
 
-        
+        for irow in range(shape[0]):
+            row = self[irow, :]
+            selection = row != fill_value
+            select_nums = row[selection]
+            ro.append(ro[-1] + len(select_nums))
+            co.extend(selection.nonzero().flatten().tolist())
+            vals.extend(select_nums.flatten().tolist())
 
         return torch.sparse_csr_tensor(torch.IntTensor(ro), torch.IntTensor(co),
                                        torch.tensor(vals, dtype=self.dtype),

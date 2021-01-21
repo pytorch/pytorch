@@ -4679,17 +4679,13 @@ add_docstr_all('crow_indices',
                r"""
 crow_indices() -> IntTensor
 
-Returns the crow_indices of a GCS sparse tensor. These crow_indices represent
-the flattened row crow_indices of the N-D tensor that has been flattened
-using reduction as described in 
-https://github.com/Quansight-Labs/rfcs/tree/pearu/rfc0005/RFC0003-sparse-roadmap.
+The compressed row indices of a CSR tensor. Strictly int32 and 1D.
 """)
 
-add_docstr_all('reduction',
+add_docstr_all('col_indices',
                r"""
-reduction() -> Tensor
+col_indices() -> Tensor
 
-Tensor which shows the demarcation between dimensions that will be
-flattened from the N-D tensor.
+Tensor which denotes the column indices of a CSR tensor. Strictly int32 and 1D.
 """
 )

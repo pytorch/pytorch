@@ -93,7 +93,7 @@ class TestSparseCSR(TestCase):
         size = (4, 2, 4)
         dense = torch.randn(size)
 
-        with self.assertRaisesRegex(RuntimeError, "dimension mismatch"):
+        with self.assertRaisesRegex(RuntimeError, "Only 2D"):
             sparse = dense.to_sparse_csr(-99)
 
     def test_csr_matvec(self):
