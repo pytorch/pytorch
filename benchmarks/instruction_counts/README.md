@@ -59,4 +59,101 @@ $ python main.py --mode A/B \
     --backtest
 ```
 
+## Quick start: Ad-hoc A/B testing
+
+The default benchmark suite is reasonably comprehensive, but as a result it is
+also somewhat slow and cannot cover any one area of the code base in great
+detail. As a result, it is not well suited to A/B testing narrow PRs, such as
+those modifying kernel implementations. For this reason, a second benchmark
+definition is provided in `definitions/ad_hoc.py`. (Along with some inline
+quick start examples.) A/B testing can be told to use this benchmark set
+instead of the standard one by passing the `--ad_hoc` flag.
+
+To show how this works, suppose we have optimized `torch.cumsum` and want to
+check if out optimizations might adversely add overhead to various workflows.
+If we modify the contents of `definitions/ad_hoc.py` from:
+
+```
+ADHOC_BENCHMARKS: FlatIntermediateDefinition = flatten({
+    ...
+})
+```
+
+to:
+
+```
+AD_HOC_SETUP = GroupedSetup(
+    py_setup=r"""
+        # Blocks, multi-line definitions, and comments are all fine.
+        x_2d = torch.ones((2, 2))
+    """,
+    cpp_setup=r"""
+        // Blocks, multi-line definitions, and comments are all fine.
+        auto x_2d = torch::ones({2, 2});
+    """
+)
+
+
+ADHOC_BENCHMARKS: FlatIntermediateDefinition = flatten({
+    "torch.cumsum (2D)": {
+        "dim 0": GroupedStmts(
+            r"torch.cumsum(x_2d, dim=0)",
+            r"torch::cumsum(x_2d, /*dim=*/0);",
+            setup=AD_HOC_SETUP,
+        ),
+
+        ("dim 0", "discontiguous"): GroupedStmts(
+            r"torch.cumsum(x_2d.t(), dim=0)",
+            r"torch::cumsum(x_2d.t(), /*dim=*/0);",
+            setup=AD_HOC_SETUP,
+        ),
+
+        "dim 1": GroupedStmts(
+            r"torch.cumsum(x_2d, dim=1)",
+            r"torch::cumsum(x_2d, /*dim=*/1);",
+            setup=AD_HOC_SETUP,
+        ),
+
+        ("dim 1", "discontiguous"): GroupedStmts(
+            r"torch.cumsum(x_2d.t(), dim=1)",
+            r"torch::cumsum(x_2d.t(), /*dim=*/1);",
+            setup=AD_HOC_SETUP,
+        ),
+
+        "both dims": GroupedStmts(
+            r"""
+                y = torch.cumsum(x_2d, dim=0)
+                z = torch.cumsum(y, dim=1)
+            """,
+            r"""
+                auto y = torch::cumsum(x_2d, /*dim=*/0);
+                auto z = torch::cumsum(y, /*dim=*/1);
+            """,
+            setup=AD_HOC_SETUP,
+            signature="f(x_2d) -> z",
+            torchscript=True,
+        )
+    }
+})
+```
+
+and then modify our earlier command line invocation:
+
+```
+# From PyTorch root
+$ cd benchmarks/instruction_counts
+$ python main.py --mode A/B \
+    --A "source activate fbcode_warm" \
+    --B "source activate my_awesome_branch" \
+    --ad_hoc  # Point to our `cumsum` specific benchmark
+```
+
+we can test only on the more targeted benchmarks.
+
+## Design
+
+### Benchmark definition
+
+
+
 ## TODO: Write full technical overview.
