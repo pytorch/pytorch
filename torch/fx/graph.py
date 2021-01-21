@@ -22,15 +22,14 @@ def _snake_case(s: str) -> str:
         ``mod.pascalCase``-> ``mod.pascal_case``
         ``mod.ALL_CAPS`` -> ``mod.all_caps``
     """
-    res = []
-    res.append(s[0].lower())
-    for i in range(1, len(s) - 1):
-        if s[i].isupper() and s[i + 1].islower() and s[i - 1] != ".":
-            res.append("_")
-        res.append(s[i].lower())
-    if len(s) > 1:
-        res.append(s[-1].lower())
-    return ''.join(res)
+    chars = []
+    prev_lower = False
+    for c in s:
+        if prev_lower and c.isupper():
+            chars.append('_')
+        chars.append(c.lower())
+        prev_lower = c.islower()
+    return ''.join(chars)
 
 def get_qualified_name(func: Callable[..., Any]) -> str:
     # things like getattr just appear in builtins
