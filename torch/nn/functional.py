@@ -1750,15 +1750,7 @@ def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tens
     """
     if has_torch_function_variadic(input, weight):
         return handle_torch_function(linear, (input, weight), input, weight, bias=bias)
-    if input.dim() == 2 and bias is not None:
-        # fused op is marginally faster
-        ret = torch.addmm(bias, input, weight.t())
-    else:
-        output = input.matmul(weight.t())
-        if bias is not None:
-            output += bias
-        ret = output
-    return ret
+    return torch._C._nn.linear(input, weight, bias)
 
 
 def bilinear(input1: Tensor, input2: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tensor:
