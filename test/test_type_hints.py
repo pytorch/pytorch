@@ -2,7 +2,7 @@ import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, set_cwd
 import tempfile
 import torch
-import re
+import doctest
 import os
 import inspect
 
@@ -18,38 +18,8 @@ def get_examples_from_docstring(docstr):
     Extracts all runnable python code from the examples
     in docstrings; returns a list of lines.
     """
-    # TODO: Figure out if there's a way to use doctest directly to
-    # implement this
-    example_file_lines = []
-    # the detection is a bit hacky because there isn't a nice way of detecting
-    # where multiline commands end. Thus we keep track of how far we got in beginning
-    # and continue to add lines until we have a compileable Python statement.
-    exampleline_re = re.compile(r"^\s+(?:>>>|\.\.\.) (.*)$")
-    beginning = ""
-    for l in docstr.split('\n'):
-        if beginning:
-            m = exampleline_re.match(l)
-            if m:
-                beginning += m.group(1)
-            else:
-                beginning += l
-        else:
-            m = exampleline_re.match(l)
-            if m:
-                beginning += m.group(1)
-        if beginning:
-            complete = True
-            try:
-                compile(beginning, "", "exec")
-            except SyntaxError:
-                complete = False
-            if complete:
-                # found one
-                example_file_lines += beginning.split('\n')
-                beginning = ""
-            else:
-                beginning += "\n"
-    return ['    ' + l for l in example_file_lines]
+    examples = doctest.DocTestParser().get_examples(docstr)
+    return [f'    {l}' for e in examples for l in e.source.splitlines()]
 
 
 def get_all_examples():
@@ -149,32 +119,12 @@ class TestTypeHints(TestCase):
             except OSError:
                 raise unittest.SkipTest('cannot symlink') from None
             (stdout, stderr, result) = mypy.api.run([
-                '--follow-imports', 'silent',
-                '--check-untyped-defs',
+                '--cache-dir=.mypy_cache/doc',
                 '--no-strict-optional',  # needed because of torch.lu_unpack, see gh-36584
                 os.path.abspath(fn),
             ])
             if result != 0:
                 self.fail(f"mypy failed:\n{stdout}")
-
-    @unittest.skipIf(not HAVE_MYPY, "need mypy")
-    def test_type_hint_examples(self):
-        """
-        Runs mypy over all the test examples present in
-        `type_hint_tests` directory.
-        """
-        test_path = os.path.dirname(os.path.realpath(__file__))
-        examples_folder = os.path.join(test_path, "type_hint_tests")
-        examples = os.listdir(examples_folder)
-        for example in examples:
-            example_path = os.path.join(examples_folder, example)
-            (stdout, stderr, result) = mypy.api.run([
-                '--follow-imports', 'silent',
-                '--check-untyped-defs',
-                example_path,
-            ])
-            if result != 0:
-                self.fail(f"mypy failed for example {example}\n{stdout}")
 
     @unittest.skipIf(not HAVE_MYPY, "need mypy")
     def test_run_mypy(self):
@@ -205,10 +155,7 @@ class TestTypeHints(TestCase):
         # TODO: Would be better not to chdir here, this affects the entire
         # process!
         with set_cwd(repo_rootdir):
-            (stdout, stderr, result) = mypy.api.run([
-                '--check-untyped-defs',
-                '--follow-imports', 'silent',
-            ])
+            (stdout, stderr, result) = mypy.api.run([])
 
         if result != 0:
             self.fail(f"mypy failed: {stdout} {stderr}")
