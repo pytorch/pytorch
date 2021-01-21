@@ -312,6 +312,72 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad):
                         args=(torch.tensor([1, 2, 3]),),
                         kwargs=dict(dim=1)),)
 
+def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
+    test_sizes = [
+        (S,),
+        (0,),
+        (S, S),
+        (0, 0),
+        (S, 0),
+        (0, S),
+        (S, S, S),
+        (0, S, S),
+        (S, 0, S),
+        (0, 0, 0),
+    ]
+
+    vector_ords = (None, 0, 0.5, 1, 2, 3.5, inf, -0.5, -1, -2, -3.5)
+    matrix_ords = (None, 'fro', 'nuc', 1, 2, inf, -1, -2, -inf)
+
+    inputs = []
+
+    is_dtype_half = dtype in [torch.float16, torch.bfloat16]
+
+    for test_size in test_sizes:
+        is_vector_norm = len(test_size) == 1
+        is_matrix_norm = len(test_size) == 2
+
+        for keepdim in [False, True]:
+            inputs.append(SampleInput(
+                make_tensor(
+                    test_size, device, dtype, low=None, high=None,
+                    requires_grad=requires_grad),
+                kwargs=dict(
+                    keepdim=keepdim)))
+
+            if not (is_vector_norm or is_matrix_norm):
+                continue
+
+            ords = vector_ords if is_vector_norm else matrix_ords
+
+            for ord in ords:
+                # TODO: remove this check when `max` is implemented for
+                #       float16 and bfloat16. Issue:
+                #       https://github.com/pytorch/pytorch/issues/50790
+                if is_vector_norm and is_dtype_half and ord == inf:
+                    continue
+
+                inputs.append(SampleInput(
+                    make_tensor(
+                        test_size, device, dtype,
+                        low=None, high=None,
+                        requires_grad=requires_grad),
+                    args=(ord,),
+                    kwargs=dict(
+                        keepdim=keepdim)))
+
+                if ord in ['nuc', 'fro']:
+                    inputs.append(SampleInput(
+                        make_tensor(
+                            test_size, device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad),
+                        kwargs=dict(
+                            ord=ord,
+                            keepdim=keepdim,
+                            dim=(0, 1))))
+        return inputs
+
 def sample_inputs_slogdet(op_info, device, dtype, requires_grad):
     # original test cases from 'method_tests' have too many test_inputs
     # we don't actually need all of them to check the autograd and jit correctness
@@ -1185,6 +1251,22 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_fliplr_flipud,
            test_inplace_grad=False,
            supports_tensor_out=False),
+    OpInfo('linalg.norm',
+           op=torch.linalg.norm,
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           test_inplace_grad=False,
+           supports_tensor_out=True,
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           sample_inputs_func=sample_inputs_linalg_norm,
+           aten_name='linalg_norm',
+           skips=(
+               # TODO: remove this once `pow` is implemented for float16
+               #       and bfloat16 on CPU. Issue:
+               #       https://github.com/pytorch/pytorch/issues/50789
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        device_type='cpu',
+                        dtypes=[torch.float16, torch.bfloat16]),
+           )),
     OpInfo('linalg.slogdet',
            aten_name='linalg_slogdet',
            op=torch.linalg.slogdet,
