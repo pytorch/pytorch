@@ -517,20 +517,20 @@ def sample_inputs_diff(op_info, device, dtype, requires_grad):
         ((S, S, S), 1, None, None),
         ((S, S, S), 1, (S, 1, S), (S, 1, S)),)
 
-    sample_inputs = tuple()
+    sample_inputs = []
     for size, dim, size_prepend, size_append in test_cases:
         args = (make_tensor(size, device, dtype,
                             low=None, high=None,
-                            requires_grad=requires_grad), 1, dim)
-        args += (make_tensor(size_prepend, device, dtype,
-                             low=None, high=None,
-                             requires_grad=requires_grad),) if size_prepend else (None,)
-        args += (make_tensor(size_append, device, dtype,
-                             low=None, high=None,
-                             requires_grad=requires_grad),) if size_append else (None,)
-        sample_inputs += (SampleInput(args),)
+                            requires_grad=requires_grad), 1, dim,
+                make_tensor(size_prepend, device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad) if size_prepend else None,
+                make_tensor(size_append, device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad) if size_append else None)
+        sample_inputs += [SampleInput(args)]
 
-    return sample_inputs
+    return tuple(sample_inputs)
 
 def sample_inputs_index_select(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S, S), device, dtype,

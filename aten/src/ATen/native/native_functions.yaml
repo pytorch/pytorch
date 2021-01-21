@@ -1374,20 +1374,17 @@
   variants: method
 
 - func: diff.Tensor_Tensor(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Tensor? append=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function, method
   dispatch:
     Math: diff_tensor_tensor
 
 - func: diff.Tensor_Scalar(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Scalar? append=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   cpp_no_default_args: ['n', 'dim', 'prepend', 'append']
   variants: function, method
   dispatch:
     Math: diff_tensor_scalar
 
 - func: diff.Scalar_Tensor(Tensor self, int n=1, int dim=-1, Scalar? prepend=None, Tensor? append=None) -> Tensor
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   cpp_no_default_args: ['n', 'dim', 'prepend', 'append']
   variants: function, method
   dispatch:
@@ -1400,20 +1397,17 @@
     Math: diff_scalar_scalar
 
 - func: diff.Tensor_Tensor_out(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Tensor? append=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   variants: function
   dispatch:
     Math: diff_tensor_tensor_out
 
 - func: diff.Tensor_Scalar_out(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Scalar? append=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   cpp_no_default_args: ['n', 'dim', 'prepend', 'append']
   variants: function
   dispatch:
     Math: diff_tensor_scalar_out
 
 - func: diff.Scalar_Tensor_out(Tensor self, int n=1, int dim=-1, Scalar? prepend=None, Tensor? append=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   cpp_no_default_args: ['n', 'dim', 'prepend', 'append']
   variants: function
   dispatch:
