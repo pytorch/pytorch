@@ -63,6 +63,8 @@ def ab_test(
     patch_b: bool = False,
     ad_hoc: bool = False,
     no_cpp: bool = False,
+    display_time: bool = False,
+    colorize: bool = False,
     backtesting: bool = False,
 ) -> None:
     patch_benchmark_utils(source_cmd_a, clean_only=not patch_a)
@@ -74,7 +76,7 @@ def ab_test(
         no_cpp=no_cpp,
         backtesting=backtesting,
     )
-    render_ab(results[0], results[1])
+    render_ab(results[0], results[1], display_time=display_time, colorize=colorize)
 
 
 def ab_main(argv: List[str]) -> None:
@@ -85,6 +87,8 @@ def ab_main(argv: List[str]) -> None:
     parser.add_argument("--patch_b", action="store_true")
     parser.add_argument("--ad_hoc", action="store_true")
     parser.add_argument("--no_cpp", action="store_true")
+    parser.add_argument("--display_time", action="store_true")
+    parser.add_argument("--colorize", action="store_true")
     parser.add_argument("--backtesting", action="store_true")
 
     args = parser.parse_args(argv)
@@ -95,6 +99,8 @@ def ab_main(argv: List[str]) -> None:
         patch_b=args.patch_b,
         ad_hoc=args.ad_hoc,
         no_cpp=args.no_cpp,
+        display_time=args.display_time,
+        colorize=args.colorize,
         backtesting=args.backtesting,
     )
 

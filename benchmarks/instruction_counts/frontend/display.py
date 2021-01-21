@@ -44,9 +44,38 @@ class ShouldRender(enum.Enum):
     MAYBE = 1
 
 
+FAINT = "\033[2m"
+BOLD = "\033[1m"
+LIGHT_RED = "\033[1;31m"
+LIGHT_GREEN = "\033[1;32m"
+RED = "\033[0;31m"
+GREEN = "\033[0;32m"
+END_CHAR = "\033[0m"
+COLOR_THRESHOLDS = (
+    ("  0.0%", "{}{}", "", ""),
+    ("  0.5%", f"{FAINT}{{}}{{}}{END_CHAR * 2}", LIGHT_GREEN, LIGHT_RED),
+    ("  2.5%", f"{{}}{{}}{END_CHAR}", LIGHT_GREEN, LIGHT_RED),
+    (" 10.0%", f"{BOLD}{{}}{{}}{END_CHAR * 2}", LIGHT_GREEN, LIGHT_RED),
+    (" 25.0%", f"{FAINT}{{}}{{}}{END_CHAR * 2}", GREEN, RED),
+    (" 50.0%", f"{{}}{{}}{END_CHAR}", GREEN, RED),
+    ("100.0%", f"{BOLD}{{}}{{}}{END_CHAR * 2}", GREEN, RED),
+)
+
+
 def strip_ansi(s: str) -> str:
     # https://gist.github.com/rene-d/9e584a7dd2935d0f461904b9f2950007
     return re.sub(r"\033\[[0-9]+(;[0-9]+)?m", "", s)
+
+
+def pad(s: str, width: int, alignment: Alignment) -> str:
+    width += (len(s) - len(strip_ansi(s)))
+    if alignment == Alignment.LEFT:
+        return s.ljust(width)
+    elif alignment == Alignment.RIGHT:
+        return s.rjust(width)
+    else:
+        assert alignment == Alignment.CENTER
+        return s.center(width)
 
 
 class Cell(abc.ABC):
@@ -144,17 +173,6 @@ class Table:
     def col_separator(self) -> str:
         return "  ┊  "
 
-    @staticmethod
-    def pad(s: str, width: int, alignment: Alignment) -> str:
-        width += (len(s) - len(strip_ansi(s)))
-        if alignment == Alignment.LEFT:
-            return s.ljust(width)
-        elif alignment == Alignment.RIGHT:
-            return s.rjust(width)
-        else:
-            assert alignment == Alignment.CENTER
-            return s.center(width)
-
     def render(self) -> Tuple[str, ...]:
         segments: Tuple[Tuple[Tuple[str, ...], ...], ...] = tuple(
             r.render() for r in self._rows)
@@ -179,7 +197,7 @@ class Table:
             for j in zip(row_segments, col_widths, alignments, self._render_col):
                 col, width, alignment, render_col = j
                 if render_col:
-                    padded_row.append(tuple(self.pad(s, width, alignment) for s in col))
+                    padded_row.append(tuple(pad(s, width, alignment) for s in col))
 
             rendered_rows.append("\n".join([
                 self.col_separator.join(ri) for ri in zip(*padded_row)
@@ -301,7 +319,8 @@ class AB_Cell(Cell):
         self,
         a: ValueType,
         b: ValueType,
-        display_time: bool = False
+        display_time: bool = False,
+        colorize: bool = False,
     ) -> None:
         self._display_time: bool = display_time
         significant_figures = min(
@@ -323,17 +342,21 @@ class AB_Cell(Cell):
         self._a_counts = int(a[0].counts(denoise=True) / a[0].number_per_run)
         self._b_counts = int(b[0].counts(denoise=True) / b[0].number_per_run)
 
+        self._colorize = colorize
+
     def render(self) -> str:
         if self._a_counts == self._b_counts:
             return "..."
 
         segment_lengths, _ = self.col_reduce(AB_Cell.segment_lengths)
         i_s0, i_s1, i_s2, t_s0, t_s1, t_s2 = [
-            s.rjust(l) for s, l in zip(self.segments, segment_lengths * 2)]
+            pad(s, l, Alignment.RIGHT)
+            for s, l in zip(self.segments, segment_lengths * 2)
+        ]
 
-        output: str = f"{i_s0} -> {i_s1}  ({i_s2})"
+        output: str = f"{i_s0} -> {i_s1}  {i_s2}"
         if self._display_time:
-            time_str = f"{t_s0} -> {t_s1}  ({t_s2})"
+            time_str = f"{t_s0} -> {t_s1}  {t_s2}"
             if self._zero_within_noise:
                 time_str = f"\033[2m{time_str}\033[0m"
 
@@ -341,13 +364,33 @@ class AB_Cell(Cell):
 
         return output
 
-    @staticmethod
-    def make_segments(a: Union[int, float], b: Union[int, float], template: str = "{}{}") -> Tuple[str, str, str]:
+    def make_segments(
+        self,
+        a: Union[int, float],
+        b: Union[int, float],
+        template: str = "{}{}"
+    ) -> Tuple[str, str, str]:
         sign_str = "+" if b >= a else "-"
         return (
             template.format(sign_str, abs(b - a)),
             template.format("", b),
-            "{}{:.1f}%".format(sign_str, 100 * abs(b - a) / b)
+            self.maybe_colorize_delta(sign_str, abs(b - a) / b)
+        )
+
+    def maybe_colorize_delta(self, sign_str: str, value: float) -> str:
+        template = "({}{:.1f}%)"
+        if not self._colorize:
+            return template.format(sign_str, value)
+
+        color_template, good_color, bad_color = [
+            i[1:]
+            for i in COLOR_THRESHOLDS
+            if abs(value) >= (float(i[0].strip("%")) / 100)
+        ][-1]
+
+        return color_template.format(
+            bad_color if sign_str == "+" else good_color,
+            template.format(sign_str, value * 100)
         )
 
     @property
@@ -369,7 +412,7 @@ class AB_Cell(Cell):
         lengths = [0, 0, 0, 0, 0, 0]
         for c in col:
             if isinstance(c, AB_Cell):
-                lengths = [max(li, len(si)) for li, si in zip(lengths, c.segments)]
+                lengths = [max(li, len(strip_ansi(si))) for li, si in zip(lengths, c.segments)]
 
         output = tuple(max(i, j) for i, j in zip(lengths[:3], lengths[3:]))
         assert len(output) == 3
@@ -379,7 +422,12 @@ class AB_Cell(Cell):
         return Alignment.RIGHT
 
 
-def render_ab(a_results: ResultType, b_results: ResultType, display_time: bool = False) -> None:
+def render_ab(
+    a_results: ResultType,
+    b_results: ResultType,
+    display_time: bool = False,
+    colorize: bool = False,
+) -> None:
     packed_results: Dict[
         Tuple[Label, int, AutogradMode],
         Dict[Tuple[Language, RuntimeMode], Tuple[ValueType, ValueType]]
@@ -418,7 +466,7 @@ def render_ab(a_results: ResultType, b_results: ResultType, display_time: bool =
             Label_Cell(label=label, autograd=autograd),
             NumThreads_Cell(num_threads=num_threads),
         ) + tuple(
-            AB_Cell(*r[lang_rt], display_time) if lang_rt in r else Null_Cell()
+            AB_Cell(*r[lang_rt], display_time, colorize) if lang_rt in r else Null_Cell()
             for lang_rt in column_keys
         ))
 

@@ -1,5 +1,5 @@
 # Instruction count microbenchmarks
-## Quick start: A/B testing
+## __Quick start: A/B testing__
 
 A more detailed description is provided in later sections, however if you are
 just interested in testing changes then this section should be sufficient.
@@ -154,6 +154,103 @@ we can test only on the more targeted benchmarks.
 
 ### Benchmark definition
 
+One primary goal of this suite is to make it easy to define semantically
+related clusters of benchmarks. (See the "Benchmark definition (Explicit)"
+section if this is not required.) For instance, consider the snippet:
 
+```
+# Setup
+x = torch.ones((4, 1))
+v = torch.ones((1,), requires_grad=True)
 
-## TODO: Write full technical overview.
+# Stmt
+y = torch.nn.functional.relu(x * v)
+```
+
+and the C++ analog:
+
+```
+// Setup
+auto x = torch::ones({4, 1});
+auto v = torch::ones({1});
+v.set_requires_grad(true);
+
+// Stmt
+auto y = torch::nn::functional::relu(x * v);
+```
+
+If we know that creation of `x` and `v` is part of setup, and the overall
+comptation uses `x` and `v` to produce `y` then we can derive TorchScript'd
+and AutoGrad variants as well. The syntax for declaring that relationship
+in the benchmark is `signature="f(x, y) -> y"`. For instance we can deduce that
+a TorchScript model will take the form:
+
+```
+@torch.jit.script
+def f(x, v):
+    y = torch.nn.functional.relu(x * v)
+    return y
+```
+
+and that we can add AutoGrad by appending a `y.backward()` (or `y.backward();`
+in C++) line after the primary stmt. These transformations are mechanical,
+however they can be quite tedious and error prone to write. (Or update!) The
+result is also quite difficult to read, with the full cross product of
+`{Python, C++} x {Eager, JIT} x {Forward, Forward+Backward}` comprising many
+dozens of lines of mostly redundant information.
+
+To simplify the process and keep benchmarks readable, several `Grouped` helpers
+are provided which take only the minimal information needed to generate all
+requested configurations. For instance in the example above, we would define:
+
+```
+example_setup = GroupedSetup(
+    """
+        x = torch.ones((4, 1))
+        v = torch.ones((1,), requires_grad=True)
+    """,
+    """
+        auto x = torch::ones({4, 1});
+        auto v = torch::ones({1});
+        v.set_requires_grad(true);
+    """
+)
+
+# `flatten` is a util for internal bookkeeping.
+BENCHMARKS = flatten({
+    "Example": GroupedStmts(
+        "y = torch.nn.functional.relu(x * v)",
+        "auto y = torch::nn::functional::relu(x * v);",
+        setup=example_setup,
+        signature="f(x, v) -> y",
+        torchscript=True,
+        autograd=True,
+    )
+})
+```
+
+A more complete API description is available in `core/api.py`. Note that our
+example has an `"Example"` tag. `core/types.py` gives a comprehensive overview
+of the label scheme. (TL;DR Nested dicts with string and Tuple[str, ...] keys
+are supported.)
+
+### Benchmark definition (Explicit)
+
+If one does not wish to use the Grouped syntax, a much simplified `TimerArgs`
+is provided as well. For instance:
+
+```
+BENCHMARKS = flatten({
+    "Example": TimerArgs(
+        "y = torch.nn.functional.relu(x * v)",
+        setup="""
+            x = torch.ones((4, 1))
+            v = torch.ones((1,), requires_grad=True)
+        """,
+        language=Language.PYTHON,
+    )
+})
+```
+
+This simply forwards the arguments to the constructor of
+`torch.utils.benchmark.Timer`.
