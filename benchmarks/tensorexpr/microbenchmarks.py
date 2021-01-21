@@ -75,23 +75,32 @@ def gen_binary_torch_fun(fn):
         return fun
     return pt_fun
 
+def gen_int_comparison_tensors(N, M):
+    return (torch.randint(0, 3, (N, M)), torch.randint(0, 3, (N, M)), torch.empty((N, M), dtype=torch.int))
+
+def gen_float_comparison_tensors(N, M):
+    return (torch.rand(N, M), torch.rand(N, M), torch.empty((N, M), dtype=torch.int))
+
+
 binary_ops = [
     ('add', (lambda a, b: a + b), torch.add),
     ('mul', (lambda a, b: a * b), torch.mul),
     ('sub', (lambda a, b: a - b), torch.sub),
     ('div', (lambda a, b: a / b), torch.div),
-    ('eq', (lambda a, b: a == b), torch.eq),
-    ('gt', (lambda a, b: a > b), torch.gt),
-    ('lt', (lambda a, b: a < b), torch.lt),
-    ('gte', (lambda a, b: a >= b), torch.greater_equal),
-    ('lte', (lambda a, b: a <= b), torch.less_equal),
+    ('eq', (lambda a, b: a == b), torch.eq, gen_int_comparison_tensors),
+    ('gt', (lambda a, b: a > b), torch.gt, gen_float_comparison_tensors),
+    ('lt', (lambda a, b: a < b), torch.lt, gen_float_comparison_tensors),
+    ('gte', (lambda a, b: a >= b), torch.greater_equal, gen_float_comparison_tensors),
+    ('lte', (lambda a, b: a <= b), torch.less_equal, gen_float_comparison_tensors),
     # ('neq', (lambda a, b: a != b), None)), # no one-op equivalent
     # ('&', (lambda a, b: a & b), torch.bitwise_and), # requires more work to test
 ]
 
 
-def nnc_relu(i, j):
-    return torch._C.te.ifThenElse(A.load([i, j]) < torch._C.te.ExprHandle.float(0), torch._C.te.ExprHandle.float(0), A.load([i, j]))
+def nnc_relu(A, B):
+    def f(i, j):
+        return torch._C.te.ifThenElse(A.load([i, j]) < torch._C.te.ExprHandle.float(0), torch._C.te.ExprHandle.float(0), A.load([i, j]))
+    return f
 
 custom_ops = [
     ('relu', nnc_relu, lambda a, b, c: c.copy_(a).relu_()),
@@ -99,10 +108,6 @@ custom_ops = [
     # ('manual_sigmoid', nnc_manual_sigmoid, lambda a, b, c: torch.sigmoid(a, out=c))
 ]
 
-def gen_custom_nnc_fun(fn):
-    def nnc_fun(A, B):
-        return fn
-    return nnc_fun
 
 def gen_custom_torch_fun(fn):
     def pt_fun(a, b, out):
@@ -111,45 +116,64 @@ def gen_custom_torch_fun(fn):
         return fun
     return pt_fun
 
+def normalize_benchmarks(ops):
+    return [i + (None,) if len(i) == 3 else i for i in ops]
+
 names = []
 nnc_fns = []
 pt_fns = []
+shape_fns = []
 
 for nnc_name, pt_op in unary_ops:
     names.append(nnc_name)
     nnc_fns.append(gen_unary_nnc_fun(nnc_name))
     pt_fns.append(gen_unary_torch_fun(pt_op))
+    shape_fns.append(None)
 
-for name, lmbda, pt_fn in binary_ops:
+for name, lmbda, pt_fn, shape_fn in normalize_benchmarks(binary_ops):
     names.append(name)
     nnc_fns.append(gen_binary_nnc_fun(lmbda))
     pt_fns.append(gen_binary_torch_fun(pt_fn))
+    shape_fns.append(shape_fn)
 
-for name, lmbda, pt_fn in custom_ops:
+for name, lmbda, pt_fn, shape_fn in normalize_benchmarks(custom_ops):
     names.append(name)
-    nnc_fns.append(gen_custom_nnc_fun(lmbda))
+    nnc_fns.append(lmbda)
     pt_fns.append(gen_custom_torch_fun(pt_fn))
+    shape_fns.append(shape_fn)
 
-benchmarks = list(zip(names, nnc_fns, pt_fns))
+benchmarks = list(zip(names, nnc_fns, pt_fns, shape_fns))
 
-def run_benchmarks(benchmarks):
+def run_benchmarks(benchmarks, sizes):
     df = pd.DataFrame(columns=['name', 'N', 'M', 'nnc_time', 'torch_time', 'ratio'])
-    sizes = [1, 4, 16, 64, 256, 1024]
     with torch.no_grad():
-        for name, nnc_fun, torch_fun in benchmarks:
+        for name, nnc_fun, torch_fun, shape_fn in benchmarks:
             for N in sizes:
                 for M in sizes:
                     iters = int(1e5 / (N + M))
                     with kernel_arena_scope():
-                        dtype = torch._C.te.Dtype.Float
+                        if shape_fn is None:
+                            tA = torch.rand(M, N).clamp(0.01, 0.99)
+                            tB = torch.rand(M, N).clamp(0.01, 0.99)
+                            tX = torch.empty(M, N)
+                            tR = torch.empty(M, N)
+                        else:
+                            tA, tB, tX = shape_fn(M, N)
+                            tR = tX.clone()
+
+                        def get_nnc_type(dtype):
+                            if dtype == torch.float:
+                                return torch._C.te.Dtype.Float
+                            elif dtype == torch.long:
+                                return torch._C.te.Dtype.Long
+
+                        dtype = get_nnc_type(tA.dtype)
 
                         dM = torch._C.te.ExprHandle.int(M)
                         dN = torch._C.te.ExprHandle.int(N)
 
-                        dims_MN = [dM, dN]
                         A = torch._C.te.Placeholder('A', dtype, [dM, dN])
                         B = torch._C.te.Placeholder('B', dtype, [dM, dN])
-
 
                         dim_args = [torch._C.te.DimArg(*args) for args in [(dM, 'm'), (dN, 'n')]]
 
@@ -159,11 +183,6 @@ def run_benchmarks(benchmarks):
                         loopnest.prepare_for_codegen()
                         stmt = torch._C.te.simplify(loopnest.root_stmt())
                         cg = torch._C.te.construct_codegen('llvm', stmt, [torch._C.te.BufferArg(x) for x in [A, B, X]])
-
-                        tA = torch.rand(M, N).clamp(0.01, 0.99)
-                        tB = torch.rand(M, N).clamp(0.01, 0.99)
-                        tX = torch.empty(M, N)
-                        tR = torch.empty(M, N)
 
 
                         # warmup
@@ -191,23 +210,19 @@ def run_benchmarks(benchmarks):
                         print()
 
                         def check_correctness(a, b):
-                            diff = abs(a.sum() - b.sum())
-                            if not (diff < 2.0):
-                                if a.bool().sum() == b.bool().sum():
-                                    return
+                            if not np.allclose(a, b):
                                 print(name, diff)
-                                assert(diff < 2.0)
+                                assert(np.allclose(a, b))
                         check_correctness(tX, tR)
     return df
 
-def dump_plot(df):
+def dump_plot(df, sizes):
     keys = []
     vals = []
     indexed = df[df['N'] == df['M']]
     for index, row in indexed.iterrows():
         keys.append(row['name'])
         vals.append(row['ratio'])
-
 
     keys = keys[::len(sizes)]
     sns.set(rc={'figure.figsize' : (5.0, 20.0)})
@@ -232,5 +247,6 @@ if __name__ == "__main__":
     if not args.multi_threaded:
         torch.set_num_threads(1)
 
-    df = run_benchmarks(benchmarks)
-    dump_plot(df)
+    sizes = [1, 4, 16, 64, 256, 1024]
+    df = run_benchmarks(benchmarks, sizes)
+    dump_plot(df, sizes)
