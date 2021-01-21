@@ -37,24 +37,23 @@ PATTERNS = (
     # Attributes which are not in old versions.
     ("torch.has_cuda", "getattr(torch, 'has_cuda', False)"),
     ("torch.version.hip", "None"),
-    ('getattr\(torch._C, f"_PYBIND11_{name}"\)',
+    (r'getattr\(torch._C, f"_PYBIND11_{name}"\)',
      'getattr(torch._C, f"_PYBIND11_{name}", None)'),
-    ('getattr\(torch._C, f"_PYBIND11_{pname}"\)',
+    (r'getattr\(torch._C, f"_PYBIND11_{pname}"\)',
      'getattr(torch._C, f"_PYBIND11_{pname}", None)'),
     ("torch._C._GLIBCXX_USE_CXX11_ABI",
      'getattr(torch._C, "_GLIBCXX_USE_CXX11_ABI", 0)'),
-    ('"TBB" in torch.__config__.parallel_info\(\)', 'False'),
+    (r'"TBB" in torch.__config__.parallel_info\(\)', 'False'),
 
     # There has been a some reorganization of libtorch, so we have to make sure
     # the right shared objects get linked in.
-    ("extra_ldflags.append\('-lc10'\)",
+    (r"extra_ldflags.append\('-lc10'\)",
      "extra_ldflags.extend(['-lc10'] + (['-lcaffe2'] if os.path.exists(os.path.join(TORCH_LIB_PATH, 'libcaffe2.so')) else []))"),
-    ("extra_ldflags.append\('-ltorch_cpu'\)",
+    (r"extra_ldflags.append\('-ltorch_cpu'\)",
      "extra_ldflags.extend(['-ltorch_cpu'] if os.path.exists(os.path.join(TORCH_LIB_PATH, 'libtorch_cpu.so')) else [])"),
 
     # Silence warnings. (This doesn't come with a warranty anyway...)
-    ("warnings.warn(ABI_INCOMPATIBILITY_WARNING.format(compiler))",
-     "return True  # Silence warning when back testing."),
+    ("ABI_INCOMPATIBILITY_WARNING.format", "''.format"),
     ("WRONG_COMPILER_WARNING.format", "''.format"),
 )
 
