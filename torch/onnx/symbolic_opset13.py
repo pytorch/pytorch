@@ -5,7 +5,7 @@
 from torch.onnx.symbolic_helper import _block_list_in_opset
 import torch
 import torch.onnx.symbolic_helper as sym_help
-from torch.onnx.symbolic_helper import parse_args
+from torch.onnx.symbolic_helper import parse_args, _unimplemented
 
 block_listed_operators = ['embedding_bag']
 
@@ -119,11 +119,15 @@ def unsafe_chunk(g, self, chunks, dim, _outputs=None):
 
     size = sym_help._get_tensor_dim_size(self, dim)
     if size is None:
-        return sym_help._unimplemented('unsafe_chunk', 'unknown dimension size')
-
+        return _unimplemented('unsafe_chunk', 'unknown dimension size')
     split_size = (size + chunks - 1) // chunks
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
     if leftover:
         splits.append(leftover)
+
+    # TODO: So far we don't have a module using this method. We'll keep 
+    # this as a constant unless we see a request of dynamics in any 
+    # user's modules.
+    splits = g.op("Constant", value_t=torch.tensor(splits, dtype=torch.long))
     return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)
