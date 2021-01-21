@@ -2821,24 +2821,19 @@ class DistributedTest:
                         msg=f"Expected gradient of {expected_grad} but got {avg} on rank {self.rank}",
                     )
 
-        @unittest.skipIf(
-            BACKEND != "nccl",
-            "Only NCCL backend supports DDP communication hook",
-        )
-        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
-        @skip_if_rocm
-        def test_ddp_hook_parity(self):
+        def _test_ddp_hook_parity(self, state, hook):
             rank = self.rank
-            rank_to_GPU = self._init_multigpu_helper()
-            gpus = [rank_to_GPU[int(r)][0] for r in range(dist.get_world_size())]
             m = torch.nn.Linear(1, 5)
             net_with_hook = torch.nn.parallel.DistributedDataParallel(
                 copy.deepcopy(m).to(rank), device_ids=[rank]
             )
-            process_group = torch.distributed.new_group(gpus)
-            net_with_hook.register_comm_hook(state=process_group, hook=default.allreduce_hook)
+            net_with_hook.register_comm_hook(state=state, hook=hook)
+            try:
+                process_group = state.process_group
+            except AttributeError:
+                process_group = state
             net_without_hook = torch.nn.parallel.DistributedDataParallel(
-                copy.deepcopy(m).to(rank), device_ids=[rank]
+                copy.deepcopy(m).to(rank), device_ids=[rank], process_group=process_group
             )
             for i in range(10):
                 # Clear gradients manually.
@@ -2863,8 +2858,46 @@ class DistributedTest:
                 loss_hook.backward()
                 grad_hook = net_with_hook.module.weight.grad
                 avg_hook = grad_hook.clone()
-                # If below fails, it means that allreduce hook differed from vanilla DDP allreduce.
-                self.assertEqual(avg_hook[0, 0], avg[0, 0])
+                # The following would fail if allreduce hook gave different
+                # results than vanilla DDP allreduce.
+                # TODO: replace below assert for powerSGD
+                if hook == default.allreduce_hook:
+                    self.assertEqual(avg_hook[0, 0], avg[0, 0])
+
+        @unittest.skipIf(
+            BACKEND != "nccl",
+            "Only NCCL backend supports DDP communication hook",
+        )
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_rocm
+        def test_ddp_hook_parity_allreduce(self):
+            self._test_ddp_hook_parity(state=None, hook=default.allreduce_hook)
+
+        @unittest.skipIf(
+            BACKEND != "nccl",
+            "Only NCCL backend supports DDP communication hook",
+        )
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_rocm
+        def test_ddp_hook_parity_allreduce_process_group(self):
+            # process_group is passed in to both DDP and comm. hook
+            rank_to_GPU = self._init_multigpu_helper()
+            gpus = [rank_to_GPU[int(r)][0] for r in range(dist.get_world_size())]
+            process_group = torch.distributed.new_group(gpus)
+            self._test_ddp_hook_parity(state=process_group, hook=default.allreduce_hook)
+
+        @unittest.skipIf(
+            BACKEND != "nccl",
+            "Only NCCL backend supports DDP communication hook",
+        )
+        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
+        @skip_if_rocm
+        def test_ddp_hook_parity_powerSGD(self):
+            powersgd_state = powerSGD.PowerSGDState(
+                process_group=None,
+                matrix_approximation_rank=1
+            )
+            self._test_ddp_hook_parity(state=powersgd_state, hook=powerSGD.powerSGD_hook)
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
