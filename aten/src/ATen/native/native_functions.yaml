@@ -5198,12 +5198,6 @@
 - func: polygamma_(Tensor(a!) self, int n) -> Tensor(a!)
   variants: method
 
-- func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
-  variants: method
-  dispatch:
-    CPU: legacy::cpu::_th_renorm_
-    CUDA: renorm__cuda
-
 - func: lerp_.Scalar(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
   variants: method
   dispatch:
@@ -6398,6 +6392,12 @@
   dispatch:
     CPU: legacy::cpu::_th_renorm
     CUDA: renorm_cuda
+
+- func: renorm_(Tensor(a!) self, Scalar p, int dim, Scalar maxnorm) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU: legacy::cpu::_th_renorm_
+    CUDA: renorm__cuda
 
 - func: unfold(Tensor(a) self, int dimension, int size, int step) -> Tensor(a)
   variants: method

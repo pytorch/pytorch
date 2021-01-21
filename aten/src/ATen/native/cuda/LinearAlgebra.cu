@@ -494,7 +494,9 @@ __global__ void kernel_renorm(T *data,
 } // anonymous namespace
 
 Tensor& renorm_out_cuda(Tensor& result, const Tensor& self, Scalar p, int64_t dim, Scalar maxnorm) {
-  // THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, self));
+  auto self_arg = TensorArg(self, "self", 1);
+  auto result_arg = TensorArg(result, "result", 2);
+  checkSameGPU("renorm", self_arg, result_arg);
   dim = at::maybe_wrap_dim(dim, self);
   TORCH_CHECK(p.toDouble() > 0, "non-positive-norm not supported")
   TORCH_CHECK(self.dim() > 1, "need at least 2 dimensions")
@@ -519,15 +521,12 @@ Tensor& renorm_out_cuda(Tensor& result, const Tensor& self, Scalar p, int64_t di
                        float,
                        scalar_t>::type;
 
-      auto p_scalar = p.to<acc_t>();
-      auto maxnorm_scalar = maxnorm.to<acc_t>();
-
       kernel_renorm<scalar_t, acc_t>
           <<<grid, threads, 0, c10::cuda::getCurrentCUDAStream()>>>(
               data.data_ptr<scalar_t>(),
-              p_scalar,
+              p.to<acc_t>(),
               size,
-              maxnorm_scalar);
+              maxnorm.to<acc_t>());
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   }
