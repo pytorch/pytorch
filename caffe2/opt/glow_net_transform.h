@@ -9,13 +9,13 @@
 #include <caffe2/opt/shape_info.h>
 #include <caffe2/proto/caffe2_pb.h>
 
-C10_DECLARE_string(onnxifi_blacklist);
-C10_DECLARE_string(onnxifi_blacklist_ops);
+C10_DECLARE_string(onnxifi_blocklist);
+C10_DECLARE_string(onnxifi_blocklist_ops);
 
 namespace caffe2 {
 namespace glow {
 /// Onnxifi transformation on the net and workspace.  We also
-/// needed the input data/shape to populate the shape. In addition, we take a \p
+/// needed the input data/shape to populate the shape. In addition, we take a 
 /// blocklist to control and mask what ops we want to consider in onnxifi
 /// process. We can also set whether to use ONNX proto or C2 proto through
 /// ONNXIFI interface.

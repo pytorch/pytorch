@@ -299,8 +299,8 @@ void fakeFp16Transform(NetDef* net) {
           FLAGS_fake_fp16_conversion_use_fp16_acc,
           FLAGS_fake_fp16_conversion_use_nnpi);
 
-  auto blocklist_pos = glow::ParseNetPositionList(FLAGS_onnxifi_blacklist);
-  auto blocklist_type = glow::ParseBlockListOps(FLAGS_onnxifi_blacklist_ops);
+  auto blocklist_pos = glow::ParseNetPositionList(FLAGS_onnxifi_blocklist);
+  auto blocklist_type = glow::ParseBlockListOps(FLAGS_onnxifi_blocklist_ops);
 
   // A hack to only do fakefp16 transformation for operators which will be
   // lowered to ONNXIFI.

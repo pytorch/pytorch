@@ -39,13 +39,13 @@ C10_DEFINE_string(
     "Shape hints in the form of Name:d0,d1:d2;");
 
 C10_DEFINE_string(
-    onnxifi_blacklist,
+    onnxifi_blocklist,
     "",
     "A list of net positions whose corresponding op will be ignored "
     "to onnxifi. Example 0-50,61,62-70");
 
 C10_DEFINE_string(
-    onnxifi_blacklist_ops,
+    onnxifi_blocklist_ops,
     "",
     "A list of operator types that will be ignored "
     "to onnxifi. Example Tanh,Mul");
@@ -155,14 +155,14 @@ void onnxifi(
   caffe2::BackendTransformerBase::annotateOpIndex(net);
 
   // Parse the blocklist
-  auto more_blocklist = ParseNetPositionList(FLAGS_onnxifi_blacklist);
+  auto more_blocklist = ParseNetPositionList(FLAGS_onnxifi_blocklist);
   for (const auto& b : blocklist) {
     more_blocklist.emplace(b);
   }
 
   // ONNX mode will change the op order so it doesn't apply here
   if (!opts.use_onnx) {
-    auto blocklisted_ops = ParseBlockListOps(FLAGS_onnxifi_blacklist_ops);
+    auto blocklisted_ops = ParseBlockListOps(FLAGS_onnxifi_blocklist_ops);
     for (const auto& op : net->op()) {
       if (blocklisted_ops.count(op.type())) {
         ArgumentHelper helper(op);
