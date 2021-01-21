@@ -242,7 +242,7 @@ void prepareProfiler(
   }
 
   if (!libkineto::api().isProfilerRegistered()) {
-    libkineto_init();
+    libkineto_init(!torch::cuda::is_available());
     libkineto::api().suppressLogMessages();
   }
 
@@ -361,10 +361,6 @@ void ProfilerResult::save(const std::string& path) {
 
 bool kinetoAvailable() {
 #ifdef USE_KINETO
-  // TODO: enable Kineto profiler for non-CUDA systems
-  if (!torch::cuda::is_available()) {
-    return false;
-  }
   return true;
 #else
   return false;
