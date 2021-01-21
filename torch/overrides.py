@@ -25,7 +25,7 @@ import __future__
 import collections
 import functools
 import types
-from typing import Dict, Set, List, Any, Callable, Iterable, Tuple, Type
+from typing import Dict, Set, List, Any, Callable, Iterable, Type
 
 import torch
 from torch._C import (
@@ -50,7 +50,7 @@ def get_ignored_functions() -> Set[Callable]:
 
     Returns
     -------
-    Tuple[Callable]
+    Set[Callable]
         A tuple of functions that are publicly available in the torch API but cannot
         be overridden with ``__torch_function__``. Mostly this is because none of the
         arguments of these functions are tensors or tensor-likes.
