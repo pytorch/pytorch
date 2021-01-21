@@ -1553,8 +1553,6 @@ inline TypePtr TensorType::fromNumberType(TypePtr typ) {
     return TensorType::createContiguous(at::kFloat, at::kCPU, {});
   } else if (typ->isSubtypeOf(BoolType::get())) {
     return TensorType::createContiguous(at::kLong, at::kCPU, {});
-  } else if (typ->isSubtypeOf(ComplexDoubleType::get())) {
-    return TensorType::createContiguous(at::kComplexDouble, at::kCPU, {});
   }
   TORCH_CHECK(false, "Unknown number type: ", typ->str());
 }
@@ -1565,8 +1563,6 @@ inline TypePtr TensorType::fromBoolType() {
 inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const c10::TypePtr & type) {
   if (type == FloatType::get()) {
     return at::typeMetaToScalarType(c10::get_default_dtype());
-  } else if (type == ComplexDoubleType::get()) {
-    return at::typeMetaToScalarType(c10::get_default_complex_dtype());
   } else if (type == IntType::get()) {
     return at::ScalarType::Long;
   } else if (type == BoolType::get()) {
@@ -2157,7 +2153,7 @@ struct TORCH_API ClassType : public NamedType {
   torch::jit::Function* findForwardHook(const std::string& name) const;
   const std::vector<torch::jit::Function*>& getForwardHooks() const;
   const std::vector<torch::jit::Function*>& getForwardPreHooks() const;
-  
+
   void checkForwardPreHookSchema(
       int pre_hook_idx,
       const FunctionSchema& pre_hook_schema) const;
@@ -2238,7 +2234,7 @@ struct TORCH_API ClassType : public NamedType {
   // List of hooks to be run before/after forward.
   std::vector<torch::jit::Function*> forward_hooks_;
   std::vector<torch::jit::Function*> forward_pre_hooks_;
-  
+
   // List of properties exposed by this class.
   std::vector<Property> properties_;
 
