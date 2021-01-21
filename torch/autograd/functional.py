@@ -1,5 +1,6 @@
 import torch
 from typing import Tuple, List
+from torch._vmap_internals import vmap
 
 # Utility functions
 
@@ -364,7 +365,7 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
     return _tuple_postprocess(outputs, is_outputs_tuple), _tuple_postprocess(jvp, is_outputs_tuple)
 
 
-def jacobian(func, inputs, create_graph=False, strict=False):
+def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
     r"""Function that computes the Jacobian of a given function.
 
     Args:
@@ -380,6 +381,12 @@ def jacobian(func, inputs, create_graph=False, strict=False):
             independent of it. If ``False``, we return a Tensor of zeros as the
             jacobian for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
+        vectorize (bool, optional): This feature is experimental. When computing
+            the jacobian, usually we invoke ``autograd.grad`` once per row of the
+            jacobian. If this flag is ``True``, we use vmap as the backend to
+            vectorize calls to ``autograd.grad`` so we only invoke it once instead
+            of once per row. This should lead to performance improvements in
+            many use cases. Defaults to ``False``.
 
     Returns:
         Jacobian (Tensor or nested tuple of Tensors): if there is a single
@@ -429,6 +436,42 @@ def jacobian(func, inputs, create_graph=False, strict=False):
     _check_requires_grad(outputs, "outputs", strict=strict)
 
     jacobian: Tuple[torch.Tensor, ...] = tuple()
+
+    if vectorize:
+        for outidx, out in enumerate(outputs):
+            flat_out = out.reshape(-1)
+
+            def vjp(grad_out):
+                vj = _autograd_grad((flat_out,), inputs, (grad_out,),
+                                    retain_graph=True, create_graph=create_graph)
+                vj = list(vj)
+                for el_idx, vj_el in enumerate(vj):
+                    if vj_el is not None:
+                        if strict and create_graph and not vj_el.requires_grad:
+                            msg = ("The jacobian of the user-provided function is "
+                                   f"independent of input {el_idx}. This is not allowed in "
+                                   "strict mode when create_graph=True.")
+                            raise RuntimeError(msg)
+                    else:
+                        if strict:
+                            msg = (f"Output {outidx} of the user-provided function is "
+                                   f"independent of input {el_idx}. This is not allowed in "
+                                   "strict mode.")
+                            raise RuntimeError(msg)
+                        vj[el_idx] = torch.zeros_like(inputs[el_idx])
+                return tuple(vj)
+
+            basis_vectors = torch.eye(flat_out.numel(), dtype=flat_out.dtype, device=flat_out.device)
+            jac_outidx = vmap(vjp)(basis_vectors)
+
+            # Each jac_outidx_j has an outer dimension of shape flat_out.numel().
+            # We need to unflatten that dimension into one of shape out.shape
+            jac_outidx = tuple(jac_outidx_j.view(out.shape + inputs_j.shape)
+                               for jac_outidx_j, inputs_j in zip(jac_outidx, inputs))
+            jacobian += (jac_outidx,)
+        jacobian = _grad_postprocess(jacobian, create_graph)
+        return _tuple_postprocess(jacobian, (is_outputs_tuple, is_inputs_tuple))
+
     for i, out in enumerate(outputs):
 
         # mypy complains that expression and variable have different types due to the empty list
@@ -461,7 +504,7 @@ def jacobian(func, inputs, create_graph=False, strict=False):
     return _tuple_postprocess(jacobian, (is_outputs_tuple, is_inputs_tuple))
 
 
-def hessian(func, inputs, create_graph=False, strict=False):
+def hessian(func, inputs, create_graph=False, strict=False, vectorize=False):
     r"""Function that computes the Hessian of a given scalar function.
 
     Args:
@@ -476,6 +519,13 @@ def hessian(func, inputs, create_graph=False, strict=False):
             such that all the outputs are independent of it. If ``False``, we return a Tensor of zeros as the
             hessian for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
+        vectorize (bool, optional): This feature is experimental. When computing
+            the hessian, usually we invoke ``autograd.grad`` once per row of the
+            hessian. If this flag is ``True``, we use vmap as the backend to
+            vectorize calls to ``autograd.grad`` so we only invoke it once instead
+            of once per row. This should lead to performance improvements in
+            many use cases. Defaults to ``False``.
+
 
     Returns:
         Hessian (Tensor or a tuple of tuple of Tensors): if there is a single input,
@@ -545,7 +595,7 @@ def hessian(func, inputs, create_graph=False, strict=False):
         _check_requires_grad(jac, "jacobian", strict=strict)
         return jac
 
-    res = jacobian(jac_func, inputs, create_graph=create_graph, strict=strict)
+    res = jacobian(jac_func, inputs, create_graph=create_graph, strict=strict, vectorize=vectorize)
     return _tuple_postprocess(res, (is_inputs_tuple, is_inputs_tuple))
 
 
