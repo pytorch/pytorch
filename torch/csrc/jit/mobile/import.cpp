@@ -279,8 +279,7 @@ mobile::Module BytecodeDeserializer::deserialize(
   return deserialize(device);
 }
 
-mobile::Module BytecodeDeserializer::deserialize(
-    c10::optional<at::Device> device) {
+mobile::Module BytecodeDeserializer::deserialize(c10::optional<at::Device> device) {
   device_ = device;
   auto mcu = std::make_shared<mobile::CompilationUnit>();
 
