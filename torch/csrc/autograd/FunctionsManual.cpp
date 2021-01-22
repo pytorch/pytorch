@@ -2111,10 +2111,28 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
 
   auto vh = v.conj().transpose(-2, -1);
 
+  // Based on a little experiment, min_threshold should be
+  //   "max_eigenvalue * matrix_size * machine_eps"
+  // See: ???
+  // However, as getting max_eigenvalue would need synchronization, I just take
+  //   a guess that the max eigenvalues would typically be less than 10
+  // Eps is still taking double and single eps value, because I don't know
+  //   if it would produce a lot of backward incompatibility due to large
+  //   eps for half-precision floating point
+  double eps = (lambda.dtype() == at::kDouble) ? 2.220446049250313e-16 : 1.1920928955078125e-07;
+  double min_threshold = 10 * lambda.size(-1) * eps;
+
   Tensor result;
   if (gv.defined()) {
       Tensor F = lambda.unsqueeze(-2) - lambda.unsqueeze(-1);
-      F.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(INFINITY);
+
+      // simple modification to make it numerically stable if there are
+      // repeated eigenvalues
+      // see https://github.com/pytorch/pytorch/issues/47599
+      // and https://arxiv.org/abs/2011.04366
+      Tensor idx = F.abs() <= min_threshold;
+      F.index_put_({idx}, INFINITY);
+
       F.pow_(-1);
       result = at::matmul(v, at::matmul(F * at::matmul(vh, gv), vh));
   } else {

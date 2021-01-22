@@ -2797,6 +2797,49 @@ class TestAutograd(TestCase):
         for upper, dims in product([True, False], [(3, 3), (5, 3, 3), (4, 3, 2, 2)]):
             run_test(upper, dims)
 
+    @skipIfNoLapack
+    def test_symeig_degenerate(self):
+        # test symeig backward if there are degenerate/repeated eigenvalues
+        dtype = torch.double
+
+        def get_loss(a, mat, P2):
+            # the loss function here is designed so that it depends on the
+            # degenerate eigenvectors, but does not depend on which linear
+            # combination of the degenerate eigenvectors are used.
+
+            # get the orthogonal vector for the eigenvectors
+            P, _ = torch.qr(mat)
+
+            # line up the eigenvalues
+            b = torch.cat((a[:1], a[1:2], a[1:2], a[2:]))
+
+            # construct the matrix
+            diag = torch.diag_embed(b)
+            A = torch.matmul(torch.matmul(P.T, diag), P)
+
+            eivals, eivecs = torch.symeig(A, eigenvectors=True)
+            U = eivecs[:, 1:3]  # the degenerate eigenvectors
+
+            loss = torch.einsum("rc,rc->", torch.matmul(P2, U), U)
+            return loss
+
+        def run_test(n):
+            # random matrix to be orthogonalized for the eigenvectors
+            mat = torch.randn((n, n), dtype=dtype).requires_grad_()
+
+            # matrix for the loss function
+            P2 = torch.randn((n, n), dtype=dtype).requires_grad_()
+
+            # the degenerate eigenvalues
+            a = torch.rand((n - 1,), dtype=dtype)
+            a = torch.sort(a)[0].requires_grad_()
+
+            gradcheck(get_loss, (a, mat, P2))
+            gradgradcheck(get_loss, (a, mat, P2))
+
+        for n in [3, 5, 10]:
+            run_test(n)
+
     @slowTest
     @skipIfNoLapack
     def test_lobpcg(self):
