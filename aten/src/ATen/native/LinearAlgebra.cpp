@@ -2227,9 +2227,9 @@ Tensor& kron_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto maxdim = std::max(self.dim(), other.dim());
   auto pad_self = maxdim - self.dim();
   auto pad_other = maxdim - other.dim();
-  std::vector<int64_t> a_reshape(2 * maxdim);
-  std::vector<int64_t> b_reshape(2 * maxdim);
-  std::vector<int64_t> result_reshape(maxdim);
+  DimVector a_reshape(2 * maxdim);
+  DimVector b_reshape(2 * maxdim);
+  DimVector result_reshape(maxdim);
   for (int i = 0; i < maxdim; i++) {
     a_reshape[2 * i] = i >= pad_self ? self.sizes()[i - pad_self] : 1;
     a_reshape[2 * i + 1] = 1;
@@ -2237,10 +2237,12 @@ Tensor& kron_out(Tensor& result, const Tensor& self, const Tensor& other) {
     b_reshape[2 * i + 1] = i >= pad_other ? other.sizes()[i - pad_other] : 1;
     result_reshape[i] = a_reshape[2 * i] * b_reshape[2 * i + 1];
   }
+  auto self_view = at::_unsafe_view(self, a_reshape);
+  auto other_view = at::_unsafe_view(other, b_reshape);
   if (!result.defined()) {
-    result = at::mul(self.reshape(a_reshape), other.reshape(b_reshape)).reshape(result_reshape);
+    result = at::_unsafe_view(at::mul(self_view, other_view), result_reshape);
   } else {
-    at::mul_out(result, self.reshape(a_reshape), other.reshape(b_reshape));
+    at::mul_out(result, self_view, other_view);
     result.resize_(result_reshape);
   }
   return result;
