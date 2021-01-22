@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
 namespace torch {
@@ -27,6 +28,7 @@ TORCH_API void ONNXSetDynamicInputShape(
 TORCH_API void ONNXAssignOutputShape(
     std::shared_ptr<Graph>& graph,
     at::ArrayRef<at::Tensor> outputs,
+    const python::IODescriptor& desc,
     bool onnx_shape_inference);
 
 // Utilize ONNX Shape Inference for node.
