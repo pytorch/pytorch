@@ -47,7 +47,11 @@ namespace impl {
 //
 // A notable subclass of this interface is TensorIteratorBase.
 struct TORCH_API MetaBase {
-  virtual void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) = 0;
+  // will_resize is an optimization for TensorIterator, handling cases when
+  // it is statically known that resizing is not necessary; in those cases,
+  // setting this to false will skip resizing.  This has no effect for
+  // functional/inplace variants.
+  virtual void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names, bool will_resize = true) = 0;
   virtual const Tensor& maybe_get_output(int64_t output_idx) = 0;
   void set_output(IntArrayRef sizes, TensorOptions options) {
     set_output(0, sizes, {}, options, {});

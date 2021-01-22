@@ -250,12 +250,12 @@ class RegisterDispatchKey:
 
     def gen_structured_class_set_output(self, k: SchemaKind, parent_class: str, generate_super: bool) -> str:
         if generate_super:
-            set_output_super = f"{parent_class}::set_output(output_idx, sizes, strides, options, names);"
+            set_output_super = f"{parent_class}::set_output(output_idx, sizes, strides, options, names, will_resize);"
         else:
             set_output_super = ""
         return f"""
 void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
-                TensorOptions options, DimnameList names) override {{
+                TensorOptions options, DimnameList names, bool will_resize) override {{
     {self.gen_structured_class_set_output_body(k)}
     if (!names.empty()) namedinference::propagate_names(outputs_[output_idx], names);
     // super must happen after, so that downstream can use maybe_get_output
@@ -311,7 +311,9 @@ if (strides.empty()) {{
         elif k is SchemaKind.out:
             return f"""
 {maybe_set_guard}
-at::native::resize_output(outputs_[output_idx], sizes);
+if (will_resize) {{
+    at::native::resize_output(outputs_[output_idx], sizes);
+}}
 if (!strides.empty()) {{
     TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
     at::native::as_strided_(outputs_[output_idx], sizes, strides);

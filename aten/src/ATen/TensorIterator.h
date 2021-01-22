@@ -297,7 +297,7 @@ struct TORCH_API TensorIteratorBase : public impl::MetaBase {
     return true;
   }
 
-  void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
+  void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names, bool will_resize) override;
 
   void build_binary_op(const Tensor& out, const Tensor& a, const Tensor& b);
 
@@ -423,7 +423,7 @@ struct TORCH_API TensorIterator final : public TensorIteratorBase {
   static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
 
   const Tensor& maybe_get_output(int64_t output_idx) override;
-  void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) override;
+  void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names, bool will_resize) override;
 };
 
 class TORCH_API TensorIteratorConfig final {

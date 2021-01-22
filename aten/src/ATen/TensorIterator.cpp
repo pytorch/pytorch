@@ -479,19 +479,19 @@ void TensorIteratorBase::allocate_or_resize_outputs() {
         // can just return contiguous output
         // it is faster because it avoids allocating 0 size tensor and
         // resizing and restriding it
-        set_output(i, tensor_shape, {}, op.options(), names_);
+        set_output(i, tensor_shape, {}, op.options(), names_, op.will_resize);
       } else {
         auto tensor_stride = invert_perm(op.stride_bytes);
         for (int dim = 0; dim < ndim(); dim++) {
           tensor_stride[dim] /= element_size;
         }
-        set_output(i, tensor_shape, tensor_stride, op.options(), names_);
+        set_output(i, tensor_shape, tensor_stride, op.options(), names_, op.will_resize);
       }
       op.current_dtype = op.target_dtype;
     } else if (op.tensor.defined()) {
       // Even if we don't resize, we still need to tell set_output about
       // the output, so that we properly set guard and propagate names
-      set_output(i, op.tensor.sizes(), {}, op.tensor.options(), names_);
+      set_output(i, op.tensor.sizes(), {}, op.tensor.options(), names_, op.will_resize);
     }
   }
 }
@@ -1147,7 +1147,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
           if (!op.tensor.defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
           }
-          set_output(i, shape_, {}, op.options().memory_format(MemoryFormat::Contiguous), names_);
+          set_output(i, shape_, {}, op.options().memory_format(MemoryFormat::Contiguous), names_, op.will_resize);
         }
         break;
       }
@@ -1158,7 +1158,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
           if (!op.tensor.defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
           }
-          set_output(i, shape_, {}, op.options().memory_format(MemoryFormat::ChannelsLast), names_);
+          set_output(i, shape_, {}, op.options().memory_format(MemoryFormat::ChannelsLast), names_, op.will_resize);
         }
         break;
       }
@@ -1175,7 +1175,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
           if (!op.tensor.defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
           }
-          set_output(i, shape_, operands_[i_defined].tensor.strides(), op.options(), names_);
+          set_output(i, shape_, operands_[i_defined].tensor.strides(), op.options(), names_, op.will_resize);
         }
         break;
       }
@@ -1307,11 +1307,12 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 // The precondition for this function is that maybe_get_output() now
 // unconditionally returns a real Tensor (prior to output setting,
 // this function may return an undefined tensor.)
-void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) {
+void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names, bool will_resize) {
   auto& op = operands_[output_idx];
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx < num_outputs_);
   const auto& t = maybe_get_output(output_idx);
   TORCH_INTERNAL_ASSERT(t.defined());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(will_resize == op.will_resize);
   if (!op.tensor.defined()) {
     op.tensor = t;
     op.current_dtype = op.target_dtype;
@@ -1369,10 +1370,11 @@ void TensorIteratorBase::set_output(int64_t output_idx, IntArrayRef sizes, IntAr
 // This is the "traditional" implementation of set_output.  On TensorIterator
 // instances, it is invoked directly from various call sites in this file.  No
 // funny business.
-void TensorIterator::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) {
+void TensorIterator::set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names, bool will_resize) {
   // NB: intentionally no superclass call
   auto& op = operands_[output_idx];
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx < num_outputs_);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(will_resize == op.will_resize);
   if (!op.tensor.defined()) {
       if (strides.empty()) {
           if (is_meta_) {
