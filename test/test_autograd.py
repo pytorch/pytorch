@@ -3227,6 +3227,8 @@ class TestAutograd(TestCase):
         last_end = 0
 
         for event in prof.function_events:
+            if event.name == 'aten::linear':
+                continue
             if event.time_range.start > last_end:
                 name_expected, input_shape_expected = next(expected_iter)
                 if name_expected is not None:
