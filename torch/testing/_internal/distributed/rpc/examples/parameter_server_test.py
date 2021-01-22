@@ -188,8 +188,8 @@ def get_accuracy(test_loader, model):
     model.eval()
     correct_sum = 0
     # Use GPU to evaluate if possible
-    device = torch.device("cuda:0" if model.num_gpus > 0
-                                      and torch.cuda.is_available() else "cpu")
+    device = torch.device(
+        "cuda:0" if model.num_gpus > 0 and torch.cuda.is_available() else "cpu")
     with torch.no_grad():
         for i, (data, target) in enumerate(test_loader):
             out = model(data)
