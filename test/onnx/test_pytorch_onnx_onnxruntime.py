@@ -5737,15 +5737,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(6, 4, 3, 3)
         self.run_test(FakeQuantizePerChannelModel(), (x))
 
-    @skipIfUnsupportedMinOpsetVersion(13)
-    def test_fake_quantize_per_channel_error(self):
-        amax = torch.ones(4)
-        scale = amax / 127.
-        zero_point = torch.zeros_like(amax, dtype=torch.long)
-        x = torch.randn(6, 4, 3, 3)
-        with self.assertRaises(RuntimeError):
-            torch.fake_quantize_per_channel_affine(x, scale, zero_point, 1, -125, 125)
-
     @skipIfUnsupportedOpsetVersion([13])
     def test_batchnorm_training(self):
         class MyModule(torch.nn.Module):
