@@ -2113,7 +2113,7 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
 
   // Based on a little experiment, min_threshold should be
   //   "max_eigenvalue * matrix_size * machine_eps"
-  // See: ???
+  // See: https://github.com/pytorch/pytorch/pull/50942
   // However, as getting max_eigenvalue would need synchronization, I just take
   //   a guess that the max eigenvalues would typically be less than 10
   // Eps is still taking double and single eps value, because I don't know
