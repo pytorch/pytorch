@@ -6,7 +6,6 @@ from torch.testing._internal.common_utils import \
     (TestCase, make_tensor, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
-from torch.testing._internal import mypy_wrapper
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -487,62 +486,6 @@ if __name__ == '__main__':
 
 
 instantiate_device_type_tests(TestTesting, globals())
-
-
-class TestMypyWrapper(TestCase):
-    def test_glob(self):
-        # can match individual files
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='test/test_torch.py',
-            filename='test/test_torch.py',
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='test/test_torch.py',
-            filename='test/test_testing.py',
-        ))
-
-        # dir matters
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='tools/codegen/utils.py',
-            filename='torch/nn/modules.py',
-        ))
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='setup.py',
-            filename='setup.py'
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='setup.py',
-            filename='foo/setup.py'
-        ))
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='foo/setup.py',
-            filename='foo/setup.py'
-        ))
-
-        # can match dirs
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='torch',
-            filename='torch/random.py',
-        ))
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='torch',
-            filename='torch/nn/cpp.py',
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='torch',
-            filename='tools/fast_nvcc/fast_nvcc.py',
-        ))
-
-        # can match wildcards
-        self.assertTrue(mypy_wrapper.glob(
-            pattern='tools/autograd/*.py',
-            filename='tools/autograd/gen_autograd.py',
-        ))
-        self.assertFalse(mypy_wrapper.glob(
-            pattern='tools/autograd/*.py',
-            filename='tools/autograd/deprecated.yaml',
-        ))
-
 
 if __name__ == '__main__':
     run_tests()
