@@ -199,9 +199,7 @@ TEST(OperatorRegistrationTest_StackBasedKernel, callKernelsWithDispatchKeySetCon
   ASSERT_FALSE(called_redispatching_kernel);
 
   // call TESTING_ONLY_GenericWrapper -> call CPU
-  expectCallsIncrement(c10::DispatchKeySet()
-                        .add(DispatchKey::TESTING_ONLY_GenericWrapper)
-                        .add(DispatchKey::CPU));
+  expectCallsIncrement(testing_cpu_set);
   ASSERT_TRUE(called_redispatching_kernel);
 }
 

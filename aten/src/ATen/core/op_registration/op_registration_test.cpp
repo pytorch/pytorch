@@ -1965,7 +1965,7 @@ bool called_kernel_cpu = false;
 bool called_kernel_autograd = false;
 bool called_kernel_tracing = false;
 
-void cpu_kernel(Tensor a) {
+void cpu_kernel(Tensor) {
   called_kernel_cpu = true;
 }
 
