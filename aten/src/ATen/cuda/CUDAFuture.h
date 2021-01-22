@@ -21,7 +21,7 @@
 
 namespace at { namespace cuda {
 
-struct TORCH_CUDA_API CUDAFuture : at::ivalue::Future {
+struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
  public:
   using at::ivalue::Future::Future;
 
