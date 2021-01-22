@@ -138,6 +138,7 @@ class TestDispatch(TestCase):
                 if not expect_raises:
                     raise
                 actual = str(e).replace(test_namespace, "test")
+                actual = actual.split("\nException raised from ")[0]
                 expected, _, expected_provenance = results.setdefault(
                     frozenset(active_ops),
                     Result(actual, "", "error after running ctors {}".format(ctor_order[:i + 1]))
