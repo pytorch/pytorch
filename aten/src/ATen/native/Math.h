@@ -290,7 +290,7 @@ static inline double calc_digamma(double x) {
     if (x_is_integer) {
       // As per C++ standard for gamma related functions and SciPy,
       // If the argument is a negative integer, NaN is returned
-      return NAN;
+      return std::numeric_limits<double>::quiet_NaN();
     }
     return calc_digamma(1 - x) - M_PI / tan(M_PI * x);
   }
@@ -342,7 +342,7 @@ static inline float calc_digamma(float x) {
     if (x_is_integer) {
     // As per C++ standard for gamma related functions and SciPy,
     // If the argument is a negative integer, NaN is returned
-      return NAN;
+      return std::numeric_limits<float>::quiet_NaN();
     }
     // Avoid rounding errors for `tan`'s input.
     // Those make a big difference at extreme values.
