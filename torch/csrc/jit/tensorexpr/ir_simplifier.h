@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/hash_provider.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
@@ -612,6 +613,268 @@ class TORCH_API IRSimplifier {
 
 // Returns true if expressions A and B can be simplified to an equal expression.
 TORCH_API bool exprEquals(const Expr* A, const Expr* B);
+
+template <typename T>
+struct TypeHash {
+  static inline std::size_t hash() {
+    return std::hash<void (*)()>{}(&TypeHash::dummy);
+  }
+
+ private:
+  static void dummy(){};
+};
+
+class TORCH_API ExprHasher : public IRVisitor {
+  template <typename T>
+  static inline std::size_t hash_impl(const T& v) {
+    return std::hash<T>{}(v);
+  }
+
+  static inline std::size_t hash_combine(std::size_t a, std::size_t b) {
+    return b ^ (a + 0x9e3779b9 + (b << 6) + (b >> 2));
+  }
+
+  static inline std::size_t dtype_hash(Dtype dtype) {
+    auto h0 = hash_impl(dtype.scalar_type());
+    auto h1 = hash_impl(dtype.lanes());
+    auto h = hash_combine(h0, h1);
+    return h;
+  }
+
+// NOLINTNEXTLINE
+#define IMM_VISIT(Type, Name)               \
+  void visit(const Name##Imm* v) override { \
+    auto ht = TypeHash<Name##Imm>().hash(); \
+    auto h0 = hash_impl(v->value());        \
+    hashes_[v] = hash_combine(ht, h0);      \
+  }
+  AT_FORALL_SCALAR_TYPES_AND(Bool, IMM_VISIT);
+#undef IMM_VISIT
+
+  template <typename Op>
+  void visit_binary_op(const Op* v) {
+    v->lhs()->accept(this);
+    v->rhs()->accept(this);
+    auto ht = TypeHash<Op>().hash();
+    auto h0 = hash_combine(hashes_.at(v->lhs()), hashes_.at(v->rhs()));
+    hashes_[v] = hash_combine(ht, h0);
+  }
+
+#define BIN_VISIT(Type)                \
+  void visit(const Type* v) override { \
+    visit_binary_op(v);                \
+  }
+
+  BIN_VISIT(Add);
+  BIN_VISIT(Sub);
+  BIN_VISIT(Mul);
+  BIN_VISIT(Div);
+  BIN_VISIT(Mod);
+  BIN_VISIT(Max);
+  BIN_VISIT(Min);
+  BIN_VISIT(And);
+  BIN_VISIT(Or);
+  BIN_VISIT(Xor);
+  BIN_VISIT(Lshift);
+  BIN_VISIT(Rshift);
+
+#undef BIN_VISIT
+
+  void visit(const CompareSelect* v) override {
+    v->lhs()->accept(this);
+    v->rhs()->accept(this);
+    v->ret_val1()->accept(this);
+    v->ret_val2()->accept(this);
+    auto h0 = hash_combine(hashes_.at(v->lhs()), hashes_.at(v->rhs()));
+    auto h1 =
+        hash_combine(hashes_.at(v->ret_val1()), hashes_.at(v->ret_val2()));
+    auto h2 = hash_combine(h0, h1);
+    auto ht = TypeHash<CompareSelect>().hash();
+    hashes_[v] = hash_combine(ht, h2);
+  }
+
+  void visit(const BitCast* v) override {
+    auto h = dtype_hash(v->dtype());
+    v->src_value()->accept(this);
+    auto ht = hash_combine(h, TypeHash<BitCast>().hash());
+    hashes_[v] = hash_combine(ht, hashes_.at(v->src_value()));
+  }
+
+  void visit(const Cast* v) override {
+    auto h = dtype_hash(v->dtype());
+    v->src_value()->accept(this);
+    auto ht = hash_combine(h, TypeHash<Cast>().hash());
+    hashes_[v] = hash_combine(ht, hashes_.at(v->src_value()));
+  }
+
+  void visit(const Var* v) override {
+    auto ht = TypeHash<Var>().hash();
+    hashes_[v] = hash_combine(ht, hash_impl(v->name_hint()));
+  }
+
+  void visit(const Load* v) override {
+    auto h = dtype_hash(v->dtype());
+    h = hash_combine(h, hash_impl(v->buf()));
+    for (const Expr* ind : v->indices()) {
+      ind->accept(this);
+      h = hash_combine(h, hashes_.at(ind));
+    }
+    v->mask()->accept(this);
+    h = hash_combine(h, hashes_.at(v->mask()));
+
+    auto ht = TypeHash<Load>().hash();
+    hashes_[v] = hash_combine(ht, h);
+  }
+
+  std::unordered_map<const Expr*, std::size_t> hashes_ = {};
+
+ public:
+  const std::size_t& hash(const Expr* e) const {
+    return hashes_.at(e);
+  }
+  const std::unordered_map<const Expr*, std::size_t>& hashes() const {
+    return hashes_;
+  }
+  std::pair<const Expr*, size_t> most_common() const {
+    std::unordered_map<std::size_t, size_t> hash_count;
+    size_t max = 0;
+    const Expr* max_expr = nullptr;
+    for (auto p : hashes()) {
+      auto new_count = ++hash_count[p.second];
+#define SKIP(Type)                          \
+  if (dynamic_cast<const Type*>(p.first)) { \
+    continue;                               \
+  }
+#define SKIPIMM(Type, Name) SKIP(Name##Imm)
+      AT_FORALL_SCALAR_TYPES_AND(Bool, SKIPIMM);
+#undef SKIPIMM
+      SKIP(Var);
+      SKIP(Buf);
+      SKIP(BitCast);
+#undef SKIP
+
+      if (new_count > max) {
+        max_expr = p.first;
+        max = new_count;
+      }
+    }
+    return std::make_pair(max_expr, max);
+  }
+};
+
+class TORCH_API CSEReplacer : public IRMutator {
+ public:
+  CSEReplacer(
+      Var* v,
+      const Expr* expr,
+      const std::unordered_map<const Expr*, std::size_t>& hashes)
+      : v_(v), expr_(expr), hash_(hashes.at(expr)), hashes_(hashes) {}
+
+ private:
+  Var* v_;
+  const Expr* expr_;
+  std::size_t hash_;
+  const std::unordered_map<const Expr*, std::size_t>& hashes_;
+
+// TODO This doesn't use an exprEquals yet...
+#define X(Type)                                          \
+  const Expr* mutate(const Type* e) override {           \
+    auto it = hashes_.find(e);                           \
+    if (it != hashes_.end() && hashes_.at(e) == hash_) { \
+      return v_;                                         \
+    }                                                    \
+    return IRMutator::mutate(e);                         \
+  }
+
+  X(Add);
+  X(Sub);
+  X(Mul);
+  X(Div);
+  X(Mod);
+  X(Max);
+  X(Min);
+  X(And);
+  X(Or);
+  X(Xor);
+  X(Lshift);
+  X(Rshift);
+  X(CompareSelect);
+  X(Cast);
+  X(BitCast);
+  X(Var);
+  X(Buf);
+  X(Ramp);
+  X(Load);
+  X(Broadcast);
+  X(IfThenElse);
+#undef X
+};
+
+/*
+
+CSE:
+1. find an inner loop -- Block with no for loops
+
+2. run ExprHasher on block
+3. hoist common expr, save v = expr
+4. run CSEReplace on block, get a new block
+5. go to 2
+
+6. return nested Let's with newest block
+
+*/
+class TORCH_API CSE : public IRMutator {
+  // Find an inner loop
+  Stmt* mutate(const tensorexpr::Block* v) override {
+    // TODO check if there is a load after a store (ideally alias analysis, but
+    // for now just bail)
+    auto for_loops = NodeFinder<For>::find(v);
+    if (for_loops.size()) {
+      return IRMutator::mutate(v);
+    }
+
+    Stmt* replaced_block = const_cast<tensorexpr::Block*>(v);
+    std::vector<std::pair<const Var*, const Expr*>> replaced_subexpressions;
+
+    for (auto i = 0; i < iters_; ++i) {
+      ExprHasher expr_hasher;
+      replaced_block->accept(&expr_hasher);
+
+      const Expr* expr;
+      size_t count;
+      std::tie(expr, count) = expr_hasher.most_common();
+      Var* var = new Var("subexpr", expr->dtype());
+
+      if (count <= 1) {
+        break;
+      }
+      GRAPH_DEBUG("Replacing ", *expr, " (count ", count, ")");
+
+      CSEReplacer cse_replace(var, expr, expr_hasher.hashes());
+      replaced_block = replaced_block->accept_mutator(&cse_replace);
+      replaced_subexpressions.emplace_back(std::make_pair(var, expr));
+    }
+    GRAPH_DEBUG("Replaced block:", *replaced_block);
+
+    if (!replaced_subexpressions.size()) {
+      return IRMutator::mutate(v);
+    }
+
+    std::vector<Stmt*> new_block_stmts;
+    for (const auto& p : replaced_subexpressions) {
+      Let* let = new Let(p.first, p.second);
+      new_block_stmts.emplace_back(let);
+    }
+    new_block_stmts.emplace_back(replaced_block);
+
+    return tensorexpr::Block::make(new_block_stmts);
+  }
+
+  int iters_;
+
+ public:
+  CSE(int iters) : iters_(iters) {}
+};
 
 } // namespace tensorexpr
 } // namespace jit

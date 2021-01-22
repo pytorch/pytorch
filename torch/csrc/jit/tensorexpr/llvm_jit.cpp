@@ -56,6 +56,7 @@ static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder() {
   JTMB.setCodeGenOptLevel(llvm::CodeGenOpt::Default);
   JTMB.setCPU(llvm::sys::getHostCPUName().str());
   JTMB.addFeatures(SubtargetFeatures.getFeatures());
+  JTMB.addFeatures(SubtargetFeatures.getFeatures());
   JTMB.getOptions().AllowFPOpFusion = llvm::FPOpFusion::Fast;
 
   return JTMB;

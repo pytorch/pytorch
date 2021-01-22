@@ -63,6 +63,8 @@ static void log_nnc_fast(benchmark::State& state) {
   ln.prepareForCodegen();
   Stmt* s = ln.root_stmt();
   s = torch::jit::tensorexpr::IRSimplifier::simplify(s);
+  CSE cse(100);
+  s = s->accept_mutator(&cse);
   std::vector<CodeGen::BufferArg> args;
   args.emplace_back(B);
   args.emplace_back(A);
@@ -147,6 +149,8 @@ static void logit_nnc_fast(benchmark::State& state) {
   optimizePointwise(&ln, B);
   Stmt* s = ln.root_stmt();
   s = torch::jit::tensorexpr::IRSimplifier::simplify(s);
+  CSE cse(100);
+  s = s->accept_mutator(&cse);
   std::vector<CodeGen::BufferArg> args;
   args.emplace_back(B);
   args.emplace_back(A);
