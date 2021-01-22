@@ -2227,9 +2227,9 @@ Tensor& kron_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto maxdim = std::max(self.dim(), other.dim());
   auto pad_self = maxdim - self.dim();
   auto pad_other = maxdim - other.dim();
-  DimVector a_reshape(2 * maxdim);
-  DimVector b_reshape(2 * maxdim);
-  DimVector result_reshape(maxdim);
+  c10::SmallVector<int64_t, 10> a_reshape(2 * maxdim);
+  c10::SmallVector<int64_t, 10> b_reshape(2 * maxdim);
+  c10::SmallVector<int64_t, 10> result_reshape(maxdim);
   for (int i = 0; i < maxdim; i++) {
     a_reshape[2 * i] = i >= pad_self ? self.sizes()[i - pad_self] : 1;
     a_reshape[2 * i + 1] = 1;
