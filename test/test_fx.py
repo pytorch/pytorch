@@ -1309,7 +1309,6 @@ class TestFX(JitTestCase):
         scripted = torch.jit.script(traced)
         self.assertIn("-> List[str]", scripted.code)
 
-<<<<<<< HEAD
     def test_user_friendly_call_provenance_with_function(self):
         def fn(x):
             return wrapper_fn(x)
@@ -1332,7 +1331,6 @@ class TestFX(JitTestCase):
                                     "being compiled since it was called"
                                     " from 'M.forward'"):
             scripted = torch.jit.script(traced)
-=======
     def test_snake_case(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1367,7 +1365,6 @@ class TestFX(JitTestCase):
             self.assertEqual(target, node.target)
             i += 1
         self.assertEqual(i, 3)
->>>>>>> snake_case FX IR names
 
 if __name__ == '__main__':
     run_tests()
