@@ -526,8 +526,8 @@ Tensor trace_cpu(const Tensor& self) {
 
     c10::guts::if_constexpr<std::is_integral<accscalar_t>::value>(
       // all integer types get promoted to kLong
-      [&] (auto _) { *result.data_ptr<int64_t>() = sum; },  // then-case, invalid for non-integral types
-      [&] (auto _) { *result.data_ptr<scalar_t>() = sum; }  // else-case, invalid for integral types
+      [&] (auto _) { *result.data_ptr<int64_t>() = _(sum); },  // then-case, invalid for non-integral types
+      [&] (auto _) { *result.data_ptr<scalar_t>() = _(sum); }  // else-case, invalid for integral types
     );
   });
 

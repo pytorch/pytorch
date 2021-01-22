@@ -27,7 +27,7 @@ from torch.testing._internal.common_utils import (
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    skipCUDAIfNoMagma, skipCUDAIfRocm,
+    skipCUDAIfNoMagma,
     onlyCUDA, onlyCPU,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyOnCPUAndCUDA,
@@ -109,11 +109,11 @@ class AbstractTestCases:
         @wrapDeterministicFlagAPITest
         def test_deterministic_flag(self):
             for deterministic in [True, False]:
-                torch.set_deterministic(deterministic)
-                self.assertEqual(deterministic, torch.is_deterministic())
+                torch.use_deterministic_algorithms(deterministic)
+                self.assertEqual(deterministic, torch.are_deterministic_algorithms_enabled())
 
-            with self.assertRaisesRegex(RuntimeError, r"set_deterministic expects a bool, but got int"):
-                torch.set_deterministic(1)
+            with self.assertRaisesRegex(RuntimeError, r"use_deterministic_algorithms expects a bool, but got int"):
+                torch.use_deterministic_algorithms(1)
 
         def test_type_conversion_via_dtype_name(self):
             x = torch.tensor([1])
@@ -1225,7 +1225,7 @@ class AbstractTestCases:
                         dest.masked_scatter_(mask, src)
 
                         # make src smaller. this should fail
-                        src = torch.randn(num_copy - 1)
+                        src = torch.zeros(num_copy - 1, dtype=dt)
                         with self.assertRaises(RuntimeError):
                             dest.masked_scatter_(mask, src)
             self.assertEqual(len(w), 27)
@@ -2833,17 +2833,31 @@ class TestTorchDeviceType(TestCase):
         return tuple(shape)
 
     @onlyCPU
-    def test_set_deterministic_beta_warning(self, device):
-        with DeterministicGuard(torch.is_deterministic()):
+    def test_use_deterministic_algorithms_beta_warning(self, device):
+        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
             # Ensures setting to false does not throw a warning
             with warnings.catch_warnings(record=True) as w:
                 warnings.simplefilter("always")
-                torch.set_deterministic(False)
+                torch.use_deterministic_algorithms(False)
                 self.assertEqual(len(w), 0)
 
-            # Setting set_deterministic(True) throws a warning once per process
-            with self.maybeWarnsRegex(UserWarning, "torch.set_deterministic is in beta"):
+            # Setting use_deterministic_algorithms(True) throws a warning once per process
+            with self.maybeWarnsRegex(UserWarning, "torch.use_deterministic_algorithms is in beta"):
+                torch.use_deterministic_algorithms(True)
+
+    @onlyCPU
+    def test_set_deterministic_deprecated_warning(self, device):
+        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
+            # Calling set_deterministic throws a warning about deprecation once per process
+            with self.maybeWarnsRegex(UserWarning, "torch.set_deterministic is deprecated"):
                 torch.set_deterministic(True)
+
+    @onlyCPU
+    def test_is_deterministic_deprecated_warning(self, device):
+        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
+            # Calling is_deterministic throws a warning about deprecation once per process
+            with self.maybeWarnsRegex(UserWarning, "torch.is_deterministic is deprecated"):
+                torch.is_deterministic()
 
     @dtypes(torch.float32, torch.complex64)
     def test_storage(self, device, dtype):
@@ -4361,7 +4375,6 @@ class TestTorchDeviceType(TestCase):
                     src = torch.randn(indices_shape, device=device)
                     self.assertEqual(dst, dst.put_(indices, src, accumulate=accumulate))
 
-    @skipCUDAIfRocm
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
               torch.testing.get_all_complex_dtypes()))
     @dtypesIfCPU(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=True) +
@@ -4392,7 +4405,6 @@ class TestTorchDeviceType(TestCase):
             input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result)
 
-    @skipCUDAIfRocm
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
               torch.testing.get_all_complex_dtypes()))
     @dtypesIfCPU(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=True) +
@@ -4434,7 +4446,6 @@ class TestTorchDeviceType(TestCase):
                          torch.tensor([[3], [1]], device=device,
                                       dtype=torch.float32).repeat(1, width))
 
-    @skipCUDAIfRocm
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=False) +
               torch.testing.get_all_complex_dtypes()))
     @dtypesIfCPU(*(torch.testing.get_all_fp_dtypes(include_bfloat16=False, include_half=True) +
@@ -4461,7 +4472,6 @@ class TestTorchDeviceType(TestCase):
             input.scatter_(0, index, src, reduce=operation)
             self.assertEqual(input, result, msg=f"result: {result} input: {input} method: {str(operation)}")
 
-    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @dtypesIfCUDA(*(torch.testing.get_all_complex_dtypes() +
                     torch.testing.get_all_int_dtypes()))

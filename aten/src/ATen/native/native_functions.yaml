@@ -91,17 +91,14 @@
   variants: method
 
 - func: _fw_primal(Tensor(a) self, int level) -> Tensor(a)
-  use_c10_dispatcher: full
   variants: method
   dispatch:
     DefaultBackend: _fw_primal
 
 - func: make_dual(Tensor(a) primal, Tensor tangent, int level) -> Tensor(a)
-  use_c10_dispatcher: full
   variants: function
 
 - func: unpack_dual(Tensor(a) dual, int level) -> (Tensor(a) primal, Tensor tangent)
-  use_c10_dispatcher: full
   variants: function
 
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
@@ -348,7 +345,6 @@
     MkldnnCPU: mkldnn_add_
 
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: full
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
@@ -907,7 +903,6 @@
   device_guard: False
 
 - func: broadcast_to(Tensor(a) self, int[] size) -> Tensor(a)
-  use_c10_dispatcher: full
   variants: function, method
   dispatch:
     Math: broadcast_to
@@ -962,7 +957,6 @@
   variants: function, method
 
 - func: tensor_split.tensor_indices_or_sections(Tensor(a) self, Tensor tensor_indices_or_sections, int dim=0) -> Tensor(a)[]
-  use_c10_dispatcher: full
   variants: function, method
 
 - func: clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor
@@ -2256,32 +2250,27 @@
     DefaultBackend: logaddexp2
 
 - func: xlogy.Tensor(Tensor self, Tensor other) -> Tensor
-  use_c10_dispatcher: full
   variants: function, method
   dispatch:
     CPU, CUDA: xlogy
 
 - func: xlogy.Scalar_Self(Scalar self, Tensor other) -> Tensor
-  use_c10_dispatcher: full
   variants: function
   dispatch:
     CPU, CUDA: xlogy
 
 - func: xlogy.Scalar_Other(Tensor self, Scalar other) -> Tensor
-  use_c10_dispatcher: full
   variants: function, method
   dispatch:
     CPU, CUDA: xlogy
 
 # xlogy: inplace variant
 - func: xlogy_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
-  use_c10_dispatcher: full
   variants: function, method
   dispatch:
     CPU, CUDA: xlogy_
 
 - func: xlogy_.Scalar_Other(Tensor(a!) self, Scalar other) -> Tensor(a!)
-  use_c10_dispatcher: full
   variants: function, method
   dispatch:
     CPU, CUDA: xlogy_
@@ -2680,7 +2669,6 @@
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
 
 - func: _sparse_sparse_matmul(Tensor self, Tensor other) -> Tensor
-  use_c10_dispatcher: full
   dispatch:
     SparseCPU: sparse_sparse_matmul_cpu
     SparseCUDA: sparse_sparse_matmul_cuda
@@ -2946,7 +2934,6 @@
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
 
 - func: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
-  use_c10_dispatcher: full
 
 - func: channel_shuffle(Tensor self, int groups) -> Tensor
   dispatch:
@@ -3361,13 +3348,11 @@
     CPU, CUDA: sin_out
 
 - func: sinc(Tensor self) -> Tensor
-  use_c10_dispatcher: full
   variants: function, method
   dispatch:
     DefaultBackend: sinc
 
 - func: sinc_(Tensor(a!) self) -> Tensor(a!)
-  use_c10_dispatcher: full
   variants: function, method
   dispatch:
     DefaultBackend: sinc_
@@ -3426,7 +3411,6 @@
   device_guard: False
 
 - func: slice.Tensor(Tensor(a) self, int dim=0, int? start=0, int? end=9223372036854775807, int step=1) -> Tensor(a)
-  use_c10_dispatcher: full
   variants: function, method
   device_guard: False
   dispatch:
@@ -4913,7 +4897,6 @@
 # function in order to workaround a bug:
 # https://github.com/pytorch/pytorch/issues/47964
 - func: view.dtype(Tensor(a) self, ScalarType dtype) -> Tensor(a)
-  use_c10_dispatcher: full
   variants: method
   device_guard: False
   dispatch:
@@ -6242,13 +6225,11 @@
     QuantizedCPU: min_quantized_cpu
 
 - func: fmin(Tensor self, Tensor other) -> Tensor
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU, CUDA: fmin
 
 - func: fmin.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: full
   dispatch:
     CPU, CUDA: fmin_out
 
@@ -6259,13 +6240,11 @@
     QuantizedCPU: max_quantized_cpu
 
 - func: fmax(Tensor self, Tensor other) -> Tensor
-  use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU, CUDA: fmax
 
 - func: fmax.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: full
   dispatch:
     CPU, CUDA: fmax_out
 
@@ -6450,13 +6429,11 @@
     SparseCPU, SparseCUDA: pow_sparse_scalar
 
 - func: pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
-  use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: pow_
 
 - func: pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
-  use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: pow_
@@ -7427,7 +7404,6 @@
     CPU, CUDA: elu
 
 - func: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result, Tensor self_or_result) -> Tensor
-  use_c10_dispatcher: full
   python_module: nn
   dispatch:
     CPU, CUDA: elu_backward
@@ -8315,7 +8291,6 @@
     CUDA: upsample_trilinear3d_backward_cuda
 
 - func: upsample_nearest1d.out(Tensor self, int[1] output_size, float? scales=None, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: full
   python_module: nn
   structured: True
   dispatch:
@@ -8327,7 +8302,6 @@
   structured_delegate: upsample_nearest1d.out
 
 - func: upsample_nearest1d_backward.grad_input(Tensor grad_output, int[1] output_size, int[3] input_size, float? scales=None, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: full
   python_module: nn
   structured: True
   dispatch:
@@ -8920,14 +8894,12 @@
 
 - func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
   python_module: linalg
-  use_c10_dispatcher: full
   variants: function
   dispatch:
     CPU, CUDA: linalg_slogdet
 
 - func: linalg_slogdet.out(Tensor self, *, Tensor(a!) sign, Tensor(b!) logabsdet) -> (Tensor(a!) sign, Tensor(b!) logabsdet)
   python_module: linalg
-  use_c10_dispatcher: full
   dispatch:
     CPU, CUDA: linalg_slogdet_out
 
@@ -8962,7 +8934,6 @@
     DefaultBackend: linalg_eigvalsh_out
 
 - func: _linalg_inv_out_helper_(Tensor(a!) self, Tensor(b!) infos_lu, Tensor(c!) infos_getri) -> Tensor(a!)
-  use_c10_dispatcher: full
   variants: function
   dispatch:
     CPU: _linalg_inv_out_helper_cpu
@@ -8970,7 +8941,6 @@
 
 - func: linalg_inv(Tensor self) -> Tensor
   python_module: linalg
-  use_c10_dispatcher: full
   variants: function
   dispatch:
     DefaultBackend: linalg_inv
@@ -9029,7 +8999,6 @@
 
 - func: linalg_svd(Tensor self, bool full_matrices=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
   python_module: linalg
-  use_c10_dispatcher: full
   variants: function
 
 - func: linalg_cond(Tensor self, Scalar? p=None) -> Tensor
@@ -9060,14 +9029,12 @@
 
 - func: linalg_pinv(Tensor self, float rcond=1e-15, bool hermitian=False) -> Tensor
   python_module: linalg
-  use_c10_dispatcher: full
   variants: function
   dispatch:
     Math: linalg_pinv
 
 - func: linalg_pinv.rcond_tensor(Tensor self, Tensor rcond, bool hermitian=False) -> Tensor
   python_module: linalg
-  use_c10_dispatcher: full
   variants: function
   dispatch:
     Math: linalg_pinv
@@ -9087,7 +9054,6 @@
     Math: linalg_pinv_out
 
 - func: _linalg_solve_out_helper_(Tensor(a!) self, Tensor(b!) other, Tensor(c!) infos) -> Tensor(a!)
-  use_c10_dispatcher: full
   variants: function
   dispatch:
     CPU: _linalg_solve_out_helper_cpu
@@ -9095,7 +9061,6 @@
 
 - func: linalg_solve(Tensor input, Tensor other) -> Tensor
   python_module: linalg
-  use_c10_dispatcher: full
   variants: function
   dispatch:
     DefaultBackend: linalg_solve
@@ -9135,7 +9100,6 @@
 
 - func: linalg_qr(Tensor self, str mode='reduced') -> (Tensor Q, Tensor R)
   python_module: linalg
-  use_c10_dispatcher: full
   variants: function
   dispatch:
     DefaultBackend: linalg_qr
@@ -9148,7 +9112,6 @@
     DefaultBackend: linalg_qr_out
 
 - func: _linalg_qr_helper(Tensor self, str mode) -> (Tensor, Tensor)
-  use_c10_dispatcher: full
   variants: function
   dispatch:
     CPU: _linalg_qr_helper_cpu
@@ -9195,11 +9158,9 @@
 
 # Note: this function is only for testing.
 - func: _test_ambiguous_defaults.a(Tensor dummy, int a=1, int b=1) -> Tensor
-  use_c10_dispatcher: full
   python_module: nn
 
 # Note: this function is only for testing.
 - func: _test_ambiguous_defaults.b(Tensor dummy, int a=2, str b="2") -> Tensor
   cpp_no_default_args: ['a', 'b']
-  use_c10_dispatcher: full
   python_module: nn
