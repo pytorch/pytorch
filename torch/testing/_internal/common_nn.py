@@ -283,6 +283,8 @@ module_tests = [
         cpp_constructor_args='torch::nn::CrossMapLRN2dOptions(5).alpha(5e-3).beta(1e-3).k(2)',
         input_size=(2, 3, 6, 6),
         check_gradgrad=False,
+        # TODO(#50743): Figure out the error. "RuntimeError: Unrecognized tensor type ID: Batched"
+        check_batched_grad=False,
     ),
     dict(
         module_name='PReLU',
@@ -3680,6 +3682,10 @@ new_module_tests = [
         desc='relu_activation',
         with_tf32=True,
         tf32_precision=0.1,
+        # TODO(#50743): figure out the error
+        # RuntimeError: The size of tensor a (6) must match the size of tensor b (4)
+        # at non-singleton dimension 2
+        check_batched_grad=False,
     ),
     dict(
         module_name='TransformerEncoderLayer',
@@ -5124,6 +5130,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         self.tf32_precision = kwargs.get('tf32_precision', 0.001)
         self.test_cpu = kwargs.get('test_cpu', True)
         self.has_sparse_gradients = kwargs.get('has_sparse_gradients', False)
+        self.check_batched_grad = kwargs.get('check_batched_grad', True)
 
     def _check_gradients(self, test_case, module, input_tuple):
         params = tuple(x for x in module.parameters())
@@ -5142,10 +5149,12 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
             test_input_jacobian = torch.is_floating_point(input_tuple[0])
             test_case.check_jacobian(module, input_tuple[0], test_input_jacobian)
         else:
-            test_case.assertTrue(gradcheck(fn_to_gradcheck, input_tuple + params))
+            test_case.assertTrue(gradcheck(fn_to_gradcheck, input_tuple + params,
+                                           check_batched_grad=self.check_batched_grad))
 
         if self.check_gradgrad:
-            test_case.assertTrue(gradgradcheck(fn_to_gradcheck, input_tuple + params))
+            test_case.assertTrue(gradgradcheck(fn_to_gradcheck, input_tuple + params,
+                                               check_batched_grad=self.check_batched_grad))
 
     def _do_test(self, test_case, module, input):
         num_threads = torch.get_num_threads()
