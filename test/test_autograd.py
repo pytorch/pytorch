@@ -2799,7 +2799,7 @@ class TestAutograd(TestCase):
 
     @skipIfNoLapack
     def test_symeig_degenerate(self):
-        # test symeig backward if there are degenerate/repeated eigenvalues
+        # test symeig backward in cases where there are degenerate/repeated eigenvalues
         dtype = torch.double
 
         def get_loss(a, mat, P2):
@@ -2813,9 +2813,8 @@ class TestAutograd(TestCase):
             # line up the eigenvalues
             b = torch.cat((a[:1], a[1:2], a[1:2], a[2:]))
 
-            # construct the matrix
-            diag = torch.diag_embed(b)
-            A = torch.matmul(torch.matmul(P.T, diag), P)
+            # construct the matrix (P.T @ diag(b) @ P)
+            A = (P.T * b) @ P
 
             eivals, eivecs = torch.symeig(A, eigenvectors=True)
             U = eivecs[:, 1:3]  # the degenerate eigenvectors
