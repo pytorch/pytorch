@@ -3395,7 +3395,9 @@ class TestLinalg(TestCase):
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_triangular_solve(self, device, dtype):
-        for (k, n), (upper, unitriangular, transpose) in itertools.product(zip([2, 3, 5], [3, 5, 7]),
+        ks = [0, 1, 3]
+        ns = [0, 5]
+        for (k, n), (upper, unitriangular, transpose) in itertools.product(zip(ks, ns),
                                                                            itertools.product([True, False], repeat=3)):
             b, A = self.triangular_solve_test_helper((n, n), (n, k), upper,
                                                      unitriangular, device, dtype)
@@ -3430,10 +3432,29 @@ class TestLinalg(TestCase):
             Ax = torch.matmul(A, x_act)
             self.assertEqual(b, Ax)
 
-        for (upper, unitriangular, transpose), batchsize in itertools.product(itertools.product(
-                [True, False], repeat=3), [1, 3, 4]):
+        def triangular_solve_zero_batch_helper(A_dims, b_dims, upper, unitriangular, transpose):
+            b, A = self.triangular_solve_test_helper(A_dims, b_dims, upper,
+                                                     unitriangular, device, dtype)
+            x = torch.triangular_solve(b, A, upper=upper,
+                                       unitriangular=unitriangular,
+                                       transpose=transpose)[0]
+            self.assertTrue(x.shape == b.shape)
+
+        for upper, unitriangular, transpose in itertools.product([True, False], repeat=3):
+            batchsize = 3
             triangular_solve_batch_helper((batchsize, 5, 5), (batchsize, 5, 10),
                                           upper, unitriangular, transpose)
+
+            # test empty input
+            triangular_solve_batch_helper((batchsize, 0, 0), (batchsize, 0, 10),
+                                          upper, unitriangular, transpose)
+            triangular_solve_batch_helper((batchsize, 0, 0), (batchsize, 0, 0),
+                                          upper, unitriangular, transpose)
+
+            # test zero batch case
+            batchsize = 0
+            triangular_solve_zero_batch_helper((batchsize, 5, 5), (batchsize, 5, 10),
+                                               upper, unitriangular, transpose)
 
 
     @slowTest
