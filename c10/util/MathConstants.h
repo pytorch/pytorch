@@ -2,6 +2,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
 
 namespace c10 {
 // TODO: Replace me with inline constexpr variable when C++17 becomes available
@@ -15,6 +16,10 @@ template<>
 C10_HOST_DEVICE inline constexpr BFloat16 pi<BFloat16>() {
   // According to https://en.wikipedia.org/wiki/Bfloat16_floating-point_format#Special_values pi is encoded as 4049
   return BFloat16(0x4049, BFloat16::from_bits());
+}
+template<>
+C10_HOST_DEVICE inline constexpr Half pi<Half>() {
+  return Half(0x4248, Half::from_bits());
 }
 } // namespace detail
 
