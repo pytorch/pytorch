@@ -15,7 +15,8 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, StepLR, \
     MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau, \
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
+    skipIfRocm
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -304,6 +305,7 @@ class TestOptim(TestCase):
                 [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
             )
 
+    @skipIfRocm
     def test_multi_tensor_optimizers(self):
         if not torch.cuda.is_available():
             return
@@ -456,6 +458,7 @@ class TestOptim(TestCase):
             optim.SparseAdam([{"params": [torch.zeros(3, layout=torch.sparse_coo)]}])
 
     # ROCm precision is too low to pass this test
+    @skipIfRocm
     def test_adadelta(self):
         for optimizer in [optim.Adadelta, optim_mt.Adadelta]:
             self._test_basic_cases(
