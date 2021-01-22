@@ -684,7 +684,6 @@
   variants: function
 
 - func: _sparse_mm_mkl_(Tensor(a!) self, Tensor sparse_, Tensor dense, Tensor t, Scalar alpha, Scalar beta) -> Tensor
-  use_c10_dispatcher: full
   variants: function
 
 - func: baddbmm.out(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
@@ -4181,7 +4180,6 @@
     DefaultBackend: resize_as_
 
 - func: resize_as_sparse_(Tensor(a!) self, Tensor the_template) -> Tensor(a!)
-  use_c10_dispatcher: full
   variants: function
   dispatch:
     SparseCPU, SparseCUDA: resize_as_sparse_
@@ -4535,14 +4533,12 @@
   device_guard: False
 
 - func: crow_indices(Tensor(a) self) -> Tensor(a)
-  use_c10_dispatcher: full
   variants: method
   dispatch:
     CompressedSparseCPU: crow_indices_sparse_csr
   device_guard: False
 
 - func: col_indices(Tensor(a) self) -> Tensor(a)
-  use_c10_dispatcher: full
   variants: method
   dispatch:
     CompressedSparseCPU: col_indices_sparse_csr
