@@ -6509,21 +6509,13 @@ class TestONNXRuntime(unittest.TestCase):
     @disableScriptTest()
     def test_unsafe_chunk(self):
         class ChunkModel(torch.nn.Module):
-            def __init__(self):
-                super(ChunkModel, self).__init__()
-
             def forward(self, x):
                 return torch.unsafe_chunk(x, 3, dim=1)
 
         model = ChunkModel()
         model.eval()
         x = torch.randn(1, 18)
-
-        for dim_size_ in range(13, 16):
-            y = torch.randn(1, dim_size_)
-            self.run_test(model, x, test_with_inputs=[y],
-                          input_names=['x'],
-                          dynamic_axes={'x': {0: 'batch_size', 1: 'dims'}})
+        self.run_test(model, x, input_names=['x'])
 
 
 def make_test(name, base, layer, bidirectional, initial_state,
