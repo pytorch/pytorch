@@ -88,10 +88,9 @@ def get_module_name_qconfig(qconfig_dict, module_name, fallback_qconfig):
 # get qconfig for module_name,
 # fallback to module_name_regex_qconfig, module_type_qconfig,
 # global_qconfig if necessary
-def get_qconfig(modules, qconfig_dict, module_name, global_qconfig):
-    assert modules is not None
+def get_qconfig(qconfig_dict, module_type, module_name, global_qconfig):
     module_type_qconfig = get_object_type_qconfig(
-        qconfig_dict, type(modules[module_name]), global_qconfig)
+        qconfig_dict, module_type, global_qconfig)
     module_name_regex_qconfig = get_module_name_regex_qconfig(
         qconfig_dict, module_name, module_type_qconfig)
     module_name_qconfig = get_module_name_qconfig(

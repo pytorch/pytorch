@@ -7,25 +7,25 @@ from torch.utils.data.datasets.decoder import (
 from typing import Iterable, Iterator, Union, List, Tuple, Any, Callable
 from io import BufferedIOBase
 
-class RoutedDecoderIterableDataset(IterableDataset):
-    r""" :class:`RoutedDecoderIterableDataset`.
+class RoutedDecoderIDP(IterableDataset):
+    r""" :class:`RoutedDecoderIDP`.
 
-    IterableDataset to decode binary streams from input iterables,
+    Iterable datapipe to decode binary streams from input iterables,
     yield pathname and decoded binary stream in a tuple.
     args:
-        dataset: Iterable dataset that provides pathname and binary stream in tuples
+        datapipe: Iterable datapipe that provides pathname and binary stream in tuples
         decoders: user defined decoders, if None, basic and image decoders will be set as default
-        length: a nominal length of the dataset
+        length: a nominal length of the datapipe
     """
 
     def __init__(
             self,
-            dataset : Iterable[Tuple[str, BufferedIOBase]],
+            datapipe : Iterable[Tuple[str, BufferedIOBase]],
             *,
             decoders : Union[None, List[Callable]] = None,
             length: int = -1):
         super().__init__()
-        self.dataset : Iterable[Tuple[str, BufferedIOBase]] = dataset
+        self.datapipe : Iterable[Tuple[str, BufferedIOBase]] = datapipe
         if decoders:
             self.decoder = Decoder(decoders)
         else:
@@ -36,7 +36,7 @@ class RoutedDecoderIterableDataset(IterableDataset):
         self.decoder.add_decoder(decoder)
 
     def __iter__(self) -> Iterator[Tuple[str, Any]]:
-        for data in self.dataset:
+        for data in self.datapipe:
             pathname = data[0]
             result = self.decoder(data)
             yield (pathname, result[pathname])

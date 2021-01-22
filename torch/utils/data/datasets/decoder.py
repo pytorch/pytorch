@@ -249,14 +249,14 @@ class Decoder:
                 return result
         return data
 
-    def decode(self, dataset):
+    def decode(self, datapipe):
         result = {}
         # single data tuple(pathname, data stream)
-        if isinstance(dataset, tuple):
-            dataset = [dataset]
+        if isinstance(datapipe, tuple):
+            datapipe = [datapipe]
 
-        if dataset is not None:
-            for k, v in dataset:
+        if datapipe is not None:
+            for k, v in datapipe:
                 # TODO: xinyu, figure out why Nvidia do this?
                 if k[0] == "_":
                     if isinstance(v, bytes):
@@ -266,5 +266,5 @@ class Decoder:
                 result[k] = self.decode1(k, v)
         return result
 
-    def __call__(self, dataset):
-        return self.decode(dataset)
+    def __call__(self, datapipe):
+        return self.decode(datapipe)
