@@ -7803,14 +7803,17 @@ class TestNN(NNTestCase):
     def test_smooth_l1_loss_vs_huber_loss(self):
         def _test_smooth_l1_loss_vs_huber_loss_helper(beta=1.0, require_equal=True):
             input, target = torch.randn(2, 2), torch.randn(2, 2)
-            smooth_l1_loss = torch.nn.SmoothL1Loss(beta=beta)(input, target)
-            huber_loss = torch.nn.HuberLoss(beta=beta)(input, target)
+            for reduction in ['mean', 'sum', 'none']:
+                smooth_l1 = torch.nn.SmoothL1Loss(beta=beta, reduction=reduction)
+                huber = torch.nn.HuberLoss(beta=beta, reduction=reduction)
+                smooth_l1_loss = smooth_l1(input, target)
+                huber_loss = huber(input, target)
 
-            if require_equal:
-                self.assertEqual(smooth_l1_loss, huber_loss)
-            else:
-                # Huber loss should be larger than smooth L1 loss by a factor of beta.
-                self.assertEqual(smooth_l1_loss * beta, huber_loss)
+                if require_equal:
+                    self.assertEqual(smooth_l1_loss, huber_loss)
+                else:
+                    # Huber loss should be larger than smooth L1 loss by a factor of beta.
+                    self.assertEqual(smooth_l1_loss * beta, huber_loss)
 
         def test_equal_when_beta_is_one():
             _test_smooth_l1_loss_vs_huber_loss_helper(beta=1.0, require_equal=True)

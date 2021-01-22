@@ -350,7 +350,7 @@ Tensor huber_loss(const Tensor& input, const Tensor& target, const int64_t reduc
   return apply_loss_reduction(iter.output(), reduction);
 }
 
-Tensor& huber_loss_out(Tensor& result, const Tensor& input, const Tensor& target, int64_t reduction, double beta) {
+Tensor& huber_loss_out(const Tensor& input, const Tensor& target, int64_t reduction, double beta, Tensor& result) {
   TORCH_CHECK(beta > 0, "huber_loss does not support non-positive values for beta.")
   if (reduction != Reduction::None) {
     Tensor loss;
@@ -369,12 +369,12 @@ Tensor& huber_loss_out(Tensor& result, const Tensor& input, const Tensor& target
 }
 
 Tensor huber_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double beta) {
-  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_input = at::zeros_like(input, MemoryFormat::Contiguous);
   return at::huber_loss_backward_out(grad_input, grad_output, input, target, reduction, beta);
 }
 
-Tensor& huber_loss_backward_out(Tensor& grad_input, const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double beta) {
-  auto norm = reduction == Reduction::Mean ? 1. / input.numel() : 1.;
+Tensor& huber_loss_backward_out(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double beta, Tensor& grad_input) {
+  auto norm = (reduction == Reduction::Mean) ? (1. / input.numel()) : 1.;
   auto iter = at::TensorIteratorConfig()
     .add_output(grad_input)
     .add_input(input)

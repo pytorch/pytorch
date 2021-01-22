@@ -878,12 +878,12 @@ class SmoothL1Loss(_Loss):
         Smooth L1 loss is closely related to :class:`HuberLoss`, being
         equivalent to :math:`huber(x, y) / beta`. This leads to the following
         differences:
-         * As beta -> 0, Smooth L1 loss converges to :class:`L1Loss`, while :class:`HuberLoss`
-           converges to a constant 0 loss.
-         * As beta -> :math:`+\infty`, Smooth L1 loss converges to a constant 0 loss, while
-           :class:`HuberLoss` converges to :class:`MSELoss`.
-         * For Smooth L1 loss, as beta varies, the L1 segment of the loss has a constant slope of 1.
-           For :class:`HuberLoss`, the slope of the L1 segment is beta.
+        * As beta -> 0, Smooth L1 loss converges to :class:`L1Loss`, while :class:`HuberLoss`
+          converges to a constant 0 loss.
+        * As beta -> :math:`+\infty`, Smooth L1 loss converges to a constant 0 loss, while
+          :class:`HuberLoss` converges to :class:`MSELoss`.
+        * For Smooth L1 loss, as beta varies, the L1 segment of the loss has a constant slope of 1.
+          For :class:`HuberLoss`, the slope of the L1 segment is beta.
 
     .. _`Fast R-CNN`: https://arxiv.org/abs/1504.08083
 
@@ -972,7 +972,7 @@ class HuberLoss(_Loss):
     __constants__ = ['reduction', 'beta']
 
     def __init__(self, reduction: str = 'mean', beta: float = 1.0) -> None:
-        super(HuberLoss, self).__init__(reduction)
+        super().__init__(reduction=reduction)
         self.beta = beta
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:

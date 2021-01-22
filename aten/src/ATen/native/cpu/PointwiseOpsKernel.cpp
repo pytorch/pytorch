@@ -97,12 +97,13 @@ static void huber_backward_cpu_kernel(TensorIterator& iter, Scalar norm, double 
     cpu_kernel_vec(iter,
       [=](scalar_t input, scalar_t target, scalar_t grad_output) -> scalar_t {
         const auto x = input - target;
-        if (x <= -beta)
+        if (x <= -beta) {
           return -norm_val * grad_output * beta;
-        else if (x >= beta)
+        } else if (x >= beta) {
           return norm_val * grad_output * beta;
-        else
+        } else {
           return norm_val * x * grad_output;
+        }
       },
       [norm_val_vec, beta_val_vec, neg_1_vec, zero_vec, pos_1_vec](
          Vec256<scalar_t> input, Vec256<scalar_t> target, Vec256<scalar_t> grad_output) -> Vec256<scalar_t> {
