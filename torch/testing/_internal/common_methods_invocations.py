@@ -1159,6 +1159,7 @@ op_db: List[OpInfo] = [
                      # with complex dtype.
                      test_complex_grad=False,
                      test_inplace_grad=False,
+                     check_batched_gradgrad=False,
                      supports_tensor_out=True,
                      decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
                      skips=(
