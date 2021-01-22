@@ -111,7 +111,9 @@ class OpInfo(object):
                  sample_inputs_func=None,  # function to generate sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
                  variant_test_name='',  # additional string to include in the test name
-                 supports_sparse=False  # supported for sparse
+                 supports_sparse=False,  # supported for sparse
+                 check_batched_grad=True,  # check batched grad when doing gradcheck
+                 check_batched_gradgrad=True,  # check batched grad grad when doing gradgradcheck
                  ):
 
         # Validates the dtypes are generated from the dispatch-related functions
@@ -153,6 +155,8 @@ class OpInfo(object):
         else:
             self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes
         self.supports_sparse = supports_sparse
+        self.check_batched_grad = check_batched_grad
+        self.check_batched_gradgrad = check_batched_gradgrad
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -308,6 +312,72 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad):
                         args=(torch.tensor([1, 2, 3]),),
                         kwargs=dict(dim=1)),)
 
+def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
+    test_sizes = [
+        (S,),
+        (0,),
+        (S, S),
+        (0, 0),
+        (S, 0),
+        (0, S),
+        (S, S, S),
+        (0, S, S),
+        (S, 0, S),
+        (0, 0, 0),
+    ]
+
+    vector_ords = (None, 0, 0.5, 1, 2, 3.5, inf, -0.5, -1, -2, -3.5)
+    matrix_ords = (None, 'fro', 'nuc', 1, 2, inf, -1, -2, -inf)
+
+    inputs = []
+
+    is_dtype_half = dtype in [torch.float16, torch.bfloat16]
+
+    for test_size in test_sizes:
+        is_vector_norm = len(test_size) == 1
+        is_matrix_norm = len(test_size) == 2
+
+        for keepdim in [False, True]:
+            inputs.append(SampleInput(
+                make_tensor(
+                    test_size, device, dtype, low=None, high=None,
+                    requires_grad=requires_grad),
+                kwargs=dict(
+                    keepdim=keepdim)))
+
+            if not (is_vector_norm or is_matrix_norm):
+                continue
+
+            ords = vector_ords if is_vector_norm else matrix_ords
+
+            for ord in ords:
+                # TODO: remove this check when `max` is implemented for
+                #       float16 and bfloat16. Issue:
+                #       https://github.com/pytorch/pytorch/issues/50790
+                if is_vector_norm and is_dtype_half and ord == inf:
+                    continue
+
+                inputs.append(SampleInput(
+                    make_tensor(
+                        test_size, device, dtype,
+                        low=None, high=None,
+                        requires_grad=requires_grad),
+                    args=(ord,),
+                    kwargs=dict(
+                        keepdim=keepdim)))
+
+                if ord in ['nuc', 'fro']:
+                    inputs.append(SampleInput(
+                        make_tensor(
+                            test_size, device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad),
+                        kwargs=dict(
+                            ord=ord,
+                            keepdim=keepdim,
+                            dim=(0, 1))))
+        return inputs
+
 def sample_inputs_slogdet(op_info, device, dtype, requires_grad):
     # original test cases from 'method_tests' have too many test_inputs
     # we don't actually need all of them to check the autograd and jit correctness
@@ -350,6 +420,56 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad):
     else:
         return (input, )
 
+def sample_inputs_addr(op_info, device, dtype, requires_grad):
+    input1 = SampleInput((make_tensor((S, M), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((S, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((M, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad)))
+
+    input2 = SampleInput((make_tensor((), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((S, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((M, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad)))
+    if dtype.is_complex:
+        alpha, beta = 0.1 + 0.3j, 0.4 + 0.6j
+    elif dtype.is_floating_point:
+        alpha, beta = 0.2, 0.6
+    else:
+        alpha, beta = 2, 3
+
+    input3 = SampleInput((make_tensor((S, M), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((S, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((M, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad)),
+                         kwargs=dict(beta=beta, alpha=alpha))
+
+    input4 = SampleInput((make_tensor((), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((S, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((M, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad)),
+                         kwargs=dict(beta=beta, alpha=alpha))
+
+    return (input1, input2, input3, input4)
 
 def sample_inputs_xlogy(self, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S), device, dtype,
@@ -845,9 +965,6 @@ op_db: List[OpInfo] = [
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cuda', dtypes=[torch.float16],
-                                active_if=TEST_WITH_ROCM),
                        SkipInfo('TestGradients', 'test_fn_grad',
                                 dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestGradients', 'test_method_grad',
@@ -892,6 +1009,18 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=[torch.bfloat16, torch.float16, torch.cfloat, torch.cdouble]),),
            sample_inputs_func=sample_inputs_addmm),
+    OpInfo('addr',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           # Reference: https://github.com/pytorch/pytorch/issues/50747
+           test_inplace_grad=False,
+           skips=(
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.float16, torch.cfloat, torch.cdouble, torch.bfloat16]),
+               # Reference: https://github.com/pytorch/pytorch/issues/50747
+               SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),),
+           sample_inputs_func=sample_inputs_addr),
+
     UnaryUfuncInfo('asin',
                    ref=np.arcsin,
                    domain=(-1, 1),
@@ -981,8 +1110,6 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics', device_type='cpu',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                dtypes=[torch.float], active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('cosh',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.cosh),
@@ -1040,6 +1167,7 @@ op_db: List[OpInfo] = [
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=True,
+                     check_batched_gradgrad=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.rfft',
                      aten_name='fft_rfft',
@@ -1048,6 +1176,8 @@ op_db: List[OpInfo] = [
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=True,
+                     check_batched_grad=False,
+                     check_batched_gradgrad=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.rfftn',
                      aten_name='fft_rfftn',
@@ -1057,6 +1187,8 @@ op_db: List[OpInfo] = [
                      default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=True,
                      test_inplace_grad=False,
+                     check_batched_grad=False,
+                     check_batched_gradgrad=False,
                      decorators=[precisionOverride({torch.float: 1e-4})],),
     SpectralFuncInfo('fft.ifft',
                      aten_name='fft_ifft',
@@ -1081,6 +1213,7 @@ op_db: List[OpInfo] = [
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_types(),
                      supports_tensor_out=True,
+                     check_batched_grad=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.irfft',
                      aten_name='fft_irfft',
@@ -1089,6 +1222,7 @@ op_db: List[OpInfo] = [
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=True,
+                     check_batched_gradgrad=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.irfftn',
                      aten_name='fft_irfftn',
@@ -1097,6 +1231,7 @@ op_db: List[OpInfo] = [
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=True,
+                     check_batched_gradgrad=False,
                      test_inplace_grad=False,),
     OpInfo('flip',
            op=torch.flip,
@@ -1116,6 +1251,22 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_fliplr_flipud,
            test_inplace_grad=False,
            supports_tensor_out=False),
+    OpInfo('linalg.norm',
+           op=torch.linalg.norm,
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           test_inplace_grad=False,
+           supports_tensor_out=True,
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           sample_inputs_func=sample_inputs_linalg_norm,
+           aten_name='linalg_norm',
+           skips=(
+               # TODO: remove this once `pow` is implemented for float16
+               #       and bfloat16 on CPU. Issue:
+               #       https://github.com/pytorch/pytorch/issues/50789
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        device_type='cpu',
+                        dtypes=[torch.float16, torch.bfloat16]),
+           )),
     OpInfo('linalg.slogdet',
            aten_name='linalg_slogdet',
            op=torch.linalg.slogdet,
@@ -1211,8 +1362,6 @@ op_db: List[OpInfo] = [
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                dtypes=[torch.float], active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('sinc',
                    ref=np_sinc_with_fp16_as_fp32,
@@ -1231,8 +1380,6 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.cfloat]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                dtypes=[torch.float], active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('sinh',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.sinh),
@@ -1373,6 +1520,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            supports_tensor_out=True,
            sample_inputs_func=sample_inputs_linalg_inv,
+           check_batched_gradgrad=False,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     UnaryUfuncInfo('angle',
                    ref=np.angle,
@@ -1392,6 +1540,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            supports_tensor_out=True,
            sample_inputs_func=sample_inputs_linalg_solve,
+           check_batched_gradgrad=False,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     OpInfo('linalg.pinv',
            aten_name='linalg_pinv',
@@ -2185,10 +2334,6 @@ def method_tests():
         ('addmv', (1,), ((S, M), (M,)), 'broadcast_lhs_coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
         ('addmv', (), ((S, M), (M,)), 'scalar_broadcast_lhs'),
         ('addmv', (), ((S, M), (M,)), 'scalar_broadcast_lhs_coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('addr', (S, M), ((S,), (M,)),),
-        ('addr', (), ((S,), (M,)), 'broadcast_lhs'),
-        ('addr', (S, M), ((S,), (M,)), 'coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('addr', (), ((S,), (M,)), 'broadcast_lhs_coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
         ('dot', (L,), ((L,),), '', (True,)),
         ('vdot', (L,), ((L,),),),
         ('mm', (S, M), ((M, S),), '', (True,)),
