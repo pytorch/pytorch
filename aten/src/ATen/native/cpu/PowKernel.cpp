@@ -2,7 +2,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec256/vec256.h>
-#include <ATen/native/TensorIterator.h>
+#include <ATen/native/TensorIterator.h> 
 #include <ATen/native/Pow.h>
 #include <ATen/native/cpu/Loops.h>
 
@@ -37,7 +37,51 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
 void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
   if (isFloatingType(iter.dtype())) {    
     // Floating types allow AVX2 vector optimizations for pow/sqrt/rsqrt:
-    if ((iter.dtype() == ScalarType::BFloat16)) {
+    if ((iter.dtype() == ScalarType::Half)) {
+      // sqrt() & rsqrt() not used for exp = 0.5 & -0.5 respectively because
+      // their specialized variants for c10::Half do not exist in aten/cpu/vec256.
+      [&]() {
+        using scalar_t = decltype(c10::impl::ScalarTypeToCPPType<ScalarType::Half>::t);
+        auto exp = exp_scalar.to<scalar_t>();
+        using Vec = Vec256<scalar_t>;
+        if (exp == 2) {
+          cpu_kernel_vec(iter,
+            [](scalar_t base) -> scalar_t {
+              return base * base;
+            },
+            [](Vec base) -> Vec { return base * base; }
+          );
+        } else if (exp == 3) {
+          cpu_kernel_vec(iter,
+            [](scalar_t base) -> scalar_t {
+              return base * base * base;
+            },
+            [](Vec base) -> Vec { return base * base * base; }
+          );
+        } else if (exp == -1) {
+          cpu_kernel_vec(iter,
+            [](scalar_t base) -> scalar_t {
+              return 1.0 / base;
+            },
+            [](Vec base) -> Vec { return base.reciprocal(); }
+          );
+        } else if (exp == -2) {
+          cpu_kernel_vec(iter,
+            [](scalar_t base) -> scalar_t {
+              return 1.0 / (base * base);
+            },
+            [](Vec base) -> Vec { return (base * base).reciprocal(); }
+          );
+        } else {
+          cpu_kernel_vec(iter,
+            [=](scalar_t base) -> scalar_t {
+              return std::pow(base, exp);
+            },
+            [=](Vec base) -> Vec { return base.pow(exp); }
+          );
+        }
+      }();
+    } else if (iter.dtype() == ScalarType::BFloat16) {
       [&]() {
         using scalar_t = decltype(c10::impl::ScalarTypeToCPPType<ScalarType::BFloat16>::t);
         auto exp = exp_scalar.to<scalar_t>();
@@ -92,9 +136,9 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
             [=](Vec base) -> Vec { return base.pow(exp); }
           );
         }
-      }();
+      }();  
     } else {
-      // float and double
+      // dispatch for float and double
       AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "pow", [&]() {
         auto exp = exp_scalar.to<double>();
         using Vec = Vec256<scalar_t>;
