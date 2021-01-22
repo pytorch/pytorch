@@ -3,6 +3,7 @@ import math
 import numbers
 import operator
 import weakref
+from typing import List
 
 import torch
 import torch.nn.functional as F
@@ -80,6 +81,7 @@ class Transform(object):
             increasing or decreasing.
     """
     bijective = False
+    domain: constraints.Constraint
     codomain: constraints.Constraint
 
     def __init__(self, cache_size=0):
@@ -202,7 +204,7 @@ class _InverseTransform(Transform):
     Inverts a single :class:`Transform`.
     This class is private; please instead use the ``Transform.inv`` property.
     """
-    def __init__(self, transform):
+    def __init__(self, transform: Transform):
         super(_InverseTransform, self).__init__(cache_size=transform._cache_size)
         self._inv = transform
 
@@ -265,7 +267,7 @@ class ComposeTransform(Transform):
         cache_size (int): Size of cache. If zero, no caching is done. If one,
             the latest single value is cached. Only 0 and 1 are supported.
     """
-    def __init__(self, parts, cache_size=0):
+    def __init__(self, parts: List[Transform], cache_size=0):
         if cache_size:
             parts = [part.with_cache(cache_size) for part in parts]
         super(ComposeTransform, self).__init__(cache_size=cache_size)
