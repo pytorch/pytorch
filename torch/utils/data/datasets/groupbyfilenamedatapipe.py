@@ -32,32 +32,32 @@ def default_sort_data_fn(datalist : List[Tuple[str, Any]]):
     return sorted(datalist, key=functools.cmp_to_key(cmp_fn))
 
 
-class GroupByFilenameIterableDataset(IterableDataset):
-    r""" :class:`GroupByFilenameIterableDataset`.
+class GroupByFilenameIDP(IterableDataset):
+    r""" :class:`GroupByFilenameIDP`.
 
-    IterableDataset to group binary streams from input iterables by pathname without extension,
+    Iterable datapipe to group binary streams from input iterables by pathname without extension,
     yield a list with `group_size` items in it, each item in the list is a tuple of
     pathname and binary stream
 
     args:
-        dataset: Iterable dataset that provides pathname and zip binary stream in tuples
+        datapipe: Iterable datapipe that provides pathname and zip binary stream in tuples
         group_size: the size of group
         max_buffer_size: the max size of stream buffer which is used to store not yet grouped but iterated data stream
         group_key_fn: a function which is used to generate group key from pathname of the data stream
         sort_data_fn: a function which is used to sort the grouped data stream before yield back
-        length: a nominal length of the dataset
+        length: a nominal length of the datapipe
     """
 
     def __init__(
             self,
-            dataset : Iterable[Tuple[str, Any]],
+            datapipe : Iterable[Tuple[str, Any]],
             group_size : int = 1,
             max_buffer_size : int = 10,
             group_key_fn : Callable = default_group_key_fn,
             sort_data_fn : Callable = default_sort_data_fn,
             length: int = -1):
         super().__init__()
-        self.dataset : Iterable[Tuple[str, Any]] = dataset
+        self.datapipe : Iterable[Tuple[str, Any]] = datapipe
         self.group_size : int = group_size
         self.max_buffer_size : int = max_buffer_size
         self.group_key_fn : Callable = group_key_fn
@@ -72,10 +72,10 @@ class GroupByFilenameIterableDataset(IterableDataset):
         assert self.max_buffer_size >= 0
 
         if self.group_size == 1:
-            for data in self.dataset:
+            for data in self.datapipe:
                 yield [data]
 
-        for data in self.dataset:
+        for data in self.datapipe:
             key = self.group_key_fn(data)
             res = self.stream_buffer.get(key, []) + [data]
             if len(res) == self.group_size:
@@ -86,7 +86,7 @@ class GroupByFilenameIterableDataset(IterableDataset):
                 if self.curr_buffer_size == self.max_buffer_size:
                     raise OverflowError(
                         "stream_buffer is overflow, please adjust the order of data "
-                        "in the input dataset or increase the buffer size!")
+                        "in the input datapipe or increase the buffer size!")
                 self.stream_buffer[key] = res
                 self.curr_buffer_size = self.curr_buffer_size + 1
 

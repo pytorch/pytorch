@@ -8,27 +8,27 @@ import sys
 import zipfile
 import warnings
 
-class ReadFilesFromZipIterableDataset(IterableDataset):
-    r""" :class:`ReadFilesFromZipIterableDataset`.
+class ReadFilesFromZipIDP(IterableDataset):
+    r""" :class:`ReadFilesFromZipIDP`.
 
-    IterableDataset to extract zip binary streams from input iterable which contains tuples of
+    Iterable data pipe to extract zip binary streams from input iterable which contains tuples of
     pathname and zip binary stream, yields pathname and extracted binary stream in a tuple.
     args:
-        dataset: Iterable dataset that provides pathname and zip binary stream in tuples
-        length: a nominal length of the dataset
+        datapipe: Iterable datapipe that provides pathname and zip binary stream in tuples
+        length: a nominal length of the datapipe
     """
     def __init__(
             self,
-            dataset : Iterable[Tuple[str, BufferedIOBase]],
+            datapipe : Iterable[Tuple[str, BufferedIOBase]],
             length : int = -1):
         super().__init__()
-        self.dataset : Iterable[Tuple[str, BufferedIOBase]] = dataset
+        self.datapipe : Iterable[Tuple[str, BufferedIOBase]] = datapipe
         self.length : int = length
 
     def __iter__(self) -> Iterator[Tuple[str, BufferedIOBase]]:
-        if not isinstance(self.dataset, Iterable):
-            raise TypeError("dataset must be Iterable type but got {}".format(type(self.dataset)))
-        for data in self.dataset:
+        if not isinstance(self.datapipe, Iterable):
+            raise TypeError("datapipe must be Iterable type but got {}".format(type(self.datapipe)))
+        for data in self.datapipe:
             validate_pathname_binary_tuple(data)
             pathname, data_stream = data
             try:

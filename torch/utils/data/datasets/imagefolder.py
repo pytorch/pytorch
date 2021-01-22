@@ -16,7 +16,7 @@ class ImageFolder:
 
     This is a class to do pre-processing for an image folder
     args:
-        root: the root of the image files. Can be either a single root string or a list of root strings
+        root: the root path of the image files. Can be either a single root string or a list of root strings
 
     """
 
