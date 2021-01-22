@@ -5,6 +5,7 @@ from copy import deepcopy
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.cuda.amp import autocast
 
+
 class AveragedModel(Module):
     r"""Implements averaged model for Stochastic Weight Averaging (SWA).
 
