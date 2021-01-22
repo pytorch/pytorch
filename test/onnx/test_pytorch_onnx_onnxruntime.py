@@ -5731,7 +5731,7 @@ class TestONNXRuntime(unittest.TestCase):
                 scale = amax / 127.
                 zero_point = torch.zeros_like(amax, dtype=torch.long)
                 # Quantize twice to test differnet branches
-                y = return torch.fake_quantize_per_channel_affine(y, scale, zero_point, 1, 0, 255)
+                y = torch.fake_quantize_per_channel_affine(input, scale, zero_point, 1, 0, 255)
                 return torch.fake_quantize_per_channel_affine(y, scale, zero_point, 1, -128, 127)
 
         x = torch.randn(6, 4, 3, 3)
@@ -5743,7 +5743,7 @@ class TestONNXRuntime(unittest.TestCase):
         scale = amax / 127.
         zero_point = torch.zeros_like(amax, dtype=torch.long)
         x = torch.randn(6, 4, 3, 3)
-        with self.assertRaises(RuntimeError)
+        with self.assertRaises(RuntimeError):
             torch.fake_quantize_per_channel_affine(x, scale, zero_point, 1, -125, 125)
 
     @skipIfUnsupportedOpsetVersion([13])
