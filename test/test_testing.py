@@ -441,17 +441,18 @@ class TestTesting(TestCase):
         self.assertEqual("no_user_msg", self._get_assert_msg(msg=None, debug_msg="no_user_msg"))
         self.assertEqual("debug_msg\nuser_msg", self._get_assert_msg(msg="user_msg", debug_msg="debug_msg"))
 
+
+    # The following 2 tests are added to ensure that test suite terminates early when
+    # CUDA assert was thrown since all subsequent test will fail.
+    # See: https://github.com/pytorch/pytorch/issues/49019
+    # Tests are slow because it spawn another process to run test suite.
     @onlyCUDA
     @slowTest
-    def test_cuda_assert_should_stop_test_suite(self, device):
-        # This test is slow because it spawn another process to run another test suite.
-
-        # Test running of cuda assert test suite should early terminate.
+    def test_cuda_assert_should_stop_device_test_suite(self, device):
         stderr = TestCase.runWithPytorchAPIUsageStderr("""\
 #!/usr/bin/env python
 
 import torch
-
 from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 
@@ -478,6 +479,38 @@ instantiate_device_type_tests(
     globals(),
     only_for='cuda'
 )
+
+if __name__ == '__main__':
+    run_tests()
+""")
+        # should capture CUDA error
+        self.assertIn('CUDA error: device-side assert triggered', stderr)
+        # should run only 1 test because it throws unrecoverable error.
+        self.assertIn('Ran 1 test', stderr)
+
+
+    @onlyCUDA
+    @slowTest
+    def test_cuda_assert_should_stop_common_test_suite(self, device):
+        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
+#!/usr/bin/env python
+
+import torch
+from torch.testing._internal.common_utils import (TestCase, run_tests, slowTest)
+
+class TestThatContainsCUDAAssertFailure(TestCase):
+
+    @slowTest
+    def test_throw_unrecoverable_cuda_exception(self):
+        x = torch.rand(10, device='cuda')
+        # cause unrecoverable CUDA exception, recoverable on CPU
+        y = x[torch.tensor([25])].cpu()
+
+    @slowTest
+    def test_trivial_passing_test_case_on_cpu_cuda(self):
+        x1 = torch.tensor([0., 1.], device='cuda')
+        x2 = torch.tensor([0., 1.], device='cpu')
+        self.assertEqual(x1, x2)
 
 if __name__ == '__main__':
     run_tests()
