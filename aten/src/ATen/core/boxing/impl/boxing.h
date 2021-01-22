@@ -331,56 +331,5 @@ struct BoxedKernelWrapper<
   }
 };
 
-//
-// 6. legacy trap for old-school multi-return out functions with mutable args
-// at start rather than end of arg list.
-// TODO remove when hacky_wrapper reorders legacy kernel out args
-//
-
-template <class Result, class... Args>
-struct BoxedKernelWrapper<
-  Result(Args...),
-  std::enable_if_t<
-    can_box_all<Args...>::value && is_tuple_of_mutable_tensor_refs<Result>::value
-    // this test fires passes for legacy kernels with out args at the front.
-    // note: this test is complicated by the fact that boolean value expressions in templates
-    // don't shortcut. some signatures have a result tuple that's wider than the arg list, and
-    // without the length limiting ternary these will cause a template evaluation error on this
-    // test, even if a length check precedes it in the conjunction.
-    && std::is_same<
-        Result,
-        guts::typelist::to_tuple_t<
-          guts::typelist::take_t<
-            guts::typelist::typelist<Args...>,
-            sizeof...(Args) >= std::tuple_size<Result>::value ? std::tuple_size<Result>::value : sizeof...(Args)
-          >
-        >
-      >::value,
-    void
-  >
-> {
-  static Result call(
-    KernelFunction::InternalBoxedKernelFunction* boxed_kernel_func,
-    OperatorKernel* functor,
-    const OperatorHandle& opHandle,
-    DispatchKeySet dispatchKeySet,
-    Args... args
-  ) {
-    using ArgTuple = std::tuple<Args...>;
-    constexpr int RetCount = std::tuple_size<Result>();
-
-    torch::jit::Stack stack = boxArgs(args...);
-    (*boxed_kernel_func)(functor, opHandle, dispatchKeySet, &stack);
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      stack.size() == RetCount,
-      "Boxed kernel was expected to return ", RetCount, " values on the stack, ",
-      "but instead returned ", stack.size(), " values."
-    );
-
-    auto legacy_result = guts::tuple_take<ArgTuple, RetCount>(ArgTuple{args...});
-    return legacy_result;
-  }
-};
-
 } // impl
 } // c10

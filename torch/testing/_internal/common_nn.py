@@ -1322,6 +1322,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine',
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -1340,6 +1341,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='affine_simple_average',
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -1359,6 +1361,7 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_tracking_stats',
+        test_cuda=(not TEST_WITH_ROCM),
     ),
     dict(
         module_name='BatchNorm1d',
@@ -3265,6 +3268,7 @@ new_module_tests = [
         input_size=(2, 128, 2, 2),  # trigger special case of spatial CUDA algo
         fullname='softmax_spatial_special',
         pickle=False,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.softmax, dim=1),
@@ -3318,6 +3322,7 @@ new_module_tests = [
         input_size=(2, 128, 2, 2),  # trigger special case of spatial CUDA algo
         fullname='log_softmax_spatial_special',
         pickle=False,
+        test_cuda=(not TEST_WITH_ROCM)
     ),
     dict(
         constructor=wrap_functional(F.log_softmax, dim=1),
@@ -4968,7 +4973,7 @@ class ModuleTest(TestBase):
         # Run backwards on CPU and GPU and compare results
         for _ in range(5):
             cpu_gradOutput = cpu_output.clone().normal_()
-            gpu_gradOutput = cpu_gradOutput.type('torch.cuda.FloatTensor')
+            gpu_gradOutput = cpu_gradOutput.type_as(gpu_output)
             cpu_gradInput = test_case._backward(cpu_module, cpu_input_tuple, cpu_output, cpu_gradOutput)
             gpu_gradInput = test_case._backward(gpu_module, gpu_input_tuple, gpu_output, gpu_gradOutput)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
@@ -5042,6 +5047,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         self.check_inplace = kwargs.get('check_inplace', False)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.skip_double = kwargs.get('skip_double', False)
+        self.skip_half = kwargs.get('skip_half', False)
         self.with_tf32 = kwargs.get('with_tf32', False)
         self.tf32_precision = kwargs.get('tf32_precision', 0.001)
         self.test_cpu = kwargs.get('test_cpu', True)
@@ -5131,15 +5137,32 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
                 assert_module_parameters_are(torch.cuda.FloatTensor, 1)  # type: ignore[attr-defined]
         else:
             # check that float()/double() casters work correctly
+            def to_type(tensor, real, complex):
+                if tensor.is_complex():
+                    return tensor.to(complex)
+                elif tensor.is_floating_point():
+                    return tensor.to(real)
+                else:
+                    return tensor
+
+            def to_half(x):
+                # TODO: torch.complex32 when properly supported
+                return to_type(x, torch.float16, None)
+
+            def to_single(x):
+                return to_type(x, torch.float32, torch.complex64)
+
+            def to_double(x):
+                return to_type(x, torch.float64, torch.complex128)
 
             # to float
-            input_tuple = tuple(t.float() if not isinstance(t, torch.LongTensor) else t for t in input_tuple)
+            input_tuple = tuple(to_single(t) for t in input_tuple)
             module.float()
             module(*input_tuple)
             assert_module_parameters_are(torch.FloatTensor)
 
             # and back to double
-            input_tuple = tuple(t.double() if not isinstance(t, torch.LongTensor) else t for t in input_tuple)
+            input_tuple = tuple(to_double(t) for t in input_tuple)
             module.double()
             module(*input_tuple)
             assert_module_parameters_are(torch.DoubleTensor)
@@ -5149,8 +5172,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
                 # and that float() casts parameters correctly
 
                 # to GPU0
-                input_tuple = tuple(
-                    t.float().cuda() if not isinstance(t, torch.LongTensor) else t.cuda() for t in input_tuple)
+                input_tuple = tuple(to_single(t).cuda() for t in input_tuple)
                 module.float().cuda()
                 module(*input_tuple)
                 assert_module_parameters_are(torch.cuda.FloatTensor, 0)  # type: ignore[attr-defined]
@@ -5184,18 +5206,17 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
 
                 if not self.skip_double:
                     # test double()
-                    input_tuple = tuple(
-                        t.double().cuda() if not isinstance(t, torch.LongTensor) else t.cuda() for t in input_tuple)
+                    input_tuple = tuple(to_double(t).cuda() for t in input_tuple)
                     module.double().cuda()
                     module(*input_tuple)
                     assert_module_parameters_are(torch.cuda.DoubleTensor, 0)  # type: ignore[attr-defined]
 
                 # test half()
-                input_tuple = tuple(
-                    t.half().cuda() if not isinstance(t, torch.LongTensor) else t.cuda() for t in input_tuple)
-                module.half().cuda()
-                module(*input_tuple)
-                assert_module_parameters_are(torch.cuda.HalfTensor, 0)  # type: ignore[attr-defined]
+                if not self.skip_half:
+                    input_tuple = tuple(to_half(t).cuda() for t in input_tuple)
+                    module.half().cuda()
+                    module(*input_tuple)
+                    assert_module_parameters_are(torch.cuda.HalfTensor, 0)  # type: ignore[attr-defined]
         torch.set_num_threads(num_threads)
 
     def _get_target(self):
