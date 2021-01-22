@@ -116,14 +116,16 @@ class AliasDb {
 
   // Generates a DOT (www.graphviz.org) graph representation
   //
+  // If `verbose` is True, single, unaliased elements will be included.
   // Returns `true` if the output file was successfully generated
   //
   // WARNING: The output dot file path can't include shell specific notations,
   //  for example you can't use "~/temp/aliasdb.dot"
   //  (instead, use "/home/user/temp/aliasdb.dot")
   //
-  TORCH_API bool dumpToGraphvizFile(const char* filename) const;
-  TORCH_API std::string toGraphviz() const;
+  TORCH_API bool dumpToGraphvizFile(const char* filename, bool verbose = false)
+      const;
+  TORCH_API std::string toGraphviz(bool verbose = false) const;
 
   static bool isMutableType(const Value* v);
   static bool isMutableType(const TypePtr& type);

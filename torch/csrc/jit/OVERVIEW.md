@@ -1280,7 +1280,7 @@ This annotation language is consumed by the `FunctionSchema` parser, which produ
 [ir/alias_analysis.h](ir/alias_analysis.h)
 An alias analysis pass consumes the per-operator aliasing information to construct a database of aliasing and mutation relationships in a graph, called `AliasDb`. This section focuses on the alias analysis pass; the public interface to `AliasDb` will be described later.
 
-The core data structure in the AliasDb is called `AliasTracker`, which is a DAG where the edges are "may point to" relationships and the  vertices are aliasing `Element`s. The most common kind of `Element` is an IR `Value`, but there are other kinds of things that can alias that aren't first-class `Value`s in the IR, like wildcards or contained types (such as in a list or tuple).
+The core data structure in the AliasDb is called `AliasTracker`, which is a DAG where the edges are "may point to" relationships and the vertices are aliasing `Element`s. The most common kind of `Element` is an IR `Value`, but there are other kinds of things that can alias that aren't first-class `Value`s in the IR, like wildcards or contained types (such as in a list or tuple).
 
 The alias analysis pass walks through the nodes in a graph, examining schema `AliasInfo`  objects and adding edges in the `AliasTracker` DAG accordingly. For example, for the node:
 ```
@@ -1296,26 +1296,70 @@ As a more involved example, the following TorchScript snippet:
 ```python
 @torch.jit.script
 def foo(a : Tensor, b : Tensor):
-        c = 2 * b
+  c = 2 * b
+  d = c + 1
   a += 1
-  if a.max() > 4:
+  if a.item() > 4:
     r = a[0]
   else:
     r = b[0]
-  return c, r
+  ret = [d, r]
+  return ret
 ```
-Will produce a graph like this:
+Will produce the following IR:
+```
+graph(%a.1 : Tensor,
+      %b.1 : Tensor):
+  %2 : int = prim::Constant[value=2]() # test/elias.py:6:6
+  %6 : int = prim::Constant[value=1]() # test/elias.py:7:10
+  %14 : int = prim::Constant[value=4]() # test/elias.py:9:16
+  %17 : int = prim::Constant[value=0]() # test/elias.py:10:10
+  %c.1 : Tensor = aten::mul(%b.1, %2) # <string>:3:9
+  %d.1 : Tensor = aten::add(%c.1, %6, %6) # test/elias.py:7:6
+  %a.3 : Tensor = aten::add_(%a.1, %6, %6) # test/elias.py:8:2
+  %13 : Scalar = aten::item(%a.3) # test/elias.py:9:5
+  %15 : bool = aten::gt(%13, %14) # test/elias.py:9:5
+  %r : Tensor = prim::If(%15) # test/elias.py:9:2
+    block0():
+      %r.1 : Tensor = aten::select(%a.3, %17, %17) # test/elias.py:10:8
+      -> (%r.1)
+    block1():
+      %r.2 : Tensor = aten::select(%b.1, %17, %17) # test/elias.py:12:8
+      -> (%r.2)
+  %ret.1 : Tensor[] = prim::ListConstruct(%d.1, %r)
+  return (%ret.1)
+```
 
-![AliasTracker graph](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/aliastracker_graph.png)
+And the following AliasDb (visualized with `AliasDb::toGraphViz`)
+
+![AliasTracker graph1](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/aliastracker_graph1.png)
 
 A few things to note:
 - "Graph Input Element" is an example of an `Element` that isn't a first-class `Value`. Alias analysis happens on a per-function level, so we don't necessarily know the aliasing relationships of the inputs. The only safe assumption is that `a` and `b` may alias each other, so they point to a special `Element` that describes "the world outside of this function".
 - `r` may point to either `a` or `b`, depending on the runtime value of `a.max()`.  A given `Element` may point to multiple other `Element`s. This can happen if there is branching control flow (like in this example), or with certain ops like `contiguous()`, which either returns an alias to the input or a fresh Tensor, depending on the runtime characteristics of the input.
 - `c` is a fresh tensor (i.e. it doesn't point to anything) since it was created using the pure operation `2 * b`.
+- `d` is a fresh tensor, but because it enters a container (`ret`), it conservatively enters the wildcard set.
+- `ret` contains the Tensor wildcard set, which is visualized as the blue dotted line.
 
-The last point demonstrates a key concept: *leaf elements uniquely describe memory locations*. Since a leaf element doesn't point to anything, the memory that backs it must have been freshly allocated by some op. Thus we can use leaf elements to represent disjoint memory locations.
+Because `c` is a fresh tensor that does not point to anything, it is a leaf element. *leaf elements uniquely describe memory locations*. Since a leaf element doesn't point to anything, the memory that backs it must have been freshly allocated by some op. Thus we can use leaf elements to represent disjoint memory locations.
 
 So to determine whether  `a` and `b` may alias, we traverse the `AliasTracker` DAG and figure out if `a` and `b` share any leaf nodes. If they do, then we know `a` and `b` might point to the same memory location, i.e. `a` and `b` may alias. This kind of query is common enough that `AliasTracker` does path compression to speed up leaf-finding, so that aliasing queries can be serviced in amortized constant time.
+
+We use Type Based Alias Analysis, so we create a distinct alias bucketing for each type.
+
+In the following graph:
+```python
+@torch.jit.script
+def foo(a : List[Tensor], b : List[Optional[Tensor]]):
+  print(a, b)
+```
+
+![AliasTracker graph2](https://github.com/pytorch/pytorch/blob/master/docs/source/_static/img/aliastracker_graph2.png)
+
+We see that `a` and `b` do not alias each other, because List[Tensor] does not subtype List[Optional[Tensor]]. There is no way for the list at `a` and `b` to be the same list at runtime. However, `a` and `b` may contain Tensors that alias.
+
+One other detail to note is why we add Elements that enter into a container into the wildcard set and initialize containers as containing the wildcard set. We could alternatively just add Elements to the Container, instead of adding them to the wildcard set. However, this would break the correctnesss of certain composite ops,
+like `aten::dict((Tensor, Tensor)[] inputs -> Dict(Tensor, Tensor)`, which does not annotate that the Tuple elements in the input list are now contained in the output dictionary.
 
 ### Writing optimization passes with `AliasDb`
 `AliasDb` provides a high-level interface to help people write mutability-safe optimization passes.

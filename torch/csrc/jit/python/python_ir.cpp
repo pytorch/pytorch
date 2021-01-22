@@ -221,6 +221,13 @@ void initPythonIRBindings(PyObject* module_) {
             db.dump();
           })
       .def(
+          "dump_alias_db_graphviz",
+          [](std::shared_ptr<Graph> g, bool verbose) {
+            AliasDb db(std::move(g));
+            std::cout << db.toGraphviz(verbose);
+          },
+          py::arg("verbose") = true)
+      .def(
           "_export_onnx",
           [](const std::shared_ptr<Graph>& g,
              const std::map<std::string, at::Tensor>& initializers,

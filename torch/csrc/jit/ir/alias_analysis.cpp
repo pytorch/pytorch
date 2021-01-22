@@ -392,17 +392,17 @@ std::string AliasDb::toString() const {
   return ss.str();
 }
 
-bool AliasDb::dumpToGraphvizFile(const char* filename) const {
+bool AliasDb::dumpToGraphvizFile(const char* filename, bool verbose) const {
   std::ofstream dot_file(filename);
   if (!dot_file.good()) {
     std::cout << "Failed to create Graphviz file: '" << filename << "'\n";
     return false;
   }
-  dot_file << toGraphviz();
+  dot_file << toGraphviz(verbose);
   return true;
 }
 
-std::string AliasDb::toGraphviz() const {
+std::string AliasDb::toGraphviz(bool verbose) const {
   std::stringstream dot;
 
   // Local helper to generate a graphviz-friendly name encoding
@@ -442,18 +442,17 @@ std::string AliasDb::toGraphviz() const {
 
   for (const auto& ptrPair : elementMap_) {
     const auto element = ptrPair.second;
-    if (!element->pointsTo.empty()) {
-      for (const auto pointedTo : element->pointsTo) {
-        dot << "  " << name(element) << " -> "
-            << name(memoryDAG_->fromIndex(pointedTo)) << "\n";
-      }
+    for (const auto pointedTo : element->pointsTo) {
+      dot << "  " << name(element) << " -> "
+          << name(memoryDAG_->fromIndex(pointedTo)) << "\n";
     }
-    if (!element->containedElements.empty()) {
-      for (const auto contained : element->containedElements) {
-        dot << "  " << name(element) << " -> "
-            << name(memoryDAG_->fromIndex(contained))
-            << " [style=dashed, color=blue]\n";
-      }
+    if (!element->pointsTo.count()) {
+      dot << name(element) << "\n";
+    }
+    for (const auto contained : element->containedElements) {
+      dot << "  " << name(element) << " -> "
+          << name(memoryDAG_->fromIndex(contained))
+          << " [style=dashed, color=blue]\n";
     }
   }
 
