@@ -45,6 +45,14 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau, Tensor& infos, int64_t 
   TORCH_CHECK(false, "Calling torch.orgqr on a CPU tensor requires compiling ",
     "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
+  // Some LAPACK implementations might not work well with empty matrices:
+  // workspace query might return lwork as 0, which is not allowed (requirement is lwork >= 1)
+  // We don't need to do any calculations in this case, so let's return early
+  if (self.numel() == 0) {
+    infos.fill_(0);
+    return;
+  }
+
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto tau_data = tau.data_ptr<scalar_t>();
