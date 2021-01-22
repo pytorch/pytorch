@@ -409,6 +409,26 @@ void SpecialPostProcess(Node* n) {
       }
       break;
     }
+    case ::c10::onnx::Reshape: {
+      // Set rank to Reshape output if possible.
+      // From shape inference, we have:
+      // %4236 : Float(*, device=cpu) = onnx::Transpose[perm=[0]](%4235)
+      // %4237 : Long(2, strides=[1], device=cpu) = onnx::Concat[axis=0](%4232)
+      // %4238 : FloatTensor(device=cpu) = onnx::Reshape(%4236, %4237)
+      // We can have it as SymbolicShape with known rank:
+      // %4238 : Float(*, *, strides=[2480, 1], requires_grad=0, device=cpu) = onnx::Reshape(%4236, %4237)
+      TensorTypePtr shape_type = n->input(1)->type()->cast<TensorType>();
+      if (nullptr != shape_type) {
+        // Reshape shape is a 1-D tensor.
+        auto shape_type_size = shape_type->sizes()[0];
+        if (shape_type_size.has_value()) {
+          c10::optional<size_t> rank = static_cast<size_t>(shape_type_size.value());
+          auto sym_shape = ::c10::SymbolicShape(rank);
+          n->output()->setType(n->output()->type()->cast<TensorType>()->withSymbolicShapes(sym_shape));
+        }
+      }
+      break;
+    }
   }
 }
 
