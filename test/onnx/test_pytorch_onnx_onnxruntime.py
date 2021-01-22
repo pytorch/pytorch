@@ -16,7 +16,7 @@ from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, disableScript
                                  skipIfUnsupportedMaxOpsetVersion, skipIfONNXShapeInference)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import model_defs.word_language_model as word_language_model
 import torchvision
 from torchvision import ops
@@ -86,6 +86,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                    input_names=None, output_names=None,
                    fixed_batch_size=False, dict_check=True):
     model.eval()
+    model_copy = copy.deepcopy(model)  # To keep the state of model
 
     if input is None:
         input = torch.randn(batch_size, 3, 224, 224, requires_grad=True)
@@ -101,7 +102,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         if dict_check and isinstance(input_args[-1], dict):
             input_kwargs = input_args[-1]
             input_args = input_args[:-1]
-        output = model(*input_args, **input_kwargs)
+        output = model_copy(*input_args, **input_kwargs)
         if isinstance(output, torch.Tensor):
             output = (output,)
 
@@ -2136,7 +2137,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, x)
 
     @skipIfUnsupportedOpsetVersion([13])
-    @disableScriptTest()
     def test_groupnorm_noaffine(self):
         model = torch.nn.GroupNorm(4, 8, 0.002, affine=False)
         x = torch.randn(3, 8, 224, 224)
@@ -2888,7 +2888,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # scripting prim_dtype
     def test_lstm_no_hidden(self):
         class LSTMModel(torch.nn.Module):
             def __init__(self):
@@ -2903,7 +2902,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(9)
-    @disableScriptTest()  # scripting prim_dtype
     def test_lstm_proj_no_hidden(self):
         class LSTMModel(torch.nn.Module):
             def __init__(self):
@@ -4085,7 +4083,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()  # dtype not available
     def test_index_put_to_masked_fill(self):
         class MaskedFillModel(torch.nn.Module):
             def forward(self, input_mask, some_const):
@@ -4100,7 +4097,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()  # dtype not available
     def test_index_put_to_masked_scatter(self):
         class MaskedScatterModel(torch.nn.Module):
             def forward(self, input_mask, some_const):
@@ -6207,10 +6203,64 @@ class TestONNXRuntime(unittest.TestCase):
             def __init__(self):
                 super(MyModule, self).__init__()
                 self.conv = torch.nn.Conv1d(10, 3, 3)
+                self.conv.bias = torch.nn.Parameter(torch.zeros(3, 10, 3))
 
             def set_cell_anchors(self, anchors):
                 if self.conv.bias is not None:
-                    self.conv.bias = anchors
+                    b = self.conv.bias
+                    assert b is not None
+                    self.conv.bias = anchors + b
+                elif self.conv.weight is not None:
+                    self.conv.weight = torch.randn(3, 10)
+                    self.conv.bias = self.conv.weight[:]
+
+            def forward(self, anchors) -> Optional[torch.Tensor]:
+                self.set_cell_anchors(anchors)
+                return self.conv.bias
+
+        model = torch.jit.script(MyModule())
+        anchors = torch.ones(3, 10, 3)
+        self.run_test(model, (anchors))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_set_attr_3(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.conv = torch.nn.Conv1d(10, 3, 3)
+                self.conv.weight = torch.nn.Parameter(torch.zeros(3, 10))
+                self.conv.bias = torch.nn.Parameter(torch.zeros(3, 10, 3))
+
+            def set_cell_anchors(self, anchors):
+                self.conv.weight = torch.zeros(10, 3)
+                if self.conv.bias is not None:
+                    self.conv.bias = torch.randn(3, 10, 3)
+                    self.conv.weight = anchors
+
+            def forward(self, anchors) -> torch.Tensor:
+                self.set_cell_anchors(anchors)
+                if self.conv.bias is not None:
+                    return self.conv.weight
+                return anchors
+
+        model = torch.jit.script(MyModule())
+        anchors = torch.rand(3, 10)
+        self.run_test(model, (anchors))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_set_attr_4(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.conv = torch.nn.Conv1d(10, 3, 3)
+                self.conv.bias = torch.nn.Parameter(torch.zeros(3, 10, 3))
+
+            def set_cell_anchors(self, anchors):
+                self.conv.weight = torch.zeros(10, 3)
+                if self.conv.bias is not None:
+                    w = self.conv.bias
+                    assert w is not None
+                    self.conv.bias = anchors + w
                 else:
                     self.conv.bias = torch.ones(3, 10, 3)
 
@@ -6222,29 +6272,31 @@ class TestONNXRuntime(unittest.TestCase):
                     assert a is not None
                     result += [a]
                 result += [feature_maps]
-                return result[0], result[0]
+                return result[0], result[1]
 
         model = torch.jit.script(MyModule())
         x = torch.rand(5, 11, 30)
-        anchors = torch.randn(3, 10, 3)
+        anchors = torch.ones(3, 10, 3)
         self.run_test(model, (x, anchors))
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_if(self):
         @torch.jit.script
         def check_init(input_data, hidden_size, prev_state):
-            # type: (torch.Tensor, int, torch.Tensor) -> torch.Tensor
+            # type: (torch.Tensor, int, torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
             batch_size = input_data.size(0)
             spatial_size_0 = input_data.size(2)
             spatial_size_1 = input_data.size(3)
             # generate empty prev_state, if None is provided
             state_size = (2, batch_size, hidden_size, spatial_size_0, spatial_size_1)
             state = torch.zeros(state_size, device=input_data.device)
+            state_copy = torch.zeros(state_size, device=input_data.device)
             if prev_state.size(0) == 0:
-                state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1)
+                state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) + state[:]
+                state_copy[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1)
             else:
                 state[:] = torch.randn(batch_size, hidden_size, spatial_size_0, spatial_size_1)
-            return state
+            return state, state_copy
 
         class Example(torch.nn.Module):
             def __init__(self, hidden_size):
@@ -6253,7 +6305,7 @@ class TestONNXRuntime(unittest.TestCase):
 
             def forward(self, input_data, prev_state):
                 prev_state = check_init(input_data, self.hidden_size, prev_state)
-                return prev_state
+                return prev_state[0], prev_state[1]
 
         model = Example(10)
         random_data = torch.rand((1, 5, 30, 30))
@@ -6264,18 +6316,23 @@ class TestONNXRuntime(unittest.TestCase):
     def test_index_put_if_2(self):
         @torch.jit.script
         def check_init(input_data, hidden_size, prev_state):
-            # type: (torch.Tensor, int, torch.Tensor) -> torch.Tensor
+            # type: (torch.Tensor, int, torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
             batch_size = input_data.size(0)
             spatial_size_0 = input_data.size(2)
             spatial_size_1 = input_data.size(3)
             # generate empty prev_state, if None is provided
             state_size = (2, batch_size, hidden_size, spatial_size_0, spatial_size_1)
             state = torch.zeros(state_size, device=input_data.device)
+            state_copy = torch.zeros(state_size, device=input_data.device)
             if prev_state.size(0) == 0:
                 state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1)
             elif prev_state.size(0) == 1:
-                state[:] = prev_state
-            return state
+                s = state[:]
+                state[:] = prev_state + s
+            elif prev_state.size(0) == 2:
+                state[:] = torch.randn(batch_size, hidden_size, spatial_size_0, spatial_size_1)
+                state_copy[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1)
+            return state, state_copy
 
         class Example(torch.nn.Module):
             def __init__(self, hidden_size):
@@ -6284,7 +6341,7 @@ class TestONNXRuntime(unittest.TestCase):
 
             def forward(self, input_data, prev_state):
                 prev_state = check_init(input_data, self.hidden_size, prev_state)
-                return prev_state
+                return prev_state[0], prev_state[1]
 
         model = Example(10)
         random_data = torch.rand((1, 5, 30, 30))
@@ -6318,6 +6375,7 @@ def make_test(name, base, layer, bidirectional, initial_state,
 
     f.__name__ = test_name
     setattr(TestONNXRuntime, f.__name__, f)
+
 
 def setup_rnn_tests():
     layers_opts = [
