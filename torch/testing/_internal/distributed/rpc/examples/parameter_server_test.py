@@ -9,6 +9,8 @@ from torch import optim
 import torch.distributed.rpc as rpc
 import torch.distributed.autograd as dist_autograd
 from torch.distributed.optim import DistributedOptimizer
+
+from time import perf_counter
 from threading import Lock
 
 from torch.testing._internal.dist_utils import dist_init
@@ -209,9 +211,10 @@ class FakeMNIST(torch.utils.data.Dataset):
         self.len = len
         self.images = []
         for i in range(10):
-            self.images.append(
-                torch.empty((1, 28, 28), dtype=torch.float).random_(0,
-                                                                    1000) / 1000)
+            img = torch.zeros((1, 28, 28), dtype=torch.float)
+            for j in range(i + 1):
+                img[0, j * 2, :] = 1
+            self.images.append(img)
 
     def __len__(self):
         return self.len
@@ -238,9 +241,12 @@ class ParameterServerTest(RpcAgentTestFixture):
     def test_parameter_server(self):
         if self.rank != 0:
             # Get data to train on
-            mnist = FakeMNIST(10000)
+            mnist = FakeMNIST(100)
             train_loader = torch.utils.data.DataLoader(mnist, batch_size=32,
                                                        shuffle=True)
             test_loader = torch.utils.data.DataLoader(mnist, batch_size=32,
                                                       shuffle=True)
+            start = perf_counter()
             run_worker(self.rank, self.world_size, 0, train_loader, test_loader)
+            stop = perf_counter()
+            print(f"Time spent training: {stop-start}s")
