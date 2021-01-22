@@ -2116,7 +2116,9 @@ class TestReductions(TestCase):
             if dim is not None:
                 mean1 = torch.mean(tensor, dim=dim, keepdim=keepdim)
             else:
-                mean1 = torch.mean(tensor).reshape((1,) * tensor.ndim)
+                mean1 = torch.mean(tensor)
+                if keepdim:
+                    mean1 = mean1.reshape((1,) * tensor.ndim)
             std2, mean2 = torch.std_mean(tensor, **kwargs)
 
             self.assertEqual(std1, std2)
@@ -2144,7 +2146,9 @@ class TestReductions(TestCase):
             if dim is not None:
                 mean1 = torch.mean(tensor, dim=dim, keepdim=keepdim)
             else:
-                mean1 = torch.mean(tensor).reshape((1,) * tensor.ndim)
+                mean1 = torch.mean(tensor)
+                if keepdim:
+                    mean1 = mean1.reshape((1,) * tensor.ndim)
             var2, mean2 = torch.var_mean(tensor, **kwargs)
 
             self.assertEqual(var1, var2)

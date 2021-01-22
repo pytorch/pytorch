@@ -3637,50 +3637,46 @@
 - func: square_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
 
-- func: std(Tensor self, bool unbiased=True) -> Tensor
+- func: std(Tensor self, bool unbiased) -> Tensor
   variants: function, method
   dispatch:
     Math: std
 
-- func: std.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
+- func: std.dim(Tensor self, int[1] dim, bool unbiased, bool keepdim=False) -> Tensor
   variants: function, method
   dispatch:
     Math: std
 
 - func: std.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> Tensor
   variants: function, method
-  cpp_no_default_args: ['dim', 'correction']
   dispatch:
     CPU, CUDA: std
 
-- func: std_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+- func: std_mean(Tensor self, bool unbiased) -> (Tensor, Tensor)
   variants: function
   dispatch:
     Math: std_mean
 
 
-- func: std_mean.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
+- func: std_mean.dim(Tensor self, int[1] dim, bool unbiased, bool keepdim=False) -> (Tensor, Tensor)
   variants: function
   dispatch:
     Math: std_mean
 
 - func: std_mean.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> (Tensor, Tensor)
   variants: function, method
-  cpp_no_default_args: ['dim', 'correction']
   dispatch:
     CPU, CUDA: std_mean
 
 - func: std_mean.names_dim(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
   variants: function
 
-- func: std.out(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: std.out(Tensor self, int[1] dim, bool unbiased, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     Math: std_out
 
 - func: std.correction_out(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
-  cpp_no_default_args: ['dim', 'correction']
   dispatch:
     CPU, CUDA: std_out
 
@@ -3940,30 +3936,27 @@
 
 - func: vander(Tensor x, int? N=None, bool increasing=False) -> Tensor
 
-- func: var(Tensor self, bool unbiased=True) -> Tensor
+- func: var(Tensor self, bool unbiased) -> Tensor
   variants: function, method
   dispatch:
     Math: var
 
-- func: var.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> Tensor
+- func: var.dim(Tensor self, int[1] dim, bool unbiased, bool keepdim=False) -> Tensor
   variants: function, method
   dispatch:
     Math: var
 
 - func: var.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> Tensor
   variants: function, method
-  cpp_no_default_args: ['dim', 'correction']
   dispatch:
     CPU, CUDA: var
 
-- func: var.out(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: var.out(Tensor self, int[1] dim, bool unbiased, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
     Math: var_out
 
 - func: var.correction_out(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
-  cpp_no_default_args: ['dim', 'correction']
   dispatch:
     CPU, CUDA: var_out
 
@@ -3973,19 +3966,18 @@
 - func: var.names_out(Tensor self, Dimname[1] dim, bool unbiased=True, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
-- func: var_mean(Tensor self, bool unbiased=True) -> (Tensor, Tensor)
+- func: var_mean(Tensor self, bool unbiased) -> (Tensor, Tensor)
   variants: function
   dispatch:
     Math: var_mean
 
-- func: var_mean.dim(Tensor self, int[1] dim, bool unbiased=True, bool keepdim=False) -> (Tensor, Tensor)
+- func: var_mean.dim(Tensor self, int[1] dim, bool unbiased, bool keepdim=False) -> (Tensor, Tensor)
   variants: function
   dispatch:
     Math: var_mean
 
 - func: var_mean.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> (Tensor, Tensor)
   variants: function, method
-  cpp_no_default_args: ['dim', 'correction']
   dispatch:
     CPU, CUDA: var_mean
 

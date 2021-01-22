@@ -1097,7 +1097,7 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
         dim,
         correction_opt,
         keepdim,
-        take_sqrt);
+        /*take_sqrt=*/false);
 
     Tensor imag_in = at::imag(self);
     Tensor imag_out_var = at::empty({0}, self.options().dtype(dtype));
@@ -1110,7 +1110,7 @@ static std::tuple<Tensor&, Tensor&> std_var_mean_out(
         dim,
         correction_opt,
         keepdim,
-        take_sqrt);
+        /*take_sqrt=*/false);
 
     at::add_out(result1, real_out_var, imag_out_var);
     if (take_sqrt) {
@@ -1213,14 +1213,14 @@ Tensor std(const Tensor& self, c10::optional<IntArrayRef> dim,
 }
 
 Tensor& std_out(
-    Tensor& result, const Tensor& self, c10::optional<IntArrayRef> dim,
-    c10::optional<int64_t> correction, bool keepdim) {
+    const Tensor& self, c10::optional<IntArrayRef> dim,
+    c10::optional<int64_t> correction, bool keepdim, Tensor& result) {
   return std_var_out("std", result, self, dim, correction, keepdim, true);
 }
 
 Tensor& var_out(
-    Tensor& result, const Tensor& self, c10::optional<IntArrayRef> dim,
-    c10::optional<int64_t> correction, bool keepdim) {
+    const Tensor& self, c10::optional<IntArrayRef> dim,
+    c10::optional<int64_t> correction, bool keepdim, Tensor& result) {
   return std_var_out("var", result, self, dim, correction, keepdim, false);
 }
 
