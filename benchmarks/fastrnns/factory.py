@@ -1,6 +1,8 @@
 import torch
 
 from collections import namedtuple
+from typing import List, Tuple
+from torch import Tensor
 
 from .cells import lstm_cell, premul_lstm_cell, premul_lstm_cell_no_bias, flat_lstm_cell
 

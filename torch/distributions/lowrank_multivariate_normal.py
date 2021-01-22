@@ -73,10 +73,10 @@ class LowRankMultivariateNormal(Distribution):
 
             capacitance = I + cov_factor.T @ inv(cov_diag) @ cov_factor
     """
-    arg_constraints = {"loc": constraints.real,
-                       "cov_factor": constraints.real,
-                       "cov_diag": constraints.positive}
-    support = constraints.real
+    arg_constraints = {"loc": constraints.real_vector,
+                       "cov_factor": constraints.independent(constraints.real, 2),
+                       "cov_diag": constraints.independent(constraints.positive, 1)}
+    support = constraints.real_vector
     has_rsample = True
 
     def __init__(self, loc, cov_factor, cov_diag, validate_args=None):
