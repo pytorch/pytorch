@@ -110,7 +110,8 @@ void sinc_kernel_cuda(TensorIterator& iter) {
       if (a == scalar_t(0)) {
         return scalar_t(1);
       } else {
-        scalar_t product = c10::pi<scalar_t> * a;
+        // NVCC says constexpr var is not accessible from device
+        scalar_t product = c10::detail::pi<scalar_t>() * a;
         return std::sin(product) / product;
       }
     });
