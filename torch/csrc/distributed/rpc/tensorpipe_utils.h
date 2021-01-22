@@ -61,7 +61,7 @@ inline std::shared_ptr<LazyStreamContext> createLazyStreamContext() {
 #else
 
 // CUDA is available. Implement CUDA-related operations.
-struct TORCH_CUDA_API CudaLazyStreamContext : public LazyStreamContext {
+struct TORCH_CUDA_CPP_API CudaLazyStreamContext : public LazyStreamContext {
   using LazyStreamContext::LazyStreamContext;
 
   // let streams in this context wiat for current streams.
