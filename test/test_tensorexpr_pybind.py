@@ -1,5 +1,4 @@
 import torch
-import unittest
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
