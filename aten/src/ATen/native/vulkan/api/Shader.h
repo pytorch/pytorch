@@ -218,16 +218,14 @@ inline Shader::Layout::Object Shader::Layout::Cache::retrieve(
   };
 }
 
-inline void Shader::Layout::Cache::purge() {
-  cache_.purge();
-}
-
 inline bool operator==(
     const Shader::WorkGroup& _1,
     const Shader::WorkGroup& _2) {
-  return (_1.data[0u] == _2.data[0u]) &&
-         (_1.data[1u] == _2.data[1u]) &&
-         (_1.data[2u] == _2.data[2u]);
+  static_assert(
+      std::is_trivially_copyable<Shader::WorkGroup>::value,
+      "This implementation is no longer valid!");
+
+  return (0 == memcmp(&_1, &_2, sizeof(Shader::WorkGroup)));
 }
 
 inline Shader::Descriptor::Descriptor(const char* const glsl)
@@ -258,12 +256,10 @@ inline bool operator==(
     const Shader::Descriptor& _1,
     const Shader::Descriptor& _2) {
   static_assert(
-      sizeof(Shader::Descriptor::shader.source) == sizeof(Shader::Descriptor::shader.binary),
-      "This implementation requires sizeof(Source) to be equal to sizeof(Binary).");
+      std::is_trivially_copyable<Shader::Descriptor>::value,
+      "This implementation is no longer valid!");
 
-  return (_1.type == _2.type) &&
-         (_1.shader.binary.spirv == _2.shader.binary.spirv) &&
-         (_1.shader.binary.size == _2.shader.binary.size);
+  return (0 == memcmp(&_1, &_2, sizeof(Shader::Descriptor)));
 }
 
 inline size_t Shader::Factory::Hasher::operator()(
@@ -286,11 +282,11 @@ inline size_t Shader::Factory::Hasher::operator()(
 inline bool operator==(
     const VkDescriptorSetLayoutBinding& _1,
     const VkDescriptorSetLayoutBinding& _2) {
-  return (_1.binding == _2.binding) &&
-         (_1.descriptorType == _2.descriptorType) &&
-         (_1.descriptorCount == _2.descriptorCount) &&
-         (_1.stageFlags == _2.stageFlags) &&
-         (_1.pImmutableSamplers == _2.pImmutableSamplers);
+  static_assert(
+      std::is_trivially_copyable<VkDescriptorSetLayoutBinding>::value,
+      "This implementation is no longer valid!");
+
+  return (0 == memcmp(&_1, &_2, sizeof(VkDescriptorSetLayoutBinding)));
 }
 
 #endif /* USE_VULKAN_API */

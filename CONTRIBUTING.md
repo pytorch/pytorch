@@ -2,10 +2,12 @@
 
 - [Contributing to PyTorch](#contributing-to-pytorch)
 - [Developing PyTorch](#developing-pytorch)
-  - [Nightly Checkout & Pull](#nightly-checkout--pull)
+  - [Tips and Debugging](#tips-and-debugging)
+- [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
 - [Unit testing](#unit-testing)
   - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
+  - [Running `mypy`](#running-mypy)
 - [Writing documentation](#writing-documentation)
   - [Building documentation](#building-documentation)
     - [Tips](#tips)
@@ -290,6 +292,17 @@ pytest test/test_nn.py -k Loss -v
 
 The above is an example of testing a change to Loss functions: this command runs tests such as
 `TestNN.test_BCELoss` and `TestNN.test_MSELoss` and can be useful to save keystrokes.
+
+### Running `mypy`
+
+One of the test suites runs `mypy` on the codebase:
+```bash
+python test/test_type_hints.py
+```
+See [Guide for adding type annotations to
+PyTorch](https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch)
+for more information on how to set up `mypy` and tackle type annotation
+tasks, as well as other ways to run `mypy` besides running that test suite.
 
 ## Writing documentation
 
@@ -903,14 +916,14 @@ You'll need to install an appropriately configured flake8; see
 [Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
 for documentation on how to do this.
 
-If you haven't set up the pre-commit hook and have already committed files and 
+If you haven't set up the pre-commit hook and have already committed files and
 CI reports `flake8` errors, you can run the check locally in your PR branch with:
 
   ```bash
   flake8 $(git diff --name-only $(git merge-base --fork-point master))
   ```
 
-fix the code so that no errors are reported when you re-run the above check again, 
+fix the code so that no errors are reported when you re-run the above check again,
 and then commit the fix.
 
 ## Building PyTorch with ASAN
@@ -1065,3 +1078,7 @@ following steps:
 4. Now you can find the pytorch working directory, which could be
    `~/workspace` or `~/project`, and run commands locally to debug
    the failure.
+
+For certain Windows failures, it may be useful to have a full [Remote
+Desktop](https://docs.microsoft.com/en-us/windows-server/remote/remote-desktop-services/clients/remote-desktop-clients) connection. See detailed instructions [here](https://github.com/pytorch/pytorch/wiki/Debugging-Windows-with-Remote-Desktop-or-CDB-(CLI-windbg)-on-CircleCI)
+for how to set that up after rerunning the job.
