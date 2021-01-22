@@ -1,10 +1,35 @@
 #!/usr/bin/env python3
 
+"""
+This module serves two purposes:
+
+- it holds the config_files function, which defines the set of subtests
+  for the test_run_mypy test in test/test_type_hints.py
+- it can be run as a script (see the docstring of main below) and passed
+  the filename of any Python file in this repo, to typecheck that file
+  using only the subset of our mypy configs that apply to it
+
+Since editors (e.g. VS Code) can be configured to use this wrapper
+script in lieu of mypy itself, the idea is that this can be used to get
+inline mypy results while developing, and have at least some degree of
+assurance that those inline results match up with what you would get
+from running the TestTypeHints test suite in CI.
+
+See also these wiki pages:
+
+- https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch
+- https://github.com/pytorch/pytorch/wiki/Lint-as-you-type
+"""
+
 import re
 import sys
 from configparser import ConfigParser
+from itertools import chain
 from pathlib import Path
 from typing import List, Set
+
+# don't import any files that live in the PyTorch repo, since this is
+# meant to work as a standalone script
 
 try:
     import mypy.api
@@ -23,15 +48,33 @@ def config_files() -> Set[str]:
     }
 
 
+def repo_root() -> Path:
+    """
+    This script assumes that the cwd is the PyTorch repository root.
+    """
+    return Path.cwd()
+
+
+def glob(*, pattern: str, filename: str) -> bool:
+    """
+    Return True iff the filename matches the (mypy ini) glob pattern.
+    """
+    full_pattern = str(repo_root() / pattern)
+    path = Path(filename)
+    return any(
+        prefix.resolve().match(full_pattern)
+        for prefix in chain([path], path.parents)
+    )
+
+
 def in_files(*, ini: str, py: str) -> bool:
     """
-    Return truthy iff the py file is included in the ini file's "files".
+    Return True iff the py file is included in the ini file's "files".
     """
-    repo_root = Path.cwd()
     config = ConfigParser()
-    config.read(repo_root / ini)
+    config.read(repo_root() / ini)
     return any(
-        Path(py).resolve().match(str(repo_root / pattern))
+        glob(pattern=pattern, filename=py)
         for pattern in re.split(r',\s*', config['mypy']['files'].strip())
     )
 
@@ -79,13 +122,13 @@ def main(args: List[str]) -> None:
         )
         for config in configs
     ]
-    mypy_issues = list(dict.fromkeys(  # remove duplicates, retain order
+    mypy_issues = [
         item
         # assume stderr is empty
         # https://github.com/python/mypy/issues/1051
         for stdout, _, _ in mypy_results
         for item in stdout.splitlines()
-    ))
+    ]
     for issue in mypy_issues:
         print(issue)
     # assume all mypy exit codes are nonnegative
