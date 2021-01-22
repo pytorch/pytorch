@@ -24,7 +24,6 @@ from torch.testing._internal.common_device_type import \
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
      onlyCUDA)
 from torch.testing import floating_and_complex_types, floating_types, all_types
-from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
 from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
 from torch.autograd import gradcheck, gradgradcheck
 
