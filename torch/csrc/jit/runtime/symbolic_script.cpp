@@ -378,7 +378,8 @@ const std::vector<std::string> functions = {
                 grad_mat2 = AD_bmm_backward_mat2(grad_output, self)
                 return grad_self, grad_mat2
             return torch.bmm(self, mat2), backward
-
+    )",
+    R"(
         def AD_mat_transpose(mat):
             dim = mat.dim()
             if dim == 1:
@@ -391,8 +392,6 @@ const std::vector<std::string> functions = {
                 dims[-2] = dim - 1
                 out = mat.permute(dims)
             return out
-    )",
-    R"(
         # In matmul backward case of [b, m, n] * [b, n, p] => [m, p],
         # instead of doing [b, m, p] and then reduce to [m, p]
         # whice potentially uses large intermediate of size b*m*p,
