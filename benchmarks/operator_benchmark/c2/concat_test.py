@@ -7,6 +7,12 @@ from caffe2.python import core
 
 """Microbenchmarks for Concat operator. Supports both Caffe2/PyTorch."""
 
+cross_product_configs = {
+    'device': ['cpu', 'cuda'],
+    'dtype': ['float'],
+    'add_axis': [0],
+}
+
 # Configs for C2 concat operator
 cat_configs_short = op_bench.config_list(
     attr_names=['sizes', 'N', 'axis'],
@@ -15,11 +21,25 @@ cat_configs_short = op_bench.config_list(
         [(512,  512,    2), 2, 1], # noqa
         [(128, 1024,    2), 2, 1], # noqa
     ],
-    cross_product_configs={
-        'device': ['cpu', 'cuda'],
-        'dtype': ['float'],
-    },
+    cross_product_configs=cross_product_configs,
     tags=['short'],
+)
+
+# Configs specific to static runtime feature - a fast runtime for pared down models
+cat_configs_static_runtime = op_bench.config_list(
+    attr_names=['sizes', 'N', 'axis', 'add_axis'],
+    attrs=[
+        [(1, 40), 5, 1, 1], # noqa
+        [[(1, 160), (1, 14)], -1, 1, 0], # noqa
+        [[(1, 20, 40), (1, 4, 40), (1, 5, 40)], -1, 1, 0], # noqa
+        [[(1, 580), (1, 174)], -1, 1, 0], # noqa
+        [(20, 40), 5, 1, 1], # noqa
+        [[(20, 160), (20, 14)], -1, 1, 0], # noqa
+        [[(20, 20, 40), (20, 4, 40), (20, 5, 40)], -1, 1, 0], # noqa
+        [[(20, 580), (20, 174)], -1, 1, 0], # noqa
+    ],
+    cross_product_configs=cross_product_configs,
+    tags=['static_runtime'],
 )
 
 cat_configs_long = op_bench.config_list(
@@ -43,10 +63,7 @@ cat_configs_long = op_bench.config_list(
         [[2**5+1,       2**6+1,         lambda: random.randint(2**5, 2**6)], # noqa
             50, 2],
     ],
-    cross_product_configs={
-        'device': ['cpu', 'cuda'],
-        'dtype': ['float'],
-    },
+    cross_product_configs=cross_product_configs,
     tags=['long'],
 )
 
@@ -58,38 +75,34 @@ cat_configs_multidim = op_bench.config_list(
         [(2**4,     2**5,   2**2,   2**4,   2**5), 8, 2], # noqa
         [(2**3+1,   2**5-1, 2**2+1, 2**4-1, 2**5+1), 17, 4], # noqa
     ],
-    cross_product_configs={
-        'device': ['cpu', 'cuda'],
-        'dtype': ['float'],
-    },
+    cross_product_configs=cross_product_configs,
     tags=['multidim'],
 )
 
 cat_configs_manyinputs = op_bench.config_list(
-    attr_names=['sizes', 'N', 'axis', 'dtype'],
+    attr_names=['sizes', 'N', 'axis'],
     attrs=[
         [[lambda: random.randint(1, 10000)], 100, 0],
         [[lambda: random.randint(1, 1000)], 1000, 0],
         [[lambda: random.randint(1, 500)], 2000, 0],
         [[lambda: random.randint(1, 300)], 3000, 0],
     ],
-    cross_product_configs={
-        'device': ['cpu', 'cuda'],
-        'dtype': ['float'],
-    },
+    cross_product_configs=cross_product_configs,
     tags=['manyinputs'],
 )
 
 
 class ConcatBenchmark(op_bench_c2.Caffe2BenchmarkBase):
-    def init(self, sizes, N, axis, dtype, device):
+    def init(self, sizes, N, axis, add_axis, dtype, device):
         random.seed(42)
         self.inputs = []
-        self.args = {'axis': axis}
+        self.args = {'axis': axis, 'add_axis': add_axis}
         gen_sizes = []
-        for i in range(N):
-            gen_sizes.append([old_size() if callable(old_size) else old_size
-                             for old_size in sizes])
+        if type(sizes) == list and N == -1:
+            gen_sizes = sizes
+        else:
+            for i in range(N):
+                gen_sizes.append([old_size() if callable(old_size) else old_size for old_size in sizes])
 
         for s in gen_sizes:
             self.inputs.append(self.tensor(s, dtype, device=device))
@@ -108,7 +121,8 @@ class ConcatBenchmark(op_bench_c2.Caffe2BenchmarkBase):
 op_bench_c2.generate_c2_test(cat_configs_short +
                              cat_configs_long +
                              cat_configs_multidim +
-                             cat_configs_manyinputs,
+                             cat_configs_manyinputs +
+                             cat_configs_static_runtime,
                              ConcatBenchmark)
 
 

@@ -157,6 +157,19 @@ def warn_if_tmpdir_set(env):
         fast_nvcc_warn(url_vars)
 
 
+def contains_non_executable(commands):
+    for command in commands:
+        # This is to deal with special command dry-run result from NVCC such as:
+        # ```
+        # #$ "/lib64/ccache"/c++ -std=c++11 -E -x c++ -D__CUDACC__ -D__NVCC__  -fPIC -fvisibility=hidden -O3 \
+        #   -I ... -m64 "reduce_scatter.cu" > "/tmp/tmpxft_0037fae3_00000000-5_reduce_scatter.cpp4.ii
+        # #$ -- Filter Dependencies -- > ... pytorch/build/nccl/obj/collectives/device/reduce_scatter.dep.tmp
+        # ```
+        if command.startswith("--"):
+            return True
+    return False
+
+
 def module_id_contents(command):
     """
     Guess the contents of the .module_id file contained within command.
@@ -275,6 +288,8 @@ def is_weakly_connected(graph):
     """
     Return true iff graph is weakly connected.
     """
+    if not graph:
+        return True
     neighbors = [set() for _ in graph]
     for node, predecessors in enumerate(graph):
         for pred in predecessors:
@@ -408,6 +423,10 @@ def exit_code(results):
     return 0
 
 
+def wrap_nvcc(args, config=default_config):
+    return subprocess.call([config.nvcc] + args)
+
+
 def fast_nvcc(args, *, config=default_config):
     """
     Emulate the result of calling the given nvcc binary with args.
@@ -422,6 +441,10 @@ def fast_nvcc(args, *, config=default_config):
     commands = dryrun_data['commands']
     if not config.faithful:
         commands = make_rm_force(unique_module_id_files(commands))
+
+    if contains_non_executable(commands):
+        return wrap_nvcc(args, config)
+
     command_parts = list(map(shlex.split, commands))
     if config.verbose:
         print_verbose_output(
