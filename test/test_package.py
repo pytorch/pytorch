@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import torch
 from sys import version_info
-from io import StringIO
+from io import StringIO, BytesIO
 import pickle
 
 try:
@@ -74,6 +74,22 @@ the_math = math
             he.save_module(module_a.__name__)
             he.save_module(package_a.__name__)
         hi = PackageImporter(filename)
+        module_a_i = hi.import_module('module_a')
+        self.assertEqual(module_a_i.result, 'module_a')
+        self.assertIsNot(module_a, module_a_i)
+        package_a_i = hi.import_module('package_a')
+        self.assertEqual(package_a_i.result, 'package_a')
+        self.assertIsNot(package_a_i, package_a)
+
+    def test_save_module_binary(self):
+        f = BytesIO()
+        with PackageExporter(f, verbose=False) as he:
+            import module_a
+            import package_a
+            he.save_module(module_a.__name__)
+            he.save_module(package_a.__name__)
+        f.seek(0)
+        hi = PackageImporter(f)
         module_a_i = hi.import_module('module_a')
         self.assertEqual(module_a_i.result, 'module_a')
         self.assertIsNot(module_a, module_a_i)
