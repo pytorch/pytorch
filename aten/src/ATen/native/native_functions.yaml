@@ -3664,7 +3664,7 @@
     Math: std_mean
 
 - func: std_mean.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> (Tensor, Tensor)
-  variants: function, method
+  variants: function
   dispatch:
     CPU, CUDA: std_mean
 
@@ -3977,7 +3977,7 @@
     Math: var_mean
 
 - func: var_mean.correction(Tensor self, int[1]? dim=None, *, int? correction=None, bool keepdim=False) -> (Tensor, Tensor)
-  variants: function, method
+  variants: function
   dispatch:
     CPU, CUDA: var_mean
 
