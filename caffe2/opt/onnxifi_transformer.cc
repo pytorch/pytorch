@@ -922,7 +922,7 @@ bool OnnxifiTransformer::supportOpOnnx(
     int pos =
         ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
     if (blocklisted_ops.count(pos)) {
-      LOG(INFO) << "Skipping blacklisted op " << op.type() << " at pos " << pos;
+      LOG(INFO) << "Skipping blocklisted op " << op.type() << " at pos " << pos;
       return false;
     }
     const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
@@ -1195,11 +1195,11 @@ void OnnxifiTransformer::applyFilteringRules(
   blocklistCpuPartition(net, blocklisted_ops);
 }
 
-void OnnxifiTransformer::getBackendId() {
+std::vector<onnxBackendID> OnnxifiTransformer::getBackendId() {
   idx_ = 0;
 
   if (opts_.use_onnx) {
-    return;
+    return backend_ids_;
   }
   // Try to find a backend that support Caffe2 proto. Note that this is quite
   // opportunistic as we don't officially support Caffe2 proto.
@@ -1214,6 +1214,7 @@ void OnnxifiTransformer::getBackendId() {
       break;
     }
   }
+  return backend_ids_;
 }
 
 NetDef OnnxifiTransformer::TransformViaC2(

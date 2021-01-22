@@ -1,9 +1,10 @@
-import torch.testing._internal.expecttest as expecttest
+from torch.testing._internal import expecttest
+from torch.testing._internal.common_utils import TestCase, run_tests
 
-import unittest
 import string
 import textwrap
 import doctest
+from typing import Dict, Any
 
 import hypothesis
 from hypothesis.strategies import text, integers, composite, sampled_from, booleans
@@ -16,7 +17,7 @@ def text_lineno(draw):
     return (t, lineno)
 
 
-class TestExpectTest(expecttest.TestCase):
+class TestExpectTest(TestCase):
     @hypothesis.given(text_lineno())
     def test_nth_line_ref(self, t_lineno):
         t, lineno = t_lineno
@@ -38,7 +39,7 @@ class TestExpectTest(expecttest.TestCase):
         r3 = {r}{quote}placeholder3{quote}
         """.format(r='r' if raw else '', quote=quote * 3)
         new_prog = expecttest.replace_string_literal(textwrap.dedent(prog), 2, t)[0]
-        ns = {}
+        ns : Dict[str, Any] = {}
         exec(new_prog, ns)
         msg = "program was:\n{}".format(new_prog)
         self.assertEqual(ns['r'], 'placeholder', msg=msg)  # noqa: F821
@@ -102,4 +103,4 @@ def load_tests(loader, tests, ignore):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

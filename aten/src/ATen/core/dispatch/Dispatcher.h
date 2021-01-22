@@ -78,8 +78,17 @@ public:
   // Implementation note: this class abstracts over the fact that we have per-operator
   // dispatch tables.  This could be easily adjusted to have a single global hash
   // table.
+  static Dispatcher& realSingleton();
 
-  static Dispatcher& singleton();
+  static Dispatcher& singleton() {
+    // Implemented inline so that steady-state code needn't incur
+    // function-call overhead. We can't just inline `realSingleton`
+    // because the function-local static would get duplicated across
+    // all DSOs that include & use this header, leading to multiple
+    // singleton instances.
+    static Dispatcher& s = realSingleton();
+    return s;
+  }
 
   // ------------------------------------------------------------------------
   //
@@ -181,12 +190,6 @@ public:
    * an error if this is called again for the same namespace.
    */
   RegistrationHandleRAII registerLibrary(std::string ns, std::string debug);
-
-  // This function is a temporary hack that allows generated_unboxing_wrappers.cpp to register its codegen'ed
-  // unboxing wrapper for aten operators. We still need those for some operators because not all work
-  // with the templated unboxing logic yet.
-  // TODO Delete setBoxedKernelFor_ once all operators work with the templated boxing logic
-  void setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func);
 
   // ------------------------------------------------------------------------
   //
@@ -310,7 +313,9 @@ public:
     // smuggle in a kernel that is typed incorrectly).  For everything
     // in core library this won't happen, because all the static registrations
     // will be done by the time a typed() handle is acquired.
+#if !defined C10_MOBILE
     operatorIterator_->op.assertSignatureIsCorrect<FuncType>();
+#endif
     return TypedOperatorHandle<FuncType>(operatorIterator_);
   }
 

@@ -28,6 +28,8 @@ from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_m
 
 from torch.testing._internal.te_utils import CudaCodeGenExecuted
 
+from jit.test_fuser_common import TestFuserCommon  # noqa: F401
+
 FUSION_GROUP = 'prim::TensorExprGroup'
 LLVM_ENABLED = torch._C._llvm_enabled()
 
@@ -160,6 +162,21 @@ class TestTEFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_abs_cuda(self):
         self._test_fused_abs(device="cuda")
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_unsqueeze_size_calculation(self):
+
+        def foo(b, d):
+            x = d.unsqueeze(1)
+            y = x * 42.
+            z = b + y
+            r = z / 42.
+            return r
+
+        inputs = (torch.rand(20, 28, device='cuda', requires_grad=True), torch.rand(20, device='cuda'))
+
+        scripted = self.checkScript(foo, inputs)
+        self.assertAllFused(scripted.graph_for(*inputs))
 
     def _test_zero_element_tensors(self, device="cpu"):
         def decode(sin_t, cos_t):
@@ -418,6 +435,26 @@ class TestTEFuser(JitTestCase):
                 graph = backward_graph(s)
                 self.assertAllFused(graph, except_for={'aten::Float', 'aten::_grad_sum_to_size'})
 
+    def test_clamp_double(self):
+        for device in self.devices:
+            def clamp_double(x, eta: float):
+                return 1 - x.clamp(eta, 1 - eta)
+
+            x = torch.tensor([1.0, 1.0], dtype=torch.double, device=device)
+            eta = 1e-9
+            s = self.checkScript(clamp_double, (x, eta), profiling=ProfilingMode.PROFILING, atol=1e-10, rtol=1e-5)
+            self.assertAllFused(s.graph_for(x, eta))
+
+    def test_clamp_int(self):
+        for device in self.devices:
+            def clamp_int(x, eta: int):
+                return x.clamp(0, eta)
+
+            x = torch.tensor([1, 1], device=device)
+            eta = 1 << 32
+            s = self.checkScript(clamp_int, (x, eta), profiling=ProfilingMode.PROFILING)
+            self.assertAllFused(s.graph_for(x, eta))
+
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "no half support with profiling on")
     def test_dropout(self):
@@ -655,7 +692,7 @@ class TestTEFuser(JitTestCase):
         y = torch.ones(1, requires_grad=True, device='cuda')
         warmup_forward(scripted_f, x, y)
         g = torch.jit.last_executed_optimized_graph()
-        diff_nodes = [n for n in g.nodes() if n.kind() == 'prim::DifferentiableGraph']
+        diff_nodes = g.findAllNodes('prim::DifferentiableGraph')
         self.assertEqual(len(diff_nodes), 1)
         g = diff_nodes[0].g('Subgraph')
         if_nodes = [n for n in g.nodes() if n.kind() == 'prim::If']
@@ -761,8 +798,7 @@ class TestTEFuser(JitTestCase):
 
     def test_scalar_arg(self):
         for device in self.devices:
-            def fn_test_scalar_arg(x, p):
-                # type: (Tensor, float) -> Tensor
+            def fn_test_scalar_arg(x: torch.Tensor, p: float) -> torch.Tensor:
                 return p * (x * x + x)
 
             x = torch.randn(4, 4, dtype=torch.float, device=device)
@@ -774,8 +810,7 @@ class TestTEFuser(JitTestCase):
 
             # use another function otherwise we will bailout
             # and won't be able to do fused checks
-            def fn_test_scalar_arg_requires_grad(x, p):
-                # type: (Tensor, float) -> Tensor
+            def fn_test_scalar_arg_requires_grad(x: torch.Tensor, p: float) -> torch.Tensor:
                 return p * (x * x + x)
 
             scripted = torch.jit.script(fn_test_scalar_arg_requires_grad)
@@ -964,7 +999,7 @@ class TestTEFuser(JitTestCase):
             forward_graph = module.graph_for(*inputs)
             self.assertGraphContainsExactly(
                 forward_graph, FUSION_GROUP, 1, consider_subgraphs=True)
-            FileCheck().check("DifferentiableGraph").check_next("TupleConstruct") \
+            FileCheck().check("DifferentiableGraph").check("TupleConstruct") \
                 .check_next("return").check(FUSION_GROUP).run(str(forward_graph))
             hy, cy = module(*inputs)
             warmup_backward((hy + cy).sum())
@@ -1281,6 +1316,7 @@ class TestTEFuser(JitTestCase):
             self.assertEqual(ref, mod.forward(x))
             self.assertLastGraphAllFused()
 
+    @unittest.skip("Temporarily disabled")
     def test_masked_fill(self):
         dtypes = [
             torch.int8,

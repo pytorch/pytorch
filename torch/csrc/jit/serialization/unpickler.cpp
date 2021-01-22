@@ -432,7 +432,8 @@ PickleOpCode Unpickler::readInstruction() {
         tensor = at::empty({0}, options).set_(storage);
       }
 
-      if (device.type() == DeviceType::CUDA) {
+      if (device.type() == DeviceType::CUDA ||
+          device.type() == DeviceType::XPU) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(
@@ -632,7 +633,7 @@ void Unpickler::rebuildTensor(bool quantized) {
     auto tup = pop(stack_).toTuple();
     const auto& elements = tup->elements();
     size_t idx = 0;
-    auto storage_tensor = elements.at(idx++).toTensor();
+    auto& storage_tensor = elements.at(idx++).toTensor();
     int64_t storage_offset = elements.at(idx++).toInt();
     std::vector<int64_t> size = tupleToIntList(elements.at(idx++));
     std::vector<int64_t> stride = tupleToIntList(elements.at(idx++));

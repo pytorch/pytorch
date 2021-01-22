@@ -642,14 +642,6 @@ class TestUnaryUfuncs(TestCase):
             size = [5, 5]
             tensor = torch.rand(size, dtype=dtype, device=device)
 
-            # index_add calls atomicAdd on cuda.
-            zeros = torch.zeros(size, dtype=dtype, device=device)
-
-            # index_add is not supported for complex dtypes on cuda yet
-            if device.startswith('cuda') and dtype.is_complex:
-                self.assertRaises(RuntimeError,
-                                  lambda: zeros.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor))
-
             with self.assertRaisesRegex(RuntimeError,
                                         (r'Unlike NumPy, torch.sign is not intended to support complex numbers\. '
                                          r'Please use torch.sgn instead\.')):
@@ -962,7 +954,6 @@ class TestUnaryUfuncs(TestCase):
         self._helper_test_igamma(loglo, loghi, device, dtype,
                                  torch.igamma, scipy.special.gammainc)
 
-    @skipCUDAIfRocm
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
@@ -1146,8 +1137,8 @@ class TestUnaryUfuncs(TestCase):
 
         cpu_tensor.requires_grad = True
         for n in [0, 1, 2, 3, 4, 5]:
-            torch.autograd.gradcheck(lambda x: x.polygamma(n),
-                                     cpu_tensor)
+            torch.autograd.gradcheck(lambda x: x.polygamma(n), cpu_tensor,
+                                     check_batched_grad=True)
 
     # TODO: update to compare against NumPy by rationalizing with OpInfo
     @onlyCUDA
@@ -1710,7 +1701,6 @@ _types_no_half = [
 
 # TODO: all these should be replaced with OpInfos
 torch_op_tests = [
-    _TorchMathTestMeta('exp'),
     _TorchMathTestMeta('floor'),
     _TorchMathTestMeta('ceil'),
     _TorchMathTestMeta('rad2deg'),
