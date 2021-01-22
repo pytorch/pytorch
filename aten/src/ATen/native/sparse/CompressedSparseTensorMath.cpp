@@ -156,7 +156,7 @@ int32_t csr_to_strided_index_convert(int32_t irow, int32_t icol, Tensor& out,
   auto src_impl = get_sparse_csr_impl(src);
   auto lda = out.strides()[0];
 
-  index += irow + icol * lda;
+  index += irow * out.strides()[0] + icol * out.strides()[1];
   return index;
 }
 
@@ -207,7 +207,6 @@ Tensor& add_out_dense_sparse_csr_cpu(Tensor& out, const Tensor& dense,
       for (int i = start_index; i < end_index; ++i) {
         auto icol = col_indices_accessor[i];
         auto index = csr_to_strided_index_convert(irow, icol, out, src);
-        std::cout << "index:: " << index << std::endl;
         out_ptr[index] += cast_value * values_accessor[i];
       }
     }

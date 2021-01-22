@@ -108,7 +108,7 @@ class TestSparseCSR(TestCase):
         self.assertEqual(res, expected)
 
         bad_vec = torch.randn(side + 10, dtype=torch.double)
-        with self.assertRaisesRegex(RuntimeError, "matmul size mismatch"):
+        with self.assertRaisesRegex(RuntimeError, "mv: expected"):
             csr.matmul(bad_vec)
 
     def test_coo_csr_conversion(self):
