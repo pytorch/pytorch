@@ -3231,8 +3231,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(halfcauchy.sample().size(), torch.Size())
         self.assertEqual(halfcauchy.sample(torch.Size((3, 2))).size(),
                          torch.Size((3, 2)))
-        self.assertEqual(halfcauchy.log_prob(self.scalar_sample).size(),
-                         torch.Size())
+        self.assertRaises(ValueError, halfcauchy.log_prob, self.scalar_sample)
         self.assertEqual(halfcauchy.log_prob(self.tensor_sample_1).size(),
                          torch.Size((3, 2)))
         self.assertEqual(halfcauchy.log_prob(self.tensor_sample_2).size(),
@@ -3916,7 +3915,10 @@ class TestConstraints(TestCase):
                 constraint = dist.support
                 message = '{} example {}/{} sample = {}'.format(
                     Dist.__name__, i + 1, len(params), value)
-                self.assertTrue(constraint.check(value).all(), msg=message)
+                self.assertEqual(constraint.event_dim, len(dist.event_shape), msg=message)
+                ok = constraint.check(value)
+                self.assertEqual(ok.shape, dist.batch_shape, msg=message)
+                self.assertTrue(ok.all(), msg=message)
 
 
 class TestNumericalStability(TestCase):
