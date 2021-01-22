@@ -527,8 +527,14 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
         constructor_args = kwargs.get('constructor_args', ())
 
     # Set up inputs from tuple of sizes or constructor fn
+    input_dtype = torch.double
     if 'input_fn' in kwargs:
         input = kwargs['input_fn']()
+        if isinstance(input, torch.Tensor):
+            input = (input,)
+
+        if all(tensor.is_complex() for tensor in input):
+            input_dtype = torch.cdouble
     else:
         input = (kwargs['input_size'],)
 
@@ -543,7 +549,7 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
             input = (input,)
         input = input + (kwargs['target_fn'](),)
 
-    args_variable, kwargs_variable = create_input(input)
+    args_variable, kwargs_variable = create_input(input, dtype=input_dtype)
     f_args_variable = deepcopy(unpack_variables(args_variable))
     out_var = deepcopy(f_args_variable)
 
