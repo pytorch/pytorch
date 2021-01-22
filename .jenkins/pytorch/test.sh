@@ -242,6 +242,21 @@ test_custom_script_ops() {
   fi
 }
 
+test_jit_hooks() {
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
+    echo "Testing jit hooks in cpp"
+    HOOK_BUILD="$PWD/../jit-hook-build"
+    pushd test/jit_hooks
+    cp -a "$HOOK_BUILD" build
+    # Run tests Python-side and export the script modules with hooks
+    python model.py --export-script-module=model
+    # Run tests C++-side and load the exported script modules
+    build/test_jit_hooks ./model
+    popd
+    assert_git_not_dirty
+  fi
+}
+
 test_torch_function_benchmark() {
   echo "Testing __torch_function__ benchmarks"
   pushd benchmarks/overrides_benchmark

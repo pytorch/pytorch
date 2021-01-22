@@ -309,7 +309,6 @@ C10_API void LogAPIUsage(const std::string& context);
 // fields, will add more fields as follow ups such as performance stats,
 // internal states and env variables and etc.
 struct DDPLoggingData {
- public:
   // Data that can be got during DistributedDataParallel construction time
   int world_size;
   int rank;
