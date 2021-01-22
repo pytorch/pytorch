@@ -71,7 +71,7 @@ class Constraint(object):
         event_dim (int): Number of rightmost dimensions that together define
             an event. The :meth:`check` method will remove this many dimensions
             when computing validity.
-        """
+    """
     is_discrete = False  # Default to continuous.
     event_dim = 0  # Default to univariate.
 
