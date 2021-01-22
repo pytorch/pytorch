@@ -10,7 +10,7 @@ import warnings
 import pickle
 from copy import deepcopy
 from itertools import repeat, product
-from functools import reduce
+from functools import reduce, partial
 from operator import mul
 from collections import OrderedDict
 
@@ -71,6 +71,11 @@ if TEST_NUMPY:
     import numpy as np
 
 DOUBLE_TENSORTYPES = [torch.double]
+
+# See #49409, we should remove these if we end up with a global gradcheck setting
+gradcheck = partial(gradcheck, check_batched_grad=True)
+gradgradcheck = partial(gradgradcheck, check_batched_grad=True)
+_assertGradAndGradgradChecks = partial(_assertGradAndGradgradChecks, check_batched_grad=True)
 
 
 # WARNING: If you add a new top-level test case to this file, you MUST
@@ -3962,7 +3967,9 @@ class TestNN(NNTestCase):
         tensors = (torch.randn(4, 4, device='cuda', requires_grad=True),
                    torch.randn(4, 4, device='cuda', requires_grad=True),
                    torch.randn(4, 4, device='cuda', requires_grad=True))
-        _assertGradAndGradgradChecks(self, lambda *i: Broadcast.apply((0, 1), *i), tensors)
+        # TODO(#50743): the following segfaults with check_batched_grad=True
+        _assertGradAndGradgradChecks(self, lambda *i: Broadcast.apply((0, 1), *i), tensors,
+                                     check_batched_grad=False)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_broadcast_not_requiring_grad(self):
