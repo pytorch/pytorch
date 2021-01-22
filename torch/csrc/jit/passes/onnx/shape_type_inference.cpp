@@ -265,8 +265,8 @@ Node* CloneNodeToGraph(
     int opset_version) {
   auto vals_to_params_map =
       buildValueToParamsMap(n->owningGraph()->block(), params_dict);
-  auto clone_node =
-      n_graph->createClone(n, [&n_graph, &vals_to_params_map, opset_version](Value* v) {
+  auto clone_node = n_graph->createClone(
+      n, [&n_graph, &vals_to_params_map, opset_version](Value* v) {
         auto v_n = v->node();
         switch (v_n->kind()) {
           case ::c10::onnx::Constant: {
