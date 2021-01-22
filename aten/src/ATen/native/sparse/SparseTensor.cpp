@@ -75,6 +75,8 @@ SparseTensor new_sparse(c10::optional<ScalarType> dtype, c10::optional<Layout> l
   DispatchKey dispatch_key;
   if (device_or_default(device).is_cuda()) {
     dispatch_key = DispatchKey::SparseCUDA;
+  } else if (device_or_default(device).type() == DeviceType::XPU) {
+    dispatch_key = DispatchKey::SparseXPU;
   } else {
     dispatch_key = DispatchKey::SparseCPU;
   }

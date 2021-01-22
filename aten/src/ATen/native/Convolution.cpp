@@ -253,7 +253,7 @@ auto ConvParams::use_nnpack(const at::Tensor& input, const at::Tensor& weight) c
          input.ndimension() == 4 && // must be in NCHW format
          weight.ndimension() == 4 &&
          (weight.size(2) < 17) && (weight.size(3) < 17) // NNPACK only supports kernels up to 16x16
-#if !defined(C10_MOBILE) && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+#if !defined(C10_MOBILE)
          && input.size(0) >= 16 // ensure large enough batch size to ensure perf, tuneable
 #endif
      ;

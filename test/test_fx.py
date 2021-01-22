@@ -54,6 +54,15 @@ wrap(a_lifted_leaf2)
 
 wrap('len')
 
+@wrap
+def wrapped_via_decorator(a):
+    return a + 1
+
+wrap('wrapper_fn')
+
+def wrapper_fn(x):
+    return torch.foo(x)
+
 class Pair(NamedTuple):
     x : torch.Tensor
     y : torch.Tensor
@@ -243,6 +252,16 @@ class TestFX(JitTestCase):
         m = symbolic_trace(to_trace)
         self.assertIn('a_lifted_leaf2', m.code)
         self.assertEqual(27, m(2))
+
+    def test_wrapped_via_decorator(self):
+        self.assertEqual(wrapped_via_decorator(0), 1)
+
+        def to_trace(y):
+            return wrapped_via_decorator(y)
+
+        m = symbolic_trace(to_trace)
+        self.assertIn('wrapped_via_decorator', m.code)
+        self.assertEqual(m(0), 1)
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
@@ -756,7 +775,7 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(st)
         traced.graph.lint(traced)
         printed = str(traced)
-        assert 'GraphModuleImpl()' in printed
+        assert 'SimpleTest()' in printed
         assert 'torch.relu' in printed
 
     def test_pretty_print_graph(self):
@@ -800,6 +819,9 @@ class TestFX(JitTestCase):
 
         self.assertTrue(neg not in relu.users)
 
+    def test_nonetype_annotation(self):
+        eb = torch.nn.EmbeddingBag(3, 4)
+        symbolic_trace(eb)
 
     def test_construct_root_dict(self):
         graph : torch.fx.Graph = torch.fx.Graph()
@@ -841,6 +863,16 @@ class TestFX(JitTestCase):
         with self.assertRaisesRegex(torch.jit.Error, "assert_foobar"):
             ms(torch.rand(4, 3))
 
+    def test_trace_fn_constant(self):
+        some_constant = torch.rand(3, 4)
+
+        def add_const(x):
+            return some_constant + x
+
+        traced = symbolic_trace(add_const)
+
+        input = torch.rand(3, 4)
+        self.assertEqual(traced(input), add_const(input))
 
     def test_copy_no_remap(self):
         traced = symbolic_trace(SimpleTest())
@@ -1276,6 +1308,29 @@ class TestFX(JitTestCase):
         self.assertIn("-> typing.List[str]", traced._code)
         scripted = torch.jit.script(traced)
         self.assertIn("-> List[str]", scripted.code)
+
+    def test_user_friendly_call_provenance_with_function(self):
+        def fn(x):
+            return wrapper_fn(x)
+
+        traced = torch.fx.symbolic_trace(fn)
+
+        with self.assertRaisesRegex(RuntimeError, "'wrapper_fn' is "
+                                    "being compiled since it was called"
+                                    " from 'fn.forward'"):
+            scripted = torch.jit.script(traced)
+
+    def test_user_friendly_call_provenance_with_module(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return wrapper_fn(x)
+
+        traced = torch.fx.symbolic_trace(M())
+
+        with self.assertRaisesRegex(RuntimeError, "'wrapper_fn' is "
+                                    "being compiled since it was called"
+                                    " from 'M.forward'"):
+            scripted = torch.jit.script(traced)
 
 if __name__ == '__main__':
     run_tests()
