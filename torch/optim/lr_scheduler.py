@@ -674,6 +674,12 @@ class ReduceLROnPlateau(object):
         else:  # mode == 'max' and epsilon_mode == 'abs':
             return a > best + self.threshold
 
+
+    def get_last_lr(self):
+        """ Return last computed learning rate by current scheduler.
+        """
+        return self._last_lr
+
     def _init_is_better(self, mode, threshold, threshold_mode):
         if mode not in {'min', 'max'}:
             raise ValueError('mode ' + mode + ' is unknown!')
