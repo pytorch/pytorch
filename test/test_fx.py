@@ -54,10 +54,14 @@ wrap(a_lifted_leaf2)
 
 wrap('len')
 
-
 @wrap
 def wrapped_via_decorator(a):
     return a + 1
+
+wrap('wrapper_fn')
+
+def wrapper_fn(x):
+    return torch.foo(x)
 
 class Pair(NamedTuple):
     x : torch.Tensor
@@ -771,7 +775,7 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(st)
         traced.graph.lint(traced)
         printed = str(traced)
-        assert 'GraphModuleImpl()' in printed
+        assert 'SimpleTest()' in printed
         assert 'torch.relu' in printed
 
     def test_pretty_print_graph(self):
@@ -1304,6 +1308,29 @@ class TestFX(JitTestCase):
         self.assertIn("-> typing.List[str]", traced._code)
         scripted = torch.jit.script(traced)
         self.assertIn("-> List[str]", scripted.code)
+
+    def test_user_friendly_call_provenance_with_function(self):
+        def fn(x):
+            return wrapper_fn(x)
+
+        traced = torch.fx.symbolic_trace(fn)
+
+        with self.assertRaisesRegex(RuntimeError, "'wrapper_fn' is "
+                                    "being compiled since it was called"
+                                    " from 'fn.forward'"):
+            scripted = torch.jit.script(traced)
+
+    def test_user_friendly_call_provenance_with_module(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return wrapper_fn(x)
+
+        traced = torch.fx.symbolic_trace(M())
+
+        with self.assertRaisesRegex(RuntimeError, "'wrapper_fn' is "
+                                    "being compiled since it was called"
+                                    " from 'M.forward'"):
+            scripted = torch.jit.script(traced)
 
 if __name__ == '__main__':
     run_tests()
