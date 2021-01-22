@@ -3,8 +3,9 @@ import functools
 import inspect
 import math
 import os
-from types import CodeType, FunctionType
+from types import CodeType, FunctionType, ModuleType
 from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
+from itertools import chain
 import torch
 from torch._C import ScriptObject  # type: ignore
 
@@ -18,12 +19,6 @@ HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 # These need to run in global scope to handle nested calls correctly
 _orig_module_call : Callable = torch.nn.Module.__call__
 _orig_module_getattr : Callable = torch.nn.Module.__getattr__
-
-# Functions we will eagerly wrap when we see them while tracing
-# this captures both `math.sqrt()` and `from math import sqrt` automatically
-_autowrap_search : List[dict] = [math.__dict__]
-_autowrap_function_ids : Set[int] = {id(value) for name, value in math.__dict__.items()
-                                     if not name.startswith("_") and callable(value)}
 
 
 def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
@@ -63,8 +58,29 @@ class Tracer(TracerBase):
     process. The different behaviors that can be overridden are described
     in the docstrings of the methods on this class.
     """
-    def __init__(self):
+    def __init__(self, autowrap_modules : List[ModuleType] = [math]):
+        """
+        Construct a Tracer object.
+
+        Args:
+
+            autowrap_modules (List[ModuleType]): defaults to `[math]`,
+                Python modules whose functions should be wrapped automatically
+                without needing to use fx.wrap().
+        """
+
         super().__init__()
+
+        # Functions we will eagerly wrap when we see them while tracing
+        # this captures both `math.sqrt()` and `from math import sqrt` automatically
+        self._autowrap_function_ids: Set[int] = {
+            id(value) for name, value in chain(*[m.__dict__.items() for m in autowrap_modules])
+            if not name.startswith("_") and callable(value)}
+
+        # Python modules to apply autowrap to at the start, in addition to
+        # modules we see while tracing
+        self._autowrap_search: List[ModuleType] = list(autowrap_modules)
+
 
     def create_arg(self, a: Any) -> 'Argument':
         """
@@ -321,7 +337,8 @@ class Tracer(TracerBase):
             def forward(*args, **kwargs):
                 return _orig_module_call(mod, *args, **kwargs)
 
-            _autowrap_check(patcher, getattr(getattr(mod, "forward", mod), "__globals__", {}))
+            _autowrap_check(patcher, getattr(getattr(mod, "forward", mod), "__globals__", {}),
+                            self._autowrap_function_ids)
             return self.call_module(mod, forward, args, kwargs)
 
         with _Patcher() as patcher:
@@ -329,7 +346,9 @@ class Tracer(TracerBase):
             patcher.patch_method(torch.nn.Module, "__getattr__", module_getattr_wrapper, deduplicate=False)
             patcher.patch_method(torch.nn.Module, "__call__", module_call_wrapper, deduplicate=False)
             _patch_wrapped_functions(patcher)
-            _autowrap_check(patcher, fn_globals)
+            _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
+            for module in self._autowrap_search:
+                _autowrap_check(patcher, module.__dict__, self._autowrap_function_ids)
 
             self.create_node('output', 'output', (self.create_arg(fn(*args)),), {},
                              type_expr=fn.__annotations__.get('return', None))
@@ -394,9 +413,9 @@ def _create_wrapped_method(cls, name):
     def wrapped(*args, **kwargs):
         """
         Search the args and kwargs for a Proxy object. If there is one,
-        emit a ``call_method`` node to preserve the call to this leaf
-        function directly. Otherwise, just return the results of this
-        function call, as this function is not being traced.
+        emit a ``call_method`` node to preserve the call to this method
+        directly. Otherwise, just return the results of this function
+        call, as this function is not being traced.
         """
         proxy = _find_proxy(args, kwargs)
         if proxy is not None:
@@ -498,18 +517,15 @@ def _patch_wrapped_functions(patcher : _Patcher):
     for cls, name in _wrapped_methods_to_patch:
         patcher.patch_method(cls, name, _create_wrapped_method(cls, name))
 
-    for frame_dict in _autowrap_search:
-        _autowrap_check(patcher, frame_dict)
 
-
-def _autowrap_check(patcher : _Patcher, frame_dict : Dict[str, Any]):
+def _autowrap_check(patcher : _Patcher, frame_dict : Dict[str, Any], function_ids : Set[int]):
     """
     Some methods, like `math.sqrt` are common enough we want to automatically wrap them as we see them.
     This method searches a scope for them and patches them if found.
     """
     if patcher.visit_once(frame_dict):
         for name, value in frame_dict.items():
-            if not name.startswith("_") and callable(value) and id(value) in _autowrap_function_ids:
+            if not name.startswith("_") and callable(value) and id(value) in function_ids:
                 patcher.patch(frame_dict, name, _create_wrapped_func(value))
 
 
@@ -546,11 +562,7 @@ def wrap(fn_or_name : Union[str, Callable]):
         fn_or_name (Union[str, Callable]): The function or name of the global function to insert into the
             graph when it's called
     """
-    if callable(fn_or_name):
-        pass
-    elif isinstance(fn_or_name, str):
-        pass
-    else:
+    if not callable(fn_or_name) and not isinstance(fn_or_name, str):
         raise RuntimeError('Unsupported type for global function! Must be either a callable or '
                            'string name')
 
