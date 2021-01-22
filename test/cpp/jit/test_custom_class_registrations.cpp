@@ -34,7 +34,6 @@ struct Foo : torch::CustomClassHolder {
 };
 
 struct FooGetterSetter : torch::CustomClassHolder {
-  int64_t x, y;
   FooGetterSetter() : x(0), y(0) {}
   FooGetterSetter(int64_t x_, int64_t y_) : x(x_), y(y_) {}
 
@@ -53,6 +52,19 @@ struct FooGetterSetter : torch::CustomClassHolder {
   }
 
   ~FooGetterSetter() {
+    // std::cout<<"Destroying object with values: "<<x<<' '<<y<<std::endl;
+  }
+
+ private:
+  int64_t x, y;
+};
+
+struct FooReadWrite : torch::CustomClassHolder {
+  int64_t x;
+  const int64_t y;
+  FooReadWrite() : x(0), y(0) {}
+  FooReadWrite(int64_t x_, int64_t y_) : x(x_), y(y_) {}
+  ~FooReadWrite() {
     // std::cout<<"Destroying object with values: "<<x<<' '<<y<<std::endl;
   }
 };
@@ -238,6 +250,11 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def(torch::init<int64_t, int64_t>())
       .def_property("x", &FooGetterSetter::getX, &FooGetterSetter::setX)
       .def_property("y", &FooGetterSetter::getY);
+
+  m.class_<FooReadWrite>("_FooReadWrite")
+      .def(torch::init<int64_t, int64_t>())
+      .def_readwrite("x", &FooReadWrite::x)
+      .def_readonly("y", &FooReadWrite::y);
 
   m.class_<LambdaInit>("_LambdaInit")
       .def(torch::init([](int64_t x, int64_t y, bool swap) {

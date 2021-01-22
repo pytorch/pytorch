@@ -152,6 +152,16 @@ class TestTorchbind(JitTestCase):
         out, result = scripted()
         self.assertEqual(result, 10)
 
+        def foo_readwrite():
+            fooReadWrite = torch.classes._TorchScriptTesting._FooReadWrite(5, 6)
+            old = fooReadWrite.x
+            fooReadWrite.x = old + 4
+            return fooReadWrite, fooReadWrite.x, fooReadWrite.y
+        scripted = torch.jit.script(foo_readwrite)
+        out, x, y = scripted()
+        self.assertEqual(x, 9)
+        self.assertEqual(y, 6)
+
     def test_torchbind_take_instance_as_method_arg(self):
         def foo():
             ss = torch.classes._TorchScriptTesting._StackString(["mom"])

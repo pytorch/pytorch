@@ -181,6 +181,51 @@ class class_ {
     return *this;
   }
 
+  template <typename T>
+  class_& def_readwrite(std::string name, T CurClass::*field) {
+    auto getterName = name + "_getter";
+    auto getter =
+        [field = std::move(field)](const c10::intrusive_ptr<CurClass>& self) {
+          return self.get()->*field;
+        };
+
+    auto wrapped_getter = detail::wrap_func<CurClass>(std::move(getter));
+    auto property_getter =
+        process_and_register_property_method(getterName, wrapped_getter);
+
+    auto setterName = name + "_setter";
+    auto setter = [field = std::move(field)](
+                      const c10::intrusive_ptr<CurClass>& self, T value) {
+      self.get()->*field = value;
+    };
+
+    auto wrapped_setter = detail::wrap_func<CurClass>(std::move(setter));
+    auto property_setter =
+        process_and_register_property_method(setterName, wrapped_setter);
+
+    classTypePtr->addProperty(name, property_getter, property_setter);
+
+    return *this;
+  }
+
+  template <typename T>
+  class_& def_readonly(std::string name, T CurClass::*field) {
+    auto getterName = name + "_getter";
+    auto getter =
+        [field = std::move(field)](const c10::intrusive_ptr<CurClass>& self) {
+          return self.get()->*field;
+        };
+
+    auto wrapped_getter = detail::wrap_func<CurClass>(std::move(getter));
+    auto property_getter =
+        process_and_register_property_method(getterName, wrapped_getter);
+
+    torch::jit::Function* property_setter;
+
+    classTypePtr->addProperty(name, property_getter, property_setter);
+    return *this;
+  }
+
   /// This is an unsafe method registration API added for adding custom JIT backend support via custom
   /// C++ classes. It is not for general purpose use.
   class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema, std::string doc_string = "") {
