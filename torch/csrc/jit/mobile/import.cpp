@@ -169,11 +169,11 @@ void parseMethods(
                   mobile::kTensorJitIndex) {
             updated_constant_vals.push_back(
                 constant_vals_from_jit[tensor_jit_index.toInt()]);
+            continue;
           }
         }
-      } else {
-        updated_constant_vals.push_back(const_item);
       }
+      updated_constant_vals.push_back(const_item);
     }
 
     std::vector<IValue> module_debug_info_list;
@@ -445,12 +445,7 @@ std::unordered_map<std::string, std::string> BytecodeDeserializer::
   if (!reader_->hasRecord("metadata.pkl")) {
     return res;
   }
-  auto it = readArchive("metadata", mcu);
-  std::cout << "it ivalue dump" << std::endl;
-  it.dump();
-  auto ivalue_dict = it.toGenericDict();
-
-  //  auto ivalue_dict = readArchive("metadata", mcu).toGenericDict();
+  auto ivalue_dict = readArchive("metadata", mcu).toGenericDict();
   for (auto it = ivalue_dict.begin(); it != ivalue_dict.end(); ++it) {
     auto key = it->key().toString()->string();
     auto value = it->value().toString()->string();
