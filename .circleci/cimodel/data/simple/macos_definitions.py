@@ -21,7 +21,7 @@ class MacOsJob:
         return [{full_job_name: props_dict}]
 
 
-WORKFLOW_DATA = [MacOsJob("10_13"), MacOsJob("10_13", True)]
+WORKFLOW_DATA = [MacOsJob("10_15"), MacOsJob("10_13"), MacOsJob("10_13", True)]
 
 
 def get_workflow_jobs():
