@@ -655,6 +655,11 @@ class ReduceLROnPlateau(object):
                     print('Epoch {:5d}: reducing learning rate'
                           ' of group {} to {:.4e}.'.format(epoch, i, new_lr))
 
+    def get_last_lr(self):
+        """ Return last computed learning rate by current scheduler.
+        """
+        return self._last_lr
+
     @property
     def in_cooldown(self):
         return self.cooldown_counter > 0
