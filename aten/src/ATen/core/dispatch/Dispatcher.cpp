@@ -43,7 +43,7 @@ Dispatcher::Dispatcher()
 
 Dispatcher::~Dispatcher() {}
 
-C10_EXPORT Dispatcher& Dispatcher::singleton() {
+C10_EXPORT Dispatcher& Dispatcher::realSingleton() {
   static Dispatcher _singleton;
   return _singleton;
 }
