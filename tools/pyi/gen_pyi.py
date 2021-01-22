@@ -1,5 +1,3 @@
-
-import os
 import collections
 from pprint import pformat
 
@@ -7,9 +5,9 @@ import argparse
 
 from tools.codegen.model import *
 from tools.codegen.api.python import *
+from tools.codegen.gen import FileManager
 from typing import Sequence, List, Dict
 
-from ..autograd.utils import CodeTemplate, write
 from ..autograd.gen_python_functions import should_generate_py_binding, load_signatures, group_overloads
 
 """
@@ -166,7 +164,7 @@ def sig_for_ops(opname: str) -> List[str]:
         raise Exception("unknown op", opname)
 
 def generate_type_hints(sig_group: PythonSignatureGroup) -> List[str]:
-    type_hints = []
+    type_hints: List[str] = []
 
     # Some deprecated ops that are on the blocklist are still included in pyi
     if sig_group.signature.name in blocklist and not sig_group.signature.deprecated:
@@ -193,7 +191,7 @@ def generate_type_hints(sig_group: PythonSignatureGroup) -> List[str]:
 
     return type_hints
 
-def gen_nn_functional(out: str) -> None:
+def gen_nn_functional(fm: FileManager) -> None:
     # Functions imported into `torch.nn.functional` from `torch`, perhaps being filtered
     # through an `_add_docstr` call
     imports = [
@@ -241,28 +239,22 @@ def gen_nn_functional(out: str) -> None:
     import_code = ["from .. import {0} as {0}".format(_) for _ in imports]
     # TODO make these types more precise
     dispatch_code = ["{}: Callable".format(_) for _ in (dispatches + from_c)]
-    stubs = CodeTemplate.from_file(os.path.join('torch', 'nn', 'functional.pyi.in'))
-    env = {
+    fm.write_with_template('torch/nn/functional.pyi', 'torch/nn/functional.pyi.in', lambda: {
         'imported_hints': import_code,
-        'dispatched_hints': dispatch_code
-    }
-    write(out, 'torch/nn/functional.pyi', stubs, env)
+        'dispatched_hints': dispatch_code,
+    })
 
     # functional.pyi already contains the definitions for those functions
     # so, we don't export then to it
     from_c.extend(['hardtanh', 'leaky_relu', 'hardsigmoid'])
     dispatch_code = ["{}: Callable".format(_) for _ in (dispatches + from_c)]
-    env = {
+    fm.write_with_template('torch/_C/_nn.pyi', 'torch/_C/_nn.pyi.in', lambda: {
         'imported_hints': import_code,
-        'dispatched_hints': dispatch_code
-    }
-    stubs = CodeTemplate.from_file(os.path.join('torch', '_C', '_nn.pyi.in'))
-    write(out, 'torch/_C/_nn.pyi', stubs, env)
+        'dispatched_hints': dispatch_code,
+    })
 
-def gen_nn_pyi(out: str) -> None:
-    gen_nn_functional(out)
 
-def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, out: str) -> None:
+def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -> None:
     """gen_pyi()
 
     This function generates a pyi file for torch.
@@ -550,14 +542,19 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, out: str) -> None:
         'dtype_class_hints': dtype_class_hints,
         'all_directive': all_directive
     }
-    TORCH_C_TYPE_STUBS = CodeTemplate.from_file(os.path.join('torch', '_C', '__init__.pyi.in'))
-    TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS = \
-        CodeTemplate.from_file(os.path.join('torch', '_C', '_VariableFunctions.pyi.in'))
-
-    write(out, 'torch/_C/__init__.pyi', TORCH_C_TYPE_STUBS, env)
-    write(out, 'torch/_C/_VariableFunctions.pyi', TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS, env)
-    write(out, 'torch/_VF.pyi', TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS, env)
-    gen_nn_pyi(out)
+    fm.write_with_template('torch/_C/__init__.pyi', 'torch/_C/__init__.pyi.in', lambda: {
+        'generated_comment': '@' + 'generated from torch/_C/__init__.pyi.in',
+        **env,
+    })
+    fm.write_with_template('torch/_C/_VariableFunctions.pyi', 'torch/_C/_VariableFunctions.pyi.in', lambda: {
+        'generated_comment': '@' + 'generated from torch/_C/_VariableFunctions.pyi.in',
+        **env,
+    })
+    fm.write_with_template('torch/_VF.pyi', 'torch/_C/_VariableFunctions.pyi.in', lambda: {
+        'generated_comment': '@' + 'generated from torch/_C/_VariableFunctions.pyi.in',
+        **env,
+    })
+    gen_nn_functional(fm)
 
 
 def main() -> None:
@@ -573,7 +570,8 @@ def main() -> None:
                         default='.',
                         help='path to output directory')
     args = parser.parse_args()
-    gen_pyi(args.native_functions_path, args.deprecated_functions_path, args.out)
+    fm = FileManager(install_dir=args.out, template_dir='.', dry_run=False)
+    gen_pyi(args.native_functions_path, args.deprecated_functions_path, fm)
 
 
 if __name__ == '__main__':
