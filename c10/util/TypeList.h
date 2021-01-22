@@ -286,7 +286,7 @@ static_assert(
  * Take/drop a number of arguments from a typelist.
  * Example:
  *   typelist<int, string> == take_t<typelist<int, string, bool>, 2>
- *   typelist<string, bool> == drop_t<typelist<int, string, bool>, 2>
+ *   typelist<bool> == drop_t<typelist<int, string, bool>, 2>
  */
 namespace detail {
   template<class TypeList, size_t offset, class IndexSequence>
@@ -311,6 +311,22 @@ template<class TypeList, size_t num> struct drop final {
   using type = typename detail::take_elements<TypeList, num, std::make_index_sequence<size<TypeList>::value - num>>::type;
 };
 template<class TypeList, size_t num> using drop_t = typename drop<TypeList, num>::type;
+
+/**
+ * Like drop, but returns an empty list rather than an assertion error if `num`
+ * is larger than the size of the TypeList.
+ * Example:
+ *   typelist<> == drop_if_nonempty_t<typelist<string, bool>, 2>
+ *   typelist<> == drop_if_nonempty_t<typelist<int, string, bool>, 3>
+ */
+template<class TypeList, size_t num> struct drop_if_nonempty final {
+  static_assert(is_instantiation_of<typelist, TypeList>::value, "In typelist::drop<T, num>, the T argument must be typelist<...>.");
+  using type = typename detail::take_elements<
+    TypeList,
+    min(num, size<TypeList>::value),
+    std::make_index_sequence<size<TypeList>::value - min(num, size<TypeList>::value)>>::type;
+};
+template<class TypeList, size_t num> using drop_if_nonempty_t = typename drop_if_nonempty<TypeList, num>::type;
 
 
 /**

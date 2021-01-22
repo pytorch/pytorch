@@ -13,6 +13,13 @@ namespace test_function_traits {
     static_assert(std::is_same<int, typename function_traits<int(int, float)>::return_type>::value, "");
     static_assert(std::is_same<typelist::typelist<int, float>, typename function_traits<void(int, float)>::parameter_types>::value, "");
     static_assert(std::is_same<typelist::typelist<int, float>, typename function_traits<int(int, float)>::parameter_types>::value, "");
+
+    static_assert(std::is_same<bool, typename make_function_traits_t<bool, typelist::typelist<int, float>>::return_type>::value, "");
+    static_assert(std::is_same<void, typename make_function_traits_t<void, typelist::typelist<int, float>>::return_type>::value, "");
+    static_assert(std::is_same<typelist::typelist<int, float>, typename make_function_traits_t<bool, typelist::typelist<int, float>>::parameter_types>::value, "");
+    static_assert(std::is_same<typelist::typelist<int, float>, typename make_function_traits_t<void, typelist::typelist<int, float>>::parameter_types>::value, "");
+    static_assert(std::is_same<bool(int, float), typename make_function_traits_t<bool, typelist::typelist<int, float>>::func_type>::value, "");
+    static_assert(std::is_same<void(int, float), typename make_function_traits_t<void, typelist::typelist<int, float>>::func_type>::value, "");
 }
 
 struct MovableOnly {
