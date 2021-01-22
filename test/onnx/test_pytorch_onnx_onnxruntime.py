@@ -398,19 +398,7 @@ class TestONNXRuntime(unittest.TestCase):
         # Only support CPU version, since tracer is not working in GPU RNN.
         self.run_test(model, (x, model.hidden))
 
-    @skipIfUnsupportedOpsetVersion([13])
-    @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()  # Faster RCNN model is not scriptable
-    def test_faster_rcnn(self):
-        model = torchvision.models.detection.faster_rcnn.fasterrcnn_resnet50_fpn(pretrained=True, min_size=200,
-                                                                                 max_size=300)
-        model.eval()
-        x = torch.randn(2, 3, 200, 300, requires_grad=True)
-        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
-        self.run_test(model, (x,), input_names=["images_tensors"], output_names=["outputs"],
-                      dynamic_axes={"images_tensors": [0, 1, 2, 3], "outputs": [0, 1, 2, 3]}, rtol=1e-3, atol=1e-5)
-
-    def get_image_from_url(self, url):
+    def get_image_from_url(self, url, size=(300, 200)):
         import os
         from urllib.parse import urlsplit
         from urllib import request
@@ -425,15 +413,40 @@ class TestONNXRuntime(unittest.TestCase):
         with open(path, 'wb') as f:
             f.write(data)
         image = Image.open(path).convert("RGB")
-        image = image.resize((300, 200), Image.BILINEAR)
+
+        image = image.resize(size, Image.BILINEAR)
+
         to_tensor = transforms.ToTensor()
         return to_tensor(image)
 
     def get_test_images(self):
         image_url = "http://farm3.staticflickr.com/2469/3915380994_2e611b1779_z.jpg"
-        image = self.get_image_from_url(url=image_url)
-        images = [image]
-        return images
+        image = self.get_image_from_url(url=image_url, size=(100, 320))
+
+        image_url2 = "https://pytorch.org/tutorials/_static/img/tv_tutorial/tv_image05.png"
+        image2 = self.get_image_from_url(url=image_url2, size=(250, 380))
+
+        return [image], [image2]
+
+    @skipIfUnsupportedOpsetVersion([13])
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @disableScriptTest()  # Faster RCNN model is not scriptable
+    def test_faster_rcnn(self):
+        model = torchvision.models.detection.faster_rcnn.fasterrcnn_resnet50_fpn(pretrained=True, min_size=200,
+                                                                                 max_size=300)
+        model.eval()
+        x = torch.randn(2, 3, 200, 300, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+        self.run_test(model, (x,), input_names=["images_tensors"], output_names=["outputs"],
+                      dynamic_axes={"images_tensors": [0, 1, 2, 3], "outputs": [0, 1, 2, 3]}, rtol=1e-3, atol=1e-5)
+        dummy_image = [torch.ones(3, 100, 100) * 0.3]
+        images, test_images = self.get_test_images()
+        self.run_test(model, (images,), test_with_inputs=[(images,), (test_images,), (dummy_image,)],
+                      input_names=["images_tensors"], output_names=["outputs"],
+                      dynamic_axes={"images_tensors": [0, 1, 2], "outputs": [0, 1, 2]}, rtol=1e-3, atol=1e-5)
+        self.run_test(model, (dummy_image,), test_with_inputs=[(dummy_image,), (images,)],
+                      input_names=["images_tensors"], output_names=["outputs"],
+                      dynamic_axes={"images_tensors": [0, 1, 2], "outputs": [0, 1, 2]}, rtol=1e-3, atol=1e-5)
 
     def test_paste_mask_in_image(self):
         # disable profiling
@@ -472,9 +485,18 @@ class TestONNXRuntime(unittest.TestCase):
     def test_mask_rcnn(self):
         model = torchvision.models.detection.mask_rcnn.maskrcnn_resnet50_fpn(pretrained=True, min_size=200,
                                                                              max_size=300)
-        images = self.get_test_images()
+        images, test_images = self.get_test_images()
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
         self.run_test(model, (images,), input_names=["images_tensors"], output_names=["boxes", "labels", "scores", "masks"],
+                      dynamic_axes={"images_tensors": [0, 1, 2], "boxes": [0, 1], "labels": [0],
+                                    "scores": [0], "masks": [0, 1, 2]}, rtol=1e-3, atol=1e-5)
+        dummy_image = [torch.ones(3, 100, 100) * 0.3]
+        self.run_test(model, (images,), test_with_inputs=[(images,), (test_images,), (dummy_image,)],
+                      input_names=["images_tensors"], output_names=["boxes", "labels", "scores", "masks"],
+                      dynamic_axes={"images_tensors": [0, 1, 2], "boxes": [0, 1], "labels": [0],
+                                    "scores": [0], "masks": [0, 1, 2]}, rtol=1e-3, atol=1e-5)
+        self.run_test(model, (dummy_image,), test_with_inputs=[(dummy_image,), (images,)],
+                      input_names=["images_tensors"], output_names=["boxes", "labels", "scores", "masks"],
                       dynamic_axes={"images_tensors": [0, 1, 2], "boxes": [0, 1], "labels": [0],
                                     "scores": [0], "masks": [0, 1, 2]}, rtol=1e-3, atol=1e-5)
 
@@ -508,11 +530,32 @@ class TestONNXRuntime(unittest.TestCase):
     def test_keypoint_rcnn(self):
         model = torchvision.models.detection.keypoint_rcnn.keypointrcnn_resnet50_fpn(pretrained=True, min_size=200,
                                                                                      max_size=300)
-        images = self.get_test_images()
+        images, test_images = self.get_test_images()
         self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
         self.run_test(model, (images,), input_names=["images_tensors"],
                       output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
                       dynamic_axes={"images_tensors": [0, 1, 2]},
+                      rtol=1e-3, atol=1e-5)
+        dummy_images = [torch.ones(3, 100, 100) * 0.3]
+        self.run_test(model, (images,), test_with_inputs=[(images,), (test_images,), (dummy_images,)],
+                      input_names=["images_tensors"], output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
+                      dynamic_axes={"images_tensors": [0, 1, 2]},
+                      rtol=5e-3, atol=1e-5)
+        self.run_test(model, (dummy_images,), test_with_inputs=[(dummy_images,), (test_images,)],
+                      input_names=["images_tensors"], output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
+                      dynamic_axes={"images_tensors": [0, 1, 2]},
+                      rtol=5e-3, atol=1e-5)
+
+    @skipIfUnsupportedOpsetVersion([13])
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @disableScriptTest()
+    def test_shufflenet_v2_dynamic_axes(self):
+        model = torchvision.models.shufflenet_v2_x0_5(pretrained=True)
+        dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)
+        test_inputs = torch.randn(3, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (dummy_input,), test_with_inputs=[(dummy_input,), (test_inputs,)],
+                      input_names=["input_images"], output_names=["outputs"],
+                      dynamic_axes={"input_images": {0: 'batch_size'}, "output": {0: 'batch_size'}},
                       rtol=1e-3, atol=1e-5)
 
     @disableScriptTest()
@@ -2754,7 +2797,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 5, dtype=torch.float)
         self.run_test(ReducedOpModule(), x)
 
-    @skipIfUnsupportedOpsetVersion([13])
     def test_reduced_sum(self):
         return self._test_reduced_ops(op=torch.sum)
 
@@ -3209,6 +3251,72 @@ class TestONNXRuntime(unittest.TestCase):
         else:
             self.run_test(model, x_float)
             self.run_test(model, x_int)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_logical_and(self):
+        class AndModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.logical_and(x, y)
+
+        x = torch.randint(0, 2, (5, 5), dtype=torch.bool)
+        y = torch.randint(0, 2, (5, 5), dtype=torch.bool)
+        self.run_test(AndModel(), input=(x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.int32)
+        y = torch.randint(10, (5, 5), dtype=torch.int32)
+        self.run_test(AndModel(), input=(x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.double)
+        y = torch.randint(10, (5, 5), dtype=torch.double)
+        self.run_test(AndModel(), input=(x, y))
+
+        x = torch.randint(10, (2, 3, 5), dtype=torch.float32)
+        y = torch.randint(10, (2, 3, 5), dtype=torch.long)
+        self.run_test(AndModel(), input=(x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_logical_or(self):
+        class OrModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.logical_or(x, y)
+
+        x = torch.randint(0, 2, (5, 5), dtype=torch.bool)
+        y = torch.randint(0, 2, (5, 5), dtype=torch.bool)
+        self.run_test(OrModel(), input=(x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.int32)
+        y = torch.randint(10, (5, 5), dtype=torch.int32)
+        self.run_test(OrModel(), input=(x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.double)
+        y = torch.randint(10, (5, 5), dtype=torch.double)
+        self.run_test(OrModel(), input=(x, y))
+
+        x = torch.randint(10, (2, 3, 5), dtype=torch.float32)
+        y = torch.randint(10, (2, 3, 5), dtype=torch.long)
+        self.run_test(OrModel(), input=(x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_logical_xor(self):
+        class XorModel(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.logical_xor(x, y)
+
+        x = torch.randint(0, 2, (5, 5), dtype=torch.bool)
+        y = torch.randint(0, 2, (5, 5), dtype=torch.bool)
+        self.run_test(XorModel(), input=(x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.int32)
+        y = torch.randint(10, (5, 5), dtype=torch.int32)
+        self.run_test(XorModel(), input=(x, y))
+
+        x = torch.randint(10, (5, 5), dtype=torch.double)
+        y = torch.randint(10, (5, 5), dtype=torch.double)
+        self.run_test(XorModel(), input=(x, y))
+
+        x = torch.randint(10, (2, 3, 5), dtype=torch.float32)
+        y = torch.randint(10, (2, 3, 5), dtype=torch.long)
+        self.run_test(XorModel(), input=(x, y))
 
     def test_gt(self):
         class GreaterModel(torch.nn.Module):
@@ -4314,7 +4422,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     @disableScriptTest()  # error in propagate as assign input shape
     @skipIfUnsupportedMinOpsetVersion(10)
-    @skipIfUnsupportedOpsetVersion([12, 13])  # Due to ONNX Loop shape inference issue
     def test_embedding_bag(self):
         model = torch.nn.EmbeddingBag(10, 5, mode='sum', scale_grad_by_freq=True)
         input = torch.randint(10, (7,))
@@ -4331,7 +4438,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (input))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfUnsupportedOpsetVersion([12, 13])  # Due to ONNX Loop shape inference issue
     def test_embedding_bag_1d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
             def forward(self, embedding_matrix, input, offset, weights):
@@ -4346,7 +4452,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (embedding_matrix, x, offset, w))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfUnsupportedOpsetVersion([12, 13])  # Due to ONNX Loop shape inference issue
     def test_embedding_bag_2d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
             def forward(self, embedding_matrix, input, weights):
@@ -5158,6 +5263,52 @@ class TestONNXRuntime(unittest.TestCase):
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
+
+    @skipIfUnsupportedMinOpsetVersion(12)
+    def test_binary_cross_entropy_with_logits(self):
+        x = torch.randn(5)
+        y = torch.empty(5).random_(2)
+        self._bce_logits_loss(x, y)
+
+        x = torch.randn(2, 3, 5, 7)
+        y = torch.empty(2, 3, 5, 7).random_(2)
+        weight = torch.tensor([2])
+        self._bce_logits_loss(x, y, weight)
+
+        x = torch.FloatTensor([[-0.4089, -1.2471, 0.5907], [-0.4897, -0.8267, -0.7349], [0.5241, -0.1246, -0.4751]])
+        y = torch.FloatTensor([[0, 1, 1], [0, 0, 1], [1, 0, 1]])
+        pos_weight = torch.empty([3]).random_(2)
+        self._bce_logits_loss(x, y, pos_weight)
+
+        x = torch.randn(3, 3, 4)
+        y = torch.empty(3, 3, 4).random_(2)
+        weight = torch.tensor([3])
+        pos_weight = torch.empty([3, 4]).random_(2)
+        self._bce_logits_loss(x, y, weight, pos_weight)
+
+    def _bce_logits_loss(self, x, y, weight=None, pos_weight=None):
+        class BCEWithLogitsLossNoneWeights(torch.nn.Module):
+            def forward(self, input, target, weight, pos_weight):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, weight=weight,
+                                                                            pos_weight=pos_weight, reduction='none')
+
+        self.run_test(BCEWithLogitsLossNoneWeights(), input=(x, y, weight, pos_weight))
+
+        class BCEWithLogitsLossMeanWeights(torch.nn.Module):
+            def forward(self, input, target, weight, pos_weight):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, weight=weight,
+                                                                            pos_weight=pos_weight, reduction='mean')
+
+        self.run_test(BCEWithLogitsLossMeanWeights(), input=(x, y, weight, pos_weight))
+
+        class BCEWithLogitsLossSumWeights(torch.nn.Module):
+            def forward(self, input, target, weight, pos_weight):
+                return torch.nn.functional.binary_cross_entropy_with_logits(input, target, weight=weight,
+                                                                            pos_weight=pos_weight, reduction='sum')
+
+        self.run_test(BCEWithLogitsLossSumWeights(), input=(x, y, weight, pos_weight))
+
+
     def test_torch_mm(self):
         class M(torch.nn.Module):
             def forward(self, mat1, mat2):
@@ -5872,7 +6023,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(Module(), (boxes, size),
                       input_names=["boxes", "size"],
                       dynamic_axes={"size": [0, 1]},
-                      test_with_inputs=[(boxes, size_2)])
+                      test_with_inputs=[(boxes, size), (boxes, size_2)])
 
     @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -5928,7 +6079,7 @@ class TestONNXRuntime(unittest.TestCase):
         input_test = torch.rand(3, 100, 150)
         self.run_test(TransformModule(), (input,),
                       input_names=["input1"], dynamic_axes={"input1": [0, 1, 2]},
-                      test_with_inputs=[(input_test,)])
+                      test_with_inputs=[(input,), (input_test,)])
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_transform_images(self):
@@ -5943,7 +6094,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         input = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
         input_test = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
-        self.run_test(TransformModule(), (input,), test_with_inputs=[(input_test,)])
+        self.run_test(TransformModule(), (input,), test_with_inputs=[(input,), (input_test,)])
 
     def get_features(self, images):
         s0, s1 = images.shape[-2:]
@@ -5960,6 +6111,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_rpn(self):
+
         class RPNModule(torch.nn.Module):
             def __init__(self):
                 super(RPNModule, self).__init__()
@@ -5982,7 +6134,7 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3],
                                     "input3": [0, 1, 2, 3], "input4": [0, 1, 2, 3],
                                     "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]},
-                      test_with_inputs=[(images2, test_features)],
+                      test_with_inputs=[(images, features), (images2, test_features)],
                       dict_check=False)
 
     @skipIfUnsupportedOpsetVersion([13])
@@ -6010,7 +6162,7 @@ class TestONNXRuntime(unittest.TestCase):
         boxes1 = torch.rand(6, 4) * 256
         boxes1[:, 2:] += boxes1[:, :2]
 
-        self.run_test(TransformModule(), (i, [boxes],), test_with_inputs=[(i1, [boxes1],)])
+        self.run_test(TransformModule(), (i, [boxes],), test_with_inputs=[(i, [boxes],), (i1, [boxes1],)])
 
     @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -6045,7 +6197,7 @@ class TestONNXRuntime(unittest.TestCase):
                       input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
                       dynamic_axes={"input1": [0, 1, 2, 3], "input2": [0, 1, 2, 3], "input3": [0, 1, 2, 3],
                                     "input4": [0, 1, 2, 3], "input5": [0, 1, 2, 3], "input6": [0, 1, 2, 3]},
-                      test_with_inputs=[(images2, test_features)],
+                      test_with_inputs=[(images, features), (images2, test_features)],
                       dict_check=False)
 
 
