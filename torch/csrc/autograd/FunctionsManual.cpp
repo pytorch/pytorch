@@ -2130,6 +2130,9 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
       // repeated eigenvalues
       // see https://github.com/pytorch/pytorch/issues/47599
       // and https://arxiv.org/abs/2011.04366
+      // Using less-or-equal sign (instead of less than) so that when
+      // min_threshold is 0 (e.g. in half-precision), it behaves the same as
+      // the original algorithm (i.e. substituting only the diagonal with INF)
       Tensor idx = F.abs() <= min_threshold;
       F.index_put_({idx}, INFINITY);
 
