@@ -4499,12 +4499,13 @@ class TestTorchDeviceType(TestCase):
                     dest.masked_scatter_(mask, src)
 
                     # make src smaller. this should fail
-                    src = torch.randn(num_copy - 1)
+                    src = torch.zeros(num_copy - 1, dtype=dt, device=device)
                     with self.assertRaises(RuntimeError):
                         dest.masked_scatter_(mask, src)
 
         if self.device_type == 'cuda':
-            self.assertEqual(len(w), 20)
+            # Since CUDA supports Half.
+            self.assertEqual(len(w), 29)
         else:
             self.assertEqual(len(w), 27)
 
