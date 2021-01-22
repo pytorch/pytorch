@@ -238,10 +238,6 @@ void parseMethods(
       print_unsupported_ops_and_throw(unsupported_op_names);
     };
 
-    //    for (const auto& constant : consts_list) {
-    //      function->append_constant(constant);
-    //    }
-
     for (const auto& constant : updated_constant_vals) {
       function->append_constant(constant);
     }
@@ -422,6 +418,7 @@ mobile::Module BytecodeDeserializer::deserialize(
   // being a Tuple (int, table), and the integer stands for the bytecode version
   // number. The rest of the elements are the same as before.
   //
+  auto meta_dict = readMobileMetadata(mcu);
   auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
 
   c10::optional<std::vector<IValue>> debug_info_bvals;
@@ -439,7 +436,6 @@ mobile::Module BytecodeDeserializer::deserialize(
         readArchive("constants", mcu).toTuple()->elements();
   }
   parseMethods(bvals, constant_values_from_jit, debug_info_bvals, *mcu);
-  auto meta_dict = readMobileMetadata(mcu);
   return mobile::Module(readArchive("data", mcu).toObject(), meta_dict, mcu);
 }
 
@@ -560,6 +556,27 @@ c10::IValue BytecodeDeserializer::readArchive(
 }
 
 } // namespace
+
+mobile::Module _load_for_mobile(
+    std::istream& in,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return _load_for_mobile(in, device, extra_files);
+}
+
+mobile::Module _load_for_mobile(
+    const std::string& filename,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return _load_for_mobile(filename, device, extra_files);
+}
+
+mobile::Module _load_for_mobile(
+    std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device) {
+  ExtraFilesMap extra_files;
+  return _load_for_mobile(std::move(rai), device, extra_files);
+}
 
 mobile::Module _load_for_mobile(
     std::istream& in,
