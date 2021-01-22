@@ -51,7 +51,7 @@ LIGHT_GREEN = "\033[1;32m"
 RED = "\033[0;31m"
 GREEN = "\033[0;32m"
 END_CHAR = "\033[0m"
-COLOR_THRESHOLDS = (
+COLOR_THRESHOLDS: Tuple[Tuple[str, str, str, str], ...] = (
     ("  0.0%", "{}{}", "", ""),
     ("  0.5%", f"{FAINT}{{}}{{}}{END_CHAR * 2}", LIGHT_GREEN, LIGHT_RED),
     ("  2.5%", f"{{}}{{}}{END_CHAR}", LIGHT_GREEN, LIGHT_RED),
@@ -60,6 +60,9 @@ COLOR_THRESHOLDS = (
     (" 50.0%", f"{{}}{{}}{END_CHAR}", GREEN, RED),
     ("100.0%", f"{BOLD}{{}}{{}}{END_CHAR * 2}", GREEN, RED),
 )
+
+# This is assumed by later parsing.
+assert all(t.endswith("%") for t, _, _, _ in COLOR_THRESHOLDS)
 
 
 def strip_ansi(s: str) -> str:
@@ -378,6 +381,7 @@ class AB_Cell(Cell):
         )
 
     def maybe_colorize_delta(self, sign_str: str, value: float) -> str:
+        value *= 100  # Convert to percent
         template = "({}{:.1f}%)"
         if not self._colorize:
             return template.format(sign_str, value)
@@ -385,12 +389,12 @@ class AB_Cell(Cell):
         color_template, good_color, bad_color = [
             i[1:]
             for i in COLOR_THRESHOLDS
-            if abs(value) >= (float(i[0].strip("%")) / 100)
+            if abs(value) >= (float(i[0].strip("%")))
         ][-1]
 
         return color_template.format(
             bad_color if sign_str == "+" else good_color,
-            template.format(sign_str, value * 100)
+            template.format(sign_str, value)
         )
 
     @property
