@@ -68,7 +68,8 @@ class Independent(Distribution):
 
     @constraints.dependent_property
     def support(self):
-        return self.base_dist.support
+        return constraints.independent(self.base_dist.support,
+                                       self.reinterpreted_batch_ndims)
 
     @property
     def mean(self):
