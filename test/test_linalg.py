@@ -3514,26 +3514,6 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, err_str):
             torch.triangular_solve(b, A)
 
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float64, torch.complex128)
-    def test_triangular_solve_autograd(self, device, dtype):
-        def run_test(A_dims, B_dims):
-            A = torch.rand(*A_dims, dtype=dtype).requires_grad_()
-            b = torch.rand(*B_dims, dtype=dtype).requires_grad_()
-
-            for upper, transpose, unitriangular in itertools.product((True, False), repeat=3):
-                def func(A, b):
-                    return torch.triangular_solve(b, A, upper, transpose, unitriangular)
-
-                gradcheck(func, [A, b])
-                gradgradcheck(func, [A, b])
-
-        run_test((3, 3), (3, 4))
-        run_test((3, 3), (3, 2))
-        run_test((2, 3, 3), (2, 3, 4))
-        run_test((2, 3, 3), (2, 3, 2))
-
     def check_single_matmul(self, x, y, shape):
         a = np.array(x, copy=False)
         b = np.array(y, copy=False)
