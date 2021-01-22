@@ -415,9 +415,13 @@ class IndependentTransform(Transform):
         return self.base_transform.sign
 
     def _call(self, x):
+        if x.dim() < self.domain.event_dim:
+            raise ValueError("Too few dimensions on input")
         return self.base_transform(x)
 
     def _inverse(self, y):
+        if y.dim() < self.codomain.event_dim:
+            raise ValueError("Too few dimensions on input")
         return self.base_transform.inv(y)
 
     def log_abs_det_jacobian(self, x, y):
