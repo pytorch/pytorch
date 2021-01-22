@@ -1331,6 +1331,7 @@ class TestFX(JitTestCase):
                                     "being compiled since it was called"
                                     " from 'M.forward'"):
             scripted = torch.jit.script(traced)
+
     def test_snake_case(self):
         class M(torch.nn.Module):
             def __init__(self):
