@@ -7,6 +7,7 @@
 
 #ifdef USE_KINETO
 #include <pthread.h>
+#include <torch/cuda.h>
 #include <libkineto.h>
 #endif
 
@@ -241,7 +242,7 @@ void prepareProfiler(
   }
 
   if (!libkineto::api().isProfilerRegistered()) {
-    libkineto_init();
+    libkineto_init(!torch::cuda::is_available());
     libkineto::api().suppressLogMessages();
   }
 
