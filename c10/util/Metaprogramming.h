@@ -52,6 +52,11 @@ using infer_function_traits_t = typename infer_function_traits<T>::type;
 /**
  * make_function_traits: creates a `function_traits` type given a Return type
  * and a typelist of Argument types
+ *
+ * Example:
+ * bool f(int, int);
+ *
+ * infer_function_traits_t<f> == make_function_traits_t<bool, typelist::typelist<int, int>>
  */
 template <typename Result, typename ArgList> struct make_function_traits {
   static_assert(false_t<ArgList>::value, "In guts::make_function_traits<Result, TypeList>, the ArgList argument must be typelist<...>.");
