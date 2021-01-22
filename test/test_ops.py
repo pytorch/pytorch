@@ -322,7 +322,7 @@ class TestCommon(JitCommonTestCase):
 
     def compute_expected_output(self, device, dtype, op):
         """
-        This is helper function which checks if the tensor operation
+        Helper function which checks if the tensor operation
         supports out= and returns expected output and sample input
         used to compute output
         """
@@ -341,27 +341,25 @@ class TestCommon(JitCommonTestCase):
 
     @ops(op_db)
     def test_out(self, device, dtype, op):
-        # Compute the expected output of op
+        # Compute expected output of op
         expected, sample = self.compute_expected_output(device, dtype, op)
         # call it with out=... and check we get the expected result
         out_kwargs = sample.kwargs.copy()
         out_kwargs['out'] = out = torch.empty_like(expected)
         op(*sample.input, *sample.args, **out_kwargs)
-        self.assertEqual(expected, out)
+        self.assertEqual(expected, out, exact_device=True)
 
     @ops(op_db)
     def test_out_empty_tensor(self, device, dtype, op):
-        # Compute the expected output of op
+        # Compute expected output of op
         expected, sample = self.compute_expected_output(device, dtype, op)
         # call it with out=... and check we get the expected result
         out_kwargs = sample.kwargs.copy()
-        empty_tensor = torch.tensor((0, 0), dtype=expected.dtype, device=expected.device)
-        out_kwargs['out'] = out = torch.empty_like(empty_tensor)
+        out_kwargs['out'] = out = torch.empty(0,0, dtype=expected.dtype, device=expected.device)
         op(*sample.input, *sample.args, **out_kwargs)
         # Verify if the empty out tensor is resized and restrided to whatever
         # striding is natural for the op to produce
-        self.assertEqual(expected.shape, out.shape)
-        self.assertEqual(expected, out)
+        self.assertEqual(expected, out, exact_device=True)
 
     @ops(op_db)
     def test_out_different_shape(self, device, dtype, op):
@@ -369,12 +367,10 @@ class TestCommon(JitCommonTestCase):
         expected, sample = self.compute_expected_output(device, dtype, op)
         # call it with out=... and check we get the expected result
         out_kwargs = sample.kwargs.copy()
-        # Create tensor of random shape.
-        tensor_of_diff_shape = torch.rand((2, 3),
-                               dtype=expected.dtype, device=expected.device)
-
-        # Create an empty tensor like tensor_of_diff_shape
-        out_kwargs['out'] = out = torch.empty_like(tensor_of_diff_shape)
+        # Create an empty tensor of different shape than
+        # the expected tensor
+        x,y = expected.shape[0], expected.shape[1]
+        out_kwargs['out'] = out = torch.empty((x+1,y+1), dtype=expected.dtype, device=expected.device)
         # Verify that using a tensor shape of incorrrect size to out=
         # raises userwarning.
         self.assertWarnsRegex(UserWarning,
@@ -382,8 +378,7 @@ class TestCommon(JitCommonTestCase):
                             lambda: op(*sample.input, *sample.args, **out_kwargs))
         # Verify if the out tensor is resized and restrided to whatever
         # striding is natural for the op to produce
-        self.assertEqual(expected.shape, out.shape)
-        self.assertEqual(expected, out)
+        self.assertEqual(expected, out, exact_device=True)
 
     @ops(op_db)
     def test_out_inplace(self, device, dtype, op):
@@ -396,10 +391,8 @@ class TestCommon(JitCommonTestCase):
         op(*inp, *sample.args, **out_kwargs)
         # Verify if the out tensor is resized and restrided to whatever
         # striding is natural for the op to produce
-        self.assertEqual(out, inp[0])
-        self.assertEqual(expected.dtype, out.dtype)
-        self.assertEqual(expected.device, out.device)
-        self.assertEqual(expected, out)
+        self.assertEqual(out, inp[0], exact_device=True)
+        self.assertEqual(expected, out, exact_device=True)
 
 instantiate_device_type_tests(TestOpInfo, globals())
 instantiate_device_type_tests(TestGradients, globals())
