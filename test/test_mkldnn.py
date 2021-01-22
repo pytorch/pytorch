@@ -478,12 +478,12 @@ class TestMkldnn(TestCase):
                         self.assertEqual(bn.weight.grad, mkldnn_bn.weight.grad, rtol=1e-3, atol=1e-3)
                         if track_running_stats:
                             self.assertEqual(bn.running_mean, mkldnn_bn.running_mean)
-                            self.assertEqual(bn.running_var, mkldnn_bn.running_var)
+                            self.assertEqual(bn.running_var, mkldnn_bn.running_var, rtol=1e-5, atol=1e-5)
                     elif not train and track_running_stats:
                         self._test_serialization(mkldnn_bn, (x.to_mkldnn(),))
                         self._test_tracing(mkldnn_bn, (x.to_mkldnn(),))
                         self.assertEqual(bn.running_mean, mkldnn_bn.running_mean.to_dense())
-                        self.assertEqual(bn.running_var, mkldnn_bn.running_var.to_dense())
+                        self.assertEqual(bn.running_var, mkldnn_bn.running_var.to_dense(), rtol=1e-5, atol=1e-5)
 
     def test_batch_norm3d(self):
         N = torch.randint(3, 10, (1,)).item()
