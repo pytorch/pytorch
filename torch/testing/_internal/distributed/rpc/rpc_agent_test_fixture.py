@@ -6,6 +6,10 @@ import torch.testing._internal.dist_utils
 
 class RpcAgentTestFixture(ABC):
     @property
+    def name(self):
+        return "worker%d" % self.rank
+
+    @property
     def world_size(self):
         return 4
 

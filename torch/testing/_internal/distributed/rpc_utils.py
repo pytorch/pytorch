@@ -44,6 +44,7 @@ from torch.testing._internal.distributed.rpc.rpc_test import (
     TensorPipeAgentRpcTest,
 )
 from torch.testing._internal.distributed.rpc.examples.parameter_server_test import ParameterServerTest
+from torch.testing._internal.distributed.rpc.examples.parameter_server_test_2 import ParameterServerTest2
 
 def _check_and_set_tcp_init():
     # if we are running with TCP init, set main address and port
@@ -116,6 +117,7 @@ MP_HELPERS_AND_SUFFIXES = {
 GENERIC_TESTS = [
     RpcTest,
     ParameterServerTest,
+    ParameterServerTest2,
     DistAutogradTest,
     DistOptimizerTest,
     JitRpcTest,

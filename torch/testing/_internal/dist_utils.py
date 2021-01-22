@@ -80,7 +80,7 @@ def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,
 
         if setup_rpc:
             rpc.init_rpc(
-                name="worker%d" % self.rank,
+                name=self.name,
                 backend=self.rpc_backend,
                 rank=self.rank,
                 world_size=self.world_size,
