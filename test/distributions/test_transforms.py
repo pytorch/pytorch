@@ -5,6 +5,7 @@ import pytest
 import torch
 from torch.autograd.functional import jacobian
 from torch.distributions import Dirichlet, Independent, Normal, TransformedDistribution, constraints
+from torch.distributions.kl import kl_divergence
 from torch.distributions.transforms import (AbsTransform, AffineTransform, ComposeTransform,
                                             CorrCholeskyTransform, ExpTransform, IndependentTransform,
                                             LowerCholeskyTransform, PowerTransform, ReshapeTransform,
@@ -458,6 +459,17 @@ def test_transformed_distribution(base_batch_dim, base_event_dim, transform_dim,
         y = y[0]
     log_prob = d.log_prob(y)
     assert log_prob.shape == d.batch_shape
+
+
+def test_kl_transformed():
+    # Regression test for https://github.com/pytorch/pytorch/issues/34859
+    scale = torch.ones(2, 3)
+    loc = torch.zeros(2, 3)
+    normal = Normal(loc=loc, scale=scale)
+    diag_normal = Independent(normal, reinterpreted_batch_ndims=1)
+    trans_dist = TransformedDistribution(diag_normal, AffineTransform(loc=0., scale=2.))
+    assert kl_divergence(diag_normal, diag_normal).shape == (2,)
+    assert kl_divergence(trans_dist, trans_dist).shape == (2,)
 
 
 if __name__ == '__main__':
