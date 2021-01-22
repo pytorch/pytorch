@@ -1,6 +1,6 @@
 
 import torch
-from torch.fx import Proxy, GraphModule, symbolic_trace
+from torch.fx import Proxy, GraphModule, Node, symbolic_trace
 
 from enum import Enum, auto
 
@@ -44,8 +44,12 @@ activation_functions = {
 
 def wrap_in_activation_function(m: GraphModule, fn: ActivationFunction) -> GraphModule:
     # Get output node
-    output_node = next(iter(reversed(m.graph.nodes)))
-    assert output_node.op == "output"
+    output_node: Optional[Node] = None
+    for n in reversed(m.graph.nodes):
+        if n.op == "output":
+            output_node = n
+            break
+    assert output_node
 
     # Get the actual output (the "input" of the output node). This is
     # the Node we want to wrap in a user-specified activation function
