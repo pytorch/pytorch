@@ -5246,62 +5246,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             {"cuda:0": "cuda:1", "cuda:1": "cuda:0"}
         )
 
-    @staticmethod
-    def _cuda_identity(x):
-        return x
-
-    def _cuda_stress_run(self, n, dst, xs):
-        futs = []
-        for i in range(n):
-            futs.append(rpc.rpc_async(
-                dst,
-                TensorPipeAgentRpcTest._cuda_identity,
-                args=(xs[i],)
-            ))
-
-        for fut in futs:
-            fut.wait()
-
-        for d in range(torch.cuda.device_count()):
-            torch.cuda.synchronize(d)
-
-    def _test_stress_cuda(self, sizes):
-        options = self.rpc_backend_options
-        dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {0: 1})
-
-        n = 10
-        xs = [torch.ones(sizes, device="cuda:0") for _ in range(n)]
-
-        rpc.init_rpc(
-            name=worker_name(self.rank),
-            backend=self.rpc_backend,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=options,
-        )
-
-        if self.rank == 0:
-            # warmup
-            self._cuda_stress_run(n, dst, xs)
-
-            # testing
-            for _ in range(5):
-                tik = time.time()
-                self._cuda_stress_run(n, dst, xs)
-                tok = time.time()
-                print(f"rank{self.rank}: {tok - tik}")
-
-        rpc.shutdown()
-
-    @skip_if_lt_x_gpu(2)
-    def test_stress_cuda_light(self):
-        self._test_stress_cuda([2, 2])
-
-    @skip_if_lt_x_gpu(2)
-    def test_stress_cuda_heavy(self):
-        self._test_stress_cuda([5000, 5000])
-
     @dist_init
     def test_rref_get_type_timeout(self):
         # Test where we try to get the type of a RRef from an owner, but RRef
