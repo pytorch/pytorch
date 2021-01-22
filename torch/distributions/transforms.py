@@ -205,7 +205,7 @@ class _InverseTransform(Transform):
     """
     def __init__(self, transform: Transform):
         super(_InverseTransform, self).__init__(cache_size=transform._cache_size)
-        self._inv = transform
+        self._inv: Transform = transform
 
     @constraints.dependent_property(is_discrete=False)
     def domain(self):
