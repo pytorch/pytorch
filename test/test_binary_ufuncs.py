@@ -979,13 +979,14 @@ class TestBinaryUfuncs(TestCase):
     def test_maximum_minimum_type_promotion(self, device, dtypes):
         a = torch.tensor((0, 1), device=device, dtype=dtypes[0])
         b = torch.tensor((1, 0), device=device, dtype=dtypes[1])
-        for op in (torch.maximum, torch.max, torch.minimum, torch.min):
+        for op in (torch.maximum, torch.max, torch.fmax, torch.minimum, torch.min, torch.fmin):
             result = op(a, b)
             self.assertEqual(result.dtype, torch.result_type(a, b))
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool]))
     def test_maximum_minimum_int_and_bool(self, device, dtype):
-        ops = ((torch.maximum, torch.max, np.maximum), (torch.minimum, torch.min, np.minimum))
+        ops = ((torch.maximum, torch.max, np.maximum), (torch.minimum, torch.min, np.minimum),
+               (torch.fmax, None, np.fmax), (torch.fmin, None, np.fmin))
         rng = np.random.default_rng()
         a_np = np.array(rng.integers(-100, 100, size=10), dtype=torch_to_numpy_dtype_dict[dtype])
         b_np = np.array(rng.integers(-100, 100, size=10), dtype=torch_to_numpy_dtype_dict[dtype])
@@ -994,21 +995,24 @@ class TestBinaryUfuncs(TestCase):
             a_tensor = torch.from_numpy(a_np).to(device=device, dtype=dtype)
             b_tensor = torch.from_numpy(b_np).to(device=device, dtype=dtype)
             tensor_result = torch_op(a_tensor, b_tensor)
-            alias_result = alias(a_tensor, b_tensor)
 
             out = torch.empty_like(a_tensor)
             torch_op(a_tensor, b_tensor, out=out)
 
             numpy_result = numpy_op(a_np, b_np)
 
-            self.assertEqual(alias_result, tensor_result)
+            if alias is not None:
+                alias_result = alias(a_tensor, b_tensor)
+                self.assertEqual(alias_result, tensor_result)
+
             self.assertEqual(tensor_result, numpy_result)
             self.assertEqual(out, numpy_result)
 
     @precisionOverride({torch.bfloat16: 1e-2})
     @dtypes(*(torch.testing.get_all_fp_dtypes()))
     def test_maximum_minimum_float(self, device, dtype):
-        ops = ((torch.maximum, torch.max, np.maximum), (torch.minimum, torch.min, np.minimum))
+        ops = ((torch.maximum, torch.max, np.maximum), (torch.minimum, torch.min, np.minimum),
+               (torch.fmax, None, np.fmax), (torch.fmin, None, np.fmin))
 
         if dtype == torch.bfloat16:
             a_np = np.random.randn(10).astype(np.float64)
@@ -1023,11 +1027,13 @@ class TestBinaryUfuncs(TestCase):
             a_tensor = torch.from_numpy(a_np).to(device=device, dtype=dtype)
             b_tensor = torch.from_numpy(b_np).to(device=device, dtype=dtype)
             tensor_result = torch_op(a_tensor, b_tensor)
-            alias_result = alias(a_tensor, b_tensor)
             out = torch.empty_like(a_tensor)
             torch_op(a_tensor, b_tensor, out=out)
 
-            self.assertEqual(alias_result, tensor_result)
+            if alias is not None:
+                alias_result = alias(a_tensor, b_tensor)
+                self.assertEqual(alias_result, tensor_result)
+
             self.assertEqual(tensor_result, numpy_result)
             self.assertEqual(out, numpy_result)
 
@@ -1035,9 +1041,10 @@ class TestBinaryUfuncs(TestCase):
     def test_maximum_minimum_float_nan_and_inf(self, device, dtype):
         # np.maximum and np.minimum functions compare input arrays element-wisely.
         # if one of the elements being compared is a NaN, then that element is returned.
-        ops = ((torch.maximum, torch.max, np.maximum), (torch.minimum, torch.min, np.minimum))
-        a_vals = (float('inf'), -float('inf'), float('nan'), float('nan'))
-        b_vals = (-float('inf'), float('inf'), float('inf'), float('nan'))
+        ops = ((torch.maximum, torch.max, np.maximum), (torch.minimum, torch.min, np.minimum),
+               (torch.fmax, None, np.fmax), (torch.fmin, None, np.fmin))
+        a_vals = (float('inf'), -float('inf'), float('nan'), float('inf'), float('nan'), float('nan'), 1, float('nan'))
+        b_vals = (-float('inf'), float('inf'), float('inf'), float('nan'), float('nan'), 0, float('nan'), -5)
         if dtype == torch.bfloat16:
             a_np = np.array(a_vals, dtype=np.float64)
             b_np = np.array(b_vals, dtype=np.float64)
@@ -1051,12 +1058,14 @@ class TestBinaryUfuncs(TestCase):
             a_tensor = torch.from_numpy(a_np).to(device=device, dtype=dtype)
             b_tensor = torch.from_numpy(b_np).to(device=device, dtype=dtype)
             tensor_result = torch_op(a_tensor, b_tensor)
-            alias_result = alias(a_tensor, b_tensor)
 
             out = torch.empty_like(a_tensor)
             torch_op(a_tensor, b_tensor, out=out)
 
-            self.assertEqual(alias_result, tensor_result)
+            if alias is not None:
+                alias_result = alias(a_tensor, b_tensor)
+                self.assertEqual(alias_result, tensor_result)
+
             if dtype == torch.bfloat16:
                 self.assertEqual(tensor_result, numpy_result, exact_dtype=False)
                 self.assertEqual(out, numpy_result, exact_dtype=False)
@@ -1066,7 +1075,7 @@ class TestBinaryUfuncs(TestCase):
 
     @dtypes(*product(torch.testing.get_all_complex_dtypes(), torch.testing.get_all_dtypes()))
     def test_maximum_minimum_complex(self, device, dtypes):
-        for torch_op in (torch.maximum, torch.minimum, torch.max, torch.min):
+        for torch_op in (torch.maximum, torch.minimum, torch.max, torch.min, torch.fmax, torch.fmin):
             with self.assertRaisesRegex(RuntimeError, '.+not implemented for.+'):
                 torch_op(torch.ones(1, device=device, dtype=dtypes[0]),
                          torch.ones(1, device=device, dtype=dtypes[1]))
