@@ -212,14 +212,12 @@ ExprHandle fast_log(const ExprHandle& v) {
   t = mlaf(t, x2, 0.666666686534881591796875);
   t = mlaf(t, x2, 2.0);
   x = x * t + FloatImm::make(0.693147180559945286226764) * e;
-  x = IfThenElse::make(
-      v < FloatImm::make(0),
-      FloatImm::make(std::numeric_limits<float>::quiet_NaN()),
-      x);
-  x = IfThenElse::make(
-      v == FloatImm::make(0),
-      FloatImm::make(-std::numeric_limits<float>::infinity()),
-      x);
+
+  auto zero = FloatImm::make(0);
+  auto nan = FloatImm::make(std::numeric_limits<float>::quiet_NaN());
+  auto neg_inf = FloatImm::make(-std::numeric_limits<float>::infinity());
+  x = CompareSelect::make(v, zero, nan, x, kLT);
+  x = CompareSelect::make(v, zero, neg_inf, x, kEQ);
   return x;
 }
 
