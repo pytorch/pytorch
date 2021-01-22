@@ -13,12 +13,11 @@ technique to train large models on multiple GPUs.
 Model Parallelism using multiple GPUs
 -------------------------------------
 
-Typically for large models 
-which don't fit on a single GPU, model parallelism is employed where certain 
-parts of the model are placed on different GPUs. Although, if this is done 
-naively for sequential models, the training process suffers from GPU under 
-utilization since only one GPU is active at one time as show in the figure 
-below:
+Typically for large models which don't fit on a single GPU, model parallelism 
+is employed where certain parts of the model are placed on different GPUs. 
+Although, if this is done naively for sequential models, the training process 
+suffers from GPU under utilization since only one GPU is active at one time as 
+shown in the figure below:
 
 .. figure:: _static/img/pipeline_parallelism/no_pipe.png
 
