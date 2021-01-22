@@ -13,7 +13,6 @@ from torch.distributions.utils import (_sum_rightmost, broadcast_all,
                                        vec_to_tril_matrix)
 from torch.nn.functional import pad
 from torch.nn.functional import softplus
-from typing import List
 
 __all__ = [
     'AbsTransform',
