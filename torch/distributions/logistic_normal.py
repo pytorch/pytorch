@@ -44,8 +44,8 @@ class LogisticNormal(TransformedDistribution):
 
     @property
     def loc(self):
-        return self.base_dist.loc
+        return self.base_dist.base_dist.loc
 
     @property
     def scale(self):
-        return self.base_dist.scale
+        return self.base_dist.base_dist.scale

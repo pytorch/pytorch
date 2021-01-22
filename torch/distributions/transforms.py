@@ -784,7 +784,7 @@ class CorrCholeskyTransform(Transform):
         if len(shape) < 1:
             raise ValueError("Too few dimensions in input")
         N = shape[-1]
-        D = round((0.25 + 2 * N) ** 0.5 - 0.5)
+        D = round((0.25 + 2 * N) ** 0.5 + 0.5)
         if D * (D - 1) // 2 != N:
             raise ValueError("Input is not a flattend lower-diagonal number")
         return shape[:-1] + (D, D)

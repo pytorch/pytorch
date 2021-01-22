@@ -4,7 +4,7 @@ import pytest
 
 import torch
 from torch.autograd.functional import jacobian
-from torch.distributions import Dirichlet, Normal, TransformedDistribution, constraints
+from torch.distributions import Dirichlet, Independent, Normal, TransformedDistribution, constraints
 from torch.distributions.transforms import (AbsTransform, AffineTransform, ComposeTransform,
                                             CorrCholeskyTransform, ExpTransform, IndependentTransform,
                                             LowerCholeskyTransform, PowerTransform, ReshapeTransform,
@@ -386,10 +386,16 @@ def test_compose_affine(event_dims):
     assert transform.codomain.event_dim == max(event_dims)
     assert transform.domain.event_dim == max(event_dims)
 
-    dist = TransformedDistribution(Normal(0, 1), transform.parts)
+    base_dist = Normal(0, 1)
+    if transform.domain.event_dim:
+        base_dist = base_dist.expand((1,) * transform.domain.event_dim)
+    dist = TransformedDistribution(base_dist, transform.parts)
     assert dist.support.event_dim == max(event_dims)
 
-    dist = TransformedDistribution(Dirichlet(torch.ones(5)), transforms)
+    base_dist = Dirichlet(torch.ones(5))
+    if transform.domain.event_dim > 1:
+        base_dist = base_dist.expand((1,) * (transform.domain.event_dim - 1))
+    dist = TransformedDistribution(base_dist, transforms)
     assert dist.support.event_dim == max(1, max(event_dims))
 
 
@@ -409,6 +415,49 @@ def test_compose_reshape(batch_shape):
     assert dist.batch_shape == batch_shape
     assert dist.event_shape == (2, 3)
     assert dist.support.event_dim == 2
+
+
+@pytest.mark.parametrize("sample_shape", [(), (7,)], ids=str)
+@pytest.mark.parametrize("transform_dim", [0, 1, 2])
+@pytest.mark.parametrize("base_batch_dim", [0, 1, 2])
+@pytest.mark.parametrize("base_event_dim", [0, 1, 2])
+@pytest.mark.parametrize("num_transforms", [0, 1, 2, 3])
+def test_transformed_distribution(base_batch_dim, base_event_dim, transform_dim,
+                                  num_transforms, sample_shape):
+    shape = torch.Size([2, 3, 4, 5])
+    base_dist = Normal(0, 1)
+    base_dist = base_dist.expand(shape[4 - base_batch_dim - base_event_dim:])
+    if base_event_dim:
+        base_dist = Independent(base_dist, base_event_dim)
+    transforms = [AffineTransform(torch.zeros(shape[4 - transform_dim:]), 1),
+                  ReshapeTransform((4, 5), (20,)),
+                  ReshapeTransform((3, 20), (6, 10))]
+    transforms = transforms[:num_transforms]
+    transform = ComposeTransform(transforms)
+
+    # Check validation in .__init__().
+    if base_batch_dim + base_event_dim < transform.domain.event_dim:
+        with pytest.raises(ValueError):
+            TransformedDistribution(base_dist, transforms)
+        return
+    d = TransformedDistribution(base_dist, transforms)
+
+    # Check sampling is sufficiently expanded.
+    x = d.sample(sample_shape)
+    assert x.shape == sample_shape + d.batch_shape + d.event_shape
+    num_unique = len(set(x.reshape(-1).tolist()))
+    assert num_unique >= 0.9 * x.numel()
+
+    # Check log_prob shape on full samples.
+    log_prob = d.log_prob(x)
+    assert log_prob.shape == sample_shape + d.batch_shape
+
+    # Check log_prob shape on partial samples.
+    y = x
+    while y.dim() > len(d.event_shape):
+        y = y[0]
+    log_prob = d.log_prob(y)
+    assert log_prob.shape == d.batch_shape
 
 
 if __name__ == '__main__':
