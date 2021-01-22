@@ -908,7 +908,7 @@ Tensor blackman_window(
     window_length += 1;
   }
   // from https://en.wikipedia.org/wiki/Window_function#Blackman_window
-  auto window = native::arange(window_length, options).mul_(at::native::pi<double> / static_cast<double>(window_length - 1));
+  auto window = native::arange(window_length, options).mul_(c10::pi<double> / static_cast<double>(window_length - 1));
   window = window.mul(4).cos_().mul_(0.08) - window.mul(2).cos_().mul_(0.5) + 0.42;
   return periodic ? window.narrow(0, 0, window_length - 1) : window;
 }
@@ -953,7 +953,7 @@ Tensor hamming_window(
     window_length += 1;
   }
   auto window = native::arange(window_length, options);
-  window.mul_(at::native::pi<double> * 2. / static_cast<double>(window_length - 1)).cos_().mul_(-beta).add_(alpha);
+  window.mul_(c10::pi<double> * 2. / static_cast<double>(window_length - 1)).cos_().mul_(-beta).add_(alpha);
   return periodic ? window.narrow(0, 0, window_length - 1) : window;
 }
 

@@ -240,7 +240,7 @@ Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool lo
     }
 
     if (full) {
-        auto stirling_term = target * at::log(target) - target + 0.5 * at::log(2 * at::native::pi<double> * target);
+        auto stirling_term = target * at::log(target) - target + 0.5 * at::log(2 * c10::pi<double> * target);
         loss += stirling_term.masked_fill(target <= 1, 0);
     }
 

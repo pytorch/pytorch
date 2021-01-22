@@ -110,8 +110,7 @@ void sinc_kernel_cuda(TensorIterator& iter) {
       if (a == scalar_t(0)) {
         return scalar_t(1);
       } else {
-        constexpr auto pi_ = at::native::pi<double>;
-        scalar_t product = scalar_t(pi_) * a;
+        scalar_t product = c10::pi<scalar_t> * a;
         return std::sin(product) / product;
       }
     });
