@@ -3,7 +3,7 @@ import math
 from torch.nn import Module
 from copy import deepcopy
 from torch.optim.lr_scheduler import _LRScheduler
-
+from torch.cuda.amp import autocast
 
 class AveragedModel(Module):
     r"""Implements averaged model for Stochastic Weight Averaging (SWA).
@@ -159,7 +159,8 @@ def update_bn(loader, model, device=None):
         if device is not None:
             input = input.to(device)
 
-        model(input)
+        with autocast():
+            model(input)
 
     for bn_module in momenta.keys():
         bn_module.momentum = momenta[bn_module]
