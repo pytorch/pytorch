@@ -5927,7 +5927,6 @@
     CUDA: legacy::cuda::_th_geqrf
 
 - func: orgqr.out(Tensor self, Tensor input2, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: full
   dispatch:
     CPU: orgqr_out
 
