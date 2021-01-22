@@ -262,37 +262,31 @@ namespace {
 
 template <typename mask_t>
 void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& source){
-  ptrdiff_t srcSize = source.numel();
+  auto srcSize = source.numel();
 
   // Determine our output size
-  ptrdiff_t totalElements = mask.sum().item<ptrdiff_t>();
+  auto totalElements = mask.sum().item<int64_t>();
 
   // The number of `1` elements present in the mask must be <= the
   // number of elements available in `src`
   TORCH_CHECK(totalElements <= srcSize, "source nElements must be == mask `1` elements");
 
-  // FIXME: there appears to be a bug in Thrust (CUDA 7.0) for mixed
-  // iterator prefix sums? Convert `mask` to the same datatype as what
-  // we're accumulating the prefix sum in (int64_t) to get around it
-  auto maskLong = mask.to(at::kLong);
+  auto mask_cont = mask.contiguous();
 
   // Use a prefix sum to determine the output locations of the masked elements
   auto maskPrefixSum = at::empty_like(mask, mask.options().dtype(kLong));
 
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
 
-  thrust::device_ptr<int64_t>
-    maskData(maskLong.data_ptr<int64_t>());
-  thrust::device_ptr<int64_t>
-    maskPrefixSumData(maskPrefixSum.data_ptr<int64_t>());
+  thrust::device_ptr<mask_t> maskData(mask_cont.data_ptr<mask_t>());
+  thrust::device_ptr<int64_t> maskPrefixSumData(
+      maskPrefixSum.data_ptr<int64_t>());
 
   thrust::exclusive_scan(
-#if CUDA_VERSION >= 7000 || defined __HIP_PLATFORM_HCC__
-    thrust::cuda::par(allocator).on(c10::cuda::getCurrentCUDAStream()),
-#endif
-    maskData,
-    maskData + maskLong.numel(),
-    maskPrefixSumData);
+      thrust::cuda::par(allocator).on(c10::cuda::getCurrentCUDAStream()),
+      maskData,
+      maskData + mask_cont.numel(),
+      maskPrefixSumData);
 
   // We are getting elements from `src` based on an offset from
   // `maskPrefixSum`, so that should be made contiguous too
@@ -304,7 +298,7 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
       .resize_outputs(false)
       .add_output(self)
       .add_input(self)
-      .add_input(mask)
+      .add_input(mask_cont)
       .add_input(maskPrefixSum)
       .build();
 
@@ -350,9 +344,6 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& so
     TORCH_WARN("masked_scatter_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
   }
-
-  // `mask` and `self` must have the same number of elements
-  TORCH_CHECK(self.numel() == b_mask.numel(), "Number of elements of self != Number of elements in mask");
 
   auto mask_dtype = b_mask.scalar_type();
   if (mask_dtype == ScalarType::Bool) {
