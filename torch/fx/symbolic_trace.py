@@ -58,7 +58,7 @@ class Tracer(TracerBase):
     process. The different behaviors that can be overridden are described
     in the docstrings of the methods on this class.
     """
-    def __init__(self, autowrap_modules : List[ModuleType] = [math]):
+    def __init__(self, autowrap_modules : Tuple[ModuleType] = (math, )):
         """
         Construct a Tracer object.
 
