@@ -130,19 +130,6 @@ def get_parameter_server(num_gpus=0):
         return param_server
 
 
-def run_parameter_server(rank, world_size):
-    # The parameter server just acts as a host for the model and responds to
-    # requests from trainers, hence it does not need to run a loop.
-    # rpc.shutdown() will wait for all workers to complete by default, which
-    # in this case means that the parameter server will wait for all trainers
-    # to complete, and then exit.
-    print("PS master initializing RPC")
-    rpc.init_rpc(name="parameter_server", rank=rank, world_size=world_size)
-    print("RPC initialized! Running parameter server...")
-    rpc.shutdown()
-    print("RPC shutdown on parameter server.")
-
-
 # --------- Trainers --------------------
 
 # nn.Module corresponding to the network trained by this trainer. The
@@ -214,16 +201,7 @@ def get_accuracy(test_loader, model):
 
 # Main loop for trainers.
 def run_worker(rank, world_size, num_gpus, train_loader, test_loader):
-    # print(f"Worker rank {rank} initializing RPC")
-    # rpc.init_rpc(
-    #     name=f"trainer_{rank}",
-    #     rank=rank,
-    #     world_size=world_size)
-
-    # print(f"Worker {rank} done initializing RPC")
-
     run_training_loop(rank, num_gpus, train_loader, test_loader)
-    # rpc.shutdown()
 
 
 class FakeMNIST(torch.utils.data.Dataset):
@@ -260,7 +238,7 @@ class ParameterServerTest(RpcAgentTestFixture):
     def test_parameter_server(self):
         if self.rank != 0:
             # Get data to train on
-            mnist = FakeMNIST(3000)
+            mnist = FakeMNIST(10000)
             train_loader = torch.utils.data.DataLoader(mnist, batch_size=32,
                                                        shuffle=True)
             test_loader = torch.utils.data.DataLoader(mnist, batch_size=32,
