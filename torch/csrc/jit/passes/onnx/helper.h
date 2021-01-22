@@ -35,7 +35,6 @@ Value* addInputToBlock(Block* block);
 void RegisterInplaceNodeInIfBlocks(
     Value* orig_data,
     Value* new_inplace_node,
-    Node* block_node,
     Block* outer_block,
     Node* initial_node);
 
@@ -45,6 +44,8 @@ void RegisterInplaceNodeInBlocks(
     Node* block_node,
     Block* outer_block,
     Node* initial_node);
+
+void MatchIfBlocksOutputForValue(Value* orig_data, Block* outer_block);
 
 TORCH_API c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type);
 } // namespace jit

@@ -97,7 +97,7 @@ Value* addInputToBlock(Block* block) {
   return block->addInput();
 }
 
-void addDummyConstantBlockOutput(Block* b, Value* orig_data) {
+void addDummyCloneBlockOutput(Block* b, Value* orig_data) {
   auto graph = b->owningGraph();
   auto newNode = graph->create(aten::clone, /*num_outputs =*/1);
   newNode->addInput(orig_data);
@@ -105,7 +105,7 @@ void addDummyConstantBlockOutput(Block* b, Value* orig_data) {
   auto* noneNode = graph->create(prim::Constant);
   noneNode->output()->setType(NoneType::get());
   newNode->addInput(noneNode->output());
-  newNode->output()->copyMetadata(orig_data);
+  newNode->output()->setType(orig_data->type());
 
   newNode->insertBefore(b->return_node());
   noneNode->insertBefore(newNode);
@@ -130,17 +130,11 @@ bool isValueUsedInBlock(Block* b, Value* val) {
 // Check If then/else blocks to match the number of outputs.
 // If the number of block outputs do not match, insert a dummy
 // constant of corresponding shape and type.
-void matchIfBlockOutputs(
-    Value* orig_data,
-    Node* block_node,
-    Block* outer_block,
-    Node* next_node) {
-  auto prev_data = block_node->input(0);
-
+void MatchIfBlocksOutputForValue(Value* orig_data, Block* outer_block) {
   int output_size = outer_block->outputs().size();
   for (Block* b : outer_block->owningNode()->blocks()) {
-    if (b->outputs().size() < output_size && !isValueUsedInBlock(b, prev_data))
-      addDummyConstantBlockOutput(b, orig_data);
+    if (b->outputs().size() < output_size && !isValueUsedInBlock(b, orig_data))
+      addDummyCloneBlockOutput(b, orig_data);
   }
 }
 
@@ -194,27 +188,34 @@ void matchIfBlockOutputs(
 void RegisterInplaceNodeInIfBlocks(
     Value* orig_data,
     Value* new_inplace_node,
-    Node* block_node,
     Block* outer_block,
     Node* initial_node) {
   if (initial_node->kind() != prim::If)
     return;
 
+  for (auto block_output : outer_block->outputs()) {
+    if (block_output->debugName() == new_inplace_node->debugName())
+      return;
+  }
+
   auto next_node = initial_node;
+
   outer_block->registerOutput(new_inplace_node);
-  if (next_node->outputs().size() == 0)
-    next_node->addOutput()->copyMetadata(new_inplace_node);
+  // Block has a new output. Add the output for the prim::If node.
+  if (next_node->outputs().size() < outer_block->outputs().size())
+    next_node->addOutput()->setType(new_inplace_node->type());
 
   auto next_block = next_node->owningBlock();
   while (nullptr != next_block->owningNode()) {
     for (auto block_output : next_block->outputs()) {
-      if (block_output->debugName() == next_node->output(0)->debugName())
+      if (block_output->debugName() == block_output->debugName())
         return;
     }
     next_block->registerOutput(next_node->output(0));
     next_node = next_block->owningNode();
-    if (next_node->outputs().size() == 0)
-      next_node->addOutput()->copyMetadata(new_inplace_node);
+    // Block has a new output. Add the output for the prim::If node.
+    if (next_node->outputs().size() < next_block->outputs().size())
+      next_node->addOutput()->setType(new_inplace_node->type());
     next_block = next_node->owningBlock();
   }
 
@@ -255,14 +256,14 @@ void RegisterInplaceNodeInLoopBlocks(
   std::vector<std::pair<Block*, Node*>> node_list = {
       std::make_pair(outer_block, next_node)};
 
-  next_node->addOutput()->copyMetadata(new_inplace_node);
+  next_node->addOutput()->setType(new_inplace_node->type());
   auto next_block = next_node->owningBlock();
 
   while (nullptr != next_block->owningNode()) {
     outer_block = next_block;
     outer_block->registerOutput(next_node->output(0));
     next_node = outer_block->owningNode();
-    next_node->addOutput()->copyMetadata(new_inplace_node);
+    next_node->addOutput()->setType(new_inplace_node->type());
     next_block = next_node->owningBlock();
     node_list.emplace_back(std::make_pair(outer_block, next_node));
   }
@@ -275,7 +276,7 @@ void RegisterInplaceNodeInLoopBlocks(
     cur_pair.second->addInput(next_data);
     // Add input to current block.
     auto cur_input = cur_pair.first->addInput();
-    cur_input->copyMetadata(next_data);
+    cur_input->setType(next_data->type());
     next_data = cur_input;
     node_list.pop_back();
   }
@@ -330,9 +331,9 @@ void RegisterInplaceNodeInBlocks(
       orig_data, new_inplace_node, block_node, outer_block, next_node);
 
   RegisterInplaceNodeInIfBlocks(
-      orig_data, new_inplace_node, block_node, outer_block, next_node);
+      orig_data, new_inplace_node, outer_block, next_node);
 
-  matchIfBlockOutputs(orig_data, block_node, outer_block, next_node);
+  MatchIfBlocksOutputForValue(orig_data, outer_block);
 }
 
 } // namespace jit
