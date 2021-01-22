@@ -38,6 +38,7 @@ docs/cpp/source/html/
 docs/cpp/source/latex/
 docs/source/generated/
 log
+test-reports/
 test/.coverage
 test/.hypothesis/
 test/cpp/api/mnist
