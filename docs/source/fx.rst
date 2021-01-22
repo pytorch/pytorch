@@ -307,23 +307,24 @@ the generated code, then debug the process of transformations that lead
 to the generated code.
 
 If you’re not familiar with debuggers, please see the auxiliary section
-:ref:`Available Debuggers`.
+:ref:`Available debuggers`.
 
 Debugging the Generated Code
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Because FX generates the ``forward()`` function on GraphModules, using
 traditional debugging techniques like ``print`` statements or ``pdb`` is
- not as straightfoward. Luckily, we have several techniques we can use
+not as straightfoward. Luckily, we have several techniques we can use
 for debugging the generated code.
 
-``pdb``
-~~~~~~~~~~~~
-Use ``pdb`` to step into the running program. Although the code that
+Use ``pdb``
+~~~~~~~~~~~~~
+Invoke ``pdb`` to step into the running program. Although the code that
 represents the FX graph is not in any source file, we can still step
 into it manually using ``pdb`` when the forward pass is invoked.
 
 ::
+
     x, y = torch.rand(2, 3), torch.rand(2, 3)
     m = symbolic_trace(M())
     import pdb; pdb.set_trace()
@@ -379,13 +380,16 @@ your code and examine it from there.
 
 Use the ``to_folder`` function from ``GraphModule``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-``to_folder`` is a method in ``GraphModule`` that allows you to dump
-out the generated FX code to a folder. Although copying the forward pass
-into the code often suffices as in :ref:`Print the generated code
+```to_folder``
+<https://pytorch.org/docs/master/fx.html?highlight=to_folder#torch.fx.GraphModule.to_folder>`__
+is a method in ``GraphModule`` that allows you to dump out the generated
+FX code to a folder. Although copying the forward pass into the code
+often suffices as in :ref:`Print the generated code
 <the above section>`, it doesn’t capture any model attribute state.
 To examine modules and parameters, we can use ``to_folder``.
 
 ::
+
     m = symbolic_trace(M())
     m.to_folder("foo", "Bar")
     from foo import Bar
