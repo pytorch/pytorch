@@ -765,7 +765,6 @@ class TestLinalg(TestCase):
             run_test_skipped_elements(shape, batch, uplo)
 
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @tf32_on_and_off(1e-3)
     def test_kron(self, device, dtype):
 
         def run_test_case(a_shape, b_shape):
@@ -787,7 +786,6 @@ class TestLinalg(TestCase):
             run_test_case(a_shape, b_shape)
 
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @tf32_on_and_off(1e-3)
     def test_kron_non_contiguous(self, device, dtype):
 
         def run_test_transposed(a_shape, b_shape):
