@@ -106,6 +106,10 @@
 #define TORCH_CUDA_API C10_IMPORT
 #endif
 
+// This is in preparation for the imminent torch_cuda split
+#define TORCH_CUDA_CU_API TORCH_CUDA_API
+#define TORCH_CUDA_CPP_API TORCH_CUDA_API
+
 #if defined(TORCH_HIP_BUILD_MAIN_LIB)
 #define TORCH_HIP_API C10_EXPORT
 #else
