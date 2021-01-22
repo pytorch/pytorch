@@ -441,7 +441,6 @@ class TestTesting(TestCase):
         self.assertEqual("no_user_msg", self._get_assert_msg(msg=None, debug_msg="no_user_msg"))
         self.assertEqual("debug_msg\nuser_msg", self._get_assert_msg(msg="user_msg", debug_msg="debug_msg"))
 
-
     # The following 2 tests are added to ensure that test suite terminates early when
     # CUDA assert was thrown since all subsequent test will fail.
     # See: https://github.com/pytorch/pytorch/issues/49019
