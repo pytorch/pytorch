@@ -126,6 +126,7 @@ Tensor& searchsorted_out_cuda(Tensor& result, const Tensor& sorted_sequence, con
   return result;
 }
 
+// We need this function to force the linking against torch_cuda_cu on Windows.
 Tensor searchsorted_cuda(const Tensor& sorted_sequence, const Tensor& self, bool out_int32, bool right) {
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
