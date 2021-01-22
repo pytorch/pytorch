@@ -364,6 +364,8 @@ Reduction Ops
     argmin
     amax
     amin
+    all
+    any
     max
     min
     dist
@@ -414,6 +416,8 @@ Comparison Ops
     less
     maximum
     minimum
+    fmax
+    fmin
     ne
     not_equal
     sort
