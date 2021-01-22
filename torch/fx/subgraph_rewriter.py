@@ -44,7 +44,26 @@ class SubgraphMatcher:
             if (pn.op == "placeholder"
                     or (pn.op == "output" and gn.op != "placeholder")):
                 return True
-            return pn.op == gn.op and pn.target == gn.target
+            if pn.op != gn.op:
+                return False
+            # Fuzzy matching for root-relative targets
+            if pn.op == "get_attr" or pn.op == "call_module":
+                # Consider a target "suffix" everything from the start
+                # of the rightmost alphabetical string ([a-zA-Z]) to the
+                # end of the target. For example, `layer4.2.conv2`,
+                # `3.conv2`, and `conv2` will all have the same suffix,
+                # but they won't be confused with `conv1`.
+                def get_target_suffix(s: str) -> str:
+                    first_letter = False
+                    for i, c in enumerate(s[::-1]):
+                        if first_letter and not c.isalpha():
+                            return s[-i:]
+                        elif c.isalpha():
+                            first_letter = True
+                pn_target_suffix = get_target_suffix(pn.target)
+                gn_target_suffix = get_target_suffix(gn.target)
+                return pn_target_suffix == gn_target_suffix
+            return pn.target == gn.target
 
         # Terminate early if the node attributes are not equal
         if not attributes_are_equal(pn, gn):
