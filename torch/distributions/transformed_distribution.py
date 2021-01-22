@@ -52,24 +52,38 @@ class TransformedDistribution(Distribution):
         else:
             raise ValueError("transforms must be a Transform or list, but was {}".format(transforms))
         shape = self.base_dist.batch_shape + self.base_dist.event_shape
-        event_dim = max([len(self.base_dist.event_shape)] + [t.event_dim for t in self.transforms])
-        batch_shape = shape[:len(shape) - event_dim]
-        event_shape = shape[len(shape) - event_dim:]
+        event_dim = self.base_dist.support.event_dim
+        for t in self.transforms:
+            shape = t.forward_shape(shape)
+            event_dim += t.codomain.event_dim - t.domain.event_dim
+            event_dim = max(event_dim, t.codomain.event_dim)
+        assert len(shape) >= event_dim
+        cut = len(shape) - event_dim
+        batch_shape = shape[:cut]
+        event_shape = shape[cut:]
         super(TransformedDistribution, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(TransformedDistribution, _instance)
         batch_shape = torch.Size(batch_shape)
-        base_dist_batch_shape = batch_shape + self.base_dist.batch_shape[len(self.batch_shape):]
-        new.base_dist = self.base_dist.expand(base_dist_batch_shape)
+        shape = batch_shape + self.event_shape
+        for t in reversed(self.transforms):
+            shape = t.inverse_shape(shape)
+        base_batch_shape = shape[:len(shape) - len(self.base_dist.event_shape)]
+        new.base_dist = self.base_dist.expand(base_batch_shape)
         new.transforms = self.transforms
         super(TransformedDistribution, new).__init__(batch_shape, self.event_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=False)
     def support(self):
-        return self.transforms[-1].codomain if self.transforms else self.base_dist.support
+        if not self.transforms:
+            return self.base_dist.support
+        support = self.transforms[-1].codomain
+        if len(self.event_shape) > support.event_dim:
+            support = constraints.independent(support, len(self.event_shape) - support.event_dim)
+        return support
 
     @property
     def has_rsample(self):

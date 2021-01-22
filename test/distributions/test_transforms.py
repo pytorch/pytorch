@@ -6,8 +6,8 @@ import torch
 from torch.autograd.functional import jacobian
 from torch.distributions import Dirichlet, Normal, TransformedDistribution, constraints
 from torch.distributions.transforms import (AbsTransform, AffineTransform, ComposeTransform,
-                                            CorrCholeskyTransform, ExpTransform,
-                                            LowerCholeskyTransform, PowerTransform,
+                                            CorrCholeskyTransform, ExpTransform, IndependentTransform,
+                                            LowerCholeskyTransform, PowerTransform, ReshapeTransform,
                                             SigmoidTransform, TanhTransform, SoftmaxTransform,
                                             StickBreakingTransform, identity_transform, Transform,
                                             _InverseTransform)
@@ -57,6 +57,7 @@ def get_transforms(cache_size):
                             torch.randn(4, 5),
                             cache_size=cache_size),
         ]),
+        ReshapeTransform((4, 5), (2, 5, 2)),
     ]
     transforms += [t.inv for t in transforms]
     return transforms
@@ -92,7 +93,16 @@ def transform_id(x):
 
 def generate_data(transform):
     torch.manual_seed(1)
+    while isinstance(transform, IndependentTransform):
+        transform = transform.base_transform
+    if isinstance(transform, ReshapeTransform):
+        return torch.randn(transform.in_shape)
+    if isinstance(transform.inv, ReshapeTransform):
+        return torch.randn(transform.inv.out_shape)
     domain = transform.domain
+    while (isinstance(domain, constraints.independent) and
+           domain.reinterpreted_batch_ndims == 0):
+        domain = domain.base_constraint
     codomain = transform.codomain
     x = torch.empty(4, 5)
     if domain is constraints.lower_cholesky or codomain is constraints.lower_cholesky:
@@ -170,8 +180,10 @@ def test_forward_inverse(transform, test_cached):
         y = transform(x)
     except NotImplementedError:
         pytest.skip('Not implemented.')
+    assert y.shape == transform.forward_shape(x.shape)
     if test_cached:
         x2 = transform.inv(y)  # should be implemented at least by caching
+        x2.shape == transform.inverse_shape(y.shape)
     else:
         try:
             x2 = transform.inv(y.clone())  # bypass cache
@@ -316,25 +328,29 @@ def test_jacobian(transform):
     except NotImplementedError:
         pytest.skip('Not implemented.')
     # Test shape
-    target_shape = x.shape[:x.dim() - transform.input_event_dim]
+    target_shape = x.shape[:x.dim() - transform.domain.event_dim]
     assert actual.shape == target_shape
 
     # Expand if required
     transform = reshape_transform(transform, x.shape)
     ndims = len(x.shape)
-    event_dim = ndims - transform.input_event_dim
+    event_dim = ndims - transform.domain.event_dim
     x_ = x.view((-1,) + x.shape[event_dim:])
     n = x_.shape[0]
     # Reshape to squash batch dims to a single batch dim
     transform = reshape_transform(transform, x_.shape)
 
-    # 1. Transforms with 0 off-diagonal elements
-    if transform.input_event_dim == 0:
+    # 1. Transforms with unit jacobian
+    if isinstance(transform, ReshapeTransform) or isinstance(transform.inv, ReshapeTransform):
+        expected = x.new_zeros(x.shape[x.dim() - transform.domain.event_dim])
+        expected = x.new_zeros(x.shape[x.dim() - transform.domain.event_dim])
+    # 2. Transforms with 0 off-diagonal elements
+    elif transform.domain.event_dim == 0:
         jac = jacobian(transform, x_)
         # assert off-diagonal elements are zero
         assert torch.allclose(jac, jac.diagonal().diag_embed())
         expected = jac.diagonal().abs().log().reshape(x.shape)
-    # 2. Transforms with non-0 off-diagonal elements
+    # 3. Transforms with non-0 off-diagonal elements
     else:
         if isinstance(transform, CorrCholeskyTransform):
             jac = jacobian(lambda x: tril_matrix_to_vec(transform(x), diag=-1), x_)
@@ -359,6 +375,40 @@ def test_jacobian(transform):
         expected = torch.slogdet(jac).logabsdet
 
     assert torch.allclose(actual, expected, atol=1e-5)
+
+
+@pytest.mark.parametrize("event_dims",
+                         [(0,), (1,), (2, 3), (0, 1, 2), (1, 2, 0), (2, 0, 1)],
+                         ids=str)
+def test_compose_affine(event_dims):
+    transforms = [AffineTransform(torch.zeros((1,) * e), 1, event_dim=e) for e in event_dims]
+    transform = ComposeTransform(transforms)
+    assert transform.codomain.event_dim == max(event_dims)
+    assert transform.domain.event_dim == max(event_dims)
+
+    dist = TransformedDistribution(Normal(0, 1), transform.parts)
+    assert dist.support.event_dim == max(event_dims)
+
+    dist = TransformedDistribution(Dirichlet(torch.ones(5)), transforms)
+    assert dist.support.event_dim == max(1, max(event_dims))
+
+
+@pytest.mark.parametrize("batch_shape", [(), (6,), (5, 4)], ids=str)
+def test_compose_reshape(batch_shape):
+    transforms = [ReshapeTransform((), ()),
+                  ReshapeTransform((2,), (1, 2)),
+                  ReshapeTransform((3, 1, 2), (6,)),
+                  ReshapeTransform((6,), (2, 3))]
+    transform = ComposeTransform(transforms)
+    assert transform.codomain.event_dim == 2
+    assert transform.domain.event_dim == 2
+    data = torch.randn(batch_shape + (3, 2))
+    assert transform(data).shape == batch_shape + (2, 3)
+
+    dist = TransformedDistribution(Normal(data, 1), transforms)
+    assert dist.batch_shape == batch_shape
+    assert dist.event_shape == (2, 3)
+    assert dist.support.event_dim == 2
 
 
 if __name__ == '__main__':
