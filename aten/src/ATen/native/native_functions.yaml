@@ -5898,7 +5898,6 @@
     CPU, CUDA: cholesky_inverse
 
 - func: cholesky_inverse.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: full
   dispatch:
     CPU, CUDA: cholesky_inverse_out
 
