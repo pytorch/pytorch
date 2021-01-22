@@ -37,6 +37,7 @@
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
+#include <torch/csrc/jit/passes/onnx/constant_map.h>
 #include <torch/csrc/jit/passes/onnx/eliminate_unused_items.h>
 #include <torch/csrc/jit/passes/onnx/eval_peephole.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
@@ -1314,6 +1315,15 @@ void initJITBindings(PyObject* module) {
       throw std::runtime_error(e.what());
     }
   });
+
+  /*
+  py::class_<TensorShapeMap>(m, "TensorShapeMap")
+      .def("getInstance", &TensorShapeMap::getInstance)
+      .def("SetDim", &TensorShapeMap::SetDim)
+      .def("SetShape", &TensorShapeMap::SetShape)
+      .def("PrintMaps", &TensorShapeMap::PrintMaps);
+  */  
+
 }
 } // namespace jit
 } // namespace torch

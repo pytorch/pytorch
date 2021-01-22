@@ -350,6 +350,9 @@ def _decide_input_format(model, args):
     except IndexError:
         warnings.warn("No input args")
         return args
+    except ValueError:
+        warnings.warn("No input args")
+        return args        
 
 def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
