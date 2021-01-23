@@ -22,6 +22,8 @@ def get_transforms(cache_size):
                        cache_size=cache_size),
         PowerTransform(exponent=torch.tensor(5.).normal_(),
                        cache_size=cache_size),
+        PowerTransform(exponent=torch.tensor(5.).normal_(),
+                       cache_size=cache_size),
         SigmoidTransform(cache_size=cache_size),
         TanhTransform(cache_size=cache_size),
         AffineTransform(0, 1, cache_size=cache_size),
@@ -58,6 +60,11 @@ def get_transforms(cache_size):
                             cache_size=cache_size),
         ]),
         ReshapeTransform((4, 5), (2, 5, 2)),
+        IndependentTransform(
+            AffineTransform(torch.randn(5),
+                            torch.randn(5),
+                            cache_size=cache_size),
+            1),
     ]
     transforms += [t.inv for t in transforms]
     return transforms
@@ -101,7 +108,7 @@ def generate_data(transform):
         return torch.randn(transform.inv.out_shape)
     domain = transform.domain
     while (isinstance(domain, constraints.independent) and
-           domain.reinterpreted_batch_ndims == 0):
+           domain is not constraints.real_vector):
         domain = domain.base_constraint
     codomain = transform.codomain
     x = torch.empty(4, 5)

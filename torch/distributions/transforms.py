@@ -241,6 +241,9 @@ class _InverseTransform(Transform):
         assert self._inv is not None
         return self._inv == other._inv
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}({repr(self._inv)})"
+
     def __call__(self, x):
         assert self._inv is not None
         return self._inv._inv_call(x)
@@ -392,8 +395,15 @@ class IndependentTransform(Transform):
     """
     def __init__(self, base_transform, reinterpreted_batch_ndims, cache_size=0):
         super().__init__(cache_size=cache_size)
-        self.base_transform = base_transform
+        self.base_transform = base_transform.with_cache(cache_size)
         self.reinterpreted_batch_ndims = reinterpreted_batch_ndims
+
+    def with_cache(self, cache_size=1):
+        if self._cache_size == cache_size:
+            return self
+        return IndependentTransform(self.base_transform,
+                                    self.reinterpreted_batch_ndims,
+                                    cache_size=cache_size)
 
     @constraints.dependent_property(is_discrete=False)
     def domain(self):
@@ -431,10 +441,10 @@ class IndependentTransform(Transform):
     def __repr__(self):
         return f"{self.__class__.__name__}({repr(self.base_transform)}, {self.reinterpreted_batch_ndims})"
 
-    def forward_shape(shape):
+    def forward_shape(self, shape):
         return self.base_transform.forward_shape(shape)
 
-    def inverse_shape(shape):
+    def inverse_shape(self, shape):
         return self.base_transform.inverse_shape(shape)
 
 
@@ -662,10 +672,14 @@ class AffineTransform(Transform):
 
     @constraints.dependent_property(is_discrete=False)
     def domain(self):
+        if self.event_dim == 0:
+            return constraints.real
         return constraints.independent(constraints.real, self.event_dim)
 
     @constraints.dependent_property(is_discrete=False)
     def codomain(self):
+        if self.event_dim == 0:
+            return constraints.real
         return constraints.independent(constraints.real, self.event_dim)
 
     def with_cache(self, cache_size=1):
