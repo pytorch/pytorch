@@ -14,7 +14,7 @@ from typing import List, Tuple, Dict, Any
 from torch.testing import \
     (make_non_contiguous, _dispatch_dtypes, floating_types, floating_types_and,
      floating_and_complex_types, floating_and_complex_types_and,
-     all_types_and_complex_and, all_types_and)
+     all_types_and_complex_and, all_types_and, all_types_and_complex)
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm,
      expectedAlertNondeterministic, precisionOverride)
@@ -487,6 +487,11 @@ def sample_inputs_xlogy(self, device, dtype, requires_grad):
                                      requires_grad=requires_grad),
                          make_tensor((S, S), device, dtype,
                                      low=0, high=None,
+                                     requires_grad=requires_grad))),)
+
+def sample_inputs_trace(self, device, dtype, requires_grad):
+    return (SampleInput((make_tensor((S, S), device, dtype,
+                                     low=None, high=None,
                                      requires_grad=requires_grad))),)
 
 def sample_inputs_linalg_inv(op_info, device, dtype, requires_grad=False):
@@ -1788,6 +1793,19 @@ if TEST_SCIPY:
                supports_tensor_out=True,
                safe_casts_outputs=True,
                sample_inputs_func=sample_inputs_xlogy),
+        OpInfo('trace',
+               dtypes=all_types_and_complex(),
+               dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+               test_inplace_grad=False,
+               supports_tensor_out=False,
+               # Reference: https://github.com/pytorch/pytorch/issues/50381
+               test_complex_grad=False,
+               sample_inputs_func=sample_inputs_trace,
+               skips=(
+                   SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                            dtypes=[torch.complex64, torch.complex128]),
+                   SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                            dtypes=[torch.complex64, torch.complex128]))),
     ]
     op_db = op_db + op_db_scipy_reference
 
@@ -2494,7 +2512,6 @@ def method_tests():
         ('triu', (S, M, M), NO_ARGS, 'batched'),
         ('triu', (S, M, M), (2,), 'batched_idx'),
         ('triu', (3, 3, S, S), NO_ARGS, 'more_batched'),
-        ('trace', (M, M), NO_ARGS),
         ('cross', (S, 3), ((S, 3),)),
         ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
         ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'dim', (), [0]),
