@@ -2119,7 +2119,7 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
   //   eps for half-precision floating point
   double eps = (lambda.dtype() == at::kDouble) ? std::numeric_limits<double>::epsilon()
                                                : std::numeric_limits<float>::epsilon();
-  auto max_abs_lambda = lambda.abs().amax(/*dim=*/-1, /*keepdim=*/true);
+  auto max_abs_lambda = lambda.abs().amax(/*dim=*/-1, /*keepdim=*/true).unsqueeze(-1);
   auto min_threshold = max_abs_lambda * (10 + lambda.size(-1)) * eps;
 
   Tensor result;
