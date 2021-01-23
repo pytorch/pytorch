@@ -44,7 +44,7 @@ def gen_sparse_coo(shape, nnz):
 
     return torch.sparse_coo_tensor(indices, values, *shape)
 
-def gen_sparse_coo_and_gcs(shape, nnz):
+def gen_sparse_coo_and_csr(shape, nnz):
     total_values = functools.reduce(operator.mul, shape, 1)
     dense = np.random.randn(total_values)
     fills = random.sample(list(range(total_values)), total_values-nnz)
