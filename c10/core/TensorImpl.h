@@ -464,7 +464,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   virtual bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const;
 
-  // Whether a tensor is sparse COO or not. Use is_sparse_csr for checking GCS format.
+  // Whether a tensor is sparse COO or not. Use is_sparse_csr for checking CSR format.
   bool is_sparse() const {
     // NB: This method is not virtual and avoid dispatches for performance reasons.
     return key_set_.has(DispatchKey::SparseCPU) ||

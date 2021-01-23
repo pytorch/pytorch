@@ -15,9 +15,9 @@ namespace at { namespace native {
 
 using namespace at::sparse;
 
-// Construction of GCS tensors.
+// Construction of CSR tensors.
 SparseTensor new_csr_tensor(const TensorOptions& options) {
-  // TODO: remove this comment after enabling autograd support for GCS tensor constructor.
+  // TODO: remove this comment after enabling autograd support for CSR tensor constructor.
   // TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   AT_ASSERT(options.layout() == kCompressedRowSparse);
   DispatchKey dispatch_key;
@@ -32,23 +32,21 @@ SparseTensor new_csr_tensor(const TensorOptions& options) {
 }
 
 // TODO: This constructor should probably use an ATen abstract method in order to make
-// autograd dispatch available for the GCS constructor. See the relevant note in native_functions.yaml. 
+// autograd dispatch available for the CSR constructor. See the relevant note in native_functions.yaml. 
 Tensor sparse_csr_tensor(const Tensor& crow_indices, const Tensor& col_indices, 
                          const Tensor& values, IntArrayRef size,
                          const TensorOptions& options) {
   TORCH_CHECK(!options.has_layout() || options.layout() == kCompressedRowSparse, "expected sparse CSR layout, but got layout ", options.layout());
-  
+  TORCH_CHECK(crow_indices.numel() == size[0] + 1, "crow_indices.numel() must be size(0)+1, but got: ", crow_indices.numel());
+
   SparseTensor self = new_csr_tensor(options);
-  int64_t nnz_size = values.numel();
-  int64_t crow_indices_size = crow_indices.numel();
-  
-  get_sparse_csr_impl(self)->resize_and_clear_(nnz_size, crow_indices_size, size);
+  get_sparse_csr_impl(self)->resize_and_clear_(values.numel(), size);
   get_sparse_csr_impl(self)->set_member_tensors_unsafe(crow_indices, col_indices, values);
   
   return self;
 }
 
-// Access members of GCS tensors.
+// Access members of CSR tensors.
 int64_t _nnz_sparse_csr(const SparseTensor& self) {
   return get_sparse_csr_impl(self)->nnz();
 }

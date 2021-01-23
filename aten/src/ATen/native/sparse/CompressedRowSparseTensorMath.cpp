@@ -153,9 +153,6 @@ Tensor& add_sparse_csr_(Tensor& self, const Tensor& other, Scalar alpha) {
 int32_t csr_to_strided_index_convert(int32_t irow, int32_t icol, Tensor& out,
                                      const SparseTensor& src) {
   int32_t index = out.storage_offset();
-  auto src_impl = get_sparse_csr_impl(src);
-  auto lda = out.strides()[0];
-
   index += irow * out.strides()[0] + icol * out.strides()[1];
   return index;
 }
@@ -220,7 +217,7 @@ Tensor& add_out_sparse_csr_cpu(const Tensor& self, const SparseTensor& other,
     return add_out_dense_sparse_csr_cpu(out, self, other, alpha);
   }
   else {
-    TORCH_CHECK(false, "NotImplementedError: Addition of sparse GCS tensors is not yet implemented.")
+    TORCH_CHECK(false, "NotImplementedError: Addition of sparse CSR tensors is not yet implemented.")
   }  
   return out;
 }

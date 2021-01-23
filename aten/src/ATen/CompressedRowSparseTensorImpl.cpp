@@ -22,8 +22,7 @@ CompressedRowSparseTensorImpl::CompressedRowSparseTensorImpl(at::DispatchKeySet 
                                          const caffe2::TypeMeta& data_type)
   :   CompressedRowSparseTensorImpl(key_set, data_type
       , at::empty({0}, at::initialTensorOptions().device(CompressedRowSparseTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // crow_indices
-      // indices in case of GCS tensor is always a 1D array so need to init size as {1,0}.
-      , at::empty({0}, at::initialTensorOptions().device(CompressedRowSparseTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // indices
+      , at::empty({0}, at::initialTensorOptions().device(CompressedRowSparseTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // col_indices
       , at::empty({0}, at::initialTensorOptions().device(CompressedRowSparseTensorSetToDeviceType(key_set)).dtype(data_type)) // values
 ) {}
 
@@ -36,10 +35,10 @@ CompressedRowSparseTensorImpl::CompressedRowSparseTensorImpl(at::DispatchKeySet 
     col_indices_(std::move(col_indices)),
     values_(std::move(values)) {}
 
-void CompressedRowSparseTensorImpl::resize_and_clear_(int64_t nnz_size, int64_t crow_size, IntArrayRef size) {
+void CompressedRowSparseTensorImpl::resize_and_clear_(int64_t nnz_size, IntArrayRef size) {
   // call crow_indices().options() here since the struct contructor calls the tensor constructor
   // with args for device specific init.
-  auto empty_crow_indices = at::empty(crow_size, crow_indices().options());
+  auto empty_crow_indices = at::empty(size[0] + 1, crow_indices().options());
   auto empty_col_indices = at::empty(nnz_size, col_indices().options());
   auto empty_values = at::empty(nnz_size, values().options());
 

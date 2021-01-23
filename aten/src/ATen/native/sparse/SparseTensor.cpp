@@ -301,20 +301,6 @@ SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
   return self;
 }
 
-std::vector<int> make_strides(std::vector<int> shape) {
-  std::vector<int> dims(shape.size());
-  std::iota(std::begin(dims), std::end(dims), 0);
-  std::vector<int> strides;
-  int ndims = shape.size();
-
-  if (ndims == 0)
-    return strides;
-
-  strides.insert(std::begin(strides), 1);
-
-  return strides;
-}
-
 SparseTensor dense_to_sparse(const Tensor& self){
   return dense_to_sparse(self, self.dim());
 }

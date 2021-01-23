@@ -368,7 +368,7 @@ assumption that the fill value is negative infinity.
 Sparse CSR Tensor
 +++++++++++++++++
 
-The CSR (Compressed Storage Row) sparse tensor implements the CSR sparse tensor
+The CSR (Compressed Sparse Row) sparse tensor implements the CSR sparse tensor
 format.
 
 Construction
@@ -379,7 +379,7 @@ integer indices in the ``crow_indices`` and ``col_indices`` functions.
 Therefore, a reduction scheme where the resulting dimensions exceed ``INT_MAX``
 for 32 bit integers is not supported (as of now).
 
-Operations on sparse GCS tensors
+Operations on sparse CSR tensors
 --------------------------------
 
 
@@ -444,9 +444,9 @@ matrix arguments.
     .. automethod:: is_coalesced
     .. automethod:: indices
     .. automethod:: values
-    .. The following methods are specific to :ref:`sparse GCS tensors <sparse-coo-docs>`:
-    .. automethod:: pointers
-    .. automethod:: reduction
+    .. The following methods are specific to :ref:`sparse CSR tensors <sparse-csr-docs>`:
+    .. automethod:: crow_indices
+    .. automethod:: col_indices
 
 The following :class:`torch.Tensor` methods support :ref:`sparse COO
 tensors <sparse-coo-docs>`:

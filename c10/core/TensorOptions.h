@@ -668,7 +668,7 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
           case DeviceType::CUDA:
             return DispatchKey::CompressedRowSparseCUDA;
           default:
-            AT_ERROR("Unsupported device type for sparse GCS layout: ", device_.type());
+            AT_ERROR("Unsupported device type for sparse CSR layout: ", device_.type());
         }
       default:
         AT_ERROR("Unsupported layout: ", layout_);

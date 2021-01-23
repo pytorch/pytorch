@@ -17,17 +17,15 @@ struct TORCH_API CompressedRowSparseTensorImpl : public TensorImpl {
  public:
   explicit CompressedRowSparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
 
-  void resize_and_clear_(int64_t nnz_size, int64_t crow_indices_size, IntArrayRef size);
+  void resize_and_clear_(int64_t nnz_size, IntArrayRef size);
   void resize_as_(const Tensor& src);
-  
-
   void set_member_tensors_unsafe(const Tensor& crow_indices, const Tensor& col_indices,
                                  const Tensor& values);
   
   Tensor crow_indices() const { return crow_indices_; }
   Tensor col_indices() const { return col_indices_; }
   Tensor values() const { return values_; }
-  int nnz() const { return values_.size(0); } // TODO: methods like these also exist in COO tensor. Deduplicate?
+  int nnz() const { return values_.size(0); }
 
  private :
   
