@@ -109,7 +109,8 @@ class PowerSGDState(object):
         self.iter = 0
 
         logging.info(
-            "PowerSGD config: matrix_approximation_rank = {}; start_powerSGD_iter = {}; use_error_feedback = {}; warm_start = {}.".format(
+            "PowerSGD config: matrix_approximation_rank = {}; "
+            "start_powerSGD_iter = {}; use_error_feedback = {}; warm_start = {}.".format(
                 self.matrix_approximation_rank,
                 self.start_powerSGD_iter,
                 self.use_error_feedback,
