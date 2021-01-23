@@ -1164,7 +1164,7 @@ void initJITBindings(PyObject* module) {
             std::move(unwrapFunc));
 
         std::function<void(py::object)> pf =
-            [functionGuard(std::move(functionGuard))](py::object inp) {
+            [functionGuard(std::move(functionGuard))](const py::object& inp) {
               return functionGuard->func_(inp);
             };
 
