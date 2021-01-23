@@ -4705,7 +4705,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 should_throw_error = is_cuda10_2_or_higher and not is_config_deterministic
                 script = f"""
 import torch
-torch.set_deterministic(True)
+torch.use_deterministic_algorithms(True)
 fn = torch.{fn_name}
 arg_sizes = {arg_sizes}
 device = '{device}'

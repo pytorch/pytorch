@@ -1,6 +1,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/MathConstants.h>
 #include <ATen/NumericUtils.h>
 #include <limits>
 #include <cstdint>
@@ -101,7 +102,7 @@ C10_HOST_DEVICE inline T normal(T val, T mean, T std) {
 template <typename T>
 C10_HOST_DEVICE inline T cauchy(T val, T median, T sigma) {
   // https://en.wikipedia.org/wiki/Cauchy_distribution#Cumulative_distribution_function
-  return median + sigma * at::tan(static_cast<T>(M_PI) * (val - static_cast<T>(0.5)));
+  return median + sigma * at::tan(c10::pi<T> * (val - static_cast<T>(0.5)));
 }
 
 /**
