@@ -9,13 +9,13 @@
 
 namespace at {
 
-struct TORCH_API CompressedSparseTensorImpl : public TensorImpl {
+struct TORCH_API CompressedRowSparseTensorImpl : public TensorImpl {
   Tensor crow_indices_;
   Tensor col_indices_;
   Tensor values_;
 
  public:
-  explicit CompressedSparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
+  explicit CompressedRowSparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
 
   void resize_and_clear_(int64_t nnz_size, int64_t crow_indices_size, IntArrayRef size);
   void resize_as_(const Tensor& src);
@@ -31,7 +31,7 @@ struct TORCH_API CompressedSparseTensorImpl : public TensorImpl {
 
  private :
   
-  explicit CompressedSparseTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type,
+  explicit CompressedRowSparseTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type,
                                at::Tensor crow_indices, at::Tensor col_indices, at::Tensor values);
 };
 } // namespace at
