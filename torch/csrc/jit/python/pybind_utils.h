@@ -60,6 +60,22 @@ IValue toIValue(
 
 py::object toPyObject(IValue ivalue);
 
+// Wrap Python function to guard deref
+struct PythonFunctionGuard {
+  explicit PythonFunctionGuard(py::function func) : func_(std::move(func)) {}
+
+  ~PythonFunctionGuard() {
+    pybind11::gil_scoped_acquire ag;
+    func_.dec_ref();
+    // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
+    // decref on the PyObject again.
+    // See Note [Destructing py::object] in python_ivalue.h
+    func_.ptr() = nullptr;
+  }
+
+  py::function func_;
+};
+
 // The PythonFutureWrapper for ivalue::Future
 //
 // NB: VISIBILITY_HIDDEN is for silencing compiling error,
@@ -90,6 +106,9 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
     // without grabbing the GIL.
     py::gil_scoped_acquire acquire;
     py::object py_obj = toPyObject(fut->value());
+    // unwrap_func is a general compositional function that takes in a
+    // py::object and executes some python function. It is currently mostly used
+    // to throw python exceptions.
     if (unwrap_func) {
       (*unwrap_func)(py_obj);
     }
@@ -194,22 +213,6 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   c10::optional<UnwrapFunc> unwrap_func;
 
  private:
-  // Wrap Python function to guard deref
-  struct PythonFunctionGuard {
-    explicit PythonFunctionGuard(py::function func) : func_(std::move(func)) {}
-
-    ~PythonFunctionGuard() {
-      pybind11::gil_scoped_acquire ag;
-      func_.dec_ref();
-      // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
-      // decref on the PyObject again.
-      // See Note [Destructing py::object] in python_ivalue.h
-      func_.ptr() = nullptr;
-    }
-
-    py::function func_;
-  };
-
   std::shared_ptr<PythonFutureWrapper> getPtr() {
     return shared_from_this();
   }

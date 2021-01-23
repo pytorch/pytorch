@@ -1159,6 +1159,19 @@ void initJITBindings(PyObject* module) {
         return std::make_shared<PythonFutureWrapper>(
             c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get()));
       }))
+      .def(py::init([](py::function unwrapFunc) {
+        auto functionGuard = std::make_shared<torch::jit::PythonFunctionGuard>(
+            std::move(unwrapFunc));
+
+        std::function<void(py::object)> pf =
+            [functionGuard(std::move(functionGuard))](py::object inp) {
+              return functionGuard->func_(inp);
+            };
+
+        return std::make_shared<PythonFutureWrapper>(
+            c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get()),
+            std::move(pf));
+      }))
       .def(
           "done",
           // Intentionally not releasing GIL
