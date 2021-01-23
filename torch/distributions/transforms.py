@@ -564,6 +564,12 @@ class PowerTransform(Transform):
     def log_abs_det_jacobian(self, x, y):
         return (self.exponent * y / x).abs().log()
 
+    def forward_shape(self, shape):
+        return torch.broadcast_shapes(shape, getattr(self.exponent, "shape", ()))
+
+    def inverse_shape(self, shape):
+        return torch.broadcast_shapes(shape, getattr(self.exponent, "shape", ()))
+
 
 def _clipped_sigmoid(x):
     finfo = torch.finfo(x.dtype)
