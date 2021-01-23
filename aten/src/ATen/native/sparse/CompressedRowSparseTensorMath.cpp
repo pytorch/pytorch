@@ -37,6 +37,8 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
   TORCH_CHECK(op1.dim() == 2, "addmm: 2-D matrices expected, got ", op1.dim(), "D tensor");
   TORCH_CHECK(op2.dim() == 2, "addmm: 2-D matrices expected, got ", op2.dim(), "D tensor");
 
+  TORCH_CHECK(out.is_contiguous(), "out argument must be contiguous, but got: ", out.suggest_memory_format());
+  
   // ixk * kxj = ixj
   int64_t dim_i = op1.size(0);
   int64_t dim_j = op2.size(1);
@@ -159,13 +161,13 @@ int32_t csr_to_strided_index_convert(int32_t irow, int32_t icol, Tensor& out,
 
 Tensor& add_out_dense_sparse_csr_cpu(Tensor& out, const Tensor& dense,
                                      const SparseTensor& src, Scalar alpha) {
-  AT_ASSERT(out.layout() == kStrided);
   AT_ASSERT(dense.layout() == kStrided);
   AT_ASSERT(src.is_sparse_csr());
+  AT_ASSERT(dense.device() == kCPU);
 
-  AT_ASSERT(!dense.is_cuda());
-  TORCH_CHECK(!out.is_cuda(), "add: expected 'out' to be CPU tensor, but got CUDA tensor");
-  TORCH_CHECK(!src.is_cuda(), "add: expected 'other' to be a CPU tensor, but got a CUDA tensor");
+  TORCH_CHECK(out.is_contiguous(), "out argument must be contiguous, but got: ", out.suggest_memory_format());
+  TORCH_CHECK(out.device() == kCPU, "add: expected 'out' to be CPU tensor, but got tensor on device: ", out.device());
+  TORCH_CHECK(src.device() == kCPU, "add: expected 'other' to be a CPU tensor, but got tensor on device: ", src.device());
 
   TORCH_CHECK(dense.sizes().equals(src.sizes()), "add: expected 'self' and 'other' to have same size, but self has size ",
     dense.sizes(), " while other has size ", src.sizes(), " (FYI: op2-sparse addition does not currently support broadcasting)");
@@ -213,7 +215,7 @@ Tensor& add_out_dense_sparse_csr_cpu(Tensor& out, const Tensor& dense,
 
 Tensor& add_out_sparse_csr_cpu(const Tensor& self, const SparseTensor& other, 
                                     Scalar alpha, SparseTensor& out) {
-  if (!self.is_sparse_csr()) {
+  if (self.layout() == kStrided) {
     return add_out_dense_sparse_csr_cpu(out, self, other, alpha);
   }
   else {

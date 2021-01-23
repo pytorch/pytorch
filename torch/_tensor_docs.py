@@ -4679,13 +4679,31 @@ add_docstr_all('crow_indices',
                r"""
 crow_indices() -> IntTensor
 
-The compressed row indices of a CSR tensor. Strictly int32 and 1D.
+Returns the tensor containing the compressed row indices of the :attr:`self`
+tensor when :attr:`self` is a sparse CSR tensor of layout ``sparse_csr``.
+The ``crow_indices`` tensor is strictly of type ``int32`` and of shape
+(:attr:`self`.size(0) + 1).
+
+Example::
+    >>> csr = torch.eye(5,5).to_sparse_csr()
+    >>> csr.crow_indices()
+    tensor([0, 1, 2, 3, 4, 5], dtype=torch.int32)
+
 """)
 
 add_docstr_all('col_indices',
                r"""
-col_indices() -> Tensor
+col_indices() -> IntTensor
 
-Tensor which denotes the column indices of a CSR tensor. Strictly int32 and 1D.
+Returns the tensor containing the column indices of the :attr:`self`
+tensor when :attr:`self` is a sparse CSR tensor of layout ``sparse_csr``.
+The ``col_indices`` tensor is strictly of type ``int32`` and of shape
+(:attr:`self`.nnz())
+
+Example::
+    >>> csr = torch.eye(5,5).to_sparse_csr()
+    >>> csr.col_indices()
+    tensor([0, 1, 2, 3, 4], dtype=torch.int32)
+
 """
 )

@@ -53,10 +53,10 @@ __ https://en.wikipedia.org/wiki/Sparse_matrix
 Sparse COO tensors
 ++++++++++++++++++
 
-Currently, PyTorch implements the so-called Coordinate format, or COO
-format, as the default sparse storage format for storing sparse
-tensors.  In COO format, the specified elements are stored as tuples
-of element indices and the corresponding values. In particular,
+The default storage format for sparse tensors in PyTorch is the so-called
+Coordinate format, or COO format. In COO format, the specified elements
+are stored as tuples of element indices and the corresponding values.
+In particular,
 
   - the indices of specified elements are collected in ``indices``
     tensor of size ``(ndim, nse)`` and with element type
@@ -368,8 +368,13 @@ assumption that the fill value is negative infinity.
 Sparse CSR Tensor
 +++++++++++++++++
 
-The CSR (Compressed Sparse Row) sparse tensor implements the CSR sparse tensor
-format.
+The CSR (Compressed Sparse Row) sparse tensor format implemented the CSR format
+for storage of 2 dimensional tensors. Although there is no support for N-dimensional
+tensors, the primary advantage over the COO format is better use of storage and
+much faster computation operations such as matvec.
+
+A CSR sparse tensor consists of three 1-D tensors: ``crow_indices``, ``col_indices``
+and ``values``.
 
 Construction
 ------------
