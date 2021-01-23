@@ -1,4 +1,5 @@
 #include <benchmark/benchmark.h>
+#include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/tensor.h>
@@ -365,7 +366,8 @@ BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV1)(benchmark::State& state) {
     te::For* mi = loops[1];
     // TODO: rfactor works on the untransformed var set. This is a problem since we need to
     // look for the loop after Split to rfactor.
-    loop.rfactor(BT->body(), mi->var());
+    auto bt_body = te::NodeFinder<te::ReduceOp>::find(loop.root_stmt())[0];
+    loop.rfactor(bt_body, mi->var());
   }
   
   loop.prepareForCodegen();
@@ -411,7 +413,8 @@ BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV2)(benchmark::State& state) {
     TORCH_CHECK(loops.size() == 2);
     te::For* mo = loops[0];
     te::For* mi = loops[1];
-    loop.rfactor(BT->body(), mi->var());
+    auto bt_body = te::NodeFinder<te::ReduceOp>::find(loop.root_stmt())[0];
+    loop.rfactor(bt_body, mi->var());
   }
 
   {

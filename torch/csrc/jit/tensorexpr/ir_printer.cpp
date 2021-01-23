@@ -596,19 +596,15 @@ std::string to_string(const Tensor* t) {
     return "(null tensor)\n";
   }
   std::ostringstream oss;
-  if (!t->body()) {
-    oss << "Tensor " << t->buf()->name_hint() << " = " << *t->ElementStmt()
-        << "\n";
-    return oss.str();
-  }
-  oss << "Tensor " << t->buf()->name_hint() << "(";
-  for (size_t i = 0; i < t->ndim(); i++) {
+  // TODO: move this to Buf printer
+  oss << "Tensor " << t->buf()->name_hint() << "[";
+  for (size_t i = 0; i < t->buf()->ndim(); i++) {
     if (i != 0) {
       oss << ", ";
     }
-    oss << *t->arg(i) << "[" << *t->dim(i) << "]";
+    oss << *t->buf()->dim(i);
   }
-  oss << ") = " << *t->body() << "\n";
+  oss << "]:\n" << *t->stmt() << "\n";
   return oss.str();
 }
 } // namespace std

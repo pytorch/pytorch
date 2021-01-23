@@ -14,17 +14,10 @@ namespace tensorexpr {
 
 class TORCH_API Tensor : KernelScopedObject {
  public:
-  Tensor(
-      const std::string& name,
-      const std::vector<const Expr*>& dims,
-      const std::vector<const Var*>& args,
-      const Expr* body)
-      // TODO: Function should not create buffers, they should be created
-      // manually before constructing a function.
-      : buf_(new Buf(name, dims, body->dtype())), args_(args), body_(body) {}
-
-  Tensor(Buf* buf, const std::vector<const Var*>& args, const Expr* body)
-      : buf_(buf), args_(args), body_(body) {}
+  Tensor(const Buf* buf, const std::vector<const Var*>& args, const Expr* body)
+      : buf_(buf) {
+    stmt_ = constructStmt(args, body, {}, {});
+  }
 
   Tensor(
       const Buf* buf,
@@ -32,65 +25,19 @@ class TORCH_API Tensor : KernelScopedObject {
       const std::vector<const Expr*>& reduce_dims,
       const std::vector<const Var*>& reduce_args,
       const Expr* body)
-      : buf_(buf),
-        args_(args),
-        body_(body),
-        reduce_dims_(reduce_dims),
-        reduce_args_(reduce_args) {}
-
-  virtual ~Tensor() {}
-
-  // Wrappers over accessors to fields of the underlying function
-  const Expr* body() const {
-    return body_;
+      : buf_(buf) {
+    stmt_ = constructStmt(args, body, reduce_dims, reduce_args);
   }
+
+  Tensor(const Buf* buf, Stmt* stmt) : buf_(buf), stmt_(stmt) {}
+
   const Buf* buf() const {
     return buf_;
   }
-  size_t ndim() const {
-    return buf()->ndim();
-  }
-  const Expr* dim(size_t index) const {
-    if (index >= ndim()) {
-      throw out_of_range_index();
-    }
-    return buf()->dim(index);
-  }
-  std::vector<const Expr*> dims() const {
-    return buf()->dims();
-  }
-  const Var* arg(size_t index) const {
-    if (index >= ndim()) {
-      throw out_of_range_index();
-    }
-    return args_[index];
-  }
-  const std::vector<const Var*>& args() const {
-    return args_;
-  }
-  size_t reduce_ndim() const {
-    return reduce_dims_.size();
-  }
-  std::vector<const Expr*> reduce_dims() const {
-    return reduce_dims_;
-  }
-  std::vector<const Var*> reduce_args() const {
-    return reduce_args_;
-  }
-  const Expr* reduce_dim(size_t index) const {
-    if (index >= reduce_ndim()) {
-      throw out_of_range_index();
-    }
-    return reduce_dims_[index];
-  }
-  const Var* reduce_arg(size_t index) const {
-    if (index >= reduce_ndim()) {
-      throw out_of_range_index();
-    }
-    return reduce_args_[index];
-  }
 
-  virtual Stmt* ElementStmt() const;
+  Stmt* stmt() const {
+    return stmt_;
+  }
 
   template <typename... Ts>
   inline ExprHandle operator()(const Ts&... ts);
@@ -99,31 +46,14 @@ class TORCH_API Tensor : KernelScopedObject {
   template <typename... Ts>
   inline ExprHandle call(const Ts&... ts);
 
-  Stmt* lowerToStmt() const;
-
  private:
-  const Buf* buf_;
-  std::vector<const Var*> args_;
-  const Expr* body_;
-  std::vector<const Expr*> reduce_dims_;
-  std::vector<const Var*> reduce_args_;
-};
-
-class TORCH_API CompoundTensor : public Tensor {
- public:
-  CompoundTensor(
-      const Buf* buf,
+  Stmt* constructStmt(
       const std::vector<const Var*>& args,
-      Stmt* stmt)
-      : Tensor(buf, args, {}, {}, nullptr), stmt_(stmt) {}
+      const Expr* body,
+      const std::vector<const Expr*>& reduce_dims,
+      const std::vector<const Var*>& reduce_args) const;
 
-  virtual ~CompoundTensor() {}
-
-  Stmt* ElementStmt() const override {
-    return stmt_;
-  }
-
- private:
+  const Buf* buf_;
   Stmt* stmt_;
 };
 
