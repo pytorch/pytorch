@@ -60,6 +60,7 @@ class SubgraphMatcher:
                             return s[-i:]
                         elif c.isalpha():
                             first_letter = True
+                    return str
                 pn_target_suffix = get_target_suffix(pn.target)
                 gn_target_suffix = get_target_suffix(gn.target)
                 return pn_target_suffix == gn_target_suffix
