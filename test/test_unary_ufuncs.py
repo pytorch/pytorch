@@ -1137,8 +1137,8 @@ class TestUnaryUfuncs(TestCase):
 
         cpu_tensor.requires_grad = True
         for n in [0, 1, 2, 3, 4, 5]:
-            torch.autograd.gradcheck(lambda x: x.polygamma(n),
-                                     cpu_tensor)
+            torch.autograd.gradcheck(lambda x: x.polygamma(n), cpu_tensor,
+                                     check_batched_grad=True)
 
     # TODO: update to compare against NumPy by rationalizing with OpInfo
     @onlyCUDA
