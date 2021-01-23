@@ -873,12 +873,9 @@ class Tensor(torch._C._TensorBase):
         # See Note [rename_ / rename API]
         return update_names(self, names, rename_map, inplace=False)
 
-    def to_sparse_csr(self, fill_value=0):
+    def to_sparse_csr(self):
         """ Convert a dense, strided tensor to compressed row storage format. 
         Only works with 2D tensors.
-
-        The ``fill_value`` is a value within the dense tensor that is
-        excluded from the sparse tensor.
 
         Examples::
 
@@ -888,6 +885,7 @@ class Tensor(torch._C._TensorBase):
             3125
         """
         shape = self.size()
+        fill_value = 0
         if len(shape) != 2:
             raise RuntimeError("Only 2D tensors can be converted to the CSR format but got shape: ", shape)
 

@@ -25,16 +25,16 @@ from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
 load_tests = load_tests
 
 class TestSparseCSR(TestCase):
-    def gen_sparse_csr(self, shape, nnz, fill_value=0):
+    def gen_sparse_csr(self, shape, nnz):
         total_values = functools.reduce(operator.mul, shape, 1)
         dense = np.random.randn(total_values)
         fills = random.sample(list(range(total_values)), total_values-nnz)
 
         for f in fills:
-            dense[f] = fill_value
+            dense[f] = 0
         dense = torch.from_numpy(dense.reshape(shape))
 
-        return dense.to_sparse_csr(fill_value)
+        return dense.to_sparse_csr()
     
     def setUp(self):
         # These parameters control the various ways we can run the test.
@@ -48,7 +48,7 @@ class TestSparseCSR(TestCase):
         self.assertEqual(type(torch.sparse_csr), torch.layout)
 
     def test_sparse_csr_from_dense(self):
-        sp = torch.tensor([[1, 2], [3, 4]]).to_sparse_csr(-999)
+        sp = torch.tensor([[1, 2], [3, 4]]).to_sparse_csr()
         self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int32), sp.crow_indices())
         self.assertEqual(torch.tensor([0, 1, 0, 1], dtype=torch.int32), sp.col_indices())
         self.assertEqual(torch.tensor([1, 2, 3, 4], dtype=torch.int64), sp.values())
@@ -71,31 +71,23 @@ class TestSparseCSR(TestCase):
         self.assertEqual(torch.tensor([0, 1, 2] * 3, dtype=torch.int32), sparse.col_indices())
         self.assertEqual(torch.tensor([2] * 9), sparse.values())
 
-
     def test_dense_convert(self):
         size = (5, 5)
         dense = torch.randn(size)
-        sparse = dense.to_sparse_csr(-999)
+        sparse = dense.to_sparse_csr()
         self.assertEqual(sparse.to_dense(), dense)
         
         size = (4, 6)
         dense = torch.randn(size)
-        sparse = dense.to_sparse_csr(-999)
+        sparse = dense.to_sparse_csr()
         self.assertEqual(sparse.to_dense(), dense)
-
-    def test_dense_convert_fill_value(self):
-        dense = torch.tensor([[1, 2, 3], [2, 2, 2], [4, 5, 2]])
-        sparse = dense.to_sparse_csr(2)
-        self.assertEqual(torch.tensor([0, 2, 2, 4], dtype=torch.int32), sparse.crow_indices())
-        self.assertEqual(torch.tensor([0, 2, 0, 1], dtype=torch.int32), sparse.col_indices())
-        self.assertEqual(torch.tensor([1, 3, 4, 5]), sparse.values())
 
     def test_dense_convert_error(self):
         size = (4, 2, 4)
         dense = torch.randn(size)
 
         with self.assertRaisesRegex(RuntimeError, "Only 2D"):
-            sparse = dense.to_sparse_csr(-99)
+            sparse = dense.to_sparse_csr()
 
     def test_csr_matvec(self):
         side = 100
