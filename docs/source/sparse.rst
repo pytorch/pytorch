@@ -374,10 +374,23 @@ tensors, the primary advantage over the COO format is better use of storage and
 much faster computation operations such as matvec.
 
 A CSR sparse tensor consists of three 1-D tensors: ``crow_indices``, ``col_indices``
-and ``values``.
+and ``values``:
+
+  - The ``crow_indices`` tensor consists of compressed row indices. This is a 1-D tensor
+  of size ``size[0] + 1``.
+  - The ``col_indices`` tensor contains the column indices of each value. This is a 1-D
+  tensor of size ``nnz``.
+  - The ``values`` tensor  contains the values of the CSR tensor. This is a 1-D tensor
+  of size ``nnz``.
 
 Construction
 ------------
+
+Sparse CSR matrices can be directly constructed by using the :func:`torch.sparse_csr_tensor`
+method. The user must supply the row and column indices and values tensors separately.
+
+
+.. warning::
 
 As a result of pytorch being linked with 32-bit MKL, we must use 32 bit
 integer indices in the ``crow_indices`` and ``col_indices`` functions.

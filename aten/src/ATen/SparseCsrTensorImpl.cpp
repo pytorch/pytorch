@@ -54,7 +54,8 @@ void SparseCsrTensorImpl::resize_and_clear_(int64_t nnz_size, IntArrayRef size) 
 }
 
 void SparseCsrTensorImpl::resize_as_(const Tensor& src) {
-  crow_indices_ = at::empty_like(src.crow_indices(), src.crow_indices().options(), src.crow_indices().suggest_memory_format());
+  crow_indices_ = at::empty_like(src.crow_indices(), src.crow_indices().options(), 
+    src.crow_indices().suggest_memory_format());
   col_indices_ = at::empty_like(src.col_indices(), src.col_indices().options(), 
     src.col_indices().suggest_memory_format());
   values_ = at::empty_like(src.values(), src.values().options(), src.values().suggest_memory_format());
@@ -92,7 +93,8 @@ void SparseCsrTensorImpl::set_member_tensors_unsafe(const Tensor& crow_indices, 
 
   TORCH_CHECK(col_indices.scalar_type() == kInt, "col_indices must be an int32 type, but got: ", 
               col_indices.dtype());
-  TORCH_CHECK(crow_indices.scalar_type() == kInt, "crow_indices must be int32 type, but got: ", crow_indices.dtype());
+  TORCH_CHECK(crow_indices.scalar_type() == kInt, "crow_indices must be int32 type, but got: ", 
+              crow_indices.dtype());
   TORCH_CHECK(values.scalar_type() == typeMetaToScalarType(dtype()), 
               "dtype of values (", values.scalar_type(), ") must match dtype of sparse tensor (", 
               typeMetaToScalarType(dtype()), ")");
@@ -100,7 +102,5 @@ void SparseCsrTensorImpl::set_member_tensors_unsafe(const Tensor& crow_indices, 
   crow_indices_ = crow_indices;
   col_indices_ = col_indices;
   values_ = values;
-
-  auto sizes_ = sizes_and_strides_.sizes_arrayref();
 }
 }

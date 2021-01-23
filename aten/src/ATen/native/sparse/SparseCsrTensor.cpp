@@ -36,8 +36,10 @@ SparseTensor new_csr_tensor(const TensorOptions& options) {
 Tensor sparse_csr_tensor(const Tensor& crow_indices, const Tensor& col_indices, 
                          const Tensor& values, IntArrayRef size,
                          const TensorOptions& options) {
-  TORCH_CHECK(!options.has_layout() || options.layout() == kSparseCsr, "expected sparse CSR layout, but got layout ", options.layout());
-  TORCH_CHECK(crow_indices.numel() == size[0] + 1, "crow_indices.numel() must be size(0)+1, but got: ", crow_indices.numel());
+  TORCH_CHECK(!options.has_layout() || options.layout() == kSparseCsr, 
+    "expected sparse CSR layout, but got layout ", options.layout());
+  TORCH_CHECK(crow_indices.numel() == size[0] + 1, 
+    "crow_indices.numel() must be size(0)+1, but got: ", crow_indices.numel());
 
   SparseTensor self = new_csr_tensor(options);
   get_sparse_csr_impl(self)->resize_and_clear_(values.numel(), size);
