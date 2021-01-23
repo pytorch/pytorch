@@ -7,6 +7,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 
 CONSTRAINTS = [
     (constraints.real,),
+    (constraints.real_vector,),
     (constraints.positive,),
     (constraints.greater_than, [-10., -2, 0, 2, 10]),
     (constraints.greater_than, 0),

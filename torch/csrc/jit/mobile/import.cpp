@@ -411,6 +411,27 @@ c10::IValue BytecodeDeserializer::readArchive(
 
 mobile::Module _load_for_mobile(
     std::istream& in,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return _load_for_mobile(in, device, extra_files);
+}
+
+mobile::Module _load_for_mobile(
+    const std::string& filename,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return _load_for_mobile(filename, device, extra_files);
+}
+
+mobile::Module _load_for_mobile(
+    std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device) {
+  ExtraFilesMap extra_files;
+  return _load_for_mobile(std::move(rai), device, extra_files);
+}
+
+mobile::Module _load_for_mobile(
+    std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
