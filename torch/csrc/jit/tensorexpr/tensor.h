@@ -99,6 +99,8 @@ class TORCH_API Tensor : KernelScopedObject {
   template <typename... Ts>
   inline ExprHandle call(const Ts&... ts);
 
+  Stmt* lowerToStmt() const;
+
  private:
   const Buf* buf_;
   std::vector<const Var*> args_;

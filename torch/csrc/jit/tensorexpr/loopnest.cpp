@@ -508,7 +508,7 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
 
   std::vector<Stmt*> loops;
   for (Tensor* t : tensors_to_compute) {
-    Stmt* loop = lowerToStmt(t);
+    Stmt* loop = t->lowerToStmt();
     // Flatten initializers.
     if (Block* block = dynamic_cast<Block*>(loop)) {
       for (auto* s : block->stmts()) {
@@ -530,46 +530,6 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
       input_bufs_.insert(buf);
     }
   }
-}
-
-Stmt* LoopNest::lowerToStmt(Tensor* t) {
-  Stmt* body = t->ElementStmt();
-
-  // If this Tensor has no functional body, it already has its axes expanded.
-  if (nullptr == t->body()) {
-    return body;
-  }
-
-  if (t->ndim() == 0 && t->reduce_ndim() == 0) {
-    return body;
-  }
-
-  const Expr* init_expr = t->buf()->initializer();
-
-  std::vector<const Expr*> indices(t->args().begin(), t->args().end());
-
-  if (t->reduce_ndim() > 0) {
-    for (size_t i = 0; i < t->reduce_ndim(); i++) {
-      // Going in reverse order: from innermost loop to the outermost
-      size_t dim_index = t->reduce_ndim() - i - 1;
-      body = new For(
-          t->reduce_arg(dim_index),
-          new IntImm(0),
-          t->reduce_dim(dim_index),
-          body);
-    }
-    if (init_expr) {
-      Store* init = new Store(t->buf(), indices, init_expr, new IntImm(1));
-      body = new Block({init, body});
-    }
-  }
-
-  for (size_t i = 0; i < t->ndim(); i++) {
-    // Going in reverse order: from innermost loop to the outermost
-    size_t dim_index = t->ndim() - i - 1;
-    body = new For(t->arg(dim_index), new IntImm(0), t->dim(dim_index), body);
-  }
-  return body;
 }
 
 class FunctionInliner : public IRMutator {
