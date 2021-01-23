@@ -1,4 +1,3 @@
-#include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <ATen/ThreadLocalState.h>
 #include <fmt/format.h>
 #include <torch/csrc/autograd/record_function_ops.h>
@@ -8,6 +7,7 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
+#include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
