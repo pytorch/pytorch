@@ -22,7 +22,7 @@ namespace cuda {
 //! If we follow a reduction parallelized on TIDx with a broadcast on TIDx we
 //! no longer need the predicate and can reset the bit accordingly
 //!
-class TORCH_CUDA_API ThreadPredicateMap {
+class TORCH_CUDA_CU_API ThreadPredicateMap {
  public:
   using SourceMapType = std::unordered_map<
       ParallelType,
