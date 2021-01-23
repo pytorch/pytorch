@@ -202,6 +202,7 @@ class DistOptimizerTest(RpcAgentTestFixture):
     def test_dist_optim(self):
         self._test_dist_optim_base(optim.Adagrad, lr=0.05)
         self._test_dist_optim_base(optim.Adam, lr=1e-2, amsgrad=True)
+        self._test_dist_optim_base(optim.AdamW, lr=0.05, amsgrad=True)
         self._test_dist_optim_base(optim.SGD, lr=0.05)
         self._test_dist_optim_base(optim.SGD, lr=1e-3, momentum=1, weight_decay=1, nesterov=True)
         self._test_dist_optim_base(optim.Adadelta, rho=0.95)
