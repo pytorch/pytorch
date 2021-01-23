@@ -3158,7 +3158,6 @@ class DistributedTest:
             ddp_logging_data = model_DDP.get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.world_size, dist.get_world_size())
             self.assertEqual(ddp_logging_data.rank, dist.get_rank())
-            self.assertEqual(ddp_logging_data.backend, 'gloo')
             self.assertEqual(ddp_logging_data.module_name, 'Net')
             self.assertEqual(ddp_logging_data.device_ids, [])
             # output_device is -1 in default if it is not set, e.g.

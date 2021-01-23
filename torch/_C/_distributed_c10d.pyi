@@ -18,7 +18,6 @@ def _register_builtin_comm_hook(reducer: Reducer, comm_hook_type: BuiltinCommHoo
 def _get_ddp_logging_data(reducer: Reducer): ...
 def _set_construction_logging_data(
     reducer: Reducer,
-    backend: str,
     module_name: str,
     device_ids: List[int],
     output_device: int,

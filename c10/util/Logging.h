@@ -312,7 +312,6 @@ struct DDPLoggingData {
   // Data that can be got during DistributedDataParallel construction time
   int world_size;
   int rank;
-  std::string backend;
   std::string module_name;
   std::vector<int> device_ids;
   int output_device;
