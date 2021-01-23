@@ -346,7 +346,6 @@ inline InferredType tryToInferType(py::handle input) {
   }
 
   if (as_module(py::cast<py::object>(input))) {
-    // if obj is already a ScriptModule, just return its ivalue
     return InferredType("Cannot infer type of ScriptModule");
   }
 
