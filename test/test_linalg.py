@@ -12,7 +12,7 @@ from math import inf, nan, isnan
 import random
 from random import randrange
 from itertools import product
-from functools import reduce
+from functools import reduce, partial
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
@@ -25,7 +25,6 @@ from torch.testing._internal.common_device_type import \
      onlyCUDA)
 from torch.testing import floating_and_complex_types, floating_types, all_types
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
-from torch.testing._internal.jit_metaprogramming_utils import gen_script_fn_and_args
 from torch.autograd import gradcheck, gradgradcheck
 
 # Protects against includes accidentally setting the default dtype
@@ -38,6 +37,10 @@ if TEST_SCIPY:
 
 # TODO: make this common and import it
 AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
+
+# See #49409, we should remove these if we end up with a global gradcheck setting
+gradcheck = partial(gradcheck, check_batched_grad=True)
+gradgradcheck = partial(gradgradcheck, check_batched_grad=True)
 
 class TestLinalg(TestCase):
     exact_dtype = True
@@ -1138,92 +1141,6 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, f"linalg_cond got an invalid norm type: {p}"):
                 torch.linalg.cond(a, p)
 
-    # Test autograd and jit functionality for linalg functions.
-    # TODO: Once support for linalg functions is added to method_tests in common_methods_invocations.py,
-    #       the `test_cases` entries below should be moved there. These entries are in a similar format,
-    #       so they should work with minimal changes.
-    @dtypes(torch.float, torch.double)
-    def test_autograd_and_jit(self, device, dtype):
-        torch.manual_seed(0)
-        S = 10
-        NO_ARGS = None  # NOTE: refer to common_methods_invocations.py if you need this feature
-        test_cases = [
-            # NOTE: Not all the features from common_methods_invocations.py are functional here, since this
-            #       is only a temporary solution.
-            # (
-            #   method name,
-            #   input size/constructing fn,
-            #   args (tuple represents shape of a tensor arg),
-            #   test variant name (will be used at test name suffix),    // optional
-            #   (should_check_autodiff[bool], nonfusible_nodes, fusible_nodes) for autodiff, // optional
-            #   indices for possible dim arg,                            // optional
-            #   fn mapping output to part that should be gradcheck'ed,   // optional
-            #   kwargs                                                   // optional
-            # )
-            ('norm', (S,), (), 'default_1d'),
-            ('norm', (S, S), (), 'default_2d'),
-            ('norm', (S, S, S), (), 'default_3d'),
-            ('norm', (S,), (inf,), 'vector_inf'),
-            ('norm', (S,), (3.5,), 'vector_3_5'),
-            ('norm', (S,), (0.5,), 'vector_0_5'),
-            ('norm', (S,), (2,), 'vector_2'),
-            ('norm', (S,), (1,), 'vector_1'),
-            ('norm', (S,), (0,), 'vector_0'),
-            ('norm', (S,), (-inf,), 'vector_neg_inf'),
-            ('norm', (S,), (-3.5,), 'vector_neg_3_5'),
-            ('norm', (S,), (-0.5,), 'vector_neg_0_5'),
-            ('norm', (S,), (2,), 'vector_neg_2'),
-            ('norm', (S,), (1,), 'vector_neg_1'),
-            ('norm', (S, S), (inf,), 'matrix_inf'),
-            ('norm', (S, S), (2,), 'matrix_2', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-            ('norm', (S, S), (1,), 'matrix_1'),
-            ('norm', (S, S), (-inf,), 'matrix_neg_inf'),
-            ('norm', (S, S), (-2,), 'matrix_neg_2', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-            ('norm', (S, S), (-1,), 'matrix_neg_1'),
-            ('norm', (S, S), ('fro',), 'fro'),
-            ('norm', (S, S), ('fro', [0, 1]), 'fro_dim'),
-            ('norm', (S, S), ('nuc',), 'nuc', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-            ('norm', (S, S), ('nuc', [0, 1]), 'nuc_dim', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ]
-        for test_case in test_cases:
-            func_name = test_case[0]
-            func = getattr(torch.linalg, func_name)
-            input_size = test_case[1]
-            args = list(test_case[2])
-            test_case_name = test_case[3] if len(test_case) >= 4 else None
-            mapping_funcs = list(test_case[6]) if len(test_case) >= 7 else None
-
-            # Skip a test if a decorator tells us to
-            if mapping_funcs is not None:
-                def decorated_func(self, device, dtype):
-                    pass
-                for mapping_func in mapping_funcs:
-                    decorated_func = mapping_func(decorated_func)
-                try:
-                    decorated_func(self, device, dtype)
-                except unittest.SkipTest:
-                    continue
-
-            msg = f'function name: {func_name}, case name: {test_case_name}'
-
-            # Test JIT
-            input = torch.randn(*input_size, dtype=dtype, device=device)
-            input_script = input.clone().detach()
-            script_method, tensors = gen_script_fn_and_args("linalg.norm", "functional", input_script, *args)
-            self.assertEqual(
-                func(input, *args),
-                script_method(input_script),
-                msg=msg)
-
-            # Test autograd
-            # gradcheck is only designed to work with torch.double inputs
-            if dtype == torch.double:
-                input = torch.randn(*input_size, dtype=dtype, device=device, requires_grad=True)
-
-                def run_func(input):
-                    return func(input, *args)
-                self.assertTrue(gradcheck(run_func, input), msg=msg)
-
     # This test calls torch.linalg.norm and numpy.linalg.norm with illegal arguments
     # to ensure that they both throw errors
     @dtypes(torch.float, torch.double)
@@ -1309,57 +1226,6 @@ class TestLinalg(TestCase):
                 torch.linalg.norm(x, ord, keepdim=keepdim, out=res_out)
                 self.assertEqual(res_out.shape, expected.shape, msg=msg)
                 self.assertEqual(res_out.cpu(), expected, msg=msg)
-
-    # Test complex number inputs for linalg.norm
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.cfloat, torch.cdouble)
-    def test_norm_complex_autograd(self, device, dtype):
-        def gen_error_message(input_size, ord, keepdim, dim=None):
-            return "complex norm autograd failed for input size %s, ord=%s, keepdim=%s, dim=%s" % (
-                input_size, ord, keepdim, dim)
-
-        if dtype == torch.cfloat:
-            dtype_real = torch.float
-        elif dtype == torch.cdouble:
-            dtype_real = torch.double
-        else:
-            raise RuntimeError(f'dtype not supported in this test: {dtype}')
-
-        vector_ords = [None, 0, 1, 2, 3, inf, -1, -2, -3, -inf]
-        matrix_ords = [None, 'fro', 1, inf, -1, -inf]
-
-        # TODO: Fix autograd for matrix orders 'nuc', 2, and -2 by adding complex
-        #       support to svd's backward method. Once this is done, these ords
-        #       should be added to `matrix_ords` above
-        # Update: svd's backward now works with https://github.com/pytorch/pytorch/pull/47761
-        # However run_test_case doesn't work for 'matrix_ords_unsupported' cases
-        # because singular values of 'x' and 'x_real' can be different and so is their norms based on singular values
-        matrix_ords_unsupported = ['nuc', 2, -2]
-
-        def run_test_case(x, ord, keepdim):
-            res = torch.linalg.norm(x, ord, keepdim=keepdim)
-            res.backward()
-
-            x_real = x.clone().detach().abs().requires_grad_(True)
-            res_real = torch.linalg.norm(x_real, ord, keepdim=keepdim)
-            res_real.backward()
-
-            msg = gen_error_message(x.size(), ord, keepdim)
-
-            self.assertEqual(res.shape, res_real.shape, msg=msg)
-            self.assertEqual(res, res_real, msg=msg)
-            self.assertEqual(x.grad.abs(), x_real.grad, msg=msg)
-
-        # Test supported ords
-        for keepdim in [False, True]:
-            for ord in vector_ords:
-                x = torch.randn(25, dtype=dtype, device=device, requires_grad=True)
-                run_test_case(x, ord, keepdim)
-
-            for ord in matrix_ords:
-                x = torch.randn(25, 25, dtype=dtype, device=device, requires_grad=True)
-                run_test_case(x, ord, keepdim)
 
     # Test that linal.norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
@@ -2255,7 +2121,8 @@ class TestLinalg(TestCase):
                 return torch.cholesky_solve(b, A, upper)
 
             gradcheck(func, [root, b, upper])
-            gradgradcheck(func, [root, b, upper], atol=1e-3)
+            # TODO(#50743): the following fails with batched grad testing
+            gradgradcheck(func, [root, b, upper], atol=1e-3, check_batched_grad=False)
 
         for (a_size, b_size), upper in itertools.product([((3, 3), (3, 4)), ((3, 3), (3, 2)),
                                                           ((2, 3, 3), (2, 3, 4)), ((2, 3, 3), (2, 3, 2))],
@@ -4838,7 +4705,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 should_throw_error = is_cuda10_2_or_higher and not is_config_deterministic
                 script = f"""
 import torch
-torch.set_deterministic(True)
+torch.use_deterministic_algorithms(True)
 fn = torch.{fn_name}
 arg_sizes = {arg_sizes}
 device = '{device}'
@@ -5467,6 +5334,107 @@ else:
         with self.assertRaisesRegex(RuntimeError, "chain_matmul: Expected one or more matrices"):
             torch.chain_matmul()
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
+                        torch.float64: 1e-8, torch.complex128: 1e-8})
+    def test_slogdet(self, device, dtype):
+        from torch.testing._internal.common_utils import (random_hermitian_matrix, random_hermitian_psd_matrix,
+                                                          random_hermitian_pd_matrix, random_square_matrix_of_rank)
+
+        # mat_chars denotes matrix characteristics
+        # possible values are: hermitian, hermitian_psd, hermitian_pd, singular, non_singular
+        def run_test(matsize, batchdims, mat_chars):
+            num_matrices = np.prod(batchdims)
+            list_of_matrices = []
+            if num_matrices != 0:
+                for idx in range(num_matrices):
+                    mat_type = idx % len(mat_chars)
+                    if mat_chars[mat_type] == 'hermitian':
+                        list_of_matrices.append(random_hermitian_matrix(matsize, dtype=dtype, device=device))
+                    elif mat_chars[mat_type] == 'hermitian_psd':
+                        list_of_matrices.append(random_hermitian_psd_matrix(matsize, dtype=dtype, device=device))
+                    elif mat_chars[mat_type] == 'hermitian_pd':
+                        list_of_matrices.append(random_hermitian_pd_matrix(matsize, dtype=dtype, device=device))
+                    elif mat_chars[mat_type] == 'singular':
+                        list_of_matrices.append(torch.ones(matsize, matsize, dtype=dtype, device=device))
+                    elif mat_chars[mat_type] == 'non_singular':
+                        list_of_matrices.append(random_square_matrix_of_rank(matsize, matsize, dtype=dtype, device=device))
+                full_tensor = torch.stack(list_of_matrices, dim=0).reshape(batchdims + (matsize, matsize))
+            else:
+                full_tensor = torch.randn(*batchdims, matsize, matsize, dtype=dtype, device=device)
+
+            actual_value = torch.linalg.slogdet(full_tensor)
+            expected_value = np.linalg.slogdet(full_tensor.cpu().numpy())
+            self.assertEqual(expected_value[0], actual_value[0], atol=self.precision, rtol=self.precision)
+            self.assertEqual(expected_value[1], actual_value[1], atol=self.precision, rtol=self.precision)
+
+            # test out=variant
+            sign_out = torch.empty_like(actual_value[0])
+            logabsdet_out = torch.empty_like(actual_value[1])
+            ans = torch.linalg.slogdet(full_tensor, out=(sign_out, logabsdet_out))
+            self.assertEqual(ans[0], sign_out)
+            self.assertEqual(ans[1], logabsdet_out)
+            self.assertEqual(sign_out, actual_value[0])
+            self.assertEqual(logabsdet_out, actual_value[1])
+
+        for matsize, batchdims in itertools.product([0, 3, 5], [(0,), (3,), (5, 3)]):
+            run_test(matsize, batchdims, mat_chars=['hermitian_pd'])
+            run_test(matsize, batchdims, mat_chars=['singular'])
+            run_test(matsize, batchdims, mat_chars=['non_singular'])
+            run_test(matsize, batchdims, mat_chars=['hermitian', 'hermitian_pd', 'hermitian_psd'])
+            run_test(matsize, batchdims, mat_chars=['singular', 'non_singular'])
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_slogdet_errors_and_warnings(self, device, dtype):
+        # slogdet requires the input to be a square matrix or batch of square matrices
+        a = torch.randn(2, 3, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, r'must be batches of square matrices'):
+            torch.linalg.slogdet(a)
+
+        # slogdet requires the input to be at least 2 dimensional tensor
+        a = torch.randn(2, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, r'must have at least 2 dimensions'):
+            torch.linalg.slogdet(a)
+
+        # slogdet requires the input to be of float, double, cfloat or cdouble types
+        a = torch.randn(2, 2, device=device, dtype=torch.bfloat16)
+        with self.assertRaisesRegex(RuntimeError, r'of float, double, cfloat or cdouble types'):
+            torch.linalg.slogdet(a)
+
+        # if non-empty out tensor with wrong shape is passed a warning is given
+        a = torch.randn(2, 3, 3, device=device, dtype=dtype)
+        sign_out = torch.empty(1, device=device, dtype=dtype)
+        real_dtype = a.real.dtype if dtype.is_complex else dtype
+        logabsdet_out = torch.empty(1, device=device, dtype=real_dtype)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should match
+        sign_out = torch.empty_like(a).to(torch.int)
+        logabsdet_out = torch.empty_like(a).to(torch.int)
+        with self.assertRaisesRegex(RuntimeError, "sign dtype Int does not match input dtype"):
+            torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
+
+        sign_out = torch.empty(0, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "logabsdet dtype Int does not match the expected dtype"):
+            torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            sign_out = torch.empty(0, device=wrong_device, dtype=dtype)
+            logabsdet_out = torch.empty(0, device=wrong_device, dtype=real_dtype)
+            with self.assertRaisesRegex(RuntimeError, "Expected sign, logabsdet and input to be on the same device"):
+                torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
+
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -5482,6 +5450,7 @@ else:
             det = M.det()
             logdet = M.logdet()
             sdet, logabsdet = M.slogdet()
+            linalg_sdet, linalg_logabsdet = torch.linalg.slogdet(M)
 
             # Test det
             self.assertEqual(det, target_sdet * target_logabsdet.exp(),
@@ -5492,6 +5461,8 @@ else:
             # precision issues when det is near zero.
             self.assertEqual(sdet * logabsdet.exp(), target_sdet * target_logabsdet.exp(),
                              atol=1e-7, rtol=0, msg='{} (slogdet)'.format(desc))
+            self.assertEqual(linalg_sdet * linalg_logabsdet.exp(), target_sdet * target_logabsdet.exp(),
+                             atol=1e-7, rtol=0, msg='{} (linalg_slogdet)'.format(desc))
 
             # Test logdet
             # Compare logdet against our own pytorch slogdet because they should
@@ -5665,13 +5636,13 @@ else:
             # Scaling adapted from `get_random_mat_scale` in _test_det_logdet_slogdet
             full_tensor *= (math.factorial(matsize - 1) ** (-1.0 / (2 * matsize)))
 
-            for fn in [torch.det, torch.logdet, torch.slogdet]:
+            for fn in [torch.det, torch.logdet, torch.slogdet, torch.linalg.slogdet]:
                 expected_value = []
                 actual_value = fn(full_tensor)
                 for full_idx in itertools.product(*map(lambda x: list(range(x)), batchdims)):
                     expected_value.append(fn(full_tensor[full_idx]))
 
-                if fn == torch.slogdet:
+                if fn == torch.slogdet or fn == torch.linalg.slogdet:
                     sign_value = torch.stack([tup[0] for tup in expected_value], dim=0).reshape(batchdims)
                     expected_value = torch.stack([tup[1] for tup in expected_value], dim=0).reshape(batchdims)
                     self.assertEqual(sign_value, actual_value[0])
