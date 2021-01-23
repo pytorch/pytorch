@@ -508,11 +508,9 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
   }
 
   std::vector<Stmt*> loops;
-  bool valid = true;
   for (Tensor* t : tensors_to_compute) {
     Stmt* loop = t->stmt();
     if (loop->get_parent()) {
-      valid = false;
       std::cerr << "Error: creating a loopnest from already used Tensors\n";
       loops = {};
       break;

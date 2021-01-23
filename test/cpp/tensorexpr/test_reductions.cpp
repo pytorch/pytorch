@@ -259,9 +259,9 @@ TEST(Reductions, ReduceMax) {
 
   Tensor* m2d = Reduce("max", {{2, "n"}}, Maximum(kFloat), in2_, {{5, "m"}});
 
-  loop = LoopNest({m2d});
-  loop.prepareForCodegen();
-  s = loop.root_stmt();
+  LoopNest loop2({m2d});
+  loop2.prepareForCodegen();
+  s = loop2.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg2(s, {in2_, m2d});
@@ -372,9 +372,9 @@ TEST(Reductions, ReduceAnyAll) {
       },
       {{10, "j"}});
 
-  loop = LoopNest({allGreaterThan});
-  loop.prepareForCodegen();
-  s = loop.root_stmt();
+  LoopNest loop2({allGreaterThan});
+  loop2.prepareForCodegen();
+  s = loop2.root_stmt();
   s = IRSimplifier::simplify(s);
 
   SimpleIREvaluator cg2(s, {b, allGreaterThan, searchValue});
