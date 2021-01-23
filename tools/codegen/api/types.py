@@ -245,10 +245,8 @@ class NativeSignature:
     # The schema this signature is derived from
     func: FunctionSchema
 
-    prefix: str = ""
-
     def name(self) -> str:
-        return self.prefix + native.name(self.func)
+        return native.name(self.func)
 
     def defn(self, name: Optional[str] = None) -> str:
         args_str = ', '.join(a.defn() for a in self.arguments())
@@ -266,6 +264,10 @@ class NativeSignature:
 
     def dispatcher_exprs(self) -> List[Expr]:
         return translate.translate(self.arguments(), dispatcher.arguments(self.func), method=False)
+
+    @staticmethod
+    def from_schema(func: FunctionSchema) -> 'NativeSignature':
+        return NativeSignature(func)
 
 # Functions only, no types
 from tools.codegen.api import cpp, dispatcher, native, translate

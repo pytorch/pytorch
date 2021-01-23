@@ -382,7 +382,7 @@ if TEST_NUMPY:
 
     # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
     numpy_to_torch_dtype_dict = {
-        np.bool_      : torch.bool,
+        np.bool       : torch.bool,
         np.uint8      : torch.uint8,
         np.int8       : torch.int8,
         np.int16      : torch.int16,
@@ -429,15 +429,15 @@ class DeterministicGuard:
         self.deterministic = deterministic
 
     def __enter__(self):
-        self.deterministic_restore = torch.are_deterministic_algorithms_enabled()
-        torch.use_deterministic_algorithms(self.deterministic)
+        self.deterministic_restore = torch.is_deterministic()
+        torch.set_deterministic(self.deterministic)
 
     def __exit__(self, exception_type, exception_value, traceback):
-        torch.use_deterministic_algorithms(self.deterministic_restore)
+        torch.set_deterministic(self.deterministic_restore)
 
-# This decorator can be used for API tests that call
-# torch.use_deterministic_algorithms().  When the test is finished, it will
-# restore the previous deterministic flag setting.
+# This decorator can be used for API tests that call torch.set_deterministic().
+# When the test is finished, it will restore the previous deterministic flag
+# setting.
 #
 # If CUDA >= 10.2, this will set the environment variable
 # CUBLAS_WORKSPACE_CONFIG=:4096:8 so that the error associated with that
@@ -467,7 +467,7 @@ class DeterministicGuard:
 def wrapDeterministicFlagAPITest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
+        with DeterministicGuard(torch.is_deterministic()):
             class CuBLASConfigGuard:
                 cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
 

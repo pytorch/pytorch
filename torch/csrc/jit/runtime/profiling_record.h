@@ -204,10 +204,11 @@ struct ProfilingRecord {
     return profiled_graph_;
   }
 
-  TORCH_API ProfileIValueOp* createProfileIValueNode(Value* in_val);
-
  private:
   ProfileOp* createProfileNode(
+      const std::function<void(Stack&)>& fp,
+      at::ArrayRef<Value*> inputs);
+  ProfileOptionalOp* createProfileOptionalNode(
       const std::function<void(Stack&)>& fp,
       at::ArrayRef<Value*> inputs);
   void instrumentBlock(Block* block);
