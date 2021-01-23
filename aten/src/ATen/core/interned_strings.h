@@ -103,6 +103,7 @@ namespace c10 {
   _(prim, Guard)                     \
   _(prim, BailOut)                   \
   _(prim, TypeCheck)                 \
+  _(prim, RequiresGradCheck)         \
   _(prim, FallbackGraph)             \
   _(prim, FusedConcat)               \
   _(prim, ConstantChunk)             \
@@ -140,7 +141,6 @@ namespace c10 {
   _(prim, GetAttr)                   \
   _(prim, HasAttr)                   \
   _(prim, profile)                   \
-  _(prim, profile_optional)          \
   _(prim, profile_ivalue)            \
   _(prim, AddStatValue)              \
   _(prim, TimePoint)                 \
@@ -294,6 +294,7 @@ namespace c10 {
   _(aten, swapdims_)                 \
   _(aten, movedim)                   \
   _(aten, moveaxis)                  \
+  _(aten, has_torch_function)        \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
   _(onnx, Concat)                    \
@@ -345,6 +346,7 @@ namespace c10 {
   _(onnx, ReduceL2)                  \
   _(onnx, Conv)                      \
   _(onnx, BatchNormalization)        \
+  _(onnx, ReduceProd)                \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \

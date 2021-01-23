@@ -8,13 +8,28 @@ import keyword
 import re
 
 def _shadows_builtin_name(name: str) -> bool:
-    return name in builtins.__dict__ or name in keyword.kwlist or name in {'inf', 'nan'}
+    return name in builtins.__dict__ or name in keyword.kwlist or name in {'inf', 'nan', 'NoneType'}
 
 def _is_magic(x: str) -> bool:
     return x.startswith('__') and x.endswith('__')
 
 def _snake_case(s: str) -> str:
-    return ''.join(['_' + i.lower() if i.isupper() else i for i in s]).lstrip('_')
+    """
+    Transforms the given string ``s`` to a Python-style variable name
+
+    Examples:
+        ``mod.snake_case`` -> ``mod.snake_case``
+        ``mod.pascalCase``-> ``mod.pascal_case``
+        ``mod.ALL_CAPS`` -> ``mod.all_caps``
+    """
+    chars = []
+    prev_lower = False
+    for c in s:
+        if prev_lower and c.isupper():
+            chars.append('_')
+        chars.append(c.lower())
+        prev_lower = c.islower()
+    return ''.join(chars)
 
 def get_qualified_name(func: Callable[..., Any]) -> str:
     # things like getattr just appear in builtins
@@ -141,11 +156,11 @@ class Graph:
 
         graph(x):
             %linear_weight : [#users=1] = self.linear.weight
-            %add_1 : [#users=1] = call_function[target=<built-in function add>](args = (%x, %linear_weight), kwargs = {})
+            %add_1 : [#users=1] = call_function[target=operator.add](args = (%x, %linear_weight), kwargs = {})
             %linear_1 : [#users=1] = call_module[target=linear](args = (%add_1,), kwargs = {})
             %relu_1 : [#users=1] = call_method[target=relu](args = (%linear_1,), kwargs = {})
-            %sum_1 : [#users=1] = call_function[target=<built-in method sum of type object at 0x7ff2da9dc300>](args = (%relu_1,), kwargs = {dim: -1}) # noqa: B950
-            %topk_1 : [#users=1] = call_function[target=<built-in method topk of type object at 0x7ff2da9dc300>](args = (%sum_1, 3), kwargs = {}) # noqa: B950
+            %sum_1 : [#users=1] = call_function[target=torch.sum](args = (%relu_1,), kwargs = {dim: -1})
+            %topk_1 : [#users=1] = call_function[target=torch.topk](args = (%sum_1, 3), kwargs = {})
             return topk_1
 
     For the semantics of operations represented in the ``Graph``, please see :class:`Node`.
@@ -735,6 +750,28 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
             else:
                 return str(arg)
 
+        def pretty_print_target(target):
+            """
+            Make target printouts more user-friendly.
+            1) builtins will be printed as `builtins.xyz`
+            2) operators will be printed as `operator.xyz`
+            3) other callables will be printed with qualfied name, e.g. torch.add
+            """
+            if isinstance(target, str):
+                return target
+            if hasattr(target, '__module__'):
+                if not hasattr(target, '__name__'):
+                    # Just to be defensive, if we don't have `__name__`, get the
+                    # qualname. Not sure if this happens for any members of `operator`
+                    # or `builtins`. This fallback path is not as good, since e.g.
+                    # things in `operator` have `_operator` as their __module__.
+                    return get_qualified_name(target)
+                if target.__module__ == 'builtins':
+                    return f'builtins.{target.__name__}'
+                elif target.__module__ == '_operator':
+                    return f'operator.{target.__name__}'
+            return get_qualified_name(target)
+
         def format_node(n : Node) -> Optional[str]:
             if n.op == 'placeholder':
                 assert isinstance(n.target, str)
@@ -751,7 +788,7 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
                 return f'return {n.args[0]}'
             else:
                 maybe_typename = f'{_type_repr(n.type)} ' if n.type is not None else ''
-                return f'%{n.name} : {maybe_typename}[#users={len(n.users)}] = {n.op}[target={n.target}](' \
+                return f'%{n.name} : {maybe_typename}[#users={len(n.users)}] = {n.op}[target={pretty_print_target(n.target)}](' \
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
 
 
@@ -762,6 +799,22 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
             if node_str:
                 s += '\n    ' + node_str
         return s
+
+    def print_tabular(self):
+        """
+        Prints the intermediate representation of the graph in tabular
+        format.
+        """
+        try:
+            from tabulate import tabulate
+        except ImportError:
+            print("`print_tabular` relies on the library `tabulate`, "
+                  "which could not be found on this machine. Run `pip "
+                  "install tabulate` to install the library.")
+        node_specs = [[n.op, n.name, n.target, n.args, n.kwargs]
+                      for n in self.nodes]
+        print(tabulate(node_specs,
+              headers=['opcode', 'name', 'target', 'args', 'kwargs']))
 
     def lint(self, root : Optional[torch.nn.Module] = None):
         """

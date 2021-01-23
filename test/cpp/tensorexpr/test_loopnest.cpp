@@ -2606,8 +2606,9 @@ TEST(LoopNest, UnrollMultipleStatements) {
       x,
       0,
       kTotalSize,
-      Block::make({Store::make(a_buf, {x}, x * 2),
-                   Store::make(b_buf, {x}, Load::make(a_buf, {x}, 1))}));
+      Block::make(
+          {Store::make(a_buf, {x}, x * 2),
+           Store::make(b_buf, {x}, Load::make(a_buf, {x}, 1))}));
   Block::make({f});
   Stmt* unrolled = nullptr;
   LoopNest::unroll(f, &unrolled);
@@ -2658,9 +2659,10 @@ TEST(LoopNest, UnrollWithLet) {
       x,
       0,
       kTotalSize,
-      Block::make({Let::make(e, 7),
-                   Store::make(a_buf, {x}, e),
-                   Store::make(b_buf, {x}, e + 1)}));
+      Block::make(
+          {Let::make(e, 7),
+           Store::make(a_buf, {x}, e),
+           Store::make(b_buf, {x}, e + 1)}));
   Block::make({f});
   Stmt* unrolled = nullptr;
   LoopNest::unroll(f, &unrolled);
@@ -2700,9 +2702,9 @@ TEST(LoopNest, NormalizeStartPositive) {
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
-  auto for_body =
-      Block::make({Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
-                   Store::make(b_buf, {x}, x * 2)});
+  auto for_body = Block::make(
+      {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
+       Store::make(b_buf, {x}, x * 2)});
   auto for_stmt = For::make(x, 50, 100, for_body);
   Block::make({for_stmt});
 
@@ -2768,9 +2770,9 @@ TEST(LoopNest, NormalizeStartZero) {
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
-  auto for_body =
-      Block::make({Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
-                   Store::make(b_buf, {x}, x * 2)});
+  auto for_body = Block::make(
+      {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
+       Store::make(b_buf, {x}, x * 2)});
   auto for_stmt = For::make(x, 0, 100, for_body);
   Block::make({for_stmt});
 
@@ -2803,9 +2805,9 @@ TEST(LoopNest, NormalizeStartVariable) {
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  auto for_body =
-      Block::make({Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
-                   Store::make(b_buf, {x}, x * 2)});
+  auto for_body = Block::make(
+      {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
+       Store::make(b_buf, {x}, x * 2)});
   auto for_stmt = For::make(x, y, 100, for_body);
   Block::make({for_stmt});
 

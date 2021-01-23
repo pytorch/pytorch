@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/serialization/export.h>
+
 #include <torch/csrc/autograd/symbolic.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
@@ -220,6 +221,14 @@ class EncoderBase {
       bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
+  void AddInitializersIntoGraphProto(
+      onnx::GraphProto* graph_proto,
+      const Block* block,
+      const std::map<std::string, at::Tensor>& initializers =
+          std::map<std::string, at::Tensor>(),
+      bool use_external_data_format = false,
+      const std::string& onnx_file_path = std::string());
+
   virtual void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
@@ -322,7 +331,8 @@ void EncoderBase::EncodeValueInfo(
         std::unordered_map<int64_t, std::string>>& dynamic_axes) {
   std::string name = n->debugName();
   v->set_name(name);
-  auto tensorTypeToONNXType = [&dynamic_axes, &name, this](
+
+  auto tensorTypeToONNXType = [&dynamic_axes, &name, n, this](
                                   const TensorTypePtr& t,
                                   onnx::TypeProto_Tensor* tensor_type) {
     if (t->dim()) {
@@ -340,7 +350,13 @@ void EncoderBase::EncodeValueInfo(
           shape->mutable_dim(i)->set_dim_value(sizes[i].static_size());
         } else {
           if (symbol_dim_map_.find(sizes[i]) == symbol_dim_map_.end()) {
-            symbol_dim_map_[sizes[i]] = name + "_" + std::to_string(i);
+            if (n->node()->kind() == prim::Param) {
+              symbol_dim_map_[sizes[i]] = name + "_dim_" + std::to_string(i);
+            } else {
+              std::string op_type = n->node()->kind().toUnqualString();
+              symbol_dim_map_[sizes[i]] =
+                  op_type + name + "_dim_" + std::to_string(i);
+            }
           }
           shape->mutable_dim(i)->set_dim_param(symbol_dim_map_[sizes[i]]);
         }
@@ -552,14 +568,33 @@ void EncoderBase::EncodeBlock(
           onnx_file_path);
     }
   }
+  AddInitializersIntoGraphProto(
+      graph_proto,
+      block,
+      initializers,
+      use_external_data_format,
+      onnx_file_path);
+}
+
+void EncoderBase::AddInitializersIntoGraphProto(
+    onnx::GraphProto* graph_proto,
+    const Block* block,
+    const std::map<std::string, at::Tensor>& initializers,
+    bool use_external_data_format,
+    const std::string& onnx_file_path) {
   AT_ASSERT(block->inputs().size() >= initializers.size());
-  for (auto& name_tensor_pair : initializers) {
+
+  for (auto input : block->inputs()) {
+    auto name_tensor_pair = initializers.find(input->debugName());
+    if (name_tensor_pair == initializers.end()) {
+      continue;
+    }
     auto p = graph_proto->add_initializer();
-    p->set_name(name_tensor_pair.first);
+    p->set_name(name_tensor_pair->first);
     EncodeTensor(
         p,
-        name_tensor_pair.second,
-        name_tensor_pair.first,
+        name_tensor_pair->second,
+        name_tensor_pair->first,
         use_external_data_format,
         onnx_file_path);
   }

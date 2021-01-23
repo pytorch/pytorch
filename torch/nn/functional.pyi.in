@@ -205,7 +205,7 @@ def instance_norm(input: Tensor, running_mean: Optional[Tensor] = ..., running_v
                   momentum: float = ..., eps: float = ...) -> Tensor: ...
 
 
-def layer_norm(input: Tensor, normalized_shape: List[int], weight: Optional[Tensor] = ..., bias: Optional[Tensor] = ...,
+def layer_norm(input: Tensor, normalized_shape: Sequence[int], weight: Optional[Tensor] = ..., bias: Optional[Tensor] = ...,
                eps: float = ...) -> Tensor: ...
 
 
@@ -227,6 +227,10 @@ def nll_loss(input: Tensor, target: Tensor, weight: Optional[Tensor] = ..., size
 def poisson_nll_loss(input: Tensor, target: Tensor, log_input: bool = ..., full: bool = ...,
                      size_average: Optional[bool] = ..., eps: float = ..., reduce: Optional[bool] = ...,
                      reduction: str = ...) -> Tensor: ...
+
+
+def gaussian_nll_loss(input: Tensor, target: Tensor, var: Tensor, full: Optional[bool] = ...,
+                      eps: Optional[float] = ..., reduction: Optional[str] = ...) -> Tensor: ...
 
 
 def kl_div(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., reduce: Optional[bool] = ...,

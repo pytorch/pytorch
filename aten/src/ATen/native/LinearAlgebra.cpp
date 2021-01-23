@@ -82,37 +82,120 @@ Tensor logdet(const Tensor& self) {
   return logdet_vals;
 }
 
-std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
+std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
   squareCheckInputs(self);
-  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())),
-              "Expected a floating point tensor as input");
+  ScalarType t = self.scalar_type();
+  TORCH_CHECK(t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble,
+              "linalg_slogdet: expected a tensor of float, double, cfloat or cdouble types but got ", t);
 
   Tensor det_P, diag_U;
   std::tie(det_P, diag_U) = _lu_det_P_diag_U(self);
-  auto det_sign = diag_U.sign().prod(-1).mul_(det_P);
+  auto det_sign = diag_U.sgn().prod(-1).mul_(det_P);
   // abslogdet_val is -inf if U is singular, in which case diag_U.abs_().log_().sum(-1) will return -inf.
   // U is singular when U(i, i) = 0 for some i in [1, self.size(-1)].
   // Since abslogdet_val cannot take nan, no special case handling is required.
-  auto abslogdet_val = diag_U.abs_().log_().sum(-1);
+  // in-place abs is not supported for complex tensors
+  auto abslogdet_val = isComplexType(t) ? diag_U.abs().log_().sum(-1) : diag_U.abs_().log_().sum(-1);
   return std::make_tuple(det_sign, abslogdet_val);
 }
 
-Tensor pinverse(const Tensor& self, double rcond) {
-  TORCH_CHECK((at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type())) && self.dim() >= 2,
-              "pinverse(", self.scalar_type(), "{", self.sizes(), "}): expected a tensor with 2 or more dimensions "
-              "of floating types");
-  if (self.numel() == 0) {
-    // Match NumPy
-    auto self_sizes = self.sizes().vec();
-    std::swap(self_sizes[self.dim() - 1], self_sizes[self.dim() - 2]);
-    return at::empty(self_sizes, self.options());
+// TODO: implement _out variant avoiding copy and using already allocated storage directly
+std::tuple<Tensor&, Tensor&> linalg_slogdet_out(const Tensor& input, Tensor& sign, Tensor& logabsdet) {
+  TORCH_CHECK(sign.scalar_type() == input.scalar_type(),
+    "sign dtype ", sign.scalar_type(), " does not match input dtype ", input.scalar_type());
+  ScalarType real_dtype = toValueType(typeMetaToScalarType(input.dtype()));
+  TORCH_CHECK(logabsdet.scalar_type() == real_dtype,
+    "logabsdet dtype ", logabsdet.scalar_type(), " does not match the expected dtype ", real_dtype);
+  TORCH_CHECK(sign.device() == input.device() && logabsdet.device() == input.device(),
+              "Expected sign, logabsdet and input to be on the same device, but found sign on ",
+              sign.device(), ", logabsdet on ", logabsdet.device(), " and input on ", input.device(), " instead.");
+
+  Tensor sign_tmp, logabsdet_tmp;
+  std::tie(sign_tmp, logabsdet_tmp) = at::linalg_slogdet(input);
+
+  at::native::resize_output(sign, sign_tmp.sizes());
+  sign.copy_(sign_tmp);
+  at::native::resize_output(logabsdet, logabsdet_tmp.sizes());
+  logabsdet.copy_(logabsdet_tmp);
+
+  return std::tuple<Tensor&, Tensor&>(sign, logabsdet);
+}
+
+std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
+  return at::linalg_slogdet(self);
+}
+
+Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
+  ScalarType t = input.scalar_type();
+  TORCH_CHECK((t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble)
+              && input.dim() >= 2,
+              "linalg_pinv(", t, "{", input.sizes(), "}): expected a tensor with 2 or more dimensions "
+              "of float, double, cfloat or cdouble types");
+  TORCH_CHECK(rcond.device() == input.device(),
+              "Expected rcond and input to be on the same device, but found rcond on ",
+              rcond.device(), " and input on ", input.device(), " instead.");
+  TORCH_CHECK(!at::isComplexType(rcond.scalar_type()),
+              "linalg_pinv: rcond tensor of complex type is not supported.");
+
+  if (input.numel() == 0) {
+    // The implementation below uses operations that do not work for zero numel tensors
+    // therefore we need this early return for 'input.numel() == 0' case
+    auto input_sizes = input.sizes().vec();
+    std::swap(input_sizes[input.dim() - 1], input_sizes[input.dim() - 2]);
+    return at::empty(input_sizes, input.options());
   }
-  Tensor U, S, V;
-  std::tie(U, S, V) = self.svd();
-  Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);
-  Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, S.options())).to(self.dtype());
-  // computes V.conj() @ diag(S_pseudoinv) @ U.T.conj()
-  return at::matmul(V.conj() * S_pseudoinv.unsqueeze(-2), U.transpose(-2, -1).conj());
+
+  // If not Hermitian use singular value decomposition, else use eigenvalue decomposition
+  if (!hermitian) {
+    // until https://github.com/pytorch/pytorch/issues/45821 is resolved
+    // svd() returns conjugated V for complex-valued input
+    Tensor U, S, V_conj;
+    // TODO: replace input.svd with linalg_svd
+    std::tie(U, S, V_conj) = input.svd();
+    Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
+    Tensor S_pseudoinv = at::where(S > (rcond.unsqueeze(-1) * max_val), S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
+    // computes V @ diag(S_pseudoinv) @ U.T.conj()
+    // TODO: replace V_conj.conj() -> V once https://github.com/pytorch/pytorch/issues/45821 is resolved
+    return at::matmul(V_conj.conj() * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
+  } else {
+    Tensor S, U;
+    std::tie(S, U) = at::linalg_eigh(input);
+    // For Hermitian matrices, singular values equal to abs(eigenvalues)
+    Tensor S_abs = S.abs();
+    // eigenvalues are sorted in ascending order starting with negative values, we need a maximum value of abs(eigenvalues)
+    Tensor max_val = S_abs.amax(/*dim=*/-1, /*keepdim=*/true);
+    Tensor S_pseudoinv = at::where(S_abs > (rcond.unsqueeze(-1) * max_val), S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
+    // computes U @ diag(S_pseudoinv) @ U.conj().T
+    return at::matmul(U * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
+  }
+}
+
+Tensor linalg_pinv(const Tensor& input, double rcond, bool hermitian) {
+  Tensor rcond_tensor = at::full({}, rcond, input.options().dtype(ScalarType::Double));
+  return at::linalg_pinv(input, rcond_tensor, hermitian);
+}
+
+// TODO: implement _out variant avoiding copy and using already allocated storage directly
+Tensor& linalg_pinv_out(Tensor& result, const Tensor& input, const Tensor& rcond, bool hermitian) {
+  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
+    "result dtype ", result.scalar_type(), " does not match the expected dtype ", input.scalar_type());
+  TORCH_CHECK(result.device() == input.device(),
+              "Expected result and input to be on the same device, but found result on ",
+              result.device(), " and input on ", input.device(), " instead.");
+
+  Tensor result_tmp = at::linalg_pinv(input, rcond, hermitian);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
+  return result;
+}
+
+Tensor& linalg_pinv_out(Tensor& result, const Tensor& input, double rcond, bool hermitian) {
+  Tensor rcond_tensor = at::full({}, rcond, input.options().dtype(ScalarType::Double));
+  return at::linalg_pinv_out(result, input, rcond_tensor, hermitian);
+}
+
+Tensor pinverse(const Tensor& self, double rcond) {
+  return at::linalg_pinv(self, rcond, /*hermitian=*/false);
 }
 
 Tensor& linalg_matrix_rank_out(Tensor& result, const Tensor& self, optional<double> tol, bool hermitian) {
