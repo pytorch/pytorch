@@ -1273,7 +1273,15 @@ op_db: List[OpInfo] = [
            supports_tensor_out=True,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            sample_inputs_func=sample_inputs_linalg_norm,
-           aten_name='linalg_norm'),
+           aten_name='linalg_norm',
+           skips=(
+               # TODO: remove this once `pow` is implemented for float16
+               #       and bfloat16 on CPU. Issue:
+               #       https://github.com/pytorch/pytorch/issues/50789
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        device_type='cpu',
+                        dtypes=[torch.float16, torch.bfloat16]),
+           )),
     OpInfo('linalg.slogdet',
            aten_name='linalg_slogdet',
            op=torch.linalg.slogdet,
