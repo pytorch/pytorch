@@ -755,7 +755,8 @@ class TestFFT(TestCase):
             # input
             (torch.randn(600, device=device, dtype=dtype),
              torch.randn(807, device=device, dtype=dtype),
-             torch.randn(12, 60, device=device, dtype=dtype)),
+             torch.randn(12, 14, device=device, dtype=dtype),
+             torch.randn(9, 6, device=device, dtype=dtype)),
             # n_fft
             (50, 27),
             # hop_length
@@ -763,7 +764,7 @@ class TestFFT(TestCase):
             # center
             (True,),
             # pad_mode
-            ("constant", "reflect", "circular"),
+            ("constant",),
             # normalized
             (True, False),
             # onesided
@@ -797,13 +798,14 @@ class TestFFT(TestCase):
             # input
             (torch.randn(600, device=device, dtype=dtype),
              torch.randn(807, device=device, dtype=dtype),
-             torch.randn(12, 60, device=device, dtype=dtype)),
+             torch.randn(12, 14, device=device, dtype=dtype),
+             torch.randn(9, 6, device=device, dtype=dtype)),
             # n_fft
             (50, 27),
             # hop_length
             (None, 10),
             # pad_mode
-            ("constant", "reflect", "replicate", "circular"),
+            ("constant",),
             # normalized
             (True, False),
         ))
@@ -869,7 +871,7 @@ class TestFFT(TestCase):
             # center
             (False, True),
             # pad_mode
-            ("constant", "reflect", "circular"),
+            ("constant",),
             # normalized
             (True, False),
         ))

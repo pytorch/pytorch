@@ -61,8 +61,7 @@ torch.backends.cudnn
 .. attribute::  torch.backends.cudnn.deterministic
 
     A :class:`bool` that, if True, causes cuDNN to only use deterministic convolution algorithms.
-    See also :func:`torch.are_deterministic_algorithms_enabled` and
-    :func:`torch.use_deterministic_algorithms`.
+    See also :func:`torch.is_deterministic` and :func:`torch.set_deterministic`.
 
 .. attribute::  torch.backends.cudnn.benchmark
 

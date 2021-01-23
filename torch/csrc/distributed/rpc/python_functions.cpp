@@ -138,29 +138,36 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
     const std::shared_ptr<JitFuture>& messageJitFuture,
     bool hasValue) {
   if (hasValue) {
+    c10::intrusive_ptr<JitFuture> pyJitFuture =
+        c10::make_intrusive<JitFuture>(PyObjectType::get());
     std::weak_ptr<JitFuture> wp = messageJitFuture;
-    return messageJitFuture->then(
-        at::wrapPropagateTLSState<IValue>([wp]() {
+    messageJitFuture->addCallback(
+        at::wrapPropagateTLSState<void>([pyJitFuture, wp]() {
           auto future = wp.lock();
           if (future->hasError()) {
-            std::rethrow_exception(future->exception_ptr());
+            pyJitFuture->setError(future->exception_ptr());
           } else {
-            return toPyIValue(*future->value().toCustomClass<Message>());
+            pyJitFuture->markCompleted(
+                toPyIValue(*future->value().toCustomClass<Message>()));
           }
-        }),
-        PyObjectType::get());
+        }));
+
+    return pyJitFuture;
   } else {
+    c10::intrusive_ptr<JitFuture> pyJitFuture =
+        c10::make_intrusive<JitFuture>(NoneType::get());
     std::weak_ptr<JitFuture> wp = messageJitFuture;
-    return messageJitFuture->then(
-        at::wrapPropagateTLSState<IValue>([wp]() {
+    messageJitFuture->addCallback(
+        at::wrapPropagateTLSState<void>([wp, pyJitFuture]() {
           auto future = wp.lock();
           if (future->hasError()) {
-            std::rethrow_exception(future->exception_ptr());
+            pyJitFuture->setError(future->exception_ptr());
           } else {
-            return IValue();
+            pyJitFuture->markCompleted(IValue());
           }
-        }),
-        NoneType::get());
+        }));
+
+    return pyJitFuture;
   }
 }
 

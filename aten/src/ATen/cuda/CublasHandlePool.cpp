@@ -53,7 +53,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
 #endif
 #if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 308
   rocblas_atomics_mode rocblas_mode;
-  if (at::globalContext().deterministicAlgorithms()) {
+  if (at::globalContext().deterministic()) {
     rocblas_mode = rocblas_atomics_not_allowed;
   } else {
     rocblas_mode = rocblas_atomics_allowed;
