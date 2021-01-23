@@ -200,7 +200,10 @@ class DistributedOptimizer:
         for param in params_rref:
             per_worker_params_rref[param.owner()].append(param)
 
-        optim_ctor = DistributedOptimizer.functional_optim_map.get(optimizer_class, optimizer_class)
+        if optimizer_class in DistributedOptimizer.functional_optim_map and jit._state._enabled:
+            optim_ctor = DistributedOptimizer.functional_optim_map.get(optimizer_class)
+        else:
+            optim_ctor = optimizer_class
         self.is_functional_optim = (optim_ctor != optimizer_class)
 
         if self.is_functional_optim:

@@ -21,7 +21,7 @@
 
 // fuser and IR parser
 #include <torch/csrc/jit/codegen/cuda/parser.h>
-#include "torch/csrc/jit/ir/irparser.h"
+#include <torch/csrc/jit/ir/irparser.h>
 
 #include <ATen/cuda/Exceptions.h>
 #include <c10/cuda/CUDAStream.h>
@@ -59,9 +59,9 @@ TensorView* makeConcreteTensor(
   // We can uncomment the below statement to test all tests with contiguous
   // tensors. return makeContigTensor(nDims, dtype);
   std::vector<IterDomain*> dom;
-  for (size_t i = 0; i < sizes.size(); i++) {
-    if (sizes[i] >= 0) {
-      dom.push_back(new IterDomain(new Int(0), new Int(sizes[i])));
+  for (int size : sizes) {
+    if (size >= 0) {
+      dom.push_back(new IterDomain(new Int(0), new Int(size)));
     } else {
       dom.push_back(new IterDomain(new Int(0), new Int()));
     }
@@ -7353,9 +7353,9 @@ TEST(NVFuserTest, FusionLSTMCell_CUDA) {
   FusionGuard fg(&fusion);
 
   TensorView* tvs[16];
-  for (size_t i = 0; i < 16; i++) {
-    tvs[i] = makeDummyTensor(2);
-    fusion.addInput(tvs[i]);
+  for (auto& tv : tvs) {
+    tv = makeDummyTensor(2);
+    fusion.addInput(tv);
   }
 
   auto ingate = unaryOp(
