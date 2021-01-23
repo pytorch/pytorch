@@ -25,13 +25,13 @@ namespace at {
 // Since the MKL interface for pytorch currently uses indexing with int32
 // type, it is important to make sure that the `crow_indices` and `col_indices`
 // are of type int32.
-struct TORCH_API CompressedRowSparseTensorImpl : public TensorImpl {
+struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
   Tensor crow_indices_;
   Tensor col_indices_;
   Tensor values_;
 
  public:
-  explicit CompressedRowSparseTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
+  explicit SparseCsrTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
 
   void resize_and_clear_(int64_t nnz_size, IntArrayRef size);
   void resize_as_(const Tensor& src);
@@ -45,7 +45,7 @@ struct TORCH_API CompressedRowSparseTensorImpl : public TensorImpl {
 
  private :
   
-  explicit CompressedRowSparseTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type,
+  explicit SparseCsrTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type,
                                at::Tensor crow_indices, at::Tensor col_indices, at::Tensor values);
 };
 } // namespace at

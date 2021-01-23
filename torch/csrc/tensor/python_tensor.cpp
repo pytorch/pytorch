@@ -124,7 +124,7 @@ PyObject *Tensor_is_sparse(PyTensorType *self, void *unused) {
 }
 
 PyObject *Tensor_is_sparse_csr(PyTensorType *self, void *unused) {
-  if (self->layout->layout == at::Layout::CompressedRowSparse) {
+  if (self->layout->layout == at::Layout::SparseCsr) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;

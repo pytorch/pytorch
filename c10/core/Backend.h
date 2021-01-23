@@ -34,8 +34,8 @@ enum class Backend {
   XPU,
   SparseCPU,
   SparseCUDA,
-  CompressedRowSparseCPU,
-  CompressedRowSparseCUDA,
+  SparseCsrCPU,
+  SparseCsrCUDA,
   SparseHIP,
   SparseXPU,
   MSNPU,
@@ -129,10 +129,10 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::SparseCUDA;
   } else if (t == DispatchKey::SparseHIP) {
     return Backend::SparseHIP;
-  } else if (t == DispatchKey::CompressedRowSparseCPU) {
-    return Backend::CompressedRowSparseCPU;
-  } else if (t == DispatchKey::CompressedRowSparseCUDA) {
-    return Backend::CompressedRowSparseCUDA;
+  } else if (t == DispatchKey::SparseCsrCPU) {
+    return Backend::SparseCsrCPU;
+  } else if (t == DispatchKey::SparseCsrCUDA) {
+    return Backend::SparseCsrCUDA;
   } else if (t == DispatchKey::MkldnnCPU) {
     return Backend::MkldnnCPU;
   } else if (t == DispatchKey::QuantizedCPU) {
@@ -176,10 +176,10 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::SparseCUDA;
     case Backend::SparseHIP:
       return DispatchKey::SparseHIP;
-    case Backend::CompressedRowSparseCPU:
-      return DispatchKey::CompressedRowSparseCPU;
-    case Backend::CompressedRowSparseCUDA:
-      return DispatchKey::CompressedRowSparseCUDA;  
+    case Backend::SparseCsrCPU:
+      return DispatchKey::SparseCsrCPU;
+    case Backend::SparseCsrCUDA:
+      return DispatchKey::SparseCsrCUDA;  
     case Backend::MkldnnCPU:
       return DispatchKey::MkldnnCPU;
     case Backend::Vulkan:
@@ -217,9 +217,9 @@ static inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::CUDA;
     case Backend::SparseHIP:
       return DeviceType::HIP;
-    case Backend::CompressedRowSparseCPU:
+    case Backend::SparseCsrCPU:
       return DeviceType::CPU;
-    case Backend::CompressedRowSparseCUDA:
+    case Backend::SparseCsrCUDA:
       return DeviceType::CUDA;
     case Backend::XPU:
     case Backend::SparseXPU:

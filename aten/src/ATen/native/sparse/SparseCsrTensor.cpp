@@ -4,10 +4,10 @@
 #include <ATen/Layout.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/CompressedRowSparseTensorImpl.h>
+#include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>
-#include <ATen/CompressedRowSparseTensorUtils.h>
+#include <ATen/SparseCsrTensorUtils.h>
 
 #include <TH/THBlasUtils.h>
 
@@ -19,15 +19,15 @@ using namespace at::sparse;
 SparseTensor new_csr_tensor(const TensorOptions& options) {
   // TODO: remove this comment after enabling autograd support for CSR tensor constructor.
   // TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
-  AT_ASSERT(options.layout() == kCompressedRowSparse);
+  AT_ASSERT(options.layout() == kSparseCsr);
   DispatchKey dispatch_key;
   if (options.device().is_cuda()) {
-    dispatch_key = DispatchKey::CompressedRowSparseCUDA;
+    dispatch_key = DispatchKey::SparseCsrCUDA;
   } else {
-    dispatch_key = DispatchKey::CompressedRowSparseCPU;
+    dispatch_key = DispatchKey::SparseCsrCPU;
   }
   
-  return detail::make_tensor<CompressedRowSparseTensorImpl>(
+  return detail::make_tensor<SparseCsrTensorImpl>(
                                                   DispatchKeySet(dispatch_key), options.dtype());
 }
 
@@ -36,7 +36,7 @@ SparseTensor new_csr_tensor(const TensorOptions& options) {
 Tensor sparse_csr_tensor(const Tensor& crow_indices, const Tensor& col_indices, 
                          const Tensor& values, IntArrayRef size,
                          const TensorOptions& options) {
-  TORCH_CHECK(!options.has_layout() || options.layout() == kCompressedRowSparse, "expected sparse CSR layout, but got layout ", options.layout());
+  TORCH_CHECK(!options.has_layout() || options.layout() == kSparseCsr, "expected sparse CSR layout, but got layout ", options.layout());
   TORCH_CHECK(crow_indices.numel() == size[0] + 1, "crow_indices.numel() must be size(0)+1, but got: ", crow_indices.numel());
 
   SparseTensor self = new_csr_tensor(options);

@@ -1,11 +1,11 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
-#include <ATen/CompressedRowSparseTensorImpl.h>
+#include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseTensorUtils.h>
-#include <ATen/CompressedRowSparseTensorUtils.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
 #include <TH/THBlasUtils.h>

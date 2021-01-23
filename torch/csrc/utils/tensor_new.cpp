@@ -645,7 +645,7 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
                                             /*copy_variables=*/false, /*copy_numpy=*/true,
                                             /*type_inference=*/type_inference);
     return at::sparse_csr_tensor(crow_indices, col_indices, values, r.intlist(3),
-                                 options(inferred_dispatch_key, inferred_scalar_type).layout(at::kCompressedRowSparse))
+                                 options(inferred_dispatch_key, inferred_scalar_type).layout(at::kSparseCsr))
                                  .set_requires_grad(r.toBool(8));
   }
   throw std::runtime_error("sparse_csr_tensor(): invalid arguments");  

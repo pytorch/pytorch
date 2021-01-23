@@ -338,7 +338,7 @@ struct C10_API TensorOptions {
   }
 
   bool is_sparse_csr() const {
-    return layout_ == c10::Layout::CompressedRowSparse;
+    return layout_ == c10::Layout::SparseCsr;
   }
 
   // For compatibility with legacy tensor.type() comparisons
@@ -661,12 +661,12 @@ inline DispatchKey computeDispatchKey(c10::optional<ScalarType> dtype, c10::opti
           default:
             AT_ERROR("Unsupported device type for mkldnn layout: ", device_.type());
         }
-      case Layout::CompressedRowSparse:
+      case Layout::SparseCsr:
         switch(device_.type()) {
           case DeviceType::CPU:
-            return DispatchKey::CompressedRowSparseCPU;
+            return DispatchKey::SparseCsrCPU;
           case DeviceType::CUDA:
-            return DispatchKey::CompressedRowSparseCUDA;
+            return DispatchKey::SparseCsrCUDA;
           default:
             AT_ERROR("Unsupported device type for sparse CSR layout: ", device_.type());
         }
@@ -706,9 +706,9 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::CUDA;
   } else if (tid == DispatchKey::SparseHIP) {
     return DeviceType::HIP;
-  } else if (tid == DispatchKey::CompressedRowSparseCPU) {
+  } else if (tid == DispatchKey::SparseCsrCPU) {
     return DeviceType::CPU;
-  } else if (tid == DispatchKey::CompressedRowSparseCUDA) {
+  } else if (tid == DispatchKey::SparseCsrCUDA) {
     return DeviceType::CUDA;
   } else if (tid == DispatchKey::MkldnnCPU) {
     return DeviceType::CPU;

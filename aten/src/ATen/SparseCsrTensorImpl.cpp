@@ -1,16 +1,16 @@
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/CompressedRowSparseTensorImpl.h>
+#include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 
 namespace at {
 namespace {
-  DeviceType CompressedRowSparseTensorSetToDeviceType(DispatchKeySet key_set) {
-    if (key_set.has(DispatchKey::CompressedRowSparseCPU)) {
+  DeviceType SparseCsrTensorSetToDeviceType(DispatchKeySet key_set) {
+    if (key_set.has(DispatchKey::SparseCsrCPU)) {
       return kCPU;
-    } else if (key_set.has(DispatchKey::CompressedRowSparseCUDA)) {
+    } else if (key_set.has(DispatchKey::SparseCsrCUDA)) {
       return kCUDA;
     } else {
       AT_ERROR("Cannot construct SparseTensor with non-sparse tensor type ID ", key_set);
@@ -18,15 +18,15 @@ namespace {
   }
 }
 
-CompressedRowSparseTensorImpl::CompressedRowSparseTensorImpl(at::DispatchKeySet key_set,
+SparseCsrTensorImpl::SparseCsrTensorImpl(at::DispatchKeySet key_set,
                                          const caffe2::TypeMeta& data_type)
-  :   CompressedRowSparseTensorImpl(key_set, data_type
-      , at::empty({0}, at::initialTensorOptions().device(CompressedRowSparseTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // crow_indices
-      , at::empty({0}, at::initialTensorOptions().device(CompressedRowSparseTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // col_indices
-      , at::empty({0}, at::initialTensorOptions().device(CompressedRowSparseTensorSetToDeviceType(key_set)).dtype(data_type)) // values
+  :   SparseCsrTensorImpl(key_set, data_type
+      , at::empty({0}, at::initialTensorOptions().device(SparseCsrTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // crow_indices
+      , at::empty({0}, at::initialTensorOptions().device(SparseCsrTensorSetToDeviceType(key_set)).dtype(ScalarType::Int)) // col_indices
+      , at::empty({0}, at::initialTensorOptions().device(SparseCsrTensorSetToDeviceType(key_set)).dtype(data_type)) // values
 ) {}
 
-CompressedRowSparseTensorImpl::CompressedRowSparseTensorImpl(at::DispatchKeySet key_set,
+SparseCsrTensorImpl::SparseCsrTensorImpl(at::DispatchKeySet key_set,
                                          const caffe2::TypeMeta& data_type,
                                          at::Tensor crow_indices, at::Tensor col_indices, 
                                          at::Tensor values)
@@ -35,7 +35,7 @@ CompressedRowSparseTensorImpl::CompressedRowSparseTensorImpl(at::DispatchKeySet 
     col_indices_(std::move(col_indices)),
     values_(std::move(values)) {}
 
-void CompressedRowSparseTensorImpl::resize_and_clear_(int64_t nnz_size, IntArrayRef size) {
+void SparseCsrTensorImpl::resize_and_clear_(int64_t nnz_size, IntArrayRef size) {
   // call crow_indices().options() here since the struct contructor calls the tensor constructor
   // with args for device specific init.
   auto empty_crow_indices = at::empty(size[0] + 1, crow_indices().options());
@@ -53,7 +53,7 @@ void CompressedRowSparseTensorImpl::resize_and_clear_(int64_t nnz_size, IntArray
   sizes_and_strides_.set_sizes(size);
 }
 
-void CompressedRowSparseTensorImpl::resize_as_(const Tensor& src) {
+void SparseCsrTensorImpl::resize_as_(const Tensor& src) {
   crow_indices_ = at::empty_like(src.crow_indices(), src.crow_indices().options(), src.crow_indices().suggest_memory_format());
   col_indices_ = at::empty_like(src.col_indices(), src.col_indices().options(), 
     src.col_indices().suggest_memory_format());
@@ -61,7 +61,7 @@ void CompressedRowSparseTensorImpl::resize_as_(const Tensor& src) {
   sizes_and_strides_.set_sizes(src.sizes());
 }
   
-void CompressedRowSparseTensorImpl::set_member_tensors_unsafe(const Tensor& crow_indices, const Tensor& col_indices,
+void SparseCsrTensorImpl::set_member_tensors_unsafe(const Tensor& crow_indices, const Tensor& col_indices,
                                                       const Tensor& values) {
   TORCH_CHECK(col_indices.layout() == kStrided, 
               "expected col_indices to be a dense tensor, but got indices of layout ", 
