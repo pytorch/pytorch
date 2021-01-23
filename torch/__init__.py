@@ -14,6 +14,7 @@ import sys
 import platform
 import textwrap
 import ctypes
+import warnings
 
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
@@ -35,7 +36,8 @@ __all__ = [
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
-    'lobpcg', 'set_deterministic', 'is_deterministic'
+    'lobpcg', 'use_deterministic_algorithms', 'set_deterministic',
+    'are_deterministic_algorithms_enabled', 'is_deterministic'
 ]
 
 ################################################################################
@@ -325,7 +327,7 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
-def set_deterministic(d):
+def use_deterministic_algorithms(d):
     r""" Sets whether PyTorch operations must use "deterministic"
     algorithms. That is, algorithms which, given the same input, and when
     run on the same software and hardware, always produce the same output.
@@ -402,13 +404,33 @@ def set_deterministic(d):
         d (:class:`bool`): If True, force operations to be deterministic.
                            If False, allow non-deterministic operations.
     """
-    _C._set_deterministic(d)
+    _C._set_deterministic_algorithms(d)
+
+def set_deterministic(d):
+    r"""This function is deprecated and will be removed in a future release.
+    Please use :func:`torch.use_deterministic_algorithms` instead.
+    """
+    warnings.warn((
+        "torch.set_deterministic is deprecated and will be removed in a future "
+        "release. Please use torch.use_deterministic_algorithms instead"))
+
+    use_deterministic_algorithms(d)
+
+def are_deterministic_algorithms_enabled():
+    r"""Returns True if the global deterministic flag is turned on. Refer to
+    :func:`torch.use_deterministic_algorithms` documentation for more details.
+    """
+    return _C._get_deterministic_algorithms()
 
 def is_deterministic():
-    r"""Returns True if the global deterministic flag is turned on. Refer to
-    :func:`torch.set_deterministic` documentation for more details.
+    r"""This function is deprecated and will be removed in a future release.
+    Please use :func:`torch.are_deterministic_algorithms_enabled` instead.
     """
-    return _C._get_deterministic()
+    warnings.warn((
+        "torch.is_deterministic is deprecated and will be removed in a future "
+        "release. Please use torch.are_deterministic_algorithms_enabled instead"))
+    return are_deterministic_algorithms_enabled()
+
 
 ################################################################################
 # Define Storage and Tensor classes
