@@ -10,6 +10,7 @@ from .functional_adagrad import _FunctionalAdagrad
 from .functional_adam import _FunctionalAdam
 from .functional_sgd import _FunctionalSGD
 from .functional_adadelta import _FunctionalAdadelta
+from .functional_rmsprop import _FunctionalRMSprop
 import torch.distributed.autograd as dist_autograd
 
 
@@ -187,6 +188,7 @@ class DistributedOptimizer:
         optim.Adam: _FunctionalAdam,
         optim.SGD: _FunctionalSGD,
         optim.Adadelta: _FunctionalAdadelta,
+        optim.RMSprop: _FunctionalRMSprop,
     }
 
     def __init__(self, optimizer_class, params_rref, *args, **kwargs):
