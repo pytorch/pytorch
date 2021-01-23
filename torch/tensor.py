@@ -890,7 +890,7 @@ class Tensor(torch._C._TensorBase):
             raise RuntimeError("Only 2D tensors can be converted to the CSR format but got shape: ", shape)
 
         if self.is_sparse:
-            return self.to_dense().to_sparse_csr(fill_value) # TODO: optimize this.
+            return self.to_dense().to_sparse_csr() # TODO: optimize this.
         if self.is_sparse_csr:
             return self
         else:
