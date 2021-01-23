@@ -211,7 +211,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
                     total_length
                 )
             )
-            state.error_dict[bucket_index] = torch.zeros(total_length, device=device)
+            state.error_dict[bucket_index] = torch.zeros(total_length, device=device, dtype=dtype)
 
         # Keep a copy of the input tensor,
         # so that we can compute the local error caused by compression later,
@@ -371,7 +371,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
 
         if state.use_error_feedback:
             # memoize the local errors.
-            state.error_dict[bucket_index] = input_tensor_cp - input_tensor
+            state.error_dict[bucket_index].copy_(input_tensor_cp - input_tensor)
         if not state.warm_start:
             state.p_memory_dict.clear()
             state.q_memory_dict.clear()
@@ -457,7 +457,7 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
                 )
             )
             state.error_dict[bucket_index] = torch.zeros(
-                padded_total_length, device=device
+                padded_total_length, device=device, dtype=input_tensor.dtype
             )
 
         # Keep a copy of the input tensor,
@@ -552,7 +552,7 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
 
         if state.use_error_feedback:
             # memoize the local errors.
-            state.error_dict[bucket_index] = input_tensor_cp - input_tensor
+            state.error_dict[bucket_index].copy_(input_tensor_cp - input_tensor)
         if torch.cuda.is_available():
             torch.cuda.synchronize(device)
         if not state.warm_start:
