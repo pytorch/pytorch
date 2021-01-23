@@ -370,7 +370,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
             torch.cuda.synchronize(device)
 
         if state.use_error_feedback:
-            # memoize the local errors.
+            # Memorize the local errors.
             state.error_dict[bucket_index].copy_(input_tensor_cp - input_tensor)
         if not state.warm_start:
             state.p_memory_dict.clear()
@@ -551,7 +551,7 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         )
 
         if state.use_error_feedback:
-            # memoize the local errors.
+            # Memorize the local errors.
             state.error_dict[bucket_index].copy_(input_tensor_cp - input_tensor)
         if torch.cuda.is_available():
             torch.cuda.synchronize(device)
