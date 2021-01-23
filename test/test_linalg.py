@@ -864,7 +864,7 @@ class TestLinalg(TestCase):
 
         # dtypes should match
         out = torch.empty_like(a).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
+        with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
             torch.kron(a, b, out=out)
 
     # This test confirms that torch.linalg.norm's dtype argument works
