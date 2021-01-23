@@ -431,6 +431,12 @@ class IndependentTransform(Transform):
     def __repr__(self):
         return f"{self.__class__.__name__}({repr(self.base_transform)}, {self.reinterpreted_batch_ndims})"
 
+    def forward_shape(shape):
+        return self.base_transform.forward_shape(shape)
+
+    def inverse_shape(shape):
+        return self.base_transform.inverse_shape(shape)
+
 
 class ReshapeTransform(Transform):
     """
@@ -787,7 +793,7 @@ class CorrCholeskyTransform(Transform):
     def forward_shape(self, shape):
         # Reshape from (..., N) to (..., D, D).
         if len(shape) < 1:
-            raise ValueError("Too few dimensions in input")
+            raise ValueError("Too few dimensions on input")
         N = shape[-1]
         D = round((0.25 + 2 * N) ** 0.5 + 0.5)
         if D * (D - 1) // 2 != N:
@@ -828,6 +834,16 @@ class SoftmaxTransform(Transform):
     def _inverse(self, y):
         probs = y
         return probs.log()
+
+    def forward_shape(self, shape):
+        if len(shape) < 1:
+            raise ValueError("Too few dimensions on input")
+        return shape
+
+    def inverse_shape(self, shape):
+        if len(shape) < 1:
+            raise ValueError("Too few dimensions on input")
+        return shape
 
 
 class StickBreakingTransform(Transform):
