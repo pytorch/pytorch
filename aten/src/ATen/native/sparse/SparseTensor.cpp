@@ -538,11 +538,17 @@ Tensor sparse_mask_helper_cpu(
     with the indices at tensor input `t`.
 
     Inputs:
-      `t`             - tensor input
+      `t`             - coalesced sparse tensor input
       `mask_indices`  - mask indices tensor
 
     Note: every index exists in the sparse tensor `t`
   */
+  TORCH_CHECK(t.is_sparse(), "t: input is not a sparse tensor");
+  TORCH_CHECK(t.is_coalesced(), "t:  input is uncoalesced");
+  TORCH_CHECK(mask_indices.dim() == t._indices().dim(), "mask_indices: operands have incompatible indices dim; self has dim ",
+      t._indices().dim(), " but mask has dim ", mask_indices.dim());
+  TORCH_CHECK(mask_indices.is_contiguous(), "mask_indices: mask is not contiguous");
+
   int64_t r_nnz = mask_indices.size(1);
   auto t_v = t._values();
   auto vsize = t_v.sizes().vec();

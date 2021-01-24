@@ -62,11 +62,6 @@ __global__ void _sparse_mask_copy_kernel(
       r_values_ti.data[out_i] = t_values_ti.data[in_i];
     }
   }
-  else {
-    for (int64_t out_i = out_start; out_i < out_end; out_i++) {
-      r_values_ti.data[out_i] = scalar_t(0);
-    }
-  }
 }
 
 } // end namespace
@@ -208,9 +203,15 @@ Tensor sparse_mask_helper_cuda(
     `t._indices()` to then filter the values.
 
     Inputs:
-      `t`             - tensor input
+      `t`             - coalesced sparse tensor input
       `mask_indices`  - mask indices tensor
   */
+  TORCH_CHECK(t.is_sparse(), "t: input is not a sparse tensor");
+  TORCH_CHECK(t.is_coalesced(), "t:  input is uncoalesced");
+  TORCH_CHECK(mask_indices.dim() == t._indices().dim(), "mask_indices: operands have incompatible indices dim; self has dim ",
+      t._indices().dim(), " but mask has dim ", mask_indices.dim());
+  TORCH_CHECK(mask_indices.is_contiguous(), "mask_indices: mask is not contiguous");
+
   int64_t r_nnz = mask_indices.size(1);
   auto t_values = t._values().contiguous();
   auto full_size = t.sizes();
@@ -221,9 +222,7 @@ Tensor sparse_mask_helper_cuda(
   auto t_indices = t._indices().contiguous();
   auto t_nnz = t._nnz();
 
-  int curDevice = -1;
-  cudaGetDevice(&curDevice);
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream(curDevice);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
 
@@ -252,13 +251,14 @@ Tensor sparse_mask_helper_cuda(
       t_indices_pos.data_ptr<int64_t>());
 
   // Step 4: Copy the Filtered `t._values()` using the matches at `t_indices_pos`
-  int64_t total_threads = r_nnz;
-  if (total_threads > 0) {
+  if (r_nnz > 0) {
     const dim3 block = dim3(
-        std::min(static_cast<int64_t>(cuda::getApplyBlock().x), total_threads));
+        std::min(static_cast<int64_t>(cuda::getApplyBlock().x), r_nnz));
     dim3 grid;
+    int curDevice = -1;
+    cudaGetDevice(&curDevice);
     TORCH_CHECK(
-        cuda::getApplyGrid(total_threads, grid, curDevice),
+        cuda::getApplyGrid(r_nnz, grid, curDevice),
         "sparse_mask_helper_cuda: input too large or too many dimensions");
 
     auto t_indices_ti = getTensorInfo<int64_t, int64_t>(t_flatten_indices);
@@ -274,7 +274,7 @@ Tensor sparse_mask_helper_cuda(
               getTensorInfo<scalar_t, int64_t>(r_values);
 
           _sparse_mask_copy_kernel<scalar_t><<<grid, block, 0, stream>>>(
-              total_threads,
+              r_nnz,
               t_nnz,
               t_indices_ti,
               mask_indices_ti,
