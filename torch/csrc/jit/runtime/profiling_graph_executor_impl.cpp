@@ -424,6 +424,22 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
       "After customPostPasses (end of runNoGradOptimizations)\n", *graph);
 }
 
+void transferProfilingInfoToConvolution(Block* b) {
+
+  for (auto n : b->nodes()) {
+    if (n->kind() == aten::conv2d) {
+      if (n->hasNamedInput("input") && n->namedInput("input")->node()->hasAttribute(attr::profiled_type)) {
+        GRAPH_DEBUG("@@@Transfering attribute to ", getHeader(n));
+        n->ty_(Symbol::attr("input_profiled_type"), n->namedInput("input")->node()->ty(attr::profiled_type));
+      }
+    }
+
+    for (auto ib: n->blocks()) {
+      transferProfilingInfoToConvolution(ib);
+    }
+  }
+}
+
 void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     std::shared_ptr<Graph>& copy) {
   GRAPH_DEBUG("Before runProfilingOptimizations:\n", *copy);
@@ -433,6 +449,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
   }
 
   runPreAutodiffPassPipeline(copy);
+  transferProfilingInfoToConvolution(copy->block());
 
   if (needsGradientInProfilingMode(copy->block())) {
     auto diff_nodes = CreateAutodiffSubgraphs(
@@ -560,9 +577,9 @@ static void replaceWithConv2dRelu(Block* block) {
         WithInsertPoint wip {n->input(0)->node()};
         auto conv_input = n->input(0)->node()->input(0);
         //auto weight_input = n->input(0)->node()->input(1);
-        bool is_mkldnn_input = mkldnn_ops.count(conv_input->node()->kind()) == 0;
+        bool is_non_mkldnn_input = mkldnn_ops.count(conv_input->node()->kind()) == 0;
         //bool is_mkldnn_weight = mkldnn_ops.count(weight_input->node()->kind()) == 0;
-        if (is_mkldnn_input) {
+        if (is_non_mkldnn_input) {
           conv_input = n->owningGraph()->insert(Symbol::aten("to_mkldnn"), {conv_input});
         }
         //weight_input = n->owningGraph()->insert(Symbol::aten("to_mkldnn"), {weight_input});
@@ -571,9 +588,11 @@ static void replaceWithConv2dRelu(Block* block) {
         // }
         std::vector<NamedValue> fused_inputs (n->input(0)->node()->inputs().begin(), n->input(0)->node()->inputs().end());
         auto fused = n->owningGraph()->insert(Symbol::prim("_conv2d_relu"), fused_inputs);
-        if (is_mkldnn_input) {
+        if (is_non_mkldnn_input) {
                   fused->node()->replaceInput(0, conv_input);
         }
+
+        //replaceWeightsBias(n);
         // if (is_mkldnn_weight) {
         //   fused->node()->replaceInput(1, weight_input);
         // }

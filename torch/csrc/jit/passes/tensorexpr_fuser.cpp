@@ -1,3 +1,4 @@
+#include <ideep/abstract_types.hpp>
 #include <math.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
@@ -22,7 +23,11 @@
 #include <ideep.hpp>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/ConvUtils.h>
+#include "ATen/core/interned_strings.h"
 #include "NativeFunctions.h"
+#include "c10/util/Exception.h"
+#include "jit/ir/ir.h"
+#include <third_party/ideep/include/ideep/operators/conv.hpp>
 
 
 // NOLINTNEXTLINE
@@ -1154,17 +1159,87 @@ Operation createTensorExprOp(const Node* node) {
   };
 }
 
+static at::Tensor convertToDesc(at::Tensor& t, ideep::tensor::desc desc) {
+    auto mkldnn_tensor = t.to_mkldnn();
+    auto itensor = at::native::itensor_from_mkldnn(mkldnn_tensor);
+    auto reordered_iten = itensor.reorder_if_differ_in(desc);
+    auto result = at::native::new_with_itensor_mkldnn(std::move(reordered_iten), optTypeMetaToScalarType(t.options().dtype_opt()), t.options().device_opt());
+    return result;
+}
+
+  // auto desc = ideep::convolution_forward::expected_weights_desc(weight_dims, 
+  //   ideep::data_type::f32, 
+  //   strides, 
+  //   padding_l, 
+  //   padding_r, 
+  //   dilates, 
+  //   1,
+  //   ideep::algorithm::convolution_direct,
+  //   ideep::prop_kind::forward_inference);
+
+void replaceWeightsBias(Node* conv) {
+  TORCH_INTERNAL_ASSERT(aten::conv2d || Symbol::prim("_conv2d_relu"));
+  auto oweight = constant_as<at::Tensor>(conv->namedInput("weight"));
+  auto ostrides = constant_as<std::vector<int64_t>>(conv->namedInput("stride"));
+  auto opadding = constant_as<std::vector<int64_t>>(conv->namedInput("padding"));
+  auto odilation = constant_as<std::vector<int64_t>>(conv->namedInput("dilation"));
+  auto ogroups = constant_as<int64_t>(conv->namedInput("groups"));
+
+
+  if (conv->namedInput("bias")->type() == NoneType::get()) {
+    GRAPH_DEBUG("no bias case isn't yet supported ");
+    return;
+  }
+
+  auto obias = constant_as<at::Tensor>(conv->namedInput("bias"));
+  if (!oweight.has_value() || !ostrides.has_value() || !opadding.has_value() || !odilation.has_value() || !ogroups.has_value() || !obias.has_value()) {
+    GRAPH_DEBUG("Some arguments to ", getHeader(conv), " aren't constant!");
+    return;
+  }
+
+  ideep::dims strides = *ostrides;
+  ideep::dims padding_l = {(*opadding)[0], (*opadding)[0]};
+  ideep::dims padding_r = {(*opadding)[1], (*opadding)[1]};
+  ideep::dims dilates = {(*odilation)[0], (*odilation)[1]};
+
+  auto input_type = conv->ty(Symbol::attr("input_profiled_type"))->cast<TensorType>();
+  auto ssizes  = input_type->sizes().concrete_sizes();
+
+  if (!ssizes.has_value()) {
+    GRAPH_DEBUG("No static sizes for ", getHeader(conv));
+  }
+
+  ideep::dims weight_dims(oweight->sizes().begin(), oweight->sizes().end());
+  ideep::dims bias_dims(obias->sizes().begin(), obias->sizes().end());
+  //ideep::dims input_size(ssizes->begin(), ssizes->end());
+  std::vector<int64_t> output_sizes = at::native::conv_output_size(*ssizes, oweight->sizes(), *opadding, *ostrides, *odilation);
+
+// desc(const dims &adims, data_type adata_type, format_tag aformat_tag)
+  ideep::tensor::desc src_desc(*ssizes, ideep::data_type::f32, ideep::format_tag::any);
+  ideep::tensor::desc weight_desc(weight_dims, ideep::data_type::f32, ideep::format_tag::any);
+  ideep::tensor::desc bias_desc(bias_dims, ideep::data_type::f32, ideep::format_tag::any);
+  ideep::tensor::desc dst_desc(output_sizes, ideep::data_type::f32, ideep::format_tag::any);
+
+  //     auto pd = get_primitive_desc</*with_bias=*/false>(
+  //      src_desc, weights_desc, tensor::desc(), dst_desc, strides, dilates_,
+  //      padding_l, padding_r, attr_t(), aalgorithm, apkind);
+  // func: conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor
+  
+  auto attr = ideep::attr_t::fuse_relu();
+  auto conv_pd = ideep::convolution_forward::get_primitive_desc<true, false>(src_desc, weight_desc, bias_desc, dst_desc, strides, dilates, padding_l, padding_r, attr);
+
+
+  auto packed_weights = convertToDesc(*oweight, conv_pd.weights_desc());
+  auto packed_bias = convertToDesc(*obias, conv_pd.bias_desc());
+
+  WithInsertPoint wip (conv);
+
+  conv->replaceInput(1, conv->owningGraph()->insertConstant(packed_weights));
+  conv->replaceInput(2, conv->owningGraph()->insertConstant(packed_bias));
+}
+
 
 Operation createConv2dRelu(const Node* node) {
-
-/*
-
-
-      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[], %groups:int, %alpha:float, %scale, %input_scale):
-        %r = aten::conv2d(%a, %w, %b, %stride, %padding, %dilation, %groups)
-        %s = aten::elu(%r, %alpha, %scale, %input_scale)
-
-*/
 
   return [](Stack* stack) {
 

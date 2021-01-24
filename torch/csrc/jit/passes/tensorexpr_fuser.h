@@ -30,6 +30,8 @@ TORCH_API void RemoveProfileNodesAndSpecializeTypes(
 TORCH_API void RemoveTensorTypeSpecializations(std::shared_ptr<Graph>& graph);
 TORCH_API void removeTensorTypeSpecializations(Block* block);
 
+TORCH_API void replaceWeightsBias(Node* n);
+
 using tensor_type_converter_t =
     c10::function_ref<TensorTypePtr(const TensorTypePtr& t)>;
 

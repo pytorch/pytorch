@@ -229,6 +229,7 @@ bool needsProfiledInputs(Node* n) {
     // pass.
     case aten::t:
     case aten::mm:
+    case aten::conv2d:
       return true;
     default:
       return ProfileRegistry::getRegistry()->shouldProfileNode(n);
