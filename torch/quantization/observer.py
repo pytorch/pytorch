@@ -58,8 +58,8 @@ class ObserverBase(ABC, nn.Module):
         self.dtype = dtype
 
     @abstractmethod
-    def forward(self, x):
-        pass
+    def forward(self, x: torch.Tensor):
+        return x
 
     @abstractmethod
     def calculate_qparams(self, **kwargs):
@@ -697,7 +697,7 @@ class HistogramObserver(_ObserverBase):
     min_val: torch.Tensor
     max_val: torch.Tensor
 
-    def __init__(self, bins=2048, upsample_rate=128, dtype=torch.quint8,
+    def __init__(self, bins: int=2048, upsample_rate=128, dtype=torch.quint8,
                  qscheme=torch.per_tensor_affine, reduce_range=False):
         # bins: The number of bins used for histogram calculation.
         super(HistogramObserver, self).__init__(dtype=dtype,
@@ -710,8 +710,69 @@ class HistogramObserver(_ObserverBase):
         self.dst_nbins = 2 ** torch.iinfo(self.dtype).bits
         self.upsample_rate = upsample_rate
 
-    @torch.jit.ignore
-    def _non_linear_param_search(self):
+    def _get_norm(self, delta_begin: torch.Tensor, delta_end: torch.Tensor, density: torch.Tensor) -> torch.Tensor:
+        r"""
+        Compute the norm of the values uniformaly distributed between
+        delta_begin and delta_end.
+        Currently only L2 norm is supported.
+
+        norm = density * (integral_{begin, end} x^2)
+             = density * (end^3 - begin^3) / 3
+        """
+        norm = 0.0
+        norm = (
+            delta_end * delta_end * delta_end
+            - delta_begin * delta_begin * delta_begin
+        ) / 3
+        return density * norm
+
+    def _compute_quantization_error(self, next_start_bin: int, next_end_bin: int):
+        r"""
+        Compute the quantization error if we use start_bin to end_bin as the
+        min and max to do the quantization.
+        """
+        bin_width = (self.max_val.item() - self.min_val.item()) / self.bins
+
+        dst_bin_width = bin_width * (next_end_bin - next_start_bin + 1) / self.dst_nbins
+        if dst_bin_width == 0.0:
+            return 0.0
+
+        src_bin = torch.arange(self.bins)
+        # distances from the beginning of first dst_bin to the beginning and
+        # end of src_bin
+        src_bin_begin = (src_bin - next_start_bin) * bin_width
+        src_bin_end = src_bin_begin + bin_width
+
+        # which dst_bins the beginning and end of src_bin belong to?
+        dst_bin_of_begin = torch.clamp(src_bin_begin // dst_bin_width, 0, self.dst_nbins - 1)
+        dst_bin_of_begin_center = (dst_bin_of_begin + 0.5) * dst_bin_width
+
+        dst_bin_of_end = torch.clamp(src_bin_end // dst_bin_width, 0, self.dst_nbins - 1)
+        dst_bin_of_end_center = (dst_bin_of_end + 0.5) * dst_bin_width
+
+        density = self.histogram / bin_width
+
+        norm = torch.zeros(self.bins)
+
+        delta_begin = src_bin_begin - dst_bin_of_begin_center
+        delta_end = dst_bin_width / 2
+        norm += self._get_norm(delta_begin, torch.ones(self.bins) * delta_end, density)
+
+        norm += (dst_bin_of_end - dst_bin_of_begin - 1) * self._get_norm(
+            torch.tensor(-dst_bin_width / 2), torch.tensor(dst_bin_width / 2), density
+        )
+
+        dst_bin_of_end_center = (
+            dst_bin_of_end * dst_bin_width + dst_bin_width / 2
+        )
+
+        delta_begin = -dst_bin_width / 2
+        delta_end = src_bin_end - dst_bin_of_end_center
+        norm += self._get_norm(torch.tensor(delta_begin), delta_end, density)
+
+        return norm.sum().item()
+
+    def _non_linear_param_search(self) -> Tuple[torch.Tensor, torch.Tensor]:
         r"""Non-linear parameter search.
 
         An approximation for L2 error minimization for selecting min/max.
@@ -719,74 +780,11 @@ class HistogramObserver(_ObserverBase):
         This follows the implementation of NormMinimization::NonlinearQuantizationParamsSearch in
         caffe2/quantization/server/norm_minimization.cc
         """
-        def _get_norm(delta_begin, delta_end, density, norm_type):
-            r"""
-            Compute the norm of the values uniformaly distributed between
-            delta_begin and delta_end.
-
-            norm = density * (integral_{begin, end} x^2)
-                 = density * (end^3 - begin^3) / 3
-            """
-            assert norm_type == "L2", "Only L2 norms are currently supported"
-            norm = 0.0
-            if norm_type == "L2":
-                norm = (
-                    delta_end * delta_end * delta_end
-                    - delta_begin * delta_begin * delta_begin
-                ) / 3
-            return density * norm
-
-        def _compute_quantization_error(next_start_bin, next_end_bin, norm_type):
-            r"""
-            Compute the quantization error if we use start_bin to end_bin as the
-            min and max to do the quantization.
-            """
-            bin_width = (self.max_val.item() - self.min_val.item()) / self.bins
-
-            dst_bin_width = bin_width * (next_end_bin - next_start_bin + 1) / self.dst_nbins
-            if dst_bin_width == 0.0:
-                return 0.0
-
-            src_bin = torch.arange(self.bins)
-            # distances from the beginning of first dst_bin to the beginning and
-            # end of src_bin
-            src_bin_begin = (src_bin - next_start_bin) * bin_width
-            src_bin_end = src_bin_begin + bin_width
-
-            # which dst_bins the beginning and end of src_bin belong to?
-            dst_bin_of_begin = torch.clamp(src_bin_begin // dst_bin_width, 0, self.dst_nbins - 1)
-            dst_bin_of_begin_center = (dst_bin_of_begin + 0.5) * dst_bin_width
-
-            dst_bin_of_end = torch.clamp(src_bin_end // dst_bin_width, 0, self.dst_nbins - 1)
-            dst_bin_of_end_center = (dst_bin_of_end + 0.5) * dst_bin_width
-
-            density = self.histogram / bin_width
-
-            norm = torch.zeros(self.bins)
-
-            delta_begin = src_bin_begin - dst_bin_of_begin_center
-            delta_end = dst_bin_width / 2
-            norm += _get_norm(delta_begin, delta_end, density, norm_type)
-
-            norm += (dst_bin_of_end - dst_bin_of_begin - 1) * _get_norm(
-                -dst_bin_width / 2, dst_bin_width / 2, density, norm_type
-            )
-
-            dst_bin_of_end_center = (
-                dst_bin_of_end * dst_bin_width + dst_bin_width / 2
-            )
-
-            delta_begin = -dst_bin_width / 2
-            delta_end = src_bin_end - dst_bin_of_end_center
-            norm += _get_norm(delta_begin, delta_end, density, norm_type)
-
-            return norm.sum()
-
         assert self.histogram.size()[0] == self.bins, "bins mistmatch"
         bin_width = (self.max_val - self.min_val) / self.bins
 
         # cumulative sum
-        total = sum(self.histogram)
+        total = torch.sum(self.histogram).item()
         cSum = torch.cumsum(self.histogram, dim=0)
 
         stepsize = 1e-5  # granularity
@@ -825,7 +823,7 @@ class HistogramObserver(_ObserverBase):
                 continue
 
             # calculate the quantization error using next_start_bin and next_end_bin
-            norm = _compute_quantization_error(next_start_bin, next_end_bin, "L2")
+            norm = self._compute_quantization_error(next_start_bin, next_end_bin)
 
             if norm > norm_min:
                 break
@@ -837,7 +835,6 @@ class HistogramObserver(_ObserverBase):
         new_max = self.min_val + bin_width * (end_bin + 1)
         return new_min, new_max
 
-    @torch.jit.ignore
     def _adjust_min_max(self,
                         combined_min: torch.Tensor,
                         combined_max: torch.Tensor,
@@ -857,7 +854,6 @@ class HistogramObserver(_ObserverBase):
         start_idx = int(torch.round((self.min_val - combined_min) / hist_bin_width).item())
         return combined_min, combined_max, downsample_rate, start_idx
 
-    @torch.jit.ignore
     def _combine_histograms(self,
                             orig_hist: torch.Tensor,
                             new_hist: torch.Tensor,
