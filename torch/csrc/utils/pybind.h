@@ -22,7 +22,25 @@ namespace py = pybind11;
 // https://pybind11.readthedocs.io/en/stable/advanced/smart_ptrs.html#custom-smart-pointers
 PYBIND11_DECLARE_HOLDER_TYPE(T, c10::intrusive_ptr<T>, true);
 
-namespace pybind11 { namespace detail {
+namespace pybind11 {
+
+#if PY_MAJOR_VERSION == 3 && PY_MINOR_VERSION >= 9
+class safe_gil_scoped_release : public gil_scoped_release {
+  public:
+    using gil_scoped_release::gil_scoped_release;
+    ~safe_gil_scoped_release() noexcept(false) {
+      if (_Py_IsFinalizing()) {
+        disarm();
+	throw std::runtime_error("Why oh why");
+      }
+    }
+};
+#else
+using safe_gil_scoped_release = gil_scoped_release;
+#endif
+
+
+namespace detail {
 
 // torch.autograd.Variable <-> at::Tensor conversions (without unwrapping)
 template <>
@@ -102,4 +120,5 @@ private:
 // http://pybind11.readthedocs.io/en/stable/advanced/cast/stl.html#c-17-library-containers
 template <typename T>
 struct type_caster<c10::optional<T>> : optional_caster<c10::optional<T>> {};
-}} // namespace pybind11::detail
+} // namespace detail
+} // namespace pybind11

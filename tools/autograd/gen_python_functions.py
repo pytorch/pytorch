@@ -831,7 +831,7 @@ def emit_single_dispatch(
 {schema_comment}
 {inits}
 auto dispatch_{name} = []({lambda_formals}) -> {lambda_return} {{
-  pybind11::gil_scoped_release no_gil;
+  pybind11::safe_gil_scoped_release no_gil;
   {dispatch_callee}({dispatch_args});
 }};
 dispatch_{name}({lambda_args}){set_requires_grad};
@@ -844,7 +844,7 @@ Py_RETURN_NONE;
 {schema_comment}
 {inits}
 auto dispatch_{name} = []({lambda_formals}) -> {lambda_return} {{
-  pybind11::gil_scoped_release no_gil;
+  pybind11::safe_gil_scoped_release no_gil;
   return {dispatch_callee}({dispatch_args});
 }};
 return wrap({namedtuple_typeref}dispatch_{name}({lambda_args}){set_requires_grad});

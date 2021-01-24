@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_function.h>
+#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <ATen/BatchedTensorImpl.h>
 #include <ATen/VmapMode.h>
@@ -65,7 +66,7 @@ void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& re
 #else
   pybind11::gil_scoped_acquire gil;
 #endif
-  pybind11::gil_scoped_release no_gil;
+  pybind11::safe_gil_scoped_release no_gil;
   Engine::thread_init(device, ready_queue, false);
 
   if (should_increment) {
@@ -74,9 +75,8 @@ void PythonEngine::thread_init(int device, const std::shared_ptr<ReadyQueue>& re
   }
 
 #ifdef IS_PYTHON_3_9_PLUS
-  // Do not call PyEval_RestoreThread, PyThreadState_[Clear|DeleteCurrent] if runtime is finalizing
+  // Do not call PyThreadState_[Clear|DeleteCurrent] if runtime is finalizing
   if (_Py_IsFinalizing()) {
-    no_gil.disarm();
     // TODO: call disarm rather than leak gil_scoped_acquired once PyThreadState_Clear can safely be called from finalize
     gil.release();
   }
