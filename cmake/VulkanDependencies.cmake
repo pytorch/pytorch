@@ -114,7 +114,7 @@ else()
       find_library(VULKAN_LIBRARY
         NAMES vulkan
         PATHS
-        "$ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/lib")
+        "$ENV{VULKAN_SDK}/lib")
 
       if(NOT VULKAN_LIBRARY)
         message(FATAL_ERROR "USE_VULKAN: Vulkan library not found")
@@ -127,8 +127,8 @@ else()
       list(APPEND Vulkan_LIBS ${VULKAN_LIBRARY})
     endif(USE_VULKAN_WRAPPER)
 
-    set(GOOGLE_SHADERC_INCLUDE_SEARCH_PATH $ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/include)
-    set(GOOGLE_SHADERC_LIBRARY_SEARCH_PATH $ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/lib)
+    set(GOOGLE_SHADERC_INCLUDE_SEARCH_PATH $ENV{VULKAN_SDK}/include)
+    set(GOOGLE_SHADERC_LIBRARY_SEARCH_PATH $ENV{VULKAN_SDK}/lib)
 
   else()
     # Try looking in system path as a last resort.
