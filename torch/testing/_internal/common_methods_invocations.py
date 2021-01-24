@@ -853,9 +853,9 @@ def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_sv
         def slice_V(v):
             return v[..., :(S - 2), :]
 
-        def uv_loss(usvh):
-            u00 = usvh[0][0, 0]
-            v00_conj = usvh[2][0, 0]
+        def uv_loss(usv):
+            u00 = usv[0][0, 0]
+            v00_conj = usv[2][0, 0]
             return u00 * v00_conj
     else:
         def slice_V(v):
