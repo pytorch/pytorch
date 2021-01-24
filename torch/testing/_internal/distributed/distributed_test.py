@@ -3152,6 +3152,9 @@ class DistributedTest:
                 global_bs=global_bs,
                 offset=bs_offset)
 
+        @unittest.skipIf(
+            BACKEND == "nccl", "nccl does not support DDP on CPU models"
+        )
         def test_ddp_logging_data(self):
             model_DDP = copy.deepcopy(DDP_NET)
             model_DDP = nn.parallel.DistributedDataParallel(model_DDP)
