@@ -1,10 +1,7 @@
-import os
-
 import torch
 import torch.nn as nn
 import torch.distributed.autograd as dist_autograd
 import torch.distributed.rpc as rpc
-import torch.multiprocessing as mp
 import torch.optim as optim
 from torch.distributed.rpc import RRef
 from torch.distributed.optim import DistributedOptimizer
