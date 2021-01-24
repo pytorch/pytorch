@@ -397,9 +397,6 @@ void IRPrinter::visit(const Store* v) {
     }
     ind->accept(this);
   }
-  if (v->indices().empty()) {
-    os() << "0";
-  }
   os() << "] = " << *v->value() << ";";
   os() << std::endl;
 }
