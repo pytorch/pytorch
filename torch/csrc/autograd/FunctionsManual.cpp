@@ -2111,16 +2111,18 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
 
   auto vh = v.conj().transpose(-2, -1);
 
-  // Based on a little experiment, min_threshold should be (approximately)
-  //   "max_abs_eigenvalue * (10 + matrix_size) * machine_eps".
-  // See: https://github.com/pytorch/pytorch/pull/50942
-  // Eps is still taking double and single eps value, because I don't know
-  //   if it would produce a lot of backward incompatibility due to large
-  //   eps for half-precision floating point
-  double eps = (lambda.dtype() == at::kDouble) ? std::numeric_limits<double>::epsilon()
-                                               : std::numeric_limits<float>::epsilon();
+  // Based on a little experiment, the original calculation of symeig_backward
+  //   (first grad) starts to deviate when the eigenalues deviation is about
+  //   1e-10 for double precision and 1e-2 for single precision (regardless of
+  //   the matrix size).
+  // See: https://colab.research.google.com/drive/1Fyk2H8hZGTtv9OH6yfr4ys2QIK2acCL8?usp=sharing
+  // Because the threshold for single precision is too high, the new algorithm
+  //   is only applied when the datatype is double precision.
+  // Also, I found setting the eps to 1e-8 (instead of 1e-10) is required to
+  //   pass the 2nd grad check (gradgradcheck).
+  double eps = (lambda.dtype() == at::kDouble) ? 1e-8 : 0.0;
   auto max_abs_lambda = lambda.abs().amax(/*dim=*/-1, /*keepdim=*/true).unsqueeze(-1);
-  auto min_threshold = max_abs_lambda * (10 + lambda.size(-1)) * eps;
+  auto min_threshold = max_abs_lambda * eps;
 
   Tensor result;
   if (gv.defined()) {
@@ -2131,7 +2133,7 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
       // see https://github.com/pytorch/pytorch/issues/47599
       // and https://arxiv.org/abs/2011.04366
       // Using less-or-equal sign (instead of less than) so that when
-      // min_threshold is 0 (e.g. in half-precision), it behaves the same as
+      // min_threshold is 0 (e.g. in single-precision), it behaves the same as
       // the original algorithm (i.e. substituting only the diagonal with INF)
       Tensor idx = F.abs() <= min_threshold;
       F.index_put_({idx}, INFINITY);

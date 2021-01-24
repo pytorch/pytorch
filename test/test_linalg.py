@@ -6115,6 +6115,65 @@ else:
         for batch_dims, eigenvectors, upper in itertools.product(batch_dims_set, (True, False), (True, False)):
             run_test((5,) + batch_dims, eigenvectors, upper)
 
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoMagma
+    @dtypes(torch.float64)
+    def test_symeig_degenerate_autograd(self, device, dtype):
+        # Test symeig backward in cases where there are degenerate/repeated eigenvalues.
+        # This is a special case because the normal calculation would produce nan
+        # or unstable calculation if there are repeated eigenvalues.
+
+        torch.manual_seed(123)
+
+        def get_loss(a, mat, P2, eps, ndegen):
+            # the loss function here is designed so that it depends on the
+            # degenerate eigenvectors, but does not depend on which linear
+            # combination of the degenerate eigenvectors are used.
+
+            # get the orthogonal vector for the eigenvectors
+            P, _ = torch.qr(mat)
+
+            # line up the eigenvalues
+            alineup = (a[..., :1] - eps,) + (a[..., :1],) * (ndegen - 1) + (a[..., 1:],)
+            b = torch.cat(alineup, dim=-1)
+
+            # construct the matrix (P.T @ diag(b) @ P)
+            A = (P.transpose(-2, -1) * b.unsqueeze(-2)) @ P
+
+            eivals, eivecs = torch.symeig(A, eigenvectors=True)
+            U = eivecs[..., :ndegen]  # the degenerate eigenvectors
+
+            loss = torch.einsum("...rc,...rc->", torch.matmul(P2, U), U)
+            return loss
+
+        def run_test(n, batch_shape, eps, ndegen):
+            if ndegen is None:
+                ndegen = n
+
+            # random matrix to be orthogonalized for the eigenvectors
+            mat = torch.randn((*batch_shape, n, n), dtype=dtype).requires_grad_()
+
+            # matrix for the loss function
+            P2 = torch.randn((*batch_shape, n, n), dtype=dtype)
+
+            # the degenerate eigenvalues
+            a = torch.rand((*batch_shape, n - ndegen + 1), dtype=dtype)
+            a = torch.sort(a, dim=-1)[0]
+
+            gradcheck(get_loss, (a, mat, P2, eps, ndegen))
+            gradgradcheck(get_loss, (a, mat, P2, eps, ndegen), eps=1e-4)
+
+        ns = [3, 5]  # size of the matrix
+        ndegens = [2, None]  # number of degenerate eigenvalues (if None, all degenerate)
+        batch_shapes = [(), (1, 1)]
+        # deviation of the repeated eigenvalues
+        # value that is slightly larger than min_threshold is required to see
+        # if the previous implementation gives the correct answer with that
+        # value (in this case, it is 2e-8)
+        epss = [2e-8, 0]
+        for (n, batch_shape, eps, ndegen) in itertools.product(ns, batch_shapes, epss, ndegens):
+            run_test(n, batch_shape, eps, ndegen)
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_pca_lowrank(self, device):
