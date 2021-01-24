@@ -231,7 +231,7 @@ void IRPrinter::visit(const Ramp* v) {
 
 void IRPrinter::visit(const Load* v) {
   // TODO: support the mask case
-  if (v->indices().size() == 0) {
+  if (v->indices().empty()) {
     os() << *v->base_handle();
   } else {
     os() << *v->base_handle() << "[";
@@ -241,9 +241,6 @@ void IRPrinter::visit(const Load* v) {
         os() << ", ";
       }
       ind->accept(this);
-    }
-    if (v->indices().empty()) {
-      os() << "0";
     }
     os() << "]";
   }
