@@ -288,7 +288,7 @@ class Vec256<double> {
   Vec256<double> C10_ALWAYS_INLINE neg() const {
     return {vec_neg(_vec0), vec_neg(_vec1)};
   }
-  Vec256<double> C10_ALWAYS_INLINE round() const { 
+  Vec256<double> C10_ALWAYS_INLINE round() const {
     return {vec_rint(_vec0), vec_rint(_vec1)};
   }
   Vec256<double> C10_ALWAYS_INLINE sin() const {

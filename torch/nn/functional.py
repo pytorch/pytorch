@@ -2485,6 +2485,72 @@ def poisson_nll_loss(
     return ret
 
 
+def gaussian_nll_loss(input, target, var, *, full=False, eps=1e-6, reduction='mean'):
+    r"""Gaussian negative log likelihood loss.
+
+    See :class:`~torch.nn.GaussianNLLLoss` for details.
+
+    Args:
+        input: expectation of the Gaussian distribution.
+        target: sample from the Gaussian distribution.
+        var: tensor of positive variance(s), one for each of the expectations
+            in the input (heteroscedastic), or a single one (homoscedastic).
+        full: ``True``/``False`` (bool), include the constant term in the loss
+            calculation. Default: ``False``.
+        eps: value added to var, for stability. Default: 1e-6.
+        reduction: specifies the reduction to apply to the output:
+            `'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the output is the average of all batch member losses,
+            ``'sum'``: the output is the sum of all batch member losses.
+            Default: ``'mean'``.
+    """
+    if not torch.jit.is_scripting():
+        tens_ops = (input, target, var)
+        if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+            return handle_torch_function(
+                gaussian_nll_loss, tens_ops, input, target, var, full=full, eps=eps, reduction=reduction)
+
+    # Inputs and targets much have same shape
+    input = input.view(input.size(0), -1)
+    target = target.view(target.size(0), -1)
+    if input.size() != target.size():
+        raise ValueError("input and target must have same size")
+
+    # Second dim of var must match that of input or be equal to 1
+    var = var.view(input.size(0), -1)
+    if var.size(1) != input.size(1) and var.size(1) != 1:
+        raise ValueError("var is of incorrect size")
+
+    # Check validity of reduction mode
+    if reduction != 'none' and reduction != 'mean' and reduction != 'sum':
+        raise ValueError(reduction + " is not valid")
+
+    # Entries of var must be non-negative
+    if torch.any(var < 0):
+        raise ValueError("var has negative entry/entries")
+
+    # Clamp for stability
+    var = var.clone()
+    with torch.no_grad():
+        var.clamp_(min=eps)
+
+    # Calculate loss (without constant)
+    loss = 0.5 * (torch.log(var) + (input - target)**2 / var).view(input.size(0), -1).sum(dim=1)
+
+    # Add constant to loss term if required
+    if full:
+        D = input.size(1)
+        loss = loss + 0.5 * D * math.log(2 * math.pi)
+
+    # Apply reduction
+    if reduction == 'mean':
+        return loss.mean()
+    elif reduction == 'sum':
+        return loss.sum()
+    else:
+        return loss
+
+
 def kl_div(
     input: Tensor,
     target: Tensor,
