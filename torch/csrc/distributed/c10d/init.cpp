@@ -185,16 +185,14 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
           "_set_construction_logging_data",
           [](
               ::c10d::Reducer& reducer,
-              const std::string& backend,
               const std::string& module_name,
               const std::string& device_ids,
-              int output_device,
+              const std::string& output_device,
               bool broadcast_buffers) -> void {
             reducer.set_construction_logging_data(
-                backend, module_name, device_ids, output_device, broadcast_buffers);
+                module_name, device_ids, output_device, broadcast_buffers);
           },
           py::arg("reducer"),
-          py::arg("backend"),
           py::arg("module_name"),
           py::arg("device_ids"),
           py::arg("output_device"),
@@ -1187,7 +1185,6 @@ Arguments:
       .def(py::init<>())
       .def_readwrite("world_size", &c10::DDPLoggingData::world_size)
       .def_readwrite("rank", &c10::DDPLoggingData::rank)
-      .def_readwrite("backend", &c10::DDPLoggingData::backend)
       .def_readwrite("module_name", &c10::DDPLoggingData::module_name)
       .def_readwrite("device_ids", &c10::DDPLoggingData::device_ids)
       .def_readwrite("output_device", &c10::DDPLoggingData::output_device)

@@ -108,10 +108,9 @@ class Reducer {
   // Set logging data that can be got during DistributedDataParallel
   // construction time.
   void set_construction_logging_data(
-      const std::string& backend,
       const std::string& module_name,
       const std::string& device_ids,
-      int output_device,
+      const std::string&  output_device,
       bool broadcast_buffers);
 
   // An Interface for users to get DDPLoggingData and log them

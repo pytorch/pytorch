@@ -1467,13 +1467,11 @@ void Reducer::ensure_prior_reduction_finished() {
 }
 
 void Reducer::set_construction_logging_data(
-  const std::string& backend,
   const std::string& module_name,
   const std::string& device_ids,
-  int output_device,
+  const std::string& output_device,
   bool broadcast_buffers
 ) {
-  ddp_logging_data_->backend = backend;
   ddp_logging_data_->module_name = module_name;
   ddp_logging_data_->device_ids = device_ids;
   ddp_logging_data_->output_device = output_device;
