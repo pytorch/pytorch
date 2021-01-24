@@ -1870,19 +1870,6 @@ class TestLinalg(TestCase):
         actual_rank, size, batches = 2, (17, 4), ()
         run_subtest(actual_rank, size, batches, device, jitted)
 
-    @onlyCPU
-    @skipCPUIfNoLapack
-    @dtypes(torch.cfloat)
-    def test_svd_complex(self, device, dtype):
-        t = torch.randn((10, 10), dtype=dtype, device=device)
-        U, S, V = torch.svd(t, some=False)
-        # note: from the math point of view, it is weird that we need to use
-        # V.T instead of V.T.conj(): torch.svd has a buggy behavior for
-        # complex numbers and it's deprecated. You should use torch.linalg.svd
-        # instead.
-        t2 = U @ torch.diag(S).type(dtype) @ V.T
-        self.assertEqual(t, t2)
-
     def _test_svd_helper(self, shape, some, col_maj, device, dtype):
         cpu_tensor = torch.randn(shape, device='cpu').to(dtype)
         device_tensor = cpu_tensor.to(device=device)
