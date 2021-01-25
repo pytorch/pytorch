@@ -1846,7 +1846,7 @@ if TEST_SCIPY:
                            SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                     dtypes=[torch.bfloat16]),
                        ),
-                       promotes_integers_to_float=True),
+                       safe_casts_outputs=True),
         OpInfo('xlogy',
                dtypes=all_types_and(torch.bool),
                dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
