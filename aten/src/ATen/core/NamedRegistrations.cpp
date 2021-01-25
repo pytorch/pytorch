@@ -18,8 +18,6 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("_sparse_log_softmax.int", CppFunction::makeFallthrough());
   m.impl("_sparse_softmax.Dimname", CppFunction::makeFallthrough());
   m.impl("_sparse_softmax.int", CppFunction::makeFallthrough());
-  m.impl("_std", CppFunction::makeFallthrough());
-  m.impl("_var", CppFunction::makeFallthrough());
   m.impl("abs", CppFunction::makeFallthrough());
   m.impl("abs.out", CppFunction::makeFallthrough());
   m.impl("abs_", CppFunction::makeFallthrough());
@@ -438,9 +436,15 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("std.names_dim", CppFunction::makeFallthrough());
   m.impl("std.names_out", CppFunction::makeFallthrough());
   m.impl("std.out", CppFunction::makeFallthrough());
+  m.impl("std.correction", CppFunction::makeFallthrough());
+  m.impl("std.correction_out", CppFunction::makeFallthrough());
+  m.impl("std.correction_names", CppFunction::makeFallthrough());
+  m.impl("std.correction_names_out", CppFunction::makeFallthrough());
   m.impl("std_mean", CppFunction::makeFallthrough());
   m.impl("std_mean.dim", CppFunction::makeFallthrough());
   m.impl("std_mean.names_dim", CppFunction::makeFallthrough());
+  m.impl("std_mean.correction", CppFunction::makeFallthrough());
+  m.impl("std_mean.correction_names", CppFunction::makeFallthrough());
   m.impl("stride.Dimname", CppFunction::makeFallthrough());
   m.impl("stride.int", CppFunction::makeFallthrough());
   m.impl("sub.Scalar", CppFunction::makeFallthrough());
@@ -493,9 +497,15 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("var.names_dim", CppFunction::makeFallthrough());
   m.impl("var.names_out", CppFunction::makeFallthrough());
   m.impl("var.out", CppFunction::makeFallthrough());
+  m.impl("var.correction", CppFunction::makeFallthrough());
+  m.impl("var.correction_out", CppFunction::makeFallthrough());
+  m.impl("var.correction_names", CppFunction::makeFallthrough());
+  m.impl("var.correction_names_out", CppFunction::makeFallthrough());
   m.impl("var_mean", CppFunction::makeFallthrough());
   m.impl("var_mean.dim", CppFunction::makeFallthrough());
   m.impl("var_mean.names_dim", CppFunction::makeFallthrough());
+  m.impl("var_mean.correction", CppFunction::makeFallthrough());
+  m.impl("var_mean.correction_names", CppFunction::makeFallthrough());
   m.impl("zero_", CppFunction::makeFallthrough());
   m.impl("zeros_like", CppFunction::makeFallthrough());
 

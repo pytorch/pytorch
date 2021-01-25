@@ -503,9 +503,12 @@ static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim
 // see https://github.com/pytorch/pytorch/pull/47305,
 Tensor trace_cpu(const Tensor& self) {
   Tensor result;
+  // Returns the ScalarType of the self tensor if the tensor is non integral type
+  // In the case, self is an integer type tensor, at::kLong is return since promote_integers
+  // is set to true
   ScalarType dtype = get_dtype(result, self, c10::nullopt, true);
   result = at::empty({}, self.options().dtype(dtype));
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "trace", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(self.scalar_type(), "trace", [&] {
     using accscalar_t = at::acc_type<scalar_t, false>;
     accscalar_t sum = 0;
     const auto* t_data = self.data_ptr<scalar_t>();
@@ -522,12 +525,11 @@ Tensor trace_cpu(const Tensor& self) {
       sum += t_data[i * (t_stride_0 + t_stride_1)];
     }
 
-    // all integer types get promoted to kLong
-    if (result.scalar_type() == at::kLong) {
-      *result.data_ptr<int64_t>() = sum;
-    } else {
-      *result.data_ptr<scalar_t>() = sum;
-    }
+    c10::guts::if_constexpr<std::is_integral<accscalar_t>::value>(
+      // all integer types get promoted to kLong
+      [&] (auto _) { *result.data_ptr<int64_t>() = _(sum); },  // then-case, invalid for non-integral types
+      [&] (auto _) { *result.data_ptr<scalar_t>() = _(sum); }  // else-case, invalid for integral types
+    );
   });
 
   return result;
@@ -844,7 +846,7 @@ Tensor any(const Tensor& self) {
               "any only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided || self.layout() == Layout::Sparse,
               "any only supports strided AND sparse layout, got: ", self.layout());
-  
+
   // Refer [all, any : uint8 compatibility]
   Tensor result;
   ScalarType out_dtype;
@@ -1254,6 +1256,59 @@ std::tuple<Tensor,Tensor> var_mean(const Tensor& self, DimnameList dim, bool unb
 
 std::tuple<Tensor,Tensor> std_mean(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
   return at::std_mean(self, dimnames_to_positions(self, dim), unbiased, keepdim);
+}
+
+Tensor std(const Tensor& self, DimnameList dim, c10::optional<int64_t> correction, bool keepdim) {
+  // FIXME: dim=None shouldn't call the DimnameList overload
+  if (dim.size() == 1 && dim[0].isWildcard()) {
+    return at::std(self, /*dim=*/c10::nullopt, correction, keepdim);
+  }
+  return at::std(self, dimnames_to_positions(self, dim), correction, keepdim);
+}
+
+Tensor& std_out(const Tensor& self, DimnameList dim, c10::optional<int64_t> correction,
+                bool keepdim, Tensor& result) {
+  // FIXME: dim=None shouldn't call the DimnameList overload
+  if (dim.size() == 1 && dim[0].isWildcard()) {
+    return at::std_out(result, self, /*dim=*/c10::nullopt, correction, keepdim);
+  }
+  return at::std_out(result, self, dimnames_to_positions(self, dim), correction, keepdim);
+}
+
+Tensor var(const Tensor& self, DimnameList dim, c10::optional<int64_t> correction, bool keepdim) {
+  // FIXME: dim=None shouldn't call the DimnameList overload
+  if (dim.size() == 1 && dim[0].isWildcard()) {
+    return at::var(self, /*dim=*/c10::nullopt, correction, keepdim);
+  }
+  return at::var(self, dimnames_to_positions(self, dim), correction, keepdim);
+}
+
+Tensor& var_out(const Tensor& self, DimnameList dim, c10::optional<int64_t> correction,
+                bool keepdim, Tensor& result) {
+  // FIXME: dim=None shouldn't call the DimnameList overload
+  if (dim.size() == 1 && dim[0].isWildcard()) {
+    return at::var_out(result, self, /*dim=*/c10::nullopt, correction, keepdim);
+  }
+  return at::var_out(
+      result, self, dimnames_to_positions(self, dim), correction, keepdim);
+}
+
+std::tuple<Tensor,Tensor> var_mean(const Tensor& self, DimnameList dim,
+                                   c10::optional<int64_t> correction, bool keepdim) {
+  // FIXME: dim=None shouldn't call the DimnameList overload
+  if (dim.size() == 1 && dim[0].isWildcard()) {
+    return at::var_mean(self, /*dim=*/c10::nullopt, correction, keepdim);
+  }
+  return at::var_mean(self, dimnames_to_positions(self, dim), correction, keepdim);
+}
+
+std::tuple<Tensor,Tensor> std_mean(const Tensor& self, DimnameList dim,
+                                   c10::optional<int64_t> correction, bool keepdim) {
+  // FIXME: dim=None shouldn't call the DimnameList overload
+  if (dim.size() == 1 && dim[0].isWildcard()) {
+    return at::std_mean(self, /*dim=*/c10::nullopt, correction, keepdim);
+  }
+  return at::std_mean(self, dimnames_to_positions(self, dim), correction, keepdim);
 }
 
 Tensor& norm_out(Tensor& result, const Tensor& self, optional<Scalar> p, DimnameList dim, bool keepdim, ScalarType dtype) {

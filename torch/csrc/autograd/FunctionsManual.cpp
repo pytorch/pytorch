@@ -2767,10 +2767,10 @@ infinitely_differentiable_native_layer_norm_backward(
             X_tensor,
             var,
             mean_tensor,
-            {1},
-            false,
-            true,
-            false);
+            /*dim=*/IntArrayRef{1},
+            /*correction=*/0,
+            /*keepdim=*/true,
+            /*is_std=*/false);
       }
       dX = dX.reshape_as(X);
     } else if (dmean.defined() && drstd.defined()) {
@@ -2779,10 +2779,10 @@ infinitely_differentiable_native_layer_norm_backward(
                X_tensor,
                var,
                mean_tensor,
-               {1},
-               false,
-               true,
-               false)
+               /*dim=*/IntArrayRef{1},
+               /*correction=*/0,
+               /*keepdim=*/true,
+               /*is_std=*/false)
                .reshape_as(X);
     }
   }
