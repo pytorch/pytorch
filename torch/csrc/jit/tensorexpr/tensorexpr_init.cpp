@@ -4,7 +4,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
-#include "torch/csrc/jit/tensorexpr/cuda_codegen.h"
+#include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
@@ -490,7 +490,11 @@ void initTensorExprBindings(PyObject* module) {
           throw std::runtime_error("PyTorch not compiled with LLVM support!");
 #endif
         } else if (name == "cuda") {
+#ifdef USE_CUDA
           cg = new tensorexpr::CudaCodeGen(stmt, args);
+#else
+          throw std::runtime_error("PyTorch not compiled with LLVM support!");
+#endif
         }else {
           cg = new tensorexpr::SimpleIREvaluator(stmt, args);
         }
