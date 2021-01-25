@@ -13,8 +13,6 @@ def get_sha():
 def get_torch_version(sha=None):
     pytorch_root = Path(__file__).parent.parent
     version = open('version.txt', 'r').read().strip()
-    if sha is None:
-        sha = get_sha()
 
     if os.getenv('PYTORCH_BUILD_VERSION'):
         assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
@@ -23,6 +21,8 @@ def get_torch_version(sha=None):
         if build_number > 1:
             version += '.post' + str(build_number)
     elif sha != 'Unknown':
+        if sha is None:
+            sha = get_sha()
         version += '+' + sha[:7]
     return version
 

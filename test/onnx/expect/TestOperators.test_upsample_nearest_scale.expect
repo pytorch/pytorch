@@ -50,16 +50,16 @@ graph {
         elem_type: 1
         shape {
           dim {
-            dim_param: "4_0"
+            dim_param: "Upsample4_dim_0"
           }
           dim {
-            dim_param: "4_1"
+            dim_param: "Upsample4_dim_1"
           }
           dim {
-            dim_param: "4_2"
+            dim_param: "Upsample4_dim_2"
           }
           dim {
-            dim_param: "4_3"
+            dim_param: "Upsample4_dim_3"
           }
         }
       }

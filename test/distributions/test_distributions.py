@@ -3915,7 +3915,10 @@ class TestConstraints(TestCase):
                 constraint = dist.support
                 message = '{} example {}/{} sample = {}'.format(
                     Dist.__name__, i + 1, len(params), value)
-                self.assertTrue(constraint.check(value).all(), msg=message)
+                self.assertEqual(constraint.event_dim, len(dist.event_shape), msg=message)
+                ok = constraint.check(value)
+                self.assertEqual(ok.shape, dist.batch_shape, msg=message)
+                self.assertTrue(ok.all(), msg=message)
 
 
 class TestNumericalStability(TestCase):
