@@ -2,7 +2,6 @@
 
 #ifdef USE_TENSORPIPE
 
-#include <gtest/gtest_prod.h>
 #include <atomic>
 #include <thread>
 
@@ -221,11 +220,11 @@ class TensorPipeAgent : public RpcAgent {
   static std::string guessUvAddress(
       tensorpipe::transport::uv::Context& uvContext);
 
- private:
-  FRIEND_TEST(TestE2ETensorPipe, TestTrainingLoop);
+  // For testing purposes.
   size_t timeoutMapSize();
   size_t numPendingResponses();
 
+ private:
   // Removes the given messageId with the given expirationTime from the
   // timeoutMap_.
   void removeFromTimeoutMap(
@@ -287,7 +286,7 @@ class TensorPipeAgent : public RpcAgent {
 #ifdef USE_CUDA_NOT_ROCM
   // An RPC-specific CUDAFuture subclass. It overrides the extractDataPtrs
   // function to handle and only handle RPC Messages.
-  struct TORCH_CUDA_API RpcCUDAFuture final : at::cuda::CUDAFuture {
+  struct TORCH_CUDA_CPP_API RpcCUDAFuture final : at::cuda::CUDAFuture {
    public:
     using at::cuda::CUDAFuture::CUDAFuture;
 
