@@ -208,9 +208,9 @@ class OpInfo(object):
         self.check_batched_grad = check_batched_grad
         self.check_batched_gradgrad = check_batched_gradgrad
 
-        self.aliases = []
+        self.aliases = ()
         if aliases is not None:
-            self.aliases = [AliasInfo(a) for a in aliases]
+            self.aliases = tuple(AliasInfo(a) for a in aliases)
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -992,6 +992,7 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad):
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
+                   aliases=('absolute', ),
                    ref=np.abs,
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
@@ -1019,10 +1020,10 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.cfloat, torch.cdouble, torch.bfloat16]),
                    ),
                    test_inplace_grad=False,
-                   assert_autodiffed=True,
-                   aliases=['absolute', ]),
+                   assert_autodiffed=True),
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
     UnaryUfuncInfo('acos',
+                   aliases=('arccos', ),
                    ref=np.arccos,
                    domain=(-1, 1),
                    handles_complex_extremals=False,
@@ -1047,8 +1048,7 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestGradients', 'test_inplace_grad',
                                 dtypes=[torch.cdouble], active_if=IS_WINDOWS),
-                   ),
-                   aliases=['arccos', ]),
+                   )),
     # NOTE: the derivative for inplace acosh is not implemented
     UnaryUfuncInfo('acosh',
                    ref=np.arccosh,
@@ -1099,6 +1099,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_addr),
 
     UnaryUfuncInfo('asin',
+                   aliases=('arcsin', ),
                    ref=np.arcsin,
                    domain=(-1, 1),
                    supports_sparse=True,
@@ -1115,8 +1116,7 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=IS_WINDOWS)
-                   ),
-                   aliases=['arcsin', ]),
+                   )),
     # NOTE: derivative for inplace asinh is not implemented
     UnaryUfuncInfo('asinh',
                    ref=np.arcsinh,
@@ -2152,7 +2152,6 @@ def method_tests():
         ('view_as_real', (S, S, S), NO_ARGS, 'complex'),
         ('view_as_complex', (S, S, 2), NO_ARGS),
         ('complex', (S, S, S), ((S, S, S),), ''),
-        ('abs', (S, S, S), NO_ARGS, '', (True,)),
         ('abs', (), NO_ARGS, 'scalar', (True,)),
         ('clamp', (S, S, S), (0, 1), '', (True,)),
         ('clamp', (S, S, S), (None, 0.5), 'min', (True,)),

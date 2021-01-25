@@ -2,7 +2,7 @@ from functools import partial, wraps
 
 import torch
 
-from torch.testing import floating_and_complex_types_and
+from torch.testing import floating_and_complex_types_and, FileCheck
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, IS_SANDCASTLE, clone_input_helper)
 from torch.testing._internal.common_methods_invocations import \
@@ -200,7 +200,18 @@ class TestCommon(JitCommonTestCase):
             # Acquires variants to test
             method = op.get_method()
             inplace = op.get_inplace()
-            variants = (v for v in (method, inplace) if v is not None)
+            inplace_ops = [inplace, ]  # list of all inplace ops: inplace variant + alias inplace variants if exist
+            aliases = []
+            for a_op in op.aliases:
+                aliases.append(a_op.op)
+                if a_op.method_variant is not None:
+                    aliases.append(a_op.method_variant)
+                if a_op.inplace_variant is not None:
+                    aliases.append(a_op.inplace_variant)
+                    inplace_ops.append(a_op.inplace_variant)
+            aliases = tuple(aliases)
+
+            variants = (v for v in (method, inplace) + aliases if v is not None)
             # Computes expected forward
 
             # below calls op's function variant
@@ -221,7 +232,7 @@ class TestCommon(JitCommonTestCase):
             for variant in variants:
                 # Verifies that inplace operations that promote int->float fail
                 #   on tensors with integer dtypes.
-                if (variant is inplace and not torch.can_cast(expected_forward.dtype, dtype)):
+                if (variant in inplace_ops and not torch.can_cast(expected_forward.dtype, dtype)):
                     try:
                         variant_forward = variant(*(clone_input_helper(input) for input in sample.input),
                                                   *sample.args,
@@ -231,14 +242,14 @@ class TestCommon(JitCommonTestCase):
                     self.fail("Inplace operation on integer tensor that should be promoted to float didn't fail!")
                 # Compares variant's forward
                 # Note: copy the tensor-type inputs when testing inplace operation
-                variant_forward = variant(*(clone_input_helper(input) if variant is inplace else input
+                variant_forward = variant(*(clone_input_helper(input) if variant in inplace_ops else input
                                             for input in sample.input),
                                           *sample.args,
                                           **sample.kwargs)
                 self.assertEqual(variant_forward, expected_forward)
 
                 # Compares variant's backward
-                if variant is not inplace or op.test_inplace_grad:
+                if variant not in inplace_ops or op.test_inplace_grad:
                     self.check_variant_backward(sample.input, variant_forward,
                                                 expected_grad, exception_during_backwards)
 
@@ -339,120 +350,45 @@ class TestCommon(JitCommonTestCase):
         sample = samples[0]
         # call it normally to get the expected result
         expected = op(*sample.input, *sample.args, **sample.kwargs)
-        # call it with out=... and check we get the expected result
-        out_kwargs = sample.kwargs.copy()
-        out_kwargs['out'] = out = torch.empty_like(expected)
-        op(*sample.input, *sample.args, **out_kwargs)
-        self.assertEqual(expected, out)
+
+        def _test(tested_op):
+            # call it with out=... and check we get the expected result
+            out_kwargs = sample.kwargs.copy()
+            out_kwargs['out'] = out = torch.empty_like(expected)
+            tested_op(*sample.input, *sample.args, **out_kwargs)
+            self.assertEqual(expected, out)
+
+        _test(op)
+        for a_op in op.aliases:
+            _test(a_op)
 
     @ops([op for op in op_db if op.aliases])
-    def test_aliases_consistency_eager(self, device, dtype, op):
-        # Currently, there is a code duplication based on
-        # test_variant_consistency_eager.
-        # To refactor those methods later.
+    def test_aliases_jit_name_remapping(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
 
-        for sample in samples:
-            expected_forward = op(*sample.input, *sample.args, **sample.kwargs)
-            # Computes expected backward
-            # NOTE: backward may fail for some dtypes
-            exception_during_backwards = False
-            expected_grad = None
-            try:
-                expected_forward.sum().backward()
-                expected_grad = sample.input.grad
-                sample.input.grad = None
-            except Exception as e:
-                exception_during_backwards = True
+        # NOTE: only tests on first sample
+        sample = samples[0]
 
-            for a_op in op.aliases:
+        sample_args_kwargs = ()
+        if len(sample.args) > 0:
+            sample_args_kwargs += (sample.args, )
+        if len(sample.kwargs) > 0:
+            sample_args_kwargs += (sample.kwargs, )
 
-                # Acquires variants to test
-                method = a_op.method_variant
-                inplace = a_op.inplace_variant
-                variants = (v for v in (a_op, method, inplace) if v is not None)
+        for a_op in op.aliases:
 
-                # Test eager consistency
-                for variant in variants:
+            def _fn(*sample_args, **sample_kwargs):                
+                return a_op(*sample_args, **sample_kwargs)
 
-                    # Verifies that inplace operations that promote int->float fail
-                    #   on tensors with integer dtypes.
-                    if (variant is inplace and not torch.can_cast(expected_forward.dtype, dtype)):
-                        try:
-                            variant_forward = variant(*(clone_input_helper(input) for input in sample.input),
-                                                      *sample.args,
-                                                      **sample.kwargs)
-                        except Exception as e:
-                            continue
-                        self.fail("Inplace operation on integer tensor that should be promoted to float didn't fail!")
-                    # Compares variant's forward
-                    # Note: copy the tensor-type inputs when testing inplace operation
-                    variant_forward = variant(*(clone_input_helper(input) if variant is inplace else input
-                                                for input in sample.input),
-                                              *sample.args,
-                                              **sample.kwargs)
-                    self.assertEqual(variant_forward, expected_forward)
-
-                    # Compares variant's backward
-                    if variant is not inplace or op.test_inplace_grad:
-                        self.check_variant_backward(sample.input, variant_forward,
-                                                    expected_grad, exception_during_backwards)
-
-    @ops([op for op in op_db if op.aliases])
-    def test_aliases_consistency_jit(self, device, dtype, op):
-        # Currently, there is a code duplication based on test_variant_consistency_jit
-        # To refactor those methods later.
-        samples = op.sample_inputs(device, dtype, requires_grad=True)
-        if len(samples) == 0:
-            self.skipTest("Skipped! No sample inputs!")
-
-        for sample in samples:
-            func = op.get_op()
-            for a_op in op.aliases:
-
-                variants = {
-                    'function': a_op.op, 'method': a_op.method_variant,
-                }
-
-                # Test traced and scripted consistency
-                for func_type, variant in variants.items():
-                    if variant is None:
-                        continue
-
-                    name = variant.__name__
-
-                    # run with disable_autodiff_subgraph_inlining(True) to test
-                    #   autodiff support. Context manager forces the graph to contain
-                    #   DifferentiableGraph nodes if they are present
-                    with disable_autodiff_subgraph_inlining():
-                        def fn(*inputs, **kwargs):
-                            output = func(*inputs, **kwargs)
-                            return op.output_func(output)
-
-                        # bfloat16 grad doesn't work for some operators
-                        dtypes_to_grad_check = floating_and_complex_types_and(torch.half) \
-                            if op.skip_bfloat16_grad else floating_and_complex_types_and(torch.half, torch.bfloat16)
-
-                        # Check scripted forward, grad, and grad grad
-                        script_fn = create_script_fn(self, name, func_type, op.output_func)
-
-                        check_against_reference(self,
-                                                script_fn,
-                                                fn,
-                                                (*sample.input,) + sample.args,
-                                                sample.kwargs,
-                                                no_grad=(dtype not in dtypes_to_grad_check))
-
-                        # Check traced forward, grad, and grad grad
-                        traced_fn = create_traced_fn(self, variant)
-                        check_against_reference(self,
-                                                traced_fn,
-                                                fn,
-                                                (*sample.input,) + sample.args,
-                                                sample.kwargs,
-                                                no_grad=(dtype not in dtypes_to_grad_check))
+            inp = (*(clone_input_helper(input) for input in sample.input), ) + sample_args_kwargs
+            traced = torch.jit.trace(_fn, *inp)
+            inp = (*(clone_input_helper(input) for input in sample.input), ) + sample_args_kwargs
+            traced(*inp)
+            inp = (*(clone_input_helper(input) for input in sample.input), ) + sample_args_kwargs
+            graph = traced.graph_for(*inp)
+            FileCheck().check(op.name).check_not(a_op.name).run(graph)
 
 
 instantiate_device_type_tests(TestOpInfo, globals())
