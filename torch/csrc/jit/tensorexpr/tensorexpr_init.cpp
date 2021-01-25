@@ -1,7 +1,9 @@
 #include <pybind11/operators.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
+#ifdef USE_CUDA
 #include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
+#endif
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
