@@ -68,10 +68,22 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
   return std::tuple<Tensor, Tensor>(vals_, vecs_);
 }
 
+// This is a type dispatching helper function for 'apply_orgqr'
+Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "orgqr_cpu", [&]{
+    apply_orgqr<scalar_t>(result, tau, infos, n_columns);
+  });
+  return result;
+}
+
 } // anonymous namespace
 
 REGISTER_ARCH_DISPATCH(eig_stub, DEFAULT, &eig_kernel_impl);
 REGISTER_AVX_DISPATCH(eig_stub, &eig_kernel_impl);
 REGISTER_AVX2_DISPATCH(eig_stub, &eig_kernel_impl);
+
+REGISTER_ARCH_DISPATCH(orgqr_stub, DEFAULT, &orgqr_kernel_impl);
+REGISTER_AVX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
+REGISTER_AVX2_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 
 }} // namespace at::native
