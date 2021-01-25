@@ -34,9 +34,10 @@ std::deque<std::string> findSubModuleAttr(
     if (node->kind() == prim::GetAttr) {
       moduleNames.push_front(node->s(attr::name));
       node = node->inputs()[0]->node();
+    } else {
+      return moduleNames;
     }
   }
-
   // Assign the inner module to attrModule.
   for (auto& moduleName : moduleNames) {
     attrModule = attrModule.attr(moduleName).toModule();
@@ -127,24 +128,16 @@ std::vector<IValue> getParamAttributes(
             paramConst = addParamAsArgument(function_, fullName, attr);
           } else if (
               attr.isObject() && !attr.toObjectRef().type()->is_module()) {
-            // Only below registered torch classes are supported.
-            auto type = attr.type();
-            TORCH_CHECK(
-                (type ==
-                 getCustomClass(
-                     "__torch__.torch.classes.quantized.Conv2dPackedParamsBase")) ||
-                    (type ==
-                     getCustomClass(
-                         "__torch__.torch.classes.quantized.Conv3dPackedParamsBase")) ||
-                    (type ==
-                     getCustomClass(
-                         "__torch__.torch.classes.quantized.LinearPackedParamsBase")),
-                "Unknown type ",
-                type->repr_str(),
-                " encountered in handling model params. This type is not supported in ONNX export.");
-            attrValues.emplace_back(
-                script::Object(attr.toObject()).run_method("__getstate__"));
-            paramConst = addParamAsArgument(function_, fullName, attr);
+            try {
+              attrValues.emplace_back(
+                  script::Object(attr.toObject()).run_method("__getstate__"));
+              paramConst = addParamAsArgument(function_, fullName, attr);
+            } catch (const std::exception&) {
+              auto type = attr.type();
+              throw ErrorReport(n->sourceRange())
+                  << "Unknown type " << type->repr_str()
+                  << " encountered in handling model params. This class type does not extend __getstate__ method.";
+            }
           } else if (attr.isNone() || name == "training") {
             auto attrVal = tryInsertConstant(*graph, attr);
             paramConst = *attrVal;
