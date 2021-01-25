@@ -335,14 +335,12 @@ set of reviewers.
 ### `use_c10_dispatcher`
 
 ```
-use_c10_dispatcher: 'full'
 use_c10_dispatcher: 'hacky_wrapper_for_legacy_signatures'
 ```
 
-This will indicate the level of integration with the c10 dispatcher.
-For any new ops, please set this to 'full'. This is also the default,
-so you can just omit it.
-This requires the operator function signature to be aligned with the
+This will indicate that the operator implementation is still using a legacy operator signature.
+For any new ops, please don't set this.
+The new, non-legacy operator signature requires the operator function signature to be aligned with the
 function schema in native_functions.yaml, i.e.
 - out arguments have to be in the end of the argument list instead of in the beginning
 - TensorOptions are taken as separate arguments
@@ -359,7 +357,6 @@ and need an adapter to work with the dispatcher calling convention. For those, w
 `use_c10_dispatcher: hacky_wrapper_for_legacy_signatures` to codegenerate a corresponding
 adapter around them in the operator registration call. Over time, we will migrate all
 those kernels to the new calling convention and hacky_wrapper will die.
-Please don't use it for new operators.
 
 ### `manual_kernel_registration`
 
