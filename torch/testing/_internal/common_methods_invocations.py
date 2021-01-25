@@ -834,10 +834,10 @@ def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False):
 
 
 def sample_inputs_std_var(op_info, device, dtype, requires_grad):
-    tensor_nd = torch.make_tensor((S, S, S), device=device, dtype=dtype,
-                                  low=None, high=None, requires_grad=requires_grad)
-    tensor_1d = torch.make_tensor((S,), device=device, dtype=dtype,
-                                  low=None, high=None, requires_grad=requires_grad)
+    tensor_nd = make_tensor((S, S, S), device=device, dtype=dtype,
+                            low=None, high=None, requires_grad=requires_grad)
+    tensor_1d = make_tensor((S,), device=device, dtype=dtype,
+                            low=None, high=None, requires_grad=requires_grad)
 
     return [
         SampleInput(tensor_nd),
