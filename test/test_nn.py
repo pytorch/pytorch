@@ -8588,6 +8588,18 @@ class TestNN(NNTestCase):
             self.assertEqual(torch.ones(1, 1, 4, 4).contiguous(memory_format=memory_format), out_t.data)
             self.assertEqual(torch.ones(1, 1, 4, 4, dtype=torch.uint8).contiguous(memory_format=memory_format), out_uint8_t.data)
 
+            # test forward when input's height is not same as width
+            m = nn.Upsample(size=(4, 2), mode='nearest')
+            in_t = torch.ones(1, 1, 2, 1).contiguous(memory_format=memory_format)
+            with warnings.catch_warnings(record=True) as w:
+                out_t = m(in_t)
+            self.assertEqual(torch.ones(1, 1, 4, 2).contiguous(memory_format=memory_format), out_t.data)
+
+            # test backward when input's height is not same as width
+            input = torch.ones(1, 1, 2, 1, requires_grad=True).contiguous(memory_format=memory_format)
+            gradcheck(lambda x: F.interpolate(x, size=(4, 2), mode='nearest'), [input])
+            gradgradcheck(lambda x: F.interpolate(x, size=(4, 2), mode='nearest'), [input])
+
             input = torch.randn(1, 1, 2, 2, requires_grad=True).contiguous(memory_format=memory_format)
             self.assertEqual(
                 F.interpolate(input, 4, mode='nearest'),
