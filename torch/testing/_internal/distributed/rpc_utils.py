@@ -46,6 +46,7 @@ from torch.testing._internal.distributed.rpc.rpc_test import (
 from torch.testing._internal.distributed.rpc.examples.batch_update_parameter_server_test import BatchUpdateParameterServerTest
 from torch.testing._internal.distributed.rpc.examples.parameter_server_test import ParameterServerTest
 from torch.testing._internal.distributed.rpc.examples.rpc_rnn import RPCRNNTest
+from torch.testing._internal.distributed.rpc.examples.pipeline import PipelineTest
 
 def _check_and_set_tcp_init():
     # if we are running with TCP init, set main address and port
@@ -120,6 +121,7 @@ GENERIC_TESTS = [
     BatchUpdateParameterServerTest,
     ParameterServerTest,
     RPCRNNTest,
+    PipelineTest,
     DistAutogradTest,
     DistOptimizerTest,
     JitRpcTest,
