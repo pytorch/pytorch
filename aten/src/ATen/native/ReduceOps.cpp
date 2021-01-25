@@ -448,7 +448,7 @@ static inline Tensor diff_helper(const Tensor& self, int64_t n, int64_t dim) {
   return at::narrow(self, dim, 1, out_len) - at::narrow(self, dim, 0, out_len);
 }
 
-Tensor diff_tensor_tensor(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>& prepend, const c10::optional<Tensor>& append) {
+Tensor diff(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>& prepend, const c10::optional<Tensor>& append) {
   if (!prepend.has_value() && !append.has_value()) {
     return diff_helper(self, n, dim);
   } else {
@@ -465,48 +465,13 @@ static inline Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim
   return at::sub_out(result, at::narrow(self, dim, 1, out_len), at::narrow(self, dim, 0, out_len));
 }
 
-Tensor& diff_tensor_tensor_out(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>& prepend, const c10::optional<Tensor>& append, Tensor& result) {
+Tensor& diff_out(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>& prepend, const c10::optional<Tensor>& append, Tensor& result) {
   if (!prepend.has_value() && !append.has_value()) {
     return diff_out_helper(self, n, dim, result);
   } else {
     auto a = prepend_append_on_dim(self, prepend, append, dim);
     return diff_out_helper(a, n, dim, result);
   }
-}
-
-static Tensor diff_broadcast_scalar(Scalar scalar, const Tensor& tensor, int64_t dim) {
-  // Helper for diff to handle when prepend/append are scalars
-  return at::scalar_tensor(scalar, tensor.options()).broadcast_to(tensor.sizes()).narrow(dim, 0, 1);
-}
-
-Tensor diff_scalar_scalar(const Tensor& self, int64_t n, int64_t dim, c10::optional<Scalar> prepend, c10::optional<Scalar> append) {
-  return diff_tensor_tensor(self, n, dim,
-              prepend.has_value() ? c10::optional<Tensor>(diff_broadcast_scalar(prepend.value(), self, dim)) : c10::nullopt,
-              append.has_value() ? c10::optional<Tensor>(diff_broadcast_scalar(append.value(), self, dim)) : c10::nullopt);
-}
-
-Tensor diff_scalar_tensor(const Tensor& self, int64_t n, int64_t dim, c10::optional<Scalar> prepend, const c10::optional<Tensor>& append) {
-  return diff_tensor_tensor(self, n, dim, prepend.has_value() ? c10::optional<Tensor>(diff_broadcast_scalar(prepend.value(), self, dim)) : c10::nullopt, append);
-}
-
-Tensor diff_tensor_scalar(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>& prepend, c10::optional<Scalar> append) {
-  return diff_tensor_tensor(self, n, dim, prepend, append.has_value() ? c10::optional<Tensor>(diff_broadcast_scalar(append.value(), self, dim)) : c10::nullopt);
-}
-
-Tensor& diff_scalar_scalar_out(const Tensor& self, int64_t n, int64_t dim, c10::optional<Scalar> prepend, c10::optional<Scalar> append, Tensor& result) {
-  return diff_tensor_tensor_out(self, n, dim,
-              prepend.has_value() ? c10::optional<Tensor>(diff_broadcast_scalar(prepend.value(), self, dim)) : c10::nullopt,
-              append.has_value() ? c10::optional<Tensor>(diff_broadcast_scalar(append.value(), self, dim)) : c10::nullopt, result);
-}
-
-Tensor& diff_scalar_tensor_out(const Tensor& self, int64_t n, int64_t dim, c10::optional<Scalar> prepend, const c10::optional<Tensor>& append, Tensor& result) {
-  return diff_tensor_tensor_out(self, n, dim,
-              prepend.has_value() ? c10::optional<Tensor>(diff_broadcast_scalar(prepend.value(), self, dim)) : c10::nullopt, append, result);
-}
-
-Tensor& diff_tensor_scalar_out(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>& prepend, c10::optional<Scalar> append, Tensor& result) {
-  return diff_tensor_tensor_out(self, n, dim, prepend,
-              append.has_value() ? c10::optional<Tensor>(diff_broadcast_scalar(append.value(), self, dim)) : c10::nullopt, result);
 }
 
 // ALL REDUCE #################################################################

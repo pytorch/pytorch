@@ -2651,12 +2651,10 @@ Args:
     n (int, optional): the number of times to recursively compute difference
     dim (int, optional): the dimension with respect to compute the difference.
         Default is the last dimension.
-    prepend, append (Tensor or Scalar, optional): values to prepend or append to
-        :attr:`input` along :attr:`dim` before computing the difference. Scalar
-        values are expanded to tensors with size 1 along :attr:`dim` and the shape of
-        :attr:`input` along all other dimensions. Otherwise, its dimension must be
-        equivalent to that of input, and its shape must match input's shape except on
-        :attr:`dim`.
+    prepend, append (Tensor, optional): values to prepend or append to
+        :attr:`input` along :attr:`dim` before computing the difference.
+        Its dimension must be equivalent to that of input, and its shape
+        must match input's shape except on :attr:`dim`.
 
 Keyword args:
     {out}

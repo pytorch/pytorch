@@ -1373,51 +1373,15 @@
 - func: fill_diagonal_(Tensor(a!) self, Scalar fill_value, bool wrap=False) -> Tensor(a!)
   variants: method
 
-- func: diff.Tensor_Tensor(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Tensor? append=None) -> Tensor
+- func: diff(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Tensor? append=None) -> Tensor
   variants: function, method
   dispatch:
-    Math: diff_tensor_tensor
+    Math: diff
 
-- func: diff.Tensor_Scalar(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Scalar? append=None) -> Tensor
-  cpp_no_default_args: ['n', 'dim', 'prepend', 'append']
-  variants: function, method
-  dispatch:
-    Math: diff_tensor_scalar
-
-- func: diff.Scalar_Tensor(Tensor self, int n=1, int dim=-1, Scalar? prepend=None, Tensor? append=None) -> Tensor
-  cpp_no_default_args: ['n', 'dim', 'prepend', 'append']
-  variants: function, method
-  dispatch:
-    Math: diff_scalar_tensor
-
-- func: diff.Scalar_Scalar(Tensor self, int n=1, int dim=-1, Scalar? prepend=None, Scalar? append=None) -> Tensor
-  cpp_no_default_args: ['n', 'dim', 'prepend', 'append']
-  variants: function, method
-  dispatch:
-    Math: diff_scalar_scalar
-
-- func: diff.Tensor_Tensor_out(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Tensor? append=None, *, Tensor(a!) out) -> Tensor(a!)
+- func: diff.out(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Tensor? append=None, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
-    Math: diff_tensor_tensor_out
-
-- func: diff.Tensor_Scalar_out(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Scalar? append=None, *, Tensor(a!) out) -> Tensor(a!)
-  cpp_no_default_args: ['n', 'dim', 'prepend', 'append']
-  variants: function
-  dispatch:
-    Math: diff_tensor_scalar_out
-
-- func: diff.Scalar_Tensor_out(Tensor self, int n=1, int dim=-1, Scalar? prepend=None, Tensor? append=None, *, Tensor(a!) out) -> Tensor(a!)
-  cpp_no_default_args: ['n', 'dim', 'prepend', 'append']
-  variants: function
-  dispatch:
-    Math: diff_scalar_tensor_out
-
-- func: diff.Scalar_Scalar_out(Tensor self, int n=1, int dim=-1, Scalar? prepend=None, Scalar? append=None, *, Tensor(a!) out) -> Tensor(a!)
-  cpp_no_default_args: ['n', 'dim', 'prepend', 'append']
-  variants: function
-  dispatch:
-    Math: diff_scalar_scalar_out
+    Math: diff_out
 
 - func: div.Tensor(Tensor self, Tensor other) -> Tensor
   variants: function, method
