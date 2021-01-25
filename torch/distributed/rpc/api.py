@@ -433,6 +433,7 @@ for method_name, method in inspect.getmembers(PyRRef):
     # Attach user-facing RRef method with modified docstring.
     new_method = method_factory(method_name, docstring)
     setattr(RRef, method_name, new_method)
+    print("foo")
 
 
 @_require_initialized
