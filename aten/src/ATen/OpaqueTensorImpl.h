@@ -72,10 +72,6 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
     AT_ERROR("opaque tensors do not have storage");
   }
 
-  int64_t storage_offset() const override {
-    AT_ERROR("opaque tensors do not have storage");
-  }
-
   /**
    * Return a TensorImpl that is a shallow-copy of this TensorImpl.
    *

@@ -77,9 +77,6 @@ bool SparseTensorImpl::has_storage() const {
 const Storage& SparseTensorImpl::storage() const {
   AT_ERROR("sparse tensors do not have storage");
 }
-int64_t SparseTensorImpl::storage_offset() const {
-  AT_ERROR("sparse tensors do not have storage");
-}
 void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values) {
   TORCH_CHECK(allow_tensor_metadata_change(), "set_indices_and_values_unsafe ", err_msg_tensor_metadata_change_not_allowed);
 

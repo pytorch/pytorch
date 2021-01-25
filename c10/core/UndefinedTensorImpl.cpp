@@ -24,8 +24,8 @@ const Storage& UndefinedTensorImpl::storage() const {
   AT_ERROR("storage() called on undefined Tensor");
 }
 
-int64_t UndefinedTensorImpl::storage_offset() const {
-  AT_ERROR("storage_offset() called on an undefined Tensor");
+void UndefinedTensorImpl::set_storage_offset(int64_t) {
+  AT_ERROR("set_storage_offset() called on an undefined Tensor");
 }
 
 IntArrayRef UndefinedTensorImpl::strides() const {
