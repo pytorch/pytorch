@@ -1628,10 +1628,11 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
 
   Tensor result;
   if (self.dim() > 2) {
-    // MAGMA's batched cholesky operator has a off-by-one error
-    // causing IMA (see https://github.com/pytorch/pytorch/issues/42666).
-    // The workaround here is to pad the input with one extra element which
-    // is hidden from the user by resizing the tensor down. This way if MAGMA
+    // MAGMA's batched cholesky operator has an off-by-one error causing IMA
+    // (see https://github.com/pytorch/pytorch/issues/42666). This code is based
+    // on the #cloneBatchedColumnMajor function however it pads the input with
+    // one extra element utilizing the fact that the resize_as_ method preserves
+    // the storage even if it's larger than the new sizes. This way if MAGMA
     // reads off bounds it will still be valid user memory.
     const Tensor input = upper ? self : self.transpose(-1, -2);
     result = at::empty(input.numel() + 1, input.options());
@@ -1651,11 +1652,7 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
     singleCheckErrors(infos[0], "cholesky_cuda");
   }
 
-  if (upper) {
-    result.transpose_(-1, -2);
-  }
-
-  return result;
+  return upper ? result.transpose_(-1, -2) : result;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2211,7 +2208,7 @@ AT_ERROR("svd: MAGMA library not found in "
 #endif
 }
 
-std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool some, bool compute_uv) {
+std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_legacy(const Tensor& self, bool some, bool compute_uv) {
   std::vector<int64_t> infos(batchCount(self), 0);
   int64_t m = self.size(-2), n = self.size(-1);
   int64_t k = std::min(m, n);
@@ -2265,6 +2262,14 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool som
   // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
   VT_working_copy.transpose_(-2, -1);
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
+}
+
+std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool some, bool compute_uv) {
+#ifdef USE_CUSOLVER
+  return _svd_helper_cuda_lib(self, some, compute_uv);
+#else
+  return _svd_helper_cuda_legacy(self, some, compute_uv);
+#endif
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
