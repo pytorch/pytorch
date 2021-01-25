@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 
+#include <ATen/CPUFunctions.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -50,34 +51,6 @@ bool canRunNatively(Node* n) {
   return true;
 }
 
-// TODO: PLEASE DON'T COPY PASTE THIS, this is copy pasted
-// generated code to unblock, need to make this nicer
-struct static_add final : public at::native::structured_add_out {
-  static_add(at::Tensor& output) : output_(output) {}
-  void set_output(
-      int64_t output_idx,
-      at::IntArrayRef sizes,
-      at::IntArrayRef strides,
-      at::TensorOptions options,
-      at::DimnameList names) override {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx == 0);
-    // NB: do NOT use resize_output as it will complain if not zero sized.
-    at::native::resize_(output_, sizes);
-    if (!strides.empty()) {
-      TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
-      output_.as_strided_(sizes, strides);
-    } else if (options.memory_format_opt().has_value()) {
-      output_.unsafeGetTensorImpl()->empty_tensor_restride(
-          *options.memory_format_opt());
-    }
-  }
-  const at::Tensor& maybe_get_output(int64_t output_idx) override {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(output_idx == 0);
-    return output_;
-  }
-  at::Tensor& output_;
-};
-
 REGISTER_OPERATOR_FUNCTOR(aten::add, aten_add, [](Node* n) -> SROperator {
   return [](ProcessedNode* p_node) {
     auto& in0_t = p_node->Input(0).toTensor();
@@ -87,9 +60,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::add, aten_add, [](Node* n) -> SROperator {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
-    static_add op{out_t};
-    op.meta(in0_t, in1_t, in2_s);
-    op.impl(in0_t, in1_t, in2_s, out_t);
+    out_t.resize_({0});
+    at::cpu::add_out(out_t, in0_t, in1_t, in2_s);
   };
 });
 
