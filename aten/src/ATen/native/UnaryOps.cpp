@@ -357,7 +357,7 @@ Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
 Tensor& sin_out(Tensor& result, const Tensor& self) {
   return unary_op_impl_float_out(result, self, sin_stub);
 }
-Tensor& sin_dtype_out(Tensor& result, const Tensor& self, ScalarType dtype) {
+Tensor& sin_dtype_out(const Tensor& self, ScalarType dtype, Tensor& result) {
   return unary_op_impl_float_out(result, self, sin_stub, dtype);
 }
 Tensor sin(const Tensor& self) {
