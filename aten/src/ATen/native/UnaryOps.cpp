@@ -57,7 +57,6 @@ Tensor unary_op_impl_float(const Tensor& self, Stub& stub, c10::optional<ScalarT
   Tensor result;
   auto iter = TensorIterator::unary_float_op(result, self, dtype);
   stub(iter.device_type(), iter);
-  iter.cast_outputs();
   return iter.output();
 }
 
