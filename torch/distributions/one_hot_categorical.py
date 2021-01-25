@@ -12,7 +12,9 @@ class OneHotCategorical(Distribution):
     Samples are one-hot coded vectors of size ``probs.size(-1)``.
 
     .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
-              and it will be normalized to sum to 1.
+              and it will be normalized to sum to 1. :attr:`logits` will be
+              interpreted as unnormalized log probabilities and can therefore be
+              any real number.
 
     See also: :func:`torch.distributions.Categorical` for specifications of
     :attr:`probs` and :attr:`logits`.
@@ -25,7 +27,7 @@ class OneHotCategorical(Distribution):
 
     Args:
         probs (Tensor): event probabilities
-        logits (Tensor): event log probabilities
+        logits (Tensor): event log probabilities (unnormalized)
     """
     arg_constraints = {'probs': constraints.simplex,
                        'logits': constraints.real_vector}

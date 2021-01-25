@@ -19,11 +19,13 @@ class Categorical(Distribution):
     If :attr:`probs` is 1-dimensional with length-`K`, each element is the relative
     probability of sampling the class at that index.
 
-    If :attr:`probs` is N-dimensional, the first N-1 dimensions are treated as a batch of 
+    If :attr:`probs` is N-dimensional, the first N-1 dimensions are treated as a batch of
     relative probability vectors.
 
     .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
               and it will be normalized to sum to 1 along the last dimension.
+              :attr:`logits` will be interpreted as unnormalized log probabilities
+              and can therefore be any real number.
 
     See also: :func:`torch.multinomial`
 
@@ -35,7 +37,7 @@ class Categorical(Distribution):
 
     Args:
         probs (Tensor): event probabilities
-        logits (Tensor): event log-odds
+        logits (Tensor): event log probabilities (unnormalized)
     """
     arg_constraints = {'probs': constraints.simplex,
                        'logits': constraints.real_vector}

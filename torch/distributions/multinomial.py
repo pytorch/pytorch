@@ -16,7 +16,9 @@ class Multinomial(Distribution):
     called (see example below)
 
     .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
-              and it will be normalized to sum to 1.
+              and it will be normalized to sum to 1. :attr:`logits` will be
+              interpreted as unnormalized log probabilities and can therefore be
+              any real number.
 
     -   :meth:`sample` requires a single shared `total_count` for all
         parameters and samples.
@@ -35,7 +37,7 @@ class Multinomial(Distribution):
     Args:
         total_count (int): number of trials
         probs (Tensor): event probabilities
-        logits (Tensor): event log probabilities
+        logits (Tensor): event log probabilities (unnormalized)
     """
     arg_constraints = {'probs': constraints.simplex,
                        'logits': constraints.real_vector}
