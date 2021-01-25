@@ -493,7 +493,7 @@ void initTensorExprBindings(PyObject* module) {
 #ifdef USE_CUDA
           cg = new tensorexpr::CudaCodeGen(stmt, args);
 #else
-          throw std::runtime_error("PyTorch not compiled with LLVM support!");
+          throw std::runtime_error("PyTorch not compiled with CUDA support!");
 #endif
         } else {
           cg = new tensorexpr::SimpleIREvaluator(stmt, args);
