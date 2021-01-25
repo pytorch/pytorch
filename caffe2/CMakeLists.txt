@@ -166,24 +166,25 @@ if(CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_HIP_SRCS CAFFE2_ALLOWLISTED_FILES)
 endif()
 
-set(Caffe2_GPU_SRCS_cu "")    # TODO: maybe have a different name
-set(Caffe2_GPU_SRCS_cpp "")   # will be everything else
+if(BUILD_SPLIT_CUDA)
+  # Splitting the source files that'll be in torch_cuda between torch_cuda_cu and torch_cuda_cpp
+  foreach(tmp ${Caffe2_GPU_SRCS})
+    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*(CUDASolver|Register.*CUDA|Legacy|THC|CUDAHooks|detail/|TensorShapeCUDA).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
+      # Currently, torch_cuda_cu will have all the .cu files in aten, as well as some others that depend on those files
+      list(APPEND Caffe2_GPU_SRCS_CU ${tmp})
+    else()
+      list(APPEND Caffe2_GPU_SRCS_CPP ${tmp})
+    endif()
+  endforeach()
 
-foreach(tmp ${Caffe2_GPU_SRCS})
-  if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*(CUDASolver|Register.*CUDA|THC|Legacy|CUDAHooks|cudnn/|detail/|TensorShapeCUDA).*\\.cpp)")
-    list(APPEND Caffe2_GPU_SRCS_cu ${tmp})
-  else()
-    list(APPEND Caffe2_GPU_SRCS_cpp ${tmp})
-  endif()
-endforeach()
-
-foreach(tmp ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
-  if("${tmp}" MATCHES ".*aten.*\\.cu")
-    list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY_cu ${tmp})
-  else()
-    list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY_cpp ${tmp})
-  endif()
-endforeach()
+  foreach(tmp ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
+    if("${tmp}" MATCHES ".*aten.*\\.cu" AND NOT "${tmp}" MATCHES ".*TensorFactories.*")
+      list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY_CU ${tmp})
+    else()
+      list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY_CPP ${tmp})
+    endif()
+  endforeach()
+endif()
 
 # Debug messages - if you want to get a list of source files, enable the
 # following.
@@ -193,20 +194,39 @@ if(FALSE)
     message(STATUS "  " ${tmp})
   endforeach()
 
-  message(STATUS "GPU sources (all): ")
+  message(STATUS "GPU sources: ")
   foreach(tmp ${Caffe2_GPU_SRCS})
     message(STATUS "  " ${tmp})
   endforeach()
 
-  message(STATUS "GPU sources: (non core)")
-  foreach(tmp ${Caffe2_GPU_SRCS_cpp})
+  if(BUILD_SPLIT_CUDA)
+    message(STATUS "GPU sources: (for torch_cuda_cpp)")
+    foreach(tmp ${Caffe2_GPU_SRCS_CPP})
+      message(STATUS "  " ${tmp})
+    endforeach()
+
+    message(STATUS "GPU sources: (for torch_cuda_cu)")
+    foreach(tmp ${Caffe2_GPU_SRCS_CU})
+      message(STATUS "  " ${tmp})
+    endforeach()
+  endif()
+
+  message(STATUS "GPU sources (w/ sort by key): ")
+  foreach(tmp ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
     message(STATUS "  " ${tmp})
   endforeach()
 
-  message(STATUS "GPU sources: (.*aten.*.cu)")
-  foreach(tmp ${Caffe2_GPU_SRCS_cu})
-    message(STATUS "  " ${tmp})
-  endforeach()
+  if(BUILD_SPLIT_CUDA)
+    message(STATUS "torch_cuda_cu GPU sources (w/ sort by key): ")
+    foreach(tmp ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_CU})
+      message(STATUS "  " ${tmp})
+    endforeach()
+
+    message(STATUS "torch_cuda_cpp GPU sources (w/ sort by key): ")
+    foreach(tmp ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_CPP})
+      message(STATUS "  " ${tmp})
+    endforeach()
+  endif()
 
   message(STATUS "CPU include: ")
   foreach(tmp ${Caffe2_CPU_INCLUDE})
@@ -255,21 +275,6 @@ if(FALSE)
 
   message(STATUS "ATen Vulkan test sources: ")
   foreach(tmp ${ATen_VULKAN_TEST_SRCS})
-    message(STATUS "  " ${tmp})
-  endforeach()
-
-  message(STATUS "Caffe2_GPU_SRCS_W_SORT_BY_KEY: ")
-  foreach(tmp ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
-    message(STATUS "  " ${tmp})
-  endforeach()
-
-  message(STATUS "Caffe2_GPU_SRCS_W_SORT_BY_KEY_cu: ")
-  foreach(tmp ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_cu})
-    message(STATUS "  " ${tmp})
-  endforeach()
-
-  message(STATUS "Caffe2_GPU_SRCS_W_SORT_BY_KEY_cpp: ")
-  foreach(tmp ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_cpp})
     message(STATUS "  " ${tmp})
   endforeach()
 
@@ -559,7 +564,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
 
   if(USE_CUDA)
-    list(APPEND Caffe2_GPU_SRCS_cu ${Caffe2_GPU_HIP_JIT_FUSERS_SRCS})
+    if(BUILD_SPLIT_CUDA)
+      list(APPEND Caffe2_GPU_SRCS_CU ${Caffe2_GPU_HIP_JIT_FUSERS_SRCS})
+    else()
+      list(APPEND Caffe2_GPU_SRCS ${Caffe2_GPU_HIP_JIT_FUSERS_SRCS})
+    endif()
     add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
     if(MSVC)
       # Delay load nvcuda.dll so we can import torch compiled with cuda on a CPU-only machine
@@ -570,8 +579,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB} ${DELAY_LOAD_FLAGS})
     target_include_directories(caffe2_nvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
     install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-    if(USE_NCCL)
-      list(APPEND Caffe2_GPU_SRCS_cpp
+    if(USE_NCCL AND BUILD_SPLIT_CUDA)
+      list(APPEND Caffe2_GPU_SRCS_CPP
+        ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
+    elseif(USE_NCCL)
+      list(APPEND Caffe2_GPU_SRCS
         ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
     endif()
   endif()
@@ -749,7 +761,6 @@ if(USE_ROCM)
 elseif(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
   if(CUDA_SEPARABLE_COMPILATION)
-    # TODO: split torch_cuda here too
     # Separate compilation fails when kernels using `thrust::sort_by_key`
     # are linked with the rest of CUDA code. Workaround by linking them separately
     set(_generated_name "torch_cuda_w_sort_by_key_intermediate_link${CMAKE_C_OUTPUT_EXTENSION}")
@@ -759,24 +770,38 @@ elseif(USE_CUDA)
     set( torch_cuda_SEPARABLE_COMPILATION_OBJECTS )
     # Pass compiled sort-by-key object + device-linked fatbin as extra dependencies of torch_cuda
     cuda_add_library(torch_cuda ${Caffe2_GPU_SRCS} ${torch_cuda_w_sort_by_key_link_file} ${Caffe2_GPU_W_SORT_BY_KEY_OBJ})
+  elseif(BUILD_SPLIT_CUDA)
+    cuda_add_library(torch_cuda_cpp ${Caffe2_GPU_SRCS_CPP} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_CPP})
+    cuda_add_library(torch_cuda_cu ${Caffe2_GPU_SRCS_CU} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_CU})
   else()
-    cuda_add_library(torch_cuda_cpp ${Caffe2_GPU_SRCS_cpp} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_cpp})
-    cuda_add_library(torch_cuda_cu ${Caffe2_GPU_SRCS_cu} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_cu})
+    cuda_add_library(torch_cuda ${Caffe2_GPU_SRCS} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
-  torch_compile_options(torch_cuda_cpp)  # see cmake/public/utils.cmake
-  torch_compile_options(torch_cuda_cu)  # see cmake/public/utils.cmake
-  target_compile_definitions(torch_cuda_cpp PRIVATE USE_CUDA)
-  target_compile_definitions(torch_cuda_cu PRIVATE USE_CUDA)
-  if(USE_NCCL)
+  if(BUILD_SPLIT_CUDA)
+    torch_compile_options(torch_cuda_cpp)  # see cmake/public/utils.cmake
+    torch_compile_options(torch_cuda_cu)  # see cmake/public/utils.cmake
+    target_compile_definitions(torch_cuda_cpp PRIVATE BUILD_SPLIT_CUDA)
+    target_compile_definitions(torch_cuda_cpp PRIVATE USE_CUDA)
+    target_compile_definitions(torch_cuda_cu PRIVATE BUILD_SPLIT_CUDA)
+    target_compile_definitions(torch_cuda_cu PRIVATE USE_CUDA)
+  else()
+    torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
+    target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
+  endif()
+  if(USE_NCCL AND BUILD_SPLIT_CUDA)
     target_link_libraries(torch_cuda_cpp PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda_cpp PRIVATE USE_NCCL)
+  elseif(USE_NCCL)
+    target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
+    target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
   endif()
 endif()
 
 if(USE_CUDA OR USE_ROCM)
-  if(USE_CUDA)
-    set(TORCHLIB_FLAVOR torch_cuda_cu) # unsure if torch_cuda_cpp is the right thing here
+  if(BUILD_SPLIT_CUDA)
+    set(TORCHLIB_FLAVOR torch_cuda_cu) # chose torch_cuda_cu here since JIT is in torch_cuda_cpp
+  elseif(USE_CUDA)
+    set(TORCHLIB_FLAVOR torch_cuda)
   elseif(USE_ROCM)
     set(TORCHLIB_FLAVOR torch_hip)
   endif()
@@ -841,11 +866,14 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/include)
   endif()
 
-  if(USE_CUDA AND MSVC)
+  if(BUILD_SPLIT_CUDA AND MSVC)
     # -INCLUDE is used to ensure torch_cuda_cpp/cu are linked against in a project that relies on them.
-    # Related issue: https://github.com/pytorch/pytorch/issues/31611
     target_link_libraries(torch_cuda_cpp INTERFACE "-INCLUDE:?warp_size@cuda@at@@YAHXZ")
     target_link_libraries(torch_cuda_cu INTERFACE "-INCLUDE:?searchsorted_cuda@native@at@@YA?AVTensor@2@AEBV32@0_N1@Z")
+  elseif(USE_CUDA AND MSVC)
+    # -INCLUDE is used to ensure torch_cuda is linked against in a project that relies on them.
+    # Related issue: https://github.com/pytorch/pytorch/issues/31611
+    target_link_libraries(torch_cuda INTERFACE "-INCLUDE:?warp_size@cuda@at@@YAHXZ")
   endif()
 
 
@@ -1101,13 +1129,18 @@ torch_set_target_props(torch_cpu)
 
 
 target_compile_options(torch_cpu PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
-if(USE_CUDA)
+if(BUILD_SPLIT_CUDA)
   target_compile_options(torch_cuda_cu PRIVATE "-DTORCH_CUDA_CU_BUILD_MAIN_LIB")
   target_compile_options(torch_cuda_cpp PRIVATE "-DTORCH_CUDA_CPP_BUILD_MAIN_LIB")
   # NB: This must be target_compile_definitions, not target_compile_options,
   # as the latter is not respected by nvcc
   target_compile_definitions(torch_cuda_cu PRIVATE "-DTORCH_CUDA_CU_BUILD_MAIN_LIB")
   target_compile_definitions(torch_cuda_cpp PRIVATE "-DTORCH_CUDA_CPP_BUILD_MAIN_LIB")
+elseif(USE_CUDA)
+  target_compile_options(torch_cuda PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
+  # NB: This must be target_compile_definitions, not target_compile_options,
+  # as the latter is not respected by nvcc
+  target_compile_definitions(torch_cuda PRIVATE "-DTORCH_CUDA_BUILD_MAIN_LIB")
 elseif(USE_ROCM)
   target_compile_options(torch_hip PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
   target_compile_definitions(torch_hip PRIVATE "-DTORCH_HIP_BUILD_MAIN_LIB")
@@ -1196,9 +1229,11 @@ endif()
 
 caffe2_interface_library(torch_cpu torch_cpu_library)
 
-if(USE_CUDA)
+if(BUILD_SPLIT_CUDA)
   caffe2_interface_library(torch_cuda_cu torch_cuda_cu_library)
   caffe2_interface_library(torch_cuda_cpp torch_cuda_cpp_library)
+elseif(USE_CUDA)
+  caffe2_interface_library(torch_cuda torch_cuda_library)
 elseif(USE_ROCM)
   caffe2_interface_library(torch_hip torch_hip_library)
 endif()
@@ -1206,18 +1241,22 @@ endif()
 caffe2_interface_library(torch torch_library)
 
 install(TARGETS torch_cpu torch_cpu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-if(USE_CUDA)
+if(BUILD_SPLIT_CUDA)
   install(TARGETS torch_cuda_cu torch_cuda_cu_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
   install(TARGETS torch_cuda_cpp torch_cuda_cpp_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+elseif(USE_CUDA)
+  install(TARGETS torch_cuda torch_cuda_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 elseif(USE_ROCM)
   install(TARGETS torch_hip torch_hip_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
 install(TARGETS torch torch_library EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 target_link_libraries(torch PUBLIC torch_cpu_library)
-if(USE_CUDA)
+if(BUILD_SPLIT_CUDA)
   target_link_libraries(torch PUBLIC torch_cuda_cu_library)
   target_link_libraries(torch PUBLIC torch_cuda_cpp_library)
+elseif(USE_CUDA)
+  target_link_libraries(torch PUBLIC torch_cuda_library)
 elseif(USE_ROCM)
   target_link_libraries(torch PUBLIC torch_hip_library)
 endif()
@@ -1225,16 +1264,18 @@ endif()
 # Install PDB files for MSVC builds
 if(MSVC AND BUILD_SHARED_LIBS)
   install(FILES $<TARGET_PDB_FILE:torch_cpu> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
-  if(USE_CUDA)
+  if(BUILD_SPLIT_CUDA)
     install(FILES $<TARGET_PDB_FILE:torch_cuda_cu> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
     install(FILES $<TARGET_PDB_FILE:torch_cuda_cpp> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
+  elseif(USE_CUDA)
+    install(FILES $<TARGET_PDB_FILE:torch_cuda> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
   elseif(USE_ROCM)
     install(FILES $<TARGET_PDB_FILE:torch_hip> DESTINATION "${TORCH_INSTALL_LIB_DIR}" OPTIONAL)
   endif()
 endif()
 
 # ---[ CUDA library.
-if(USE_CUDA)
+if(BUILD_SPLIT_CUDA)
   target_link_libraries(torch_cuda_cu INTERFACE torch::cudart)
   target_link_libraries(torch_cuda_cpp INTERFACE torch::cudart)
   target_link_libraries(torch_cuda_cu PUBLIC c10_cuda torch::nvtoolsext)
@@ -1259,6 +1300,21 @@ if(USE_CUDA)
   # linking; libculibos and cublas must be last.
   target_link_libraries(torch_cuda_cpp PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
   target_link_libraries(torch_cuda_cu PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
+elseif(USE_CUDA)
+  target_link_libraries(torch_cuda INTERFACE torch::cudart)
+  target_link_libraries(torch_cuda PUBLIC c10_cuda torch::nvtoolsext)
+
+  target_include_directories(
+      torch_cuda INTERFACE $<INSTALL_INTERFACE:include>)
+  target_include_directories(
+      torch_cuda PRIVATE ${Caffe2_GPU_INCLUDE})
+  target_link_libraries(
+      torch_cuda PRIVATE ${Caffe2_CUDA_DEPENDENCY_LIBS})
+
+  # These public dependencies must go after the previous dependencies, as the
+  # order of the libraries in the linker call matters here when statically
+  # linking; libculibos and cublas must be last.
+  target_link_libraries(torch_cuda PUBLIC torch_cpu_library ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 endif()
 
 # ---[ Metal(OSX) modification
