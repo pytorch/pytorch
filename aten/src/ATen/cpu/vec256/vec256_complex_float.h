@@ -242,7 +242,8 @@ public:
   }
   Vec256<c10::complex<float>> acos() const {
     // acos(x) = pi/2 - asin(x)
-    const __m256 pi_2 = _mm256_setr_ps(M_PI/2, 0.0, M_PI/2, 0.0, M_PI/2, 0.0, M_PI/2, 0.0);
+    constexpr float pi_2f = c10::pi<float> / 2;
+    const __m256 pi_2 = _mm256_setr_ps(pi_2f, 0.0, pi_2f, 0.0, pi_2f, 0.0, pi_2f, 0.0);
     return _mm256_sub_ps(pi_2, asin());
   }
   Vec256<c10::complex<float>> atan() const;
