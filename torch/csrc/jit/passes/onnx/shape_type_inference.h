@@ -1,8 +1,8 @@
 #pragma once
 
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/python/python_arg_flatten.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
+#include <torch/csrc/jit/python/python_arg_flatten.h>
 
 namespace torch {
 namespace jit {
