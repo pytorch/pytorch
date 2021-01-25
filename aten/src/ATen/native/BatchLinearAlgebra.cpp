@@ -1566,6 +1566,8 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
     VT_working_copy.zero_();
   }
   // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
+  // Note that the 'apply_svd' routine returns VT = V^T (for real inputs) or VT = V^H (for complex inputs), not V.
+  VT_working_copy = VT_working_copy.conj();
   VT_working_copy.transpose_(-2, -1);
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
@@ -1596,8 +1598,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& V,
     1. the 2nd parameter is bool some=True, which if effectively the opposite
        of full_matrices=True
 
-    2. svd returns V, while linalg.svd returns VT. To accommodate the
-       difference, we transpose() V upon return
+    2. svd returns V, while linalg.svd returns VT = V^T (for real inputs) or VT = V^H (for complex inputs).
+       To accommodate the difference, we transpose() and conj() V upon return
 */
 
 std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matrices, bool compute_uv) {
@@ -1608,7 +1610,7 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matr
     Tensor U, S, V;
     std::tie(U, S, V) = at::_svd_helper(self, some, compute_uv);
     if (compute_uv) {
-        Tensor VT = V.transpose(-2, -1);
+        Tensor VT = V.conj().transpose(-2, -1);
         return std::make_tuple(U, S, VT);
     } else {
         Tensor empty_U = at::empty({0}, self.options());

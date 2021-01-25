@@ -204,8 +204,6 @@ inline static void apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& S
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cuda_gesvdj", [&] {
     _apply_svd_lib_gesvdj<scalar_t>(self_working_copy, U, S, VT, infos, compute_uv, some);
   });
-
-  VT = VT.conj();
 }
 
 // call cusolver gesvdj batched function to calculate svd
@@ -256,8 +254,6 @@ inline static void apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, Te
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cuda_gesvdjBatched", [&] {
     _apply_svd_lib_gesvdjBatched<scalar_t>(self_working_copy, U, S, VT, infos, compute_uv);
   });
-
-  VT = VT.conj();
 }
 
 // entrance of calculations of `svd` using cusolver gesvdj and gesvdjBatched
