@@ -170,7 +170,7 @@ class FakeQuantize(FakeQuantizeBase):
             key = prefix + name
             if key in state_dict:
                 val = state_dict[key]
-                # Custom handling to allow loading min_vals or max_vals
+                # Custom handling to allow loading scale and zero_point
                 # of size N into uninitialized buffers of size 0. The
                 # buffers are resized here, and the values are copied in
                 # the default state_dict loading code of the parent.

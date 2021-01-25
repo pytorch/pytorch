@@ -566,7 +566,7 @@ def load(f, map_location=None, pickle_module=pickle, **pickle_load_args):
         >>> torch.load('tensors.pt', map_location={'cuda:1':'cuda:0'})
         # Load tensor from io.BytesIO object
         >>> with open('tensor.pt', 'rb') as f:
-                buffer = io.BytesIO(f.read())
+        ...     buffer = io.BytesIO(f.read())
         >>> torch.load(buffer)
         # Load a module with 'ascii' encoding for unpickling
         >>> torch.load('module.pt', encoding='ascii')
