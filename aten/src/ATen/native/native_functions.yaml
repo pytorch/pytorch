@@ -7482,25 +7482,21 @@
     DefaultBackend: smooth_l1_loss_backward
 
 - func: huber_loss.out(Tensor self, Tensor target, int reduction=Mean, float beta=1.0, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: full
   python_module: nn
   dispatch:
     CPU, CUDA: huber_loss_out
 
 - func: huber_loss(Tensor self, Tensor target, int reduction=Mean, float beta=1.0) -> Tensor
-  use_c10_dispatcher: full
   python_module: nn
   dispatch:
     CPU, CUDA: huber_loss
 
 - func: huber_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta, *, Tensor(a!) grad_input) -> Tensor(a!)
-  use_c10_dispatcher: full
   python_module: nn
   dispatch:
     CPU, CUDA: huber_loss_backward_out
 
 - func: huber_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction, float beta) -> Tensor
-  use_c10_dispatcher: full
   python_module: nn
   dispatch:
     DefaultBackend: huber_loss_backward
