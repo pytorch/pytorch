@@ -6,6 +6,8 @@
 #include <cfloat>
 #include <limits>
 #include <type_traits>
+#include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
 #include <c10/util/MathConstants.h>
 #include <c10/util/math_compat.h>
 
