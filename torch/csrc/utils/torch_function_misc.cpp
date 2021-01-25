@@ -1,10 +1,11 @@
-#include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/torch_function_misc.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_strings.h>
 
 namespace torch {
   static thread_local bool enable_torch_function = true;
+  static thread_local py::object last_overload_default_kwargs = py::reinterpret_borrow<py::object>(Py_None);
   PyObject* disabled_torch_function = nullptr;
 
   bool torch_function_enabled() {
@@ -17,6 +18,14 @@ namespace torch {
 
   void set_disabled_torch_function_impl(PyObject* value) {
     disabled_torch_function = value;
+  }
+
+  PyObject* get_current_overload_default_kwargs() {
+    return last_overload_default_kwargs.ptr();
+  }
+
+  void set_current_overload_default_kwargs(PyObject* kwargs) {
+    last_overload_default_kwargs = py::reinterpret_steal<py::object>(kwargs);
   }
 }
 
@@ -233,4 +242,15 @@ PyObject* THPModule_has_torch_function_variadic(PyObject*, PyObject *const *args
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
+}
+
+PyObject* THPModule_get_current_overload_default_kwargs(PyObject*, PyObject*) {
+  PyObject* ret = torch::get_current_overload_default_kwargs();
+  Py_INCREF(ret);
+  return ret;
+}
+
+PyObject* THPModule_set_current_overload_default_kwargs(PyObject*, PyObject *kwargs) {
+  torch::set_current_overload_default_kwargs(kwargs);
+  Py_RETURN_NONE;
 }

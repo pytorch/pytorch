@@ -687,6 +687,37 @@ void FunctionParameter::set_default_str(const std::string& str) {
   }
 }
 
+PyObject *FunctionParameter::get_default() {
+  if (!optional) {
+    throw std::runtime_error("optional must be true to call this function.");
+  }
+
+  switch (type_) {
+    case ParameterType::TENSOR: Py_RETURN_NONE;
+    case ParameterType::SCALAR: // TODO
+    case ParameterType::INT64: return PyLong_FromLongLong(default_int);
+    case ParameterType::DOUBLE: return PyFloat_FromDouble(default_double);
+    case ParameterType::COMPLEX: return PyComplex_FromDoubles(default_complex[0], default_complex[1]);
+    case ParameterType::TENSOR_LIST: return "tuple of Tensors";
+    case ParameterType::INT_LIST: return "tuple of ints";
+    case ParameterType::FLOAT_LIST: return "tuple of floats";
+    case ParameterType::GENERATOR: return "torch.Generator";
+    case ParameterType::BOOL: return "bool";
+    case ParameterType::STORAGE: return "torch.Storage";
+    case ParameterType::PYOBJECT: return "object";
+    case ParameterType::SCALARTYPE: return "torch.dtype";
+    case ParameterType::LAYOUT: return "torch.layout";
+    case ParameterType::MEMORY_FORMAT: return "torch.memory_format";
+    case ParameterType::QSCHEME: return "torch.qscheme";
+    case ParameterType::DEVICE: return "torch.device";
+    case ParameterType::STRING: return "str";
+    case ParameterType::DIMNAME: return "name";
+    case ParameterType::DIMNAME_LIST: return "tuple of names";
+    case ParameterType::SCALAR_LIST: return "tuple of Scalars";
+    default: throw std::runtime_error("unknown parameter type");
+  }
+}
+
 FunctionSignature::FunctionSignature(const std::string& fmt, int index)
   : min_args(0)
   , max_args(0)
@@ -960,7 +991,20 @@ bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, 
     }
     return false;
   }
+
+  if (!overloaded_args.empty()) {
+    dump_default_kwargs();
+  }
+
   return true;
+}
+
+inline void FunctionSignature::dump_default_kwargs() {
+  py::dict default_kwargs;
+  for (auto param : params) {
+    if (param.optional) {
+    }
+  }
 }
 
 PythonArgParser::PythonArgParser(std::vector<std::string> fmts, bool traceable)

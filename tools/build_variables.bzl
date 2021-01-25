@@ -573,7 +573,7 @@ libtorch_python_core_sources = [
     "torch/csrc/utils/tensor_new.cpp",
     "torch/csrc/utils/tensor_numpy.cpp",
     "torch/csrc/utils/tensor_types.cpp",
-    "torch/csrc/utils/disable_torch_function.cpp",
+    "torch/csrc/utils/torch_function_misc.cpp",
 ]
 
 libtorch_python_distributed_core_sources = [

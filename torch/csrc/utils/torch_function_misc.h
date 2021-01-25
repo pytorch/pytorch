@@ -10,6 +10,8 @@ namespace torch {
   PyObject* disabled_torch_function_impl();
   void set_disabled_torch_function_impl(PyObject* value);
   bool check_has_torch_function(PyObject* obj);
+  PyObject* get_current_overload_default_kwargs();
+  void set_current_overload_default_kwargs(PyObject* kwargs);
 }
 
 PyObject* THPModule_isEnabledTorchFunction(PyObject* self, PyObject *unused);
@@ -18,3 +20,5 @@ PyObject* THPModule_disable_torch_function(PyObject *self, PyObject *args);
 PyObject* THPModule_has_torch_function(PyObject*, PyObject *arg);
 PyObject* THPModule_has_torch_function_unary(PyObject*, PyObject *obj);
 PyObject* THPModule_has_torch_function_variadic(PyObject*, PyObject *const *args, Py_ssize_t nargs);
+PyObject* THPModule_get_current_overload_default_kwargs(PyObject*, PyObject*);
+PyObject* THPModule_set_current_overload_default_kwargs(PyObject*, PyObject* kwargs);

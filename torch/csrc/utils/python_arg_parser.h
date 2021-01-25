@@ -61,7 +61,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/torch_function_misc.h>
 #include <torch/csrc/utils/six.h>
 #include <torch/csrc/autograd/variable.h>
 
@@ -138,6 +138,8 @@ struct PYBIND11_EXPORT FunctionSignature {
   bool hidden;
   bool deprecated;
   bool disable_torch_function;
+private:
+  void dump_default_kwargs();
 };
 
 struct PythonArgs {
@@ -217,6 +219,7 @@ struct FunctionParameter {
   bool check(PyObject* obj, std::vector<py::handle> &overloaded_args, int argnum);
 
   void set_default_str(const std::string& str);
+  PyObject* get_default();
   std::string type_name() const;
 
   ParameterType type_;
