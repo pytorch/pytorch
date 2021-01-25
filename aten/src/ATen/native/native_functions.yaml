@@ -5927,14 +5927,13 @@
     CUDA: legacy::cuda::_th_geqrf
 
 - func: orgqr.out(Tensor self, Tensor input2, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    CPU: legacy::cpu::_th_orgqr_out
+    CPU: orgqr_out
 
 - func: orgqr(Tensor self, Tensor input2) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_orgqr
+    CPU: orgqr
 
 - func: ormqr.out(Tensor self, Tensor input2, Tensor input3, bool left=True, bool transpose=False, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures

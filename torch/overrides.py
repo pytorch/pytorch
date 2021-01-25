@@ -183,6 +183,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.nn.functional.hardswish,
         torch.is_vulkan_available,
         torch.is_deterministic,
+        torch.are_deterministic_algorithms_enabled,
+        torch.use_deterministic_algorithms,
         torch.set_deterministic,
         torch.unify_type_list,
         torch.make_dual,
