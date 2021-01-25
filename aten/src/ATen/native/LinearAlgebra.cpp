@@ -147,12 +147,14 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
 
   // If not Hermitian use singular value decomposition, else use eigenvalue decomposition
   if (!hermitian) {
-    Tensor U, S, VH;
-    std::tie(U, S, VH) = at::linalg_svd(input, /*full_matrices*/false);
+    Tensor U, S, V;
+    // TODO: replace input.svd with linalg_svd
+    // using linalg_svd breaks pytorch/xla, see https://github.com/pytorch/xla/issues/2755
+    std::tie(U, S, V) = input.svd();
     Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
     Tensor S_pseudoinv = at::where(S > (rcond.unsqueeze(-1) * max_val), S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
-    // computes V @ diag(S_pseudoinv) @ U.conj().T == (U @ diag(S_pseudoinv) @ VH).conj().T
-    return at::matmul(U * S_pseudoinv.unsqueeze(-2), VH).conj().transpose(-2, -1);
+    // computes V @ diag(S_pseudoinv) @ U.conj().T
+    return at::matmul(V * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
   } else {
     Tensor S, U;
     std::tie(S, U) = at::linalg_eigh(input);
