@@ -275,11 +275,27 @@ Module ScriptModuleDeserializer::deserialize(
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::istream& in,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return import_ir_module(std::move(cu), in, device, extra_files);
+}
+
+Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
+    std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
   auto reader = torch::make_unique<PyTorchStreamReader>(&in);
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
   return deserializer.deserialize(device, extra_files);
+}
+
+Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
+    const std::string& filename,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return import_ir_module(std::move(cu), filename, device, extra_files);
 }
 
 Module import_ir_module(
@@ -295,11 +311,24 @@ Module import_ir_module(
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return import_ir_module(std::move(cu), std::move(rai), device, extra_files);
+}
+
+Module import_ir_module(
+    std::shared_ptr<CompilationUnit> cu,
+    std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
   return deserializer.deserialize(device, extra_files);
+}
+
+Module load(std::istream& in, c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return load(in, device, extra_files);
 }
 
 Module load(
@@ -311,6 +340,11 @@ Module load(
   return module;
 }
 
+Module load(const std::string& filename, c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return load(filename, device, extra_files);
+}
+
 Module load(
     const std::string& filename,
     c10::optional<at::Device> device,
@@ -318,6 +352,13 @@ Module load(
   std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
   auto module = load(std::move(rai), device, extra_files);
   return module;
+}
+
+Module load(
+    std::shared_ptr<ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device) {
+  ExtraFilesMap extra_files;
+  return load(std::move(rai), device, extra_files);
 }
 
 Module load(
