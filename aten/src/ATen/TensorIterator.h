@@ -476,6 +476,10 @@ public:
   //   the operation.
   // Setting this flag to true sets check_all_same_dtype_ to false.
   TensorIteratorConfig& promote_inputs_to_common_dtype(const bool _promote_inputs_to_common_dtype);
+
+  // Sets the "common_dtype" to the specified dtype.
+  // NOTE: If "common_dtype" is set, computation of common_dtype is skipped
+  // and the specified dtype is directly used as the "common_dtype".
   TensorIteratorConfig& set_common_dtype(c10::optional<ScalarType> common_dtype);
 
   // Sets the promote_integer_inputs_to_float_ flag, which is false by default
