@@ -878,5 +878,72 @@ class TestWrapTorchFunction(TestCase):
 
         self.assertEqual(f(A()), -1)
 
+class TestIndexing(TestCase):
+    """ Regression tests for gh-46277 """
+    def test_getitem(self):
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                return -1
+
+        t = torch.tensor([5])
+        self.assertEqual(t[A()], -1)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_getitem_subclass(self):
+        class A(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                return -1
+
+        t = torch.tensor([5])
+        self.assertEqual(t[A()], -1)
+        self.assertEqual(t[5, A()], -1)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_setitem(self):
+        triggered = set()
+
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                triggered.add(func)
+                return -1
+
+        t = torch.tensor([5])
+        t[A()] = 1
+        t[5, A()] = 1
+        self.assertIn(Tensor.__setitem__, triggered)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_setitem_val(self):
+        triggered = set()
+
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                triggered.add(func)
+                return -1
+
+        t = torch.tensor([5])
+        t[0] = A()
+        self.assertIn(Tensor.__setitem__, triggered)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_setitem_subclass(self):
+        triggered = set()
+
+        class A(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                triggered.add(func)
+                return -1
+
+        t = torch.tensor([5])
+        t[A()] = 1
+        t[5, A()] = 1
+        self.assertIn(Tensor.__setitem__, triggered)
+        self.assertEqual(t, torch.tensor([5]))
+
 if __name__ == '__main__':
     run_tests()
