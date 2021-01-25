@@ -348,40 +348,57 @@ class TestCommon(JitCommonTestCase):
     @ops([op for op in op_db if op.aliases])
     def test_aliases_consistency_eager(self, device, dtype, op):
         # Currently, there is a code duplication based on
-        # test_variant_consistency_eager to check forward only results.
+        # test_variant_consistency_eager.
         # To refactor those methods later.
-        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
 
         for sample in samples:
             expected_forward = op(*sample.input, *sample.args, **sample.kwargs)
+            # Computes expected backward
+            # NOTE: backward may fail for some dtypes
+            exception_during_backwards = False
+            expected_grad = None
+            try:
+                expected_forward.sum().backward()
+                expected_grad = sample.input.grad
+                sample.input.grad = None
+            except Exception as e:
+                exception_during_backwards = True
+
             for a_op in op.aliases:
-                alias_forward = a_op(*sample.input, *sample.args, **sample.kwargs)
-                self.assertEqual(alias_forward, expected_forward, atol=0, rtol=0)
 
-                if a_op.method_variant is not None:
-                    alias_forward = a_op.method_variant(*sample.input, *sample.args, **sample.kwargs)
-                    self.assertEqual(alias_forward, expected_forward, atol=0, rtol=0)
+                # Acquires variants to test
+                method = a_op.method_variant
+                inplace = a_op.inplace_variant
+                variants = (v for v in (a_op, method, inplace) if v is not None)
 
-                if a_op.inplace_variant is not None:
-                    if (op.promotes_integers_to_float and
-                            dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)):
+                # Test eager consistency
+                for variant in variants:
+
+                    # Verifies that inplace operations that promote int->float fail
+                    #   on tensors with integer dtypes.
+                    if (variant is inplace and not torch.can_cast(expected_forward.dtype, dtype)):
                         try:
-                            alias_forward = a_op.inplace_variant(
-                                *(clone_input_helper(input) for input in sample.input),
-                                *sample.args,
-                                **sample.kwargs
-                            )
-                            self.fail("Inplace operation on integer tensor that should be promoted to float didn't fail!")
+                            variant_forward = variant(*(clone_input_helper(input) for input in sample.input),
+                                                      *sample.args,
+                                                      **sample.kwargs)
                         except Exception as e:
-                            pass
-                    else:
-                        alias_forward = a_op.inplace_variant(
-                            *(clone_input_helper(input) for input in sample.input), 
-                            *sample.args, **sample.kwargs
-                        )
-                        self.assertEqual(alias_forward, expected_forward, atol=0, rtol=0)
+                            continue
+                        self.fail("Inplace operation on integer tensor that should be promoted to float didn't fail!")
+                    # Compares variant's forward
+                    # Note: copy the tensor-type inputs when testing inplace operation
+                    variant_forward = variant(*(clone_input_helper(input) if variant is inplace else input
+                                                for input in sample.input),
+                                              *sample.args,
+                                              **sample.kwargs)
+                    self.assertEqual(variant_forward, expected_forward)
+
+                    # Compares variant's backward
+                    if variant is not inplace or op.test_inplace_grad:
+                        self.check_variant_backward(sample.input, variant_forward,
+                                                    expected_grad, exception_during_backwards)
 
     @ops([op for op in op_db if op.aliases])
     def test_aliases_consistency_jit(self, device, dtype, op):
