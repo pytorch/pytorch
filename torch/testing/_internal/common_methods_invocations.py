@@ -14,7 +14,7 @@ from typing import List, Tuple, Dict, Any
 from torch.testing import \
     (make_non_contiguous, _dispatch_dtypes, floating_types, floating_types_and,
      floating_and_complex_types, floating_and_complex_types_and,
-     all_types_and_complex_and, all_types_and)
+     all_types_and_complex_and, all_types_and, all_types_and_complex)
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm,
      expectedAlertNondeterministic, precisionOverride)
@@ -59,6 +59,16 @@ class SampleInput(object):
         self.args = args
         self.kwargs = kwargs if kwargs is not None else {}
         self.output_process_fn_grad = output_process_fn_grad
+
+    def __repr__(self):
+        arguments = [
+            f'input[{len(self.input)}]',
+            f'args={self.args}' if len(self.args) > 0 else None,
+            f'kwargs={self.kwargs}' if len(self.kwargs) > 0 else None,
+            (f'output_process_fn_grad={self.output_process_fn_grad}'
+             if self.output_process_fn_grad is not None else None)]
+
+        return f'SampleInput({", ".join(a for a in arguments if a is not None)})'
 
 
 _NOTHING = object()  # Unique value to distinguish default from anything else
@@ -107,11 +117,13 @@ class OpInfo(object):
                  supports_tensor_out=True,  # whether the op supports the out kwarg, returning a Tensor
                  skips=tuple(),  # information about which tests to skip
                  decorators=None,  # decorators to apply to generated tests
-                 promotes_integers_to_float=False,  # whether op promotes unary output to float or not
+                 safe_casts_outputs=False,  # whether op allows safe casting when writing to out arguments
                  sample_inputs_func=None,  # function to generate sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
                  variant_test_name='',  # additional string to include in the test name
-                 supports_sparse=False  # supported for sparse
+                 supports_sparse=False,  # supported for sparse
+                 check_batched_grad=True,  # check batched grad when doing gradcheck
+                 check_batched_gradgrad=True,  # check batched grad grad when doing gradgradcheck
                  ):
 
         # Validates the dtypes are generated from the dispatch-related functions
@@ -139,7 +151,7 @@ class OpInfo(object):
         self.test_inplace_grad = test_inplace_grad
         self.test_complex_grad = test_complex_grad
         self.supports_tensor_out = supports_tensor_out
-        self.promotes_integers_to_float = promotes_integers_to_float
+        self.safe_casts_outputs = safe_casts_outputs
 
         self.skips = skips
         self.decorators = decorators
@@ -153,6 +165,8 @@ class OpInfo(object):
         else:
             self.autodiff_nonfusible_nodes = autodiff_nonfusible_nodes
         self.supports_sparse = supports_sparse
+        self.check_batched_grad = check_batched_grad
+        self.check_batched_gradgrad = check_batched_gradgrad
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -308,6 +322,72 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad):
                         args=(torch.tensor([1, 2, 3]),),
                         kwargs=dict(dim=1)),)
 
+def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
+    test_sizes = [
+        (S,),
+        (0,),
+        (S, S),
+        (0, 0),
+        (S, 0),
+        (0, S),
+        (S, S, S),
+        (0, S, S),
+        (S, 0, S),
+        (0, 0, 0),
+    ]
+
+    vector_ords = (None, 0, 0.5, 1, 2, 3.5, inf, -0.5, -1, -2, -3.5)
+    matrix_ords = (None, 'fro', 'nuc', 1, 2, inf, -1, -2, -inf)
+
+    inputs = []
+
+    is_dtype_half = dtype in [torch.float16, torch.bfloat16]
+
+    for test_size in test_sizes:
+        is_vector_norm = len(test_size) == 1
+        is_matrix_norm = len(test_size) == 2
+
+        for keepdim in [False, True]:
+            inputs.append(SampleInput(
+                make_tensor(
+                    test_size, device, dtype, low=None, high=None,
+                    requires_grad=requires_grad),
+                kwargs=dict(
+                    keepdim=keepdim)))
+
+            if not (is_vector_norm or is_matrix_norm):
+                continue
+
+            ords = vector_ords if is_vector_norm else matrix_ords
+
+            for ord in ords:
+                # TODO: remove this check when `max` is implemented for
+                #       float16 and bfloat16. Issue:
+                #       https://github.com/pytorch/pytorch/issues/50790
+                if is_vector_norm and is_dtype_half and ord == inf:
+                    continue
+
+                inputs.append(SampleInput(
+                    make_tensor(
+                        test_size, device, dtype,
+                        low=None, high=None,
+                        requires_grad=requires_grad),
+                    args=(ord,),
+                    kwargs=dict(
+                        keepdim=keepdim)))
+
+                if ord in ['nuc', 'fro']:
+                    inputs.append(SampleInput(
+                        make_tensor(
+                            test_size, device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad),
+                        kwargs=dict(
+                            ord=ord,
+                            keepdim=keepdim,
+                            dim=(0, 1))))
+        return inputs
+
 def sample_inputs_slogdet(op_info, device, dtype, requires_grad):
     # original test cases from 'method_tests' have too many test_inputs
     # we don't actually need all of them to check the autograd and jit correctness
@@ -350,6 +430,56 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad):
     else:
         return (input, )
 
+def sample_inputs_addr(op_info, device, dtype, requires_grad):
+    input1 = SampleInput((make_tensor((S, M), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((S, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((M, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad)))
+
+    input2 = SampleInput((make_tensor((), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((S, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((M, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad)))
+    if dtype.is_complex:
+        alpha, beta = 0.1 + 0.3j, 0.4 + 0.6j
+    elif dtype.is_floating_point:
+        alpha, beta = 0.2, 0.6
+    else:
+        alpha, beta = 2, 3
+
+    input3 = SampleInput((make_tensor((S, M), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((S, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((M, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad)),
+                         kwargs=dict(beta=beta, alpha=alpha))
+
+    input4 = SampleInput((make_tensor((), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((S, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad),
+                          make_tensor((M, ), device, dtype,
+                          low=None, high=None,
+                          requires_grad=requires_grad)),
+                         kwargs=dict(beta=beta, alpha=alpha))
+
+    return (input1, input2, input3, input4)
 
 def sample_inputs_xlogy(self, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S), device, dtype,
@@ -357,6 +487,11 @@ def sample_inputs_xlogy(self, device, dtype, requires_grad):
                                      requires_grad=requires_grad),
                          make_tensor((S, S), device, dtype,
                                      low=0, high=None,
+                                     requires_grad=requires_grad))),)
+
+def sample_inputs_trace(self, device, dtype, requires_grad):
+    return (SampleInput((make_tensor((S, S), device, dtype,
+                                     low=None, high=None,
                                      requires_grad=requires_grad))),)
 
 def sample_inputs_linalg_inv(op_info, device, dtype, requires_grad=False):
@@ -839,15 +974,12 @@ op_db: List[OpInfo] = [
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-1,
                                                   torch.complex64: 1e-2}),),
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cuda', dtypes=[torch.float16],
-                                active_if=TEST_WITH_ROCM),
                        SkipInfo('TestGradients', 'test_fn_grad',
                                 dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestGradients', 'test_method_grad',
@@ -862,7 +994,7 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    test_inplace_grad=False,
                    skips=(
@@ -892,12 +1024,24 @@ op_db: List[OpInfo] = [
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         dtypes=[torch.bfloat16, torch.float16, torch.cfloat, torch.cdouble]),),
            sample_inputs_func=sample_inputs_addmm),
+    OpInfo('addr',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           # Reference: https://github.com/pytorch/pytorch/issues/50747
+           test_inplace_grad=False,
+           skips=(
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.float16, torch.cfloat, torch.cdouble, torch.bfloat16]),
+               # Reference: https://github.com/pytorch/pytorch/issues/50747
+               SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),),
+           sample_inputs_func=sample_inputs_addr),
+
     UnaryUfuncInfo('asin',
                    ref=np.arcsin,
                    domain=(-1, 1),
                    supports_sparse=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
@@ -916,7 +1060,7 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    test_inplace_grad=False,
                    skips=(
@@ -937,7 +1081,7 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
@@ -951,7 +1095,7 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    test_inplace_grad=False,
                    skips=(
@@ -974,21 +1118,19 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
                    handles_large_floats=False,
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics', device_type='cpu',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                dtypes=[torch.float], active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('cosh',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.cosh),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    assert_autodiffed=True,
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/48641
@@ -1014,7 +1156,7 @@ op_db: List[OpInfo] = [
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                    ),
                    assert_autodiffed=True,
-                   promotes_integers_to_float=True),
+                   safe_casts_outputs=True),
     SpectralFuncInfo('fft.fft',
                      aten_name='fft_fft',
                      ref=np.fft.fft,
@@ -1040,6 +1182,7 @@ op_db: List[OpInfo] = [
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=True,
+                     check_batched_gradgrad=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.rfft',
                      aten_name='fft_rfft',
@@ -1048,6 +1191,8 @@ op_db: List[OpInfo] = [
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=True,
+                     check_batched_grad=False,
+                     check_batched_gradgrad=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.rfftn',
                      aten_name='fft_rfftn',
@@ -1057,6 +1202,8 @@ op_db: List[OpInfo] = [
                      default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=True,
                      test_inplace_grad=False,
+                     check_batched_grad=False,
+                     check_batched_gradgrad=False,
                      decorators=[precisionOverride({torch.float: 1e-4})],),
     SpectralFuncInfo('fft.ifft',
                      aten_name='fft_ifft',
@@ -1081,6 +1228,7 @@ op_db: List[OpInfo] = [
                      dtypes=all_types_and(torch.bool),
                      default_test_dtypes=floating_types(),
                      supports_tensor_out=True,
+                     check_batched_grad=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.irfft',
                      aten_name='fft_irfft',
@@ -1089,6 +1237,7 @@ op_db: List[OpInfo] = [
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=True,
+                     check_batched_gradgrad=False,
                      test_inplace_grad=False,),
     SpectralFuncInfo('fft.irfftn',
                      aten_name='fft_irfftn',
@@ -1097,6 +1246,7 @@ op_db: List[OpInfo] = [
                      dtypes=all_types_and_complex_and(torch.bool),
                      default_test_dtypes=floating_and_complex_types(),
                      supports_tensor_out=True,
+                     check_batched_gradgrad=False,
                      test_inplace_grad=False,),
     OpInfo('flip',
            op=torch.flip,
@@ -1116,6 +1266,22 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_fliplr_flipud,
            test_inplace_grad=False,
            supports_tensor_out=False),
+    OpInfo('linalg.norm',
+           op=torch.linalg.norm,
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           test_inplace_grad=False,
+           supports_tensor_out=True,
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           sample_inputs_func=sample_inputs_linalg_norm,
+           aten_name='linalg_norm',
+           skips=(
+               # TODO: remove this once `pow` is implemented for float16
+               #       and bfloat16 on CPU. Issue:
+               #       https://github.com/pytorch/pytorch/issues/50789
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        device_type='cpu',
+                        dtypes=[torch.float16, torch.bfloat16]),
+           )),
     OpInfo('linalg.slogdet',
            aten_name='linalg_slogdet',
            op=torch.linalg.slogdet,
@@ -1137,7 +1303,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    decorators=(precisionOverride({torch.bfloat16: 5e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
@@ -1157,7 +1323,7 @@ op_db: List[OpInfo] = [
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
@@ -1171,7 +1337,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True),
     UnaryUfuncInfo('log2',
@@ -1182,7 +1348,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-1}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
@@ -1206,13 +1372,11 @@ op_db: List[OpInfo] = [
                    skip_bfloat16_grad=True,
                    handles_large_floats=False,
                    handles_complex_extremals=False,
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                dtypes=[torch.float], active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('sinc',
                    ref=np_sinc_with_fp16_as_fp32,
@@ -1222,7 +1386,7 @@ op_db: List[OpInfo] = [
                    skip_bfloat16_grad=True,
                    handles_large_floats=False,
                    handles_complex_extremals=False,
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2,
                                                   torch.float16: 1e-2}),),
                    skips=(
@@ -1231,14 +1395,12 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.cfloat]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                dtypes=[torch.float], active_if=TEST_WITH_ROCM),
                    )),
     UnaryUfuncInfo('sinh',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.sinh),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    assert_autodiffed=True,
                    decorators=(precisionOverride({torch.float16: 1e-2}),),
                    skips=(
@@ -1261,7 +1423,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
@@ -1282,7 +1444,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
@@ -1302,13 +1464,13 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool, torch.half),
                    dtypesIfCPU=all_types_and(torch.bool, torch.half),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
-                   promotes_integers_to_float=True),
+                   safe_casts_outputs=True),
     UnaryUfuncInfo('expm1',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.expm1),
                    dtypes=all_types_and(torch.bool, torch.half),
                    dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half),
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    assert_autodiffed=True,
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/pull/48926#issuecomment-739734774
@@ -1327,7 +1489,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=None,
                    assert_autodiffed=True,
                    skip_bfloat16_grad=True,
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/45690
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
@@ -1343,11 +1505,12 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                    decorators=(precisionOverride({torch.half: 5e-2}),),
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    assert_autodiffed=True,
                    handles_complex_extremals=False),
     UnaryUfuncInfo('sqrt',
                    ref=np.sqrt,
+                   supports_sparse=True,
                    domain=(0, float('inf')),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -1363,7 +1526,7 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/pull/47293#issuecomment-721774436
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.bfloat16])),
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    handles_complex_extremals=False),
     OpInfo('linalg.inv',
            aten_name='linalg_inv',
@@ -1372,6 +1535,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            supports_tensor_out=True,
            sample_inputs_func=sample_inputs_linalg_inv,
+           check_batched_gradgrad=False,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     UnaryUfuncInfo('angle',
                    ref=np.angle,
@@ -1381,7 +1545,7 @@ op_db: List[OpInfo] = [
                    dtypesIfROCM=all_types_and_complex_and(torch.bool),
                    decorators=(precisionOverride({torch.float16: 1e-2,
                                                   torch.bfloat16: 1e-2}),),
-                   promotes_integers_to_float=True,
+                   safe_casts_outputs=True,
                    supports_complex_to_float=True,
                    test_inplace_grad=False),
     OpInfo('linalg.solve',
@@ -1391,6 +1555,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            supports_tensor_out=True,
            sample_inputs_func=sample_inputs_linalg_solve,
+           check_batched_gradgrad=False,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     OpInfo('linalg.pinv',
            aten_name='linalg_pinv',
@@ -1559,7 +1724,7 @@ if TEST_SCIPY:
                        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
                        dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
                        dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
-                       promotes_integers_to_float=True,
+                       safe_casts_outputs=True,
                        assert_autodiffed=True,
                        test_complex_grad=False),  # Reference: https://github.com/pytorch/pytorch/issues/48552
         UnaryUfuncInfo('digamma',
@@ -1574,7 +1739,7 @@ if TEST_SCIPY:
                            # in float16 and NaN's can't be tested for equality.
                            SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                     device_type='cuda', dtypes=[torch.float16]),),
-                       promotes_integers_to_float=True),
+                       safe_casts_outputs=True),
         UnaryUfuncInfo('erf',
                        ref=scipy.special.erf,
                        decorators=(precisionOverride({torch.float16: 1e-2,
@@ -1587,7 +1752,7 @@ if TEST_SCIPY:
                            SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                     dtypes=[torch.bfloat16]),),
                        assert_autodiffed=True,
-                       promotes_integers_to_float=True),
+                       safe_casts_outputs=True),
         UnaryUfuncInfo('erfc',
                        ref=scipy.special.erfc,
                        decorators=(precisionOverride({torch.float16: 1e-2,
@@ -1600,7 +1765,7 @@ if TEST_SCIPY:
                            SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                     dtypes=[torch.bfloat16]),),
                        assert_autodiffed=True,
-                       promotes_integers_to_float=True),
+                       safe_casts_outputs=True),
         UnaryUfuncInfo('erfinv',
                        ref=scipy.special.erfinv,
                        decorators=(precisionOverride({torch.float16: 1e-2,
@@ -1609,7 +1774,7 @@ if TEST_SCIPY:
                        dtypes=all_types_and(torch.bool),
                        dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
                        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
-                       promotes_integers_to_float=True,
+                       safe_casts_outputs=True,
                        domain=(-1, 1),
                        skips=(
                            # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
@@ -1626,8 +1791,21 @@ if TEST_SCIPY:
                dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                test_inplace_grad=True,
                supports_tensor_out=True,
-               promotes_integers_to_float=True,
+               safe_casts_outputs=True,
                sample_inputs_func=sample_inputs_xlogy),
+        OpInfo('trace',
+               dtypes=all_types_and_complex(),
+               dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+               test_inplace_grad=False,
+               supports_tensor_out=False,
+               # Reference: https://github.com/pytorch/pytorch/issues/50381
+               test_complex_grad=False,
+               sample_inputs_func=sample_inputs_trace,
+               skips=(
+                   SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                            dtypes=[torch.complex64, torch.complex128]),
+                   SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                            dtypes=[torch.complex64, torch.complex128]))),
     ]
     op_db = op_db + op_db_scipy_reference
 
@@ -2184,10 +2362,6 @@ def method_tests():
         ('addmv', (1,), ((S, M), (M,)), 'broadcast_lhs_coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
         ('addmv', (), ((S, M), (M,)), 'scalar_broadcast_lhs'),
         ('addmv', (), ((S, M), (M,)), 'scalar_broadcast_lhs_coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('addr', (S, M), ((S,), (M,)),),
-        ('addr', (), ((S,), (M,)), 'broadcast_lhs'),
-        ('addr', (S, M), ((S,), (M,)), 'coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
-        ('addr', (), ((S,), (M,)), 'broadcast_lhs_coef', (), (), (), ident, {'beta': 0.2, 'alpha': 0.6}),
         ('dot', (L,), ((L,),), '', (True,)),
         ('vdot', (L,), ((L,),),),
         ('mm', (S, M), ((M, S),), '', (True,)),
@@ -2338,7 +2512,6 @@ def method_tests():
         ('triu', (S, M, M), NO_ARGS, 'batched'),
         ('triu', (S, M, M), (2,), 'batched_idx'),
         ('triu', (3, 3, S, S), NO_ARGS, 'more_batched'),
-        ('trace', (M, M), NO_ARGS),
         ('cross', (S, 3), ((S, 3),)),
         ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
         ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'dim', (), [0]),
@@ -2551,6 +2724,8 @@ def method_tests():
          'scalar_broadcast_rhs'),
         ('maximum', (S, S), ((S, S),)),
         ('minimum', (S, S), ((S, S),)),
+        ('fmax', (S, S), ((S, S),)),
+        ('fmin', (S, S), ((S, S),)),
         ('resize_', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
         ('resize_', (), (dont_convert(()),), 'scalar'),
         ('resize_', (), (torch.Size([1, 1, 1])), 'scalar_to_dims'),

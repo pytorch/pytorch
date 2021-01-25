@@ -1,15 +1,15 @@
 import torch
 from torch.fx.graph_module import GraphModule
-from typing import Callable, List, Dict, Set, Any, Optional
+from typing import Callable, List, Dict, Any, Optional
 
 class Partition:
     def __init__(self, name: str):
         self.name: str = name
         self.node_names: List[str] = []
-        self.inputs: Set[str] = set()
-        self.outputs: Set[str] = set()
-        self.partitions_dependent_on: Set[str] = set()
-        self.partition_dependents: Set[str] = set()
+        self.inputs: Dict[str, None] = {}
+        self.outputs: Dict[str, None] = {}
+        self.partitions_dependent_on: Dict[str, None] = {}
+        self.partition_dependents: Dict[str, None] = {}
         self.graph : torch.fx.graph.Graph = torch.fx.graph.Graph()  # type: ignore
         self.environment : Dict[torch.fx.node.Node, torch.fx.node.Node] = {}  # type: ignore
         self.targets : Dict[str, Any] = {}
@@ -37,15 +37,15 @@ def split_module(
         if def_partition_name != use_partition_name:
             if def_partition_name is not None:
                 def_partition = partitions[def_partition_name]
-                def_partition.outputs.add(def_node.name)
+                def_partition.outputs.setdefault(def_node.name)
                 if use_partition_name is not None:
-                    def_partition.partition_dependents.add(use_partition_name)
+                    def_partition.partition_dependents.setdefault(use_partition_name)
 
             if use_partition_name is not None:
                 use_partition = partitions[use_partition_name]
-                use_partition.inputs.add(def_node.name)
+                use_partition.inputs.setdefault(def_node.name)
                 if def_partition_name is not None:
-                    use_partition.partitions_dependent_on.add(def_partition_name)
+                    use_partition.partitions_dependent_on.setdefault(def_partition_name)
 
     # split nodes into parititons
     for node in m.graph.nodes:
@@ -83,7 +83,7 @@ def split_module(
         root_partition = root_partitions.pop()
         sorted_partitions.append(root_partition)
         for dependent in partitions[root_partition].partition_dependents:
-            partitions[dependent].partitions_dependent_on.remove(root_partition)
+            partitions[dependent].partitions_dependent_on.pop(root_partition)
             if not partitions[dependent].partitions_dependent_on:
                 root_partitions.append(dependent)
     if len(sorted_partitions) != len(partitions):
