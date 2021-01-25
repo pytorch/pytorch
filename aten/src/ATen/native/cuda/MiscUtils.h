@@ -110,15 +110,5 @@ static inline Storage pin_memory(int64_t size) {
       /*resizable=*/false);
 }
 
-// heuristic:
-//   cublas_x_batched doesn't work very well for small batchsize
-//   cublas_x_batched is intended to be used for matrices of small sizes where the launch overhead is a significant factor.
-// with use_loop_launch = True, we will loop through all batches, and launch single matrix cusolver/cublas kernels
-// (This heuristic was originally tested in getrf + getrs(getri), which may not work well on other kernels. )
-inline static bool use_loop_launch(int batch_size, int matrix_size) {
-  return (batch_size <= 8) || \
-         (/* batch_size > 8 && */ matrix_size >= 512);
-}
-
 } // namespace native
 } // namespace at
