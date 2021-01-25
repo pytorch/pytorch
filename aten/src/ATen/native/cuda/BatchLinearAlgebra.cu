@@ -1625,26 +1625,34 @@ AT_ERROR("cholesky: MAGMA library not found in "
 
 Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
   std::vector<int64_t> infos(batchCount(self), 0);
-  Tensor self_working_copy;
-  if (upper) {
-    self_working_copy = cloneBatchedColumnMajor(self.transpose(-1, -2));
+
+  Tensor result;
+  if (self.dim() > 2) {
+    // MAGMA's batched cholesky operator has an off-by-one error causing IMA
+    // (see https://github.com/pytorch/pytorch/issues/42666). This code is based
+    // on the #cloneBatchedColumnMajor function however it pads the input with
+    // one extra element utilizing the fact that the resize_as_ method preserves
+    // the storage even if it's larger than the new sizes. This way if MAGMA
+    // reads off bounds it will still be valid user memory.
+    const Tensor input = upper ? self : self.transpose(-1, -2);
+    result = at::empty(input.numel() + 1, input.options());
+    result.resize_as_(input).copy_(input).transpose_(-1, -2);
   } else {
-    self_working_copy = cloneBatchedColumnMajor(self);
+    result = cloneBatchedColumnMajor(upper ? self.transpose(-1, -2) : self);
   }
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "cholesky_cuda", [&]{
-    apply_cholesky<scalar_t>(self_working_copy, false, infos);
-  });
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      self.scalar_type(), "cholesky_cuda", [&] {
+        apply_cholesky<scalar_t>(result, false, infos);
+      });
+
   if (self.dim() > 2) {
     batchCheckErrors(infos, "cholesky_cuda");
   } else {
     singleCheckErrors(infos[0], "cholesky_cuda");
   }
-  if (upper) {
-    return self_working_copy.transpose(-1, -2);
-  } else {
-    return self_working_copy;
-  }
+
+  return upper ? result.transpose_(-1, -2) : result;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
