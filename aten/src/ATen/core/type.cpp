@@ -145,6 +145,10 @@ FloatTypePtr FloatType::get() {
   static auto value = FloatType::create();
   return value;
 }
+ComplexDoubleTypePtr ComplexDoubleType::get() {
+  static auto value = ComplexDoubleType::create();
+  return value;
+}
 BoolTypePtr BoolType::get() {
   static auto value = BoolType::create();
   return value;
