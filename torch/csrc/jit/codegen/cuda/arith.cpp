@@ -243,7 +243,7 @@ TensorView* arithOpOverloads(
 }
 } // namespace
 
-TORCH_CUDA_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
+TORCH_CUDA_CU_API Val* binaryOp(BinaryOpType type, Val* v1, Val* v2) {
   auto vals = maybeBroadcast({v1, v2});
   Val* out = newOutputVal({vals[0], vals[1]});
   if (is_logical_op(type)) {
@@ -593,7 +593,7 @@ TensorView* sub_alpha(TensorView* v1, TensorView* v2, Val* v3) {
   return arithOpOverloads(sub_alpha, v1, v2, v3);
 }
 // lerp
-TORCH_CUDA_API Val* lerp(Val* start, Val* end, Val* weight) {
+TORCH_CUDA_CU_API Val* lerp(Val* start, Val* end, Val* weight) {
   auto vals = maybeBroadcast({start, end, weight});
   Val* intrm1 = binaryOp(BinaryOpType::Sub, vals[1], vals[0]);
   Val* intrm2 = binaryOp(BinaryOpType::Mul, vals[2], intrm1);
