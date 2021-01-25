@@ -15,7 +15,6 @@ from typing import List, Any, Type, cast
 from torch.distributed.optim import ZeroRedundancyOptimizer
 from torch.optim import SGD
 from torch.testing._internal.common_distributed import skip_if_no_gpu, MultiProcessTestCase
-from torch.distributed.optim.zero_redundancy_optimizer import _broadcast_object
 from torch.testing._internal.common_distributed import skip_if_rocm
 
 import copy
@@ -477,15 +476,19 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 # Test state dict save/load/equivalence with pytorch
                 # - save state for both
                 sharded_optimizer.consolidate_state_dict()
-                sharded_optimizer_state_dict = sharded_optimizer.state_dict() if self.rank == RECIPIENT_RANK else {}
-                sharded_optimizer_state_dict = _broadcast_object(
-                    sharded_optimizer_state_dict,
-                    src_rank=RECIPIENT_RANK,
-                    group=dist.group.WORLD,
-                    dist_device=self.device,
+                sharded_optimizer_state_dict = (
+                    sharded_optimizer.state_dict() if self.rank == RECIPIENT_RANK else torch.zeros(1)
                 )
-
                 ddp_state_dict = ddp_optimizer.state_dict()
+
+                #  - sync the saved state with all the ranks
+                exchange_list = [sharded_optimizer_state_dict]
+                dist.broadcast_object_list(
+                    exchange_list,
+                    src=RECIPIENT_RANK,
+                    group=dist.group.WORLD,
+                )
+                sharded_optimizer_state_dict = exchange_list[0]
 
                 # - cross load the states
                 ddp_optimizer.load_state_dict(sharded_optimizer_state_dict)
@@ -539,13 +542,14 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
 
                 # - save state
                 sharded_optimizer.consolidate_state_dict()
-                sharded_optimizer_state_dict = sharded_optimizer.state_dict() if self.rank == RECIPIENT_RANK else {}
-                sharded_optimizer_state_dict = _broadcast_object(
-                    sharded_optimizer_state_dict,
-                    src_rank=RECIPIENT_RANK,
-                    group=dist.group.WORLD,
-                    dist_device=self.device,
+                sharded_optimizer_state_dict = (
+                    sharded_optimizer.state_dict() if self.rank == RECIPIENT_RANK else torch.zeros(1)
                 )
+                exchange_list = [sharded_optimizer_state_dict]
+
+                dist.broadcast_object_list(exchange_list, src=RECIPIENT_RANK, group=dist.group.WORLD)
+
+                sharded_optimizer_state_dict = exchange_list[0]
 
                 # - step() a couple more times
                 ref_loss = None
