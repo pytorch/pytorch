@@ -5,12 +5,13 @@ import torch._C as C
 """
 PythonDispatcher class is a thin python-binding to C++ dispatcher and it
 is designed to show how dispatcher precompute works. In particular,
-it shows for a certain op `foo`, how the computed dispatch table looks
+it shows for a certain op `foo`, what the computed dispatch table looks
 like after user register their kernels to certains dispatch keys.
 
 In the real C++ dispatcher we support many dispatch keys for different
-functionalities. For simplicity PythonDispatcher only support one example
-dispatch key in each category.
+functionalities. For simplicity PythonDispatcher only supports dispatch
+keys for a single example of each use case. These use cases are listed below:
+
 - CPU/AutogradCPU: represents in-tree backends which we usually have dedicated inference &
     autograd kernel in pytorch core library.
     E.g. CPU, CUDA
@@ -29,7 +30,8 @@ dispatch key in each category.
     Kernels registered to this key MUST work for both inference + autograd for all backends.
 
 Note we only allow registrations to alias keys inside pytorch core library. E.g you shouldn't register
-a Math kernel from torch-xla extension, instead you should upstream the kernel into pytorch/pytorch repo.
+a Math or DefaultBackend kernel from torch-xla extension, instead you should upstream the kernel into
+pytorch/pytorch repo so that it's available for all backends and continuously tested even without the extension.
 
 Usage:
   dispatcher = PythonDispatcher()
