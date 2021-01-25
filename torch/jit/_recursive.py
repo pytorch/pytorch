@@ -238,7 +238,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                 scripted_fn = torch.jit.script(value)
                 concrete_type_builder.add_function_attribute(
                     name,
-                    torch._C._jit_try_infer_type(scripted_fn),
+                    torch._C._jit_try_infer_type(scripted_fn).type(),
                     value)
             except Exception as e:
                 # If we fail to script the function, it isn't a hard error.
@@ -277,8 +277,8 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             inferred_msg = "Its type was inferred; try adding a type annotation for the attribute." if inferred else ""
             additional_info = f"{attr_type.reason()} {inferred_msg}"
             hint = "(This attribute exists on the Python module, " \
-            f"but we failed to convert Python type: '{torch.typename(type(value))}' " \
-            f"to a TorchScript type. {additional_info})"
+                f"but we failed to convert Python type: '{torch.typename(type(value))}' " \
+                f"to a TorchScript type. {additional_info})"
             concrete_type_builder.add_failed_attribute(name, hint)
 
     # add hooks to concrete type

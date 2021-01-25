@@ -427,7 +427,7 @@ class TestModuleContainers(JitTestCase):
         whose type cannot be inferred fails with a relevant error message
         suggesting annotating the attribute.
         """
-        class JitClass:
+        class JitClass:  # noqa: B903
             def __init__(self, v: int):
                 self.v = v
 

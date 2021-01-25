@@ -877,11 +877,15 @@ void initPythonIRBindings(PyObject* module_) {
       }))
       .def(
           "type",
-          [](std::shared_ptr<InferredType> self) { return self->type(); })
+          [](const std::shared_ptr<InferredType>& self) {
+            return self->type();
+          })
       .def(
           "success",
-          [](std::shared_ptr<InferredType> self) { return self->success(); })
-      .def("reason", [](std::shared_ptr<InferredType> self) {
+          [](const std::shared_ptr<InferredType>& self) {
+            return self->success();
+          })
+      .def("reason", [](const std::shared_ptr<InferredType>& self) {
         return self->reason();
       });
 
