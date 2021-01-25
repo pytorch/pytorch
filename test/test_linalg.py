@@ -838,7 +838,7 @@ class TestLinalg(TestCase):
         self.assertTrue(c.is_contiguous(memory_format=torch.channels_last))
         torch.kron(a, b, out=c)
         self.assertTrue(c.is_contiguous(memory_format=torch.channels_last))
-        c = c.contiguous()
+        c = c.contiguous(memory_format=torch.contiguous_format)
         torch.kron(a, b, out=c)
         self.assertTrue(c.is_contiguous(memory_format=torch.contiguous_format))
 
