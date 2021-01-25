@@ -101,7 +101,7 @@ class RelaxedOneHotCategorical(TransformedDistribution):
     Args:
         temperature (Tensor): relaxation temperature
         probs (Tensor): event probabilities
-        logits (Tensor): the log probability of each event.
+        logits (Tensor): unnormalized log probability for each event
     """
     arg_constraints = {'probs': constraints.simplex,
                        'logits': constraints.real}
