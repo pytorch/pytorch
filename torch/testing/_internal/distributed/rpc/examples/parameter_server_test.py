@@ -2,19 +2,22 @@
 # https://github.com/pytorch/examples/blob/master/distributed/rpc/parameter_server/rpc_parameter_server.py
 # and https://pytorch.org/tutorials/intermediate/rpc_param_server_tutorial.html
 
+from threading import Lock
+from time import perf_counter
+
 import torch
+import torch.distributed.autograd as dist_autograd
+import torch.distributed.rpc as rpc
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import optim
-import torch.distributed.rpc as rpc
-import torch.distributed.autograd as dist_autograd
 from torch.distributed.optim import DistributedOptimizer
-
-from time import perf_counter
-from threading import Lock
-
 from torch.testing._internal.dist_utils import dist_init
-from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import RpcAgentTestFixture
+from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import \
+    RpcAgentTestFixture
+
+torch.manual_seed(42)
+
 
 # --------- MNIST Network to train, from pytorch/examples -----
 
@@ -75,8 +78,6 @@ def call_method(method, rref, *args, **kwargs):
 # remote_method(Foo.bar, rref, arg1, arg2) is equivalent to calling
 # <foo_instance>.bar(arg1, arg2) on the remote node and getting the result
 # back.
-
-
 def remote_method(method, rref, *args, **kwargs):
     args = [method, rref] + list(args)
     return rpc.rpc_sync(rref.owner(), call_method, args=args, kwargs=kwargs)
@@ -112,7 +113,7 @@ class ParameterServer(nn.Module):
         return cpu_grads
 
     # Wrap local parameters in a RRef. Needed for building the
-    # DistributedOptimizer which optimizes paramters remotely.
+    # DistributedOptimizer which optimizes parameters remotely.
     def get_param_rrefs(self):
         param_rrefs = [rpc.RRef(param) for param in self.model.parameters()]
         return param_rrefs
@@ -157,12 +158,13 @@ class TrainerNet(nn.Module):
 
 
 def run_training_loop(rank, num_gpus, train_loader, test_loader):
-    # Runs the typical nueral network forward + backward + optimizer step, but
+    # Runs the typical neural network forward + backward + optimizer step, but
     # in a distributed fashion.
     net = TrainerNet(num_gpus=num_gpus)
-    # Build DistributedOptmizer.
+    # Build DistributedOptimizer.
     param_rrefs = net.get_global_param_rrefs()
     opt = DistributedOptimizer(optim.SGD, param_rrefs, lr=0.03)
+    prev_loss = float('+inf')
     for i, (data, target) in enumerate(train_loader):
         with dist_autograd.context() as cid:
             model_output = net(data)
@@ -170,6 +172,8 @@ def run_training_loop(rank, num_gpus, train_loader, test_loader):
             loss = F.nll_loss(model_output, target)
             if i % 5 == 0:
                 print(f"Rank {rank} training batch {i} loss {loss.item()}")
+                assert(loss < prev_loss)
+                prev_loss = loss
             dist_autograd.backward(cid, [loss])
             # Ensure that dist autograd ran successfully and gradients were
             # returned.
@@ -188,8 +192,8 @@ def get_accuracy(test_loader, model):
     model.eval()
     correct_sum = 0
     # Use GPU to evaluate if possible
-    device = torch.device(
-        "cuda:0" if model.num_gpus > 0 and torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if model.num_gpus > 0
+        and torch.cuda.is_available() else "cpu")
     with torch.no_grad():
         for i, (data, target) in enumerate(test_loader):
             out = model(data)
@@ -241,7 +245,7 @@ class ParameterServerTest(RpcAgentTestFixture):
     def test_parameter_server(self):
         if self.rank != 0:
             # Get data to train on
-            mnist = FakeMNIST(100)
+            mnist = FakeMNIST(700)
             train_loader = torch.utils.data.DataLoader(mnist, batch_size=32,
                                                        shuffle=True)
             test_loader = torch.utils.data.DataLoader(mnist, batch_size=32,
