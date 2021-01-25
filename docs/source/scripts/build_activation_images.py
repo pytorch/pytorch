@@ -48,6 +48,9 @@ functions = [
     # 'Threshold'  Omit, pending cleanup. See PR5457
 ]
 
+PYTORCH_ORANGE = "#EE4C2C"
+PYTORCH_LIGHT_GRAY = "#BBBBBB"
+
 
 def plot_function(function, **args):
     """
@@ -70,10 +73,10 @@ for function_name in functions:
 
         # Start a new plot
         pylab.clf()
-        pylab.grid(color='k', alpha=0.2, linestyle='--')
+        pylab.grid(color=PYTORCH_LIGHT_GRAY, linestyle='--')
 
         # Plot the current function
-        plot_function(function)
+        plot_function(function, color=PYTORCH_ORANGE)
 
         # The titles are a little redundant, given context?
         pylab.title(function_name + " activation function")
@@ -83,5 +86,5 @@ for function_name in functions:
         pylab.ylim([-7, 7])
 
         # And save it
-        pylab.savefig(plot_path)
+        pylab.savefig(plot_path, dpi=300)
         print('Saved activation image for {} at {}'.format(function, plot_path))
