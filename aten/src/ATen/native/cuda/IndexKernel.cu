@@ -176,10 +176,10 @@ void index_fill_kernel_impl(
 
     auto* __restrict__ self_data = reinterpret_cast<scalar_t*>(self_ptr + offsets[0]);
     auto idx = *reinterpret_cast<int64_t*>(idx_ptr + offsets[1]);
+    CUDA_KERNEL_ASSERT(idx >= -self_dim_size && idx < self_dim_size && "index out of bounds");
     if (idx < 0) {
       idx += self_dim_size;
     }
-    CUDA_KERNEL_ASSERT(idx >= -self_dim_size && idx < self_dim_size && "index out of bounds");
 
     self_data[idx * self_dim_stride] = fill_val;
   };

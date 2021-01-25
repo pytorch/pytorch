@@ -146,13 +146,13 @@ void index_fill_kernel(
       for (int64_t elem = 0; elem < n; ++elem) {
         auto* self_data = reinterpret_cast<scalar_t*>(self_data_bytes);
         auto idx = *reinterpret_cast<int64_t*>(index_data_bytes);
-        if (idx < 0) {
-          idx += self_dim_size;
-        }
         if (idx < -self_dim_size || idx >= self_dim_size) {
           TORCH_CHECK_INDEX(false,
             "index ", idx, " is out of bounds for dimension ",
             dim, " with size ", self_dim_size);
+        }
+        if (idx < 0) {
+          idx += self_dim_size;
         }
 
         self_data[idx * self_dim_stride] = fill_val;

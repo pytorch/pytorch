@@ -733,7 +733,7 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
   }
 
   if (!self.is_complex() && source.isComplex()) {
-    TORCH_CHECK(false, "Converting complex Scalar to non-complex type is forbidden");
+    TORCH_CHECK(false, "index_fill_(): Converting complex Scalar to non-complex type is forbidden");
   }
 
   // Handle the case when `self` is 0-dim
