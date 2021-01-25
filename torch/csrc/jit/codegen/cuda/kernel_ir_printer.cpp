@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
+
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
@@ -163,8 +164,9 @@ void IrPrinter::handle(const kir::UnaryOp* node) {
     os_ << *op << gen(node->in());
   } else {
     if (node->getUnaryOpType() == UnaryOpType::Cast) {
-      const auto cast_str = cast_func_str({node->in()->getDataType().value(),
-                                           node->out()->getDataType().value()});
+      const auto cast_str = cast_func_str(
+          {node->in()->getDataType().value(),
+           node->out()->getDataType().value()});
       os_ << cast_str.value();
     } else {
       os_ << node->getUnaryOpType();

@@ -276,6 +276,7 @@ Loss Functions
     nn.CTCLoss
     nn.NLLLoss
     nn.PoissonNLLLoss
+    nn.GaussianNLLLoss
     nn.KLDivLoss
     nn.BCELoss
     nn.BCEWithLogitsLoss
@@ -299,6 +300,7 @@ Vision Layers
     :template: classtemplate.rst
 
     nn.PixelShuffle
+    nn.PixelUnshuffle
     nn.Upsample
     nn.UpsamplingNearest2d
     nn.UpsamplingBilinear2d

@@ -178,8 +178,15 @@ def parse_header(path):
             else:
                 fn_name = fn_name[:-1]
             generic_functions.append(Function(fn_name))
-        elif l.startswith('THC_API void THNN_'):
-            fn_name = l[len('THC_API void THNN_'):]
+        elif l.startswith('TORCH_CUDA_CPP_API void THNN_'):
+            fn_name = l[len('TORCH_CUDA_CPP_API void THNN_'):]
+            if fn_name[0] == '(' and fn_name[-2] == ')':
+                fn_name = fn_name[1:-2]
+            else:
+                fn_name = fn_name[:-1]
+            generic_functions.append(Function(fn_name))
+        elif l.startswith('TORCH_CUDA_CU_API void THNN_'):
+            fn_name = l[len('TORCH_CUDA_CU_API void THNN_'):]
             if fn_name[0] == '(' and fn_name[-2] == ')':
                 fn_name = fn_name[1:-2]
             else:

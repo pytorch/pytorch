@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
+#include <torch/csrc/utils/python_numbers.h>
 
 #ifdef USE_CUDA
 #include <cuda_runtime.h>
@@ -15,7 +16,7 @@ static PyObject * THPStorage_(size)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
-  return PyLong_FromLong(self->cdata->nbytes() / sizeof(scalar_t));
+  return THPUtils_packUInt64(self->cdata->nbytes() / sizeof(scalar_t));
   END_HANDLE_TH_ERRORS
 }
 
@@ -50,7 +51,7 @@ static PyObject * THPStorage_(elementSize)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
-  return PyLong_FromLong(THWStorage_(elementSize)(LIBRARY_STATE_NOARGS));
+  return THPUtils_packInt64(THWStorage_(elementSize)(LIBRARY_STATE_NOARGS));
   END_HANDLE_TH_ERRORS
 }
 
@@ -315,7 +316,7 @@ PyObject * THPStorage_(getDevice)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
-  return PyLong_FromLong(THCStorage_(getDevice)(LIBRARY_STATE self->cdata));
+  return THPUtils_packInt32(THCStorage_(getDevice)(LIBRARY_STATE self->cdata));
   END_HANDLE_TH_ERRORS
 }
 #endif
