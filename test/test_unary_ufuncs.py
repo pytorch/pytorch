@@ -451,6 +451,10 @@ class TestUnaryUfuncs(TestCase):
                 self._test_out_arg(op, input, out)
 
     def _dtype_out_arg_helper(self, op, input, np_kwarg, torch_kwarg):
+        # Helper to verify op against its NumPy reference with
+        # specified kwargs passed to both variants.
+        # Note: `np_kwarg` and `torch_kwarg` are passed directly to the operator.
+        #       Caller should ensure that both have the relevant kwargs
         dtype = input.dtype
         computation_dtype = torch_kwarg['dtype']
         try:
