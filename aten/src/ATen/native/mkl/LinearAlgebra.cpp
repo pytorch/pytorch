@@ -141,7 +141,6 @@ static inline void baddbmm_mkl_template(const Tensor& res, const Tensor& mat1, c
   if (batch_size == 1) {
     const scalar_t* A;
     const scalar_t* B;
-    scalar_t* const C = res_data;
     if (canAvoidTensorAccessor) {
       scalar_t* mat1_data = static_cast<scalar_t*>(mat1.data_ptr());
       scalar_t* mat2_data = static_cast<scalar_t*>(mat2.data_ptr());
