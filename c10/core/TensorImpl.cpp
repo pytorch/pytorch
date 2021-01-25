@@ -236,9 +236,11 @@ int64_t TensorImpl::stride(int64_t d) const {
   return sizes_and_strides_.stride_at_unchecked(d);
 }
 
+#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 bool TensorImpl::has_storage() const {
   return storage_;
 }
+#endif
 
 bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
 #ifdef DEBUG
