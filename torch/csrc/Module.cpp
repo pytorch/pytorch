@@ -459,17 +459,17 @@ PyObject *THPModule_deterministicCuDNN(PyObject *_unused, PyObject *noargs)
   else Py_RETURN_FALSE;
 }
 
-PyObject *THPModule_setDeterministic(PyObject *_unused, PyObject *arg)
+PyObject *THPModule_setDeterministicAlgorithms(PyObject *_unused, PyObject *arg)
 {
-  THPUtils_assert(PyBool_Check(arg), "set_deterministic expects a bool, "
-          "but got %s", THPUtils_typename(arg));
-  at::globalContext().setDeterministic(arg == Py_True);
+  THPUtils_assert(PyBool_Check(arg), "use_deterministic_algorithms expects a "
+          "bool, but got %s", THPUtils_typename(arg));
+  at::globalContext().setDeterministicAlgorithms(arg == Py_True);
   Py_RETURN_NONE;
 }
 
-PyObject *THPModule_deterministic(PyObject *_unused, PyObject *noargs)
+PyObject *THPModule_deterministicAlgorithms(PyObject *_unused, PyObject *noargs)
 {
-  if (at::globalContext().deterministic()) Py_RETURN_TRUE;
+  if (at::globalContext().deterministicAlgorithms()) Py_RETURN_TRUE;
   else Py_RETURN_FALSE;
 }
 
@@ -613,8 +613,8 @@ static PyMethodDef TorchMethods[] = {
   {"_set_cudnn_benchmark", THPModule_setBenchmarkCuDNN, METH_O,  nullptr},
   {"_get_cudnn_deterministic", THPModule_deterministicCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_deterministic", THPModule_setDeterministicCuDNN, METH_O,  nullptr},
-  {"_get_deterministic", THPModule_deterministic, METH_NOARGS,     nullptr},
-  {"_set_deterministic", THPModule_setDeterministic, METH_O,  nullptr},
+  {"_get_deterministic_algorithms", THPModule_deterministicAlgorithms, METH_NOARGS,     nullptr},
+  {"_set_deterministic_algorithms", THPModule_setDeterministicAlgorithms, METH_O,  nullptr},
   {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS,     nullptr},
   {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O,  nullptr},
   {"_vmapmode_increment_nesting", THPModule_vmapmode_increment_nesting, METH_NOARGS, nullptr},
