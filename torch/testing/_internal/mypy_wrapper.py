@@ -21,11 +21,12 @@ See also these wiki pages:
 - https://github.com/pytorch/pytorch/wiki/Lint-as-you-type
 """
 
+import fnmatch
 import re
 import sys
 from configparser import ConfigParser
 from itertools import chain
-from pathlib import Path
+from pathlib import Path, PurePath, PurePosixPath
 from typing import List, Set
 
 # don't import any files that live in the PyTorch repo, since this is
@@ -48,22 +49,13 @@ def config_files() -> Set[str]:
     }
 
 
-def repo_root() -> Path:
-    """
-    This script assumes that the cwd is the PyTorch repository root.
-    """
-    return Path.cwd()
-
-
-def glob(*, pattern: str, filename: str) -> bool:
+def glob(*, pattern: str, filename: PurePosixPath) -> bool:
     """
     Return True iff the filename matches the (mypy ini) glob pattern.
     """
-    full_pattern = str(repo_root() / pattern)
-    path = Path(filename)
     return any(
-        prefix.resolve().match(full_pattern)
-        for prefix in chain([path], path.parents)
+        fnmatch.fnmatchcase(str(prefix), pattern)
+        for prefix in chain([filename], filename.parents)
     )
 
 
@@ -72,9 +64,11 @@ def in_files(*, ini: str, py: str) -> bool:
     Return True iff the py file is included in the ini file's "files".
     """
     config = ConfigParser()
-    config.read(repo_root() / ini)
+    repo_root = Path.cwd()
+    filename = PurePosixPath(PurePath(py).relative_to(repo_root).as_posix())
+    config.read(repo_root / ini)
     return any(
-        glob(pattern=pattern, filename=py)
+        glob(pattern=pattern, filename=filename)
         for pattern in re.split(r',\s*', config['mypy']['files'].strip())
     )
 
@@ -83,10 +77,11 @@ def main(args: List[str]) -> None:
     """
     Run mypy on one Python file using the correct config file(s).
 
-    This function assumes the following about its input:
+    This function assumes the following preconditions hold:
 
+    - the cwd is set to the root of this cloned repo
     - args is a valid list of CLI arguments that could be passed to mypy
-    - the last element of args is the path of a file to typecheck
+    - last element of args is an absolute path to a file to typecheck
     - all the other args are config flags for mypy, rather than files
 
     These assumptions hold, for instance, when mypy is run automatically
@@ -97,15 +92,12 @@ def main(args: List[str]) -> None:
           "python.linting.enabled": true,
           "python.linting.mypyEnabled": true,
           "python.linting.mypyPath":
-            "/path/to/pytorch/torch/testing/_internal/mypy_wrapper.py",
-          "python.linting.mypyArgs": [
-            "--show-column-numbers"
-          ]
+            "${workspaceFolder}/torch/testing/_internal/mypy_wrapper.py"
         }
 
-    More generally, this should work for any editor that runs mypy on
-    one file at a time (setting the cwd to the repo root) and allows you
-    to set the path to the mypy executable.
+    More generally, this should work for any editor sets the cwd to the
+    repo root, runs mypy on one file at a time via its absolute path,
+    and allows you to set the path to the mypy executable.
     """
     if not args:
         sys.exit('The PyTorch mypy wrapper must be passed exactly one file.')
@@ -115,6 +107,10 @@ def main(args: List[str]) -> None:
             # insert right before args[-1] to avoid being overridden
             # by existing flags in args[:-1]
             args[:-1] + [
+                # uniform, in case some configs set these and some don't
+                '--show-error-codes',
+                '--show-column-numbers',
+                # don't special-case the last line
                 '--no-error-summary',
                 f'--config-file={config}',
                 args[-1],
@@ -122,13 +118,13 @@ def main(args: List[str]) -> None:
         )
         for config in configs
     ]
-    mypy_issues = [
+    mypy_issues = list(dict.fromkeys(  # remove duplicates, retain order
         item
         # assume stderr is empty
         # https://github.com/python/mypy/issues/1051
         for stdout, _, _ in mypy_results
         for item in stdout.splitlines()
-    ]
+    ))
     for issue in mypy_issues:
         print(issue)
     # assume all mypy exit codes are nonnegative
