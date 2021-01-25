@@ -208,9 +208,9 @@ class OpInfo(object):
         self.check_batched_grad = check_batched_grad
         self.check_batched_gradgrad = check_batched_gradgrad
 
-        self.aliases = ()
+        self.aliases = ()  # type: ignore
         if aliases is not None:
-            self.aliases = tuple(AliasInfo(a) for a in aliases)
+            self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
