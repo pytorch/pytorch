@@ -490,6 +490,22 @@ class Module:
         """
         return self._apply(lambda t: t.cuda(device))
 
+    def xpu(self: T, device: Optional[Union[int, device]] = None) -> T:
+        r"""Moves all model parameters and buffers to the XPU.
+
+        This also makes associated parameters and buffers different objects. So
+        it should be called before constructing optimizer if the module will
+        live on XPU while being optimized.
+
+        Arguments:
+            device (int, optional): if specified, all parameters will be
+                copied to that device
+
+        Returns:
+            Module: self
+        """
+        return self._apply(lambda t: t.xpu(device))
+
     def cpu(self: T) -> T:
         r"""Moves all model parameters and buffers to the CPU.
 

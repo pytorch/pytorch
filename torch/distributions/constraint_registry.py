@@ -153,11 +153,19 @@ transform_to = ConstraintRegistry()
 ################################################################################
 
 @biject_to.register(constraints.real)
-@biject_to.register(constraints.real_vector)
 @transform_to.register(constraints.real)
-@transform_to.register(constraints.real_vector)
 def _transform_to_real(constraint):
     return transforms.identity_transform
+
+
+@biject_to.register(constraints.independent)
+def _biject_to_independent(constraint):
+    return biject_to(constraint.base_constraint)
+
+
+@transform_to.register(constraints.independent)
+def _transform_to_independent(constraint):
+    return transform_to(constraint.base_constraint)
 
 
 @biject_to.register(constraints.positive)

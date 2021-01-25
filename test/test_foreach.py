@@ -4,7 +4,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, skipCUDAIfRocm, ops)
 from torch._six import inf, nan
-from torch.testing._internal.common_methods_invocations import fe_op_db
+from torch.testing._internal.common_methods_invocations import foreach_unary_op_db
 
 N_values = [20] if not TEST_WITH_SLOW else [30, 300]
 
@@ -119,8 +119,7 @@ class TestForeach(TestCase):
             else:
                 self.assertEqual(tensors1, expected)
 
-
-    @ops(fe_op_db)
+    @ops(foreach_unary_op_db)
     def test_unary(self, device, dtype, op):
         for N in N_values:
             tensors = op.sample_inputs(device, dtype, N)
@@ -131,44 +130,16 @@ class TestForeach(TestCase):
             fe_res = method(tensors)
             self.assertEqual(ref_res, fe_res)
 
-            if op.promotes_integers_to_float and dtype in torch.testing.integral_types_and(torch.bool):
+            if op.safe_casts_outputs and dtype in torch.testing.integral_types_and(torch.bool):
                 with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
+                    inplace(tensors)
+            elif dtype in [torch.complex64, torch.complex128] and inplace == torch._foreach_abs_:
+                # Special case for abs
+                with self.assertRaisesRegex(RuntimeError, r"In-place abs is not supported for complex tensors."):
                     inplace(tensors)
             else:
                 inplace(tensors)
                 self.assertEqual(tensors, fe_res)
-
-    #
-    # Unary ops
-    #
-
-    # Separate test for abs due to a lot of special cases
-    # Absolute value of a complex number a + bj is defined as sqrt(a^2 + b^2), i.e. a floating point
-    @dtypes(*(torch.testing.floating_and_complex_types_and(torch.bfloat16, torch.half)))
-    def test_abs(self, device, dtype):
-        for N in N_values:
-            tensors1 = self._get_test_data(device, dtype, N)
-            # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-            control_dtype = torch.float32 if (self.device_type == 'cuda' and
-                                              (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
-
-            expected = [torch.abs(tensors1[i].to(dtype=control_dtype)).to(dtype=dtype) for i in range(N)]
-            res = torch._foreach_abs(tensors1)
-            if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
-                self.assertEqual(res, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
-
-                torch._foreach_abs_(tensors1)
-                self.assertEqual(res, tensors1)
-            else:
-                expected = [torch.abs(tensors1[i]) for i in range(N)]
-                self.assertEqual(res, expected)
-
-                if dtype in [torch.complex64, torch.complex128]:
-                    with self.assertRaisesRegex(RuntimeError, r"In-place abs is not supported for complex tensors."):
-                        torch._foreach_abs_(tensors1)
-                else:
-                    torch._foreach_abs_(tensors1)
-                    self.assertEqual(res, tensors1)
 
     #
     # Pointwise ops
@@ -221,7 +192,6 @@ class TestForeach(TestCase):
 
             res_min = torch._foreach_minimum(tensors1, tensors2)
             self.assertEqual(res_min, expected_min)
-
 
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False)))
     def test_max_min_float_inf_nan(self, device, dtype):
