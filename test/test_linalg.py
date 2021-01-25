@@ -3919,20 +3919,104 @@ class TestLinalg(TestCase):
 
     @onlyCPU
     @skipCPUIfNoLapack
-    def test_orgqr_errors(self, device):
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_orgqr(self, device, dtype):
+        def generate_reflectors_and_tau(A):
+            """
+            This function uses numpy.linalg.qr with mode "raw" to extract output of LAPACK's geqrf.
+            There is torch.geqrf function but it doesn't work with complex-valued input.
+            """
+            if A.numel() > 0:
+                A_cpu = A.cpu()
+                flattened_batch_shape = [-1, *A_cpu.shape[-2:]]
+                reflectors = torch.empty_like(A_cpu).view(*flattened_batch_shape)
+                tau_shape = [*A_cpu.shape[:-2], A_cpu.shape[-1]]
+                tau = torch.empty(tau_shape, dtype=dtype).view(-1, A_cpu.shape[-1])
+                for A_i, reflectors_i, tau_i in zip(A_cpu.contiguous().view(*flattened_batch_shape), reflectors, tau):
+                    reflectors_tmp, tau_i[:] = map(torch.from_numpy, np.linalg.qr(A_i, mode='raw'))
+                    reflectors_i[:] = reflectors_tmp.T
+                reflectors = reflectors.view(*A_cpu.shape)
+                tau = tau.view(tau_shape)
+                return reflectors.to(A.device), tau.to(A.device)
+
+            reflectors = torch.empty_like(A)
+            tau = torch.empty(*A.shape[:-2], A.shape[-1], dtype=dtype, device=device)
+            return reflectors, tau
+
+        def run_test(shape):
+            A = torch.randn(*shape, dtype=dtype, device=device)
+            reflectors, tau = generate_reflectors_and_tau(A)
+            expected, _ = torch.linalg.qr(A)
+            actual = torch.orgqr(reflectors, tau)
+            # torch.linalg.qr does not work correctly for zero batch dimension tensors
+            # see https://github.com/pytorch/pytorch/issues/50576
+            if (A.numel() > 0):
+                self.assertEqual(expected, actual)
+            else:
+                self.assertTrue(actual.shape == shape)
+
+            out = torch.empty_like(A)
+            ans = torch.orgqr(reflectors, tau, out=out)
+            self.assertEqual(ans, out)
+            if (A.numel() > 0):
+                self.assertEqual(expected, out)
+
+        shapes = [(0, 0), (5, 0),  # Empty matrix
+                  (5, 5), (5, 3),  # Single matrix
+                  (0, 0, 0), (0, 5, 5), (0, 5, 3),  # Zero batch dimension tensors
+                  (2, 5, 5), (2, 5, 3),  # 3-dim tensors
+                  (2, 1, 5, 5), (2, 1, 5, 3)]  # 4-dim tensors
+        for shape in shapes:
+            run_test(shape)
+
+    @onlyCPU
+    @skipCPUIfNoLapack
+    def test_orgqr_errors_and_warnings(self, device):
         test_cases = [
             # input1 size, input2 size, error regex
-            ((10,), (2,), r"'input' should be 2 dimensional"),
-            ((10, 6), (20,), r"input.size\(1\) must be greater than or equal to input2.size\(0\)"),
-            ((6, 10), (5,), r"input.size\(0\) must be greater than or equal to input.size\(1\)"),
-            ((0, 0), (0,), r"'input' should not be empty"),
-            ((2, 2), (2, 0,), r"'tau' should not be empty")
+            ((10,), (2,), r"input must have at least 2 dimensions"),
+            ((10, 6), (20,), r"input.shape\[-1\] must be greater than or equal to tau.shape\[-1\]"),
+            ((6, 10), (5,), r"input.shape\[-2\] must be greater than or equal to input.shape\[-1\]"),
         ]
         for a_size, tau_size, error_regex in test_cases:
             a = torch.rand(*a_size, device=device)
             tau = torch.rand(*tau_size, device=device)
             with self.assertRaisesRegex(RuntimeError, error_regex):
                 torch.orgqr(a, tau)
+
+        # if out tensor with wrong shape is passed a warning is given
+        reflectors = torch.randn(3, 3, device=device)
+        tau = torch.randn(3, device=device)
+        out = torch.empty(2, 3, device=device)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.orgqr(reflectors, tau, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should match
+        out = torch.empty_like(reflectors).to(torch.int)
+        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match the expected dtype"):
+            torch.orgqr(reflectors, tau, out=out)
+
+        with self.assertRaisesRegex(RuntimeError, "tau dtype Int does not match input dtype"):
+            torch.orgqr(reflectors, tau.to(torch.int))
+
+        # TODO: enable the following tests when orgqr is implemented for CUDA
+        if torch.cuda.is_available():
+            with self.assertRaisesRegex(RuntimeError, "the operator doesn't exist for this backend"):
+                # device of out and input should match
+                wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+                out = torch.empty_like(reflectors).to(wrong_device)
+                # with self.assertRaisesRegex(RuntimeError, "Expected result and input to be on the same device"):
+                torch.orgqr(reflectors, tau, out=out)
+
+                # device of tau and input should match
+                wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+                tau = tau.to(wrong_device)
+                # with self.assertRaisesRegex(RuntimeError, "Expected input and tau to be on the same device"):
+                torch.orgqr(reflectors, tau)
 
     @precisionOverride({torch.complex64: 5e-6})
     @skipCUDAIfNoMagma

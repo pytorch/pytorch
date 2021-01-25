@@ -264,7 +264,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::AnyEnumType:
       break;
     case TypeKind::ComplexDoubleType:
-       AT_ASSERT(false);
+      AT_ASSERT(false);
     case TypeKind::EnumType:
       EnumTypePtr enum_type = type->expect<EnumType>();
       py::object py_obj = py::reinterpret_borrow<py::object>(obj);
