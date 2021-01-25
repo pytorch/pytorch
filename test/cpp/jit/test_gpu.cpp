@@ -6399,6 +6399,56 @@ TEST(NVFuserTest, FusionCacheAfter_CUDA) {
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionCacheFork_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeSymbolicTensor(2);
+  TensorView* tv1 = add(tv0, new Double(1.0));
+  TensorView* tv2 = mul(tv1, new Double(3.0));
+  fusion.addInput(tv0);
+  fusion.addOutput(tv1);
+  fusion.addOutput(tv2);
+  // Before:  TV1 = TV0 + 1
+  //          TV2 = TV1 * 1
+  // Output:  TV1, TV2
+
+  // After:   TV1 = TV0 + 1
+  //          TV3 = TV1
+  //          TV2 = TV1 * 1
+  // Output:  TV3, TV2
+
+  constexpr int BSX = 32;
+  tv2->split(-1, BSX);
+  tv0->computeAt(tv2, -1);
+
+  // cache_fork automatically applies ComputeAt to the cache TensorView
+  auto cf1 = tv1->cache_fork();
+
+  // Thread and Block binding
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  constexpr int M = 32, N = 457;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor aten_input = at::randn({M, N}, options);
+  at::Tensor aten_output1 = aten_input + 1.0;
+  at::Tensor aten_output2 = aten_output1 * 3.0;
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({aten_input});
+
+  testValidate(
+      &fusion,
+      cg_outputs,
+      {aten_input},
+      {aten_output1, aten_output2},
+      __LINE__,
+      __FILE__);
+}
+
 TEST(NVFuserTest, FusionCacheIndirect_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

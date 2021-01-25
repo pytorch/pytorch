@@ -911,8 +911,9 @@ bool isConstantAllocation(const TensorView* tv) {
   bool constant_allocation = true;
   auto domain = tv->domain()->domain();
   for (size_t axis = tv->getThisComputeAtAxis(); axis < domain.size(); ++axis) {
-    if (!domain[axis]->isBroadcast() && !domain[axis]->isReduction()) {
-      constant_allocation &= domain[axis]->isConstScalar();
+    if (!domain[axis]->isBroadcast() && !domain[axis]->isReduction() &&
+        !domain[axis]->isParallelized()) {
+      constant_allocation &= domain[axis]->extent()->isConstScalar();
     }
   }
   return constant_allocation;
@@ -928,8 +929,7 @@ std::vector<TensorView*> findTensorViewsToDuplicate(
   // Find any pointwise definition expressions via depth-first search (DFS)
   std::vector<TensorView*> stack;
   for (auto tensor : other_tv) {
-    if (fusion->unordered_uses(tensor).size() > 1 &&
-        !fusion->hasOutput(tensor)) {
+    if (tensor->uses().size() > 1 && !fusion->hasOutput(tensor)) {
       stack.push_back(tensor);
     }
   }
@@ -966,16 +966,28 @@ std::vector<TensorView*> findTensorViewsToDuplicate(
   return duplicate_tv;
 }
 
+bool canComputeAtInline(TensorView* tv) {
+  auto uses = tv->uses();
+  if (uses.size() == 1) {
+    Expr* expr = *uses.begin();
+    TensorView* consumer = expr->output(0)->as<TensorView>();
+    bool optional_inline =
+        !tv->hasBroadcast() && tv->nDims() == consumer->nDims();
+    bool required_inline = !isConstantAllocation(tv);
+    return optional_inline || required_inline;
+  }
+  return false;
+}
+
 //! Find all TensorViews that require inline ComputeAt
 //! to avoid non-static allocation error
 std::vector<TensorView*> findTensorViewsToComputeAtInline(
     Fusion* fusion,
-    const std::vector<TensorView*>& other_tv) {
+    const std::vector<TensorView*>& tensors) {
   std::vector<TensorView*> computeAt_inline_tv;
-  for (auto tv : other_tv) {
+  for (auto tv : tensors) {
     if (!fusion->hasInput(tv) && !fusion->hasOutput(tv)) {
-      if (!isConstantAllocation(tv) &&
-          tv->getMemoryType() == MemoryType::Local) {
+      if (tv->getMemoryType() == MemoryType::Local && canComputeAtInline(tv)) {
         computeAt_inline_tv.push_back(tv);
       }
     }
@@ -994,7 +1006,7 @@ void setupSharedMemory(
     stack.pop_back();
     if (!fusion->hasOutput(tensor) && !fusion->hasInput(tensor)) {
       tensor->setMemoryType(MemoryType::Shared);
-      for (auto expr : fusion->unordered_uses(tensor)) {
+      for (auto expr : tensor->uses()) {
         if (canDuplicate(expr)) {
           auto output = expr->output(0)->as<TensorView>();
           stack.push_back(output);
@@ -1072,8 +1084,8 @@ void organizeAxes(
   }
 }
 
-Expr* checkBroadcast(Fusion* fusion, TensorView* tv) {
-  auto uses = fusion->unordered_uses(tv);
+Expr* checkBroadcast(TensorView* tv) {
+  auto uses = tv->uses();
   if (uses.size() == 1) {
     auto expr = *uses.begin();
     bool isBroadcast = expr->getExprType().value() == ExprType::BroadcastOp;
@@ -1082,8 +1094,8 @@ Expr* checkBroadcast(Fusion* fusion, TensorView* tv) {
   return nullptr;
 };
 
-Expr* checkCastOp(Fusion* fusion, TensorView* tv) {
-  auto uses = fusion->unordered_uses(tv);
+Expr* checkCastOp(TensorView* tv) {
+  auto uses = tv->uses();
   if (uses.size() == 1) {
     auto expr = *uses.begin();
     bool isCastOp = expr->getExprType().value() == ExprType::UnaryOp &&
@@ -1096,10 +1108,10 @@ Expr* checkCastOp(Fusion* fusion, TensorView* tv) {
 void handleCastBroadcastInput(Fusion* fusion, TensorView* input) {
   TORCH_INTERNAL_ASSERT(fusion->hasInput(input));
 
-  auto castOp_expr = checkCastOp(fusion, input);
+  auto castOp_expr = checkCastOp(input);
   if (castOp_expr != nullptr) {
     auto castOp_tv = castOp_expr->output(0)->as<TensorView>();
-    auto broadcast_expr = checkBroadcast(fusion, castOp_tv);
+    auto broadcast_expr = checkBroadcast(castOp_tv);
     if (broadcast_expr != nullptr) {
       auto broadcast_tv = broadcast_expr->output(0)->as<TensorView>();
       castOp_tv->computeAt(broadcast_tv, -1);
@@ -1134,6 +1146,15 @@ void scheduleNormalization(
 
   organizeAxes(reduction_tv, all_tv);
 
+  // For intermediate outputs, apply cache_fork
+  for (const auto output : fusion->outputs()) {
+    if (!output->uses().empty()) {
+      if (output->getValType().value() == ValType::TensorView) {
+        other_tv.push_back(output->as<TensorView>()->cache_fork());
+      }
+    }
+  }
+
   // Scheduling the Reduction
   if (rparams.fastest_dim) {
     const bool kHasOuterAxis = reduction_tv.front()->nDims() > 1;
@@ -1153,13 +1174,13 @@ void scheduleNormalization(
         }
 
         // Reduction Split
-        //      [outer,   |rF-Leftover, rf-Unroll|]
+        //      [outer,   |rf-Unroll, rF-Leftover|]
         // Idx:     0     |   (-2)       (-1)    |
         //                ----------------------
         //                Reduction Dimensions
-        tv->split(-1, rparams.loop_unroll);
+        tv->split(-1, rparams.loop_unroll, false);
 
-        auto reduction_tv_rf = tv->rFactor({-1});
+        auto reduction_tv_rf = tv->rFactor({-2});
         rfactor_tv.push_back(reduction_tv_rf);
       }
 
@@ -1171,7 +1192,7 @@ void scheduleNormalization(
             tv->split(0, rparams.batches_per_block);
             tv->split(1, rparams.num_warps);
           }
-          tv->split(-1, rparams.loop_unroll);
+          tv->split(-1, rparams.loop_unroll, false);
         }
       }
 
@@ -1187,14 +1208,13 @@ void scheduleNormalization(
           }
         }
 
-        // 5) Handle Inline-ComputeAt
         // Fusion input castOp replaces cache_after
         // Determine if there are any casts or broadcast on fusion inputs
         for (const auto input : in_tv) {
           if (input->getRootDomain().size() > 1) {
             // If pseudo-cache, skip cache after
-            bool hasBroadcast = checkBroadcast(fusion, input) != nullptr;
-            bool hasCast = checkCastOp(fusion, input) != nullptr;
+            bool hasBroadcast = checkBroadcast(input) != nullptr;
+            bool hasCast = checkCastOp(input) != nullptr;
             if (!hasBroadcast && !hasCast) {
               other_tv.push_back(input->cache_after());
             }
@@ -1203,9 +1223,9 @@ void scheduleNormalization(
       }
 
       // 6) Parallel Binding
-      //      [Out-Lft, Out-PerBlock?, Out-NumWarps>|, rF-Lft,  rf-Unroll]
-      // Idx: [   0        1              2         |    3          4    ]
-      //      [  BIDx      1             TIDy       |   TIDx        4    ]
+      //      [Out-Lft, Out-PerBlock?, Out-NumWarps>|, rf-Unroll,  rF-Lft]
+      // Idx: [   0        1              2         |      3         4   ]
+      //      [  BIDx      1             TIDy       |      3        TIDx ]
       //      |-------------------------------------|--------------------]
       //                    Outer                         Reduction
       // For all TensorViews
@@ -1217,7 +1237,7 @@ void scheduleNormalization(
               tv->axis(2)->parallelize(ParallelType::TIDy);
             }
           }
-          tv->axis(-2)->parallelize(ParallelType::TIDx);
+          tv->axis(-1)->parallelize(ParallelType::TIDx);
         }
       }
 
@@ -1240,7 +1260,7 @@ void scheduleNormalization(
             tv->axis(2)->parallelize(ParallelType::TIDy);
           }
         }
-        tv->axis(-2)->parallelize(ParallelType::TIDx);
+        tv->axis(-1)->parallelize(ParallelType::TIDx);
       }
       // end persistent kernel
     } else {
@@ -1248,22 +1268,22 @@ void scheduleNormalization(
       std::vector<TensorView*> rfactor_tv;
       for (auto tv : reduction_tv) {
         // Reduction Splits
-        //      [ Outer  |, rF-Leftover, rf-TDX, rf-Unroll|]
-        // Idx:     0    |     1         2         3      |
+        //      [ Outer  |, rF-Leftover, rf-Unroll, rf-TDX|]
+        // Idx:     0    |     1             2         3  |
         //               ----------------------------------
         //                       Reduction Dimensions
-        tv->split(-1, rparams.loop_unroll);
-        tv->split(-2, rparams.lparams.bdimx());
+        tv->split(-1, rparams.lparams.bdimx());
+        tv->split(-2, rparams.loop_unroll);
 
-        auto reduction_tv_rf = tv->rFactor({-3, -1});
+        auto reduction_tv_rf = tv->rFactor({-3, -2});
         rfactor_tv.push_back(reduction_tv_rf);
       }
 
       // 2) Split the other TensorViews
       for (auto tv : other_tv) {
         if (tv->getRootDomain().size() == kReductionRootDims) {
-          tv->split(-1, rparams.loop_unroll);
-          tv->split(-2, rparams.lparams.bdimx());
+          tv->split(-1, rparams.lparams.bdimx());
+          tv->split(-2, rparams.loop_unroll);
         }
       }
 
@@ -1293,7 +1313,7 @@ void scheduleNormalization(
         auto compute_inline_tv =
             findTensorViewsToComputeAtInline(fusion, other_tv);
         for (auto tensor : compute_inline_tv) {
-          auto uses = fusion->unordered_uses(tensor);
+          auto uses = tensor->uses();
           TORCH_INTERNAL_ASSERT(
               uses.size() == 1,
               "This inline-computeAt TensorView ",
@@ -1306,8 +1326,8 @@ void scheduleNormalization(
       }
 
       // 6) Parallel Binding
-      //      [ outer |, rF-Leftover, rf-TDX, rf-Unroll]
-      // Idx: [  BIDx |     1          TIDx       3    ]
+      //      [ outer |, rF-Leftover, rf-Unroll, rf-TDX]
+      // Idx: [  BIDx |     1           2         TIDx ]
       //      |-------|--------------------------------]
       //        Outer             Reduction
       // For all TensorViews
@@ -1316,7 +1336,7 @@ void scheduleNormalization(
           if (kHasOuterAxis) {
             tv->axis(0)->parallelize(ParallelType::BIDx);
           }
-          tv->axis(-2)->parallelize(ParallelType::TIDx);
+          tv->axis(-1)->parallelize(ParallelType::TIDx);
         }
       }
 
@@ -1333,7 +1353,7 @@ void scheduleNormalization(
         if (kHasOuterAxis) {
           tv->axis(0)->parallelize(ParallelType::BIDx);
         }
-        tv->axis(-2)->parallelize(ParallelType::TIDx);
+        tv->axis(-1)->parallelize(ParallelType::TIDx);
       }
     } // end non-persistent
     // end fastest_dim logic
@@ -1445,7 +1465,7 @@ void scheduleNormalization(
     // 5) Handle Inline-ComputeAt
     auto compute_inline_tv = findTensorViewsToComputeAtInline(fusion, other_tv);
     for (auto tensor : compute_inline_tv) {
-      auto uses = fusion->unordered_uses(tensor);
+      auto uses = tensor->uses();
       TORCH_INTERNAL_ASSERT(
           uses.size() == 1,
           "This inline-computeAt TensorView ",

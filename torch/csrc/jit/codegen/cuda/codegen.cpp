@@ -343,6 +343,42 @@ class CudaKernelGenerator : private kir::IrVisitor {
     return expr.str();
   }
 
+  // If one argument is a tensorview and the other is a scalar, make sure we
+  // cast the scalar to the tensorview type
+  std::string scalarCast(kir::Val* lhs, kir::Val* rhs) {
+    // If neither are scalars return
+    if (!((lhs->isScalar() || rhs->isScalar()) &&
+          (lhs->isA<kir::TensorIndex>() || rhs->isA<kir::TensorIndex>()))) {
+      return "";
+    }
+
+    // Looking for mixed tensorview scalar options where types don't match
+    // but are either both floating or both int types. We should cast
+    // scalar to tensorview type in these instances.
+    auto lhs_t = lhs->dtype();
+    auto rhs_t = rhs->dtype();
+
+    // If same type, don't cast anything
+    if (lhs_t == rhs_t) {
+      return "";
+    }
+
+    // Don't do anything when dealing with bools
+    if (lhs_t == DataType::Bool || rhs_t == DataType::Bool) {
+      return "";
+    }
+
+    // Mixing floating and int combination
+    if ((isFloatingPointType(lhs_t) != isFloatingPointType(rhs_t)) ||
+        (isIntegralType(lhs_t) != isIntegralType(rhs_t))) {
+      return "";
+    }
+
+    std::stringstream cast;
+    cast << "(" << (lhs->isA<TensorView>() ? rhs_t : lhs_t) << ") ";
+    return cast.str();
+  }
+
   void visit(const kir::BinaryOp* node) final {
     const auto op_type = node->operation();
     if (print_inline_) {
@@ -363,9 +399,12 @@ class CudaKernelGenerator : private kir::IrVisitor {
         //    =  lhs
         //    op rhs;
         //
+
+        auto cast = scalarCast(node->lhs(), node->rhs());
         if (auto op = inline_op_str(op_type)) {
           code_ << "\n";
-          indent() << kTab << "= " << gen(node->lhs()) << "\n";
+          indent() << kTab << "= " << (node->lhs()->isScalar() ? cast : "")
+                   << gen(node->lhs()) << "\n";
           indent() << kTab;
           if (alsoBooleanOperator(op_type) &&
               node->out()->dtype() == DataType::Bool) {
@@ -373,7 +412,8 @@ class CudaKernelGenerator : private kir::IrVisitor {
           } else {
             code_ << *op;
           }
-          code_ << " " << gen(node->rhs());
+          code_ << " " << (node->rhs()->isScalar() ? cast : "")
+                << gen(node->rhs());
         } else {
           if (integer_op_str(op_type) && isIntegralType(node->out()->dtype())) {
             auto int_op = integer_op_str(op_type);
@@ -381,8 +421,10 @@ class CudaKernelGenerator : private kir::IrVisitor {
           } else {
             code_ << " = " << op_type << "(\n";
           }
-          indent() << kTab << gen(node->lhs()) << ",\n";
-          indent() << kTab << gen(node->rhs()) << ")";
+          indent() << kTab << (node->lhs()->isScalar() ? cast : "")
+                   << gen(node->lhs()) << ",\n";
+          indent() << kTab << (node->rhs()->isScalar() ? cast : "")
+                   << gen(node->rhs()) << ")";
         }
       }
       code_ << ";\n";

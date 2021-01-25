@@ -110,6 +110,9 @@ class TORCH_CUDA_API Fusion final {
   // TODO: Rename to register
   void removeOutput(Val* output);
 
+  //! Replace output with another value
+  void replaceOutput(Val* output, Val* replacement);
+
   //! Clear Expr's from TV uses that are not required to produce outputs from
   //! inputs
   void resetTvUses();

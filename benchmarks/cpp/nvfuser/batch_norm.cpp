@@ -72,10 +72,10 @@ static void MagicScheduler_BatchNorm(benchmark::State& benchmark_state) {
   // setup fusion
   auto input = TensorViewBuilder()
                    .ndims(input_shape.size())
-                   .dtype(DataType::Double)
+                   .dtype(DataType::Float)
                    .build();
-  auto weight = TensorViewBuilder().ndims(1).dtype(DataType::Double).build();
-  auto bias = TensorViewBuilder().ndims(1).dtype(DataType::Double).build();
+  auto weight = TensorViewBuilder().ndims(1).dtype(DataType::Float).build();
+  auto bias = TensorViewBuilder().ndims(1).dtype(DataType::Float).build();
   fusion.addInput(input);
   fusion.addInput(weight);
   fusion.addInput(bias);
@@ -90,7 +90,7 @@ static void MagicScheduler_BatchNorm(benchmark::State& benchmark_state) {
 
   // inputs
   at::manual_seed(0);
-  auto options = at::TensorOptions().dtype(at::kDouble).device(at::kCUDA, 0);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor at_x = at::randn(input_shape, options);
   at::Tensor at_weight = at::ones({input_shape[1]}, options);
   at::Tensor at_bias = at::zeros({input_shape[1]}, options);
@@ -131,7 +131,7 @@ static void MagicScheduler_BatchNorm_Baseline(
 
   // inputs
   at::manual_seed(0);
-  auto options = at::TensorOptions().dtype(at::kDouble).device(at::kCUDA, 0);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor at_x = at::randn(input_shape, options);
   at::Tensor at_weight = at::ones({input_shape[1]}, options);
   at::Tensor at_bias = at::zeros({input_shape[1]}, options);

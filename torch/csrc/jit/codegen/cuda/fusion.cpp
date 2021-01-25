@@ -240,6 +240,25 @@ void Fusion::removeOutput(Val* output) {
   resetTvUses();
 }
 
+void Fusion::replaceOutput(Val* output, Val* replacement) {
+  auto find_output = std::find(outputs_.begin(), outputs_.end(), output);
+  TORCH_CHECK(find_output != outputs_.end(), "Unable to find output in Fusion");
+
+  if (find_output != outputs_.end()) {
+    *find_output = replacement;
+
+    if (replacement->getValType().value() == ValType::TensorView) {
+      replacement->setIsFusionOutput(true);
+      replacement->as<TensorView>()->setMemoryType(MemoryType::Global);
+    }
+    if (output->getValType().value() == ValType::TensorView) {
+      output->setIsFusionOutput(false);
+      output->as<TensorView>()->setMemoryType(MemoryType::Local);
+    }
+    resetTvUses();
+  }
+}
+
 bool Fusion::inFusion(const Statement* stmt) const {
   bool in_fusion = stmt->fusion() == this;
   Statement* nonconst_stmt = const_cast<Statement*>(stmt); // NOLINT

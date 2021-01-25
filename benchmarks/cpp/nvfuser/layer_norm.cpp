@@ -70,7 +70,7 @@ static void MagicScheduler_LayerNorm(benchmark::State& benchmark_state) {
   // setup fusion
   auto input = TensorViewBuilder()
                    .ndims(input_shape.size())
-                   .dtype(DataType::Double)
+                   .dtype(DataType::Float)
                    .build();
   fusion.addInput(input);
   auto output = setupLayerNorm(&fusion, input, input_shape.size(), norm_shape);
@@ -82,7 +82,7 @@ static void MagicScheduler_LayerNorm(benchmark::State& benchmark_state) {
 
   // inputs
   at::manual_seed(0);
-  auto options = at::TensorOptions().dtype(at::kDouble).device(at::kCUDA, 0);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor at_x = at::randn(input_shape, options);
   std::vector<c10::IValue> inputs({at_x});
 
@@ -120,7 +120,7 @@ static void MagicScheduler_LayerNorm_Baseline(
 
   // inputs
   at::manual_seed(0);
-  auto options = at::TensorOptions().dtype(at::kDouble).device(at::kCUDA, 0);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor at_x = at::randn(input_shape, options);
 
   cudaDeviceSynchronize();

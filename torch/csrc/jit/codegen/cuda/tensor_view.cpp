@@ -692,6 +692,55 @@ TensorView* TensorView::cache_before() {
   return producer;
 }
 
+TensorView* TensorView::cache_fork() {
+  FusionGuard fg(fusion());
+
+  // Before: [Expr] -> This TV (Global Output) -> [Usage Expr]
+  // After:  [Expr] -> This TV (Local) -> [Usage Expr] > Next TV
+  //                            (Fork) -> [Set Expr]   -> New TV (Global Output)
+
+  TORCH_CHECK(
+      fusion()->hasOutput(this) && !this->uses().empty(),
+      "Error adding cache_fork ",
+      this,
+      " this TensorView must be an output with subsequent uses");
+
+  // This domain will be the producer, so create the consumer
+  auto root_domain = getRootDomain();
+  TensorView* new_output = new TensorView(
+      new TensorDomain(
+          root_domain, std::vector<bool>(root_domain.size(), true)),
+      getDataType().value());
+
+  // Create write operation from this TV to new output
+  new UnaryOp(UnaryOpType::Set, new_output, this);
+
+  // The new TV becomes an output.
+  // New TV has global memory type.
+  // This TV has local memory type.
+  fusion()->replaceOutput(this, new_output);
+
+  // Transform new output according to this TV
+  TransformReplay::replayCasP(new_output, this, -1);
+
+  // Set the computeAt for this forked TensorView
+  // to the Fusion outputs without any uses
+  if (hasComputeAt()) {
+    auto this_ca_pos = getThisComputeAtAxis();
+    auto rel_ca_pos = getRelativeComputeAtAxis();
+
+    for (Val* out : fusion()->outputs()) {
+      if (out->getValType() == ValType::TensorView) {
+        if (out->uses().empty()) {
+          new_output->setComputeAt(
+              out->as<TensorView>(), this_ca_pos, rel_ca_pos);
+        }
+      }
+    }
+  }
+  return new_output;
+}
+
 TensorView* TensorView::cache_after() {
   FusionGuard fg(fusion());
 

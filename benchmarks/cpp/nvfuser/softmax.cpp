@@ -48,7 +48,7 @@ static void MagicScheduler_Softmax(benchmark::State& benchmark_state) {
   // setup fusion
   auto input = TensorViewBuilder()
                    .ndims(input_shape.size())
-                   .dtype(DataType::Double)
+                   .dtype(DataType::Float)
                    .build();
   fusion.addInput(input);
   auto output =
@@ -61,7 +61,7 @@ static void MagicScheduler_Softmax(benchmark::State& benchmark_state) {
 
   // inputs
   at::manual_seed(0);
-  auto options = at::TensorOptions().dtype(at::kDouble).device(at::kCUDA, 0);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor at_x = at::randn(input_shape, options);
   std::vector<c10::IValue> inputs({at_x});
 
@@ -95,7 +95,7 @@ static void MagicScheduler_Softmax_Baseline(benchmark::State& benchmark_state) {
 
   // inputs
   at::manual_seed(0);
-  auto options = at::TensorOptions().dtype(at::kDouble).device(at::kCUDA, 0);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor at_x = at::randn(input_shape, options);
 
   cudaDeviceSynchronize();
@@ -136,11 +136,11 @@ static void MagicScheduler_Softmax_Dropout(benchmark::State& benchmark_state) {
   // setup fusion
   auto attention_scores = TensorViewBuilder()
                               .ndims(input_shape.size())
-                              .dtype(DataType::Double)
+                              .dtype(DataType::Float)
                               .build();
   auto attention_mask = TensorViewBuilder()
                             .ndims(input_shape.size())
-                            .dtype(DataType::Double)
+                            .dtype(DataType::Float)
                             .build();
   Double* divisor = new Double();
   fusion.addInput(attention_scores);
@@ -169,7 +169,7 @@ static void MagicScheduler_Softmax_Dropout(benchmark::State& benchmark_state) {
 
   // inputs
   at::manual_seed(0);
-  auto options = at::TensorOptions().dtype(at::kDouble).device(at::kCUDA, 0);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor at_scores = at::randn(input_shape, options);
   at::Tensor at_mask = at::randn(input_shape, options);
   std::vector<c10::IValue> inputs(
@@ -210,7 +210,7 @@ static void MagicScheduler_Softmax_Dropout_Baseline(
 
   // inputs
   at::manual_seed(0);
-  auto options = at::TensorOptions().dtype(at::kDouble).device(at::kCUDA, 0);
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor attention_scores = at::randn(input_shape, options);
   at::Tensor at_y = at::randn(input_shape, options);
 

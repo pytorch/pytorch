@@ -306,6 +306,12 @@ class TORCH_CUDA_API TensorView : public Val {
   // read tensor into shared memory or registers. Analogous to TVM Cache_Read
   TensorView* cache_after();
 
+  // For a fusion output with other uses, we want to avoid writing to global
+  // memory and then reading the output again. We write to global memory
+  // separately after an operation. We replace this fusion output with the
+  // direct write TensorView.
+  TensorView* cache_fork();
+
   MemoryType getMemoryType() const {
     return memory_type_;
   }
