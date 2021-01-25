@@ -225,13 +225,6 @@ public:
 
   void checkInvariants() const;
 
-  /* Check if operator calls with a given dispatch key
-   * need to be observed with RecordFunction.
-   */
-  inline bool shouldRecord(DispatchKey dispatch_key) const {
-    return dispatch_key != DispatchKey::BackendSelect;
-  }
-
   //
   // ------------------------------------------------------------------------
   //
@@ -431,7 +424,7 @@ C10_ALWAYS_INLINE Return Dispatcher::_callWithDispatchKeySet(const TypedOperator
     at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
     if (C10_UNLIKELY(guard.isActive())) {
       auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
-      if (shouldRecord(dispatchKey) && op.operatorIterator_->op.isObserved()) {
+      if (op.operatorIterator_->op.isObserved()) {
         int64_t seq_num = -1;
         // Setting sequence number in the Autograd case to associate
         // the forward range with the coresponding Autograd's node
@@ -512,7 +505,7 @@ C10_ALWAYS_INLINE void Dispatcher::_callBoxed(const OperatorHandle& op, const im
     at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
     if (C10_UNLIKELY(guard.isActive())) {
       auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
-      if (shouldRecord(dispatchKey) && entry.isObserved()) {
+      if (entry.isObserved()) {
         int64_t seq_num = -1;
         if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
           seq_num = at::sequence_number::peek();
