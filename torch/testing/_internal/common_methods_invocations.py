@@ -798,6 +798,34 @@ class ForeachUnaryFuncInfo(OpInfo):
         self.inplace_variant = inplace
         self.ref = ref
 
+class ForeachBinaryFuncInfo(OpInfo):
+    """Early version of a specialized OpInfo for foreach unary functions"""
+    def __init__(self,
+                 name,
+                 method,
+                 inplace,
+                 ref,  # torch reference function
+                 ref_name, # torch reference function name
+                 dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                 dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                 dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                 dtypesIfROCM=None,
+                 promotes_integers_to_float=False,
+                 sample_inputs_func=sample_inputs_foreach,
+                 **kwargs):
+        super(ForeachBinaryFuncInfo, self).__init__(name,
+                                                   dtypes=dtypes,
+                                                   dtypesIfCPU=dtypesIfCPU,
+                                                   dtypesIfCUDA=dtypesIfCUDA,
+                                                   dtypesIfROCM=dtypesIfROCM,
+                                                   promotes_integers_to_float=promotes_integers_to_float,
+                                                   sample_inputs_func=sample_inputs_func,
+                                                   **kwargs)
+        self.method_variant = method
+        self.inplace_variant = inplace
+        self.ref = ref
+        self.ref_name = ref_name
+
 class HermitianOpInfo(OpInfo):
     """Operator information for Hermitian functions
     These are functions that take Hermitian matrices as input.
@@ -1012,6 +1040,33 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad):
         make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad)
     )
     return [SampleInput(tensor) for tensor in tensors]
+
+foreach_binary_op_db: List[OpInfo] = [
+    ForeachBinaryFuncInfo('_foreach_add',
+                          method=torch._foreach_add,
+                          inplace=torch._foreach_add_,
+                          ref=torch.add,
+                          ref_name='add'),
+
+    ForeachBinaryFuncInfo('_foreach_sub',
+                          method=torch._foreach_sub,
+                          inplace=torch._foreach_sub_,
+                          ref=torch.sub,
+                          ref_name='sub'),
+
+    ForeachBinaryFuncInfo('_foreach_mul',
+                          method=torch._foreach_mul,
+                          inplace=torch._foreach_mul_,
+                          ref=torch.mul,
+                          ref_name='mul'),
+
+    ForeachBinaryFuncInfo('_foreach_div',
+                          method=torch._foreach_div,
+                          inplace=torch._foreach_div_,
+                          ref=torch.div,
+                          ref_name='div',
+                          promotes_integers_to_float=True),
+]
 
 foreach_unary_op_db: List[OpInfo] = [
     ForeachUnaryFuncInfo('_foreach_neg',
