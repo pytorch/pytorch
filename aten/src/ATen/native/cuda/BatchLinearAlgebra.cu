@@ -2260,6 +2260,8 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_legacy(const Tensor& self, b
     VT_working_copy = same_stride_to(VT_working_copy, self.options()).zero_();
   }
   // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
+  // Note that the 'apply_svd' routine returns VT = V^T (for real inputs) or VT = V^H (for complex inputs), not V.
+  VT_working_copy = VT_working_copy.conj();
   VT_working_copy.transpose_(-2, -1);
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
