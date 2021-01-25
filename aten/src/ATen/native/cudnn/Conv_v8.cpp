@@ -18,11 +18,11 @@ namespace {
 
 cudnnDataType_t getDataType(ScalarType dtype) {
   switch (dtype) {
-  case kHalf: 
+  case kHalf:
     return CUDNN_DATA_HALF;
-  case kFloat: 
+  case kFloat:
     return CUDNN_DATA_FLOAT;
-  case kDouble: 
+  case kDouble:
     return CUDNN_DATA_DOUBLE;
   default:
     TORCH_CHECK(false, "Illegal tensor data type: ", dtype);
@@ -95,7 +95,7 @@ struct ConvolutionCalculator final {
   IntArrayRef dilation;
 
   ScalarType dtype;
-  MemoryFormat layout;
+  MemoryFormat memory_format;
 
   ConvolutionCalculator(const Tensor &output, const Tensor &input, const Tensor &weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation):
@@ -103,7 +103,7 @@ struct ConvolutionCalculator final {
     padding(padding), stride(stride), dilation(dilation)
   {
     dtype = input.scalar_type();
-    layout = cudnn_conv_use_channels_last(input, weight) ?
+    memory_format = cudnn_conv_use_channels_last(input, weight) ?
       at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
   }
 
