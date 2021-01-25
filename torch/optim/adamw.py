@@ -1,5 +1,5 @@
-import math
 import torch
+from . import functional as F
 from .optimizer import Optimizer
 
 

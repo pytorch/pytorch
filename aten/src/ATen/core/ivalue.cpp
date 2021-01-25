@@ -80,6 +80,8 @@ TypePtr IValue::type() const {
       return StorageType::get();
     case Tag::Double:
       return FloatType::get();
+    case Tag::ComplexDouble:
+      return ComplexDoubleType::get();
     case Tag::Int:
       return IntType::get();
     case Tag::Bool:
@@ -284,6 +286,8 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isStorage() && lhs.toStorage().unsafeGetStorageImpl() == rhs.toStorage().unsafeGetStorageImpl();
     case Tag::Double:
       return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
+    case Tag::ComplexDouble:
+      return rhs.isComplexDouble() && lhs.toComplexDouble() == rhs.toComplexDouble();
     case Tag::Int:
       return rhs.isInt() && lhs.toInt() == rhs.toInt();
     case Tag::Bool:
@@ -352,6 +356,7 @@ size_t IValue::hash(const IValue& v) {
     case Tag::Capsule:
     case Tag::Generator:
     case Tag::Quantizer:
+    case Tag::ComplexDouble:
     case Tag::Enum:
     case Tag::Stream:
     case Tag::Uninitialized:
@@ -687,6 +692,16 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
         << std::setprecision(std::numeric_limits<double>::max_digits10)
         << v.toDouble()
         << std::setprecision(orig_prec);
+    } case IValue::Tag::ComplexDouble: {
+      c10::complex<double> d = v.toComplexDouble();
+      IValue real(d.real()), imag(std::abs(d.imag()));
+      auto sign = "";
+      if (d.imag() >= 0) {
+        sign = "+";
+      } else {
+        sign = "-";
+      }
+      return out << real << sign << imag << "j";
     } case IValue::Tag::Int:
       return out << v.toInt();
     case IValue::Tag::Bool:
