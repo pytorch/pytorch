@@ -931,25 +931,6 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False):
 def sample_inputs_linalg_svd(op_info, device, dtype, requires_grad=False):
     return _sample_inputs_svd(op_info, device, dtype, requires_grad, is_linalg_svd=True)
 
-def sample_inputs_pinverse(op_info, device, dtype, requires_grad=False):
-    """
-    This function generates input for torch.pinverse with distinct singular values so that autograd is always stable.
-    Implementation of torch.pinverse depends on torch.svd, therefore it's sufficient to check only square S x S matrix
-    and the batched (3 x S x S) input.
-    """
-    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-
-    test_cases = (
-        random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),  # pinverse
-        random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device),  # pinverse 'batched'
-    )
-
-    out = []
-    for a in test_cases:
-        a.requires_grad = requires_grad
-        out.append(SampleInput(a))
-    return out
-
 
 def sample_inputs_flip(op_info, device, dtype, requires_grad):
     tensors = (
