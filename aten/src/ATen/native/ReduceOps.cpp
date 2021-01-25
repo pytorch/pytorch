@@ -415,7 +415,7 @@ Tensor cummaxmin_backward(const Tensor& grad, const Tensor& input, const Tensor&
 
 static Tensor prepend_append_on_dim(const Tensor& self, const c10::optional<Tensor>& prepend, const c10::optional<Tensor>& append, int64_t dim) {
   // Helper for diff that handles prepending and appending when at least one is present
-  TORCH_INTERNAL_ASSERT(prepend.has_value() || append.has_value(), "either prepend or append must be has_value");
+  TORCH_INTERNAL_ASSERT(prepend.has_value() || append.has_value(), "either prepend or append must be have value");
   if (!prepend.has_value() && append.has_value()) {
     return at::cat({self, append.value()}, dim);
   } else if (prepend.has_value() && !append.has_value()) {
