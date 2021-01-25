@@ -612,6 +612,7 @@ static void replaceWithConv2dRelu(Block* block) {
         bool is_mkldnn_input = mkldnn_ops.count(pool_input->node()->kind()) == 0;
         //bool is_mkldnn_weight = mkldnn_ops.count(weight_input->node()->kind()) == 0;
         if (is_mkldnn_input) {
+          WithInsertPoint wip {n};
           pool_input = n->owningGraph()->insert(Symbol::aten("to_mkldnn"), {pool_input});
           n->replaceInput(0, pool_input);
         }
