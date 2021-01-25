@@ -307,9 +307,9 @@ at::Tensor my_op(const Tensor& self, const Tensor& other) {
 If we already know inference kernels and derivative formulas for operators `+` and `*` in our system,
 you can just register `my_op` to `Math` and both inference & autograd will just work.
 Although it seems we only write down the inference formula here, PyTorch autograd system would correctly
-set up the backward for `my_op` using the chain formula and derivatives of `+` & `-` operators.
+set up the backward for `my_op` using the chain formula and derivatives of `+` & `*` operators.
 In other words `d_out/d_self = 1; d_out/d_other = 2` can be derived automatically from
-the `my_op` inference kernel. Of course if we don't have derivative formula defined for either `+` or `-`,
+the `my_op` inference kernel. Of course if we don't have derivative formula defined for either `+` or `*`,
 backward of `my_op` can no longer be derived automatically.
 
 Whether to use `Math` or `DefaultBackend` for your kernel can be decided by the following steps:
@@ -322,9 +322,10 @@ Whether to use `Math` or `DefaultBackend` for your kernel can be decided by the 
 3. If you prefer to write backend-specific kernels, use reserved dispatch keys for your backend instead,
    e.g. `CPU/AutogradCPU`.
 
-If you add backend specific kernel to any operator that only had `Math` kernel before(no dispatch section
-or only `Math` entry in dispatch section), you **have to** move the old implementation to a `<op>_math`
-kernel and put it in `Math` field so that it's still available for other backends to use.
+**Important**: because a `Math` kernel is implicitly registered for ops with no `dispatch:` section,
+when you add a backend-specific kernel (and hence a `dispatch:` section) to one of these, you **must** also
+add a `Math:` entry that names the old kernel implementation (it's named after the op, with _<overload name>
+added if applicable), so that it's still available for other backends to use.
 
 If you implemented a native function in C++ and want to find out which dispatch keyword
 should be used in native_functions.yaml, please [follow steps in dispatch keywords](#choosing-the-right-dispatch-keyword)
