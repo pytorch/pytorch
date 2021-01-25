@@ -119,7 +119,7 @@ struct PhiloxCudaState {
   bool captured_ = false;
 };
 
-struct TORCH_CUDA_API CUDAGeneratorImpl : public c10::GeneratorImpl {
+struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   // Constructors
   CUDAGeneratorImpl(DeviceIndex device_index = -1);
   ~CUDAGeneratorImpl() = default;
@@ -155,10 +155,10 @@ private:
 namespace cuda {
 namespace detail {
 
-  TORCH_CUDA_API const Generator& getDefaultCUDAGenerator(DeviceIndex device_index = -1);
-  TORCH_CUDA_API Generator createCUDAGenerator(DeviceIndex device_index = -1);
+TORCH_CUDA_CPP_API const Generator& getDefaultCUDAGenerator(
+    DeviceIndex device_index = -1);
+TORCH_CUDA_CPP_API Generator createCUDAGenerator(DeviceIndex device_index = -1);
 
 } // namespace detail
 } // namespace cuda
 } // namespace at
-

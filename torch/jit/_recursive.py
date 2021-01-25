@@ -263,7 +263,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         if isinstance(value, torch.jit.ScriptFunction):
             concrete_type_builder.add_function_attribute(
                 name,
-                torch._C._jit_try_infer_type(value),
+                torch._C._jit_try_infer_type(value).type(),
                 value)
             continue
 
