@@ -30,15 +30,15 @@ constexpr int kFcdReductionThreadX = 128;
 constexpr int kNonFcdReductionThreadX = 32;
 constexpr int kNonFcdReductionThreadY = 32;
 
-TORCH_CUDA_API bool hasReductionNode(const Block* block);
+TORCH_CUDA_CU_API bool hasReductionNode(const Block* block);
 
-TORCH_CUDA_API bool isReductionNode(const Node* node);
+TORCH_CUDA_CU_API bool isReductionNode(const Node* node);
 
 // returns whether or not a parsing function exists for the given node type.
-TORCH_CUDA_API bool isNodeParsible(const Node* node);
+TORCH_CUDA_CU_API bool isNodeParsible(const Node* node);
 
 // lowers PyTorch jit graph to `Fusion`.
-TORCH_CUDA_API std::unique_ptr<Fusion> parseJitIR(
+TORCH_CUDA_CU_API std::unique_ptr<Fusion> parseJitIR(
     const std::shared_ptr<Graph>& graph);
 
 } // namespace cuda
