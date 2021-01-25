@@ -44,6 +44,16 @@ install_ubuntu() {
       DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENKERNELS}
     fi
 
+    git clone https://bitbucket.org/icl/magma.git -b hipMAGMA
+    cd magma
+    cp make.inc-examples/make.inc.hip-mkl-gcc make.inc
+    export MKLROOT=/opt/conda
+    export LD_LIBRARY_PATH=/opt/conda/lib
+    echo "LIBDIR += -L/opt/conda/lib" >> make.inc
+    make -f make.gen.hipMAGMA -j $(nproc)
+    make lib/libmagma.so -j $(nproc) MKLROOT=/opt/conda
+    cd ..
+
   # Cleanup
   apt-get autoclean && apt-get clean
   rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
