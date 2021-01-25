@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+#include "torch/csrc/jit/tensorexpr/cuda_codegen.h"
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 
@@ -428,6 +429,14 @@ void initTensorExprBindings(PyObject* module) {
           &tensorexpr::LoopNest::simplify,
           py::return_value_policy::reference)
       .def(
+        "set_GPU_block_index",
+        &tensorexpr::LoopNest::setGPUBlockIndex,
+        py::return_value_policy::reference)
+      .def(
+        "set_GPU_thread_index",
+        &tensorexpr::LoopNest::setGPUThreadIndex,
+        py::return_value_policy::reference)
+      .def(
           "__str__",
           [](const tensorexpr::LoopNest& self) {
             std::stringstream ss;
@@ -480,7 +489,9 @@ void initTensorExprBindings(PyObject* module) {
 #else
           throw std::runtime_error("PyTorch not compiled with LLVM support!");
 #endif
-        } else {
+        } else if (name == "cuda") {
+          cg = new tensorexpr::CudaCodeGen(stmt, args);
+        }else {
           cg = new tensorexpr::SimpleIREvaluator(stmt, args);
         }
         return cg;
