@@ -4120,9 +4120,10 @@ class TestTorchDeviceType(TestCase):
                 'expected scalar_type Double but found Float'):
             torch.logcumsumexp(b, axis, out=inplace_out)
 
-    @dtypes(*torch.testing.get_all_dtypes(include_bfloat16=False, include_half=False))
-    @dtypesIfCPU(*torch.testing.get_all_dtypes(include_bfloat16=False, include_half=True))
-    @dtypesIfCUDA(*torch.testing.get_all_dtypes(include_bfloat16=True, include_half=True))
+    # RngNormal not implemented for type f16 for XLA
+    @dtypes(*torch.testing.get_all_dtypes(include_half=False))
+    @dtypesIfCPU(*torch.testing.get_all_dtypes())
+    @dtypesIfCUDA(*torch.testing.get_all_dtypes())
     def test_diff(self, device, dtype):
         def _test_diff_numpy(t, dims=None):
             for dim in dims if dims else range(t.dim()):
