@@ -247,7 +247,6 @@ class TestLinalg(TestCase):
 
     # NOTE: old_cholesky* tests were moved here from test_torch.py and test_autograd.py
     @slowTest
-    @skipCUDAIf(True, "See issue #26789.")
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
@@ -864,7 +863,7 @@ class TestLinalg(TestCase):
 
         # dtypes should match
         out = torch.empty_like(a).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
+        with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
             torch.kron(a, b, out=out)
 
     # This test confirms that torch.linalg.norm's dtype argument works
@@ -996,6 +995,7 @@ class TestLinalg(TestCase):
     # their matrix norm results match
     @skipCUDAIfNoMagma
     @dtypes(torch.float, torch.double)
+    @precisionOverride({torch.float32: 2e-5})
     def test_norm_matrix(self, device, dtype):
         def run_test_case(input, p, dim, keepdim):
             result = torch.linalg.norm(input, ord, dim, keepdim)
@@ -1187,6 +1187,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.cfloat, torch.cdouble)
+    @precisionOverride({torch.cfloat: 2e-4})
     def test_norm_complex(self, device, dtype):
         def gen_error_message(input_size, ord, keepdim, dim=None):
             return "complex norm failed for input size %s, ord=%s, keepdim=%s, dim=%s" % (
@@ -1229,6 +1230,7 @@ class TestLinalg(TestCase):
 
     # Test that linal.norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
+    @skipCUDAIf(True, r"GPU Test is blocking torch.svd https://github.com/pytorch/pytorch/pull/48436")
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_MACOS, "Skipped on MacOS!")
     @skipCUDAIfNoMagma
@@ -1594,7 +1596,7 @@ class TestLinalg(TestCase):
                 expected = np.linalg.norm(xn, p, keepdims=keepdim)
                 msg = gen_error_message(x.size(), p, keepdim)
                 self.assertEqual(res.shape, expected.shape, msg=msg)
-                self.assertEqual(res, expected, msg=msg)
+                self.assertEqual(res, expected, msg=msg, rtol=1.3e-6, atol=3e-4)
 
     # Ensure torch.norm with p='fro' and p=2 give the same results for mutually supported input combinations
     @dtypes(torch.float)
@@ -1732,7 +1734,7 @@ class TestLinalg(TestCase):
         self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
     # ~~~ tests for torch.svd ~~~
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_svd(self, device, dtype):
@@ -1791,7 +1793,7 @@ class TestLinalg(TestCase):
         for dims, some, compute_uv in product(shapes, [True, False], [True, False]):
             run_test(dims, some, compute_uv)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float)
     def test_svd_no_singularvectors(self, device, dtype):
@@ -1801,7 +1803,7 @@ class TestLinalg(TestCase):
             u, s_actual, v = torch.svd(a, compute_uv=False)
             self.assertEqual(s_expect, s_actual, msg="Singular values don't match")
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_svd_lowrank(self, device, dtype):
@@ -1870,17 +1872,18 @@ class TestLinalg(TestCase):
         actual_rank, size, batches = 2, (17, 4), ()
         run_subtest(actual_rank, size, batches, device, jitted)
 
-    @onlyCPU
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.cfloat)
     def test_svd_complex(self, device, dtype):
+        # this test verifies that torch.svd really returns V and not V.conj()
+        # see: https://github.com/pytorch/pytorch/issues/45821
         t = torch.randn((10, 10), dtype=dtype, device=device)
         U, S, V = torch.svd(t, some=False)
-        # note: from the math point of view, it is weird that we need to use
-        # V.T instead of V.T.conj(): torch.svd has a buggy behavior for
-        # complex numbers and it's deprecated. You should use torch.linalg.svd
-        # instead.
-        t2 = U @ torch.diag(S).type(dtype) @ V.T
+        # verify that t ≈ t2
+        # t2 = U @ diag(S) @ Vᴴ
+        # Vᴴ is the conjugate transpose of V
+        t2 = U @ torch.diag(S).type(dtype) @ V.conj().T
         self.assertEqual(t, t2)
 
     def _test_svd_helper(self, shape, some, col_maj, device, dtype):
@@ -1901,44 +1904,44 @@ class TestLinalg(TestCase):
         for x, y in zip(cpu_result, device_result):
             self.assertEqual(x[..., :m].abs(), y[..., :m].abs(), atol=1e-5, rtol=0)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_svd_square(self, device, dtype):
         self._test_svd_helper((10, 10), True, False, device, dtype)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_types())
     def test_svd_square_col_maj(self, device, dtype):
         self._test_svd_helper((10, 10), True, True, device, dtype)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_types())
     def test_svd_tall_some(self, device, dtype):
         self._test_svd_helper((20, 5), True, False, device, dtype)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_types())
     def test_svd_tall_all(self, device, dtype):
         self._test_svd_helper((20, 5), False, False, device, dtype)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_types())
     def test_svd_tall_some_col_maj(self, device, dtype):
         self._test_svd_helper((5, 20), True, True, device, dtype)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_types())
     def test_svd_tall_all_col_maj(self, device, dtype):
         self._test_svd_helper((5, 20), False, True, device, dtype)
 
     # ~~~ tests for torch.linalg.svd ~~~
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_linalg_svd_compute_uv(self, device, dtype):
@@ -1952,7 +1955,10 @@ class TestLinalg(TestCase):
             # check linalg.svd vs numpy
             expected = np.linalg.svd(np_t, full_matrices, compute_uv=True)
             actual = torch.linalg.svd(t, full_matrices, compute_uv=True)
-            self.assertEqual(actual, expected)
+            # sign/phase of the singular vectors is not unique and therefore absolute values are compared
+            self.assertEqual(abs(actual[0]), abs(expected[0]))
+            self.assertEqual(actual[1], expected[1])
+            self.assertEqual(abs(actual[2]), abs(expected[2]))
             # check linalg.svd vs linalg.svd(out=...)
             out = (torch.empty_like(actual[0]),
                    torch.empty_like(actual[1]),
@@ -1961,7 +1967,7 @@ class TestLinalg(TestCase):
             self.assertEqual(actual, out)
             self.assertEqual(actual, out2)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_linalg_svd_no_compute_uv(self, device, dtype):
@@ -1990,7 +1996,7 @@ class TestLinalg(TestCase):
             assert USV.V is out[2]
             self.assertEqual(USV.S, np_s)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @onlyCUDA
     @dtypes(torch.float)
@@ -2060,7 +2066,6 @@ class TestLinalg(TestCase):
             self.assertEqual(x, x_exp)
 
     @slowTest
-    @skipCUDAIf(True, "See https://github.com/pytorch/pytorch/issues/48996")
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -2177,12 +2182,9 @@ class TestLinalg(TestCase):
 
         for torch_inverse in [torch.inverse, torch.linalg.inv]:
             for batches, n in itertools.product(
-                [[], [0], [1], [4], [2, 3]],
+                [[], [0], [1], [2], [4], [2, 3]],
                 [0, 5, 64]
             ):
-                # large batch size and large matrix size will be tested in test_inverse_many_batches (slow test)
-                if batches and batches[0] == 32 and n == 256:
-                    continue
                 matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
                 run_test(torch_inverse, matrices, batches, n)
 
@@ -3916,20 +3918,104 @@ class TestLinalg(TestCase):
 
     @onlyCPU
     @skipCPUIfNoLapack
-    def test_orgqr_errors(self, device):
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_orgqr(self, device, dtype):
+        def generate_reflectors_and_tau(A):
+            """
+            This function uses numpy.linalg.qr with mode "raw" to extract output of LAPACK's geqrf.
+            There is torch.geqrf function but it doesn't work with complex-valued input.
+            """
+            if A.numel() > 0:
+                A_cpu = A.cpu()
+                flattened_batch_shape = [-1, *A_cpu.shape[-2:]]
+                reflectors = torch.empty_like(A_cpu).view(*flattened_batch_shape)
+                tau_shape = [*A_cpu.shape[:-2], A_cpu.shape[-1]]
+                tau = torch.empty(tau_shape, dtype=dtype).view(-1, A_cpu.shape[-1])
+                for A_i, reflectors_i, tau_i in zip(A_cpu.contiguous().view(*flattened_batch_shape), reflectors, tau):
+                    reflectors_tmp, tau_i[:] = map(torch.from_numpy, np.linalg.qr(A_i, mode='raw'))
+                    reflectors_i[:] = reflectors_tmp.T
+                reflectors = reflectors.view(*A_cpu.shape)
+                tau = tau.view(tau_shape)
+                return reflectors.to(A.device), tau.to(A.device)
+
+            reflectors = torch.empty_like(A)
+            tau = torch.empty(*A.shape[:-2], A.shape[-1], dtype=dtype, device=device)
+            return reflectors, tau
+
+        def run_test(shape):
+            A = torch.randn(*shape, dtype=dtype, device=device)
+            reflectors, tau = generate_reflectors_and_tau(A)
+            expected, _ = torch.linalg.qr(A)
+            actual = torch.orgqr(reflectors, tau)
+            # torch.linalg.qr does not work correctly for zero batch dimension tensors
+            # see https://github.com/pytorch/pytorch/issues/50576
+            if (A.numel() > 0):
+                self.assertEqual(expected, actual)
+            else:
+                self.assertTrue(actual.shape == shape)
+
+            out = torch.empty_like(A)
+            ans = torch.orgqr(reflectors, tau, out=out)
+            self.assertEqual(ans, out)
+            if (A.numel() > 0):
+                self.assertEqual(expected, out)
+
+        shapes = [(0, 0), (5, 0),  # Empty matrix
+                  (5, 5), (5, 3),  # Single matrix
+                  (0, 0, 0), (0, 5, 5), (0, 5, 3),  # Zero batch dimension tensors
+                  (2, 5, 5), (2, 5, 3),  # 3-dim tensors
+                  (2, 1, 5, 5), (2, 1, 5, 3)]  # 4-dim tensors
+        for shape in shapes:
+            run_test(shape)
+
+    @onlyCPU
+    @skipCPUIfNoLapack
+    def test_orgqr_errors_and_warnings(self, device):
         test_cases = [
             # input1 size, input2 size, error regex
-            ((10,), (2,), r"'input' should be 2 dimensional"),
-            ((10, 6), (20,), r"input.size\(1\) must be greater than or equal to input2.size\(0\)"),
-            ((6, 10), (5,), r"input.size\(0\) must be greater than or equal to input.size\(1\)"),
-            ((0, 0), (0,), r"'input' should not be empty"),
-            ((2, 2), (2, 0,), r"'tau' should not be empty")
+            ((10,), (2,), r"input must have at least 2 dimensions"),
+            ((10, 6), (20,), r"input.shape\[-1\] must be greater than or equal to tau.shape\[-1\]"),
+            ((6, 10), (5,), r"input.shape\[-2\] must be greater than or equal to input.shape\[-1\]"),
         ]
         for a_size, tau_size, error_regex in test_cases:
             a = torch.rand(*a_size, device=device)
             tau = torch.rand(*tau_size, device=device)
             with self.assertRaisesRegex(RuntimeError, error_regex):
                 torch.orgqr(a, tau)
+
+        # if out tensor with wrong shape is passed a warning is given
+        reflectors = torch.randn(3, 3, device=device)
+        tau = torch.randn(3, device=device)
+        out = torch.empty(2, 3, device=device)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.orgqr(reflectors, tau, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should match
+        out = torch.empty_like(reflectors).to(torch.int)
+        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match the expected dtype"):
+            torch.orgqr(reflectors, tau, out=out)
+
+        with self.assertRaisesRegex(RuntimeError, "tau dtype Int does not match input dtype"):
+            torch.orgqr(reflectors, tau.to(torch.int))
+
+        # TODO: enable the following tests when orgqr is implemented for CUDA
+        if torch.cuda.is_available():
+            with self.assertRaisesRegex(RuntimeError, "the operator doesn't exist for this backend"):
+                # device of out and input should match
+                wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+                out = torch.empty_like(reflectors).to(wrong_device)
+                # with self.assertRaisesRegex(RuntimeError, "Expected result and input to be on the same device"):
+                torch.orgqr(reflectors, tau, out=out)
+
+                # device of tau and input should match
+                wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+                tau = tau.to(wrong_device)
+                # with self.assertRaisesRegex(RuntimeError, "Expected input and tau to be on the same device"):
+                torch.orgqr(reflectors, tau)
 
     @precisionOverride({torch.complex64: 5e-6})
     @skipCUDAIfNoMagma
