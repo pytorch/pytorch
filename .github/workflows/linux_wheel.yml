@@ -29,7 +29,7 @@ jobs:
       image: ${{ matrix.container_image }}
     env:
       DESIRED_PYTHON: ${{ matrix.python_version }}
-      DESIRED_CUDA: ${{ matrix.gpu_arch }}
+      DESIRED_CUDA: ${{ matrix.gpu_arch_version }}
       SKIP_ALL_TESTS: 1
     steps:
       - name: Clone pytorch/pytorch
@@ -60,10 +60,10 @@ jobs:
         run: |
           /builder/manywheel/build_rocm.sh
       - name: Build PyTorch binary (CPU specific)
-        if: ${{ matrix.gpu_arch == 'cpu' }}
+        if: ${{ matrix.gpu_arch_type == 'cpu' }}
         run: |
           /builder/manywheel/build_cpu.sh
       - uses: actions/upload-artifact@v2
         with:
-          name: pytorch-wheel-py${{ matrix.python_version }}-${{ matrix.gpu_arch }}
+          name: pytorch-wheel-py${{ matrix.python_version }}-${{matrix.gpu_arch_type}}-${{ matrix.gpu_arch_version }}
           path: /remote/**/*.whl

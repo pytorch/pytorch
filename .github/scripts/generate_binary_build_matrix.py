@@ -64,18 +64,19 @@ def generate_matrix():
         python_versions = [python_versions[-1]]
         arches = ["cpu", CUDA_ARCHES[-1], ROCM_ARCHES[-1]]
     matrix = []
-    for (python_version, arch) in itertools.product(python_versions, arches):
+    for item in itertools.product(python_versions, arches):
+        python_version, arch_version = item
         # Not my favorite code here
         gpu_arch_type = "cuda"
-        if "rocm" in CONTAINER_IMAGES[arch]:
+        if "rocm" in CONTAINER_IMAGES[arch_version]:
             gpu_arch_type = "rocm"
-        elif "cpu" in CONTAINER_IMAGES[arch]:
+        elif "cpu" in CONTAINER_IMAGES[arch_version]:
             gpu_arch_type = "cpu"
         matrix.append({
             "python_version": python_version,
-            "gpu_arch": arch,
+            "gpu_arch_version": arch_version,
             "gpu_arch_type": gpu_arch_type,
-            "container_image": CONTAINER_IMAGES[arch]
+            "container_image": CONTAINER_IMAGES[arch_version]
         })
     return json.dumps({"include": matrix})
 
