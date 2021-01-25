@@ -25,8 +25,9 @@ class CallableIterableDataset(IterableDataset[T_co]):
 
     def __init__(self,
                  dataset: IterableDataset,
-                 *,
+                 *args,
                  fn: Callable = default_fn,
+                 **kwargs,
                  ) -> None:
         super(CallableIterableDataset, self).__init__()
         self.dataset = dataset
@@ -34,10 +35,12 @@ class CallableIterableDataset(IterableDataset[T_co]):
             warnings.warn("Lambda function is not supported for pickle, "
                           "please use regular python function instead.")
         self.fn = fn  # type: ignore
+        self.args = args
+        self.kwargs = kwargs
 
     def __iter__(self) -> Iterator[T_co]:
         for data in self.dataset:
-            yield self.fn(data)
+            yield self.fn(data, *self.args, **self.kwargs)
 
     def __len__(self) -> int:
         if isinstance(self.dataset, Sized) and len(self.dataset) >= 0:
@@ -82,7 +85,8 @@ class CollateIterableDataset(CallableIterableDataset):
     """
     def __init__(self,
                  dataset: IterableDataset,
-                 *,
+                 *args,
                  collate_fn: Callable = _utils.collate.default_collate,
+                 **kwargs,
                  ) -> None:
-        super(CollateIterableDataset, self).__init__(dataset, fn=collate_fn)
+        super(CollateIterableDataset, self).__init__(dataset, *args, fn=collate_fn, **kwargs)

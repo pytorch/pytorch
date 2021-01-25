@@ -430,8 +430,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/gen_variable_factories.py"
     "${TOOLS_PATH}/autograd/gen_variable_type.py"
     "${TOOLS_PATH}/autograd/load_derivatives.py"
-    "${TOOLS_PATH}/autograd/nested_dict.py"
-    "${TOOLS_PATH}/autograd/utils.py"
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
 
@@ -720,6 +718,7 @@ elseif(USE_CUDA)
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
+  target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
   if(USE_NCCL)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
@@ -1249,7 +1248,7 @@ if(USE_ROCM)
   get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
   if(MY_DEFINITIONS)
     foreach(_item ${MY_DEFINITIONS})
-      list(APPEND HIP_HCC_FLAGS "-D${_item}")
+      list(APPEND HIP_CLANG_FLAGS "-D${_item}")
     endforeach()
   endif()
 
