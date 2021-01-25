@@ -48,6 +48,10 @@ struct TORCH_API MetalTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
   }
 
  private:
+  const char* tensorimpl_type_name() const override {
+    return "MetalTensorImpl";
+  }
+
   SmallVector<int64_t, 5> strides_;
 };
 } // namespace at
