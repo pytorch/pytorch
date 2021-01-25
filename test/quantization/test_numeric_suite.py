@@ -23,6 +23,7 @@ from torch.testing._internal.common_quantization import (
     AnnotatedConvModel,
     AnnotatedSingleLayerLinearModel,
     LSTMwithHiddenDynamicModel,
+    AnnotatedTwoLayerLinearModel,
     QuantizationTestCase,
     SingleLayerLinearDynamicModel,
     test_only_eval_fn,
@@ -219,6 +220,30 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
         linear_data = self.calib_data[0][0]
         module_swap_list = [nn.Linear]
         model_list = [AnnotatedSingleLayerLinearModel(qengine)]
+        for model in model_list:
+            model.eval()
+            if hasattr(model, "fuse_model"):
+                model.fuse_model()
+            q_model = quantize(model, test_only_eval_fn, [self.calib_data])
+            compare_and_validate_results(model, q_model, module_swap_list, linear_data)
+
+    def test_compare_model_stub_partial(self):
+        r"""Compare the output of static quantized linear layer and its float shadow module"""
+
+        qengine = torch.backends.quantized.engine
+        # TODO: Rebase on top of PR to remove compare and validate results here
+
+        def compare_and_validate_results(float_model, q_model, module_swap_list, data):
+            ob_dict = compare_model_stub(float_model, q_model, module_swap_list, data)
+            self.assertEqual(len(ob_dict), 1)
+            for k, v in ob_dict.items():
+                self.assertTrue(len(v["float"]) == len(v["quantized"]))
+                for i, val in enumerate(v["quantized"]):
+                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+
+        linear_data = self.calib_data[0][0]
+        module_swap_list = [nn.Linear]
+        model_list = [AnnotatedTwoLayerLinearModel()]
         for model in model_list:
             model.eval()
             if hasattr(model, "fuse_model"):

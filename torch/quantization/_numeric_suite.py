@@ -306,6 +306,7 @@ def prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger):
 
     reassign = {}
     for name, mod in q_module.named_children():
+
         if name not in float_module_children:
             continue
 
@@ -314,7 +315,7 @@ def prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger):
         if type(float_mod) not in module_swap_list:
             prepare_model_with_stubs(float_mod, mod, module_swap_list, Logger)
 
-        if type(float_mod) in module_swap_list:
+        if type(float_mod) in module_swap_list and type(mod) is not type(float_mod):
             reassign[name] = Shadow(mod, float_mod, Logger)
 
     for key, value in reassign.items():
