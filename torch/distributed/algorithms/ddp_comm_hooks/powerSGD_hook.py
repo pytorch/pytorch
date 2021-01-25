@@ -232,7 +232,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     rank1_tensors_memory = (
         torch.cat([tensor.view(-1) for tensor in rank1_tensors])
         if rank1_tensors
-        else torch.tensor([], device=device)
+        else torch.tensor([], device=device, dtype=dtype)
     )
 
     # Step II: Handle high-rank tensors.
