@@ -230,7 +230,7 @@ Tensor sparse_mask_helper_cuda(
 
   // Step 1: flatten the sparse indices `t._indices()` tensor into a 1D indices
   // tensor `t_flatten_indices`.
-  auto t_flatten_indices = at::sparse::flatten_indices(t_indices, full_size);
+  auto t_flatten_indices = at::sparse::flatten_indices(t_indices, full_size).contiguous();
 
   // Step 2: flatten the sparse indices `mask_indices` tensor into a 1D indices
   // tensor `mask_flatten_indices`. Note: This could be not sorted if the input
