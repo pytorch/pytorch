@@ -5324,6 +5324,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         self.test_cpu = kwargs.get('test_cpu', True)
         self.with_tf32 = kwargs.get('with_tf32', True)
         self.tf32_precision = kwargs.get('tf32_precision', 0.001)
+        self.check_batched_grad = kwargs.get('check_batched_grad', True)
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -5356,10 +5357,10 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
             def apply_fn(input1, input2, target, *params):  # type: ignore[misc]
                 return module(input1, input2, target)
 
-        gradcheck(apply_fn, inputs)
+        gradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
 
         if self.check_gradgrad:
-            gradgradcheck(apply_fn, inputs)
+            gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
 
     def test_cuda(self, test_case, dtype, extra_args=None):
         def convert_dtype(obj, dtype, requires_grad=False):
