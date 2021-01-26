@@ -7,19 +7,7 @@ Overview
 --------
 .. automodule:: torch.fx
 
-<<<<<<< HEAD
-Writing Transformations
------------------------
-
-TODO
-
-Debugging Transformations
--------------------------
-
-TODO
-=======
 .. _Limitations of Symbolic Tracing:
->>>>>>> Document FX debugging
 
 Limitations of Symbolic Tracing
 -------------------------------
@@ -302,8 +290,6 @@ Miscellanea
    -  Annotations on local names within a function are not currently
       supported.
 
-<<<<<<< HEAD
-=======
 Writing Transformations
 -----------------------
 
@@ -403,9 +389,9 @@ Use the ``to_folder`` Function From ``GraphModule``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 :meth:`GraphModule.to_folder` is a method in ``GraphModule`` that allows
 you to dump out the generated FX code to a folder. Although copying the
-forward pass into the code often suffices as in :ref:`Print the Generated Code
-<the above section>`, it doesn’t capture any model attribute state.
-To examine modules and parameters, we can use ``to_folder``.
+forward pass into the code often suffices as in :ref:`Print the Generated Code`,
+it doesn’t capture any model attribute state. To examine modules and parameters,
+we can use ``to_folder``.
 
 ::
 
@@ -507,7 +493,6 @@ window in your IDE (e.g. View → Terminal in VSCode), or b) use the
 built-in debugger (usually a graphical wrapper around ``pdb``).
 
 
->>>>>>> Document FX debugging
 API Reference
 -------------
 
