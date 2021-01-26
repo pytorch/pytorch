@@ -98,6 +98,11 @@ class FunctionCounts(object):
     ) -> "FunctionCounts":
         return self._merge(other, lambda c: -c)
 
+    def __mul__(self, other: Union[int, float]) -> "FunctionCounts":
+        return self._from_dict({
+            fn: int(c * other) for c, fn in self._data
+        }, self.inclusive)
+
     def transform(self, map_fn: Callable[[str], str]) -> "FunctionCounts":
         counts: DefaultDict[str, int] = collections.defaultdict(int)
         for c, fn in self._data:
@@ -151,6 +156,7 @@ class CallgrindStats(object):
     baseline_exclusive_stats: FunctionCounts
     stmt_inclusive_stats: FunctionCounts
     stmt_exclusive_stats: FunctionCounts
+    stmt_callgrind_out: Optional[str]
 
     def __repr__(self) -> str:
         newline = "\n"  # `\` cannot appear in fstring code section.
@@ -264,6 +270,10 @@ class CallgrindStats(object):
             baseline_exclusive_stats=strip(self.baseline_exclusive_stats),
             stmt_inclusive_stats=strip(self.stmt_inclusive_stats),
             stmt_exclusive_stats=strip(self.stmt_exclusive_stats),
+
+            # `as_standardized` will change symbol names, so the contents will
+            # no longer map directly to `callgrind.out`
+            stmt_callgrind_out=None,
         )
 
 
@@ -497,6 +507,7 @@ class _ValgrindWrapper(object):
         number: int,
         collect_baseline: bool,
         is_python: bool,
+        retain_out_file: bool,
     ) -> CallgrindStats:
         """Collect stats, and attach a reference run which can be used to filter interpreter overhead."""
         self._validate()
@@ -516,12 +527,13 @@ class _ValgrindWrapper(object):
                     globals={},
                     number=number,
                     is_python=True,
+                    retain_out_file=False,
                 )
-            baseline_inclusive_stats, baseline_exclusive_stats = \
+            baseline_inclusive_stats, baseline_exclusive_stats, _ = \
                 self._baseline_cache[cache_key]
 
-        stmt_inclusive_stats, stmt_exclusive_stats = self._invoke(
-            task_spec, globals, number, is_python)
+        stmt_inclusive_stats, stmt_exclusive_stats, out_contents = self._invoke(
+            task_spec, globals, number, is_python, retain_out_file)
         return CallgrindStats(
             task_spec=task_spec,
             number_per_run=number,
@@ -530,6 +542,7 @@ class _ValgrindWrapper(object):
             baseline_exclusive_stats=baseline_exclusive_stats,
             stmt_inclusive_stats=stmt_inclusive_stats,
             stmt_exclusive_stats=stmt_exclusive_stats,
+            stmt_callgrind_out=out_contents,
         )
 
     def _invoke(
@@ -538,7 +551,8 @@ class _ValgrindWrapper(object):
         globals: Dict[str, Any],
         number: int,
         is_python: bool,
-    ) -> Tuple[FunctionCounts, FunctionCounts]:
+        retain_out_file: bool,
+    ) -> Tuple[FunctionCounts, FunctionCounts, Optional[str]]:
         """Core invocation method for Callgrind collection.
 
         Valgrind operates by effectively replacing the CPU with an emulated
@@ -660,7 +674,17 @@ class _ValgrindWrapper(object):
                     begin_collecting = False
 
                 return FunctionCounts(tuple(sorted(fn_counts, reverse=True)), inclusive=inclusive)
-            return parse_output(inclusive=True), parse_output(inclusive=False)
+
+            callgrind_out_contents: Optional[str] = None
+            if retain_out_file:
+                with open(callgrind_out, "rt") as f:
+                    callgrind_out_contents = f.read()
+
+            return (
+                parse_output(inclusive=True),
+                parse_output(inclusive=False),
+                callgrind_out_contents,
+            )
         finally:
             shutil.rmtree(working_dir)
 

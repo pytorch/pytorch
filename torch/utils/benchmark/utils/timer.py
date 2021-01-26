@@ -403,7 +403,8 @@ class Timer(object):
     def collect_callgrind(
         self,
         number: int = 100,
-        collect_baseline: bool = True
+        collect_baseline: bool = False,
+        retain_out_file: bool = False,
     ) -> valgrind_timer_interface.CallgrindStats:
         """Collect instruction counts using Callgrind.
 
@@ -450,4 +451,6 @@ class Timer(object):
             globals=self._globals,
             number=number,
             collect_baseline=collect_baseline and is_python,
-            is_python=is_python)
+            is_python=is_python,
+            retain_out_file=retain_out_file,
+        )
