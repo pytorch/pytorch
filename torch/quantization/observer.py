@@ -730,7 +730,6 @@ class HistogramObserver(_ObserverBase):
         norm = density * (integral_{begin, end} x^2)
              = density * (end^3 - begin^3) / 3
         """
-        norm = 0.0
         norm = (
             delta_end * delta_end * delta_end
             - delta_begin * delta_begin * delta_begin
