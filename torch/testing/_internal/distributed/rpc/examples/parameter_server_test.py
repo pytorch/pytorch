@@ -215,7 +215,7 @@ class FakeMNIST(torch.utils.data.Dataset):
         self.len = len
         self.images = []
         for i in range(10):
-            img = torch.zeros((1, 28, 28), dtype=torch.float)
+            img = torch.zeros((1, 28, 28), dtype=torch.double)
             for j in range(i + 1):
                 img[0, j * 2, :] = 1
             self.images.append(img)
