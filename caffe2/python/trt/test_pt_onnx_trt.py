@@ -22,6 +22,8 @@ import torch
 import torchvision.models as models
 
 import pycuda.driver as cuda
+# This import causes pycuda to automatically manage CUDA context creation and cleanup.
+import pycuda.autoinit
 
 import tensorrt as trt
 TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
