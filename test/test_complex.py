@@ -33,7 +33,7 @@ class TestComplexJIT(JitTestCase):
         torch.jit.save(scripted, buffer)
         buffer.seek(0)
         loaded = torch.jit.load(buffer)
-        self.assertEqual(loaded.a, 3+5j)
+        self.assertEqual(loaded.a, 3 + 5j)
 
 class TestComplexTensor(TestCase):
     @dtypes(*torch.testing.get_all_complex_dtypes())
