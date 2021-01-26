@@ -18,6 +18,8 @@ namespace c10 {
 // DispatchKeySet.  Higher bit indexes get handled by dispatching first (because
 // we "count leading zeros" when we extract the highest priority dispatch
 // key.)
+//
+// NOTE: Keep the list in sync with `DispatchKey` in tools/codegen/model.py
 enum class DispatchKey : uint8_t {
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ UNDEFINED ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
