@@ -293,16 +293,16 @@ struct TORCH_API ViewInfo {
   /// By default we use as_strided to recover views which is more efficient.
   /// view_fn is only saved when as_strided is not supported.
   /// If view_fn has value, we use it to recover views in backward.
-  c10::optional<std::function<Variable(const Variable&)>> view_fn_;
+  std::function<Variable(const Variable&)> view_fn_;
 
   /// Accessors for the view function
   bool has_view_fn() const {
-    return view_fn_.has_value();
+    return view_fn_ != nullptr;
   }
 
   std::function<Variable(const Variable&)> view_fn() const {
     TORCH_CHECK(has_view_fn(), "Can only access the view function if it exists.");
-    return view_fn_.value();
+    return view_fn_;
   }
 
   /// The chain function can be used to build a new ViewInfo for a differentiable view
@@ -314,9 +314,9 @@ struct TORCH_API ViewInfo {
   /// The "view_func", if provided, should be a function that allows to re-do the view
   /// between "base" and "tensor".
   ViewInfo chain(const Variable & base, const Variable & tensor,
-    c10::optional<std::function<Variable(const Variable&)>> view_func=c10::nullopt) const;
+    std::function<Variable(const Variable&)> view_func=nullptr) const;
 
-  ViewInfo(Variable base, c10::optional<std::function<Variable(const Variable&)>> view_fn) :
+  ViewInfo(Variable base, std::function<Variable(const Variable&)> view_fn) :
     base_(std::move(base)),
     view_fn_(std::move(view_fn)) {
     TORCH_CHECK(base_.defined(), "base is undefined");

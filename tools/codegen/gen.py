@@ -192,7 +192,7 @@ def is_cuda_dispatch_key(dk: str) -> bool:
 # Structured kernel generation is only supported for certain key types;
 # otherwise use old-style
 def is_structured_dispatch_key(dk: str) -> bool:
-    return dk in {'CUDA', 'CPU'}
+    return dk in STRUCTURED_DISPATCH_KEYS
 
 # Generates RegisterSchema.cpp.  Depending on the selector, either
 # all schemas are registered, or only some are (in the case of
@@ -222,13 +222,13 @@ class RegisterSchema:
 #     API without having to disambiguate which overload you want
 #     (as would be the case if you directly registered native::
 #     functions).
+#   - The tertiary function of this file is to generate *static*
+#     cpp API bindings which can be used to bypass dispatcher
+#     directly to kernels, but with user-friendly cpp-style API
 @dataclass(frozen=True)
 class RegisterDispatchKey:
     dispatch_key: str
 
-    # TODO: Give more precise type Union[Literal[Target.DEFINITION,
-    # Target.REGISTRATION]]; requires Literal from typing_extensions
-    # which we don't have a dep for yet.
     target: Target
 
     # Selector object to determine which operators to generate
@@ -237,9 +237,6 @@ class RegisterDispatchKey:
 
     # Whether or not we are actually code-genning for ROCm
     rocm: bool
-
-    def __post_init__(self) -> None:
-        assert self.target is not Target.DECLARATION
 
     @method_with_native_function
     def __call__(self, f: Union[StructuredNativeFunctions, NativeFunction]) -> List[str]:
@@ -376,17 +373,16 @@ struct {class_name} final : public {parent_class} {{
             assert self.dispatch_key not in g.out.dispatch, \
                 "Do not explicitly specify Meta dispatch key on structured " \
                 "functions, they will be automatically generated for you"
-        elif self.dispatch_key not in g.out.dispatch:
-            return []
         elif not is_structured_dispatch_key(self.dispatch_key):
             return list(mapMaybe(self.gen_unstructured, g.functions()))
+        elif self.dispatch_key not in g.out.dispatch:
+            return []
 
         # Inner helper function to close over g
         # TODO: This function has a lot of similarity with gen_unstructured.  If
         # you edit this, you may need to also edit gen_unstructured.
         @with_native_function
         def gen_one(f: NativeFunction) -> Optional[str]:
-            assert self.target is not Target.DECLARATION
             assert not f.manual_kernel_registration
 
             # TODO: put this into StructuredNativeFunctions itself
@@ -402,9 +398,20 @@ struct {class_name} final : public {parent_class} {{
                 return None
 
             k = f.func.kind()
-            sig = NativeSignature.from_schema(f.func)
+            sig = NativeSignature(f.func, prefix="wrapper_")
 
-            if self.target is Target.DEFINITION:
+            # Unconditionally generate function version, never fallback binding.
+            # Some extra massaging would then be necessary in a hypothetical
+            # CPUTensor class
+            cpp_sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=False)
+            # For now, don't generate faithful signature for simplicity
+            cpp_sig = cpp_sig_group.signature
+
+            if self.target is Target.DECLARATION:
+                # namespace is handled by template
+                return f"TORCH_API {cpp_sig.decl()};\n"
+
+            elif self.target is Target.DEFINITION:
                 if self.dispatch_key == 'Meta':
                     class_name = f"structured_{meta.name(g)}_meta_{k.name}"
                     parent_class = f"at::meta::{meta.name(g)}"
@@ -452,6 +459,12 @@ namespace {{
 }}
 
 }} // anonymous namespace
+
+namespace {self.dispatch_key.lower()} {{
+{cpp_sig.defn()} {{
+    return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
+}}
+}} // namespace {self.dispatch_key.lower()}
 """
 
             elif self.target is Target.REGISTRATION:
@@ -468,9 +481,6 @@ namespace {{
 
     @method_with_native_function
     def gen_unstructured(self, f: NativeFunction) -> Optional[str]:
-        # for mypy type refinement; would be fixed by TODO on target
-        assert self.target is not Target.DECLARATION
-
         if self.dispatch_key not in f.dispatch:
             return None
         if f.manual_kernel_registration:
@@ -484,7 +494,9 @@ namespace {{
         args = native.arguments(f.func)
         args_str = ', '.join(a.defn() for a in args)
 
-        if self.target is Target.DEFINITION:
+        if self.target is Target.DECLARATION:
+            return ''
+        elif self.target is Target.DEFINITION:
             impl_name = f"at::native::{f.dispatch[self.dispatch_key]}"
 
             args_exprs_str = ', '.join(a.name for a in args)
@@ -768,7 +780,7 @@ class ComputeBackendSelect:
             return None
 
         name = native.name(f.func)
-        native_sig = NativeSignature.from_schema(f.func)
+        native_sig = NativeSignature(f.func)
 
         if not any(isinstance(a.argument, TensorOptionsArguments) for a in native_sig.arguments()):
             return None
@@ -1284,15 +1296,19 @@ def main() -> None:
         # kernels
         "Meta",
     ]
+    # Only a limited set of dispatch keys get CPUFunctions.h headers generated
+    # for them; this is the set
+    functions_keys = {
+        "CPU",
+        "CUDA",
+    }
     if options.backend_whitelist:
         dispatch_keys = [k for k in dispatch_keys if is_generic_dispatch_key(k) or k in options.backend_whitelist]
 
     for dispatch_key in dispatch_keys:
-        cpp_template = 'RegisterDispatchKey.cpp'
-
         fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
 
-        fm.write_with_template(f'Register{dispatch_key}.cpp', cpp_template, lambda: {
+        fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
             'extra_cuda_headers': extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else '',
             'legacy_th_headers':
                 '#include <ATen/LegacyTHFunctionsCPU.h>' if dispatch_key == "CPU" else
@@ -1308,6 +1324,16 @@ def main() -> None:
                 grouped_native_functions
             )),
         })
+
+        if dispatch_key in functions_keys:
+            fm.write_with_template(f'{dispatch_key}Functions.h', 'DispatchKeyFunctions.h', lambda: {
+                'dispatch_namespace': dispatch_key.lower(),
+                'dispatch_declarations': list(concatMap(
+                    RegisterDispatchKey(dispatch_key, Target.DECLARATION, selector, rocm=options.rocm),
+                    grouped_native_functions
+                )),
+            })
+
         del fm
 
     # BackendSelect is generated specially

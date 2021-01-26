@@ -74,6 +74,7 @@ DEFINE_DISPATCH(masked_fill_stub);
 REGISTER_NO_CPU_DISPATCH(index_put_accum_stub, index_put_accum_fn);
 DEFINE_DISPATCH(masked_select_serial_stub);
 DEFINE_DISPATCH(masked_select_stub);
+DEFINE_DISPATCH(masked_scatter_stub);
 
 DEFINE_DISPATCH(gather_stub);
 DEFINE_DISPATCH(scatter_stub);
@@ -1120,6 +1121,41 @@ std::vector<Tensor> nonzero_numpy(const Tensor& self) {
   }
 
   return self.nonzero().unbind(1);
+}
+
+Tensor & masked_scatter__cpu(Tensor& self, const Tensor & mask, const Tensor & source) {
+  at::assert_no_internal_overlap(self);
+  TORCH_CHECK(
+      self.scalar_type() == source.scalar_type(),
+      "masked_scatter: expected self and source to have same dtypes but got",
+      self.scalar_type(),
+      " and ",
+      source.scalar_type());
+
+  TORCH_CHECK(self.device().type() == at::kCPU, "device type of self (", self.device().type(), ") is not CPU");
+  TORCH_CHECK(mask.device().type() == at::kCPU, "device type of mask (", mask.device().type(), ") is not CPU");
+  TORCH_CHECK(source.device().type() == at::kCPU, "device type of source (", source.device().type(), ") is not CPU");
+
+  Tensor b_mask;
+  std::tie(b_mask) = expand_inplace(self, mask, "masked_scatter_");
+
+  if (b_mask.dtype() == ScalarType::Byte) {
+    TORCH_WARN("masked_scatter_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
+            "please use a mask with dtype torch.bool instead.");
+  }
+
+  auto src_cont = source.contiguous();
+
+  auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
+      .check_all_same_dtype(false)
+      .resize_outputs(false)
+      .add_output(self)
+      .add_input(b_mask)
+      .build();
+
+  masked_scatter_stub(iter.device_type(), iter, src_cont);
+  return self;
 }
 
 }} // at::native

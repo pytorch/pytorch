@@ -134,6 +134,8 @@ genrule(
         "aten/src/ATen/RegisterMeta.cpp",
         "aten/src/ATen/RegisterDefaultBackend.cpp",
         "aten/src/ATen/RegisterSchema.cpp",
+        "aten/src/ATen/CPUFunctions.h",
+        "aten/src/ATen/CUDAFunctions.h",
         "aten/src/ATen/Functions.h",
         "aten/src/ATen/Functions.cpp",
         "aten/src/ATen/NativeFunctions.h",
