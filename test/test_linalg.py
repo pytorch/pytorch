@@ -1377,7 +1377,7 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
-    @dtypes(torch.double, torch.float)
+    @dtypes(*floating_and_complex_types())
     def test_eig_basic(self, device, dtype):
         a = torch.tensor([[1.96, 0.00, 0.00, 0.00, 0.00],
                           [-6.49, 3.80, 0.00, 0.00, 0.00],
@@ -1398,11 +1398,25 @@ class TestLinalg(TestCase):
         #
         # compare with numpy
         np_e, np_v = np.linalg.eig(a.cpu().numpy())
-        # np_e.shape == (n, 2), where each column contain the real and
-        # imaginary parts of the result
-        self.assertEqual(ee[:, 0], np_e)  # real part
-        self.assertEqual(ee[:, 1], torch.zeros(ee.shape[0], dtype=dtype))  # imaginary part
+        if dtype.is_complex:
+            self.assertEqual(ee, np_e)
+        else:
+            # np_e.shape == (n, 2), where each column contain the real and
+            # imaginary parts of the result
+            self.assertEqual(ee[:, 0], np_e)  # real part
+            self.assertEqual(ee[:, 1], torch.zeros(ee.shape[0], dtype=dtype))  # imaginary part
         self.assertEqual(vv, np_v)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.complex64, torch.complex128)
+    def test_eig_backward_complex(self, device, dtype):
+        # torch.eig's backward is not supported yet for complex types. We
+        # should kill this test once it's implemented.
+        a = torch.tensor([[1., 2], [3, 4]], device=device, dtype=dtype, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "eig does not support automatic differentiation for outputs with complex dtype"):
+            e, v = torch.eig(a, True)
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
