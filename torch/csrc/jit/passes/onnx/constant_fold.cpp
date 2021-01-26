@@ -287,7 +287,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     updated_val = inputTensorValues[0];
     std::vector<int64_t> shape(inputTensorValues[1].sizes()[0], 0);
     auto shape_a = inputTensorValues[1].accessor<int64_t, 1>();
-    for (size_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
+    for (int64_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
       // All shape dim values should be >= -1
       // onnx::Reshape supports a shape dim value to be zero, in
       // which case the actual dim value remains unchanged. However,

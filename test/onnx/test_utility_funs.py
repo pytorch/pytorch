@@ -284,7 +284,7 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Slice"
             assert node.kind() != "onnx::Concat"
             assert node.kind() != "onnx::Unsqueeze"
-            
+
         if self.opset_version <= 12:
             assert len(list(graph.nodes())) == 3
         else:
@@ -786,7 +786,6 @@ TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
                                (TestCase,),
                                dict(TestUtilityFuns.__dict__, opset_version=10))
 
-
 # opset 11 tests
 TestUtilityFuns_opset11 = type(str("TestUtilityFuns_opset11"),
                                (TestCase,),
@@ -804,9 +803,9 @@ TestUtilityFuns_opset13 = type(str("TestUtilityFuns_opset13"),
 
 # opset 11 tests
 TestUtilityFuns_opset11_new_jit_API = type(str("TestUtilityFuns_opset11_new_jit_API"),
-                                          (TestCase,),
-                                          dict(TestUtilityFuns.__dict__, opset_version=11,
-                                          use_new_jit_passes=True))
+                                           (TestCase,),
+                                           dict(TestUtilityFuns.__dict__, opset_version=11,
+                                           use_new_jit_passes=True))
 
 # opset 12 tests
 TestUtilityFuns_opset12_new_jit_API = type(str("TestUtilityFuns_opset12_new_jit_API"),
