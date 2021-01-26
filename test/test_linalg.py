@@ -17,7 +17,7 @@ from functools import reduce, partial
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
      TEST_WITH_ASAN, make_tensor, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU,
-     wrapDeterministicFlagAPITest, iter_indices)
+     wrapDeterministicFlagAPITest, iter_indices, gradcheck, gradgradcheck)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -25,7 +25,6 @@ from torch.testing._internal.common_device_type import \
      onlyCUDA)
 from torch.testing import floating_and_complex_types, floating_types, all_types
 from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
-from torch.autograd import gradcheck, gradgradcheck
 
 # Protects against includes accidentally setting the default dtype
 # NOTE: jit_metaprogramming_utils sets the default dtype to double!
@@ -34,10 +33,6 @@ assert torch.get_default_dtype() is torch.float32
 
 if TEST_SCIPY:
     import scipy
-
-# See #49409, we should remove these if we end up with a global gradcheck setting
-gradcheck = partial(gradcheck, check_batched_grad=True)
-gradgradcheck = partial(gradgradcheck, check_batched_grad=True)
 
 class TestLinalg(TestCase):
     exact_dtype = True
@@ -3206,7 +3201,7 @@ class TestLinalg(TestCase):
 
             # Check autograd
             ops = [op.detach().requires_grad_() for op in operands]
-            self.assertTrue(torch.autograd.gradcheck(lambda *ops: torch.einsum(equation, ops), ops))
+            self.assertTrue(gradcheck(lambda *ops: torch.einsum(equation, ops), ops))
             for op in ops:
                 self.assertTrue(op._version == 0)
 
