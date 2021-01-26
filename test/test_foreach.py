@@ -672,12 +672,12 @@ class TestForeach(TestCase):
                     if (dtype in torch.testing.get_all_complex_dtypes()) and \
                         self.device_type == 'cuda' and \
                         foreach_bin_op == torch._foreach_sub:
-                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"):
-                            foreach_bin_op_(tensors, scalars)
+                            with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"):
+                                foreach_bin_op_(tensors, scalars)
 
-                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"):
-                            foreach_bin_op(tensors, scalars)
-                        return
+                            with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"):
+                                foreach_bin_op(tensors, scalars)
+                            return
 
                     if foreach_bin_op == torch._foreach_sub and self.device_type == "cpu":
                         with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"):
