@@ -1478,21 +1478,18 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         data = (torch.rand((1, 30), dtype=torch.float),)
         options = itertools.product(
-            [(ModuleLinear(has_relu=False), True)],
+            [ModuleLinear(has_relu=False)],
             self.all_quant_types)
         quantized_nodes = {
-            # is_module
-            True: {
-                # quant_type:
-                QuantType.DYNAMIC: ns.call_module(nnqd.Linear),
-                QuantType.STATIC: ns.call_module(nnq.Linear),
-                # note that we are checking the final result
-                QuantType.QAT: ns.call_module(nnq.Linear),
-            },
+            # quant_type:
+            QuantType.DYNAMIC: ns.call_module(nnqd.Linear),
+            QuantType.STATIC: ns.call_module(nnq.Linear),
+            # note that we are checking the final result
+            QuantType.QAT: ns.call_module(nnq.Linear),
         }
-        for (model, is_module), quant_type in options:
+        for model, quant_type in options:
             self.checkGraphModeFxOp(
-                model, data, quant_type, quantized_nodes[is_module][quant_type])
+                model, data, quant_type, quantized_nodes[quant_type])
 
         for f_relu, quant_type in itertools.product([True, False], [QuantType.STATIC, QuantType.QAT]):
             for model, quantized_node in [
