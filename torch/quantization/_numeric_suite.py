@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.quantization import prepare
+import torch.quantization as tq
 from typing import Dict
 
 from .quantization_mappings import (
@@ -194,6 +195,17 @@ class OutputLogger(Logger):
         self.stats["tensor_val"].append(x)
         return x
 
+class ErrorLogger(ns.Logger):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x ,y):
+
+        print('Error', torch.norm(x-y))
+        self.stats['signal'] = torch.norm(y)
+        self.stats['error'] = torch.norm(x-y)
+        return
+
 
 def _convert_tuple_to_list(t):
     return list(_convert_tuple_to_list(x) for x in t) if type(t) is tuple else t
@@ -281,6 +293,35 @@ class Shadow(nn.Module):
         self.logger(output, shadow_output)
         return output
 
+class QATShadow(nn.Module):
+    r"""Shadow module attaches the float module to its matching quantized module
+    as the shadow. Then it uses Logger module to process the outputs of both
+    modules.
+    Args:
+        float_module: float QAT module that we need to shadow
+        Logger: type of logger used to process the output of
+        float_module with and without fake quant.
+        ShadowLogger or custom loggers can be used.
+    """
+
+    def __init__(self, module, Logger):
+        super(Shadow, self).__init__()
+        self.orig_module = module
+        self.logger = Logger()
+
+    def forward(self, x):
+        output = self.orig_module(x)
+        with torch.no_grad():
+            # Save original state
+            self.orig_module.apply(tq.disable_fake_quant)
+            self.orig_module.apply(tq.disable_observer)
+            shadow_output = self.orig_module(x)
+            # TODO: Restore it back, currently state is not preserved
+            self.orig_module.apply(tq.enable_fake_quant)
+            self.orig_module.apply(tq.enable_observer)
+            self.logger(output, shadow_output)
+
+        return output
 
 def prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger):
     r"""Prepare the model by attaching the float module to its matching quantized
@@ -320,6 +361,70 @@ def prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger):
     for key, value in reassign.items():
         q_module._modules[key] = value
 
+
+
+def _logger_forward_hook(self, input, output):
+    r"""Forward hook that calls logger on the input and output of fake quant
+    """
+    with torch.no_grad():
+        if self.fake_quant_enabled[0]:
+            # Pass first input of fake quant to logger
+            return self.logger(input[0], output)
+
+def _register_logger_hook(module):
+    assert hasattr(module, 'activation_post_process'), \
+        'Expect activation_post_process attribute already attached to the module'
+    assert hasattr(module, 'logger'), \
+        'Expect logger attribute already attached to the module'
+    return module.register_forward_hook(_logger_forward_hook)
+
+
+
+
+def _insert_logger(module, Logger):
+    for name, mod in module.named_children():
+        print(name)
+        if isinstance(mod, tq.FakeQuantizeBase):
+            mod.add_module('logger', Logger())
+            # Register logger as the first entry in the hook list
+            # All post forward hooks are preserved and will be executed after the logger
+            handle = _register_logger_hook(mod)
+            mod._forward_hooks.move_to_end(handle.id, last=False)
+        else:
+            _insert_logger(mod, Logger)
+
+    return
+
+def prepare_qat_model_with_stubs(float_module, module_swap_list, Logger):
+    r"""Prepare the model by attaching the float module to its matching quantized
+    module as the shadow if the float module type is in module_swap_list.
+    Example usage:
+        prepare_model_with_stubs(float_model, q_model, module_swap_list, Logger)
+        q_model(data)
+        ob_dict = get_logger_dict(q_model)
+    Args:
+        float_module: float module used to generate the q_module
+        q_module: module quantized from float_module
+        module_swap_list: list of float module types to attach the shadow
+        Logger: type of logger to be used in shadow module to process the outputs of
+            quantized module and its float shadow module
+    """
+    _insert_logger(float_module, Logger)
+    float_module_children = {}
+    reassign={}
+    for name, mod in float_module.named_children():
+        float_module_children[name] = mod
+
+        float_mod = float_module_children[name]
+
+        if type(float_mod) not in module_swap_list:
+            prepare_model_with_stubs(float_mod, module_swap_list, Logger)
+
+        if type(float_mod) in module_swap_list:
+            reassign[name] = Shadow(float_mod, Logger)
+
+    for key, value in reassign.items():
+        float_module._modules[key] = value
 
 def compare_model_stub(
     float_model, q_model, module_swap_list, *data, Logger=ShadowLogger
