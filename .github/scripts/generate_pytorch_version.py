@@ -6,6 +6,7 @@ import subprocess
 import re
 
 from datetime import datetime
+from distutils.util import strtobool
 from pathlib import Path
 
 PYTORCH_ROOT = Path(__file__).parent.parent
@@ -44,17 +45,19 @@ def get_base_version():
     return re.sub(LEGACY_BASE_VERSION_SUFFIX_PATTERN, "", dirty_version)
 
 class PytorchVersion:
-    def __init__(self, gpu_arch_type, gpu_arch_version, with_build_suffix):
+    def __init__(self, gpu_arch_type, gpu_arch_version, no_build_suffix):
         self.gpu_arch_type = gpu_arch_type
         self.gpu_arch_version = gpu_arch_version
-        self.with_build_suffix = with_build_suffix
+        self.no_build_suffix = no_build_suffix
 
     def get_post_build_suffix(self):
         # CUDA 10.2 is the version to be uploaded to PyPI so it doesn't have a
         # version suffix
         if ((self.gpu_arch_type == "cuda" and self.gpu_arch_version == "10.2")
-                or not self.with_build_suffix):
+                or self.no_build_suffix):
             return ""
+        if self.gpu_arch_type == "cuda":
+            return f"+cu{self.gpu_arch_version.replace('.', '')}"
         return f"+{self.gpu_arch_type}{self.gpu_arch_version}"
 
     def get_release_version(self):
@@ -65,7 +68,7 @@ class PytorchVersion:
         return f"{get_tag()}{self.get_post_build_suffix()}"
 
     def get_nightly_version(self):
-        date_str = datetime.today().strftime('+%Y%m%d')
+        date_str = datetime.today().strftime('%Y%m%d')
         build_suffix = self.get_post_build_suffix()
         return f"{get_base_version()}.dev{date_str}{build_suffix}"
 
@@ -75,10 +78,9 @@ def main():
     )
     parser.add_argument(
         "--no-build-suffix",
-        type=bool,
+        type=strtobool,
         help="Whether or not to add a build suffix typically (+cpu)",
-        default=False
-
+        default=os.environ.get("NO_BUILD_SUFFIX", False)
     )
     parser.add_argument(
         "--gpu-arch-type",

@@ -74,8 +74,8 @@ def generate_matrix():
             gpu_arch_type = "cpu"
         matrix.append({
             "python_version": python_version,
-            "gpu_arch_version": arch_version,
             "gpu_arch_type": gpu_arch_type,
+            "gpu_arch_version": arch_version,
             "container_image": CONTAINER_IMAGES[arch_version]
         })
     return json.dumps({"include": matrix})
