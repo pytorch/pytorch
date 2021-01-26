@@ -335,7 +335,6 @@ class DeviceTypeTestBase(TestCase):
     def run(self, result=None):
         super().run(result=result)
         # Early terminate test if _stop_test_suite is set.
-        # Using this flag avoids unnecessary check invoke of torch.cuda.synchronize()
         if self._stop_test_suite:
             result.stop()
 
