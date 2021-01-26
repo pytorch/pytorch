@@ -30,6 +30,7 @@ C10_ALWAYS_INLINE vfloat32 vec_float(const vint32& vec_in) {
 C10_ALWAYS_INLINE vint32 vec_signed(const vfloat32& vec_in) {
   vint32 vec_out;
   __asm__("xvcvspsxws %x0,%x1" : "=wa"(vec_out) : "wf"(vec_in));
+  return vec_out;
 }
 
 C10_ALWAYS_INLINE vint64 vec_signed(const vfloat64& vec_in) {
