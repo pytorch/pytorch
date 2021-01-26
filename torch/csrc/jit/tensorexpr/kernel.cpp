@@ -1052,7 +1052,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::relu: {
       return computeOneOperand("aten_relu", v, [](const ExprHandle& a) {
         auto zero = Cast::make(a.dtype(), 0);
-        return ifThenElse(CompareSelect::make(a, zero, kLT), zero, a);
+        return CompareSelect::make(a, zero, zero, a, kLT);
       });
     } break;
 

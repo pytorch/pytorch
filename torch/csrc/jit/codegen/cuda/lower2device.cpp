@@ -148,7 +148,7 @@ Kernel* GpuLower::kernel() const {
 //
 // TODO(kir): this is a interim solution for easing the Kernel IR splitting
 //
-class TORCH_CUDA_API GpuLower::KernelIrMapper : private OptInConstDispatch {
+class TORCH_CUDA_CU_API GpuLower::KernelIrMapper : private OptInConstDispatch {
  public:
   explicit KernelIrMapper(GpuLower* gpu_lower)
       : gpu_lower_(gpu_lower), ir_builder_(gpu_lower->kernel()) {}
