@@ -983,6 +983,46 @@ class TestQuantizeFx(QuantizationTestCase):
             # make sure it runs
             m(torch.randn(2, 1, 3, 3))
 
+    def test_qconfig_for_call_func(self):
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    Linear(),
+                    Linear()
+                )
+                self.mods2 = Linear()
+
+            def forward(self, x):
+                x = self.mods1(x)
+                x = self.mods2(x)
+                return x
+
+        model = M().eval()
+        qconfig_dict = {"": default_qconfig, "module_name": [("mods2", None)]}
+        m = prepare_fx(model, qconfig_dict)
+        print(m)
+        m(torch.rand(5,5))
+
+        m = convert_fx(m)
+        order_check = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.linear),
+            ns.call_function(torch.ops.quantized.linear),
+            ns.call_method('dequantize'),
+            ns.call_function(torch.nn.functional.linear)
+        ]
+        m(torch.rand(5,5))
+
     def test_preserve_attributes(self):
         class M(torch.nn.Module):
             def __init__(self):

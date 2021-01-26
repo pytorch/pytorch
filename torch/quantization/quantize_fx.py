@@ -130,8 +130,7 @@ class QuantizationTracer(Tracer):
                     args : Tuple[Argument, ...], kwargs : Dict[str, Argument], name : Optional[str] = None,
                     type_expr : Optional[Any] = None) -> Node:
         node = super().create_node(kind, target, args, kwargs, name, type_expr)
-        if kind == "call_method":
-            self.node_name_to_scope[node.name] = (self.scope.module_path, self.scope.module_type)
+        self.node_name_to_scope[node.name] = (self.scope.module_path, self.scope.module_type)
         return node
 
 def _prepare_fx(model: torch.nn.Module, qconfig_dict: Any,
