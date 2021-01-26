@@ -2190,6 +2190,12 @@ class TestQuantizedOps(TestCase):
         X = torch.ones((0, 2, 4, 4), dtype=torch.float32)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                        dtype=torch.quint8)
+
+        # upsample_nearest2d
+        qY = torch.nn.functional.upsample_nearest(qX, scale_factor=2)
+        np.testing.assert_equal(qY.size(), (0, 2, 8, 8),
+                                "Quantized upsample_nearsest2d with batch size 0 failed.")
+
         # relu
         qY = torch.nn.functional.relu(qX)
         np.testing.assert_equal(qY.size(), qX.size(),
@@ -2411,7 +2417,7 @@ class TestQuantizedOps(TestCase):
         batch_size = 4
         target_seq_length = 128
         source_seq_length = 64
-        embed_dim = 512  # Must be divisible buy the number of heads
+        embed_dim = 512  # Must be divisible by the number of heads
 
         dropout = 0  # This is not supported
 
@@ -2451,11 +2457,10 @@ class TestQuantizedOps(TestCase):
         with torch.no_grad():
             for bias, add_bias_kv, add_zero_attn in itertools.product(
                     Bias, Add_bias_kv, Add_zero_attn):
-                # Assume 12dB is sufficient for functional equivalence
-                # Without the bias, linear might perform poorly
-                min_power = 12 if bias else 10
-                max_mse = 5 if bias else 10
+                min_power = 20
+                max_mse = 4
 
+                # PTQ
                 mha = MultiheadAttentionModel(embed_dim, num_heads, dropout,
                                               bias, add_bias_kv, add_zero_attn)
                 mha.eval()
@@ -2465,11 +2470,10 @@ class TestQuantizedOps(TestCase):
                 mha_prepared = torch.quantization.prepare(
                     mha, prepare_custom_config_dict=custom_module_config)
 
-                # Reference result
-                y_ref = mha(*fp_data)
-
                 # Calibrate
                 y = mha_prepared(*fp_data)
+                y_ref = mha(*fp_data)
+                # Check the result of the prepare
                 self.assertEqual(y_ref[0], y[0])  # Attention
                 self.assertEqual(y_ref[1], y[1])  # Weight
 
@@ -2478,6 +2482,10 @@ class TestQuantizedOps(TestCase):
                     mha_prepared,
                     convert_custom_config_dict=custom_module_config)
                 qy = mha_quantized(*q_data)
+
+                # Reference result
+                mha.layer = mha_quantized.layer.dequantize()
+                y_ref = mha(*fp_data)
 
                 snr = _snr(y, qy)
                 for signal, mse, power in snr:
@@ -3314,7 +3322,6 @@ class TestQuantizedEmbeddingOps(TestCase):
 
 
     """ Tests the correctness of the embedding_bag_8bit quantized operator """
-    @skipIfNoFBGEMM
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            num_offsets=st.integers(1, 20),
@@ -3369,7 +3376,6 @@ class TestQuantizedEmbeddingOps(TestCase):
     """ Tests the correctness of the quantized embedding lookup operator """
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0))
-    @skipIfNoFBGEMM
     def test_embedding_byte(self, num_embeddings, embedding_dim):
         quant_op = torch.ops.quantized.embedding_byte
         prepack_op = torch.ops.quantized.embedding_bag_prepack
@@ -3400,7 +3406,6 @@ class TestQuantizedEmbeddingOps(TestCase):
         torch.testing.assert_allclose(ref, qresult, atol=0.005, rtol=1e-3)
 
 
-    @skipIfNoFBGEMM
     def test_embedding_2d_indices(self):
         """
         Tests the case where 2D indices are passed into the operator
@@ -3423,7 +3428,6 @@ class TestQuantizedEmbeddingOps(TestCase):
         qresult = quant_op(packed_weight, indices, pruned_weights=False)
         torch.testing.assert_allclose(ref, qresult, atol=0.05, rtol=1e-3)
 
-    @skipIfNoFBGEMM
     def test_embedding_bag_2d_indices(self):
         """
         Tests the case where 2D indices are passed into the operator

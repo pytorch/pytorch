@@ -82,7 +82,7 @@ class MultiheadAttention(nn.MultiheadAttention):
         assert type(other) == cls._FLOAT_MODULE
         assert hasattr(other, 'qconfig'), "The float module must have 'qconfig'"
         # Setting the dropout to 0.0!
-        observed = cls(other.embed_dim, other.num_heads, 0.0,
+        observed = cls(other.embed_dim, other.num_heads, other.dropout,
                        (other.in_proj_bias is not None),
                        (other.bias_k is not None),
                        other.add_zero_attn, other.kdim, other.vdim)
@@ -139,6 +139,72 @@ class MultiheadAttention(nn.MultiheadAttention):
         # Explicit prepare
         observed = torch.quantization.prepare(observed, inplace=True)
         return observed
+
+    @torch.jit.unused
+    def dequantize(self):
+        r"""Utility to convert the quantized MHA back to float.
+
+        The motivation for this is that it is not trivial to conver the weights
+        from the format that is used in the quantized version back to the
+        float.
+        """
+        fp = self._FLOAT_MODULE(self.embed_dim, self.num_heads, self.dropout,
+                                (self.in_proj_bias is not None),
+                                (self.bias_k is not None),
+                                self.add_zero_attn, self.kdim, self.vdim)
+        assert fp._qkv_same_embed_dim == self._qkv_same_embed_dim
+        if self.bias_k is not None:
+            fp.bias_k = nn.Parameter(self.bias_k.dequantize())
+        if self.bias_v is not None:
+            fp.bias_v = nn.Parameter(self.bias_v.dequantize())
+
+        # Set the linear weights
+        w, b = self.out_proj._weight_bias()
+        fp.out_proj.weight = nn.Parameter(w.dequantize())
+        fp.out_proj.bias = nn.Parameter(b)
+
+        wQ, bQ = self.linear_Q._weight_bias()
+        wQ = wQ.dequantize()
+        wK, bK = self.linear_K._weight_bias()
+        wK = wK.dequantize()
+        wV, bV = self.linear_V._weight_bias()
+        wV = wV.dequantize()
+        if fp._qkv_same_embed_dim:
+            # Use separate params
+            _start = 0
+            _end = _start + fp.embed_dim
+            fp.in_proj_weight[_start:_end, :] = wQ
+            if fp.in_proj_bias is not None:
+                assert all(bQ == 0)
+                fp.in_proj_bias[_start:_end] = bQ
+
+            _start = _end
+            _end = _start + fp.embed_dim
+            fp.in_proj_weight[_start:_end, :] = wK
+            if fp.in_proj_bias is not None:
+                assert all(bK == 0)
+                fp.in_proj_bias[_start:_end] = bK
+
+            _start = _end
+            fp.in_proj_weight[_start:, :] = wV
+            if fp.in_proj_bias is not None:
+                assert all(bV == 0)
+                fp.in_proj_bias[_start:] = bV
+        else:
+            fp.q_proj_weight = wQ
+            fp.k_proj_weight = wK
+            fp.v_proj_weight = wV
+            if fp.in_proj_bias is None:
+                self.linear_Q.bias = None  # type: ignore
+                self.linear_K.bias = None  # type: ignore
+                self.linear_V.bias = None  # type: ignore
+            else:
+                fp.in_proj_bias[0:fp.embed_dim] = self.linear_Q.bias
+                fp.in_proj_bias[fp.embed_dim:(fp.embed_dim * 2)] = self.linear_K.bias
+                fp.in_proj_bias[(fp.embed_dim * 2):] = self.linear_V.bias
+
+        return fp
+
 
     @classmethod
     def from_observed(cls, other):
