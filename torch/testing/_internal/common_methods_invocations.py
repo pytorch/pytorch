@@ -17,7 +17,7 @@ from torch.testing import \
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and, all_types_and, all_types_and_complex)
 from torch.testing._internal.common_device_type import \
-    (skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
+    (skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack, skipCPUIfNoMkl,
      skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride)
 from torch.testing._internal.common_cuda import tf32_is_not_fp32
 from torch.testing._internal.common_utils import \
@@ -1264,7 +1264,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            test_inplace_grad=False,
            supports_tensor_out=True,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            sample_inputs_func=sample_inputs_linalg_norm,
            aten_name='linalg_norm',
            skips=(
@@ -1283,7 +1283,7 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_slogdet,
            output_func=itemgetter(1),
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
                # These tests do not work with output_func=itemgetter(1)
                # TODO: remove this once https://github.com/pytorch/pytorch/issues/49326 is resolved
@@ -1529,7 +1529,7 @@ op_db: List[OpInfo] = [
            supports_tensor_out=True,
            sample_inputs_func=sample_inputs_linalg_inv,
            check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
     UnaryUfuncInfo('angle',
                    ref=np.angle,
                    dtypes=all_types_and_complex_and(torch.bool),
@@ -1549,7 +1549,8 @@ op_db: List[OpInfo] = [
            supports_tensor_out=True,
            sample_inputs_func=sample_inputs_linalg_solve,
            check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           skips=(SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
     OpInfo('linalg.pinv',
            aten_name='linalg_pinv',
            op=torch.linalg.pinv,
@@ -1557,7 +1558,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_linalg_pinv,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
     HermitianOpInfo('linalg.pinv',
                     variant_test_name='hermitian',
                     aten_name='linalg_pinv',
@@ -1566,7 +1567,7 @@ op_db: List[OpInfo] = [
                     test_inplace_grad=False,
                     supports_tensor_out=False,
                     sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
-                    decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+                    decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
                     skips=(
                         # These tests do not take into account custom op.get_op()
                         SkipInfo('TestCommon', 'test_variant_consistency_jit'),)
@@ -1578,7 +1579,7 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_svd,
            decorators=[
-               skipCUDAIfNoMagma,
+               skipCUDAIfNoMagmaAndNoCusolver,
                skipCPUIfNoLapack,
                # gradgrad checks are slow
                DecorateInfo(slowTest, 'TestGradients', 'test_fn_gradgrad'),
@@ -1595,7 +1596,7 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_linalg_svd,
            decorators=[
-               skipCUDAIfNoMagma,
+               skipCUDAIfNoMagmaAndNoCusolver,
                skipCPUIfNoLapack,
                # gradgrad checks are slow
                DecorateInfo(slowTest, 'TestGradients', 'test_fn_gradgrad'),
@@ -1610,7 +1611,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_linalg_pinv,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
     OpInfo('gather',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
