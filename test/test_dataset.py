@@ -200,7 +200,7 @@ class TestFunctionalIterableDataset(TestCase):
                 it = iter(bucket_ds)
                 for i in range(bucket_num):
                     ref = sorted(arrs[i * bucket_size: (i + 1) * bucket_size])
-                    bucket = []
+                    bucket: List = []
                     while len(bucket) < len(ref):
                         try:
                             batch = next(it)
