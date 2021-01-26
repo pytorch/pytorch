@@ -58,6 +58,8 @@ DECLARE_DISPATCH(binary_fn, max_elementwise_stub);
 DECLARE_DISPATCH(binary_fn, min_elementwise_stub);
 DECLARE_DISPATCH(binary_fn, maximum_stub);
 DECLARE_DISPATCH(binary_fn, minimum_stub);
+DECLARE_DISPATCH(binary_fn, fmax_stub);
+DECLARE_DISPATCH(binary_fn, fmin_stub);
 DECLARE_DISPATCH(binary_fn_beta, smooth_l1_stub);
 DECLARE_DISPATCH(binary_fn, sigmoid_backward_stub);
 DECLARE_DISPATCH(binary_fn_alpha, logit_backward_stub);
@@ -74,5 +76,6 @@ DECLARE_DISPATCH(binary_fn, igammac_stub);
 DECLARE_DISPATCH(binary_fn, nextafter_stub);
 DECLARE_DISPATCH(binary_fn, heaviside_stub);
 DECLARE_DISPATCH(binary_fn, copysign_stub);
+DECLARE_DISPATCH(binary_fn, xlogy_stub);
 
 }} // namespace at::native

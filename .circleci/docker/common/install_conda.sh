@@ -92,6 +92,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_install magma-cuda110 -c pytorch
   elif [[ "$CUDA_VERSION" == 11.1* ]]; then
     conda_install magma-cuda111 -c pytorch
+  elif [[ "$CUDA_VERSION" == 11.2* ]]; then
+    conda_install magma-cuda112 -c pytorch
   fi
 
   # TODO: This isn't working atm
@@ -109,6 +111,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     numba \
     llvmlite \
     unittest-xml-reporting \
+    boto3==1.16.34 \
     coverage \
     hypothesis==4.53.2 \
     mypy==0.770 \

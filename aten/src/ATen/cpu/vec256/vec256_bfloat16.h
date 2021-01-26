@@ -25,7 +25,7 @@ static inline void cvtbf16_fp32(const __m256i& a, __m256& o1, __m256& o2) {
 static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
   __m256i lo = _mm256_castps_si256(a);
   __m256i hi = _mm256_castps_si256(b);
-  __m256i nan = _mm256_set1_epi32(0x7fc0);
+  __m256i nan = _mm256_set1_epi32(0xffff);
   __m256i mask_lo = _mm256_castps_si256(_mm256_cmp_ps(a, a, _CMP_ORD_Q));
   __m256i mask_hi = _mm256_castps_si256(_mm256_cmp_ps(b, b, _CMP_ORD_Q));
   __m256i ones = _mm256_set1_epi32(0x1);
@@ -203,7 +203,23 @@ public:
     return cvtfp32_bf16(o1, o2);
   }
   Vec256<BFloat16> angle() const {
-    return _mm256_set1_epi16(0);
+    __m256 lo, hi;
+    cvtbf16_fp32(values, lo, hi);
+    auto angle_lambda = [](__m256 values) {
+      const auto zero_vec = _mm256_set1_ps(0.f);
+      const auto nan_vec = _mm256_set1_ps(NAN);
+      const auto not_nan_mask = _mm256_cmp_ps(values, values, _CMP_EQ_OQ);
+      const auto nan_mask = _mm256_cmp_ps(not_nan_mask, zero_vec, _CMP_EQ_OQ);
+      const auto pi = _mm256_set1_ps(c10::pi<float>);
+
+      const auto neg_mask = _mm256_cmp_ps(values, zero_vec, _CMP_LT_OQ);
+      auto angle = _mm256_blendv_ps(zero_vec, pi, neg_mask);
+      angle = _mm256_blendv_ps(angle, nan_vec, nan_mask);
+      return angle;
+    };
+    auto o1 = angle_lambda(lo);
+    auto o2 = angle_lambda(hi);
+    return cvtfp32_bf16(o1, o2);
   }
   Vec256<BFloat16> real() const {
     return *this;

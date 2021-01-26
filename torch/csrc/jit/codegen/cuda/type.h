@@ -191,18 +191,18 @@ DataType promote_type(const DataType& t1, const DataType& t2);
 
 // If type cannot be found (i.e. codegen does not support provided type) returns
 // DataType::Null
-TORCH_CUDA_API DataType aten_to_data_type(const at::ScalarType& scalar_type);
-TORCH_CUDA_API at::ScalarType data_type_to_aten(const DataType& data_type);
+TORCH_CUDA_CU_API DataType aten_to_data_type(const at::ScalarType& scalar_type);
+TORCH_CUDA_CU_API at::ScalarType data_type_to_aten(const DataType& data_type);
 
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const ValType);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const DataType);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const ExprType);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const UnaryOpType);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const BinaryOpType);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const TernaryOpType);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const ParallelType);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const MemoryType);
-TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const IterType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ValType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const DataType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ExprType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const UnaryOpType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const BinaryOpType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const TernaryOpType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const ParallelType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const MemoryType);
+TORCH_CUDA_CU_API std::ostream& operator<<(std::ostream&, const IterType);
 
 std::string stringifyBooleanOp(const UnaryOpType);
 std::string stringifyBooleanOp(const BinaryOpType);
@@ -212,15 +212,15 @@ std::string stringifyThread(const ParallelType);
 std::string typePrefix(const DataType);
 
 // TODO: ThreadDim should be BlockDim and BlockDim should be GridDim
-TORCH_CUDA_API bool isParallelTypeThreadDim(ParallelType);
-TORCH_CUDA_API bool isParallelTypeBlockDim(ParallelType);
-TORCH_CUDA_API bool isParallelTypeThread(ParallelType);
+TORCH_CUDA_CU_API bool isParallelTypeThreadDim(ParallelType);
+TORCH_CUDA_CU_API bool isParallelTypeBlockDim(ParallelType);
+TORCH_CUDA_CU_API bool isParallelTypeThread(ParallelType);
 
-TORCH_CUDA_API c10::optional<std::string> inline_op_str(const UnaryOpType);
-TORCH_CUDA_API c10::optional<std::string> inline_op_str(const BinaryOpType);
-TORCH_CUDA_API c10::optional<std::string> integer_op_str(const BinaryOpType);
+TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const UnaryOpType);
+TORCH_CUDA_CU_API c10::optional<std::string> inline_op_str(const BinaryOpType);
+TORCH_CUDA_CU_API c10::optional<std::string> integer_op_str(const BinaryOpType);
 
-TORCH_CUDA_API c10::optional<std::string> cast_func_str(
+TORCH_CUDA_CU_API c10::optional<std::string> cast_func_str(
     const std::pair<DataType, DataType>&);
 
 size_t dataTypeSize(DataType type);

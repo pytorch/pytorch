@@ -28,7 +28,7 @@ namespace cuda {
 //! It does not generate predicates, but it will generate allocations, and loop
 //! nests to initialize reduction buffers.
 //!
-class TORCH_CUDA_API LoopNestGenerator {
+class TORCH_CUDA_CU_API LoopNestGenerator {
  public:
   static std::vector<kir::Expr*> loweredExprs(
       Fusion* fusion,

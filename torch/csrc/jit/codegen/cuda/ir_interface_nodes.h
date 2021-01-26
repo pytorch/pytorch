@@ -21,7 +21,7 @@ namespace cuda {
 //! This value can be a symbolic value (defined after the kernel
 //! is compiled) or a constant value (inlined into the kernel definition).
 //!
-class TORCH_CUDA_API Bool : public Val {
+class TORCH_CUDA_CU_API Bool : public Val {
  public:
   Bool() : Val(ValType::Scalar, DataType::Bool), maybe_value_{c10::nullopt} {}
 
@@ -49,7 +49,7 @@ class TORCH_CUDA_API Bool : public Val {
 //! A Float64 value. For now we don't have any other type besides
 //! Float64. This value can be a symbolic value (defined after the kernel
 //! is compiled) or a constant value (inlined into the kernel definition).
-class TORCH_CUDA_API Double : public Val {
+class TORCH_CUDA_CU_API Double : public Val {
  public:
   using ScalarType = double;
 
@@ -79,7 +79,7 @@ class TORCH_CUDA_API Double : public Val {
 
 //! An Int64 value. If used for indexing it's set as size_t. Otherwise it's an
 //! inlined literal in the kernel.
-class TORCH_CUDA_API Int : public Val {
+class TORCH_CUDA_CU_API Int : public Val {
  public:
   using ScalarType = int64_t;
 
@@ -139,7 +139,7 @@ class TVDomainGuard;
 //! getComputeAtAxis not being const because it can return a TV that some expect
 //! to be non-const is the biggest headache.
 //!
-class TORCH_CUDA_API TensorView : public Val {
+class TORCH_CUDA_CU_API TensorView : public Val {
  public:
   TensorView(
       TensorDomain* domain,
@@ -326,8 +326,8 @@ class TORCH_CUDA_API TensorView : public Val {
     return axes_to_swizzle_;
   }
 
-  friend TORCH_CUDA_API TransformReplay;
-  friend TORCH_CUDA_API OptOutMutator;
+  friend TORCH_CUDA_CU_API TransformReplay;
+  friend TORCH_CUDA_CU_API OptOutMutator;
   friend ComputeAt;
   friend void adjustMemoryTypes(Fusion* fusion);
   friend class ir_utils::TVDomainGuard;
@@ -385,7 +385,7 @@ class TORCH_CUDA_API TensorView : public Val {
 //!       .contiguity(contiguity)
 //!       .build();
 //!
-class TORCH_CUDA_API TensorViewBuilder {
+class TORCH_CUDA_CU_API TensorViewBuilder {
  public:
   //! Set the number of dimensions of the tensor (default 0, meaning scalar)
   TensorViewBuilder& ndims(size_t ndims);

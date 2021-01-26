@@ -18,7 +18,7 @@ class Fusion;
 //! \warning IrCloner machinery is a specialized helper for implementing
 //!   Fusion copy operations and it's not intended for any other uses
 //!
-class TORCH_CUDA_API IrCloner : private OptInConstDispatch {
+class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   friend class Statement;
 
  public:

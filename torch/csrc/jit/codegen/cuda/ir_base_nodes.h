@@ -59,7 +59,7 @@ class IrCloner;
 //! Basically beinng able to succienctly traverse down the inhereitance stack of
 //! a Statment at runtime. This is currently implemented in dispatch.h
 //!
-class TORCH_CUDA_API Statement : public NonCopyable, public PolymorphicBase {
+class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
   friend void swap(Fusion&, Fusion&) noexcept;
 
  public:
@@ -163,7 +163,7 @@ class TORCH_CUDA_API Statement : public NonCopyable, public PolymorphicBase {
 //! 5) An enum value must be added to ValType in type.h
 //! 6) A string entry must be added in val_type_string_map
 //!
-class TORCH_CUDA_API Val : public Statement {
+class TORCH_CUDA_CU_API Val : public Statement {
  public:
   // We may not want to register this value during Val's constructor. The reason
   // for this is that if we register the val, then ina derived constructor try
@@ -324,7 +324,7 @@ class TORCH_CUDA_API Val : public Statement {
 //!  7) A string entry must be added in expr_type_string_map
 //!  8) Entry added to ir_graphviz .cpp/.h
 //!
-class TORCH_CUDA_API Expr : public Statement {
+class TORCH_CUDA_CU_API Expr : public Statement {
  public:
   explicit Expr(ExprType type);
   Expr(const Expr* src, IrCloner* ir_cloner);
