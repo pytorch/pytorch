@@ -692,8 +692,6 @@ extern "C"
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
-TORCH_API PyObject* initModule();
-// separate decl and defn for msvc error C2491
 PyObject* initModule() {
   HANDLE_TH_ERRORS
   at::internal::lazy_init_num_threads();
