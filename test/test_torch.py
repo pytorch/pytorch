@@ -4158,8 +4158,13 @@ class TestTorchDeviceType(TestCase):
 
         t = torch.ones(2, 3)
 
-        # Size of prepend/append needs to be same as t except along given dim
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(
+                RuntimeError, 'diff expects prepend or append to be the same dimension as input'):
+            invalid_prepend = torch.tensor([1, 2, 3], device=device, dtype=dtype)
+            t.diff(dim=0, prepend=invalid_prepend)
+
+        with self.assertRaisesRegex(
+                RuntimeError, 'diff expects the shape of tensor to prepend or append to match that of input'):
             invalid_prepend = torch.tensor([[0, 1]], device=device, dtype=dtype)
             t.diff(dim=0, prepend=invalid_prepend)
 
@@ -4168,7 +4173,7 @@ class TestTorchDeviceType(TestCase):
             torch.diff(t, n=2)
 
         with self.assertRaisesRegex(
-                RuntimeError, 'diff requires input that is at least one-dimensional'):
+                RuntimeError, 'diff expects input to be at least one-dimensional'):
             scalar = torch.tensor(2, device=device, dtype=dtype)
             torch.diff(scalar)
 

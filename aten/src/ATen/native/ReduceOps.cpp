@@ -425,7 +425,26 @@ static Tensor prepend_append_on_dim(const Tensor& self, const c10::optional<Tens
   }
 }
 
-static inline int64_t diff_check(const Tensor& self, int64_t n, int64_t dim) {
+static inline void diff_check_compatible_shape(const Tensor& self, const c10::optional<Tensor>&other, int64_t dim) {
+  // Helper for diff that checks whether the shape of the tensor to prepend or append
+  // is compatible with that of input
+  if (other.has_value()) {
+    TORCH_CHECK(
+        other.value().dim() == self.dim(),
+        "diff expects prepend or append to be the same dimension as input");
+
+    for (int i = 0; i < other.value().dim(); i++) {
+      TORCH_CHECK(
+          other.value().size(i) == self.size(i) || i == dim,
+          "diff expects the shape of tensor to prepend or append to match that of"
+          " input except along the differencing dimension;"
+          " input.size(", i, ") = ", self.size(i), "but got"
+          " tensor.size(", i, ") = ", other.value().size(i));
+    }
+  }
+}
+
+static inline void diff_check(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>&prepend, const c10::optional<Tensor>& append) {
   // Helper for diff that checks whether its parameters are valid
   TORCH_CHECK(
       n == 1,
@@ -435,13 +454,14 @@ static inline int64_t diff_check(const Tensor& self, int64_t n, int64_t dim) {
 
   TORCH_CHECK(
       self.dim() >= 1,
-      "diff requires input that is at least one-dimensional");
+      "diff expects input to be at least one-dimensional");
 
-  return self.size(dim) - 1;
+  diff_check_compatible_shape(self, prepend, dim);
+  diff_check_compatible_shape(self, append, dim);
 }
 
 static inline Tensor diff_helper(const Tensor& self, int64_t n, int64_t dim) {
-  auto out_len = diff_check(self, n, dim);
+  auto out_len = self.size(dim) - 1;
   if (self.dtype() == at::kBool) {
     return at::logical_xor(at::narrow(self, dim, 1, out_len), at::narrow(self, dim, 0, out_len));
   }
@@ -449,6 +469,7 @@ static inline Tensor diff_helper(const Tensor& self, int64_t n, int64_t dim) {
 }
 
 Tensor diff(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>& prepend, const c10::optional<Tensor>& append) {
+  diff_check(self, n, dim, prepend, append);
   if (!prepend.has_value() && !append.has_value()) {
     return diff_helper(self, n, dim);
   } else {
@@ -458,7 +479,7 @@ Tensor diff(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tens
 }
 
 static inline Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim, Tensor& result) {
-  auto out_len = diff_check(self, n, dim);
+  auto out_len = self.size(dim) - 1;
   if (self.dtype() == at::kBool) {
     return at::logical_xor_out(result, at::narrow(self, dim, 1, out_len), at::narrow(self, dim, 0, out_len));
   }
@@ -466,6 +487,7 @@ static inline Tensor& diff_out_helper(const Tensor& self, int64_t n, int64_t dim
 }
 
 Tensor& diff_out(const Tensor& self, int64_t n, int64_t dim, const c10::optional<Tensor>& prepend, const c10::optional<Tensor>& append, Tensor& result) {
+  diff_check(self, n, dim, prepend, append);
   if (!prepend.has_value() && !append.has_value()) {
     return diff_out_helper(self, n, dim, result);
   } else {
