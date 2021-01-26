@@ -218,11 +218,22 @@ class ConvRelu(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 debug: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+        # Supported combinations are:
+        # quant_type | activation (compute_type) | weight
+        #  static       quint8                      qint8
+        # tuple (activation_dtype, weight_dtype, compute_dtype)
+        supported_dtypes = [
+            (torch.quint8, torch.qint8, None),
+        ]
+
         # TODO: debug option for conv module
         qconfig = quantizer.qconfig_map[node.name]
-        activation_statically_quantized = activation_is_statically_quantized(qconfig)
-        # only static qunatization (for both ptq and qat) is supported for conv
-        if not activation_statically_quantized:
+        dtypes = get_qconfig_dtypes(qconfig)
+        if dtypes not in supported_dtypes:
+            warnings.warn(
+                "dtype combination: {} is not "
+                "supported by Conv "
+                "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
             if self.relu_node:
                 conv_out = quantizer.quantized_graph.node_copy(self.conv_node, load_arg(quantized=False))
                 relu_args = [conv_out]
@@ -232,6 +243,8 @@ class ConvRelu(QuantizeHandler):
                     "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
             else:
                 return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+
+        activation_statically_quantized = activation_is_statically_quantized(qconfig)
 
         if self.conv_node.op == 'call_module':
             # note that relu should already be fused into conv module in the fusion step
