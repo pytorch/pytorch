@@ -40,5 +40,5 @@ else
   echo "signing.keyId=${ANDROID_SIGN_KEY}" >> $GRADLE_PROPERTIES
   echo "signing.password=${ANDROID_SIGN_PASS}" >> $GRADLE_PROPERTIES
 
-  $GRADLE_PATH -p ~/workspace/android/ uploadArchives
+  USE_VULKAN=1 $GRADLE_PATH -p ~/workspace/android/ uploadArchives
 fi

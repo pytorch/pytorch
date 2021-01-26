@@ -73,7 +73,8 @@ ln -s ${BUILD_ANDROID_INCLUDE_DIR_arm_v8a} ${JNI_INCLUDE_DIR}/arm64-v8a
 ln -s ${BUILD_ANDROID_LIB_DIR_arm_v8a} ${JNI_LIBS_DIR}/arm64-v8a
 fi
 
-GRADLE_PARAMS="-p android assembleRelease --debug --stacktrace"
+#FIXME Remove USE_VULKAN
+USE_VULKAN=1 GRADLE_PARAMS="-p android assembleRelease --debug --stacktrace"
 if [[ "${BUILD_ENVIRONMENT}" == *-gradle-build-only-x86_32* ]]; then
     GRADLE_PARAMS+=" -PABI_FILTERS=x86"
 fi
