@@ -1497,7 +1497,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 self.checkGraphModeFxOp(model, data, quant_type, quantized_node)
 
     @skipIfNoFBGEMM
-    def test_linear_functional(self):
+    def test_functional_linear(self):
         class FuncLinear(torch.nn.Module):
             def __init__(self, use_bias, has_relu, f_relu):
                 super(FuncLinear, self).__init__()
@@ -1595,22 +1595,80 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 quantized_nodes[dim])
 
     @skipIfNoFBGEMM
-    def test_conv2d_functional(self):
-        for bias in [True, False]:
-            conv = torch.nn.Conv2d(1, 1, 1, bias=bias)
+    def test_functional_conv(self):
+        """ Test for function conv and functional conv + relu
+        """
+        class FuncConv(torch.nn.Module):
+            def __init__(self, use_bias, has_relu, f_relu):
+                super().__init__()
+                self.w = torch.randn(3, 3, 3, 3)
+                self.b = torch.randn(3) if use_bias else None
+                self.stride = (1, 1)
+                self.padding = (0, 0)
+                self.dilation = (1, 1)
+                self.groups = 1
+                self.use_bias = use_bias
+                if has_relu:
+                    if f_relu:
+                        self.relu = F.relu
+                    else:
+                        self.relu = torch.nn.ReLU()
+                else:
+                    self.relu = torch.nn.Identity()
+
+            def forward(self, x):
+                x = F.conv2d(x, self.w, self.b, self.stride, self.padding, self.dilation, self.groups)
+                x = self.relu(x)
+                return x
+
+        data = (torch.randn((2, 3, 4, 4), dtype=torch.float),)
+
+        quant_type_to_prepare_expected_node_occurrence = {
+            QuantType.DYNAMIC: {},
             # There should be 3 observers: after input, weight and activation.
-            # No observer after bias.
-            prepare_expected_node_occurrence = {
+            QuantType.STATIC: {
                 ns.call_module(torch.quantization.HistogramObserver): 2,
                 ns.call_module(torch.quantization.PerChannelMinMaxObserver): 1,
+            },
+            # There should be 3 observers: after input, weight and activation.
+            QuantType.QAT: {
+                ns.call_module(torch.quantization.FakeQuantize): 3,
+            },
+        }
+        quant_type_to_qconv_fun = {
+            QuantType.STATIC: ns.call_function(torch.ops.quantized.conv2d),
+            QuantType.QAT: ns.call_function(torch.ops.quantized.conv2d),
+        }
+        quant_type_to_qconv_relu_fun = {
+            QuantType.STATIC: ns.call_function(torch.ops.quantized.conv2d_relu),
+            QuantType.QAT: ns.call_function(torch.ops.quantized.conv2d_relu),
+        }
+
+        options = itertools.product(
+            self.static_quant_types,
+            (True, False),  # use_bias
+            (True, False),  # has_relu
+            (True, False),  # functional relu
+        )
+        for quant_type, use_bias, has_relu, f_relu in options:
+            model = FuncConv(use_bias, has_relu, f_relu)
+            if has_relu:
+                qconv_fun = quant_type_to_qconv_relu_fun[quant_type]
+            else:
+                qconv_fun = quant_type_to_qconv_fun[quant_type]
+
+            convert_node_occurrence = {
+                ns.call_function(torch.quantize_per_tensor): 1 if quant_type != QuantType.DYNAMIC else 0,
+                qconv_fun: 1,
+                ns.call_method("dequantize"): 1 if quant_type != QuantType.DYNAMIC else 0
             }
-            expected_node_occurrence = \
-                {ns.call_function(torch.ops.quantized.conv2d): 1}
+            prepare_expected_node_occurrence = \
+                quant_type_to_prepare_expected_node_occurrence[quant_type]
             self.checkGraphModeFxOp(
-                conv, (torch.randn(4, 1, 4, 4),), QuantType.STATIC,
+                model, data, quant_type, qconv_fun,
                 prepare_expected_node_occurrence=prepare_expected_node_occurrence,
-                expected_node_occurrence=expected_node_occurrence,
-            )
+                expected_node_occurrence=convert_node_occurrence)
+
 
     @skipIfNoFBGEMM
     def test_quantized_conv_relu(self):
