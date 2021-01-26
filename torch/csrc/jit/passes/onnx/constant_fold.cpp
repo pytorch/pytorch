@@ -246,7 +246,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
       }
       auto axes = inputTensorValues[1].accessor<int64_t, 1>();
       updated_val = inputTensorValues[0];
-      for (size_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
+      for (int64_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
         updated_val = at::unsqueeze(updated_val, axes[i]);
       }
       return c10::optional<at::Tensor>(updated_val);
