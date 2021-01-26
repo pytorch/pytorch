@@ -121,7 +121,6 @@ GENERIC_TESTS = [
     BatchUpdateParameterServerTest,
     ParameterServerTest,
     RPCRNNTest,
-    PipelineTest,
     DistAutogradTest,
     DistOptimizerTest,
     JitRpcTest,
@@ -145,7 +144,8 @@ PROCESS_GROUP_TESTS = [
 # These suites should be standalone, and separate from the ones in the generic
 # list (not subclasses of those!).
 TENSORPIPE_TESTS = [
-    TensorPipeAgentRpcTest
+    TensorPipeAgentRpcTest,
+    PipelineTest
 ]
 
 
