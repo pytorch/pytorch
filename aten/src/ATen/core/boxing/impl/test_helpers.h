@@ -51,6 +51,11 @@ inline Result callOpUnboxed(const c10::OperatorHandle& op, Args... args) {
 }
 
 template<class Result, class... Args>
+inline Result callOpUnboxedWithDispatchKey(const c10::OperatorHandle& op, c10::DispatchKey dispatchKey, Args... args) {
+  return op.typed<Result(Args...)>().callWithDispatchKey(dispatchKey, std::forward<Args>(args)...);
+}
+
+template<class Result, class... Args>
 inline Result callOpUnboxedWithPrecomputedDispatchKeySet(const c10::OperatorHandle& op, c10::DispatchKeySet ks, Args... args) {
   return op.typed<Result(Args...)>().redispatch(ks, std::forward<Args>(args)...);
 }

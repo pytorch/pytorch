@@ -137,6 +137,11 @@ public:
   template<class Return, class... Args>
   Return call(const TypedOperatorHandle<Return (Args...)>& op, Args... args) const;
 
+  // Like call, but override the default DispatchKey calculation code,
+  // instead dispatching straight to the provided DispatchKey
+  template<class Return, class... Args>
+  Return callWithDispatchKey(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey dispatchKey, Args... args) const;
+
   // Like call, but intended for use in a redispatch: you are currently
   // in some currentDispatchKey, you have finished processing the key and
   // you now want to redispatch to the next dispatch key in the chain.
@@ -374,6 +379,10 @@ public:
     return c10::Dispatcher::singleton().call<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 
+  Return callWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
+    return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
+  }
+
   // Note: benchmarks showed that this function wasn't getting inlined during calls to at::empty
   C10_ALWAYS_INLINE Return redispatch(DispatchKeySet currentDispatchKeySet, Args... args) const {
     return c10::Dispatcher::singleton().redispatch<Return, Args...>(*this, currentDispatchKeySet, std::forward<Args>(args)...);
@@ -387,6 +396,20 @@ private:
 
 namespace detail {
 template<class... Args> inline void unused_arg_(const Args&...) {}
+}
+
+template<class Return, class... Args>
+inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(Args...)>& op, DispatchKey dispatchKey, Args... args) const {
+  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+  // No alias dispatch key is allowed at runtime.
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKey));
+  auto dispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
+    .template getDispatchKeySetUnboxed<Args...>(
+      DispatchKeySet(DispatchKeySet::FULL_AFTER, dispatchKey),
+      args...
+    );
+  const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
+  return _callWithDispatchKeySet<Return, Args...>(op, kernel, dispatchKeySet, args...);
 }
 
 // Note: benchmarks showed that this function wasn't getting inlined during calls to at::empty
