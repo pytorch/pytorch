@@ -47,13 +47,13 @@ std::unique_ptr<BCSRMatrix> generateBlockCSRMatrix(
     const uint32_t row_block_size,
     const uint32_t col_block_size,
     const uint8_t* zero_points) {
+  assert(K > 0);
   std::unique_ptr<BCSRMatrix> bcsr_mat_ptr = std::make_unique<BCSRMatrix>();
   auto& bcsr_mat = *bcsr_mat_ptr;
   const uint32_t num_row_blocks = (N + row_block_size - 1) / row_block_size;
   // K must be > 0
   const uint32_t num_col_blocks = (K + col_block_size - 1) / col_block_size;
 
-  bcsr_mat.row_values.clear();
   bcsr_mat.row_values.reserve(num_row_blocks);
   uint32_t num_nnz_blocks{0};
   bcsr_mat.row_values.push_back(num_nnz_blocks);
