@@ -428,6 +428,7 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
         Tensors where ``Jacobian[i][j]`` will contain the Jacobian of the
         ``i``\th output and ``j``\th input and will have as size the
         concatenation of the sizes of the corresponding output and the
+        corresponding input and will have same dtype and device as the
         corresponding input.
 
     Example:
@@ -466,7 +467,6 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
                                           "jacobian")
     _check_requires_grad(outputs, "outputs", strict=strict)
 
-    jacobian: Tuple[torch.Tensor, ...] = tuple()
 
     if vectorize:
         if strict:
@@ -532,20 +532,25 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False):
 
         # Step 3: The returned jacobian is one big tensor per input. In this step,
         # we split each Tensor by output.
-        jacobian = tuple(
-            tuple(jac_out.view(output.shape + inp.shape)
-                  for jac_out, output in zip(jac.split(output_numels, dim=0), outputs))
-            for jac, inp in zip(jacobians_of_flat_output, inputs))
+        jacobian_input_output = []
+        for jac, input_i in zip(jacobians_of_flat_output, inputs):
+            jacobian_input_i_output = []
+            for jac, output_j in zip(jac.split(output_numels, dim=0), outputs):
+                jacobian_input_i_output_j = jac.view(output_j.shape + input_i.shape)
+                jacobian_input_i_output.append(jacobian_input_i_output_j)
+            jacobian_input_output.append(jacobian_input_i_output)
 
-        # Step 4: Right now, `jacobian` is a Tuple[Tuple[...]].
-        # The outer tuple corresponds to the number of inputs,
-        # the inner tuple corresponds to the number of outputs.
-        # We need to exchange the order of these before returning.
-        jacobian = tuple(zip(*jacobian))
+        # Step 4: Right now, `jacobian` is a List[List[Tensor]].
+        # The outer List corresponds to the number of inputs,
+        # the inner List corresponds to the number of outputs.
+        # We need to exchange the order of these and convert to tuples
+        # before returning.
+        jacobian_output_input = tuple(zip(*jacobian_input_output))
 
-        jacobian = _grad_postprocess(jacobian, create_graph)
-        return _tuple_postprocess(jacobian, (is_outputs_tuple, is_inputs_tuple))
+        jacobian_output_input = _grad_postprocess(jacobian_output_input, create_graph)
+        return _tuple_postprocess(jacobian_output_input, (is_outputs_tuple, is_inputs_tuple))
 
+    jacobian: Tuple[torch.Tensor, ...] = tuple()
     for i, out in enumerate(outputs):
 
         # mypy complains that expression and variable have different types due to the empty list
@@ -601,14 +606,14 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False):
             This should lead to performance improvements in many use cases.
             Defaults to ``False``.
 
-
     Returns:
         Hessian (Tensor or a tuple of tuple of Tensors): if there is a single input,
         this will be a single Tensor containing the Hessian for the input.
         If it is a tuple, then the Hessian will be a tuple of tuples where
         ``Hessian[i][j]`` will contain the Hessian of the ``i``\th input
         and ``j``\th input with size the sum of the size of the ``i``\th input plus
-        the size of the ``j``\th input.
+        the size of the ``j``\th input. ``Hessian[i][j]`` will have the same
+        dtype and device as the corresponding ``i``\th input.
 
     Example:
 
