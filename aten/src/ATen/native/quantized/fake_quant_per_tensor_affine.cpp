@@ -145,7 +145,9 @@ Tensor fake_quantize_per_tensor_affine_cachemask_backward(
     const Tensor& mask) {
   TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
   TORCH_CHECK(mask.scalar_type() == ScalarType::Bool);
-  TORCH_CHECK(mask.numel() == dY.numel(), "`mask` and `dY` are not the same size");
+  TORCH_CHECK(mask.numel() == dY.numel(),
+      "`mask` and `dY` are not the same size: ",
+      "`mask` is size ", mask.numel(), " and `dY` is size ", dY.numel());
   if (dY.numel() <= 0) {
     return dY;
   }

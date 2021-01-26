@@ -2108,6 +2108,7 @@ void fake_quantize_tensor_cachemask_kernel(
     .add_input(input)
     .build();
 
+  // TODO(#51090): make it work for other dtypes
   iter_combined.for_each([&](char** data, const int64_t* strides, int64_t n) {
     for (int64_t i = 0; i < n; i++) {
       float* output_val = (float*)(data[0] + i * strides[0]);
