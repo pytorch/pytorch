@@ -43,6 +43,7 @@ jobs:
         with:
           path: pytorch
           submodules: recursive
+          ref: ${{ github.head_ref }}
       - name: Clone pytorch/builder
         uses: actions/checkout@v2
         with:
@@ -50,7 +51,7 @@ jobs:
           path: builder
       - name: Generate version string
         run: |
-          version = $(.github/scripts/generate_pytorch_version.py)
+          version=$(.github/scripts/generate_pytorch_version.py)
           echo "Generated version: ${version}"
           echo "PYTORCH_BUILD_VERSION=${version}" >> $GITHUB_ENV
       # TODO: Remove this once we remove the need for the directories to be
