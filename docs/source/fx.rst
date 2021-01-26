@@ -7,6 +7,8 @@ Overview
 --------
 .. automodule:: torch.fx
 
+.. _Limitations of Symbolic Tracing:
+
 Limitations of Symbolic Tracing
 -------------------------------
 
@@ -293,6 +295,7 @@ Writing Transformations
 
 TODO
 
+
 Debugging
 -----------
 
@@ -307,7 +310,7 @@ the generated code, then debug the process of transformations that lead
 to the generated code.
 
 If you’re not familiar with debuggers, please see the auxiliary section
-:ref:`Available debuggers`.
+:ref:`Available Debuggers`.
 
 Debugging the Generated Code
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -330,7 +333,9 @@ into it manually using ``pdb`` when the forward pass is invoked.
     import pdb; pdb.set_trace()
     m(x, y)
 
-Print the generated code
+.. _Print the Generated Code:
+
+Print the Generated Code
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 If you’d like to run the same code multiple times, then it can be
 a bit tedious to step to the right code with ``pdb``. In that case, one
@@ -352,10 +357,12 @@ your code and examine it from there.
     traced = symbolic_trace(M())
 
     # Print the code generated from symbolic tracing. This outputs:
-    #   def forward(self, y):
-    #       x = self.x
-    #       add_1 = x + y;  x = y = None
-    #       return add_1
+    """
+    def forward(self, y):
+        x = self.x
+        add_1 = x + y;  x = y = None
+        return add_1
+    """
     # Copy this code for later
     print(traced)
 
@@ -378,13 +385,11 @@ your code and examine it from there.
     post_trace = SubclassM()
 
 
-Use the ``to_folder`` function from ``GraphModule``
+Use the ``to_folder`` Function From ``GraphModule``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-```to_folder``
-<https://pytorch.org/docs/master/fx.html?highlight=to_folder#torch.fx.GraphModule.to_folder>`__
-is a method in ``GraphModule`` that allows you to dump out the generated
-FX code to a folder. Although copying the forward pass into the code
-often suffices as in :ref:`Print the generated code
+:meth:`GraphModule.to_folder` is a method in ``GraphModule`` that allows
+you to dump out the generated FX code to a folder. Although copying the
+forward pass into the code often suffices as in :ref:`Print the Generated Code
 <the above section>`, it doesn’t capture any model attribute state.
 To examine modules and parameters, we can use ``to_folder``.
 
@@ -401,11 +406,11 @@ After running the above example, we can then look at the code within
 Debugging the Transformation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-First, read the `FX
-documentation <https://pytorch.org/docs/master/fx.html>`__. Understand
-the most important classes (``Node``, ``Graph``, ``Proxy``, and
-``Tracer``), and determine which class attributes might give you the
-best representation of your program’s intermediate state.
+First, read the FX
+documentation. Understand the most important classes (:class:`Node`,
+:class:`Graph`, and :class:`Tracer`), and determine which
+class attributes might give you the best representation of your
+program’s intermediate state.
 
 There are several ways to examine what ``symbolic_tracing`` produces:
 
@@ -424,23 +429,29 @@ There are several ways to examine what ``symbolic_tracing`` produces:
 
     # Print the code produced by tracing the module. The generated `forward`
     # function is:
-    #   def forward(self, x, y):
-    #       add_1 = x + y;  x = y = None
-    #       return add_1
+    """
+    def forward(self, x, y):
+        add_1 = x + y;  x = y = None
+        return add_1
+    """
     print(traced)
 
     # Print the internal Graph. This representation returns:
-    #   graph(x, y):
-    #       %add_1 : [#users=1] = call_function[target=<built-in function add>](args = (%x, %y), kwargs = {})
-    #       return add_1
+    """
+    graph(x, y):
+        %add_1 : [#users=1] = call_function[target=<built-in function add>](args = (%x, %y), kwargs = {})
+        return add_1
+    """
     print(traced.graph)
 
     # Print a tabular representation of the internal Graph. This gives us:
-    #    opcode         name    target                   args      kwargs
-    #    -------------  ------  -----------------------  --------  --------
-    #    placeholder    x       x                        ()        {}
-    #    placeholder    y       y                        ()        {}
-    #    call_function  add_1   <built-in function add>  (x, y)    {}
+    """
+    opcode         name    target                   args      kwargs
+    -------------  ------  -----------------------  --------  --------
+    placeholder    x       x                        ()        {}
+    placeholder    y       y                        ()        {}
+    call_function  add_1   <built-in function add>  (x, y)    {}
+    """
     traced.graph.print_tabular()
 
 Using the above example, let’s say that the call to ``print(traced)``
@@ -452,15 +463,17 @@ start a ``pdb`` session. We can see what’s happening during the
 symbolic tracing by breaking on ``traced = symbolic_trace(m)``, then
 pressing ``s`` to “step into” the call to ``symbolic_trace(m)``.
 
-We may also have good luck by editing the ``print_IR`` method to print
+We may also have good luck by editing the ``print_tabular`` method to print
 different attributes of the Nodes in the Graph. (For example, we might
 want to see the Node’s ``input_nodes`` and ``users``.)
 
-Available debuggers
+.. _Available Debuggers:
+
+Available Debuggers
 ^^^^^^^^^^^^^^^^^^^^^^
 
 The most common Python debugger is
-```pdb`` <https://docs.python.org/3/library/pdb.html>`__. You can start
+`pdb <https://docs.python.org/3/library/pdb.html>`__. You can start
 your program in “debug mode” with ``pdb`` by typing
 ``python -m pdb FILENAME.py`` into the command line, where ``FILENAME``
 is the name of the file you want to debug. After that, you can use the
@@ -503,4 +516,4 @@ API Reference
 .. autoclass:: torch.fx.Tracer
   :members:
 
-.. autoclass:: torch.fx.Proxy
+.. autofunction:: torch.fx.replace_pattern
