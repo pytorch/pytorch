@@ -339,6 +339,9 @@ class TORCH_API Tensor {
   /// Returns if a `Tensor` has CUDA backend.
   bool is_cuda() const;
 
+  /// Returns if a `Tensor` has XPU backend.
+  bool is_xpu() const;
+
   /// Returns if a `Tensor` has HIP backend.
   bool is_hip() const;
 

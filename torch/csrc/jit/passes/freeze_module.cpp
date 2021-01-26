@@ -156,7 +156,7 @@ class AttributePropagator {
       Module& attrModule,
       std::shared_ptr<Graph>& graph) {
     if (!input->type()->cast<InterfaceType>() &&
-        !input->type()->expect<ClassType>()->is_module()) {
+        !input->type()->expectRef<ClassType>().is_module()) {
       return false;
     }
 
@@ -425,7 +425,7 @@ class AttributePropagator {
           if (!findConstantAttr(input, name, attrModule, graph)) {
             GRAPH_DEBUG(
                 input->type()->cast<InterfaceType>() ||
-                        input->type()->expect<ClassType>()->is_module()
+                        input->type()->expectRef<ClassType>().is_module()
                     ? "attribute: " + name + " is mutable."
                     : "");
             continue;

@@ -1,13 +1,18 @@
+import builtins
+import contextlib
+import copy
+import functools
+import math
+import numbers
+import operator
+import os
+import pickle
+import sys
 import torch
 import unittest
-import operator
-import numbers
-import pickle
-import copy
-import sys
-import functools
-import contextlib
+from math import sqrt
 from pathlib import Path
+from torch.multiprocessing import Process
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap
 from torch.fx.experimental import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
@@ -16,6 +21,7 @@ from copy import deepcopy
 from torch.fx.proxy import TraceError
 
 from fx.quantization import Quantizer
+from fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 
 from typing import Any, Callable, Dict, NamedTuple, List, Optional, Tuple, Union
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_ROCM, IS_WINDOWS, IS_SANDCASTLE, IS_MACOS
@@ -50,6 +56,23 @@ def a_lifted_leaf2(a, b):
     return a[0] + a[1] + b
 
 wrap(a_lifted_leaf2)
+
+wrap('len')
+
+@wrap
+def wrapped_via_decorator(a):
+    return a + 1
+
+
+real_wrapped_via_decorator = wrapped_via_decorator
+real_a_lifed_leaf = a_lifted_leaf
+real_a_lifed_leaf2 = a_lifted_leaf2
+_sqrt = sqrt
+
+wrap('wrapper_fn')
+
+def wrapper_fn(x):
+    return torch.foo(x)
 
 class Pair(NamedTuple):
     x : torch.Tensor
@@ -230,6 +253,7 @@ class TestFX(JitTestCase):
         m = symbolic_trace(to_trace)
         self.assertIn('a_lifted_leaf', m.code)
         self.assertEqual(27, m(2))
+        self.assertIs(a_lifted_leaf, real_a_lifed_leaf)
 
     def test_wrap_fn_directly(self):
         self.assertEqual(3 + 4 + 5, a_lifted_leaf2((3, 4), 5))
@@ -240,6 +264,19 @@ class TestFX(JitTestCase):
         m = symbolic_trace(to_trace)
         self.assertIn('a_lifted_leaf2', m.code)
         self.assertEqual(27, m(2))
+        self.assertIs(a_lifted_leaf2, real_a_lifed_leaf2)
+
+    def test_wrapped_via_decorator(self):
+        self.assertEqual(wrapped_via_decorator(0), 1)
+
+        def to_trace(y):
+            return wrapped_via_decorator(y)
+
+        m = symbolic_trace(to_trace)
+        self.assertIn('wrapped_via_decorator', m.code)
+        self.assertEqual(m(0), 1)
+        self.assertIs(wrapped_via_decorator, real_wrapped_via_decorator)
+        self.assertFalse(hasattr(wrapped_via_decorator, "__fx_already_patched"))
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
@@ -706,21 +743,53 @@ class TestFX(JitTestCase):
         traced = torch.fx.symbolic_trace(IHaveATensorConstant())
         torch.jit.script(traced)
 
-    def test_len(self):
-        class LenTest(torch.nn.Module):
-            def forward(self, x):
-                return len(x)
-
-        lt = LenTest()
-        with self.assertRaisesRegex(RuntimeError, "'len' is not supported. Replace it with 'torch.fx.len'."):
-            symbolic_trace(lt)
-
     def test_torch_fx_len(self):
         class FXLenTest(torch.nn.Module):
             def forward(self, x):
-                return torch.fx.len(x)
+                return len(x)
 
         traced = symbolic_trace(FXLenTest())
+        self.assertEqual(traced(torch.rand(3, 4)), 3)
+
+        # Test scriptability
+        scripted = torch.jit.script(FXLenTest())
+        self.assertEqual(scripted(torch.rand(3)), 3)
+
+        traced_scripted = torch.jit.script(traced)
+        self.assertEqual(traced_scripted(torch.rand(3)), 3)
+
+        # Test non-proxy len
+        class FXLenTest2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = [3, 4, 5]
+
+            def forward(self, x):
+                return x + len(self.l)
+
+        traced2 = symbolic_trace(FXLenTest2())
+        inp = torch.rand(3, 4)
+        self.assertEqual(traced2(inp), inp + 3.0)
+        self.assertIs(len, builtins.len)
+
+    def test_sqrt(self):
+        class Sqrt1(torch.nn.Module):
+            def forward(self, x):
+                return sqrt(x.size(0))
+
+        class Sqrt2(torch.nn.Module):
+            def forward(self, x):
+                return math.sqrt(x.size(0))
+
+        class Sqrt3(torch.nn.Module):
+            def forward(self, x):
+                return x + math.sqrt(2) + sqrt(2)
+
+        self.checkGraphModule(Sqrt1(), [torch.zeros(8)])
+        self.checkGraphModule(Sqrt2(), [torch.zeros(8)])
+        self.checkGraphModule(Sqrt3(), [torch.zeros(8)])
+        self.assertIs(sqrt, _sqrt)
+        self.assertIs(math.sqrt, _sqrt)
 
     def test_torch_custom_ops(self):
         class M(torch.nn.Module):
@@ -741,7 +810,7 @@ class TestFX(JitTestCase):
         traced = symbolic_trace(st)
         traced.graph.lint(traced)
         printed = str(traced)
-        assert 'GraphModuleImpl()' in printed
+        assert 'SimpleTest()' in printed
         assert 'torch.relu' in printed
 
     def test_pretty_print_graph(self):
@@ -785,6 +854,9 @@ class TestFX(JitTestCase):
 
         self.assertTrue(neg not in relu.users)
 
+    def test_nonetype_annotation(self):
+        eb = torch.nn.EmbeddingBag(3, 4)
+        symbolic_trace(eb)
 
     def test_construct_root_dict(self):
         graph : torch.fx.Graph = torch.fx.Graph()
@@ -826,6 +898,16 @@ class TestFX(JitTestCase):
         with self.assertRaisesRegex(torch.jit.Error, "assert_foobar"):
             ms(torch.rand(4, 3))
 
+    def test_trace_fn_constant(self):
+        some_constant = torch.rand(3, 4)
+
+        def add_const(x):
+            return some_constant + x
+
+        traced = symbolic_trace(add_const)
+
+        input = torch.rand(3, 4)
+        self.assertEqual(traced(input), add_const(input))
 
     def test_copy_no_remap(self):
         traced = symbolic_trace(SimpleTest())
@@ -1374,6 +1456,110 @@ class TestFX(JitTestCase):
         self.assertIn("-> typing.List[str]", traced._code)
         scripted = torch.jit.script(traced)
         self.assertIn("-> List[str]", scripted.code)
+
+    def getitem_inner(self):
+        class GetItemBase(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer('pe', torch.randn(8, 8))
+
+        class GetItem1(GetItemBase):
+            def forward(self, x):
+                return self.pe[:, :x.size(0)]
+
+        class GetItem2(GetItemBase):
+            def forward(self, x):
+                return self.pe[x.size(0)]
+
+        class GetItem3(GetItemBase):
+            def forward(self, x):
+                return self.pe[4]  # fx creates `self._tensor_constant0` here
+
+        self.checkGraphModule(GetItem1(), [torch.zeros(4)])
+        self.checkGraphModule(GetItem2(), [torch.zeros(4)])
+        self.checkGraphModule(GetItem3(), [torch.zeros(4)])
+
+    @unittest.skipUnless(os.environ.get("FX_PATCH_GETITEM") == "1",
+                         "Will be checked in test_getitem_subproc")
+    def test_getitem(self):
+        self.getitem_inner()
+
+    def test_getitem_subproc(self):
+        # need to run this test in a subproc to work around:
+        #   https://github.com/pytorch/pytorch/issues/50710
+        proc = Process(target=run_getitem_target)
+        proc.start()
+        proc.join()
+        self.assertEqual(proc.exitcode, 0)
+
+
+    def test_user_friendly_call_provenance_with_function(self):
+        def fn(x):
+            return wrapper_fn(x)
+
+        traced = torch.fx.symbolic_trace(fn)
+
+        with self.assertRaisesRegex(RuntimeError, "'wrapper_fn' is "
+                                    "being compiled since it was called"
+                                    " from 'fn.forward'"):
+            scripted = torch.jit.script(traced)
+
+    def test_user_friendly_call_provenance_with_module(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return wrapper_fn(x)
+
+        traced = torch.fx.symbolic_trace(M())
+
+        with self.assertRaisesRegex(RuntimeError, "'wrapper_fn' is "
+                                    "being compiled since it was called"
+                                    " from 'M.forward'"):
+            scripted = torch.jit.script(traced)
+
+    def test_snake_case(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.activations = torch.nn.ModuleDict([
+                    ["snake_case", torch.nn.ReLU()],
+                    ["PascalCase", torch.nn.LeakyReLU()],
+                    ["ALL_CAPS", torch.nn.PReLU()]
+                ])
+
+            def forward(self, x):
+                a = self.activations["snake_case"](x)
+                b = self.activations["PascalCase"](x)
+                c = self.activations["ALL_CAPS"](x)
+                return a, b, c
+
+        traced = symbolic_trace(M())
+
+        check = [
+            ("activations_snake_case", "activations.snake_case"),
+            ("activations_pascal_case", "activations.PascalCase"),
+            ("activations_all_caps", "activations.ALL_CAPS")
+        ]
+
+        i = 0
+        for node in traced.graph.nodes:
+            if node.op == "placeholder" or node.op == "output":
+                continue
+            name = check[i][0]
+            target = check[i][1]
+            self.assertEqual(name, node.name)
+            self.assertEqual(target, node.target)
+            i += 1
+        self.assertEqual(i, 3)
+
+
+def run_getitem_target():
+    from torch.fx.symbolic_trace import _wrapped_methods_to_patch
+    _wrapped_methods_to_patch.append((torch.Tensor, "__getitem__"))
+    try:
+        TestFX().getitem_inner()
+    finally:
+        _wrapped_methods_to_patch.pop()
+
 
 if __name__ == '__main__':
     run_tests()
