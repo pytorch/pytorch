@@ -1,6 +1,9 @@
 #include <pybind11/operators.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
+#ifdef USE_CUDA
+#include <torch/csrc/jit/tensorexpr/cuda_codegen.h>
+#endif
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
@@ -25,9 +28,194 @@ void initTensorExprBindings(PyObject* module) {
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, DTYPE_SINGLETON_ACCESSOR)
 #undef DTYPE_SINGLETON_ACCESSOR
 
-  auto expr_handle_class = py::class_<tensorexpr::ExprHandle>(te, "ExprHandle")
-                               .def(py::self + py::self)
-                               .def(py::self * py::self);
+  auto expr_handle_class =
+      py::class_<tensorexpr::ExprHandle>(te, "ExprHandle")
+          .def(py::self + py::self)
+          .def(py::self * py::self)
+          .def(py::self - py::self)
+          .def(py::self / py::self)
+          .def(py::self % py::self)
+          .def(py::self == py::self)
+          .def(py::self != py::self)
+          .def(py::self > py::self)
+          .def(py::self >= py::self)
+          .def(py::self < py::self)
+          .def(py::self <= py::self)
+          .def(py::self & py::self)
+          .def(py::self | py::self)
+          .def(py::self ^ py::self)
+          .def(py::self << py::self)
+          .def(py::self >> py::self)
+          .def(
+              "sin",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::sin(self);
+              })
+          .def(
+              "cos",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::cos(self);
+              })
+          .def(
+              "tan",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::tan(self);
+              })
+          .def(
+              "asin",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::asin(self);
+              })
+          .def(
+              "acos",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::acos(self);
+              })
+          .def(
+              "atan",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::atan(self);
+              })
+          .def(
+              "sinh",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::sinh(self);
+              })
+          .def(
+              "cosh",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::cosh(self);
+              })
+          .def(
+              "tanh",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::tanh(self);
+              })
+          .def(
+              "sigmoid",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::sigmoid(self);
+              })
+          .def(
+              "exp",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::exp(self);
+              })
+          .def(
+              "expm1",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::expm1(self);
+              })
+          .def(
+              "abs",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::abs(self);
+              })
+          .def(
+              "log",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::log(self);
+              })
+          .def(
+              "fast_log",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::fast_log(self);
+              })
+          .def(
+              "log2",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::log2(self);
+              })
+          .def(
+              "log10",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::log10(self);
+              })
+          .def(
+              "log1p",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::log1p(self);
+              })
+          .def(
+              "erf",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::erf(self);
+              })
+          .def(
+              "erfc",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::erfc(self);
+              })
+          .def(
+              "sqrt",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::sqrt(self);
+              })
+          .def(
+              "rsqrt",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::rsqrt(self);
+              })
+          .def(
+              "ceil",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::ceil(self);
+              })
+          .def(
+              "floor",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::floor(self);
+              })
+          .def(
+              "round",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::round(self);
+              })
+          .def(
+              "trunc",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::trunc(self);
+              })
+          .def(
+              "frac",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::frac(self);
+              })
+          .def(
+              "lgamma",
+              [](const tensorexpr::ExprHandle& self) {
+                return tensorexpr::lgamma(self);
+              })
+          .def("isnan", [](const tensorexpr::ExprHandle& self) {
+            return tensorexpr::isnan(self);
+          });
+  te.def(
+      "ifThenElse",
+      [](const tensorexpr::ExprHandle& c,
+         const tensorexpr::ExprHandle& t,
+         const tensorexpr::ExprHandle& f) {
+        return tensorexpr::ifThenElse(c, t, f);
+      });
+  te.def(
+      "atan2",
+      [](const tensorexpr::ExprHandle& v1, const tensorexpr::ExprHandle& v2) {
+        return tensorexpr::atan2(v1, v2);
+      });
+  te.def(
+      "pow",
+      [](const tensorexpr::ExprHandle& v1, const tensorexpr::ExprHandle& v2) {
+        return tensorexpr::pow(v1, v2);
+      });
+  te.def(
+      "fmod",
+      [](const tensorexpr::ExprHandle& v1, const tensorexpr::ExprHandle& v2) {
+        return tensorexpr::fmod(v1, v2);
+      });
+  te.def(
+      "remainder",
+      [](const tensorexpr::ExprHandle& v1, const tensorexpr::ExprHandle& v2) {
+        return tensorexpr::remainder(v1, v2);
+      });
 
 #define EXPRHANDLE_CTOR(ctype, name) \
   expr_handle_class.def_static(      \
@@ -56,9 +244,13 @@ void initTensorExprBindings(PyObject* module) {
              const std::vector<tensorexpr::ExprHandle>& v) {
             return self.call(v);
           });
+  py::class_<tensorexpr::Cast>(te, "Cast")
+      .def_static("make", &tensorexpr::Cast::make);
+
   py::class_<tensorexpr::DimArg>(te, "DimArg")
       .def(py::init<const tensorexpr::ExprHandle&>())
       .def(py::init<const tensorexpr::ExprHandle&, const std::string&>());
+
   te.def(
       "Compute",
       [](const std::string& func_name,
@@ -222,8 +414,29 @@ void initTensorExprBindings(PyObject* module) {
           },
           py::return_value_policy::reference)
       .def(
+          "flatten",
+          [](const tensorexpr::LoopNest& self,
+             const std::vector<tensorexpr::For*>& loops) {
+            tensorexpr::For* flattened;
+            self.flatten(loops, &flattened);
+            return flattened;
+          },
+          py::return_value_policy::reference)
+      .def(
           "reorder",
           &tensorexpr::LoopNest::reorderAxis,
+          py::return_value_policy::reference)
+      .def(
+          "simplify",
+          &tensorexpr::LoopNest::simplify,
+          py::return_value_policy::reference)
+      .def(
+          "set_GPU_block_index",
+          &tensorexpr::LoopNest::setGPUBlockIndex,
+          py::return_value_policy::reference)
+      .def(
+          "set_GPU_thread_index",
+          &tensorexpr::LoopNest::setGPUThreadIndex,
           py::return_value_policy::reference)
       .def(
           "__str__",
@@ -276,7 +489,13 @@ void initTensorExprBindings(PyObject* module) {
 #ifdef TORCH_ENABLE_LLVM
           cg = new tensorexpr::LLVMCodeGen(stmt, args);
 #else
-          cg = new tensorexpr::SimpleIREvaluator(stmt, args);
+          throw std::runtime_error("PyTorch not compiled with LLVM support!");
+#endif
+        } else if (name == "cuda") {
+#ifdef USE_CUDA
+          cg = new tensorexpr::CudaCodeGen(stmt, args);
+#else
+          throw std::runtime_error("PyTorch not compiled with CUDA support!");
 #endif
         } else {
           cg = new tensorexpr::SimpleIREvaluator(stmt, args);
