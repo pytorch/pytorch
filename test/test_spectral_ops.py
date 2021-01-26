@@ -6,10 +6,11 @@ from itertools import product
 import itertools
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA)
+    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, TEST_MKL)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, onlyOnCPUAndCUDA,
-     skipCPUIfNoMkl, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA, OpDTypes)
+     skipCPUIfNoMkl, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA, OpDTypes,
+     skipIf)
 from torch.testing._internal.common_methods_invocations import spectral_funcs
 
 from distutils.version import LooseVersion
@@ -1196,6 +1197,29 @@ class TestFFT(TestCase):
 
         self.assertEqual(i_original.repeat(1, 1), i_single, atol=1e-6, rtol=0, exact_dtype=True)
         self.assertEqual(i_original.repeat(4, 1), i_multi, atol=1e-6, rtol=0, exact_dtype=True)
+
+    @onlyCUDA
+    @skipIf(not TEST_MKL, "Test requires MKL")
+    @skipCUDAIfRocm
+    def test_stft_window_device(self, device):
+        # Test the (i)stft window must be on the same device as the input
+        x = torch.randn(1000, dtype=torch.complex64)
+        window = torch.randn(100, dtype=torch.complex64)
+
+        with self.assertRaisesRegex(RuntimeError, "stft input and window must be on the same device"):
+            torch.stft(x, n_fft=100, window=window.to(device))
+
+        with self.assertRaisesRegex(RuntimeError, "stft input and window must be on the same device"):
+            torch.stft(x.to(device), n_fft=100, window=window)
+
+        X = torch.stft(x, n_fft=100, window=window)
+
+        with self.assertRaisesRegex(RuntimeError, "istft input and window must be on the same device"):
+            torch.istft(X, n_fft=100, window=window.to(device))
+
+        with self.assertRaisesRegex(RuntimeError, "istft input and window must be on the same device"):
+            torch.istft(x.to(device), n_fft=100, window=window)
+
 
 instantiate_device_type_tests(TestFFT, globals())
 

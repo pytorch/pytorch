@@ -622,6 +622,10 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
     write_opt(SS, onesidedOpt) << ", return_complex="; \
     write_opt(SS, return_complexOpt) << ") "
 
+  TORCH_CHECK(!window.defined() || window.device() == self.device(),
+              "stft input and window must be on the same device but got self on ",
+              self.device(), " and window on ", window.device())
+
   // default_init hop_length and win_length
   auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
   auto win_length = win_lengthOpt.value_or(n_fft);
@@ -768,6 +772,10 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
     SS << ", center=" << center << ", normalized=" << normalized << ", onesided="; \
     write_opt(SS, onesidedOpt) << ", length="; \
     write_opt(SS, lengthOpt) << ", return_complex=" << return_complex << ") "
+
+  TORCH_CHECK(!window.defined() || window.device() == self.device(),
+              "istft input and window must be on the same device but got self on ",
+              self.device(), " and window on ", window.device())
 
   // default_init hop_length and win_length
   const auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
