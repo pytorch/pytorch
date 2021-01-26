@@ -5,7 +5,6 @@ import warnings
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
-import torch.nn.quantizable as nnqa
 from torch.nn.intrinsic import _FusedModule
 
 from .quantization_mappings import (

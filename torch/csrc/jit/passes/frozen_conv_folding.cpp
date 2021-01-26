@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <ATen/Utils.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -7,8 +7,8 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
+#include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
-#include <c10/core/ScalarType.h>
 
 namespace torch {
 namespace jit {
@@ -166,7 +166,7 @@ bool checkConvAndBroadcastingOpPreConditions(Node* conv, Node* op) {
 
   // avoid fusing op that causes type promotion
   // resticting to float avoids int/float difficulties with scalar overload
-  if (!weight_tensor.is_floating_point())  {
+  if (!weight_tensor.is_floating_point()) {
     return false;
   }
 
@@ -178,7 +178,9 @@ bool checkConvAndBroadcastingOpPreConditions(Node* conv, Node* op) {
     if (!op_tensor.is_floating_point()) {
       return false;
     }
-    if (c10::promoteTypes(op_tensor.scalar_type(), weight_tensor.scalar_type()) != weight_tensor.scalar_type()) {
+    if (c10::promoteTypes(
+            op_tensor.scalar_type(), weight_tensor.scalar_type()) !=
+        weight_tensor.scalar_type()) {
       return false;
     }
   }
