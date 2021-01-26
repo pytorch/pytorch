@@ -127,7 +127,7 @@ class PowerSGDState(object):
 
         if self.iter == self.start_powerSGD_iter:
             logging.info(
-                "Starting to apply PowerSGD after {} iterations.".format(self.iter)
+                "Start to apply PowerSGD after {} iterations.".format(self.iter)
             )
 
 
