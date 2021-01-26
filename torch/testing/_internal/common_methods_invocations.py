@@ -1148,7 +1148,7 @@ op_db: List[OpInfo] = [
                     check_batched_gradgrad=False,
                     supports_tensor_out=True,
                     sample_inputs_func=sample_inputs_linalg_cholesky,
-                    decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+                    decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
                     skips=(
                         # These tests do not take into account custom op.get_op()
                         SkipInfo('TestCommon', 'test_variant_consistency_jit'),
@@ -1335,7 +1335,7 @@ op_db: List[OpInfo] = [
                     check_batched_gradgrad=False,
                     supports_tensor_out=True,
                     sample_inputs_func=sample_inputs_linalg_cholesky,
-                    decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+                    decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
                     skips=(
                         # These tests do not take into account custom op.get_op()
                         SkipInfo('TestCommon', 'test_variant_consistency_jit'),
@@ -1353,7 +1353,7 @@ op_db: List[OpInfo] = [
                     supports_tensor_out=False,
                     sample_inputs_func=sample_inputs_linalg_eigh,
                     output_func=lambda out: (out[0], abs(out[1])),  # gauge invariant loss function
-                    decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+                    decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
                     skips=(
                         # These tests do not take into account custom op.get_op()
                         SkipInfo('TestCommon', 'test_variant_consistency_jit'),
@@ -1366,7 +1366,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            test_inplace_grad=False,
            supports_tensor_out=True,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            sample_inputs_func=sample_inputs_linalg_norm,
            aten_name='linalg_norm',
            skips=(
@@ -1385,7 +1385,7 @@ op_db: List[OpInfo] = [
            # TODO: TypeError: empty_like(): argument 'input' (position 1) must be Tensor, not torch.return_types.linalg_qr
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_linalg_qr,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
@@ -1398,7 +1398,7 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_linalg_inv,
            output_func=itemgetter(1),
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                # These tests do not work with output_func=itemgetter(1)
                # TODO: remove this once https://github.com/pytorch/pytorch/issues/49326 is resolved
@@ -1477,7 +1477,7 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_linalg_qr,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
@@ -1543,7 +1543,7 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_legacy_solve,
            check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            # cuda gradchecks are slow
            # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
            skips=(SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
@@ -1687,7 +1687,7 @@ op_db: List[OpInfo] = [
            supports_tensor_out=True,
            sample_inputs_func=sample_inputs_linalg_solve,
            check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
     OpInfo('linalg.pinv',
            aten_name='linalg_pinv',
@@ -1713,7 +1713,7 @@ op_db: List[OpInfo] = [
                     check_batched_gradgrad=False,
                     supports_tensor_out=True,
                     sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
-                    decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+                    decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
                     skips=(
                         # These tests do not take into account custom op.get_op()
                         SkipInfo('TestCommon', 'test_variant_consistency_jit'),
