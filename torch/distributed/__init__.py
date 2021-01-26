@@ -34,6 +34,8 @@ if is_available():
         _broadcast_coalesced,
         _compute_bucket_assignment_by_size,
         _test_python_store,
+        _set_construction_logging_data,
+        _get_ddp_logging_data
     )
     if sys.platform != 'win32':
         from torch._C._distributed_c10d import (
