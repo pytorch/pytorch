@@ -7084,8 +7084,6 @@ class TestAutogradDeviceType(TestCase):
             self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
     def _test_rnn_mod(self, mod, inp):
-        from functools import partial
-
         def flatten_out(mod, inp):
             out = mod(inp)
             return tuple([t if isinstance(t, torch.Tensor) else tt for t in out for tt in t])
