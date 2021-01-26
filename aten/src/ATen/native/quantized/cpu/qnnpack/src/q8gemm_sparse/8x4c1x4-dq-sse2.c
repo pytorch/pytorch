@@ -13,27 +13,6 @@
 
 #define MR 8
 #define COL_BLOCK_SIZE 4
-#define PACKED_A_BLOCK_SIZE COL_BLOCK_SIZE*MR
-
-#define LOAD_TRANSPOSED_A_BLOCK(id, index, col_block_id)                  \
-  const __m128i va##id = _mm_set_epi8(                                    \
-                         0,                                               \
-                         0,                                               \
-                         0,                                               \
-                         0,                                               \
-                         0,                                               \
-                         0,                                               \
-                         0,                                               \
-                         0,                                               \
-                         *(a7 + col_block_id * COL_BLOCK_SIZE + index),   \
-                         *(a6 + col_block_id * COL_BLOCK_SIZE + index),   \
-                         *(a5 + col_block_id * COL_BLOCK_SIZE + index),   \
-                         *(a4 + col_block_id * COL_BLOCK_SIZE + index),   \
-                         *(a3 + col_block_id * COL_BLOCK_SIZE + index),   \
-                         *(a2 + col_block_id * COL_BLOCK_SIZE + index),   \
-                         *(a1 + col_block_id * COL_BLOCK_SIZE + index),   \
-                         *(a0 + col_block_id * COL_BLOCK_SIZE + index)    \
-                         );
 
 #define CONVERT_TO_FP_AND_TRANSPOSE(a, b, c, d, t_a, t_b, t_c, t_d)  \
   a_ps = _mm_cvtepi32_ps(a);                                         \
@@ -48,6 +27,37 @@
   t_b = _mm_shuffle_ps(tmp0, tmp2, _MM_SHUFFLE(3, 1, 3, 1));         \
   t_c = _mm_shuffle_ps(tmp1, tmp3, _MM_SHUFFLE(2, 0, 2, 0));         \
   t_d = _mm_shuffle_ps(tmp1, tmp3, _MM_SHUFFLE(3, 1, 3, 1));
+
+PYTORCH_QNNP_INLINE __m128i load_transposed_a_block(
+    const uint8_t* a0,
+    const uint8_t* a1,
+    const uint8_t* a2,
+    const uint8_t* a3,
+    const uint8_t* a4,
+    const uint8_t* a5,
+    const uint8_t* a6,
+    const uint8_t* a7,
+    const uint32_t index,
+    const uint32_t col_block_id) {
+  return _mm_set_epi8(
+                   0,
+                   0,
+                   0,
+                   0,
+                   0,
+                   0,
+                   0,
+                   0,
+                   *(a7 + col_block_id * COL_BLOCK_SIZE + index),
+                   *(a6 + col_block_id * COL_BLOCK_SIZE + index),
+                   *(a5 + col_block_id * COL_BLOCK_SIZE + index),
+                   *(a4 + col_block_id * COL_BLOCK_SIZE + index),
+                   *(a3 + col_block_id * COL_BLOCK_SIZE + index),
+                   *(a2 + col_block_id * COL_BLOCK_SIZE + index),
+                   *(a1 + col_block_id * COL_BLOCK_SIZE + index),
+                   *(a0 + col_block_id * COL_BLOCK_SIZE + index)
+                   );
+}
 
 void pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4__sse2(
     size_t mr,
@@ -150,7 +160,7 @@ void pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4__sse2(
       // 2. Load 4 1x8 registers.
       // Thus have 8x8 (8k x 8m) activations a0, a1, a2, a3, a4, a5, a6, a7
       // Each containing 8 m values.
-      // Macro LOAD_TRANSPOSED_A_BLOCK loads 1x8 block of transposed
+      // Macro load_transposed_a_block loads 1x8 block of transposed
       // activations by loading 1 column of values in 1x8 register
 
       // Load column id of the first 1x4 block
@@ -162,14 +172,22 @@ void pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4__sse2(
       // one valid value exist.
       // In that case for the corresponding block from a we may not have
       // out of bound access. We may access max of 3 bytes out of bound
-      LOAD_TRANSPOSED_A_BLOCK(0, 0, col_block_id_0)
-      LOAD_TRANSPOSED_A_BLOCK(1, 1, col_block_id_0)
-      LOAD_TRANSPOSED_A_BLOCK(2, 2, col_block_id_0)
-      LOAD_TRANSPOSED_A_BLOCK(3, 3, col_block_id_0)
-      LOAD_TRANSPOSED_A_BLOCK(4, 0, col_block_id_1)
-      LOAD_TRANSPOSED_A_BLOCK(5, 1, col_block_id_1)
-      LOAD_TRANSPOSED_A_BLOCK(6, 2, col_block_id_1)
-      LOAD_TRANSPOSED_A_BLOCK(7, 3, col_block_id_1)
+      const __m128i va0 = load_transposed_a_block(
+          a0, a1, a2, a3, a4, a5, a6, a7, 0, col_block_id_0);
+      const __m128i va1 = load_transposed_a_block(
+          a0, a1, a2, a3, a4, a5, a6, a7, 1, col_block_id_0);
+      const __m128i va2 = load_transposed_a_block(
+          a0, a1, a2, a3, a4, a5, a6, a7, 2, col_block_id_0);
+      const __m128i va3 = load_transposed_a_block(
+          a0, a1, a2, a3, a4, a5, a6, a7, 3, col_block_id_0);
+      const __m128i va4 = load_transposed_a_block(
+          a0, a1, a2, a3, a4, a5, a6, a7, 0, col_block_id_1);
+      const __m128i va5 = load_transposed_a_block(
+          a0, a1, a2, a3, a4, a5, a6, a7, 1, col_block_id_1);
+      const __m128i va6 = load_transposed_a_block(
+          a0, a1, a2, a3, a4, a5, a6, a7, 2, col_block_id_1);
+      const __m128i va7 = load_transposed_a_block(
+          a0, a1, a2, a3, a4, a5, a6, a7, 3, col_block_id_1);
       // 1.
       const __m128i vxa0 =
           sub_zero_point(_mm_unpacklo_epi8(va0, vzero), va_zero_point);
@@ -272,10 +290,10 @@ void pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4__sse2(
 
       // Load column id of the first 1x4 block
       int32_t col_block_id_0 = temp_w_block_ids_ptr[0];
-      LOAD_TRANSPOSED_A_BLOCK(0, 0, col_block_id_0)
-      LOAD_TRANSPOSED_A_BLOCK(1, 1, col_block_id_0)
-      LOAD_TRANSPOSED_A_BLOCK(2, 2, col_block_id_0)
-      LOAD_TRANSPOSED_A_BLOCK(3, 3, col_block_id_0)
+      const __m128i va0 = load_transposed_a_block(a0, a1, a2, a3, a4, a5, a6, a7, 0, col_block_id_0);
+      const __m128i va1 = load_transposed_a_block(a0, a1, a2, a3, a4, a5, a6, a7, 1, col_block_id_0);
+      const __m128i va2 = load_transposed_a_block(a0, a1, a2, a3, a4, a5, a6, a7, 2, col_block_id_0);
+      const __m128i va3 = load_transposed_a_block(a0, a1, a2, a3, a4, a5, a6, a7, 3, col_block_id_0);
       const __m128i vxa0 =
           sub_zero_point(_mm_unpacklo_epi8(va0, vzero), va_zero_point);
       const __m128i vxa1 =
