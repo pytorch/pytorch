@@ -71,9 +71,10 @@ TEST(CustomOperatorTest, ExplicitSchema) {
 TEST(CustomOperatorTest, ListParameters) {
   // Check that lists work well.
   torch::RegisterOperators reg(
-      "foo::lists(int[] ints, float[] floats, Tensor[] tensors) -> float[]",
+      "foo::lists(int[] ints, float[] floats, complex[] doubles, Tensor[] tensors) -> float[]",
       [](torch::List<int64_t> ints,
          torch::List<double> floats,
+         torch::List<c10::complex<double>> doubles,
          torch::List<at::Tensor> tensors) { return floats; });
 
   auto& ops = getAllOperatorsFor(Symbol::fromQualString("foo::lists"));
@@ -82,16 +83,19 @@ TEST(CustomOperatorTest, ListParameters) {
   auto& op = ops.front();
   ASSERT_EQ(op->schema().name(), "foo::lists");
 
-  ASSERT_EQ(op->schema().arguments().size(), 3);
+  ASSERT_EQ(op->schema().arguments().size(), 4);
   ASSERT_EQ(op->schema().arguments()[0].name(), "ints");
   ASSERT_TRUE(
       op->schema().arguments()[0].type()->isSubtypeOf(ListType::ofInts()));
   ASSERT_EQ(op->schema().arguments()[1].name(), "floats");
   ASSERT_TRUE(
       op->schema().arguments()[1].type()->isSubtypeOf(ListType::ofFloats()));
-  ASSERT_EQ(op->schema().arguments()[2].name(), "tensors");
+  ASSERT_EQ(op->schema().arguments()[2].name(), "doubles");
   ASSERT_TRUE(
-      op->schema().arguments()[2].type()->isSubtypeOf(ListType::ofTensors()));
+      op->schema().arguments()[2].type()->isSubtypeOf(ListType::ofComplexDoubles()));
+  ASSERT_EQ(op->schema().arguments()[3].name(), "tensors");
+  ASSERT_TRUE(
+      op->schema().arguments()[3].type()->isSubtypeOf(ListType::ofTensors()));
 
   ASSERT_EQ(op->schema().returns().size(), 1);
   ASSERT_TRUE(
@@ -100,6 +104,7 @@ TEST(CustomOperatorTest, ListParameters) {
   Stack stack;
   push(stack, c10::List<int64_t>({1, 2}));
   push(stack, c10::List<double>({1.0, 2.0}));
+  push(stack, c10::List<c10::complex<double>>({c10::complex<double>(2.4, -5.5), c10::complex<double>(-1.3, 2)}));
   push(stack, c10::List<at::Tensor>({at::ones(5)}));
   op->getOperation()(&stack);
   c10::List<double> output;

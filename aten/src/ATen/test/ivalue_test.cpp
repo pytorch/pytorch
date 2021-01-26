@@ -49,6 +49,26 @@ TEST(IValueTest, Basic) {
   ASSERT_TRUE(ten2.toTensor().equal(ten.toTensor()));
   std::move(ten2).toTensor();
   ASSERT_EQ(tv.use_count(), 2);
+
+  c10::List<c10::complex<double>> foo1({(3, 4), (3, -4), (5, 0)});
+  ASSERT_EQ(foo1.use_count(), 1);
+  IValue bar1{foo1};
+  ASSERT_EQ(foo1.use_count(), 2);
+  auto baz1 = bar1;
+  ASSERT_EQ(foo1.use_count(), 3);
+  auto foo12 = std::move(bar1);
+  ASSERT_EQ(foo1.use_count(), 3);
+  ASSERT_TRUE(foo12.isComplexDoubleList());
+  ASSERT_TRUE(bar1.isNone());
+  foo12 = IValue(c10::complex<double>(3, 4));
+  ASSERT_TRUE(foo12.isComplexDouble());
+  ASSERT_EQ(foo12.toComplexDouble(), c10::complex<double>(3,4));
+  ASSERT_EQ(foo1.use_count(), 2);
+  ASSERT_TRUE(baz1.toComplexDoubleVector() == std::vector<c10::complex<double>>({(3, 4), (3, -4), (5, 0)}));
+  IValue the_complex_list(
+      at::ivalue::Tuple::create({IValue(c10::complex<double>(3.4, 4.7)), IValue(c10::complex<double>(0, 2.3)), bar1}));
+  ASSERT_EQ(foo.use_count(), 3);
+  ASSERT_TRUE(the_complex_list.isTuple());
 }
 
 static std::array<IValue, 5> makeSampleIValues() {
