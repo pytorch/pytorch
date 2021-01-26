@@ -819,7 +819,7 @@ class TestCase(expecttest.TestCase):
 
     # checker to early terminate test suite if unrecoverable failure occurs.
     def _should_stop_test_suite(self):
-        if torch.cuda.is_available():
+        if torch.cuda.is_initialized():
             # CUDA device side error will cause subsequence test cases to fail.
             # stop entire test suite if catches RuntimeError during torch.cuda.synchronize().
             try:
