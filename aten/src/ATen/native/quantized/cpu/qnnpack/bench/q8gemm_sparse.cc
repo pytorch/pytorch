@@ -15,13 +15,13 @@
 #include <random>
 #include <vector>
 
+#include <pack_block_sparse.h>
 #include <qnnpack/AlignedAllocator.h>
 #include <qnnpack/pack.h>
 #include <qnnpack/params.h>
 #include <qnnpack/q8gemm.h>
 #include <qnnpack/q8gemm_sparse.h>
 #include <qnnpack/requantization.h>
-#include <qnnpack/pack_block_sparse.h>
 
 #include <benchmark/benchmark.h>
 
@@ -604,7 +604,7 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 8x8__aarch64_neon, 8, 8, 8, 1)
 BENCHMARK_REGISTER_F(Q8GEMM_Op, 8x8__aarch64_neon)
     ->Apply(SparseGEMMBenchGemmArguments);
 
-BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 8x8c1x4_prepacked__aarch64_neon, 8, 8, 4)
+BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 8x8c1x4_prepacked__aarch64_neon, 8, 8, 4, 1, 4)
 (benchmark::State& state) {
   for (auto _ : state) {
     auto m_blocks = (mc() + mr()  - 1) / mr();

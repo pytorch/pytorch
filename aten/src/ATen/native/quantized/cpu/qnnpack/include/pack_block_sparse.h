@@ -10,13 +10,16 @@
 #include <cstdint>
 #include <memory>
 #include <vector>
+#include <cassert>
 
+#include <qnnpack/AlignedAllocator.h>
+#include <qnnpack/common.h>
 #include <qnnpack/math.h>
 
 typedef struct {
-  std::vector<uint32_t, AlignedAllocator<uint32_t, 8>> col_indices;
-  std::vector<uint32_t, AlignedAllocator<uint32_t, 8>> row_values;
-  std::vector<uint8_t, AlignedAllocator<uint8_t, 32>> values;
+  std::vector<uint32_t, AlignedAllocator<uint32_t, 16>> col_indices;
+  std::vector<uint32_t, AlignedAllocator<uint32_t, 16>> row_values;
+  std::vector<uint8_t, AlignedAllocator<uint8_t, 16>> values;
   uint32_t col_block_size;
   uint32_t row_block_size;
   void print() {
