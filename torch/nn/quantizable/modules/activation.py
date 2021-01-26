@@ -162,15 +162,17 @@ class MultiheadAttention(nn.MultiheadAttention):
             fp.bias_v = nn.Parameter(self.bias_v.dequantize())
 
         # Set the linear weights
-        w, b = self.out_proj._weight_bias()
+        # Note: Because the linear layers are quantized, mypy does not nkow how
+        # to deal with them -- might need to ignore the typing checks.
+        w, b = self.out_proj._weight_bias()  # type: ignore
         fp.out_proj.weight = nn.Parameter(w.dequantize())
         fp.out_proj.bias = nn.Parameter(b)
 
-        wQ, bQ = self.linear_Q._weight_bias()
+        wQ, bQ = self.linear_Q._weight_bias()  # type: ignore
         wQ = wQ.dequantize()
-        wK, bK = self.linear_K._weight_bias()
+        wK, bK = self.linear_K._weight_bias()  # type: ignore
         wK = wK.dequantize()
-        wV, bV = self.linear_V._weight_bias()
+        wV, bV = self.linear_V._weight_bias()  # type: ignore
         wV = wV.dequantize()
         if fp._qkv_same_embed_dim:
             # Use separate params
