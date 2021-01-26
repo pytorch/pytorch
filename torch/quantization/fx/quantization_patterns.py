@@ -272,7 +272,8 @@ class ConvRelu(QuantizeHandler):
                     root_module = quantizer.modules['']
                     act_post_process_name = self.relu_node.name if self.relu_node else self.conv_node.name
                     return quantize_node(
-                        root_module, quantizer.quantized_graph, op_out, quantizer.activation_post_process_map[act_post_process_name])
+                        root_module, quantizer.quantized_graph, op_out,
+                        quantizer.activation_post_process_map[act_post_process_name])
                 else:
                     # output for dynamically quantized conv op is not quantized
                     return op_out
