@@ -5,18 +5,12 @@ from torch.testing._internal.jit_utils import JitTestCase
 
 devices = (torch.device('cpu'), torch.device('cuda:0'))
 
-class TestComplexJIT(JitTestCase):
+class TestComplex(JitTestCase):
     def test_script(self):
         def fn(a: complex):
             return a
 
-        b = 3 + 5j
-        result = self.checkScript(fn, (b,))
-        cu = torch.jit.CompilationUnit('''
-                def fn(a: complex):
-                    return a
-        ''')
-        self.assertEqual(b, cu.fn(b))
+        self.checkScript(fn, (3 + 5j,))
 
 class TestComplexTensor(TestCase):
     @dtypes(*torch.testing.get_all_complex_dtypes())

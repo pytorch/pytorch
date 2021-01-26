@@ -305,7 +305,7 @@ def try_ann_to_type(ann, loc):
         return FutureType(try_ann_to_type(ann.__args__[0], loc))
     if ann is float:
         return FloatType.get()
-    if inspect.isclass(ann) and issubclass(ann, builtins.complex):
+    if ann is complex:
         return ComplexDoubleType.get()
     if ann is int:
         return IntType.get()
