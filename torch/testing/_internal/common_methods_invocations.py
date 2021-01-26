@@ -1349,7 +1349,8 @@ op_db: List[OpInfo] = [
                     dtypes=floating_and_complex_types(),
                     test_inplace_grad=False,
                     check_batched_gradgrad=False,
-                    # TODO: TypeError: empty_like(): argument 'input' (position 1) must be Tensor, not torch.return_types.linalg_eigh
+                    # TODO: TypeError: empty_like(): argument 'input' (position 1) must be Tensor,
+                    # not torch.return_types.linalg_eigh
                     supports_tensor_out=False,
                     sample_inputs_func=sample_inputs_linalg_eigh,
                     output_func=lambda out: (out[0], abs(out[1])),  # gauge invariant loss function
