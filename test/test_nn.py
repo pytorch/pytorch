@@ -10,7 +10,7 @@ import warnings
 import pickle
 from copy import deepcopy
 from itertools import repeat, product
-from functools import reduce, partial
+from functools import reduce
 from operator import mul
 from collections import OrderedDict
 

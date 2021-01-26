@@ -12,7 +12,7 @@ from math import inf, nan, isnan
 import random
 from random import randrange
 from itertools import product
-from functools import reduce, partial
+from functools import reduce
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
