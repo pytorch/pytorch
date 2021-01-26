@@ -337,7 +337,10 @@ async def run_command(command, *, env, deps, gather_data, i, save):
     Run the command with the given env after waiting for deps.
     """
     for task in deps:
-        await task
+        dep_result = await task
+        # abort if a previous step failed
+        if 'exit_code' not in dep_result or dep_result['exit_code'] != 0:
+            return {}
     if gather_data:
         t1 = time.monotonic()
     proc = await asyncio.create_subprocess_shell(
@@ -368,7 +371,7 @@ async def run_command(command, *, env, deps, gather_data, i, save):
     return results
 
 
-async def run_graph(*, env, commands, graph, gather_data, save):
+async def run_graph(*, env, commands, graph, gather_data=False, save=None):
     """
     Return outputs/errors (and optionally time/file info) from commands.
     """
@@ -391,8 +394,8 @@ def print_command_outputs(command_results):
     Print captured stdout and stderr from commands.
     """
     for result in command_results:
-        sys.stdout.write(result['stdout'].decode('ascii'))
-        sys.stderr.write(result['stderr'].decode('ascii'))
+        sys.stdout.write(result.get('stdout', b'').decode('ascii'))
+        sys.stderr.write(result.get('stderr', b'').decode('ascii'))
 
 
 def write_log_csv(command_parts, command_results, *, filename):
@@ -401,15 +404,15 @@ def write_log_csv(command_parts, command_results, *, filename):
     """
     tmp_files = []
     for result in command_results:
-        tmp_files.extend(result['files'].keys())
+        tmp_files.extend(result.get('files', {}).keys())
     with open(filename, 'w', newline='') as csvfile:
         fieldnames = ['command', 'seconds'] + list(dict.fromkeys(tmp_files))
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         for i, result in enumerate(command_results):
             command = f'{i} {os.path.basename(command_parts[i][0])}'
-            row = {'command': command, 'seconds': result['time']}
-            writer.writerow({**row, **result['files']})
+            row = {'command': command, 'seconds': result.get('time', 0)}
+            writer.writerow({**row, **result.get('files', {})})
 
 
 def exit_code(results):
@@ -417,7 +420,7 @@ def exit_code(results):
     Aggregate individual exit codes into a single code.
     """
     for result in results:
-        code = result['exit_code']
+        code = result.get('exit_code', 0)
         if code != 0:
             return code
     return 0

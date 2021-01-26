@@ -878,6 +878,22 @@ class TestDistributions(TestCase):
                 self.assertIn(Dist, distributions_with_examples,
                               "Please add {} to the EXAMPLES list in test_distributions.py".format(Dist.__name__))
 
+    def test_support_attributes(self):
+        for Dist, params in EXAMPLES:
+            for param in params:
+                d = Dist(**param)
+                event_dim = len(d.event_shape)
+                self.assertEqual(d.support.event_dim, event_dim)
+                try:
+                    self.assertEqual(Dist.support.event_dim, event_dim)
+                except NotImplementedError:
+                    pass
+                is_discrete = d.support.is_discrete
+                try:
+                    self.assertEqual(Dist.support.is_discrete, is_discrete)
+                except NotImplementedError:
+                    pass
+
     def test_distribution_expand(self):
         shapes = [torch.Size(), torch.Size((2,)), torch.Size((2, 1))]
         for Dist, params in EXAMPLES:
@@ -1620,8 +1636,8 @@ class TestDistributions(TestCase):
         self.assertEqual(LogisticNormal(mean, std).sample((7,)).size(), (7, 5, 6))
         self.assertEqual(LogisticNormal(mean_1d, std_1d).sample((1,)).size(), (1, 2))
         self.assertEqual(LogisticNormal(mean_1d, std_1d).sample().size(), (2,))
-        self.assertEqual(LogisticNormal(0.2, .6).sample((1,)).size(), (2,))
-        self.assertEqual(LogisticNormal(-0.7, 50.0).sample((1,)).size(), (2,))
+        self.assertEqual(LogisticNormal(0.2, .6).sample().size(), (2,))
+        self.assertEqual(LogisticNormal(-0.7, 50.0).sample().size(), (2,))
 
         # sample check for extreme value of mean, std
         set_rng_seed(1)
@@ -3831,6 +3847,16 @@ class TestKL(TestCase):
                     'Expected {}'.format(expected_shape),
                     'Actual {}'.format(kl.shape),
                 ]))
+
+    def test_kl_transformed(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/34859
+        scale = torch.ones(2, 3)
+        loc = torch.zeros(2, 3)
+        normal = Normal(loc=loc, scale=scale)
+        diag_normal = Independent(normal, reinterpreted_batch_ndims=1)
+        trans_dist = TransformedDistribution(diag_normal, AffineTransform(loc=0., scale=2.))
+        self.assertEqual(kl_divergence(diag_normal, diag_normal).shape, (2,))
+        self.assertEqual(kl_divergence(trans_dist, trans_dist).shape, (2,))
 
     def test_entropy_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]

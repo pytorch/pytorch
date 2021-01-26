@@ -66,9 +66,6 @@ torch/csrc/autograd/generated/*
 torch/testing/_internal/generated/annotated_fn_args.py
 torch/testing/_internal/data/*.pt
 torch/csrc/cudnn/cuDNN.cpp
-torch/csrc/deploy/interpreter/cpython
-torch/csrc/deploy/interpreter/frozen
-torch/csrc/deploy/interpreter/third_party/typing_extensions.py
 torch/csrc/generated
 torch/csrc/generic/TensorMethods.cpp
 torch/csrc/jit/generated/*
