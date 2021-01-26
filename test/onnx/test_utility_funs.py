@@ -284,7 +284,12 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Slice"
             assert node.kind() != "onnx::Concat"
             assert node.kind() != "onnx::Unsqueeze"
-        assert len(list(graph.nodes())) == 3
+            
+        if self.opset_version <= 12:
+            assert len(list(graph.nodes())) == 3
+        else:
+            # Unsqueeze op parameter 'axie' as an input instand of as an attribute for opset >= 13
+            assert len(list(graph.nodes())) == 4
 
     def test_constant_fold_transpose_matmul(self):
         class MatMulNet(torch.nn.Module):
@@ -619,7 +624,7 @@ class TestUtilityFuns(TestCase):
         assert next(iter).kind() == "aten::dequantize"
 
     # prim::ListConstruct is exported as onnx::SequenceConstruct for opset >= 11
-    @skipIfUnsupportedOpsetVersion([11, 12])
+    @skipIfUnsupportedOpsetVersion([11, 12, 13])
     def test_prim_fallthrough(self):
         # Test prim op
         class PrimModule(torch.jit.ScriptModule):
@@ -792,16 +797,27 @@ TestUtilityFuns_opset12 = type(str("TestUtilityFuns_opset12"),
                                (TestCase,),
                                dict(TestUtilityFuns.__dict__, opset_version=12))
 
+# opset 13 tests
+TestUtilityFuns_opset13 = type(str("TestUtilityFuns_opset13"),
+                               (TestCase,),
+                               dict(TestUtilityFuns.__dict__, opset_version=13))
+
 # opset 11 tests
-TestUtilityFuns_opset9_new_jit_API = type(str("TestUtilityFuns_opset9_new_jit_API"),
+TestUtilityFuns_opset11_new_jit_API = type(str("TestUtilityFuns_opset11_new_jit_API"),
                                           (TestCase,),
-                                          dict(TestUtilityFuns.__dict__, opset_version=9,
+                                          dict(TestUtilityFuns.__dict__, opset_version=11,
                                           use_new_jit_passes=True))
 
 # opset 12 tests
 TestUtilityFuns_opset12_new_jit_API = type(str("TestUtilityFuns_opset12_new_jit_API"),
                                            (TestCase,),
                                            dict(TestUtilityFuns.__dict__, opset_version=12,
+                                           use_new_jit_passes=True))
+
+# opset 13 tests
+TestUtilityFuns_opset13_new_jit_API = type(str("TestUtilityFuns_opset13_new_jit_API"),
+                                           (TestCase,),
+                                           dict(TestUtilityFuns.__dict__, opset_version=13,
                                            use_new_jit_passes=True))
 
 
