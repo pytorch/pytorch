@@ -304,6 +304,7 @@ class Transformer(Interpreter):
     def __init__(self, module):
         super().__init__(module)
         self.new_graph = Graph()
+
         class TransformerTracer(Tracer):
             def __init__(self, graph: Graph):
                 super().__init__()
