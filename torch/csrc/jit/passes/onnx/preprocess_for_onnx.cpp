@@ -291,9 +291,9 @@ static void decomposeLinear(Block* b) {
 } // namespace
 
 void PreprocessForONNX(std::shared_ptr<Graph>& graph) {
-  GRAPH_DUMP("priot to decompose linear", graph);
+  GRAPH_DEBUG("priot to decompose linear", graph);
   decomposeLinear(graph->block());
-  GRAPH_DUMP("after decompose linear", graph);
+  GRAPH_DEBUG("after decompose linear", graph);
   FuseWithListUnpack(graph->block());
   ReplaceAddWithConcat(graph->block());
   fuseListAndListUnpack(graph->block());

@@ -10631,12 +10631,12 @@ dedent """
                 # script module
                 jit_t = torch.jit.script(t)
 
-                x = x_init.detach().clone().requires_grad_()
-                w = w_init.detach().clone().requires_grad_()
-                b = b_init.detach().clone().requires_grad_()
-                x_ref = x_init.detach().clone().requires_grad_()
-                w_ref = w_init.detach().clone().requires_grad_()
-                b_ref = b_init.detach().clone().requires_grad_()
+                x = x_init.detach().requires_grad_()
+                w = w_init.detach().requires_grad_()
+                b = b_init.detach().requires_grad_()
+                x_ref = x_init.detach().requires_grad_()
+                w_ref = w_init.detach().requires_grad_()
+                b_ref = b_init.detach().requires_grad_()
 
                 # profiling/optimization runs
                 jit_o = jit_t(x, w, b)
