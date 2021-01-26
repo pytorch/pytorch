@@ -77,6 +77,51 @@ class ZeroRedundancyOptimizer(Optimizer):
 
     .. _ZeRO: https://arxiv.org/abs/1910.02054
 
+
+    Example::
+    >>> from torch.distributed.optim import ZeroRedundancyOptimizer
+    >>> from torch import optim
+    >>> from torch.nn.parallel import DistributedDataParallel as DDP
+    >>>
+    >>> # Problem statement
+    >>> model = myAwesomeModel().to(rank)
+    >>> model = DDP(model, device_ids=[rank])
+    >>> dataloader = mySuperFastDataloader()
+    >>> loss_ln = myVeryRelevantLoss()
+    >>>
+    >>> # optimizer specific arguments e.g. LR, momentum, etc...
+    >>> base_optimizer_arguments = { "lr": 1e-4, **smart_options}
+    >>> optimizer = ZeroRedundancyOptimizer(
+    >>>     params=model.parameters(),
+    >>>     optim=optim.AdamW
+    >>>     **base_optimizer_arguments)
+    >>>
+    >>> # Any relevant training loop, almost nothing specific to ZeroRedundancyOptimizer
+    >>> reference_rank = 0  # This rank will be able to checkpoint
+    >>> model.train()
+    >>> for e in range(epochs):
+    >>>     for (data, target) in dataloader:
+    >>>         data, target = data.to(rank), target.to(rank)
+    >>>
+    >>>         # Train
+    >>>         model.zero_grad()
+    >>>         outputs = model(data)
+    >>>         loss = loss_fn(outputs, target)
+    >>>         loss.backward()
+    >>>         optimizer.step()
+    >>>
+    >>>         ...
+    >>>         # WARNING - Checkpointing requires has some specificities:
+    >>>         # - all ranks: consolidate needed before one rank can save
+    >>>         optimizer.consolidate_state_dict(reference_rank)
+    >>>
+    >>>         # - reference rank: the state can be saved
+    >>>         if rank == reference_rank:
+    >>>            checkpoint = optimizer.state_dict()
+    >>>            ...
+    >>>
+    >>>         # - all ranks: load a checkpoint, can be a checkpoint from normal PyTorch
+    >>>         optimizer.load_state_dict(a_normal_checkpointed_state)
     """
 
     def __init__(
@@ -319,9 +364,6 @@ class ZeroRedundancyOptimizer(Optimizer):
         # - get the pytorch compliant parameter indexing
         state_dict = super().state_dict()
 
-        # - get an id map which links the parameter id to the index in the reference state
-        global_id_map = {id(p): i for i, p in enumerate(chain(*(g["params"] for g in self.param_groups)))}
-
         # - go through the per-shard states, which are all indexed locally
         unordered_state = {}
         for rank, s in enumerate(self._all_states):
@@ -350,33 +392,33 @@ class ZeroRedundancyOptimizer(Optimizer):
         Arguments:
             state_dict (dict): optimizer state. Should be an object returned
                 from a call to :meth:`state_dict`
+
+        .. note: all the parameters present in the loaded state dict will be exposed by this optimizer
+            through the `param_groups` attribute, but the actual parameter update computations will be spread
+            in between the ranks. The actual per-rank optimizer will thus only effectively work on a subset
+            of the parameters.
         """
 
         # NOTE: PyTorch 1.5 does not index linearly but with the id(params) at saving time
         # we work around that here by using the fact that the params are ordered as in the param_groups
 
         # Param index to param map
-        global_id_map = {i: p for i, p in enumerate(chain(*(g["params"] for g in self.param_groups)))}
+        index_to_param = {i: p for i, p in enumerate(chain(*(g["params"] for g in self.param_groups)))}
 
         # Prune the state_dict from the states which this rank does not own, then normal base load
         other_state = []
         for i_param, key in enumerate(state_dict["state"].keys()):
             # Check that this rank owns this param, if not remove from the state
-            param = global_id_map[i_param]
-            if self.param_to_rank[param] != self.rank:
-                other_state.append(key)
-
-        # Keep the state in place in order not to break the following enumerations, but wipe the contents
-        for other_parameter in other_state:
-            state_dict["state"][other_parameter] = None
+            if self.param_to_rank[index_to_param[i_param]] != self.rank:
+                state_dict["state"][key] = None
 
         super().load_state_dict(state_dict)
 
         # Set the sharded optimizer state.
         # Keep the original type (not respected by PyTorch which casts to the model type)
         for k, (_, v) in enumerate(state_dict["state"].items()):
-            if k in global_id_map:
-                param = global_id_map[k]
+            if k in index_to_param:
+                param = index_to_param[k]
 
                 # Only add this state to the sharded optimizer if it owns this param
                 for pg in self.optim.param_groups:
@@ -384,10 +426,10 @@ class ZeroRedundancyOptimizer(Optimizer):
                         self.optim.state[param] = _recursive_copy_to_device(v, non_blocking=True, device=param.device)
 
         # Update the param_group keys
-        for fpg, pg in zip(state_dict["param_groups"], self.param_groups):
-            for key in fpg.keys():
+        for new_pg, pg in zip(state_dict["param_groups"], self.param_groups):
+            for key in new_pg.keys():
                 if key != "params":
-                    pg[key] = fpg[key]
+                    pg[key] = new_pg[key]
 
         # Sync with the optimizer param groups
         self._update_param_groups(local_to_global=False)
