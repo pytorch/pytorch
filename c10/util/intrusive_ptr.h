@@ -280,7 +280,7 @@ class intrusive_ptr final {
  public:
   using element_type = TTarget;
 
-  intrusive_ptr() noexcept
+  constexpr intrusive_ptr() noexcept
       : intrusive_ptr(NullType::singleton(), raw::DontIncreaseRefcount{}) {}
 
   intrusive_ptr(intrusive_ptr&& rhs) noexcept : target_(rhs.target_) {

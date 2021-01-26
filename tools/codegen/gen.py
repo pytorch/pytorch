@@ -651,9 +651,10 @@ class ComputeTensorMethod:
         sig_group = CppSignatureGroup.from_native_function(f, method=True, fallback_binding=f.manual_cpp_binding)
 
         if self.target is Target.DECLARATION:
-            result = f"{sig_group.signature.decl()} const;\n"
+            no_defaults = any(arg.ctype.cpp_type(strip_ref=True) == "c10::optional<Tensor>" for arg in sig_group.signature.arguments())
+            result = f"{sig_group.signature.decl(no_defaults=no_defaults)} const;\n"
             if sig_group.faithful_signature is not None:
-                result += f"{sig_group.faithful_signature.decl()} const;\n"
+                result += f"{sig_group.faithful_signature.decl(no_defaults=no_defaults)} const;\n"
             return result
 
         assert self.target is Target.DEFINITION

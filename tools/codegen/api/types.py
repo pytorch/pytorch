@@ -157,9 +157,12 @@ class CppSignature:
         return n
 
     # Render the C++ declaration for this signature
-    def decl(self) -> str:
+    def decl(self, no_defaults: bool = False) -> str:
         returns_type = cpp.returns_type(self.func.returns)
-        cpp_args_str = ', '.join(a.decl() for a in self.arguments())
+        args = self.arguments()
+        if no_defaults:
+            args = [a.no_default() for a in args]
+        cpp_args_str = ', '.join(a.decl() for a in args)
         return f"{returns_type} {self.name()}({cpp_args_str})"
 
     # Render the C++ definition for this signature, not including
