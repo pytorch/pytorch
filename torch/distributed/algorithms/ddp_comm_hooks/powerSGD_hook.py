@@ -20,7 +20,7 @@ def _orthogonalize(matrix, epsilon=1e-8):
         # This epsilon is not needed if the input matrix covers the gradients of at least one entire layer in the neural network.
         if epsilon == 0:
             # Note that col ** 2 can underflow/overflow if we use FP16.
-            # May need to consder multiplying a scaling factor and divding it later, or using bfloat16 isntead.
+            # May need to consider multiplying a scaling factor and dividing it later, or using bfloat16 instead.
             col /= torch.sqrt(torch.sum(col ** 2))
         else:
             col /= torch.sqrt(torch.sum(col ** 2)) + epsilon
@@ -83,7 +83,7 @@ class PowerSGDState(object):
         # because PowerSGD is a biased compressor,
         # i.e., compressing and decompressing a random gradient does not yield the original in expectation.
         # This mechanism requires a temporary copy of the input gradients,
-        # so it increases the peak memory consumption by the size of gradient tensor.
+        # so it increases the peak memory consumption by the size of the gradient tensor.
         # However, if the target matrices are known to be exactly low-ranked (instead of just low stable rank),
         # sometimes it is possible to converge to the optima without error feedback.
         # See: http://proceedings.mlr.press/v54/yurtsever17a/yurtsever17a.pdf
@@ -141,20 +141,20 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     2) Handles rank-1 tensors by allreducing them without compression:
         2.1) Allocate contiguous memory for those rank-1 tensors,
         and allreduces all the rank-1 tensors as a batch, without compression;
-        2.2) Copies the indvidual rank-1 tensors from the contiguous memory back to the input tensor.
+        2.2) Copies the individual rank-1 tensors from the contiguous memory back to the input tensor.
     3) Handles high-rank tensors by PowerSGD compression:
         3.1) For each high-rank tensor M, creates two low-rank tensors P and Q for decomposing M,
         such that M = PQ^T, where Q is initialized from a standard normal distribution and orthogonalized;
         3.2) Computes each P in Ps, which is equal to MQ;
         3.3) Allreduces Ps as a batch;
-        3.4) Orthogonizes each P in Ps;
+        3.4) Orthogonalizes each P in Ps;
         3.5) Computes each Q in Qs, which is approximately equal to M^TP;
         3.6) Allreduces Qs as a batch;
         3.7) Computes each M among all the high-rank tensors, which is approximately equal to PQ^T.
 
     TODO(wayi@): The above procedure does two matmul+allreduce steps per iteration --
     one left multiplication and one right multiplication.
-    For warm start, can take one such step at a time, and alternate between them.
+    For warm-start, can take one such step at a time, and alternate between them.
 
     Args:
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
@@ -305,7 +305,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         with torch.random.fork_rng(devices=[]):
             # Fork this RNG to avoid changing the seed globally and affecting the random sampling anywhere else in the training.
             # The seed makes sure that the initial random values are the same across all the DDP replicas.
-            # Such seed should differ at every step.
+            # This seed should differ at every step.
             # Since it is very slow to fork RNG state across all the CUDA devices,
             # only fork on CPU and then move the generated tensor to the CUDA device (by overwriting q).
             torch.manual_seed(state.rng.randint(1_000_000_000))
@@ -337,7 +337,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
             tensor.copy_(rank1_tensors_memory[idx : idx + tensor.shape[0]])
             idx += tensor.shape[0]
 
-        # Since these Ps will be orthogonized later, no need to divide them by world size.
+        # Since these Ps will be orthogonalized later, no need to divide them by world size.
         return [
             dist.all_reduce(
                 state.p_memory_dict[bucket_index], group=group_to_use, async_op=True
@@ -403,7 +403,7 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     such that M = PQ^T, where Q is initialized from a standard normal distribution and orthogonalized;
     2) Computes P, which is equal to MQ;
     3) Allreduces P;
-    4) Orthogonizes P;
+    4) Orthogonalizes P;
     5) Computes Q, which is approximately equal to M^TP;
     6) Allreduces Q;
     7) Computes M, which is approximately equal to PQ^T.
@@ -411,7 +411,7 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
 
     TODO(wayi@): The above procedure does two matmul+allreduce steps per iteration --
     one left multiplication and one right multiplication.
-    For warm start, can take one such step at a time, and alternate between them.
+    For warm-start, can take one such step at a time, and alternate between them.
 
     Args:
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
@@ -494,7 +494,7 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
                     # Fork this RNG to avoid changing the seed globally and affecting the random sampling
                     # anywhere else in the training.
                     # The seed makes sure that the initial random values are the same across all the DDP replicas.
-                    # Such seed should differ at every step.
+                    # This seed should differ at every step.
                     # Since it is very slow to fork RNG state across all the CUDA devices,
                     # only fork on CPU and then move the generated tensor to the CUDA device.
                     torch.manual_seed(rng.randint(1_000_000_000))
