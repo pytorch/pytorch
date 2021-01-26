@@ -1904,7 +1904,7 @@ def gradcheck(fn, inputs, **kwargs):
     return torch.autograd.gradcheck(fn, inputs, **kwargs)
 
 
-def gradgradcheck(fn, inputs, **kwargs):
+def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
     # Wrapper around gradgradcheck that enables certain keys by default
     keys_enabled_by_default = (
         "check_batched_grad",)
@@ -1912,7 +1912,7 @@ def gradgradcheck(fn, inputs, **kwargs):
     for key in keys_enabled_by_default:
         kwargs[key] = kwargs.get(key, True)
 
-    return torch.autograd.gradgradcheck(fn, inputs, **kwargs)
+    return torch.autograd.gradgradcheck(fn, inputs, grad_outputs, **kwargs)
 
 
 def _assertGradAndGradgradChecks(test_case, apply_fn, inputs, **kwargs):
