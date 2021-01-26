@@ -359,9 +359,13 @@ class Quantizer:
                 # precedence: [TODO] module_name_qconfig (need scope support
                 # from fx)
                 # > function_qconfig > global_qconfig
+                # module_name takes precedence over function qconfig
                 function_qconfig = get_object_type_qconfig(
                     qconfig_dict, node.target, global_qconfig)
-                self.qconfig_map[node.name] = function_qconfig
+                module_path, module_type = node_name_to_scope[node.name]
+                qconfig = get_qconfig(
+                    qconfig_dict, module_type, module_path, function_qconfig)
+                self.qconfig_map[node.name] = qconfig
             elif node.op == "call_method":
                 module_path, module_type = node_name_to_scope[node.name]
                 # use the qconfig of the module that the node belongs to
