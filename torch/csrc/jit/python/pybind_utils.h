@@ -6,6 +6,7 @@
 #include <ATen/core/stack.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
+#include <pybind11/complex.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
@@ -637,8 +638,7 @@ inline py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
   } else if (ivalue.isComplexDouble()) {
-    return py::cast(
-      static_cast<std::complex<double>>(std::move(ivalue).toComplexDouble()));
+    return py::cast(static_cast<std::complex<double>>(std::move(ivalue).toComplexDouble()));
   } else if (ivalue.isInt()) {
     return py::cast(std::move(ivalue).toInt());
   } else if (ivalue.isBool()) {

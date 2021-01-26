@@ -1,9 +1,22 @@
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
 from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.jit_utils import JitTestCase
 
 devices = (torch.device('cpu'), torch.device('cuda:0'))
 
+class TestComplexJIT(JitTestCase):
+    def test_script(self):
+        def fn(a: complex):
+            return a
+
+        b = 3 + 5j
+        result = self.checkScript(fn, (b,))
+        cu = torch.jit.CompilationUnit('''
+                def fn(a: complex):
+                    return a
+        ''')
+        self.assertEqual(b, cu.fn(b))
 
 class TestComplexTensor(TestCase):
     @dtypes(*torch.testing.get_all_complex_dtypes())

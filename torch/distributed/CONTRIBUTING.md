@@ -89,3 +89,6 @@ python test/distributed/rpc/test_process_group_agent.py
 # Run a specific test method.
 pytest -k test_self_add test/distributed/rpc/test_process_group_agent.py
 ```
+
+Note that the RPC framework is by default only tested with filesystem [initialization](https://pytorch.org/docs/stable/distributed.html#initialization). To run tests with TCP initialization, set the
+environment variable `RPC_INIT_WITH_TCP=1` before running your test command.
