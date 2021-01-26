@@ -766,6 +766,36 @@ class HermitianOpInfo(OpInfo):
         return hermitian_func
 
 
+def sample_inputs_linalg_cholesky(op_info, device, dtype, requires_grad=False):
+    """
+    This function generates always positive-definite input for torch.linalg.cholesky using
+    random_hermitian_pd_matrix.
+    The input is generated as the itertools.product of 'batches' and 'ns'.
+    In total this function generates 8 SampleInputs
+    'batches' cases include:
+        () - single input,
+        (0,) - zero batched dimension,
+        (2,) - batch of two matrices,
+        (1, 1) - 1x1 batch of matrices
+    'ns' gives 0x0 and 5x5 matrices.
+    Zeros in dimensions are edge cases in the implementation and important to test for in order to avoid unexpected crashes.
+    """
+    from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+    # TODO: add 0 to 'ns'
+    # Currently tests fail most probably because of triangular_solve
+    # (used in backward) does not work well with empty inputs
+    # might be fixed with https://github.com/pytorch/pytorch/pull/50948
+    batches = [(), (0, ), (2, ), (1, 1)]
+    ns = [5, ]
+    out = []
+    for batch, n in product(batches, ns):
+        a = random_hermitian_pd_matrix(n, *batch, dtype=dtype, device=device)
+        a.requires_grad = requires_grad
+        out.append(SampleInput(a))
+    return out
+
+
 def sample_inputs_linalg_pinv_hermitian(op_info, device, dtype, requires_grad=False):
     """
     This function generates input for torch.linalg.pinv with hermitian=True keyword argument.
@@ -1101,6 +1131,21 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_broadcast_to),
+    HermitianOpInfo('cholesky',
+                    op=torch.cholesky,
+                    dtypes=floating_and_complex_types(),
+                    test_inplace_grad=False,
+                    check_batched_gradgrad=False,
+                    supports_tensor_out=True,
+                    sample_inputs_func=sample_inputs_linalg_cholesky,
+                    decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+                    skips=(
+                        # These tests do not take into account custom op.get_op()
+                        SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+                        # cuda gradchecks are slow
+                        # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+                        SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
+                    ),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -1269,6 +1314,25 @@ op_db: List[OpInfo] = [
                # cuda gradchecks are slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
                SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
+    HermitianOpInfo('linalg.cholesky',
+                    aten_name='linalg_cholesky',
+                    op=torch.linalg.cholesky,
+                    dtypes=floating_and_complex_types(),
+                    test_inplace_grad=False,
+                    # TODO: RuntimeError: While computing batched gradients,
+                    # got: vmap: Calling Tensor.as_strided is not supported
+                    # unless the batch dims being vmapped over are at the front of the tensor (in memory layout).
+                    check_batched_gradgrad=False,
+                    supports_tensor_out=True,
+                    sample_inputs_func=sample_inputs_linalg_cholesky,
+                    decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+                    skips=(
+                        # These tests do not take into account custom op.get_op()
+                        SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+                        # cuda gradchecks are slow
+                        # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+                        SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
+                    ),
     OpInfo('linalg.norm',
            op=torch.linalg.norm,
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),

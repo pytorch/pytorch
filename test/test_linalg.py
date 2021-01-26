@@ -223,25 +223,16 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float64, torch.complex128)
-    def test_cholesky_autograd(self, device, dtype):
-        def func(root):
-            x = 0.5 * (root + root.transpose(-1, -2).conj())
-            return torch.linalg.cholesky(x)
-
+    def test_cholesky_hermitian_grad(self, device, dtype):
+        # Check that the gradient is Hermitian (or symmetric)
         def run_test(shape):
-            root = torch.rand(*shape, dtype=dtype, device=device, requires_grad=True)
-            root = root + torch.eye(shape[-1], dtype=dtype, device=device)
-
-            gradcheck(func, root)
-            gradgradcheck(func, root)
-
             root = torch.rand(*shape, dtype=dtype, device=device)
             root = torch.matmul(root, root.transpose(-1, -2).conj())
             root.requires_grad_()
             chol = torch.linalg.cholesky(root).sum().backward()
-            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())  # Check the gradient is hermitian
+            self.assertEqual(root.grad, root.grad.transpose(-1, -2).conj())
 
-        shapes = ((3, 3), (4, 3, 2, 2))
+        shapes = ((3, 3), (1, 1, 3, 3))
         for shape in shapes:
             run_test(shape)
 
