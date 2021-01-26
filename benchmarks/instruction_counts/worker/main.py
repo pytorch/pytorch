@@ -16,6 +16,7 @@ Because this file only expects to run in a child context, error handling means
 plumbing failures up to the caller, not raising in this process.
 """
 import argparse
+import collections
 import dataclasses
 import io
 import os
@@ -23,7 +24,7 @@ import pickle
 import re
 import timeit
 import traceback
-from typing import Any, Optional, Union, TYPE_CHECKING
+from typing import Any, DefaultDict, List, Optional, Tuple, Union, TYPE_CHECKING
 import sys
 
 COMPAT_TIMER: bool = False
@@ -58,23 +59,11 @@ WORKER_PATH = os.path.abspath(__file__)
 # Callgrind iterations to run.
 MIN_RUN_TIME = 5
 
-def callgrind_iters(t: float, language: Language) -> int:
-    # Fill ~30 seconds, factoring in the ~50x slowdown from Callgrind.
-    n = int(30 / 50 / t)
-    assert n, "Callgrind should not be used for very large expressions."
-
-    if language == Language.CPP:
-        # C++ is quite stable, so we always run 500 iterations unless t is
-        # quite large. This helps keep measurements consistent, since the
-        # determinism means that we don't need to increase number to increase
-        # signal quality.
-        return min(500, n)
-
-    else:
-        # There is some noise from the CPython interpreter, so we run for the
-        # full ~30 seconds. (Or at least 10 iterations.)
-        assert language == Language.PYTHON
-        return max(10, n)
+# Repeats are inexpensive as long as they are all run in the same process. This
+# also lets us filter outliers (e.g. malloc arena reorganization), so we don't
+# need a high CALLGRIND_NUMBER to get good data.
+CALLGRIND_NUMBER = 100
+CALLGRIND_REPEATS = 20
 
 
 @dataclasses.dataclass(frozen=True)
@@ -159,13 +148,23 @@ def _run(timer_args: WorkerTimerArgs) -> WorkerOutput:
     )
 
     m = timer.blocked_autorange(min_run_time=MIN_RUN_TIME)
-    stats = timer.collect_callgrind(
-        number=callgrind_iters(m.median, timer_args.language),
+
+    stats: Tuple[CallgrindStats, ...] = timer.collect_callgrind(
+        number=CALLGRIND_NUMBER,
         collect_baseline=False,
+        repeats=CALLGRIND_REPEATS,
+        retain_out_file=True,
     )
+
+    grouped_stats: DefaultDict[int, List[CallgrindStats]] = collections.defaultdict(list)
+    for s in stats:
+        grouped_stats[s.counts(denoise=True)].append(s)
+
+    # Pick the most common count, with lower total count breaking ties.
+    key = sorted([(-len(v), k) for k, v in grouped_stats.items()])[0][1]
     return WorkerOutput(
         wall_time=m,
-        instructions=stats,
+        instructions=grouped_stats[key][0],
     )
 
 
