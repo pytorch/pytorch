@@ -15,13 +15,13 @@
 #include <random>
 #include <vector>
 
+#include <pack_block_sparse.h>
 #include <qnnpack/AlignedAllocator.h>
 #include <qnnpack/pack.h>
 #include <qnnpack/params.h>
 #include <qnnpack/q8gemm.h>
 #include <qnnpack/q8gemm_sparse.h>
 #include <qnnpack/requantization.h>
-#include <qnnpack/pack_block_sparse.h>
 
 #include <benchmark/benchmark.h>
 
