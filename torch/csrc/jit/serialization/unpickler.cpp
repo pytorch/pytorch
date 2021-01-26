@@ -546,6 +546,7 @@ void Unpickler::readGlobal(
   } else if (module_name == "builtins" && class_name == "complex") {
     globals_.emplace_back([this] {
       auto elems = pop(stack_).toTuple()->elements();
+      AT_ASSERT(elems.size() == 2);
       auto complex =
           c10::complex<double>(elems.at(0).toDouble(), elems.at(1).toDouble());
       stack_.emplace_back(complex);
