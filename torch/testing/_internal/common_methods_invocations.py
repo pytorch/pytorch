@@ -1438,6 +1438,7 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            test_complex_grad=False,
            test_inplace_grad=False,
+           # std has only partial support for complex and half (#51127)
            skips=(SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
                            dtypes=[torch.half, torch.complex64, torch.complex128]),),
            assert_autodiffed=True,
@@ -1732,6 +1733,7 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            test_complex_grad=False,
            test_inplace_grad=False,
+           # var has only partial support for complex and half (#51127)
            skips=(SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
                            dtypes=[torch.half, torch.complex64, torch.complex128]),),
            assert_autodiffed=True,
