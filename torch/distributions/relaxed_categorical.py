@@ -31,7 +31,7 @@ class ExpRelaxedCategorical(Distribution):
     """
     arg_constraints = {'probs': constraints.simplex,
                        'logits': constraints.real_vector}
-    support = constraints.real_vector
+    support = constraints.real_vector  # The true support is actually a submanifold of this.
     has_rsample = True
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
