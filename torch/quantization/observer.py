@@ -58,8 +58,8 @@ class ObserverBase(ABC, nn.Module):
         self.dtype = dtype
 
     @abstractmethod
-    def forward(self, x: torch.Tensor):
-        return x
+    def forward(self, x):
+        pass
 
     @abstractmethod
     def calculate_qparams(self, **kwargs):
@@ -697,8 +697,14 @@ class HistogramObserver(_ObserverBase):
     min_val: torch.Tensor
     max_val: torch.Tensor
 
-    def __init__(self, bins: int=2048, upsample_rate=128, dtype=torch.quint8,
-                 qscheme=torch.per_tensor_affine, reduce_range=False):
+    def __init__(
+        self,
+        bins: int=2048,
+        upsample_rate: int=128,
+        dtype: torch.dtype=torch.quint8,
+        qscheme=torch.per_tensor_affine,
+        reduce_range=False
+    ):
         # bins: The number of bins used for histogram calculation.
         super(HistogramObserver, self).__init__(dtype=dtype,
                                                 qscheme=qscheme,
@@ -710,7 +716,12 @@ class HistogramObserver(_ObserverBase):
         self.dst_nbins = 2 ** torch.iinfo(self.dtype).bits
         self.upsample_rate = upsample_rate
 
-    def _get_norm(self, delta_begin: torch.Tensor, delta_end: torch.Tensor, density: torch.Tensor) -> torch.Tensor:
+    def _get_norm(
+        self,
+        delta_begin: torch.Tensor,
+        delta_end: torch.Tensor,
+        density: torch.Tensor
+    ) -> torch.Tensor:
         r"""
         Compute the norm of the values uniformaly distributed between
         delta_begin and delta_end.
@@ -726,7 +737,9 @@ class HistogramObserver(_ObserverBase):
         ) / 3
         return density * norm
 
-    def _compute_quantization_error(self, next_start_bin: int, next_end_bin: int):
+    def _compute_quantization_error(
+        self, next_start_bin: int, next_end_bin: int
+    ):
         r"""
         Compute the quantization error if we use start_bin to end_bin as the
         min and max to do the quantization.
@@ -835,10 +848,12 @@ class HistogramObserver(_ObserverBase):
         new_max = self.min_val + bin_width * (end_bin + 1)
         return new_min, new_max
 
-    def _adjust_min_max(self,
-                        combined_min: torch.Tensor,
-                        combined_max: torch.Tensor,
-                        upsample_rate: int) -> Tuple[torch.Tensor, torch.Tensor, int, int]:
+    def _adjust_min_max(
+        self,
+        combined_min: torch.Tensor,
+        combined_max: torch.Tensor,
+        upsample_rate: int
+    ) -> Tuple[torch.Tensor, torch.Tensor, int, int]:
         # We ensure that:
         # (combined_max - combined_min)/(downsample_rate*Nbins) = (max - min)/(upsample_rate*Nbins)
         # This allows us to have a common grid of resolution s, where we can align
@@ -846,7 +861,8 @@ class HistogramObserver(_ObserverBase):
         # start_idx maps min_val to the histogram bin index.
 
         hist_bin_width = (self.max_val - self.min_val) / (self.bins * upsample_rate)
-        downsample_rate = int(torch.ceil((combined_max - combined_min) / (self.bins * hist_bin_width)).item())
+        downsample_rate = int(torch.ceil(
+            (combined_max - combined_min) / (self.bins * hist_bin_width)).item())
         e = downsample_rate * (self.bins * hist_bin_width) - (combined_max - combined_min)
         # Relax only the max, not the min, so that for one sided distributions, min stays at zero
         combined_max = combined_max + e
@@ -911,7 +927,8 @@ class HistogramObserver(_ObserverBase):
             assert combined_min.numel() == 1 and combined_max.numel() == 1, (
                 "histogram min/max values must be scalar."
             )
-            combined_histogram = torch.histc(x, self.bins, min=int(combined_min), max=int(combined_max))
+            combined_histogram = torch.histc(
+                x, self.bins, min=int(combined_min), max=int(combined_max))
             if combined_min == min_val and combined_max == max_val:
                 combined_histogram += self.histogram
             else:

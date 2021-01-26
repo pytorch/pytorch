@@ -697,35 +697,29 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
 
 class TestHistogramObserver(QuantizationTestCase):
-    # @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)))
-    def test_observer_scriptable(self, qdtype=torch.qint8):
-        obs = HistogramObserver(dtype=qdtype)
-        scripted = torch.jit.script(obs)
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+           qscheme=st.sampled_from(
+               (torch.per_tensor_affine, torch.per_tensor_symmetric)
+               )
+           )
+    def test_observer_scriptable(self, qdtype, qscheme):
+        ob_list = [
+            HistogramObserver(dtype=qdtype, qscheme=qscheme),
+            default_histogram_observer()
+        ]
+        for obs in ob_list:
+            # obs = HistogramObserver(dtype=qdtype)
+            scripted = torch.jit.script(obs)
 
-        x = torch.rand(3, 4)
-        obs(x)
-        scripted(x)
-        self.assertTrue(torch.equal(obs.histogram, scripted.histogram))
-        buf = io.BytesIO()
-        torch.jit.save(scripted, buf)
-        buf.seek(0)
-        loaded = torch.jit.load(buf)
-        self.assertTrue(torch.equal(obs.histogram, scripted.histogram))
-
-    def test_default_observer(self):
-        obs = default_histogram_observer()
-        scripted = torch.jit.script(obs)
-
-        x = torch.rand(3, 4)
-        obs(x)
-        scripted(x)
-        self.assertTrue(torch.equal(obs.histogram, scripted.histogram))
-        buf = io.BytesIO()
-        torch.jit.save(scripted, buf)
-        buf.seek(0)
-        loaded = torch.jit.load(buf)
-        self.assertTrue(torch.equal(obs.histogram, scripted.histogram))
-
+            x = torch.rand(3, 4)
+            obs(x)
+            scripted(x)
+            self.assertTrue(torch.equal(obs.histogram, scripted.histogram))
+            buf = io.BytesIO()
+            torch.jit.save(scripted, buf)
+            buf.seek(0)
+            loaded = torch.jit.load(buf)
+            self.assertTrue(torch.equal(obs.histogram, scripted.histogram))
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
