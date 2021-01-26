@@ -7,11 +7,21 @@ Overview
 --------
 .. automodule:: torch.fx
 
+Writing Transformations
+-----------------------
+
+TODO
+
+Debugging Transformations
+-------------------------
+
+TODO
+
 Limitations of Symbolic Tracing
 -------------------------------
 
-FX uses a system of **symbolic tracing** (a.k.a `abstract
-interpretation <https://en.wikipedia.org/wiki/Abstract_interpretation>`__)
+FX uses a system of **symbolic tracing** (a.k.a `symbolic
+execution <https://en.wikipedia.org/wiki/Symbolic_execution>`__)
 to capture the semantics of programs in a transformable/analyzable form.
 The system is **tracing** in that it executes the program (really an
 ``nn.Module`` or function) to gather this information. It is
@@ -287,16 +297,6 @@ Miscellanea
       supported.
    -  Annotations on local names within a function are not currently
       supported.
-
-Writing Transformations
------------------------
-
-TODO
-
-Debugging Transformations
--------------------------
-
-TODO
 
 API Reference
 -------------
