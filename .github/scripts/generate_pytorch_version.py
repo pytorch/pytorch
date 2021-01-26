@@ -9,19 +9,25 @@ from datetime import datetime
 from distutils.util import strtobool
 from pathlib import Path
 
-PYTORCH_ROOT = Path(__file__).parent.parent
 LEADING_V_PATTERN = re.compile("^v")
+TRAILING_RC_PATTERN = re.compile("-rc[0-9]*$")
 LEGACY_BASE_VERSION_SUFFIX_PATTERN = re.compile("a0$")
 
 class NoGitTagException(Exception):
     pass
 
+def get_pytorch_root():
+    return Path(subprocess.check_output(
+        ['git', 'rev-parse', '--show-toplevel']
+    ).decode('ascii').strip())
+
 def get_tag():
+    root = get_pytorch_root()
     # We're on a tag
     am_on_tag = (
         subprocess.run(
             ['git', 'describe', '--tags', '--exact'],
-            cwd=PYTORCH_ROOT,
+            cwd=root,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         ).returncode == 0
@@ -30,16 +36,19 @@ def get_tag():
     if am_on_tag:
         dirty_tag = subprocess.check_output(
             ['git', 'describe'],
-            cwd=PYTORCH_ROOT
+            cwd=root
         ).decode('ascii').strip()
         # Strip leading v that we typically do when we tag branches
         # ie: v1.7.1 -> 1.7.1
         tag = re.sub(LEADING_V_PATTERN, "", dirty_tag)
+        # Strip trailing rc pattern
+        # ie: 1.7.1-rc1 -> 1.7.1
+        tag = re.sub(TRAILING_RC_PATTERN, "", tag)
     return tag
 
 def get_base_version():
-    PYTORCH_ROOT = Path(__file__).parent.parent
-    dirty_version = open('version.txt', 'r').read().strip()
+    root = get_pytorch_root()
+    dirty_version = open(root / 'version.txt', 'r').read().strip()
     # Strips trailing a0 from version.txt, not too sure why it's there in the
     # first place
     return re.sub(LEGACY_BASE_VERSION_SUFFIX_PATTERN, "", dirty_version)

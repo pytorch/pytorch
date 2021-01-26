@@ -1,10 +1,14 @@
 name: Build Linux Wheels
 
 on:
-  pull_request:
+  # TODO: These are only runnable from workflow_dispatch, we need to eventually add
+  #       a cron
+  # TODO: Add an on_release trigger to build on tags
+  workflow_dispatch:
 
 jobs:
   generate-build-matrix:
+    if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
@@ -21,6 +25,7 @@ jobs:
           MATRIX=$(python .github/scripts/generate_binary_build_matrix.py)
           echo "::set-output name=matrix::${MATRIX}"
   build-wheel:
+    if: ${{ github.repository_owner == 'pytorch' }}
     needs: generate-build-matrix
     runs-on: linux.2xlarge
     strategy:
@@ -43,7 +48,6 @@ jobs:
         with:
           path: pytorch
           submodules: recursive
-          ref: ${{ github.head_ref }}
       - name: Clone pytorch/builder
         uses: actions/checkout@v2
         with:
@@ -79,3 +83,4 @@ jobs:
         with:
           name: pytorch-wheel-py${{ matrix.python_version }}-${{matrix.gpu_arch_type}}-${{ matrix.gpu_arch_version }}
           path: /remote/**/*.whl
+      # TODO: Add a step here for uploading binaries

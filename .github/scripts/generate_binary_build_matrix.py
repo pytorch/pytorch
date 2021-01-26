@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 
 """Generates a matrix to be utilized through github actions
 
@@ -54,8 +54,7 @@ FULL_PYTHON_VERSIONS = [
 
 
 def is_pull_request():
-    return False
-    # return os.environ.get("GITHUB_HEAD_REF")
+    return os.environ.get("GITHUB_HEAD_REF")
 
 def generate_matrix():
     python_versions = FULL_PYTHON_VERSIONS
