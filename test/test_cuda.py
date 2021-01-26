@@ -3538,8 +3538,8 @@ class TestCudaComm(TestCase):
         for i, x in enumerate(out):
             self.assertTrue(isinstance(x, type(out2[-1])))  # x must be a tensor
             cat = torch.cat((outputs[0][i], outputs[1][i]))
-            self.assertTrue(torch.equal(x, cat.to(0)))
-            
+            self.assertTrue(torch.equal(x, cat.to(0)))    
+
 
 if __name__ == '__main__':
     run_tests()
