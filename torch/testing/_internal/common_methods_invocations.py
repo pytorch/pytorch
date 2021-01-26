@@ -913,6 +913,22 @@ def sample_inputs_svd(op_info, device, dtype, requires_grad=False):
 def sample_inputs_linalg_svd(op_info, device, dtype, requires_grad=False):
     return _sample_inputs_svd(op_info, device, dtype, requires_grad, is_linalg_svd=True)
 
+def sample_inputs_linalg_qr(op_info, device, dtype, requires_grad=False):
+    """
+    This function generates input for torch.linalg.qr
+    The input is generated as the itertools.product of 'batches' and 'ns'.
+    """
+    # TODO: add 0 to 'ns' and (0, ) to 'batches'
+    # Currently tests fail most probably because of triangular_solve
+    # (used in backward) does not work well with empty inputs
+    # might be fixed with https://github.com/pytorch/pytorch/pull/50948
+    batches = [(), (2, ), (1, 1)]
+    ns = [2, 5]
+    out = []
+    for batch, (m, n) in product(batches, product(ns, ns)):
+        a = torch.randn(*batch, m, n, dtype=dtype, device=device, requires_grad=requires_grad)
+        out.append(SampleInput(a))
+    return out
 
 def sample_inputs_flip(op_info, device, dtype, requires_grad):
     tensors = (
@@ -1269,6 +1285,19 @@ op_db: List[OpInfo] = [
                         device_type='cpu',
                         dtypes=[torch.float16, torch.bfloat16]),
            )),
+    OpInfo('linalg.qr',
+           aten_name='linalg_qr',
+           op=torch.linalg.qr,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           # TODO: TypeError: empty_like(): argument 'input' (position 1) must be Tensor, not torch.return_types.linalg_qr
+           supports_tensor_out=False,
+           sample_inputs_func=sample_inputs_linalg_qr,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           skips=(
+               # cuda gradchecks are slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
     OpInfo('linalg.slogdet',
            aten_name='linalg_slogdet',
            op=torch.linalg.slogdet,
@@ -1350,6 +1379,17 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,),
+    OpInfo('qr',
+           op=torch.qr,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           supports_tensor_out=False,
+           sample_inputs_func=sample_inputs_linalg_qr,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           skips=(
+               # cuda gradchecks are slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -2603,15 +2643,6 @@ def method_tests():
          'batched_symmetric_pd', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('logdet', lambda dtype, device: make_nonzero_det(random_fullrank_matrix_distinct_singular_value(S, 3), 1, 0), NO_ARGS,
          'batched_distinct_singular_values', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('qr', (S, S), (False,), 'square_single', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('qr', (S, S - 2), (True,), 'tall_single' , (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('qr', (S - 2, S), (False,), 'wide_single' , (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('qr', (3, S, S), (False,), 'square_batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('qr', (3, S, S - 2), (True,), 'tall_batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('qr', (3, S - 2, S), (True,), 'wide_batched' , (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('qr', (3, 2, S, S), (False,), 'square_many_batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('qr', (3, 2, S, S - 2), (True,), 'tall_many_batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
-        ('qr', (3, 2, S - 2, S), (True,), 'wide_many_batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('lu', (S, S), (True, False), 'square_single_no_info', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('lu', (S, S), (True, True), 'square_single_with_info', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('lu', (3, S, S), (True, False), 'square_batch_no_info', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
