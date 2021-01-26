@@ -610,6 +610,10 @@ def select(g, self, dim, index):
         return g.op("Gather", self, index, axis_i=dim)
 
 
+def square(g, self):
+    return g.op("Mul", self, self)
+
+
 def squeeze(g, self, dim=None):
     if dim is None:
         return g.op("Squeeze", self)
@@ -2327,10 +2331,28 @@ def is_floating_point(g, self):
     return g.op("Constant", value_t=torch.BoolTensor([0]))
 
 
+def __isnot_(g, self, other):
+    if sym_help._is_none(other):
+        if sym_help._is_none(self):
+            return g.op("Constant", value_t=torch.BoolTensor([0]))
+        return g.op("Constant", value_t=torch.BoolTensor([1]))
+    return ne(g, self, other)
+
+
+# exists to refine the type of the Value
+# if x is an optional Tensor, unchecked_cast will cast
+# x to Tensor, so the rest of the graph knows that x is a Tensor
+# this doesn't do anything in runtime and is a noop in ONNX
+def prim_unchecked_cast(g, self):
+    return self
+
+
 def prim_dtype(g, self):
     dtype = sym_help._try_get_scalar_type(self)
+    if dtype is None:
+        dtype = "Float"
     dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
-    return g.op("Constant", value_t=torch.IntTensor([dtype]))
+    return g.op("Constant", value_t=torch.tensor(dtype))
 
 
 # tolist is currently supported only for 1D input tensors.
@@ -2656,13 +2678,8 @@ def meshgrid(g, tensor_list):
 
 
 def remainder(g, input, other):
-    # torch.remainder does not follow regular type promotion logic.
-    # Instead, it is implicitly casting `other` to the same type of `input`.
-    input_scalar_type = input.type().scalarType()
-    if input_scalar_type:
-        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx[input_scalar_type])
     div = g.op("Div", input, other)
-    if sym_help._is_fp(input):
+    if sym_help._is_fp(input) or sym_help._is_fp(other):
         div = g.op("Floor", div)
     quo = g.op("Mul", div, other)
     return g.op("Sub", input, quo)
@@ -2824,3 +2841,21 @@ def as_strided(g, self, sizes, strides, offset=None):
         if offset:
             ind = g.op("Add", ind, g.op("Constant", torch.tensor([offset])))
         return g.op("Gather", self_1d, ind)
+
+
+def __derive_index(g, index, start, step):
+    return g.op("Add", start, g.op("Mul", index, step))
+
+
+# Source code for aten op can be found here: pytorch/torch/csrc/jit/runtime/register_prim_ops.cpp
+# if (step > 0 && lo < hi) {
+#   push(stack, 1 + (hi - 1 - lo) / step);
+# } else if (step < 0 && lo > hi) {
+#   push(stack, 1 + (lo - 1 - hi) / (0 - step));
+# } else {
+#  push(stack, 0);
+# }
+def __range_length(g, lo, hi, step):
+    sub = g.op("Sub", hi, lo)
+    div = g.op("Ceil", true_divide(g, sub, step))
+    return g.op("Cast", div, to_i=sym_help.cast_pytorch_to_onnx['Long'])

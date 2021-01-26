@@ -38,7 +38,7 @@ class Multinomial(Distribution):
         logits (Tensor): event log probabilities
     """
     arg_constraints = {'probs': constraints.simplex,
-                       'logits': constraints.real}
+                       'logits': constraints.real_vector}
     total_count: int
 
     @property
@@ -70,9 +70,9 @@ class Multinomial(Distribution):
     def _new(self, *args, **kwargs):
         return self._categorical._new(*args, **kwargs)
 
-    @constraints.dependent_property
+    @constraints.dependent_property(is_discrete=True, event_dim=1)
     def support(self):
-        return constraints.integer_interval(0, self.total_count)
+        return constraints.multinomial(self.total_count)
 
     @property
     def logits(self):

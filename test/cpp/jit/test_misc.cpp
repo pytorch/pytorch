@@ -504,18 +504,18 @@ TEST(SchemaParserTest, NestedArrays) {
   ASSERT_TRUE(IntType::get()->isSubtypeOf(s.arguments()
                                               .at(0)
                                               .type()
-                                              ->expect<ListType>()
-                                              ->getElementType()
-                                              ->expect<ListType>()
-                                              ->getElementType()));
+                                              ->expectRef<ListType>()
+                                              .getElementType()
+                                              ->expectRef<ListType>()
+                                              .getElementType()));
   auto s2 = parseSchema("at::what(int[][] foo) -> ()");
   ASSERT_TRUE(IntType::get()->isSubtypeOf(s2.arguments()
                                               .at(0)
                                               .type()
-                                              ->expect<ListType>()
-                                              ->getElementType()
-                                              ->expect<ListType>()
-                                              ->getElementType()));
+                                              ->expectRef<ListType>()
+                                              .getElementType()
+                                              ->expectRef<ListType>()
+                                              .getElementType()));
 }
 
 TEST(SchemaParserTest, NamedReturns) {
@@ -531,7 +531,7 @@ TEST(SchemaParserTest, Futures) {
   // futures
   auto s4 = parseSchema("at::what(Future(int) foo) -> ()");
   ASSERT_TRUE(IntType::get()->isSubtypeOf(
-      s4.arguments().at(0).type()->expect<FutureType>()->getElementType()));
+      s4.arguments().at(0).type()->expectRef<FutureType>().getElementType()));
 }
 
 TEST(SchemaParserTest, AnnotatedAliasSets) {
@@ -1751,7 +1751,7 @@ TEST(InsertAndEliminateRedundantGuardsTest, Basic) {
   });
   ASSERT_NE(guard, nodes.end());
   ASSERT_EQ(
-      guard->input()->type()->expect<TensorType>()->sizes().size(),
+      guard->input()->type()->expectRef<TensorType>().sizes().size(),
       c10::nullopt);
   checkShape(*guard, {2, 3}, false);
   auto is_guard = [](Node* n) { return n->kind() == prim::Guard; };

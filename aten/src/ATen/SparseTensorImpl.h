@@ -47,7 +47,6 @@ public:
   void set_stride(int64_t dim, int64_t new_stride) override;
   void set_storage_offset(int64_t storage_offset) override;
 
-  int64_t dim() const override;
   bool has_storage() const override;
   const Storage& storage() const override;
   int64_t storage_offset() const override;

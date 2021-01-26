@@ -78,7 +78,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       return static_cast<int64_t>(stream->cdata);
     }
     case TypeKind::ListType: {
-      const auto& elem_type = type->expect<ListType>()->getElementType();
+      const auto& elem_type = type->expectRef<ListType>().getElementType();
       switch (elem_type->kind()) {
         // allows single int/float to be broadcasted to a fixed size list
         case TypeKind::IntType:
@@ -127,7 +127,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         // return an IValue() to denote a NoneType
         return {};
       }
-      return toIValue(obj, type->expect<OptionalType>()->getElementType());
+      return toIValue(obj, type->expectRef<OptionalType>().getElementType());
     }
     case TypeKind::ClassType: {
       auto classType = type->expect<ClassType>();
@@ -157,8 +157,18 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
               attrName));
         }
 
-        const auto& contained = py::getattr(obj, attrName.c_str());
-        userObj->setSlot(slot, toIValue(contained, attrType));
+        try {
+          const auto& contained = py::getattr(obj, attrName.c_str());
+          userObj->setSlot(slot, toIValue(contained, attrType));
+        } catch (std::exception& e) {
+          throw py::cast_error(c10::str(
+              "Could not cast attribute '",
+              attrName,
+              "' to type ",
+              attrType->repr_str(),
+              ": ",
+              e.what()));
+        }
       }
       return userObj;
     }
@@ -253,6 +263,8 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::AnyClassType:
     case TypeKind::AnyEnumType:
       break;
+    case TypeKind::ComplexDoubleType:
+      AT_ASSERT(false);
     case TypeKind::EnumType:
       EnumTypePtr enum_type = type->expect<EnumType>();
       py::object py_obj = py::reinterpret_borrow<py::object>(obj);
