@@ -169,7 +169,7 @@ endif()
 if(BUILD_SPLIT_CUDA)
   # Splitting the source files that'll be in torch_cuda between torch_cuda_cu and torch_cuda_cpp
   foreach(tmp ${Caffe2_GPU_SRCS})
-    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*(CUDASolver|Register.*CUDA|THC|Legacy|CUDAHooks|cudnn/|detail/|TensorShapeCUDA).*\\.cpp)")
+    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*(Register.*CUDA|Legacy|THC|CUDAHooks|detail/|TensorShapeCUDA).*\\.cpp)" AND NOT "${tmp}" MATCHES "(.*THC((CachingHost)?Allocator|General).*\\.cpp)")
       # Currently, torch_cuda_cu will have all the .cu files in aten, as well as some others that depend on those files
       list(APPEND Caffe2_GPU_SRCS_CU ${tmp})
     else()
@@ -781,7 +781,9 @@ elseif(USE_CUDA)
     torch_compile_options(torch_cuda_cpp)  # see cmake/public/utils.cmake
     torch_compile_options(torch_cuda_cu)  # see cmake/public/utils.cmake
     target_compile_definitions(torch_cuda_cpp PRIVATE BUILD_SPLIT_CUDA)
+    target_compile_definitions(torch_cuda_cpp PRIVATE USE_CUDA)
     target_compile_definitions(torch_cuda_cu PRIVATE BUILD_SPLIT_CUDA)
+    target_compile_definitions(torch_cuda_cu PRIVATE USE_CUDA)
   else()
     torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
     target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
@@ -797,7 +799,7 @@ endif()
 
 if(USE_CUDA OR USE_ROCM)
   if(BUILD_SPLIT_CUDA)
-    set(TORCHLIB_FLAVOR torch_cuda_cu) # chose torch_cuda_cu here since JIT is in torch_cuda_cu
+    set(TORCHLIB_FLAVOR torch_cuda_cu) # chose torch_cuda_cu here since JIT is in torch_cuda_cpp
   elseif(USE_CUDA)
     set(TORCHLIB_FLAVOR torch_cuda)
   elseif(USE_ROCM)

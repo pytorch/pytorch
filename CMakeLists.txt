@@ -257,11 +257,6 @@ option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 option(USE_DEPLOY "Enable torch::deploy embedded python interpreter" OFF)
 
-if($ENV{BUILD_SPLIT_CUDA})
-  # I'm pretty sure there's already a way to do this but I tried adding to the list in cmake.py and it didn't work.
-  set(BUILD_SPLIT_CUDA ON CACHE BOOL "" FORCE)
-endif()
-
 # Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
 # On Windows platform, if user does not install libuv in build conda env and
 # does not set libuv_ROOT environment variable. Set USE_DISTRIBUTED to OFF.
