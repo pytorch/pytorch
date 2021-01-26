@@ -204,13 +204,12 @@ class TestCommon(JitCommonTestCase):
             aliases = []
             for a_op in op.aliases:
                 aliases.append(a_op.op)
-                if a_op.method_variant is not None:
-                    aliases.append(a_op.method_variant)
-                if a_op.inplace_variant is not None:
-                    aliases.append(a_op.inplace_variant)
-                    inplace_ops.append(a_op.inplace_variant)
+                aliases.append(a_op.method_variant)
+                aliases.append(a_op.inplace_variant)
+                inplace_ops.append(a_op.inplace_variant)
             aliases = tuple(aliases)
 
+            inplace_ops = tuple(v for v in inplace_ops if v is not None)
             variants = (v for v in (method, inplace) + aliases if v is not None)
             # Computes expected forward
 
@@ -363,7 +362,7 @@ class TestCommon(JitCommonTestCase):
             _test(a_op)
 
     @ops([op for op in op_db if op.aliases])
-    def test_aliases_jit_name_remapping(self, device, dtype, op):
+    def test_jit_alias_remapping(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
@@ -371,24 +370,85 @@ class TestCommon(JitCommonTestCase):
         # NOTE: only tests on first sample
         sample = samples[0]
 
+        # Prepare data for test scripting
+        args = [f"t{i}" for i in range(len(sample.input))] + \
+               [f"s{i}" for i in range(len(sample.args))]
+        args_annot_kw = args + [f"{k}: {type(v).__name__} = {v}" for k, v in sample.kwargs.items()]
+        args_kw = args + [f"{k}={v}" for k, v in sample.kwargs.items()]
+
+        # Prepare data for test tracing
         sample_args_kwargs = ()
         if len(sample.args) > 0:
             sample_args_kwargs += (sample.args, )
         if len(sample.kwargs) > 0:
             sample_args_kwargs += (sample.kwargs, )
 
-        for a_op in op.aliases:
+        original_name = op.name
+        original_name_inplace = original_name + "_"
+        expected_dtype = op(*sample.input, *sample.args, **sample.kwargs).dtype
 
-            def _fn(*sample_args, **sample_kwargs):                
-                return a_op(*sample_args, **sample_kwargs)
+        for a_op in op.aliases:  
+            inplace = a_op.inplace_variant
+            method_or_inplace = [a_op.inplace_variant, a_op.method_variant]            
+            variants = (v for v in (a_op.op, a_op.method_variant, a_op.inplace_variant) if v is not None)
 
-            inp = (*(clone_input_helper(input) for input in sample.input), ) + sample_args_kwargs
-            traced = torch.jit.trace(_fn, *inp)
-            inp = (*(clone_input_helper(input) for input in sample.input), ) + sample_args_kwargs
-            traced(*inp)
-            inp = (*(clone_input_helper(input) for input in sample.input), ) + sample_args_kwargs
-            graph = traced.graph_for(*inp)
-            FileCheck().check(op.name).check_not(a_op.name).run(graph)
+            # Test scripting:
+            for variant in variants:
+                variant_name = variant.__name__
+                op_name = original_name_inplace if variant is inplace else original_name
+
+                if variant in method_or_inplace:
+                    fn_template = '''
+                    def _fn(t0{c}{args_annot_kw}):
+                        return t0.{alias_name}({args_kw})
+                    '''
+                    # remove the first input tensor
+                    script = fn_template.format(
+                        c=", " if len(args_kw[1:]) > 1 else "",
+                        args_annot_kw=", ".join(args_annot_kw[1:]),
+                        args_kw=", ".join(args_kw[1:]),
+                        alias_name=variant_name,
+                    )
+                else:
+                    fn_template = '''
+                        def _fn({args_annot_kw}):
+                            return variant({args_kw})
+                    '''
+                    script = fn_template.format(
+                        args_annot_kw=", ".join(args_annot_kw),
+                        args_kw=", ".join(args_kw),
+                    )
+                scripted = torch.jit.CompilationUnit(script)._fn
+
+                if (variant is inplace and not torch.can_cast(expected_dtype, dtype)):
+                    try:
+                        inp = (clone_input_helper(input) for input in sample.input)
+                        scripted(*inp, *sample.args, **sample.kwargs)
+                    except Exception as e:
+                        continue
+                    self.fail("Inplace operation on integer tensor that should be promoted to float didn't fail!")
+
+                inp = (clone_input_helper(input) for input in sample.input)
+                scripted(*inp, *sample.args, **sample.kwargs)
+                inp = (clone_input_helper(input) for input in sample.input)
+                graph = scripted.graph_for(*inp, *sample.args, **sample.kwargs)
+                FileCheck().check(op_name).check_not(variant_name).run(graph)
+
+            # Test tracing:
+            for variant in variants:
+                variant_name = variant.__name__
+                op_name = original_name_inplace if variant is inplace else original_name
+
+                def _fn(*sample_args, **sample_kwargs):
+                    return variant(*sample_args, **sample_kwargs)
+
+                inp = (*(clone_input_helper(input) for input in sample.input), ) + sample_args_kwargs
+                traced = torch.jit.trace(_fn, *inp)
+                inp = (*(clone_input_helper(input) for input in sample.input), ) + sample_args_kwargs
+                traced(*inp)
+                inp = (*(clone_input_helper(input) for input in sample.input), ) + sample_args_kwargs
+                graph = traced.graph_for(*inp)
+                FileCheck().check(op_name).check_not(variant_name).run(graph)
 
 
 instantiate_device_type_tests(TestOpInfo, globals())
