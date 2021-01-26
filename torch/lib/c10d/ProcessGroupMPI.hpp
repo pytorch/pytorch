@@ -108,6 +108,10 @@ class ProcessGroupMPI : public ProcessGroup {
   // Abort the MPI program, needs to be called when exception is detected
   void abort();
 
+  const std::string getBackendName() const {
+      return MPI_BACKEND_NAME;
+  }
+
   c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& data,
       const BroadcastOptions& opts = BroadcastOptions()) override;

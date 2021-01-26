@@ -319,6 +319,7 @@ struct DDPLoggingData {
   int bucket_cap_mb;
   bool find_unused_parameters;
   bool gradient_as_bucket_view;
+  std::string backend_name;
 };
 
 namespace detail {

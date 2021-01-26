@@ -42,6 +42,12 @@ enum class OpType : std::uint8_t {
   UNKNOWN = 100,
 };
 
+const std::string GLOO_BACKEND_NAME = "gloo";
+const std::string NCCL_BACKEND_NAME = "nccl";
+const std::string MPI_BACKEND_NAME = "mpi";
+const std::string ROUND_ROBIN_BACKEND_NAME = "round_robin";
+const std::string UNDEFINED = "undefined";
+
 // Converts OpType to human readable string.
 std::string opTypeToString(OpType opType);
 
@@ -168,6 +174,10 @@ class ProcessGroup : public torch::CustomClassHolder {
 
   int getSize() const {
     return size_;
+  }
+
+  virtual const std::string getBackendName() const {
+    return UNDEFINED;
   }
 
   virtual c10::intrusive_ptr<ProcessGroup::Work> broadcast(

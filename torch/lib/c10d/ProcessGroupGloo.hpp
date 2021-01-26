@@ -133,6 +133,10 @@ class ProcessGroupGloo : public ProcessGroup {
     int threads;
   };
 
+  const std::string getBackendName() const {
+      return GLOO_BACKEND_NAME;
+  }
+
   // Helper functions to create a new device object.
   // They are static functions on this class to keep them logically
   // separate from the rest of the code base (e.g. torch/csrc/distributed).

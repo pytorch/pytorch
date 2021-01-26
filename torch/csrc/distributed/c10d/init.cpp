@@ -1191,7 +1191,8 @@ Arguments:
       .def_readwrite("broadcast_buffers", &c10::DDPLoggingData::broadcast_buffers)
       .def_readwrite("bucket_cap_mb", &c10::DDPLoggingData::bucket_cap_mb)
       .def_readwrite("find_unused_parameters", &c10::DDPLoggingData::find_unused_parameters)
-      .def_readwrite("gradient_as_bucket_view", &c10::DDPLoggingData::gradient_as_bucket_view);
+      .def_readwrite("gradient_as_bucket_view", &c10::DDPLoggingData::gradient_as_bucket_view)
+      .def_readwrite("backend_name", &c10::DDPLoggingData::backend_name);
 
   module.def(
       "_compute_bucket_assignment_by_size",
