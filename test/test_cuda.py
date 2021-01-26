@@ -3513,10 +3513,10 @@ class TestCudaComm(TestCase):
         out2 = TestNamedTupleInput_0(a,b)
 
         outputs = [out1, out2]
-        out = gather(outputs, 'cpu') # test on cpu
+        out = scatter_gather.gather(outputs, 'cpu') # test on cpu
 
         for i, x in enumerate(out):
-            self.assertTrue(isinstance(x, type(out4[-1]))) # x must be a tensor
+            self.assertTrue(isinstance(x, type(out2[-1]))) # x must be a tensor
             cat = torch.cat((outputs[0][i], outputs[1][i]))
             self.assertTrue(torch.equal(x.to(0), cat.to(0)))
 
@@ -3533,10 +3533,10 @@ class TestCudaComm(TestCase):
         out2 = TestNamedTupleInput_1(a,b)
 
         outputs = [out1, out2]
-        out = gather(outputs, 0) # test on gpu
+        out = scatter_gather.gather(outputs, 0) # test on gpu
 
         for i, x in enumerate(out):
-            self.assertTrue(isinstance(x, type(out4[-1]))) # x must be a tensor
+            self.assertTrue(isinstance(x, type(out2[-1]))) # x must be a tensor
             cat = torch.cat((outputs[0][i], outputs[1][i]))
             self.assertTrue(torch.equal(x, cat.to(0)))
             
