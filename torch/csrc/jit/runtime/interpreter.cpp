@@ -790,9 +790,6 @@ struct CodeImpl {
     insertInstruction(PROFILE_OP, profile_function_table_.size());
     if (node->cast<ProfileOp>()) {
       profile_function_table_.push_back(node->cast<ProfileOp>()->getCallback());
-    } else if (node->cast<ProfileOptionalOp>()) {
-      profile_function_table_.push_back(
-          node->cast<ProfileOptionalOp>()->getCallback());
     } else if (node->cast<ProfileIValueOp>()) {
       profile_function_table_.push_back(
           node->cast<ProfileIValueOp>()->getCallback());
@@ -847,7 +844,7 @@ struct CodeImpl {
 
   void emitTupleConstruct(Node* node) {
     bool named =
-        node->output()->type()->expect<TupleType>()->name().has_value();
+        node->output()->type()->expectRef<TupleType>().name().has_value();
     if (named) {
       emitContainerConstruct(NAMED_TUPLE_CONSTRUCT, node);
     } else {
@@ -938,7 +935,7 @@ struct CodeImpl {
         break;
       case prim::CallFunction:
         emitCall(
-            node->inputs().at(0)->type()->expect<FunctionType>()->function(),
+            node->inputs().at(0)->type()->expectRef<FunctionType>().function(),
             node->inputs().slice(1));
         break;
       case prim::CallMethod:
@@ -955,7 +952,6 @@ struct CodeImpl {
         emitBailOut(node);
         break;
       case prim::profile_ivalue:
-      case prim::profile_optional:
       case prim::profile:
         emitProfile(node);
         break;
