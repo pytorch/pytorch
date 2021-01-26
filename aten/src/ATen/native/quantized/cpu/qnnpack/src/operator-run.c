@@ -148,7 +148,6 @@ static void compute_q8gemm_prepack_a_sparse(
   const size_t mr_packed_block_start =
     ((mr_block_start >> context->log2_mr) * context->a_packed_stride);
 
-  size_t output_channel_index = nr_block_start;
   context->prepack_ukernel(
       mr_block_size,
       context->k,
