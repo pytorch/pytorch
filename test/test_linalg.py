@@ -247,7 +247,6 @@ class TestLinalg(TestCase):
 
     # NOTE: old_cholesky* tests were moved here from test_torch.py and test_autograd.py
     @slowTest
-    @skipCUDAIf(True, "See issue #26789.")
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
@@ -1378,7 +1377,7 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
-    @dtypes(torch.double, torch.float)
+    @dtypes(*floating_and_complex_types())
     def test_eig_basic(self, device, dtype):
         a = torch.tensor([[1.96, 0.00, 0.00, 0.00, 0.00],
                           [-6.49, 3.80, 0.00, 0.00, 0.00],
@@ -1399,11 +1398,25 @@ class TestLinalg(TestCase):
         #
         # compare with numpy
         np_e, np_v = np.linalg.eig(a.cpu().numpy())
-        # np_e.shape == (n, 2), where each column contain the real and
-        # imaginary parts of the result
-        self.assertEqual(ee[:, 0], np_e)  # real part
-        self.assertEqual(ee[:, 1], torch.zeros(ee.shape[0], dtype=dtype))  # imaginary part
+        if dtype.is_complex:
+            self.assertEqual(ee, np_e)
+        else:
+            # np_e.shape == (n, 2), where each column contain the real and
+            # imaginary parts of the result
+            self.assertEqual(ee[:, 0], np_e)  # real part
+            self.assertEqual(ee[:, 1], torch.zeros(ee.shape[0], dtype=dtype))  # imaginary part
         self.assertEqual(vv, np_v)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.complex64, torch.complex128)
+    def test_eig_backward_complex(self, device, dtype):
+        # torch.eig's backward is not supported yet for complex types. We
+        # should kill this test once it's implemented.
+        a = torch.tensor([[1., 2], [3, 4]], device=device, dtype=dtype, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "eig does not support automatic differentiation for outputs with complex dtype"):
+            e, v = torch.eig(a, True)
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
@@ -1873,17 +1886,18 @@ class TestLinalg(TestCase):
         actual_rank, size, batches = 2, (17, 4), ()
         run_subtest(actual_rank, size, batches, device, jitted)
 
-    @onlyCPU
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.cfloat)
     def test_svd_complex(self, device, dtype):
+        # this test verifies that torch.svd really returns V and not V.conj()
+        # see: https://github.com/pytorch/pytorch/issues/45821
         t = torch.randn((10, 10), dtype=dtype, device=device)
         U, S, V = torch.svd(t, some=False)
-        # note: from the math point of view, it is weird that we need to use
-        # V.T instead of V.T.conj(): torch.svd has a buggy behavior for
-        # complex numbers and it's deprecated. You should use torch.linalg.svd
-        # instead.
-        t2 = U @ torch.diag(S).type(dtype) @ V.T
+        # verify that t ≈ t2
+        # t2 = U @ diag(S) @ Vᴴ
+        # Vᴴ is the conjugate transpose of V
+        t2 = U @ torch.diag(S).type(dtype) @ V.conj().T
         self.assertEqual(t, t2)
 
     def _test_svd_helper(self, shape, some, col_maj, device, dtype):
@@ -2066,7 +2080,6 @@ class TestLinalg(TestCase):
             self.assertEqual(x, x_exp)
 
     @slowTest
-    @skipCUDAIf(True, "See https://github.com/pytorch/pytorch/issues/48996")
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
