@@ -432,6 +432,9 @@ void TensorPipeAgent::startImpl() {
     }
     std::unique_ptr<TransportRegistration> reg =
         TensorPipeTransportRegistry()->Create(key);
+    if (!reg->transport->isViable()) {
+      continue;
+    }
     if (priority == -1) {
       priority = reg->priority;
     }
@@ -465,6 +468,9 @@ void TensorPipeAgent::startImpl() {
       // std::unique_ptr<CudaChannelRegistration>, depending on the type of the
       // registry.
       auto reg = registry->Create(key);
+      if (!reg->channel->isViable()) {
+        continue;
+      }
       if (priority == -1) {
         priority = reg->priority;
       }
