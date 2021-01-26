@@ -107,10 +107,10 @@ class TestMkldnn(TestCase):
         # these numbers are just empirical results that seem to work.
         self.assertWarnsRegex(UserWarning,
                               'double precision floating point',
-                              lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2))
+                              lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2, check_batched_grad=False))
         self.assertWarnsRegex(UserWarning,
                               'double precision floating point',
-                              lambda: gradgradcheck(func, [root], atol=4e-2, rtol=1e-2))
+                              lambda: gradgradcheck(func, [root], atol=4e-2, rtol=1e-2, check_batched_grad=False))
 
     def test_autograd_from_mkldnn(self):
         # MKLDNN only supports float32
@@ -123,7 +123,7 @@ class TestMkldnn(TestCase):
         # these numbers are just empirical results that seem to work.
         self.assertWarnsRegex(UserWarning,
                               'double precision floating point',
-                              lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2))
+                              lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2, check_batched_grad=False))
 
     def test_detach(self):
         root = torch.randn(4, 5, dtype=torch.float32).to_mkldnn().requires_grad_()
