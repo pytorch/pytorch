@@ -538,6 +538,7 @@ struct pytorch_q8gemm_sparse_parameters {
   uint8_t nr;
   uint8_t kr;
   uint8_t log2_mr;
+  uint8_t log2_row_block_size;
   uint32_t row_block_size;
   uint32_t col_block_size;
 };
@@ -603,7 +604,8 @@ struct pytorch_x8zip_parameters {
 
 struct pytorch_qnnp_parameters {
   struct pytorch_q8conv_parameters q8conv;
-  struct pytorch_q8gemm_sparse_parameters q8gemm_sparse;
+  struct pytorch_q8gemm_sparse_parameters q8gemm_sparse_c1x4;
+  struct pytorch_q8gemm_sparse_parameters q8gemm_sparse_c8x1;
   struct pytorch_q8conv_xzp_parameters q8conv_xzp;
   struct pytorch_q8dwconv_up_parameters q8dw9;
   struct pytorch_q8dwconv_mp_parameters q8dw25;
