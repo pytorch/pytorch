@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/fold_if_node.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
@@ -376,19 +377,54 @@ bool IsBlockReturnTypeSame(Node* n) {
   return true;
 }
 
-void ComputeConstant(Node* n) {
+c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
+  std::vector<at::Tensor> inputTensorValues;
+  std::cout << "node = " << n->output()->debugName() << ", input size =" << n->inputs().size() << std::endl;
+  for (auto i = 0; i < n->inputs().size(); i++) {
+    if (TensorTypePtr input_type = n->input(i)->type()->cast<TensorType>()) {
+      if (!ConstantValueMap::HasValue(n->input(i)->debugName())) {
+        return c10::nullopt;
+      }
+      auto tensor_value = ConstantValueMap::GetValue(n->input(i)->debugName());
+      inputTensorValues.emplace_back(tensor_value);
+    }
+  }
+  std::cout << "inputTensorValues len = " << inputTensorValues.size() << std::endl;
+  return onnx_constant_fold::runTorchBackendForOnnx(n, inputTensorValues, opset_version);  
+}
+
+
+void ComputeConstant(Node* n, int opset_version) {
+  std::cout << "ComputeConstant for node " << n->output()->debugName() << " of type " << n->kind() << std::endl;
+  if (n->kind() == ::c10::onnx::Constant) {
+    std::cout << "constant node: " << n->output()->debugName() << std::endl; 
+    at::Tensor const_val(n->t(attr::value));
+    ConstantValueMap::SetValue(n->output()->debugName(), const_val);
+    return;
+  }
+  if (n->kind() != ::c10::onnx::Shape) {
+    auto const_fold_val =  ComputeConstantFolding(n, opset_version);
+    if (const_fold_val.has_value()) {
+      ConstantValueMap::SetValue(n->output()->debugName(), const_fold_val.value());
+    }
+  }
   switch (n->kind()) {
     case ::c10::onnx::Shape: {
       std::cout << "shape node: " << n->output()->debugName() << std::endl;      
       std::cout << "shape input node: " << n->input()->debugName() << std::endl;
-      if (TensorShapeMap::HasShape(n->input()->debugName())) {
-        auto shape_size = TensorShapeMap::GetShape(n->input()->debugName()).concrete_sizes();
+      if (ConstantValueMap::HasShape(n->input()->debugName())) {
+        auto shape_size = ConstantValueMap::GetShape(n->input()->debugName()).concrete_sizes();
         std::vector<int64_t> shape_value;
         if (shape_size.has_value()) {
           for (const auto& v: shape_size.value()) {
             shape_value.emplace_back(static_cast<int64_t>(v));
           }
-          ConstantTensorMap::SetValue(n->output()->debugName(), shape_value);
+          auto options = c10::TensorOptions().dtype(at::kLong).device(at::kCPU);
+          //at::Tensor f = at::from_blob((void*)shape_value.data(), {(int64_t)shape_value.size()}, options);
+          //at::Tensor f_copy = f;
+          auto f = at::from_blob(shape_value.data(), {shape_value.size()}, at::kLong).to(at::kCPU);
+          ConstantValueMap::SetValue(n->output()->debugName(), f);
+          ConstantValueMap::PrintMaps();
         }
       }
       break;
@@ -396,11 +432,16 @@ void ComputeConstant(Node* n) {
     case ::c10::onnx::Reshape: {
       std::cout << "reshape node: " << n->output()->debugName() << std::endl;      
       std::cout << "reshape input node: " << n->input(1)->debugName() << std::endl;
-      if (ConstantTensorMap::HasValue(n->input(1)->debugName())) {
-        auto shape_size = ConstantTensorMap::GetValue(n->input(1)->debugName());
-        auto vary_shape_size = c10::VaryingShape<int64_t>(shape_size);
-        TensorShapeMap::SetShape(n->output()->debugName(), vary_shape_size);
-        n->output()->setType(n->output()->type()->cast<TensorType>()->withSymbolicShapes(::c10::SymbolicShape(shape_size)));
+      if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
+        auto shape_size = ConstantValueMap::GetValue(n->input(1)->debugName());
+        std::vector<int64_t> shape_temp;
+        auto shape_size_a = shape_size.accessor<int64_t, 1>();
+        for (auto i=0; i<shape_size.size(0); i++) {          
+          shape_temp.emplace_back(static_cast<int64_t>(shape_size_a[i]));
+        }
+        auto vary_shape_size = c10::VaryingShape<int64_t>(shape_temp);
+        ConstantValueMap::SetShape(n->output()->debugName(), vary_shape_size);
+        n->output()->setType(n->output()->type()->cast<TensorType>()->withSymbolicShapes(::c10::SymbolicShape(shape_temp)));
       }
       break;
     }
@@ -408,22 +449,39 @@ void ComputeConstant(Node* n) {
       break;
     }
   }
+  std::cout << "after Constant" << std::endl;
+  ConstantValueMap::PrintMaps();
 }
 
-void ProcessMap(Node* n) {
+void ProcessConstantValueMap(Node* n, int opset_version) {
   auto full_check = false;
   if (TensorTypePtr output_type = n->output()->type()->cast<TensorType>()) {
-    std::cout << "process node: " << n->output()->debugName() << std::endl;
+    std::cout << "process node output: " << n->output()->debugName() << std::endl;
     if (output_type->dim().has_value()) {
       size_t rank = static_cast<size_t>(output_type->dim().value());
-      TensorShapeMap::SetDim(n->output()->debugName(), rank);
+      ConstantValueMap::SetRank(n->output()->debugName(), rank);
       auto output_type_size = output_type->sizes();
       if (output_type_size.concrete_sizes().has_value()) {
-        TensorShapeMap::SetShape(n->output()->debugName(), output_type_size);
+        ConstantValueMap::SetShape(n->output()->debugName(), output_type_size);
       }
     }
   }
-  ComputeConstant(n);
+  for (auto i = 0; i < n->inputs().size(); i++) {
+    if (TensorTypePtr input_type = n->input(i)->type()->cast<TensorType>()) {
+      std::cout << "process node input: " << n->input(i)->debugName() << std::endl;
+      if (input_type->dim().has_value()) {
+        size_t rank = static_cast<size_t>(input_type->dim().value());
+        ConstantValueMap::SetRank(n->input(i)->debugName(), rank);
+        auto input_type_size = input_type->sizes();
+        if (input_type_size.concrete_sizes().has_value()) {
+          ConstantValueMap::SetShape(n->input(i)->debugName(), input_type_size);
+        }
+      }
+    }
+  }
+  ComputeConstant(n, opset_version);
+  std::cout << "*** Finish ComputeConstant" << std::endl;
+  ConstantValueMap::PrintMaps();
 }
 
 // Any additional post process that are specific to individual node kind.
@@ -600,7 +658,7 @@ void ONNXShapeTypeInference(
   }
 
   SpecialPostProcess(n);
-  ProcessMap(n);
+  ProcessConstantValueMap(n, opset_version);
   GRAPH_DEBUG(
       "Torch graph after shape inference:", n->owningGraph()->toString());
 }
@@ -676,6 +734,7 @@ void ONNXShapeTypeInference(
     std::shared_ptr<Graph>& graph,
     const ParamMap& params_dict,
     int opset_version) {
+  ConstantValueMap::ClearMaps();
   ONNXShapeTypeInference(graph->block(), params_dict, opset_version);
 }
 

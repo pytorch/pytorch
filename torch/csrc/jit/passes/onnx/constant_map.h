@@ -7,38 +7,32 @@
 namespace torch {
 namespace jit {
 
-class TORCH_API TensorShapeMap{
+class TORCH_API ConstantValueMap {
 public:
-  static TensorShapeMap& getInstance();
-  static void SetDim(std::string dimName, size_t dimValue);
-  static void SetShape(std::string dimName, c10::VaryingShape<int64_t>& shapeValue);
-  static bool HasShape(std::string dimName);
-  static c10::VaryingShape<int64_t> GetShape(std::string dimName);
+  static ConstantValueMap& getInstance();
+
+  static void SetRank(std::string tensorName, size_t rankValue);
+
+  static void SetShape(std::string tensorName, c10::VaryingShape<int64_t>& shapeValue);
+  static bool HasShape(std::string tensorName);
+  static c10::VaryingShape<int64_t> GetShape(std::string tensorName);
+
+  static void SetValue(std::string tensorName, at::Tensor value);
+  static bool HasValue(std::string tensorName);
+  static at::Tensor GetValue(std::string tensorName);
+
   static void PrintMaps();
-  ~TensorShapeMap()= default;
+  static void ClearMaps();
+  ~ConstantValueMap()= default;
 private:
-  TensorShapeMap() {};
-  TensorShapeMap& operator=(const TensorShapeMap&)= delete;
+  ConstantValueMap() {};
+  ConstantValueMap& operator=(const ConstantValueMap&)= delete;
 
-  static TensorShapeMap* instance;
-  std::unordered_map<std::string, size_t> dimMap;
-  std::unordered_map<std::string, c10::VaryingShape<int64_t>> shapeMap;  
-};
+  static ConstantValueMap* instance;
 
-class ConstantTensorMap{
-public:
-  static ConstantTensorMap& getInstance();  
-  static void SetValue(std::string dimName, std::vector<int64_t>& value);
-  static bool HasValue(std::string dimName);
-  static std::vector<int64_t> GetValue(std::string dimName);
-  static void PrintMaps();
-  ~ConstantTensorMap()= default;
-private:
-  ConstantTensorMap() {};  
-  ConstantTensorMap& operator=(const ConstantTensorMap&)= delete;
-
-  static ConstantTensorMap* instance;
-  std::unordered_map<std::string, std::vector<int64_t>> int64Map;
+  std::unordered_map<std::string, size_t> rankMap;
+  std::unordered_map<std::string, c10::VaryingShape<int64_t>> shapeMap;
+  std::unordered_map<std::string, at::Tensor> tensorValueMap;
 };
 
 } // namespace jit

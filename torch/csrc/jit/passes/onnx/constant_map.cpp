@@ -13,95 +13,77 @@ namespace onnx {
 using namespace ::c10::onnx;
 }
 
-std::mutex tensorShapeMutex;
-std::mutex constantTensorMutex;
+std::mutex constantValueMutex;
 
-class TensorShapeMap;
-class ConstantTensorMap;
+class ConstantValueMap;
 
-TensorShapeMap* TensorShapeMap::instance= nullptr;
-ConstantTensorMap* ConstantTensorMap::instance= nullptr;
+ConstantValueMap* ConstantValueMap::instance= nullptr;
 
-TensorShapeMap& TensorShapeMap::getInstance(){
-  std::lock_guard<std::mutex> myLock(tensorShapeMutex);
+ConstantValueMap& ConstantValueMap::getInstance(){
+  std::lock_guard<std::mutex> myLock(constantValueMutex);
   if ( !instance ){
-      instance= new TensorShapeMap();
+      instance= new ConstantValueMap();
   }
   // volatile int dummy{};
   return *instance;
 }
 
-void TensorShapeMap::SetDim(std::string dimName, size_t dimValue) {
-  TensorShapeMap::getInstance().dimMap.emplace(dimName, dimValue);
+void ConstantValueMap::SetRank(std::string tensorName, size_t rankValue) {
+  ConstantValueMap::getInstance().rankMap.emplace(tensorName, rankValue);
 }
 
-void TensorShapeMap::SetShape(std::string dimName, c10::VaryingShape<int64_t>& shapeValue) {
-  TensorShapeMap::getInstance().shapeMap.emplace(dimName, shapeValue);
+void ConstantValueMap::SetShape(std::string tensorName, c10::VaryingShape<int64_t>& shapeValue) {
+  ConstantValueMap::getInstance().shapeMap.emplace(tensorName, shapeValue);
 }
 
-bool TensorShapeMap::HasShape(std::string dimName) {
-  return TensorShapeMap::getInstance().shapeMap.find(dimName) != 
-    TensorShapeMap::getInstance().shapeMap.end();
+bool ConstantValueMap::HasShape(std::string tensorName) {
+  return ConstantValueMap::getInstance().shapeMap.find(tensorName) != 
+    ConstantValueMap::getInstance().shapeMap.end();
 }
 
-c10::VaryingShape<int64_t> TensorShapeMap::GetShape(std::string dimName) {
-  return TensorShapeMap::getInstance().shapeMap[dimName];
+c10::VaryingShape<int64_t> ConstantValueMap::GetShape(std::string tensorName) {
+  return ConstantValueMap::getInstance().shapeMap[tensorName];
 }
 
-void TensorShapeMap::PrintMaps() {
-  std::cout << "Print Dim Maps:" << std::endl;
-  for (const auto& x: TensorShapeMap::getInstance().dimMap) {
-    std::cout << x.first << ": " << x.second << std::endl;
-  }
-  std::cout << "Print Shape Maps:" << std::endl;
-  for (const auto& x: TensorShapeMap::getInstance().shapeMap) {
-    auto sizes = x.second.concrete_sizes();
+void ConstantValueMap::SetValue(std::string tensorName, at::Tensor value) {
+  ConstantValueMap::getInstance().tensorValueMap.emplace(tensorName, value);
+}
+
+bool ConstantValueMap::HasValue(std::string tensorName) {
+  return ConstantValueMap::getInstance().tensorValueMap.find(tensorName) != 
+    ConstantValueMap::getInstance().tensorValueMap.end();
+}
+
+at::Tensor ConstantValueMap::GetValue(std::string tensorName) {
+  return ConstantValueMap::getInstance().tensorValueMap[tensorName];
+}
+
+void ConstantValueMap::ClearMaps() {
+  ConstantValueMap::getInstance().rankMap.clear();
+  ConstantValueMap::getInstance().shapeMap.clear();
+  ConstantValueMap::getInstance().tensorValueMap.clear();
+}
+
+void ConstantValueMap::PrintMaps() {
+  std::cout << "Print rank/shape Maps:" << std::endl;
+  for (const auto& x: ConstantValueMap::getInstance().rankMap) {
     std::stringstream ss;
-    if (sizes.has_value()) {
-      for (const auto& sz : sizes.value()) {
-        ss << sz << ", ";
-      }
-    } else if (TensorShapeMap::getInstance().dimMap.find(x.first) != 
-               TensorShapeMap::getInstance().dimMap.end()) {
-      auto dim = TensorShapeMap::getInstance().dimMap[x.first];
-      for (auto i = 0; i < dim ; ++i) {
-        ss << "*, ";
+    if (ConstantValueMap::getInstance().shapeMap.find(x.first) != 
+        ConstantValueMap::getInstance().shapeMap.end()) {
+      auto shape = ConstantValueMap::getInstance().shapeMap[x.first].concrete_sizes();
+      if (shape.has_value()) {
+        for (const auto& sz : shape.value()) {
+          ss << sz << ", ";
+        }
       }
     }
-    std::cout << x.first << ": " << ss.str() << std::endl;
+    ss << " (rank = " << x.second << ")";
+    std::cout << "node " << x.first << ": " << ss.str() << std::endl;
   }
-}
-
-ConstantTensorMap& ConstantTensorMap::getInstance(){
-  std::lock_guard<std::mutex> myLock(constantTensorMutex);
-  if ( !instance ){
-      instance= new ConstantTensorMap();
-  }
-  // volatile int dummy{};
-  return *instance;
-}
-
-void ConstantTensorMap::SetValue(std::string dimName, std::vector<int64_t>& value) {
-  ConstantTensorMap::getInstance().int64Map.emplace(dimName, value);
-}
-
-bool ConstantTensorMap::HasValue(std::string dimName) {
-  return ConstantTensorMap::getInstance().int64Map.find(dimName) != 
-    ConstantTensorMap::getInstance().int64Map.end();
-}
-
-std::vector<int64_t> ConstantTensorMap::GetValue(std::string dimName) {
-  return ConstantTensorMap::getInstance().int64Map[dimName];
-}
-
-void ConstantTensorMap::PrintMaps() {
+  std::cout << std::endl;
   std::cout << "Print Value Maps:" << std::endl;
-  for (const auto& x: ConstantTensorMap::getInstance().int64Map) {
-    std::stringstream ss;
-    for (const auto& sz : x.second) {
-      ss << sz << ", ";
-    }
-    std::cout << x.first << ": " << ss.str() << std::endl;
+  for (const auto& x: ConstantValueMap::getInstance().tensorValueMap) {
+    std::cout << "node " << x.first << ": " << x.second << std::endl;
   }
 }
 
