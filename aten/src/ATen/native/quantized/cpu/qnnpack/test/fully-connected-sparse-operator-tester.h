@@ -17,10 +17,10 @@
 #include <vector>
 #include <memory>
 
+#include <pack_block_sparse.h>
 #include <pytorch_qnnpack.h>
 #include <qnnpack_func.h>
 #include <qnnpack/AlignedAllocator.h>
-#include <qnnpack/pack_block_sparse.h>
 
 namespace {
   void fillBlockSparseWeights(
