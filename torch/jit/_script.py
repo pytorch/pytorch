@@ -273,8 +273,8 @@ if _enabled:
     # which always throws an exception.
 
     class ScriptModule(with_metaclass(ScriptMeta, Module)):  # type: ignore
-        """
-        ``ScriptModule``s wrap a C++ ``torch::jit::Module``. ``ScriptModule``s
+        r"""
+        A wrapper around C++ ``torch::jit::Module``. ``ScriptModule``\s
         contain methods, attributes, parameters, and
         constants. These can be accessed the same as on a normal ``nn.Module``.
         """
@@ -1095,24 +1095,8 @@ def _recursive_compile_class(obj, loc):
     rcb = _jit_internal.createResolutionCallbackForClassMethods(obj)
     _compile_and_register_class(obj, rcb, _qual_name)
 
-
-class CompilationUnit(object):
-    def __init__(self, lang=None, _frames_up=0):
-        self._c = torch._C.CompilationUnit()
-        if lang is not None:
-            self.define(lang, _frames_up=_frames_up + 1)
-
-    def define(self, lang, rcb=None, _frames_up=0):
-        if not rcb:
-            rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
-        self._c.define(lang, rcb)
-
-    def __getattr__(self, attr):
-        r = self._c.find_function(attr)
-        if r is None:
-            raise AttributeError("'CompilationUnit' has no attribute '{}'".format(attr))
-        return r
-
+CompilationUnit = torch._C.CompilationUnit
+set_module(CompilationUnit, "torch.jit")
 
 def _unwrap_optional(x):
     assert x is not None, "Unwrapping null optional"
