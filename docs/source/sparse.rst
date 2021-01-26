@@ -467,6 +467,7 @@ tensors <sparse-coo-docs>`:
 :meth:`~torch.Tensor.resize_as_`
 :meth:`~torch.Tensor.size`
 :meth:`~torch.Tensor.pow`
+:meth:`~torch.Tensor.sqrt`
 :meth:`~torch.Tensor.square`
 :meth:`~torch.Tensor.smm`
 :meth:`~torch.Tensor.sspaddmm`

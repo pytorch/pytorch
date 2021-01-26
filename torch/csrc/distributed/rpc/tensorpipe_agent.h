@@ -220,7 +220,17 @@ class TensorPipeAgent : public RpcAgent {
   static std::string guessUvAddress(
       tensorpipe::transport::uv::Context& uvContext);
 
+  // For testing purposes.
+  size_t timeoutMapSize();
+  size_t numPendingResponses();
+
  private:
+  // Removes the given messageId with the given expirationTime from the
+  // timeoutMap_.
+  void removeFromTimeoutMap(
+      uint64_t messageId,
+      steady_clock_time_point expirationTime);
+
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
   void collectNames();
 
@@ -276,7 +286,7 @@ class TensorPipeAgent : public RpcAgent {
 #ifdef USE_CUDA_NOT_ROCM
   // An RPC-specific CUDAFuture subclass. It overrides the extractDataPtrs
   // function to handle and only handle RPC Messages.
-  struct TORCH_CUDA_API RpcCUDAFuture final : at::cuda::CUDAFuture {
+  struct TORCH_CUDA_CPP_API RpcCUDAFuture final : at::cuda::CUDAFuture {
    public:
     using at::cuda::CUDAFuture::CUDAFuture;
 
@@ -357,12 +367,22 @@ class TensorPipeAgent : public RpcAgent {
   mutable std::mutex mutex_;
   uint64_t nextMessageID_{0};
 
+  // Metadata used for tracking of whether certain RPCs have timed out or not.
+  struct TimeoutMessageMetadata {
+    TimeoutMessageMetadata(
+        uint64_t messageId_,
+        std::shared_ptr<AtomicJitFuture> responseFuture_,
+        std::chrono::milliseconds timeout_)
+        : messageId(messageId_),
+          responseFuture(responseFuture_),
+          timeout(timeout_) {}
+    uint64_t messageId;
+    std::shared_ptr<AtomicJitFuture> responseFuture;
+    std::chrono::milliseconds timeout;
+  };
+
   // Map to store the expiration times for each message.
-  std::map<
-      steady_clock_time_point,
-      std::vector<std::pair<
-          std::shared_ptr<AtomicJitFuture>,
-          std::chrono::milliseconds>>>
+  std::map<steady_clock_time_point, std::vector<TimeoutMessageMetadata>>
       timeoutMap_;
 
   // Thread that will poll the timeoutMap_ for timed out messages and mark them
