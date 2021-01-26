@@ -328,11 +328,17 @@ enum pytorch_qnnp_status qnnpackConv(
   // We need to check if the corresponding values on this
   // invocation is same as cached values.
   // If so we can skip setup step.
-  if (convolution->input != input ||
+
+  bool recalculate_indirection_buffer{true};
+#ifndef __APPLE__
+  recalculate_indirection_buffer =
+      (convolution->input != input ||
       convolution->batch_size != batch_size ||
       convolution->input_height != input_height ||
       convolution->input_width != input_width ||
-      convolution->input_pixel_stride != input_pixel_stride) {
+      convolution->input_pixel_stride != input_pixel_stride);
+#endif
+  if (recalculate_indirection_buffer) {
     pytorch_qnnp_status status = pytorch_qnnp_setup_convolution2d_nhwc_q8(
         convolution,
         batch_size,

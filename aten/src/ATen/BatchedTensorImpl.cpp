@@ -97,7 +97,7 @@ void BatchedTensorImpl::set_storage_offset(int64_t storage_offset) {
 }
 #ifdef DEBUG
 bool BatchedTensorImpl::has_storage() const {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(storage_ == nullptr, "BatchedTensorImpl assumes that storage_ is never set");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!storage_, "BatchedTensorImpl assumes that storage_ is never set");
   return false;
 }
 #endif
