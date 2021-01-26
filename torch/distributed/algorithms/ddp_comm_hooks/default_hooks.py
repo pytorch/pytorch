@@ -2,6 +2,18 @@ import torch
 import torch.distributed as dist
 
 
+def allreduce_fut(
+    process_group: dist.ProcessGroup, tensor: torch.Tensor
+) -> torch.futures.Future:
+    "Averages the input gradient tensor by allreduce and returns a future."
+    fut = dist.all_reduce(tensor, group=process_group, async_op=True).get_future()
+
+    def div_by_group_size(fut):
+        return [fut.value()[0].div_(process_group.size())]
+
+    return fut.then(div_by_group_size)
+
+
 def allreduce_hook(
     process_group: dist.ProcessGroup, bucket: dist._GradBucket
 ) -> torch.futures.Future:
@@ -18,15 +30,8 @@ def allreduce_hook(
         >>> ddp_model.register_comm_hook(process_group, allreduce_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
-    world_size = group_to_use.size()
 
-    tensor = bucket.get_tensors()[0]
-    fut = dist.all_reduce(tensor, group=group_to_use, async_op=True).get_future()
-
-    def then_callback(fut):
-        return [fut.value()[0].div_(world_size)]
-
-    return fut.then(then_callback)
+    return allreduce_fut(group_to_use, bucket.get_tensors()[0])
 
 
 def fp16_compress_hook(
