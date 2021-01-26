@@ -159,11 +159,6 @@ License: BSD-3-Clause
 Files: third_party/kineto
   For details, see third_party/kineto/LICENSE
 
-Name: libkineto
-License: BSD-3-Clause
-Files: third_party/kineto/libkineto
-  For details, see third_party/kineto/libkineto/LICENSE
-
 Name: libnop
 License: Apache-2.0
 Files: third_party/tensorpipe/third_party/libnop
