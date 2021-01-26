@@ -37,6 +37,14 @@ def conv1x1(in_planes, out_planes, stride=1):
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
 
 
+def get_cuda_if_available(i):
+    assert i >= 0
+    if torch.cuda.is_available():
+        return f"cuda:{min(i, torch.cuda.device_count() - 1)}"
+    else:
+        return "cpu"
+
+
 class Bottleneck(nn.Module):
     # Bottleneck in torchvision places the stride for downsampling at 3x3 convolution(self.conv2)
     # while original implementation places the stride at the first 1x1 convolution(self.conv1)
@@ -194,7 +202,7 @@ class DistResNet50(nn.Module):
         self.p1_rref = rpc.remote(
             workers[0],
             ResNetShard1,
-            args=("cuda:0",) + args,
+            args=(get_cuda_if_available(0),) + args,
             kwargs=kwargs
         )
 
@@ -202,7 +210,7 @@ class DistResNet50(nn.Module):
         self.p2_rref = rpc.remote(
             workers[1],
             ResNetShard2,
-            args=("cuda:1",) + args,
+            args=(get_cuda_if_available(1),) + args,
             kwargs=kwargs
         )
 
