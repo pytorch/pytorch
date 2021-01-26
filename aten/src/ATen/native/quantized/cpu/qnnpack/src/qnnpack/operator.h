@@ -41,6 +41,7 @@ typedef struct {
   const uint32_t* col_indices;
   const uint32_t* row_values;
   const uint8_t* values;
+  uint32_t row_block_size;
   uint32_t col_block_size;
 } sparse_matrix_t;
 

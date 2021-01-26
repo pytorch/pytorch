@@ -134,6 +134,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
     const uint32_t* kernel_col_indices,
     const uint32_t* kernel_row_values,
     const uint8_t* kernel_values,
+    const uint32_t kernel_row_block_size,
     const uint32_t kernel_col_block_size,
     uint8_t output_zero_point,
     uint8_t output_min,
