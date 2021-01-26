@@ -134,7 +134,11 @@ class LLVMCodeGenImpl : public IRVisitor {
   };
 
   using SimdCallee = std::tuple<llvm::FunctionType*, llvm::Value*, bool>;
-  SimdCallee getSimdFunction(const std::string& name, llvm::Type* type, Arity arity, int lanes);
+  SimdCallee getSimdFunction(
+      const std::string& name,
+      llvm::Type* type,
+      Arity arity,
+      int lanes);
 
  public:
   LLVMCodeGenImpl(
@@ -1316,7 +1320,11 @@ void LLVMCodeGenImpl::emitIsNan(const Intrinsics* v) {
   }
 }
 
-LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(const std::string& basename, llvm::Type* basetype, Arity arity, int lanes) {
+LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(
+    const std::string& basename,
+    llvm::Type* basetype,
+    Arity arity,
+    int lanes) {
   std::string name;
   llvm::Type* type;
   bool use_simd;
@@ -1363,9 +1371,10 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
         return;
       } break;
 
-#define SIMD_UNARY_MATH_CASE(enum, name, type)                            \
-  case enum: {                                                            \
-    std::tie(call_ty, call_fn, call_simd_sleef) = getSimdFunction(name, type, Unary, v->dtype().lanes()); \
+#define SIMD_UNARY_MATH_CASE(enum, name, type)                  \
+  case enum: {                                                  \
+    std::tie(call_ty, call_fn, call_simd_sleef) =               \
+        getSimdFunction(name, type, Unary, v->dtype().lanes()); \
   } break;
         SIMD_UNARY_MATH_CASE(kLog10, "log10f", FloatTy_)
         SIMD_UNARY_MATH_CASE(kLog, "logf", FloatTy_)
@@ -1393,9 +1402,10 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
         SIMD_UNARY_MATH_CASE(kLgamma, "lgammaf", FloatTy_)
 #undef SIMD_UNARY_MATH_CASE
 
-#define SIMD_BINARY_MATH_CASE(enum, name, type)                          \
-  case enum: {                                                           \
-    std::tie(call_ty, call_fn, call_simd_sleef) = getSimdFunction(name, type, Binary, v->dtype().lanes()); \
+#define SIMD_BINARY_MATH_CASE(enum, name, type)                  \
+  case enum: {                                                   \
+    std::tie(call_ty, call_fn, call_simd_sleef) =                \
+        getSimdFunction(name, type, Binary, v->dtype().lanes()); \
   } break;
         SIMD_BINARY_MATH_CASE(kAtan2, "atan2f", FloatTy_)
         SIMD_BINARY_MATH_CASE(kPow, "powf", FloatTy_)
@@ -1419,9 +1429,10 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 
   } else if (v->dtype().scalar_type() == ScalarType::Double) {
     switch (v->op_type()) {
-#define SIMD_UNARY_MATH_CASE(enum, name, type)                            \
-  case enum: {                                                            \
-    std::tie(call_ty, call_fn, call_simd_sleef) = getSimdFunction(name, type, Unary, v->dtype().lanes()); \
+#define SIMD_UNARY_MATH_CASE(enum, name, type)                  \
+  case enum: {                                                  \
+    std::tie(call_ty, call_fn, call_simd_sleef) =               \
+        getSimdFunction(name, type, Unary, v->dtype().lanes()); \
   } break;
       SIMD_UNARY_MATH_CASE(kLog10, "log10", DoubleTy_)
       SIMD_UNARY_MATH_CASE(kLog, "log", DoubleTy_)
@@ -1460,9 +1471,10 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
         return;
       } break;
 
-#define SIMD_BINARY_MATH_CASE(enum, name, type)                          \
-  case enum: {                                                           \
-    std::tie(call_ty, call_fn, call_simd_sleef) = getSimdFunction(name, type, Binary, v->dtype().lanes()); \
+#define SIMD_BINARY_MATH_CASE(enum, name, type)                  \
+  case enum: {                                                   \
+    std::tie(call_ty, call_fn, call_simd_sleef) =                \
+        getSimdFunction(name, type, Binary, v->dtype().lanes()); \
   } break;
         SIMD_BINARY_MATH_CASE(kAtan2, "atan2", DoubleTy_)
         SIMD_BINARY_MATH_CASE(kPow, "pow", DoubleTy_)
@@ -1470,12 +1482,14 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 #undef SIMD_BINARY_MATH_CASE
 
       case kRemainder: {
-    FunctionCallee callee = module_->getOrInsertFunction(
-        "remainder", llvm::FunctionType::get(DoubleTy_, {DoubleTy_, DoubleTy_}, false), {});
-    call_ty = callee.getFunctionType();
-    call_fn = callee.getCallee();
-    applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));
-  } break;
+        FunctionCallee callee = module_->getOrInsertFunction(
+            "remainder",
+            llvm::FunctionType::get(DoubleTy_, {DoubleTy_, DoubleTy_}, false),
+            {});
+        call_ty = callee.getFunctionType();
+        call_fn = callee.getCallee();
+        applyMathFunctionAttributes(llvm::cast<llvm::Function>(call_fn));
+      } break;
 
       default: {
         throw unimplemented_lowering(v);
