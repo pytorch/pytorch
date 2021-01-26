@@ -10,7 +10,6 @@ install_ubuntu() {
     fi
     apt-get install -y kmod
     apt-get install -y wget
-    apt-get install -y libopenblas-dev
 
     # Need the libc++1 and libc++abi1 libraries to allow torch._C to load at runtime
     apt-get install -y libc++1
@@ -24,13 +23,7 @@ install_ubuntu() {
     DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated \
                    rocm-dev \
                    rocm-utils \
-                   rocfft \
-                   miopen-hip \
-                   rocblas \
-                   hipsparse \
-                   rocrand \
-                   hipcub \
-                   rocthrust \
+                   rocm-libs \
                    rccl \
                    rocprofiler-dev \
                    roctracer-dev
@@ -44,19 +37,22 @@ install_ubuntu() {
       DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENKERNELS}
     fi
 
+    # install hipMAGMA into /opt/rocm/magma
+    pushd /opt/rocm
     git clone https://bitbucket.org/icl/magma.git -b hipMAGMA
     cd magma
     cp make.inc-examples/make.inc.hip-mkl-gcc make.inc
+    export PATH=${PATH}:/opt/rocm/bin
     export MKLROOT=/opt/conda
-    export LD_LIBRARY_PATH=/opt/conda/lib
-    echo "LIBDIR += -L/opt/conda/lib" >> make.inc
+    export LD_LIBRARY_PATH=${MKLROOT}/lib
+    echo "LIBDIR += -L${MKLROOT}/lib" >> make.inc
     make -f make.gen.hipMAGMA -j $(nproc)
-    make lib/libmagma.so -j $(nproc) MKLROOT=/opt/conda
-    cd ..
+    make lib/libmagma.so -j $(nproc)
+    popd
 
-  # Cleanup
-  apt-get autoclean && apt-get clean
-  rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+    # Cleanup
+    apt-get autoclean && apt-get clean
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 }
 
 install_centos() {
