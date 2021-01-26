@@ -51,6 +51,8 @@ class UseC10Dispatcher(Enum):
     full = 0
     hacky_wrapper_for_legacy_signatures = 1
 
+STRUCTURED_DISPATCH_KEYS = {'CUDA', 'CPU'}
+
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
 # functions and legacy TH functions.  The legacy TH functions are gone,
@@ -236,7 +238,7 @@ class NativeFunction:
                 assert isinstance(v, str), e
                 for k in ks.split(","):
                     dispatch[k.strip()] = v
-        else:
+        elif not structured and structured_delegate is None:
             from tools.codegen.api import cpp
             dispatch['Math'] = cpp.name(func)
 
@@ -305,6 +307,13 @@ class NativeFunction:
         if self.structured or self.structured_delegate:
             assert self.use_c10_dispatcher is UseC10Dispatcher.full, \
                 "Structured kernels MUST be use_c10_dispatcher: full; port your argument order"
+        if self.structured_inherits is not None:
+            assert self.structured, "structured_inherits must also imply structured: True"
+        if self.structured_delegate is not None:
+            for k in STRUCTURED_DISPATCH_KEYS:
+                assert k not in self.dispatch, \
+                    f"if structured_delegate, then must not have {k} in dispatch dictionary " \
+                    "(it is delegated!)"
 
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
