@@ -19,7 +19,7 @@ int64_t UndefinedTensorImpl::stride(int64_t d) const {
 
 #ifdef DEBUG
 bool UndefinedTensorImpl::has_storage() const {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(storage_ == nullptr, "UndefinedTensorImpl assumes that storage_ is never set");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!storage_, "UndefinedTensorImpl assumes that storage_ is never set");
   return false;
 }
 #endif
