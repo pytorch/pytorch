@@ -15,9 +15,7 @@ import torch.nn.functional as F
 import torch.jit
 import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
-from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryFileName
-
-from torch.autograd.gradcheck import gradgradcheck, gradcheck
+from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryFileName, gradcheck, gradgradcheck
 
 types = [torch.float, torch.bfloat16]
 

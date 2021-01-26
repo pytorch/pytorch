@@ -13,7 +13,7 @@ import torch
 import torch.backends.cudnn
 import torch.utils.cpp_extension
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
-from torch.autograd.gradcheck import gradcheck
+from torch.testing._internal.common_utils import gradcheck
 
 
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
