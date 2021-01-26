@@ -3533,14 +3533,13 @@ class TestCudaComm(TestCase):
         out2 = TestNamedTupleInput_1(a, b)
 
         outputs = [out1, out2]
-        out = scatter_gather.gather(outputs, 0) # test on gpu
+        out = scatter_gather.gather(outputs, 0)  # test on gpu
 
         for i, x in enumerate(out):
-            self.assertTrue(isinstance(x, type(out2[-1]))) # x must be a tensor
+            self.assertTrue(isinstance(x, type(out2[-1])))  # x must be a tensor
             cat = torch.cat((outputs[0][i], outputs[1][i]))
             self.assertTrue(torch.equal(x, cat.to(0)))
             
 
 if __name__ == '__main__':
     run_tests()
-    
