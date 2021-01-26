@@ -21,6 +21,9 @@ class MultiheadAttention(nn.MultiheadAttention):
     representation subspaces.
     See reference: Attention Is All You Need
 
+    The original MHA module is not quantizable.
+    This reimplements it by explicitly instantiating the linear layers.
+
     .. math::
         \text{MultiHead}(Q, K, V) = \text{Concat}(head_1,\dots,head_h)W^O
         \text{where} head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)
