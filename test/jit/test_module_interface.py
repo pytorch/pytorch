@@ -7,7 +7,7 @@ import torch.nn as nn
 import os
 import sys
 from torch import Tensor
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -63,7 +63,6 @@ class TestModuleInterface(JitTestCase):
             torch.jit.script(TestNotModuleInterfaceCall())
 
     def test_module_interface(self):
-        global OneTwoModule, OneTwoClass
         @torch.jit.interface
         class OneTwoModule(nn.Module):
             def one(self, x: Tensor, y: Tensor) -> Tensor:
@@ -107,6 +106,7 @@ class TestModuleInterface(JitTestCase):
             def forward2(self, x: Tensor) -> Tensor:
                 return self.two(self.one(x, x)) + 1
 
+        make_global(OneTwoModule, OneTwoClass)
         def use_module_interface(mod_list: List[OneTwoModule], x: torch.Tensor):
             return mod_list[0].forward(x) + mod_list[1].forward(x)
 
@@ -155,7 +155,6 @@ class TestModuleInterface(JitTestCase):
         self.checkModule(TestModule(), (input,))
 
     def test_module_interface_subtype(self):
-        global OneTwoModule
         @torch.jit.interface
         class OneTwoModule(nn.Module):
             def one(self, x: Tensor, y: Tensor) -> Tensor:
@@ -167,6 +166,7 @@ class TestModuleInterface(JitTestCase):
             def forward(self, x: Tensor) -> Tensor:
                 pass
 
+        make_global(OneTwoModule)
         @torch.jit.script
         def as_module_interface(x: OneTwoModule) -> OneTwoModule:
             return x
@@ -200,22 +200,22 @@ class TestModuleInterface(JitTestCase):
             as_module_interface(scripted_wrong_mod)
 
         # Check that interface implementations can be contravariant in argument types and covariant in return type.
-        global TensorToAny
         @torch.jit.interface
         class TensorToAny(nn.Module):
             def forward(self, input: torch.Tensor) -> Any:
                 pass
 
+        make_global(TensorToAny)
         @torch.jit.script
         def as_tensor_to_any(x: TensorToAny) -> TensorToAny:
             return x
 
-        global AnyToAny
         @torch.jit.interface
         class AnyToAny(nn.Module):
             def forward(self, input: Any) -> Any:
                 pass
 
+        make_global(AnyToAny)
         @torch.jit.script
         def as_any_to_any(x: AnyToAny) -> AnyToAny:
             return x
