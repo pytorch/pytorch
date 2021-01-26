@@ -172,6 +172,8 @@ except ImportError:
 def _construct_test_name(test_name, op, device_type, dtype):
     if op is not None:
         test_name += "_" + op.name.replace('.', '_')
+        if op.variant_test_name:
+            test_name += "_" + op.variant_test_name
 
     test_name += "_" + device_type
 
@@ -247,12 +249,25 @@ class DeviceTypeTestBase(TestCase):
             #   op-specific decorators to the original test.
             #   Test-sepcific decorators are applied to the original test,
             #   however.
-            if op is not None and op.decorators is not None:
+            if op is not None:
+                active_decorators = []
+                if op.should_skip(generic_cls.__name__, name, cls.device_type, dtype):
+                    active_decorators.append(skipIf(True, "Skipped!"))
+
+                if op.decorators is not None:
+                    for decorator in op.decorators:
+                        # Can't use isinstance as it would cause a circular import
+                        if decorator.__class__.__name__ == 'DecorateInfo':
+                            if decorator.is_active(generic_cls.__name__, name, cls.device_type, dtype):
+                                active_decorators += decorator.decorators
+                        else:
+                            active_decorators.append(decorator)
+
                 @wraps(test)
                 def test_wrapper(*args, **kwargs):
                     return test(*args, **kwargs)
 
-                for decorator in op.decorators:
+                for decorator in active_decorators:
                     test_wrapper = decorator(test_wrapper)
 
                 test_fn = test_wrapper
@@ -260,12 +275,8 @@ class DeviceTypeTestBase(TestCase):
                 test_fn = test
 
             # Constructs the test
-            @wraps(test)
+            @wraps(test_fn)
             def instantiated_test(self, name=name, test=test_fn, dtype=dtype, op=op):
-                if op is not None and op.should_skip(generic_cls.__name__, name,
-                                                     self.device_type, dtype):
-                    self.skipTest("Skipped!")
-
                 device_arg: str = cls.get_primary_device()
                 if hasattr(test_fn, 'num_required_devices'):
                     device_arg = cls.get_all_devices()
