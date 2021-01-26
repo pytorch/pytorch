@@ -85,7 +85,7 @@ def _make_sentry(source_cmd: Optional[str]) -> WorkOrder:
         ),
         timer_args=timer_args,
         source_cmd=source_cmd,
-        timeout=180.0,
+        timeout=240.0,
         retries=2,
     )
 
@@ -118,7 +118,7 @@ def collect(
                 auto_labels=auto_labels,
                 timer_args=timer_args,
                 source_cmd=source_cmd,
-                timeout=180.0,
+                timeout=240.0,
                 retries=2,
             )
             for source_cmd in source_cmds
