@@ -107,7 +107,7 @@ void _amp_foreach_non_finite_check_and_unscale_cuda_(TensorList scaled_grads,
 
   // is_non_overlapping_and_dense() is not available in Python.
   // GradScaler can't filter for it. We need to filter here.
-  if (can_use_fast_route({scaled_grads})) {
+  if (can_use_fast_route(scaled_grads)) {
     // Hopefully common case.
     // can_use_fast_route is true, which confirms:
     //  - all scaled_grads are strided
