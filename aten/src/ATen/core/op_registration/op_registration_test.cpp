@@ -246,13 +246,13 @@ TEST(OperatorRegistrationTest, whenRegisteringCPUTensorType_thenCanOnlyCallUnbox
 
   // Ensure that dispatcher doesn't take the dispatch key from the tensor but from the direct argument instead.
   called_kernel_cpu = false;
-  callOpUnboxedWithDispatchKey<void, Tensor>(*op, c10::DispatchKey::CPU, dummyTensor(c10::DispatchKey::CUDA));
+  callOpUnboxedWithPrecomputedDispatchKeySet<void, Tensor>(*op, c10::DispatchKeySet(c10::DispatchKey::CPU), dummyTensor(c10::DispatchKey::CUDA));
   EXPECT_TRUE(called_kernel_cpu);
 
   // Ensure that disptach key from tensor is not used here.
   called_kernel_cpu = false;
   expectThrows<c10::Error>([&] {
-    callOpUnboxedWithDispatchKey<void, Tensor>(*op, c10::DispatchKey::CUDA, dummyTensor(c10::DispatchKey::CPU));
+    callOpUnboxedWithPrecomputedDispatchKeySet<void, Tensor>(*op, c10::DispatchKeySet(c10::DispatchKey::CUDA), dummyTensor(c10::DispatchKey::CPU));
   }, "Could not run '_test::dummy' with arguments from the 'CUDA'"
   " backend.");
 }
@@ -2011,33 +2011,6 @@ TEST(OperatorRegistrationTest, callKernelsWithDispatchKeySetConvention_call_redi
 
   // call Tracing -> call Autograd -> call CPU
   callOpUnboxed<void, Tensor>(*op, dummyTensor(tracing_autograd_cpu_set, true));
-  EXPECT_TRUE(called_kernel_tracing);
-  EXPECT_TRUE(called_kernel_autograd);
-  EXPECT_TRUE(called_kernel_cpu);
-}
-
-TEST(OperatorRegistrationTest, callKernelsWithDispatchKeySetConvention_callWithDispatchKey_redispatchesToLowerPriorityKernels) {
-  auto m = MAKE_TORCH_LIBRARY(test);
-  m.def("fn(Tensor dummy) -> ()");
-  m.impl("fn", c10::DispatchKey::CPU, cpu_kernel);
-  m.impl("fn", c10::DispatchKey::AutogradCPU, autograd_kernel_redispatching_with_DispatchKeySet);
-  m.impl("fn", c10::DispatchKey::Tracer, tracing_kernel_redispatching_with_DispatchKeySet);
-
-  auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
-  ASSERT_TRUE(op.has_value());
-
-  called_kernel_cpu = called_kernel_autograd = called_kernel_tracing = false;
-
-  // call Autograd -> call CPU
-  callOpUnboxedWithDispatchKey<void, Tensor>(*op, c10::DispatchKey::AutogradCPU, dummyTensor(c10::DispatchKey::CPU, true));
-  EXPECT_FALSE(called_kernel_tracing);
-  EXPECT_TRUE(called_kernel_autograd);
-  EXPECT_TRUE(called_kernel_cpu);
-
-  called_kernel_cpu = called_kernel_autograd = called_kernel_tracing = false;
-
-  // call Tracing -> call Autograd -> call CPU
-  callOpUnboxedWithDispatchKey<void, Tensor>(*op, c10::DispatchKey::Tracer, dummyTensor(c10::DispatchKey::CPU, true));
   EXPECT_TRUE(called_kernel_tracing);
   EXPECT_TRUE(called_kernel_autograd);
   EXPECT_TRUE(called_kernel_cpu);
