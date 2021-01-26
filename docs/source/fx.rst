@@ -7,13 +7,25 @@ Overview
 --------
 .. automodule:: torch.fx
 
+<<<<<<< HEAD
+Writing Transformations
+-----------------------
+
+TODO
+
+Debugging Transformations
+-------------------------
+
+TODO
+=======
 .. _Limitations of Symbolic Tracing:
+>>>>>>> Document FX debugging
 
 Limitations of Symbolic Tracing
 -------------------------------
 
-FX uses a system of **symbolic tracing** (a.k.a `abstract
-interpretation <https://en.wikipedia.org/wiki/Abstract_interpretation>`__)
+FX uses a system of **symbolic tracing** (a.k.a `symbolic
+execution <https://en.wikipedia.org/wiki/Symbolic_execution>`__)
 to capture the semantics of programs in a transformable/analyzable form.
 The system is **tracing** in that it executes the program (really an
 ``nn.Module`` or function) to gather this information. It is
@@ -290,6 +302,8 @@ Miscellanea
    -  Annotations on local names within a function are not currently
       supported.
 
+<<<<<<< HEAD
+=======
 Writing Transformations
 -----------------------
 
@@ -408,7 +422,7 @@ Debugging the Transformation
 
 First, read the FX
 documentation. Understand the most important classes (:class:`Node`,
-:class:`Graph`, and :class:`Tracer`), and determine which
+:class:`Graph`, :class:`Proxy`, and :class:`Tracer`), and determine which
 class attributes might give you the best representation of your
 program’s intermediate state.
 
@@ -493,6 +507,7 @@ window in your IDE (e.g. View → Terminal in VSCode), or b) use the
 built-in debugger (usually a graphical wrapper around ``pdb``).
 
 
+>>>>>>> Document FX debugging
 API Reference
 -------------
 
@@ -515,5 +530,7 @@ API Reference
 
 .. autoclass:: torch.fx.Tracer
   :members:
+
+.. autoclass:: torch.fx.Proxy
 
 .. autofunction:: torch.fx.replace_pattern
