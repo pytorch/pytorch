@@ -329,7 +329,15 @@ public:
     store(x_tmp);
     exp.store(y_tmp);
     for (int i = 0; i < size(); i++) {
-      x_tmp[i] = std::pow(x_tmp[i], y_tmp[i]);
+      if (x_tmp[i] == c10::complex<float>(0, 0)) {
+        if (y_tmp[i] == c10::complex<float>(0, 0)) {
+          x_tmp[i] = c10::complex<float>(1, 0);
+        } else if (std::signbit(y_tmp[i].real()) || y_tmp[i].imag() != 0.0) {
+          x_tmp[i] = c10::complex<float>(NAN, NAN);
+        }
+      } else {
+        x_tmp[i] = std::pow(x_tmp[i], y_tmp[i]);
+      }
     }
     return loadu(x_tmp);
   }

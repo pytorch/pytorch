@@ -737,7 +737,7 @@ class TestBinaryUfuncs(TestCase):
     @onlyOnCPUAndCUDA
     @dtypes(*(torch.testing.get_all_dtypes(include_bool=False, include_bfloat16=False)))
     def test_complex_scalar_pow_tensor(self, device, dtype):
-        complexes = [0.5j, 1. + 1.j, -1.5j, 2.2 - 1.6j, 1 + 0j]
+        complexes = [0.j, 0.5j, 1. + 1.j, -1.5j, 2.2 - 1.6j, 1 + 0j]
         exp = make_tensor((100,), device, dtype, low=-2, high=2)
         exp[0] = exp[10] = exp[20] = 0
         for base in complexes:

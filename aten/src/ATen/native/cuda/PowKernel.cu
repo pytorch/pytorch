@@ -105,6 +105,13 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
   if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
+        if (base == scalar_t(0.0)) {
+          if (exp == scalar_t(0.0)) {
+            return scalar_t(1, 0);
+          } else if (::signbit(exp.real()) || exp.imag() != 0.0) {
+            return scalar_t(NAN, NAN);
+          }
+        }
         return complex_pow_(base, exp);
       });
     });
@@ -163,6 +170,13 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow_cuda", [&]() {
       const auto exp = exp_scalar.to<scalar_t>();
       gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t base) -> scalar_t {
+        if (base == scalar_t(0.0)) {
+          if (exp == scalar_t(0.0)) {
+            return scalar_t(1, 0);
+          } else if (::signbit(exp.real()) || exp.imag() != 0.0) {
+            return scalar_t(NAN, NAN);
+          }
+        }
         return complex_pow_(base, exp);
       });
     });

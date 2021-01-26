@@ -11,11 +11,30 @@ namespace at { namespace native {
 namespace {
 
 void pow_tensor_tensor_kernel(TensorIterator& iter) {
-  if (isFloatingType(iter.dtype()) || isComplexType(iter.dtype())) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "pow", [&]() {
+  if (isFloatingType(iter.dtype())) {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "pow", [&]() {
       using Vec = Vec256<scalar_t>;
       cpu_kernel_vec(iter,
         [=](scalar_t base, scalar_t exp) -> scalar_t {
+          return std::pow(base, exp);
+        },
+        [&](Vec base, Vec exp) -> Vec {
+          return base.pow(exp);
+        }
+      );
+    });
+  } else if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "pow", [&]() {
+      using Vec = Vec256<scalar_t>;
+      cpu_kernel_vec(iter,
+        [=](scalar_t base, scalar_t exp) -> scalar_t {
+          if (base == scalar_t(0.0)) {
+            if (exp == scalar_t(0.0)) {
+              return scalar_t(1, 0);
+            } else if (std::signbit(exp.real()) || exp.imag() != 0.0) {
+              return scalar_t(NAN, NAN);
+            }
+          }
           return std::pow(base, exp);
         },
         [&](Vec base, Vec exp) -> Vec {
@@ -141,6 +160,13 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
       } else {
         cpu_kernel_vec(iter,
           [=](scalar_t base) -> scalar_t {
+            if (base == scalar_t(0.0)) {
+              if (exp == 0.0) {
+                return scalar_t(1, 0);
+              } else if (std::signbit(exp.real()) || exp.imag() != 0.0) {
+                return scalar_t(NAN, NAN);
+              }
+            }
             return std::pow(base, scalar_t(exp));
           },
           [=](Vec base) -> Vec { return base.pow(scalar_t(exp)); } // std::pow cannot accept mixed complex data types.
