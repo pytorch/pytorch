@@ -246,7 +246,7 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
       .findSchemaOrThrow("aten::copy_", "")
       .typed<Tensor & (Tensor &, const Tensor &, bool)>();
     c10::Dispatcher::singleton()
-      .callWithPrecomputedDispatchKeySet<Tensor &, Tensor &, const Tensor &, bool>(op, ks & c10::after_autograd_keyset, self_, src_, non_blocking);
+      .redispatch<Tensor &, Tensor &, const Tensor &, bool>(op, ks & c10::after_autograd_keyset, self_, src_, non_blocking);
   }
   increment_version(self);
   rebase_history(self , std::move(grad_fn));
@@ -286,7 +286,7 @@ Tensor& resize_(
       .findSchemaOrThrow("aten::resize_", "")
       .typed<Tensor & (Tensor &, IntArrayRef, c10::optional<MemoryFormat>)>();
     c10::Dispatcher::singleton()
-      .callWithPrecomputedDispatchKeySet<Tensor &, Tensor &, IntArrayRef, c10::optional<MemoryFormat>>(op, ks & c10::after_autograd_keyset, self_, size, optional_memory_format);
+      .redispatch<Tensor &, Tensor &, IntArrayRef, c10::optional<MemoryFormat>>(op, ks & c10::after_autograd_keyset, self_, size, optional_memory_format);
   }
 
   if (self.fw_grad(/* level */ 0).defined()) {
@@ -312,7 +312,7 @@ Tensor& resize_as_(
       .findSchemaOrThrow("aten::resize_as_", "")
       .typed<Tensor & (Tensor &, const Tensor &, c10::optional<MemoryFormat>)>();
     c10::Dispatcher::singleton()
-      .callWithPrecomputedDispatchKeySet<Tensor &, Tensor &, const Tensor &, c10::optional<MemoryFormat>>(op, ks & c10::after_autograd_keyset, self_, the_template_, optional_memory_format);
+      .redispatch<Tensor &, Tensor &, const Tensor &, c10::optional<MemoryFormat>>(op, ks & c10::after_autograd_keyset, self_, the_template_, optional_memory_format);
   }
 
   // Handle fw grad

@@ -230,6 +230,7 @@ void parseMethods(
 class BytecodeDeserializer final {
  public:
   explicit BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader);
+  mobile::Module deserialize(c10::optional<at::Device> device);
   mobile::Module deserialize(
       c10::optional<at::Device> device,
       ExtraFilesMap& extra_files);
@@ -274,6 +275,12 @@ mobile::Module BytecodeDeserializer::deserialize(
           std::string(static_cast<char*>(meta_ptr.get()), meta_size);
     }
   }
+  return deserialize(device);
+}
+
+mobile::Module BytecodeDeserializer::deserialize(
+    c10::optional<at::Device> device) {
+  device_ = device;
   auto mcu = std::make_shared<mobile::CompilationUnit>();
 
   // bvals can have 2 possible formats:

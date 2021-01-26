@@ -192,7 +192,7 @@ def is_cuda_dispatch_key(dk: str) -> bool:
 # Structured kernel generation is only supported for certain key types;
 # otherwise use old-style
 def is_structured_dispatch_key(dk: str) -> bool:
-    return dk in {'CUDA', 'CPU'}
+    return dk in STRUCTURED_DISPATCH_KEYS
 
 # Generates RegisterSchema.cpp.  Depending on the selector, either
 # all schemas are registered, or only some are (in the case of
@@ -373,10 +373,10 @@ struct {class_name} final : public {parent_class} {{
             assert self.dispatch_key not in g.out.dispatch, \
                 "Do not explicitly specify Meta dispatch key on structured " \
                 "functions, they will be automatically generated for you"
-        elif self.dispatch_key not in g.out.dispatch:
-            return []
         elif not is_structured_dispatch_key(self.dispatch_key):
             return list(mapMaybe(self.gen_unstructured, g.functions()))
+        elif self.dispatch_key not in g.out.dispatch:
+            return []
 
         # Inner helper function to close over g
         # TODO: This function has a lot of similarity with gen_unstructured.  If
@@ -817,7 +817,7 @@ DispatchKeySet _dk_set = c10::DispatchKeySet({dispatch_key}) | c10::detail::mult
     .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
     .typed<{dispatcher_sig.type()}>();
   {compute_dk}
-  return op.callWithPrecomputedDispatchKeySet(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
+  return op.redispatch(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
 }}
 """
         elif self.target is Target.REGISTRATION:

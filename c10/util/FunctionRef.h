@@ -38,7 +38,7 @@ Ret (*callback)(intptr_t callable, Params ...params) = nullptr;
 intptr_t callable;
 
 template<typename Callable>
-static inline Ret callback_fn(intptr_t callable, Params ...params) {
+static Ret callback_fn(intptr_t callable, Params ...params) {
     return (*reinterpret_cast<Callable*>(callable))(
         std::forward<Params>(params)...);
 }

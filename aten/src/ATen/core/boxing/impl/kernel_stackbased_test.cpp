@@ -39,7 +39,7 @@ void redispatchingKernel_with_DispatchKeySet(const OperatorHandle& op, c10::Disp
   // this kernel is a no-op- it just redispatches to the lower-priority kernel
   called_redispatching_kernel = true;
   auto updated_ks = ks & c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::TESTING_ONLY_GenericWrapper);
-  op.callBoxed(updated_ks, stack);
+  op.redispatchBoxed(updated_ks, stack);
 }
 
 void expectCallsIncrement(c10::DispatchKeySet ks) {
