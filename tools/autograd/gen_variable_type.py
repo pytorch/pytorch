@@ -239,7 +239,7 @@ ${var}.${api_name}(${unpacked_method_args})""")
 
 CALL_DISPATCH_VIA_PRECOMPUTED_DISPATCH_KEYS = CodeTemplate("""\
 c10::Dispatcher::singleton()
-  .callWithPrecomputedDispatchKeySet<${ret_and_arg_types}>(${redispatch_args})""")
+  .redispatch<${ret_and_arg_types}>(${redispatch_args})""")
 
 # If the non-variable operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
