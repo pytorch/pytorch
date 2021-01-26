@@ -403,23 +403,6 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
                             dim=(0, 1))))
         return inputs
 
-def sample_inputs_slogdet(op_info, device, dtype, requires_grad):
-    # original test cases from 'method_tests' have too many test_inputs
-    # we don't actually need all of them to check the autograd and jit correctness
-    # sample inputs with shapes 0x0, 0xSxS, 2x0x0 are added
-    test_inputs = (
-        torch.randn(0, 0, dtype=dtype, device=device),  # '0x0'
-        torch.randn(S, S, dtype=dtype, device=device),  # 'SxS'
-        torch.randn(0, S, S, dtype=dtype, device=device),  # 'zero_batched_SxS'
-        torch.randn(2, 0, 0, dtype=dtype, device=device),  # 'batched_0x0'
-        torch.randn(2, S, S, dtype=dtype, device=device),  # 'batched_SxS'
-    )
-    out = []
-    for a in test_inputs:
-        a.requires_grad = requires_grad
-        out.append(SampleInput(a))
-    return out
-
 def sample_inputs_addmm(op_info, device, dtype, requires_grad):
     input = SampleInput((make_tensor((S, S), device, dtype,
                                      low=None, high=None,
@@ -511,7 +494,7 @@ def sample_inputs_trace(self, device, dtype, requires_grad):
 
 def sample_inputs_linalg_inv(op_info, device, dtype, requires_grad=False):
     """
-    This function generates always invertible input for torch.linalg.inv using
+    This function generates always invertible input for linear algebra ops using
     random_fullrank_matrix_distinct_singular_value.
     The input is generated as the itertools.product of 'batches' and 'ns'.
     In total this function generates 8 SampleInputs
@@ -519,17 +502,17 @@ def sample_inputs_linalg_inv(op_info, device, dtype, requires_grad=False):
         () - single input,
         (0,) - zero batched dimension,
         (2,) - batch of two matrices,
-        (2, 3) - 2x3 batch of matrices
+        (1, 1) - 1x1 batch of matrices
     'ns' gives 0x0 and 5x5 matrices.
     Zeros in dimensions are edge cases in the implementation and important to test for in order to avoid unexpected crashes.
     """
     from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
-    batches = [(), (0, ), (2, ), (2, 3)]
+    batches = [(), (0, ), (2, ), (1, 1)]
     ns = [0, 5]
     out = []
     for batch, n in product(batches, ns):
-        a = random_fullrank_matrix_distinct_singular_value(n, *batch, dtype=dtype).to(device)
+        a = random_fullrank_matrix_distinct_singular_value(n, *batch, dtype=dtype, device=device)
         a.requires_grad = requires_grad
         out.append(SampleInput(a))
     return out
@@ -783,31 +766,11 @@ class HermitianOpInfo(OpInfo):
         return hermitian_func
 
 
-def sample_inputs_linalg_pinv(op_info, device, dtype, requires_grad=False):
-    """
-    This function generates input for torch.linalg.pinv with distinct singular values so that autograd is always stable
-    Implementation of torch.linalg.pinv depends on torch.svd and torch.linalg.eigh, therefore it's sufficient to
-    check only square S x S matrix and the batched (3 x S x S) input.
-    """
-    from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
-
-    test_cases = (
-        random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),  # single matrix
-        random_fullrank_matrix_distinct_singular_value(S, 3, dtype=dtype).to(device),  # batch of matrices
-    )
-
-    out = []
-    for a in test_cases:
-        a.requires_grad = requires_grad
-        out.append(SampleInput(a))
-    return out
-
-
 def sample_inputs_linalg_pinv_hermitian(op_info, device, dtype, requires_grad=False):
     """
     This function generates input for torch.linalg.pinv with hermitian=True keyword argument.
     """
-    out = sample_inputs_linalg_pinv(op_info, device, dtype, requires_grad)
+    out = sample_inputs_linalg_inv(op_info, device, dtype, requires_grad)
     for o in out:
         o.kwargs = {"hermitian": True}
     return out
@@ -1300,7 +1263,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
            supports_tensor_out=False,
-           sample_inputs_func=sample_inputs_slogdet,
+           sample_inputs_func=sample_inputs_linalg_inv,
            output_func=itemgetter(1),
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
@@ -1587,21 +1550,32 @@ op_db: List[OpInfo] = [
            op=torch.linalg.pinv,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
-           supports_tensor_out=False,
-           sample_inputs_func=sample_inputs_linalg_pinv,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           supports_tensor_out=True,
+           sample_inputs_func=sample_inputs_linalg_inv,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           skips=(
+               # cuda gradchecks are slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
     HermitianOpInfo('linalg.pinv',
                     variant_test_name='hermitian',
                     aten_name='linalg_pinv',
                     op=torch.linalg.pinv,
                     dtypes=floating_and_complex_types(),
                     test_inplace_grad=False,
-                    supports_tensor_out=False,
+                    check_batched_grad=False,
+                    check_batched_gradgrad=False,
+                    supports_tensor_out=True,
                     sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
                     decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
                     skips=(
                         # These tests do not take into account custom op.get_op()
-                        SkipInfo('TestCommon', 'test_variant_consistency_jit'),)
+                        SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+                        # cuda gradchecks are slow
+                        # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+                        SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
                     ),
     OpInfo('svd',
            op=torch.svd,
@@ -1640,9 +1614,15 @@ op_db: List[OpInfo] = [
            op=torch.pinverse,
            dtypes=floating_and_complex_types(),
            test_inplace_grad=False,
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
            supports_tensor_out=False,
-           sample_inputs_func=sample_inputs_linalg_pinv,
-           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
+           sample_inputs_func=sample_inputs_linalg_inv,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+           skips=(
+               # cuda gradchecks are slow
+               # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
     OpInfo('gather',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
