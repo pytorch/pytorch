@@ -167,7 +167,6 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base));
       const auto& base_bw_info = diff_view_meta->get_backward_view();
       new_bw_info = base_bw_info.chain(base, tensor, view_func);
-      creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
     } else {
       new_bw_info = ViewInfo(base, view_func);
     }
@@ -184,13 +183,16 @@ inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_dif
       auto diff_view_meta = static_cast<DifferentiableViewMeta*>(base_meta);
       const auto& base_fw_info = diff_view_meta->get_forward_view();
       new_fw_info = base_fw_info.chain(base, tensor, view_func);
-      creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
     } else {
       new_fw_info = ViewInfo(base, view_func);
     }
   }
 
   if (is_fw_differentiable || is_bw_differentiable) {
+    if (base.is_view()) {
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base));
+      creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
+    }
     return make_variable_differentiable_view(tensor, std::move(new_bw_info), std::move(new_fw_info),
                                              creation_meta, allow_tensor_metadata_change);
   } else {
@@ -213,7 +215,6 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
       // It is ok to create a ViewInfo where only the base is correct in this case as inplace operations on such views are
       // not allowed
       new_bw_info = ViewInfo(base_bw_info.base_, /* view_func */ nullptr);
-      creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
     } else {
       new_bw_info = ViewInfo(base, /* view_func */ nullptr);
     }
@@ -233,10 +234,14 @@ inline std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor>& ten
       // It is ok to create a ViewInfo where only the base is correct in this case as inplace operations on such views are
       // not allowed
       new_fw_info = ViewInfo(base_fw_info.base_, /* view_func */ nullptr);
-      creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
     } else {
       new_fw_info = ViewInfo(base, /* view_func */ nullptr);
     }
+  }
+
+  if ((is_fw_differentiable || is_bw_differentiable) && base.is_view()) {
+    auto diff_view_meta = static_cast<DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(base));
+    creation_meta = propagate_creation_meta(diff_view_meta->get_creation_meta(), creation_meta);
   }
 
   for(Tensor &tensor : tensors) {
