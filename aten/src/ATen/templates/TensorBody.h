@@ -807,7 +807,7 @@ namespace c10 {
 
       optional(const optional&) = default;
       optional(optional&&) noexcept = default;
-      constexpr optional& operator=(nullopt_t) noexcept {
+      optional& operator=(nullopt_t) noexcept {
         tensorOrUndefined_.reset();
         return *this;
       }
