@@ -3506,17 +3506,17 @@ class TestCudaComm(TestCase):
         num_gpus = torch.cuda.device_count()
         a = torch.rand(num_gpus * 2, device=0)
         b = torch.rand(num_gpus * 2, device=1)
-        out1 = TestNamedTupleInput_0(a,b)
+        out1 = TestNamedTupleInput_0(a, b)
 
         a = torch.rand(num_gpus * 2, device=1)
         b = torch.rand(num_gpus * 2, device=0)
-        out2 = TestNamedTupleInput_0(a,b)
+        out2 = TestNamedTupleInput_0(a, b)
 
         outputs = [out1, out2]
-        out = scatter_gather.gather(outputs, 'cpu') # test on cpu
+        out = scatter_gather.gather(outputs, 'cpu')  # test on cpu
 
         for i, x in enumerate(out):
-            self.assertTrue(isinstance(x, type(out2[-1]))) # x must be a tensor
+            self.assertTrue(isinstance(x, type(out2[-1])))  # x must be a tensor
             cat = torch.cat((outputs[0][i], outputs[1][i]))
             self.assertTrue(torch.equal(x.to(0), cat.to(0)))
 
@@ -3526,11 +3526,11 @@ class TestCudaComm(TestCase):
 
         a = torch.rand(num_gpus * 2, device=0)
         b = torch.rand(num_gpus * 2, device=1)
-        out1 = TestNamedTupleInput_1(a,b)
+        out1 = TestNamedTupleInput_1(a, b)
 
         a = torch.rand(num_gpus * 2, device=1)
         b = torch.rand(num_gpus * 2, device=0)
-        out2 = TestNamedTupleInput_1(a,b)
+        out2 = TestNamedTupleInput_1(a, b)
 
         outputs = [out1, out2]
         out = scatter_gather.gather(outputs, 0) # test on gpu
@@ -3543,3 +3543,4 @@ class TestCudaComm(TestCase):
 
 if __name__ == '__main__':
     run_tests()
+    
