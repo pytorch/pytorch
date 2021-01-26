@@ -796,6 +796,16 @@ def sample_inputs_linalg_cholesky(op_info, device, dtype, requires_grad=False):
     return out
 
 
+def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False):
+    """
+    This function generates input for torch.linalg.eigh with UPLO="U" or "L" keyword argument.
+    """
+    out = sample_inputs_linalg_inv(op_info, device, dtype, requires_grad)
+    for o in out:
+        o.kwargs = {"UPLO": np.random.choice(["L", "U"])}
+    return out
+
+
 def sample_inputs_linalg_pinv_hermitian(op_info, device, dtype, requires_grad=False):
     """
     This function generates input for torch.linalg.pinv with hermitian=True keyword argument.
@@ -1325,6 +1335,24 @@ op_db: List[OpInfo] = [
                     check_batched_gradgrad=False,
                     supports_tensor_out=True,
                     sample_inputs_func=sample_inputs_linalg_cholesky,
+                    decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+                    skips=(
+                        # These tests do not take into account custom op.get_op()
+                        SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+                        # cuda gradchecks are slow
+                        # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+                        SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)
+                    ),
+    HermitianOpInfo('linalg.eigh',
+                    aten_name='linalg_eigh',
+                    op=torch.linalg.eigh,
+                    dtypes=floating_and_complex_types(),
+                    test_inplace_grad=False,
+                    check_batched_gradgrad=False,
+                    # TODO: TypeError: empty_like(): argument 'input' (position 1) must be Tensor, not torch.return_types.linalg_eigh
+                    supports_tensor_out=False,
+                    sample_inputs_func=sample_inputs_linalg_eigh,
+                    output_func=lambda out: (out[0], abs(out[1])),  # gauge invariant loss function
                     decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
                     skips=(
                         # These tests do not take into account custom op.get_op()
