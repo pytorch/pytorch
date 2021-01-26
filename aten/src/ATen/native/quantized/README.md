@@ -21,7 +21,7 @@ Tensor quantized_xand(Tensor qa, Tensor qb) {
   // Some type checks for qa and qb should be here...
   Tensor qc;
   double scale = qa.q_scale();
-  long zero_point qa.q_zero_point();
+  int64_t zero_point = qa.q_zero_point();
 
   auto iter = TensorIterator::binary_op(qc, qa, qb);
 

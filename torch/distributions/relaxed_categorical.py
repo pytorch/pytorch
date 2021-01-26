@@ -30,8 +30,8 @@ class ExpRelaxedCategorical(Distribution):
     (Jang et al, 2017)
     """
     arg_constraints = {'probs': constraints.simplex,
-                       'logits': constraints.real}
-    support = constraints.real
+                       'logits': constraints.real_vector}
+    support = constraints.real_vector  # The true support is actually a submanifold of this.
     has_rsample = True
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
@@ -104,7 +104,7 @@ class RelaxedOneHotCategorical(TransformedDistribution):
         logits (Tensor): the log probability of each event.
     """
     arg_constraints = {'probs': constraints.simplex,
-                       'logits': constraints.real}
+                       'logits': constraints.real_vector}
     support = constraints.simplex
     has_rsample = True
 

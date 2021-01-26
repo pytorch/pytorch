@@ -33,6 +33,9 @@ using at::Scalar;
 using at::IntArrayRef;
 using at::TensorList;
 
+const char* kCudnnDoubleBackwardMsg = "Double backwards is not supported for CuDNN RNNs due to limitations in the CuDNN API. To run double backwards, please disable the CuDNN backend temporarily while running the forward pass of your RNN. For example: \nwith torch.backends.cudnn.flags(enabled=False):\n    output = model(inputs)";
+
+
 bool isDefined(const c10::optional<Tensor>& t) {
   return t.has_value() && t->defined();
 }
@@ -71,9 +74,21 @@ Tensor copysign_tensor_self_backward(const Tensor & grad, const Tensor & self, c
   return grad * ratio;
 }
 
-Tensor not_implemented(const char* name) {
-  throw std::runtime_error(
-      std::string("the derivative for '") + name + "' is not implemented");
+template <typename T>
+T not_implemented_base(const char* name, const char* reason) {
+  std::string msg = c10::str("the derivative for '", name, "' is not implemented.");
+  if (strlen(reason) > 0) {
+    msg = c10::str(msg, " ", reason);
+  };
+  throw std::runtime_error(msg);
+}
+
+Tensor not_implemented(const char* name, const char* reason) {
+  return not_implemented_base<Tensor>(name, reason);
+}
+
+std::vector<Tensor> not_implemented_list(const char* name, const char* reason) {
+  return not_implemented_base<std::vector<Tensor>>(name, reason);
 }
 
 Tensor maybe_multiply(const Tensor & t, const Scalar & s) {
@@ -1906,6 +1921,19 @@ Tensor elu_double_backward(
     }
 }
 
+Tensor slice_backward_wrapper(
+    const at::Tensor& grad,
+    const c10::IntArrayRef& input_sizes,
+    int64_t dim,
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
+    int64_t step) {
+  auto start_val = start.has_value() ? start.value() : 0;
+  auto end_val = end.has_value() ? end.value() : INT64_MAX;
+
+  return slice_backward(grad, input_sizes, dim, start_val, end_val, step);
+}
+
 // https://j-towns.github.io/papers/svd-derivative.pdf
 //
 // This makes no assumption on the signs of sigma.
@@ -1921,21 +1949,16 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   auto gsigma = grads[1];
 
   auto u = raw_u;
-  // Currently torch.svd for complex dtypes returns the conjugate of V,
-  // while the backward formula is derived with just V (without the conjugation)
-  // therefore here we need to conjugate the V output of SVD and grads[2].
-  // Once https://github.com/pytorch/pytorch/issues/45821 is resolved
-  // extra .conj(), that are marked below in the code, shall be removed.
-  auto v = raw_v.conj();  // TODO: remove .conj()
+  auto v = raw_v;
   auto gu = grads[0];
-  auto gv = grads[2].conj();  // TODO: remove .conj()
+  auto gv = grads[2];
 
   if (!some) {
     // We ignore the free subspace here because possible base vectors cancel
     // each other, e.g., both -v and +v are valid base for a dimension.
     // Don't assume behavior of any particular implementation of svd.
     u = raw_u.narrow(-1, 0, k);
-    v = raw_v.narrow(-1, 0, k).conj();  // TODO: remove .conj()
+    v = raw_v.narrow(-1, 0, k);
     if (gu.defined()) {
       gu = gu.narrow(-1, 0, k);
     }
@@ -2331,6 +2354,7 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
                         const Tensor& signdet, const Tensor& logabsdet) {
   auto singular_case_backward = [&](const Tensor& grad_logabsdet, const Tensor& self) -> Tensor {
     Tensor u, sigma, v;
+    // TODO: replace self.svd with linalg_svd
     std::tie(u, sigma, v) = self.svd();
     // sigma has all non-negative entries (also with at least one zero entry)
     // so logabsdet = \sum log(abs(sigma))
@@ -2340,17 +2364,19 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
   };
 
   auto nonsingular_case_backward = [&](const Tensor& grad_logabsdet, const Tensor& self) -> Tensor {
-    return unsqueeze_multiple(grad_logabsdet, {-1, -2}, self.dim()) * self.inverse().transpose(-2, -1);
+    // TODO: replace self.inverse with linalg_inverse
+    return unsqueeze_multiple(grad_logabsdet, {-1, -2}, self.dim()) * self.inverse().conj().transpose(-2, -1);
   };
 
   if (self.dim() == 2) {
-    if (signdet.item<double>() == 0) {
+    bool is_singular = self.is_complex() ? signdet.abs().item<double>() == 0 : signdet.item<double>() == 0;
+    if (is_singular) {
       return singular_case_backward(grad_logabsdet, self);
     } else {
       return nonsingular_case_backward(grad_logabsdet, self);
     }
   } else {
-    auto nonzero_signdet_indices = at::native::toListOfOptionalTensors(at::where(signdet));
+    auto nonzero_signdet_indices = at::native::toListOfOptionalTensors(self.is_complex() ? at::where(signdet.abs()) : at::where(signdet));
     c10::optional<Tensor> first_nonzero_signdet_index = nonzero_signdet_indices[0];
 
     if (first_nonzero_signdet_index->size(0) == logabsdet.numel()) {  // all log determinants are finite (non-singular)
