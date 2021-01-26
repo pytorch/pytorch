@@ -9,54 +9,40 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/cudnn/ConvShared.h>
+#include <ATen/native/utils/ParamsHash.h>
 #include <ATen/cudnn/Handle.h>
 #include <ATen/TensorUtils.h>
+
+#include <unordered_map>
 
 namespace at { namespace native{
 
 namespace {
 
-cudnnDataType_t getDataType(ScalarType dtype) {
-  switch (dtype) {
-  case kHalf:
-    return CUDNN_DATA_HALF;
-  case kFloat:
-    return CUDNN_DATA_FLOAT;
-  case kDouble:
-    return CUDNN_DATA_DOUBLE;
-  default:
-    TORCH_CHECK(false, "Illegal tensor data type: ", dtype);
-  }
-}
-
-cudnnDataType_t getDataType(const Tensor &t) {
-  return getDataType(t.scalar_type());
-}
-
-int64_t getAlignment(const Tensor &t) {
+uint8_t getAlignment(const Tensor &t) {
   // alignment are in bytes
-  int64_t alignment = 1;
+  uint8_t alignment = 1;
   uint64_t address = reinterpret_cast<uint64_t>(t.data_ptr());
-  while (address % alignment == 0) alignment *= 2;
-  return std::min<int64_t>(alignment / 2, 16);
+  while (address % alignment == 0 && alignment < 16) alignment *= 2;
+  return alignment;
 }
 
-cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, int64_t id) {
+cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, int64_t id, uint8_t alignment) {
   auto shape = t.sizes();
   auto strides = t.strides();
   return cudnn_frontend::TensorBuilder()
     .setDim(shape.size(), shape.data())
     .setStrides(strides.size(), strides.data())
     .setId(id)
-    .setAlignment(getAlignment(t))
-    .setDataType(getDataType(t))
+    .setAlignment(alignment)
+    .setDataType(getCudnnDataType(t))
     .build();
 }
 
-cudnn_frontend::ConvDesc_v8 getConvDescriptor(ScalarType dtype, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation) {
+cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation) {
   uint64_t convDim = stride.size();
   return cudnn_frontend::ConvDescBuilder()
-    .setDataType(getDataType(dtype))
+    .setDataType(dataType)
     .setMathMode(CUDNN_CROSS_CORRELATION)
     .setNDims(convDim)
     .setStrides(convDim, stride.data())
@@ -67,11 +53,11 @@ cudnn_frontend::ConvDesc_v8 getConvDescriptor(ScalarType dtype, IntArrayRef padd
 }
 
 void filterEngineConfigs(
-  std::vector<cudnnBackendDescriptor_t> &from,
-  std::vector<cudnnBackendDescriptor_t> &to,
+  cudnn_frontend::EngineConfigList &from,
+  cudnn_frontend::EngineConfigList &to,
   bool deterministic, bool allow_tf32, c10::ScalarType scalar_type)
 {
-  auto filter = [=](cudnnBackendDescriptor_t &c) {
+  auto filter = [=](cudnnBackendDescriptor_t c) {
     if (deterministic) {
       if (cudnn_frontend::isNonDeterministic(c)) return true;
     }
@@ -84,6 +70,16 @@ void filterEngineConfigs(
   cudnn_frontend::filter(from, to, filter);
 }
 
+struct CacheKey {
+  ConvolutionParams params;
+  uint8_t input_alignment;
+  uint8_t weight_alignment;
+  uint8_t output_alignment;
+};
+
+// fixme: make this thread-safe
+std::unordered_map<CacheKey, cudnn_frontend::ManagedOpaqueDescriptor, ParamsHash<CacheKey>, ParamsEqual<CacheKey>> engine_cache;
+
 }
 
 struct ConvolutionCalculator final {
@@ -94,32 +90,56 @@ struct ConvolutionCalculator final {
   IntArrayRef stride;
   IntArrayRef dilation;
 
-  ScalarType dtype;
-  MemoryFormat memory_format;
-
   ConvolutionCalculator(const Tensor &output, const Tensor &input, const Tensor &weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation):
     output(output), input(input), weight(weight),
     padding(padding), stride(stride), dilation(dilation)
-  {
-    dtype = input.scalar_type();
-    memory_format = cudnn_conv_use_channels_last(input, weight) ?
-      at::MemoryFormat::ChannelsLast : at::MemoryFormat::Contiguous;
-  }
+  {}
 
-  Tensor run(bool benchmark, bool deterministic, bool allow_tf32) {
+  Tensor run(int64_t groups, bool benchmark, bool deterministic, bool allow_tf32) {
     if (output.numel() == 0) {
       return output;
     }
 
     cudnnHandle_t handle = getCudnnHandle();
 
+    CacheKey key;
+    setConvolutionParams(&key.params, input, weight, padding, stride, dilation, groups, deterministic, allow_tf32);
+    key.input_alignment = getAlignment(input);
+    key.output_alignment = getAlignment(output);
+    key.weight_alignment = getAlignment(weight);
+
+    auto run = [&](cudnn_frontend::ManagedOpaqueDescriptor cfg) {
+      auto plan = cudnn_frontend::ExecutionPlanBuilder()
+          .setHandle(handle)
+          .setEngineConfig(cfg)
+          .build();
+
+      auto workspace_size = plan.getWorkspaceSize();
+      auto workspace = at::empty({workspace_size}, input.options().dtype(kByte));
+      void * data_ptrs[] = {input.data_ptr(), output.data_ptr(), weight.data_ptr()};
+      // std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
+      int64_t uids[] = {'x', 'y', 'w'};
+      auto variantPack = cudnn_frontend::VariantPackBuilder()
+          .setWorkspacePointer(workspace.data_ptr())
+          .setDataPointers(3, data_ptrs)
+          .setUids(3, uids)
+          .build();
+      AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
+    };
+
+    auto search = engine_cache.find(key);
+    if (search != engine_cache.end()) {
+      run(search->second);
+      return output;
+    }
+
     auto op_builder = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR);
     op_builder
-        .setxDesc(getTensorDescriptor(input, 'x'))
-        .setyDesc(getTensorDescriptor(output, 'y'))
-        .setwDesc(getTensorDescriptor(weight, 'w'))
-        .setcDesc(getConvDescriptor(input.scalar_type(), padding, stride, dilation));
+        .setxDesc(getTensorDescriptor(input, 'x', key.input_alignment))
+        .setyDesc(getTensorDescriptor(output, 'y', key.output_alignment))
+        .setwDesc(getTensorDescriptor(weight, 'w', key.weight_alignment))
+        .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation));
     if (input.scalar_type() == kDouble) {
       op_builder.setAlpha(1.0).setBeta(0.0);
     } else {
@@ -143,27 +163,13 @@ struct ConvolutionCalculator final {
 
     auto& engine_configs = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
 
-    std::vector<cudnnBackendDescriptor_t> filtered_configs;
+    cudnn_frontend::EngineConfigList filtered_configs;
     filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, input.scalar_type());
 
     for (auto &cfg : filtered_configs) {
       try {
-        auto plan = cudnn_frontend::ExecutionPlanBuilder()
-            .setHandle(handle)
-            .setEngineConfig(cfg)
-            .build();
-
-        auto workspace_size = plan.getWorkspaceSize();
-        auto workspace = at::empty({workspace_size}, input.options().dtype(kByte));
-        void * data_ptrs[] = {input.data_ptr(), output.data_ptr(), weight.data_ptr()};
-        // std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
-        int64_t uids[] = {'x', 'y', 'w'};
-        auto variantPack = cudnn_frontend::VariantPackBuilder()
-            .setWorkspacePointer(workspace.data_ptr())
-            .setDataPointers(3, data_ptrs)
-            .setUids(3, uids)
-            .build();
-        AT_CUDNN_CHECK(cudnnBackendExecute(handle, plan.get_raw_desc(), variantPack.get_raw_desc()));
+        run(cfg);
+        engine_cache[key] = cfg;
         return output;
       } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
     }
@@ -177,7 +183,7 @@ void raw_cudnn_convolution_forward_out(
     bool benchmark, bool deterministic, bool allow_tf32)
 {
   TORCH_CHECK(!benchmark, "not supported yet");
-  ConvolutionCalculator(output, input, weight, padding, stride, dilation).run(benchmark, deterministic, allow_tf32);
+  ConvolutionCalculator(output, input, weight, padding, stride, dilation).run(groups, benchmark, deterministic, allow_tf32);
 }
 
 }}
