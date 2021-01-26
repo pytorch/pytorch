@@ -2,6 +2,7 @@ from typing import List, Optional, Tuple
 import ast
 from ._importlib import _resolve_name
 
+
 class _ExtractModuleReferences(ast.NodeVisitor):
     """
     Extract the list of global variables a block of code will read and write
@@ -34,9 +35,10 @@ class _ExtractModuleReferences(ast.NodeVisitor):
             # from my_package import foo
             # foo may be a module, so we have to add it to the list of
             # potential references, if import of it fails, we will ignore it
-            if alias.name != '*':
+            if alias.name != "*":
                 self.references[(name, alias.name)] = True
             else:
                 self.references[(name, None)] = True
+
 
 find_files_source_depends_on = _ExtractModuleReferences.run

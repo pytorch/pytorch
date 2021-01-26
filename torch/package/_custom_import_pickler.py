@@ -21,7 +21,7 @@ class CustomImportPickler(_Pickler):
         memo = self.memo
 
         if name is None:
-            name = getattr(obj, '__qualname__', None)
+            name = getattr(obj, "__qualname__", None)
         if name is None:
             name = obj.__name__
 
@@ -37,8 +37,8 @@ class CustomImportPickler(_Pickler):
             obj2, parent = _getattribute(module, name)
         except (ImportError, KeyError, AttributeError):
             raise PicklingError(
-                "Can't pickle %r: it's not found as %s.%s" %
-                (obj, module_name, name)) from None
+                "Can't pickle %r: it's not found as %s.%s" % (obj, module_name, name)
+            ) from None
         else:
             if obj2 is not obj:
                 # CHANGED: More specific error message in the case of mangling.
@@ -73,25 +73,27 @@ class CustomImportPickler(_Pickler):
                         else "'importlib.import_module'"
                     )
 
-                    msg += (f"\n\nThe object being pickled is from '{orig_module_name}', "
-                            f"which is coming from {obj_location}."
-                            f"\nHowever, when we import '{orig_module_name}', it's coming from {obj2_location}."
-                            "\nTo fix this, make sure 'PackageExporter.importers' lists "
-                            f"{obj_importer_name} before {obj2_importer_name}")
+                    msg += (
+                        f"\n\nThe object being pickled is from '{orig_module_name}', "
+                        f"which is coming from {obj_location}."
+                        f"\nHowever, when we import '{orig_module_name}', it's coming from {obj2_location}."
+                        "\nTo fix this, make sure 'PackageExporter.importers' lists "
+                        f"{obj_importer_name} before {obj2_importer_name}"
+                    )
                 raise PicklingError(msg)
 
         if self.proto >= 2:
             code = _extension_registry.get((module_name, name))
             if code:
                 assert code > 0
-                if code <= 0xff:
+                if code <= 0xFF:
                     write(EXT1 + pack("<B", code))
-                elif code <= 0xffff:
+                elif code <= 0xFFFF:
                     write(EXT2 + pack("<H", code))
                 else:
                     write(EXT4 + pack("<i", code))
                 return
-        lastname = name.rpartition('.')[2]
+        lastname = name.rpartition(".")[2]
         if parent is module:
             name = lastname
         # Non-ASCII identifiers are supported only with protocols >= 3.
@@ -102,8 +104,13 @@ class CustomImportPickler(_Pickler):
         elif parent is not module:
             self.save_reduce(getattr, (parent, lastname))
         elif self.proto >= 3:
-            write(GLOBAL + bytes(module_name, "utf-8") + b'\n' +
-                  bytes(name, "utf-8") + b'\n')
+            write(
+                GLOBAL
+                + bytes(module_name, "utf-8")
+                + b"\n"
+                + bytes(name, "utf-8")
+                + b"\n"
+            )
         else:
             if self.fix_imports:
                 r_name_mapping = _compat_pickle.REVERSE_NAME_MAPPING
@@ -113,15 +120,23 @@ class CustomImportPickler(_Pickler):
                 elif module_name in r_import_mapping:
                     module_name = r_import_mapping[module_name]
             try:
-                write(GLOBAL + bytes(module_name, "ascii") + b'\n' +
-                      bytes(name, "ascii") + b'\n')
+                write(
+                    GLOBAL
+                    + bytes(module_name, "ascii")
+                    + b"\n"
+                    + bytes(name, "ascii")
+                    + b"\n"
+                )
             except UnicodeEncodeError:
                 raise PicklingError(
                     "can't pickle global identifier '%s.%s' using "
-                    "pickle protocol %i" % (module, name, self.proto)) from None
+                    "pickle protocol %i" % (module, name, self.proto)
+                ) from None
 
         self.memoize(obj)
+
     dispatch[FunctionType] = save_global
+
 
 def import_module_from_importers(module_name, importers):
     last_err = None
@@ -136,11 +151,15 @@ def import_module_from_importers(module_name, importers):
     else:
         raise ModuleNotFoundError(module_name)
 
+
 def create_custom_import_pickler(data_buf, importers):
     if importers == [importlib.import_module]:
         # if we are using the normal import library system, then
         # we can use the C implementation of pickle which is faster
         return Pickler(data_buf, protocol=3)
     else:
-        return CustomImportPickler(lambda mod: import_module_from_importers(mod, importers),
-                                   data_buf, protocol=3)
+        return CustomImportPickler(
+            lambda mod: import_module_from_importers(mod, importers),
+            data_buf,
+            protocol=3,
+        )
