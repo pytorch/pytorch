@@ -300,6 +300,27 @@ BINARY_COMP_HELPER(LessEquals, <=)
 C10_API void SetAPIUsageLogger(std::function<void(const std::string&)> logger);
 C10_API void LogAPIUsage(const std::string& context);
 
+// PyTorch ddp usage logging capabilities
+// DDPLoggingData holds data that can be logged in applications
+// for analysis and debugging. Data structure is defined in
+// c10 directory so that it can be easily imported by both c10
+// and torch files.
+// TODO -- right now starting with logging a small set of straightforward
+// fields, will add more fields as follow ups such as performance stats,
+// internal states and env variables and etc.
+struct DDPLoggingData {
+  // Data that can be got during DistributedDataParallel construction time
+  int world_size;
+  int rank;
+  std::string module_name;
+  std::vector<int> device_ids;
+  int output_device;
+  bool broadcast_buffers;
+  int bucket_cap_mb;
+  bool find_unused_parameters;
+  bool gradient_as_bucket_view;
+};
+
 namespace detail {
 // Return value is needed to do the static variable initialization trick
 C10_API bool LogAPIUsageFakeReturn(const std::string& context);
