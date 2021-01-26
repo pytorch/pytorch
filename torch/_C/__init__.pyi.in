@@ -524,6 +524,7 @@ def _disabled_torch_function_impl(func: Callable, types: Iterable[Type], args: T
 # Defined in `valgrind.h` and `callgrind.h` respecitively.
 def _valgrind_supported_platform() -> _bool: ...  # NVALGRIND
 def _valgrind_toggle() -> None: ...  # CALLGRIND_TOGGLE_COLLECT
+def _valgrind_dump_stats() -> None: ...  # CALLGRIND_DUMP_STATS
 
 has_openmp: _bool
 has_mkl: _bool

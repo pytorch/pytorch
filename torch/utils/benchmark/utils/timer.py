@@ -2,7 +2,7 @@
 import enum
 import timeit
 import textwrap
-from typing import Any, Callable, Dict, List, NoReturn, Optional, Type, Union
+from typing import overload, Any, Callable, Dict, List, NoReturn, Optional, Tuple, Type, Union
 
 import numpy as np
 import torch
@@ -400,12 +400,33 @@ class Timer(object):
             task_spec=self._task_spec
         )
 
+    @overload
+    def collect_callgrind(
+        self,
+        number: int,
+        repeats: None,
+        collect_baseline: bool,
+        retain_out_file: bool,
+    ) -> valgrind_timer_interface.CallgrindStats:
+        ...
+
+    @overload
+    def collect_callgrind(
+        self,
+        number: int,
+        repeats: int,
+        collect_baseline: bool,
+        retain_out_file: bool,
+    ) -> Tuple[valgrind_timer_interface.CallgrindStats, ...]:
+        ...
+
     def collect_callgrind(
         self,
         number: int = 100,
+        repeats: Optional[int] = None,
         collect_baseline: bool = False,
         retain_out_file: bool = False,
-    ) -> valgrind_timer_interface.CallgrindStats:
+    ):
         """Collect instruction counts using Callgrind.
 
         Unlike wall times, instruction counts are deterministic
@@ -440,17 +461,22 @@ class Timer(object):
         if not isinstance(self._task_spec.stmt, str):
             raise ValueError("`collect_callgrind` currently only supports string `stmt`")
 
+        if repeats is not None and repeats < 1:
+            raise ValueError("If specified, `repeats` must be >= 1")
+
         # Check that the statement is valid. It doesn't guarantee success, but it's much
         # simpler and quicker to raise an exception for a faulty `stmt` or `setup` in
         # the parent process rather than the valgrind subprocess.
         self._timer.timeit(1)
         is_python = (self._language == Language.PYTHON)
         assert is_python or not self._globals
-        return valgrind_timer_interface.wrapper_singleton().collect_callgrind(
+        result = valgrind_timer_interface.wrapper_singleton().collect_callgrind(
             task_spec=self._task_spec,
             globals=self._globals,
             number=number,
+            repeats=repeats or 1,
             collect_baseline=collect_baseline and is_python,
             is_python=is_python,
             retain_out_file=retain_out_file,
         )
+        return (result[0] if repeats is None else result)

@@ -19,7 +19,19 @@ void _valgrind_toggle() {
     #endif
 }
 
+void _valgrind_dump_stats() {
+    #if defined(NVALGRIND)
+    TORCH_CHECK(false, "Valgrind is not supported.");
+    #else
+    // NB: See note in Module.cpp
+    CALLGRIND_TOGGLE_COLLECT;
+    CALLGRIND_DUMP_STATS;
+    CALLGRIND_TOGGLE_COLLECT;
+    #endif
+}
+
 PYBIND11_MODULE(callgrind_bindings, m) {
     m.def("_valgrind_supported_platform", &_valgrind_supported_platform);
     m.def("_valgrind_toggle", &_valgrind_toggle);
+    m.def("_valgrind_dump_stats", &_valgrind_dump_stats);
 }
