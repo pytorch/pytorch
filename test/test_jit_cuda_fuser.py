@@ -8,7 +8,10 @@ from torch.testing._internal.common_utils import run_tests, ProfilingMode, GRAPH
 from torch.testing._internal.codegen.random_topo_test import runDefaultTestWithSeed
 from torch.testing import FileCheck
 
-from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
+from test_jit import JitTestCase, RUN_CUDA
+
+from jit.test_fuser_common import TestFuserCommon  # noqa: F401
+
 import itertools
 import numpy as np
 import math

@@ -7,6 +7,7 @@
 
 #ifdef USE_KINETO
 #include <pthread.h>
+#include <torch/cuda.h>
 #include <libkineto.h>
 #endif
 
@@ -136,7 +137,7 @@ void pushProfilingCallbacks() {
   auto state_ptr = getProfilerTLSState();
   TORCH_INTERNAL_ASSERT(state_ptr, "Expected profiler state set");
   auto handle = at::addThreadLocalCallback(at::RecordFunctionCallback(
-      [](const at::RecordFunction& fn) {
+      [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         auto state_ptr = getProfilerTLSState();
         if (!state_ptr || state_ptr->config().state != ProfilerState::KINETO) {
           return std::make_unique<KinetoObserverContext>();
@@ -241,7 +242,8 @@ void prepareProfiler(
   }
 
   if (!libkineto::api().isProfilerRegistered()) {
-    libkineto_init();
+    libkineto_init(!torch::cuda::is_available());
+    libkineto::api().suppressLogMessages();
   }
 
   if (!libkineto::api().isProfilerInitialized()) {

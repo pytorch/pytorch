@@ -51,7 +51,7 @@ namespace cuda {
 //! predicate still in the inner most loop, making sure that we cover edges and
 //! corners.
 //!
-class TORCH_CUDA_API UnrollPass {
+class TORCH_CUDA_CU_API UnrollPass {
  public:
   // Take the incoming exprs and run loop unrolling, returning the new IR
   static std::vector<kir::Expr*> runPass(

@@ -46,7 +46,7 @@ namespace impl {
 // (although presently it isn't).
 //
 // A notable subclass of this interface is TensorIteratorBase.
-struct CAFFE2_API MetaBase {
+struct TORCH_API MetaBase {
   virtual void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides, TensorOptions options, DimnameList names) = 0;
   virtual const Tensor& maybe_get_output(int64_t output_idx) = 0;
   void set_output(IntArrayRef sizes, TensorOptions options) {

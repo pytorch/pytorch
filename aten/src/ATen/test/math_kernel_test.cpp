@@ -4,9 +4,22 @@
 
 using namespace at;
 
-#define ASSERT_ALLCLOSE_TOLERANCES(t1, t2, atol, rtol) \
-  ASSERT_TRUE(t1.is_same_size(t2));                    \
-  ASSERT_TRUE(t1.allclose(t2, atol, rtol));
+bool allClose(const at::Tensor& t1, const at::Tensor& t2, double rtol=1e-5, double atol=1e-8) {
+  if (!t1.is_same_size(t2)) {
+    std::cerr << "Difference in tensor shapes: "
+      << t1.sizes() << " v.s. " << t2.sizes() << std::endl;
+    return false;
+  }
+  bool equal = t1.allclose(t2, rtol, atol);
+  if (!equal) {
+    std::cerr << "Difference in tensor value: \nFirst tensor:\n"
+        << t1 << "\nSecond tensor:\n" << t2 << std::endl;
+  }
+  return equal;
+}
+
+#define ASSERT_ALLCLOSE_TOLERANCES(t1, t2, rtol, atol) \
+  ASSERT_TRUE(allClose(t1, t2, rtol, atol));
 
 // Ideally we want to test both forward and backward on math kernels but I
 // haven't found an easy way to do it.  Currently we only test forward here
@@ -56,9 +69,9 @@ TEST(MathKernelTest, NativeLayerNorm) {
       auto math_out = at::native::math_native_layer_norm(
             input, normalized_shape, undef_weight ? undef : weight, undef_weight ? undef : bias,
             eps);
-      ASSERT_ALLCLOSE_TOLERANCES(std::get<0>(out), std::get<0>(math_out), 1e-4, 1e-6);
-      ASSERT_ALLCLOSE_TOLERANCES(std::get<1>(out), std::get<1>(math_out), 1e-4, 1e-6);
-      ASSERT_ALLCLOSE_TOLERANCES(std::get<2>(out), std::get<2>(math_out), 1e-4, 1e-6);
+      ASSERT_ALLCLOSE_TOLERANCES(std::get<0>(out), std::get<0>(math_out), 1e-3, 1e-5);
+      ASSERT_ALLCLOSE_TOLERANCES(std::get<1>(out), std::get<1>(math_out), 1e-3, 1e-5);
+      ASSERT_ALLCLOSE_TOLERANCES(std::get<2>(out), std::get<2>(math_out), 1e-3, 1e-5);
     }
   }
 }
@@ -79,5 +92,23 @@ TEST(MathKernelTest, Addr) {
       auto math_out = at::native::math_addr(M, vec1, vec2, beta, alpha);
       ASSERT_ALLCLOSE_TOLERANCES(out, math_out, 1e-4, 1e-6);
     }
+  }
+}
+
+TEST(MathKernelTest, SiluBackward) {
+  const auto input = rand({20, 10});
+  const auto grad_output = rand({20, 10});
+  auto out = at::native::silu_backward(grad_output, input);
+  auto math_out = at::native::math_silu_backward(grad_output, input);
+  ASSERT_ALLCLOSE_TOLERANCES(out, math_out, 1e-4, 1e-6);
+}
+
+TEST(MathKernelTest, NarrowCopy)  {
+  auto x = rand({5, 8, 7});
+  for (int64_t dim = 0; dim < 3; ++dim) {
+    const int64_t start = 1, length = 4;
+    auto y_ref = x.narrow(dim, start, length);
+    auto y_test = at::native::narrow_copy_dense(x, dim, start, length);
+    ASSERT_ALLCLOSE_TOLERANCES(y_ref, y_test, 0, 0);
   }
 }

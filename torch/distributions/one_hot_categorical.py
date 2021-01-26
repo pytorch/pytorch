@@ -28,8 +28,8 @@ class OneHotCategorical(Distribution):
         logits (Tensor): event log probabilities
     """
     arg_constraints = {'probs': constraints.simplex,
-                       'logits': constraints.real}
-    support = constraints.simplex
+                       'logits': constraints.real_vector}
+    support = constraints.one_hot
     has_enumerate_support = True
 
     def __init__(self, probs=None, logits=None, validate_args=None):

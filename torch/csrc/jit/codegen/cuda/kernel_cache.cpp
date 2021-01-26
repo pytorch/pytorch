@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
+
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
@@ -219,7 +220,7 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
   encoding_.clear();
   for (const auto& input : inputs) {
     if (input.isTensor()) {
-      auto input_tensor = input.toTensor();
+      auto& input_tensor = input.toTensor();
 
       for (auto size : input_tensor.sizes()) {
         encodeBuffer(size, encoding_);

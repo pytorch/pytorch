@@ -50,7 +50,7 @@ class PredicateCompute {
       bool ignore_block_grid_reductions = true);
 };
 
-class TORCH_CUDA_API UnswitchPredicate {
+class TORCH_CUDA_CU_API UnswitchPredicate {
  public:
   static kir::Bool* get(
       const std::vector<kir::ForLoop*>& outer_loops,

@@ -5,38 +5,14 @@
 namespace c10 {
 namespace impl {
 
-C10_DEFINE_bool(disable_variable_dispatch, false, "This flag forcibly disables the Variable code paths from executing, which currently breaks profiling in the process.");
-
-namespace {
-
-/// In the CAFFE2_FB_LIMITED_MOBILE_CAPABILITY build setting,
-/// thread_local is not supported.
-#ifndef CAFFE2_FB_LIMITED_MOBILE_CAPABILITY
-
 // NB: POD, zero initialized!
 thread_local PODLocalDispatchKeySet raw_local_dispatch_key_set;
 
-#else // defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
-
-static PODLocalDispatchKeySet raw_local_dispatch_key_set;
-
-#endif
-
-} // anonymous namespace
-
+#if defined(_MSC_VER) || defined(C10_ANDROID)
 LocalDispatchKeySet tls_local_dispatch_key_set() {
-  // Hack until variable performance is fixed
-  //
-  // ezyang: I'm pretty unhappy about this implementation, it looks wrong
-  // to me, as it seems to be performing a mutation on
-  // raw_local_dispatch_key_set.  I can't conveniently test the correct
-  // version though...
-  if (FLAGS_disable_variable_dispatch) {
-    raw_local_dispatch_key_set.set_excluded(
-      raw_local_dispatch_key_set.excluded() | autograd_dispatch_keyset);
-  }
   return raw_local_dispatch_key_set;
 }
+#endif // defined(_MSC_VER) || defined(C10_ANDROID)
 
 void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set) {
   raw_local_dispatch_key_set = PODLocalDispatchKeySet {

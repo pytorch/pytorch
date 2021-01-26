@@ -14,7 +14,7 @@ namespace fuser {
 namespace cuda {
 
 //! Calculate Fusion IR expressions
-class TORCH_CUDA_API ExpressionEvaluator : private OptOutDispatch {
+class TORCH_CUDA_CU_API ExpressionEvaluator : private OptOutDispatch {
  public:
   explicit ExpressionEvaluator(Fusion* fusion) : fusion_(fusion) {}
 

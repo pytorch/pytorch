@@ -30,7 +30,7 @@ bool areEqualScalars(Val* v1, Val* v2);
 //!   2) Negation i.e. val * -1
 //!   3) Reduction across a dimension i.e. val.sum(axis=2)
 //!   4) split/merge
-class TORCH_CUDA_API UnaryOp : public Expr {
+class TORCH_CUDA_CU_API UnaryOp : public Expr {
  public:
   UnaryOp(UnaryOpType type, Val* out, Val* in);
 
@@ -59,7 +59,7 @@ class TORCH_CUDA_API UnaryOp : public Expr {
 //! and produce a single output. Examples include:
 //!  1) Add/mul/div/mod/sub (A * B)
 //!  2) LT (A < B)
-class TORCH_CUDA_API BinaryOp : public Expr {
+class TORCH_CUDA_CU_API BinaryOp : public Expr {
  public:
   BinaryOp(BinaryOpType type, Val* out, Val* lhs, Val* rhs);
 
@@ -90,7 +90,7 @@ class TORCH_CUDA_API BinaryOp : public Expr {
 
 //! Broadcast in to match out. is_broadcast_dims are relative to out. Where
 //! is_broadcast_dims.size() == out->nDims().
-class TORCH_CUDA_API BroadcastOp : public Expr {
+class TORCH_CUDA_CU_API BroadcastOp : public Expr {
  public:
   //! \param out The output tensor
   //! \param in The input tensor
@@ -134,7 +134,7 @@ class TORCH_CUDA_API BroadcastOp : public Expr {
 //! Output's axes marked as reduction will be reduced to produce an output
 //! tensor. The output tensors size will be the size of all
 //! non-reduction/non-broadcast dimensions.
-class TORCH_CUDA_API ReductionOp : public Expr {
+class TORCH_CUDA_CU_API ReductionOp : public Expr {
  public:
   ReductionOp(BinaryOpType reduction_op_type, Val* init, Val* out, Val* in);
 
@@ -163,7 +163,7 @@ class TORCH_CUDA_API ReductionOp : public Expr {
   Val* const in_ = nullptr;
 };
 
-class TORCH_CUDA_API TransposeOp : public Expr {
+class TORCH_CUDA_CU_API TransposeOp : public Expr {
  public:
   TransposeOp(TensorView* out, TensorView* in, std::vector<int> new2old);
 
@@ -187,7 +187,7 @@ class TORCH_CUDA_API TransposeOp : public Expr {
   const std::vector<int> new2old_;
 };
 
-class TORCH_CUDA_API TernaryOp : public Expr {
+class TORCH_CUDA_CU_API TernaryOp : public Expr {
  public:
   TernaryOp(TernaryOpType type, Val* out, Val* in1, Val* in2, Val* in3);
 
@@ -228,7 +228,7 @@ class ReplayTransformations;
 //! TensorDomains which represent how to iterate over a tensor is made up of
 //! IterDomains to form an ND iterable. We directly set parallization strategies
 //! on IterDomains.
-class TORCH_CUDA_API IterDomain : public Val {
+class TORCH_CUDA_CU_API IterDomain : public Val {
  public:
   IterDomain(
       Val* start,
@@ -370,7 +370,7 @@ class TORCH_CUDA_API IterDomain : public Val {
 //! which should give us an operation in the list [split, merge] or similar
 //! operations that take in a TensorDomain, applies a transformation and outputs
 //! a tensor domain.
-class TORCH_CUDA_API TensorDomain : public Val {
+class TORCH_CUDA_CU_API TensorDomain : public Val {
  public:
   explicit TensorDomain(
       std::vector<IterDomain*> domain,
@@ -507,7 +507,7 @@ class TORCH_CUDA_API TensorDomain : public Val {
 //! Representation a split on an IterDomain by "factor"
 //! inner_split dictates if the factor section of the split should be inside the
 //! remainer or outside.
-class TORCH_CUDA_API Split : public Expr {
+class TORCH_CUDA_CU_API Split : public Expr {
  public:
   Split(
       IterDomain* outer,
@@ -552,7 +552,7 @@ class TORCH_CUDA_API Split : public Expr {
 //!
 //! \todo Should this be a unary op type?
 //!
-class TORCH_CUDA_API Merge : public Expr {
+class TORCH_CUDA_CU_API Merge : public Expr {
  public:
   Merge(IterDomain* out, IterDomain* outer, IterDomain* inner);
 
@@ -584,7 +584,7 @@ class TORCH_CUDA_API Merge : public Expr {
 //! - blockDim.z
 //! - T3.stride[2]
 //!
-class TORCH_CUDA_API NamedScalar : public Val {
+class TORCH_CUDA_CU_API NamedScalar : public Val {
  public:
   NamedScalar(std::string name, DataType dtype)
       : Val(ValType::NamedScalar, dtype), name_(name) {}

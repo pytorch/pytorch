@@ -26,7 +26,7 @@
 
 // fuser and IR parser
 #include <torch/csrc/jit/codegen/cuda/parser.h>
-#include "torch/csrc/jit/ir/irparser.h"
+#include <torch/csrc/jit/ir/irparser.h>
 
 #include "test_gpu_validator.h"
 
@@ -4846,13 +4846,14 @@ TEST(NVFuserTest, FusionSoftmax1DNormalized_CUDA) {
   sub_tv3->computeAt(sum_exp_rf_tv9, -1);
   sub_tv3_copy->computeAt(output_tv7, -1);
 
-  TensorView* tensors_to_parallelize[] = {max_val_tv1,
-                                          bcast_max_tv2,
-                                          sum_exp_tv5,
-                                          bcast_sum_tv6,
-                                          output_tv7,
-                                          max_val_rf_tv8,
-                                          sum_exp_rf_tv9};
+  TensorView* tensors_to_parallelize[] = {
+      max_val_tv1,
+      bcast_max_tv2,
+      sum_exp_tv5,
+      bcast_sum_tv6,
+      output_tv7,
+      max_val_rf_tv8,
+      sum_exp_rf_tv9};
 
   for (auto tv : tensors_to_parallelize) {
     tv->axis(-1)->parallelize(ParallelType::TIDx);
@@ -4978,13 +4979,14 @@ TEST(NVFuserTest, FusionSoftmax3DNormalized_CUDA) {
   sub_tv3->computeAt(sum_exp_rf_tv9, -1);
   sub_tv3_copy->computeAt(output_tv7, -1);
 
-  TensorView* tensors_to_parallelize[] = {max_val_tv1,
-                                          bcast_max_tv2,
-                                          sum_exp_tv5,
-                                          bcast_sum_tv6,
-                                          output_tv7,
-                                          max_val_rf_tv8,
-                                          sum_exp_rf_tv9};
+  TensorView* tensors_to_parallelize[] = {
+      max_val_tv1,
+      bcast_max_tv2,
+      sum_exp_tv5,
+      bcast_sum_tv6,
+      output_tv7,
+      max_val_rf_tv8,
+      sum_exp_rf_tv9};
 
   for (auto tv : tensors_to_parallelize) {
     tv->axis(0)->parallelize(ParallelType::BIDx);
@@ -6882,15 +6884,16 @@ TEST(NVFuserTest, FusionSmemDynamicPersistentSoftmax2D_CUDA) {
   cache_x->setMemoryType(MemoryType::Shared);
   exp->setMemoryType(MemoryType::Shared);
 
-  std::vector<TensorView*> all_tensors({x,
-                                        cache_x,
-                                        max_val,
-                                        bcast_max,
-                                        x_max_sub,
-                                        exp,
-                                        sum_exp,
-                                        bcast_sum,
-                                        softmax});
+  std::vector<TensorView*> all_tensors(
+      {x,
+       cache_x,
+       max_val,
+       bcast_max,
+       x_max_sub,
+       exp,
+       sum_exp,
+       bcast_sum,
+       softmax});
 
   auto tidx = new Int();
   fusion.addInput(tidx);
@@ -7549,25 +7552,27 @@ TEST(NVFuserTest, FusionPersistentNormLocalShared_CUDA) {
   std::vector<TensorView*> common_tensors(
       {x_sum, x_sum_bcast, x_mean, var_sum, var_sum_bcast, var, var_eps, rvar});
 
-  std::vector<TensorView*> static_tensors({sx,
-                                           sx_cache,
-                                           sx_sum,
-                                           sx_mean_sub,
-                                           sx_mean_sub_pow,
-                                           sx_var_sum,
-                                           sx_norm,
-                                           sx_norm_gamma,
-                                           sx_norm_gamma_beta});
+  std::vector<TensorView*> static_tensors(
+      {sx,
+       sx_cache,
+       sx_sum,
+       sx_mean_sub,
+       sx_mean_sub_pow,
+       sx_var_sum,
+       sx_norm,
+       sx_norm_gamma,
+       sx_norm_gamma_beta});
 
-  std::vector<TensorView*> dynamic_tensors({dx,
-                                            dx_cache,
-                                            dx_sum,
-                                            dx_mean_sub,
-                                            dx_mean_sub_pow,
-                                            dx_var_sum,
-                                            dx_norm,
-                                            dx_norm_gamma,
-                                            dx_norm_gamma_beta});
+  std::vector<TensorView*> dynamic_tensors(
+      {dx,
+       dx_cache,
+       dx_sum,
+       dx_mean_sub,
+       dx_mean_sub_pow,
+       dx_var_sum,
+       dx_norm,
+       dx_norm_gamma,
+       dx_norm_gamma_beta});
 
   std::vector<TensorView*> all_tensors;
   all_tensors.insert(
@@ -7699,20 +7704,21 @@ TEST(NVFuserTest, FusionSmemDynamicPersistentNorm_CUDA) {
   cache_x->setMemoryType(MemoryType::Shared);
   x_mean_sub->setMemoryType(MemoryType::Shared);
 
-  std::vector<TensorView*> all_tensors({x_sum,
-                                        x_mean,
-                                        cache_x,
-                                        x_sum_bcast,
-                                        x_mean_sub,
-                                        x_mean_sub_pow,
-                                        var_sum,
-                                        var_sum_bcast,
-                                        var,
-                                        var_eps,
-                                        rvar,
-                                        norm,
-                                        norm_gamma,
-                                        norm_gamma_beta});
+  std::vector<TensorView*> all_tensors(
+      {x_sum,
+       x_mean,
+       cache_x,
+       x_sum_bcast,
+       x_mean_sub,
+       x_mean_sub_pow,
+       var_sum,
+       var_sum_bcast,
+       var,
+       var_eps,
+       rvar,
+       norm,
+       norm_gamma,
+       norm_gamma_beta});
 
   auto tidx = new Int();
   fusion.addInput(tidx);

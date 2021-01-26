@@ -77,7 +77,7 @@ class TransposeOp;
 
 // By default, all IR nodes are handled in this dispatch, and will call an empty
 // function on all nodes.
-class TORCH_CUDA_API OptOutConstDispatch : public PolymorphicBase {
+class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
  public:
   // Hierarchal dispatch functions for handle
   virtual void handle(const Statement*);
@@ -104,7 +104,7 @@ class TORCH_CUDA_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const TransposeOp*) {}
 };
 
-class TORCH_CUDA_API OptOutDispatch : public PolymorphicBase {
+class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
  public:
   // Hierarchal dispatch functions for handle
   virtual void handle(Statement*);
@@ -131,7 +131,7 @@ class TORCH_CUDA_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(TransposeOp*) {}
 };
 
-class TORCH_CUDA_API OptInConstDispatch : public PolymorphicBase {
+class TORCH_CUDA_CU_API OptInConstDispatch : public PolymorphicBase {
  public:
   // Hierarchal dispatch functions for handle
   virtual void handle(const Statement*);
@@ -188,7 +188,7 @@ class TORCH_CUDA_API OptInConstDispatch : public PolymorphicBase {
   }
 };
 
-class TORCH_CUDA_API OptInDispatch : public PolymorphicBase {
+class TORCH_CUDA_CU_API OptInDispatch : public PolymorphicBase {
  public:
   // Hierarchal dispatch functions for handle
   virtual void handle(Statement* s);
@@ -245,7 +245,7 @@ class TORCH_CUDA_API OptInDispatch : public PolymorphicBase {
   }
 };
 
-class TORCH_CUDA_API OptOutMutator : public PolymorphicBase {
+class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
  public:
   // Hierarchal dispatch functions for handle
   virtual Statement* mutate(Statement* s);
@@ -293,7 +293,7 @@ class TORCH_CUDA_API OptOutMutator : public PolymorphicBase {
   virtual Statement* mutate(TransposeOp*);
 };
 
-class TORCH_CUDA_API OptInMutator : public PolymorphicBase {
+class TORCH_CUDA_CU_API OptInMutator : public PolymorphicBase {
  public:
   std::unordered_map<Val*, Val*> mutations;
 
