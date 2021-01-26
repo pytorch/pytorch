@@ -1065,8 +1065,6 @@ class TestFX(JitTestCase):
                 return super().call_method(n)
 
         transformed = NegSigmSwapXformer(gm).transform()
-        print(gm.graph)
-        print(transformed.graph)
         input = torch.randn(3, 4)
         self.assertEqual(transformed(input), torch.neg(input).sigmoid())
 

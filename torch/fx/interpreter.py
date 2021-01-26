@@ -48,7 +48,7 @@ class Interpreter:
             gm = torch.fx.symbolic_trace(fn)
             input = torch.randn(3, 4)
             result = NegSigmSwapInterpreter(gm).run(input)
-            assert torch.testing.assert_allclose(result, torch.neg(input).sigmoid())
+            torch.testing.assert_allclose(result, torch.neg(input).sigmoid())
 
     Args:
         module (GraphModule): The module to be executed
@@ -263,30 +263,86 @@ class Interpreter:
             return self.env[n_arg]
         return map_arg(args, load_arg)
 
-class TransformerTracer(Tracer):
-    def __init__(self, graph: Graph):
-        super().__init__()
-        self.graph = graph
-
-    def is_leaf_module(self, _, __) -> bool:
-        return True
-
 class Transformer(Interpreter):
+    """
+    ``Transformer`` is a special type of interpreter that produces a
+    new ``Module``. It exposes a ``transform()`` method that returns
+    the transformed ``Module``. ``Transformer`` does not require
+    arguments to run, as ``Interpreter`` does. ``Transformer`` works
+    entirely symbolically.
+
+    Example:
+        Suppose we want to swap all instances of ``torch.neg`` with
+        ``torch.sigmoid`` and vice versa (including their ``Tensor``
+        method equivalents). We could subclass ``Transformer`` like so::
+
+            class NegSigmSwapXformer(Transformer):
+                def call_function(self, n : Node) -> Any:
+                    if n.target == torch.sigmoid:
+                        n = copy.copy(n)
+                        n.target = torch.neg
+                    return super().call_function(n)
+
+                def call_method(self, n : Node) -> Any:
+                    if n.target == 'neg':
+                        n = copy.copy(n)
+                        n.target = 'sigmoid'
+                    return super().call_method(n)
+
+            def fn(x):
+                return torch.sigmoid(x).neg()
+
+            gm = torch.fx.symbolic_trace(fn)
+
+            transformed : torch.nn.Module = NegSigmSwapXformer(gm).transform()
+            input = torch.randn(3, 4)
+            torch.testing.assert_allclose(transformed(input), torch.neg(input).sigmoid())
+
+    Args:
+        module (GraphModule): The ``Module`` to be transformed.
+    """
     def __init__(self, module):
         super().__init__(module)
         self.new_graph = Graph()
+        class TransformerTracer(Tracer):
+            def __init__(self, graph: Graph):
+                super().__init__()
+                self.graph = graph
+
+            def is_leaf_module(self, _, __) -> bool:
+                return True
         self.tracer = TransformerTracer(self.new_graph)
         self.tracer.root = module
 
     def placeholder(self, n : Node) -> Proxy:
+        """
+        Execute a ``placeholder`` node. In ``Transformer``, this is
+        overridden to insert a new ``placeholder`` into the output
+        graph.
+
+        Args:
+            n (Node): The placeholder node to execute
+        """
         assert isinstance(n.target, str)
         return Proxy(self.new_graph.placeholder(n.target), self.tracer)
 
     def get_attr(self, n : Node) -> Proxy:
+        """
+        Execute a ``get_attr`` node. In ``Transformer``, this is
+        overridden to insert a new ``get_attr`` node into the output
+        graph.
+
+        Args:
+            n (Node): The get_attr node to execute
+        """
         assert isinstance(n.target, str)
         return Proxy(self.new_graph.get_attr(n.target), self.tracer)
 
     def transform(self) -> GraphModule:
+        """
+        Transform ``self.module`` and return the transformed
+        ``GraphModule``.
+        """
         result = super().run()
         if result is not None:
             assert isinstance(result, Proxy)
