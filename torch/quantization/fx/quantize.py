@@ -934,7 +934,8 @@ class Quantizer:
                 packed_weight = packed_weights[node.name]
                 # add a prepacked attribute to root
                 packed_weight_name = get_new_packed_weight_name(quantized_root)
-                setattr(quantized_root, packed_weight_name, packed_weight)
+                # setattr(quantized_root, packed_weight_name, packed_weight)
+                quantized_root.register_buffer(packed_weight_name, packed_weight)
                 # replace prepack node with a getattr node
                 env[node.name] = folded_graph.create_node(
                     'get_attr', packed_weight_name, (), {})

@@ -1495,6 +1495,37 @@ class TestQuantizeFx(QuantizationTestCase):
             str(context.exception) ==
             'Per channel weight observer is not supported yet for ConvTranspose{n}d.')
 
+    def test_attrs_are_buffers(self):
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    Linear(),
+                    Linear()
+                )
+                self.mods2 = Linear()
+
+            def forward(self, x):
+                x = self.mods1(x)
+                x = self.mods2(x)
+                return x
+
+        model = M().eval()
+        qconfig_dict = {"": default_qconfig, "module_name": [("mods2", None)]}
+        m = prepare_fx(model, qconfig_dict)
+        print(m)
+        m(torch.rand(5,5))
+        m = convert_fx(m)
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
