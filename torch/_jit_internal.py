@@ -194,6 +194,9 @@ def get_closure(fn):
 # functions will be defined at a global scope like MyGlobalClass. In cases
 # where they are not, it is possible to work around issues by declaring the
 # values global in the function.
+# In Python 3.9 declaring class as global will make it invisible to
+# `inspect.getsource`, see https://bugs.python.org/issue42666 .
+# This could be worked around by manualy adding it to `global()` dictionary.
 
 
 
