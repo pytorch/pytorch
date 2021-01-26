@@ -8,6 +8,8 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
 from torch.testing._internal import mypy_wrapper
+from torch.testing._internal.stats_utils import \
+    (regression_info)
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -543,6 +545,87 @@ class TestMypyWrapper(TestCase):
             pattern='tools/autograd/*.py',
             filename=PurePosixPath('tools/autograd/deprecated.yaml'),
         ))
+
+
+def fakehash(char):
+    return char * 40
+
+
+def makecase(name, seconds, *, errored=False, failed=False, skipped=False):
+    return {
+        'name': name,
+        'seconds': seconds,
+        'errored': errored,
+        'failed': failed,
+        'skipped': skipped
+    }
+
+
+class TestStatsUtils(TestCase):
+    maxDiff = None
+
+    def test_regression_info(self):
+        self.assertEqual(
+            '''\
+Following output is to check this commit for test time regressions:
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+Comparing test times against base commit and its 1 most recent ancestors:
+    bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb   1 run  found in S3, total time    40.00s
+    cccccccccccccccccccccccccccccccccccccccc   1 run  found in S3, total time    43.00s
+
+Prior average total time:    41.50s ± 2.12s
+Current       total time:    42.00s
+🟢 this commit maintains total test job time within 1 standard deviation
+
+------ tests added/removed ------
+
+--- tests whose times changed ---
+''',
+            regression_info(
+                fakehash('a'),
+                {
+                    'total_seconds': 42,
+                    'suites': {
+                        'Foo': {
+                            'total_seconds': 42,
+                            'cases': [
+                                makecase('test_foo', 42),
+                            ],
+                        },
+                    },
+                },
+                {
+                    fakehash('b'): [
+                        {
+                            'total_seconds': 40,
+                            'suites': {
+                                'Foo': {
+                                    'total_seconds': 40,
+                                    'cases': [
+                                        makecase('test_foo', 40),
+                                    ],
+                                },
+                            },
+                        }
+                    ],
+                    fakehash('c'): [
+                        {
+                            'total_seconds': 43,
+                            'suites': {
+                                'Foo': {
+                                    'total_seconds': 43,
+                                    'cases': [
+                                        makecase('test_foo', 43),
+                                    ],
+                                },
+                            },
+                        }
+                    ],
+                },
+                stdev_threshold=2,
+            )
+        )
 
 
 if __name__ == '__main__':

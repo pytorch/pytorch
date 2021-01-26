@@ -4,9 +4,7 @@
 from xml.dom import minidom
 from glob import glob
 import bz2
-from collections import defaultdict
 import json
-import math
 import os
 from pathlib import Path
 import statistics
@@ -16,6 +14,9 @@ import time
 import boto3
 import datetime
 import requests
+
+from torch.testing._internal import stats_utils
+
 
 class TestCase:
     def __init__(self, dom):
@@ -184,20 +185,8 @@ def send_report_to_s3(obj):
     # gunzip command whereas Python's bz2 does work with bzip2
     obj.put(Body=bz2.compress(json.dumps(obj).encode()))
 
-def print_suite_regression_info(name, info):
-    print()
-    print(f"class {name}:")
-    missing = info.get("missing")
-    if missing:
-        print("    missing in current run,")
-
 def print_regressions(obj, *, n, stdev_threshold):
     sha1 = os.environ.get("CIRCLE_SHA1")
-
-    print()
-
-    print("Following output is to check this commit for test time regressions:")
-    print(f"    {sha1}")
 
     base = subprocess.check_output(
         ["git", "merge-base", sha1, "origin/master"],
@@ -228,100 +217,17 @@ def print_regressions(obj, *, n, stdev_threshold):
     for commit, summaries in index.items():
         objects[commit] = []
         for summary in summaries:
-            binary = summary.get()['Body'].read()
-            string = bz2.decompress(binary).decode('utf-8')
+            binary = summary.get()["Body"].read()
+            string = bz2.decompress(binary).decode("utf-8")
             objects[commit].append(json.loads(string))
 
     print()
-
-    print(f"Comparing test times for job {job} against base commit and its {n-1} most recent ancestors:")
-    for commit in commits:
-        runs = objects[commit]
-        num_runs = len(runs)
-        prefix = str(num_runs).rjust(3)
-        plural = " " if num_runs == 1 else "s"
-        times = [o['total_seconds'] for o in runs]
-        t = ""
-        if num_runs > 0:
-            t += f", total time {statistics.mean(times):8.2f}s"
-            if num_runs > 1:
-                t += f" ± {statistics.stdev(times):7.2f}s"
-        print(f"    {commit} {prefix} run{plural} found in S3{t}")
-
-    print()
-
-    times = [o["total_seconds"] for runs in objects.values() for o in runs]
-    total_mean = statistics.mean(times)
-    total_stdev = statistics.stdev(times)
-    print(f"Prior average total time: {total_mean:8.2f}s ± {total_stdev:.2f}s")
-    print(f"Current       total time: {obj['total_seconds']:8.2f}s")
-    stdevs_bigger = (obj["total_seconds"] - total_mean) / total_stdev
-    stdevs_abs = abs(stdevs_bigger)
-    stdevs_floor = math.floor(stdevs_abs)
-    stdevs_ceil = math.ceil(stdevs_abs)
-    if stdevs_abs < stdev_threshold:
-        icon, verb, prep, amount = "🟢", "maintains", "within", stdevs_ceil
-    else:
-        prep, amount = "by at least", stdevs_floor
-        if stdevs_bigger < 0:
-            icon, verb = "🟣", "reduces"
-        else:
-            icon, verb = "🔴", "increases"
-    plural = "" if amount == 1 else "s"
-    print(f"{icon} this commit {verb} total test job time {prep} {amount} standard deviation{plural}")
-
-    all_runs = [obj] + [run for runs in objects.values() for run in runs]
-    all_tests = defaultdict(set)
-    for run in all_runs:
-        for name, suite in run["suites"].items():
-            all_tests[name] |= {case["name"] for case in suite["cases"]}
-
-    print()
-    print("------ tests added/removed ------")
-
-    for suite, cases in all_tests.items():
-        missing_suite = []
-        missing_cases = defaultdict(list)
-        for commit, runs in objects.items():
-            for run in runs:
-                suite_dict = run["suites"].get(suite)
-                if suite_dict:
-                    run_cases = {case["name"] for case in suite_dict["cases"]}
-                    for case in cases - run_cases:
-                        missing_cases[case].append(commit)
-                else:
-                    missing_suite.append(commit)
-        if missing_suite or missing_cases:
-            print()
-            print(f"test suite {suite}:")
-            if missing_suite:
-                print("    missing in these commits:")
-                for missing_commit in missing_suite:
-                    print(f"        {missing_commit}")
-            for case, missing_commits in missing_cases.items():
-                print(f"    test case {case} missing in these commits:")
-                for missing_commit in missing_commits:
-                    print(f"        {missing_commit}")
-
-    print()
-    print("--- tests whose times changed ---")
-
-    for suite, cases in all_tests.items():
-        info = {}
-        curr_suite_dict = obj["suites"].get(suite)
-        missing_suite = False
-        if not curr_suite_dict:
-            for commit, runs in objects.items():
-                if runs:
-                    missing_suite = True
-                for run in runs:
-                    if suite in run["suites"]:
-                        pass
-        for commit, runs in objects.items():
-            for run in runs:
-                suite_dict = run["suites"].get(suite)
-        if info:
-            print_suite_regression_info(info)
+    print(stats_utils.regression_info(
+        sha1,
+        obj,
+        objects,
+        stdev_threshold=stdev_threshold,
+    ), end="")
 
 def positive_integer(value):
     parsed = int(value)
