@@ -19,8 +19,8 @@
 
 #include <fp16.h>
 
+#include <pack_block_sparse.h>
 #include <qnnpack/AlignedAllocator.h>
-#include <qnnpack/pack_block_sparse.h>
 #include <qnnpack/params.h>
 #include <qnnpack/requantization.h>
 
