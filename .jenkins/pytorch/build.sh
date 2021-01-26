@@ -23,17 +23,6 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda10.2-cudnn7-py3-gcc7* ]]; then
-  # Enabling DEPLOY build (embedded torch python interpreter, experimental)
-  # only on one config for now, can expand later
-  export USE_DEPLOY=ON
-
-  # Deploy feature builds cpython. It requires these packages.
-  # TODO move this to dockerfile?
-  sudo apt-get -qq update
-  sudo apt-get -qq install libffi-dev libbz2-dev libreadline-dev libncurses5-dev libncursesw5-dev libgdbm-dev libsqlite3-dev uuid-dev tk-dev
-fi
-
 echo "Python version:"
 python --version
 
