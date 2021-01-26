@@ -1,5 +1,4 @@
 from collections import OrderedDict
-from copy import deepcopy
 import functools
 from numbers import Number
 from typing import Any, Dict, Optional, Tuple, Union
@@ -79,7 +78,7 @@ class Tensor(torch._C._TensorBase):
                     new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
                     new_tensor.requires_grad = self.requires_grad
             if self.grad is not None:
-                new_tensor.grad = deepcopy(self.grad)
+                new_tensor.grad = self.grad.__deepcopy__(memo)
             memo[id(self)] = new_tensor
             return new_tensor
 
