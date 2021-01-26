@@ -13,7 +13,8 @@ jobs:
     steps:
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - id: set-matrix
+      - name: Generating build matrix
+        id: set-matrix
         run: |
           # outputting for debugging purposes
           python .github/scripts/generate_binary_build_matrix.py
@@ -29,7 +30,12 @@ jobs:
       image: ${{ matrix.container_image }}
     env:
       DESIRED_PYTHON: ${{ matrix.python_version }}
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: ${{ matrix.gpu_arch_version }}
+      GPU_ARCH_VERSION: ${{ matrix.GPU_ARCH_VERSION }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
+      PYTORCH_BUILD_NUMBER: 1
       SKIP_ALL_TESTS: 1
     steps:
       - name: Clone pytorch/pytorch
@@ -42,7 +48,11 @@ jobs:
         with:
           repository: pytorch/builder
           path: builder
-      # TODO: Add version generation here from binary_populate_env.sh
+      - name: Generate version string
+        run: |
+          version = $(.github/scripts/generate_pytorch_version.py)
+          echo "Generated version: ${version}"
+          echo "PYTORCH_BUILD_VERSION=${version}" >> $GITHUB_ENV
       # TODO: Remove this once we remove the need for the directories to be
       #       in specific locations
       - name: Symlink repositories to root directory (for legacy scripts purposes)
