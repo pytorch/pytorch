@@ -50,8 +50,9 @@ jobs:
           repository: pytorch/builder
           path: builder
       - name: Generate version string
+        working-directory: pytorch/
         run: |
-          version=$(pytorch/.github/scripts/generate_pytorch_version.py)
+          version=$(.github/scripts/generate_pytorch_version.py)
           echo "Generated version: ${version}"
           echo "PYTORCH_BUILD_VERSION=${version}" >> $GITHUB_ENV
       # TODO: Remove this once we remove the need for the directories to be
