@@ -105,7 +105,7 @@ std::vector<Tensor> foreach_pointwise_op(TensorList input, TensorList tensors1, 
 std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {  \
     check_foreach_api_restrictions(input, tensors1, tensors2);                                                                        \
                                                                                                                                       \
-    if (!can_use_fast_route({input, tensors1, tensors2}, {scalar})) {                                                                 \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalar)) {                                                                   \
         return at::native::foreach_tensor_##NAME##_scalar_slow(input, tensors1, tensors2, scalar);                                    \
     }                                                                                                                                 \
                                                                                                                                       \
@@ -115,7 +115,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(TensorList input, Tensor
 void foreach_tensor_##NAME##_scalar_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {                \
     check_foreach_api_restrictions(input, tensors1, tensors2);                                                                        \
                                                                                                                                       \
-    if (!can_use_fast_route({input, tensors1, tensors2}, {scalar})) {                                                                 \
+    if (!can_use_fast_route({input, tensors1, tensors2}, scalar)) {                                                                   \
         return at::native::foreach_tensor_##NAME##_scalar_slow_(input, tensors1, tensors2, scalar);                                   \
     }                                                                                                                                 \
                                                                                                                                       \
