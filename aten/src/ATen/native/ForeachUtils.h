@@ -146,4 +146,3 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, bool promote_i
 
 }
 }} // at::native
-

@@ -113,10 +113,6 @@ def _lazy_call(callable):
     if is_initialized():
         callable()
     else:
-        # TODO(torch_deploy): this accesses linecache, which attempts to read the
-        # file system to get traceback info. Patch linecache or do something
-        # else here if this ends up being important.
-
         # Don't store the actual traceback to avoid memory cycle
         _queued_calls.append((callable, traceback.format_stack()))
 
