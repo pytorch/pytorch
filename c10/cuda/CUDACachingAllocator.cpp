@@ -242,12 +242,9 @@ class DeviceCachingAllocator {
       // Free all non-split cached blocks and retry alloc.
       || (free_cached_blocks() && alloc_block(params, true));
 
-    if (block_found) {
-      TORCH_INTERNAL_ASSERT(params.err == cudaSuccess &&
-                            params.block != nullptr &&
-                            params.block->ptr != nullptr);
-    } else {
-      // For any other error code, alloc_block should have thrown an exception already.
+    if (!block_found) {
+      // For any error code other than cudaErrorMemoryAllocation,
+      // alloc_block should have thrown an exception already.
       TORCH_INTERNAL_ASSERT(params.err == cudaErrorMemoryAllocation);
 
       size_t device_free;
@@ -291,9 +288,11 @@ class DeviceCachingAllocator {
         " reserved in total by PyTorch)");
     }
 
+    TORCH_INTERNAL_ASSERT(params.err == cudaSuccess &&
+                          params.block != nullptr &&
+                          params.block->ptr != nullptr);
     Block* block = params.block;
     Block* remaining = nullptr;
-    TORCH_INTERNAL_ASSERT(block);
 
     const bool already_split = block->is_split();
     if (should_split(block, size)) {
