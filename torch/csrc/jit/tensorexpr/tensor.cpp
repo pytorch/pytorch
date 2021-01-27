@@ -8,6 +8,43 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+Stmt* Tensor::lowerToStmt() const {
+  Stmt* s = ElementStmt();
+
+  // If this Tensor has no functional body, it already has its axes expanded.
+  if (nullptr == body()) {
+    return s;
+  }
+
+  if (ndim() == 0 && reduce_ndim() == 0) {
+    return s;
+  }
+
+  const Expr* init_expr = buf()->initializer();
+
+  std::vector<const Expr*> indices(args().begin(), args().end());
+
+  if (reduce_ndim() > 0) {
+    for (size_t i = 0; i < reduce_ndim(); i++) {
+      // Going in reverse order: from innermost loop to the outermost
+      size_t dim_index = reduce_ndim() - i - 1;
+      s = new For(
+          reduce_arg(dim_index), new IntImm(0), reduce_dim(dim_index), s);
+    }
+    if (init_expr) {
+      Store* init = new Store(buf(), indices, init_expr, new IntImm(1));
+      s = new Block({init, s});
+    }
+  }
+
+  for (size_t i = 0; i < ndim(); i++) {
+    // Going in reverse order: from innermost loop to the outermost
+    size_t dim_index = ndim() - i - 1;
+    s = new For(arg(dim_index), new IntImm(0), dim(dim_index), s);
+  }
+  return s;
+}
+
 Tensor* Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
