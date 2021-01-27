@@ -286,7 +286,7 @@ class TensorPipeAgent : public RpcAgent {
 #ifdef USE_CUDA_NOT_ROCM
   // An RPC-specific CUDAFuture subclass. It overrides the extractDataPtrs
   // function to handle and only handle RPC Messages.
-  struct TORCH_CUDA_API RpcCUDAFuture final : at::cuda::CUDAFuture {
+  struct TORCH_CUDA_CPP_API RpcCUDAFuture final : at::cuda::CUDAFuture {
    public:
     using at::cuda::CUDAFuture::CUDAFuture;
 

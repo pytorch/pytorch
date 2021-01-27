@@ -4899,6 +4899,10 @@ for shape in [(1,), ()]:
         self.assertFalse(out.dtype.is_floating_point)
         self.assertFalse(out.requires_grad)
 
+        val = torch.empty(5).requires_grad_()
+        out = val.count_nonzero()
+        self.assertFalse(out.requires_grad)
+
         def assert_only_first_requires_grad(res):
             if not isinstance(res, tuple):
                 res = (res,)
