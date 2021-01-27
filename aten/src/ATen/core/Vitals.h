@@ -4,6 +4,9 @@
 #include <sstream>
 #include <unordered_map>
 
+namespace at {
+namespace vitals {
+
 bool torchVitalEnabled();
 
 struct TorchVitalAttr {
@@ -36,6 +39,9 @@ struct TorchVital {
     }
   }
 };
+
+} // namespace at
+} // namespace vitals
 
 #define TORCH_VITAL_DECLARE(name) extern TorchVital TorchVital_##name;
 
