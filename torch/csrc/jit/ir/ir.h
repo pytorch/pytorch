@@ -72,11 +72,11 @@ using namespace ::c10::attr;
 namespace aten {
 using namespace ::c10::aten;
 }
-namespace cuda {
+namespace _cuda {
 #ifndef __HIP_PLATFORM_HCC__
-using namespace ::c10::cuda;
+using namespace ::c10::_cuda;
 #endif
-} // namespace cuda
+} // namespace _cuda
 
 struct Function;
 struct MatchedSchema;

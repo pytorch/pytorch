@@ -445,6 +445,44 @@ class TestCUDA(JitTestCase):
             return e0.query() and s0.query() and s1.query()
         self.assertTrue(test_wait_event())
 
+        # Test asynchronous task operations enqueued on multiple CUDA Streams.
+        def test_multi_stream_async_ops():
+            # This task function computes the torch.mm operation on the given
+            # user stream and returns the output tensor of the operation.
+            @torch.jit.script
+            def foo(user_stream:'torch.classes.cuda.Stream', A: torch.Tensor) -> torch.Tensor:
+                with torch.cuda.stream(user_stream):
+                    B = torch.mm(A, A).to("cuda")
+                # Wait for B to be computed
+                user_stream.synchronize()
+                return B
+
+            @torch.jit.script
+            def wait_script():
+                fut : List[Future[torch.Tensor]] = []
+                device_index = torch.cuda.current_device()
+                output = [] # List to hold the output of `foo`
+                A = torch.rand(2, 2, device="cuda")
+                # Enqueue `foo` task function using `torch.jit.fork` on different
+                # user streams.
+                for _ in range(3):
+                    user_stream = torch.jit.cuda.Stream(device_index, 0)
+                    fut.append(torch.jit.fork(foo, user_stream, A))
+
+                # Now use `torch.jit.wait` to synchronize all the operations
+                # to complete.
+                for future in fut:
+                    output.append(torch.jit.wait(future))
+
+                return output
+
+            return wait_script()
+
+        result = test_multi_stream_async_ops()
+        # Check if all the tensors in output are equal
+        for output in result:
+            self.assertEqual(output, result[0])
+
         # Test if a scripted module with cuda streams can be saved, loaded and executed
         def test_save_load(self):
             class Model(torch.nn.Module):

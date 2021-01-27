@@ -486,8 +486,11 @@ def _get_device_index(device: Any, optional: bool = False, allow_cpu: bool = Fal
         device_idx = device
     if device_idx is None:
         if optional:
-            # If we are in scripting mode, call the corresponding JIT API
-            # to get the device index else call the eager API.
+            # The eager API _get_current_device_index uses `lambda` functions which are
+            # not supported in JIT and hence not scriptable. The JIT  equivalent API to get
+            # the current device index is `torch.jit.cuda.get_current_device_index()` which can
+            # be scripted. We use is_scripting to check the mode we are in and call the
+            # respective API.
             if torch.jit.is_scripting():
                 device_idx = torch.jit.cuda.get_current_device_index()
             else:

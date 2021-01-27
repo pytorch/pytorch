@@ -226,22 +226,16 @@ std::shared_ptr<SugaredValue> CUDAPythonModuleValue::attr(
   const std::unordered_set<std::string> cuda_ops = {
       "current_stream",
       "default_stream",
-      "_setDevice",
-      "_setStream",
+      "current_device",
+      "set_device",
+      "set_stream",
       "device_index",
       "device_count",
   };
 
-  // current_device is treated as an aten operator here. This is done
-  // in order to differentiate from c10::cuda::current_device.
-  // We cannot re-name current_device , since this needs to be consistent with
-  // eager mode naming torch.cuda.current_device.
-  if (field == "current_device") {
-    return std::make_shared<BuiltinFunction>(Symbol::aten(field), c10::nullopt);
-  }
-
   if (cuda_ops.find(field) != cuda_ops.end()) {
-    return std::make_shared<BuiltinFunction>(Symbol::cuda(field), c10::nullopt);
+    return std::make_shared<BuiltinFunction>(
+        Symbol::_cuda(field), c10::nullopt);
   }
 
   py::object member = getattr(loc, field);
