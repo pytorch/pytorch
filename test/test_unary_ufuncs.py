@@ -344,9 +344,9 @@ class TestUnaryUfuncs(TestCase):
     @suppress_warnings
     @ops(unary_ufuncs, allowed_dtypes=(*get_all_fp_dtypes(), *get_all_complex_dtypes()))
     def test_reference_numerics_extremal(self, device, dtype, op):
-        include_extremals = (op.handles_complex_extremals if
+        handles_extremals = (op.handles_complex_extremals if
                              dtype in (torch.cfloat, torch.cdouble) else op.handles_extremals)
-        if not include_extremals:
+        if not handles_extremals:
             raise self.skipTest("This op does not handle extremal values")
 
         tensors = generate_numeric_tensors_extremal(device, dtype,
