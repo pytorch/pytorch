@@ -55,8 +55,11 @@ void initPythonCustomClassBindings(PyObject* module) {
             auto type = self.class_type_.type_->castRaw<ClassType>();
             AT_ASSERT(type);
             auto* fn = type->findStaticMethod(name);
-            AT_ASSERT(fn);
-            return ScriptClassFunctionPtr(fn);
+            if (fn) {
+              return ScriptClassFunctionPtr(fn);
+            }
+
+            throw AttributeError("%s does not exist", name.c_str());
           })
       .def_property_readonly("__doc__", [](const ScriptClass& self) {
         return self.class_type_.type_->expectRef<ClassType>().doc_string();
