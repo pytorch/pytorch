@@ -7377,6 +7377,20 @@ class TestAutogradDeviceType(TestCase):
         with self.assertRaises(RuntimeError):
             v1[0].mul_(2)
 
+    def test_inplace_view_of_multiple_output_view(self, device):
+        a = torch.rand(10, device=device, requires_grad=True).clone()
+        b = a.unbind(0)
+        c = b[0].view_as(b[0])
+        with self.assertRaises(RuntimeError):
+            c.mul_(2)
+
+    def test_inplace_multiple_output_view_of_view(self, device):
+        a = torch.rand(10, device=device, requires_grad=True).clone()
+        b = a.view_as(a)
+        c = b.unbind(0)
+        with self.assertRaises(RuntimeError):
+            c[0].mul_(2)
+
     def test_inplace_view_makes_base_require_grad(self, device):
         # in-place modification to view makes base require grad
         a = torch.randn(4, 4, device=device, requires_grad=False)
