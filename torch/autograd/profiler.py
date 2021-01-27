@@ -1102,6 +1102,10 @@ def filter_name(name):
     ]
     return name in filtered_out_names
 
+# Demangles and optionally rewrites the provided event name,
+# with_wildcard - whether to replace certain numbered event names
+# with a wildcard name to aggregate them together in the profiler table
+# output
 def rewrite_name(name, with_wildcard=False):
     string_table = StringTable()
     name = string_table[name]
