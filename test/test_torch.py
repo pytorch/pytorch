@@ -4479,49 +4479,50 @@ class TestTorchDeviceType(TestCase):
                                             [True, False, True, False, True]], device=device))
 
     @onlyOnCPUAndCUDA
-    def test_masked_scatter(self, device):
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_masked_scatter(self, device, dtype):
+        dt = dtype
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             for maskType in [torch.uint8, torch.bool]:
-                for dt in torch.testing.get_all_dtypes():
-                    num_copy, num_dest = 3, 10
-                    dest = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dtype=dt, device=device)
-                    dest2 = dest.clone()
-                    src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt, device=device)
-                    mask = torch.tensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0), dtype=maskType, device=device)
+                num_copy, num_dest = 3, 10
+                dest = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dtype=dt, device=device)
+                dest2 = dest.clone()
+                dest_ones = dest.clone()
+                dest_ones_expected = dest.clone()
+                src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt, device=device)
+                src_ones = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1], dtype=dt, device=device)
+                mask = torch.tensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0), dtype=maskType, device=device)
 
-                    if dt == torch.bool:
-                        # torch.bool is a special case and is being tested
-                        # in a separate test
-                        continue
+                if dt == torch.bool:
+                    # torch.bool is a special case and is being tested
+                    # in a separate test
+                    return
 
-                    # TODO: update test when masked scatter is supported for complex
-                    if (dt == torch.half and self.device_type == 'cpu') or dt.is_complex:
-                        self.assertRaises(RuntimeError, lambda: dest.masked_scatter_(mask, src))
-                        continue
+                # TODO: update test when masked scatter is supported for complex
+                # and cpu supports half
+                if (dt == torch.half and self.device_type == 'cpu') or dt.is_complex:
+                    self.assertRaises(RuntimeError, lambda: dest.masked_scatter_(mask, src))
+                    return
 
+                dest.masked_scatter_(mask, src)
+                j = 0
+                for i in range(num_dest):
+                    if mask[i]:
+                        dest2[i] = src[j]
+                        dest_ones_expected[i] = src_ones[j]
+                        j += 1
+                self.assertEqual(dest, dest2, atol=0, rtol=0)
+
+                dest_ones.masked_scatter_(mask, src_ones)
+                self.assertEqual(dest_ones, dest_ones_expected, atol=0, rtol=0)
+
+                # make src smaller. this should fail
+                src = torch.zeros(num_copy - 1, dtype=dt, device=device)
+                with self.assertRaises(RuntimeError):
                     dest.masked_scatter_(mask, src)
-                    j = 0
-                    for i in range(num_dest):
-                        if mask[i]:
-                            dest2[i] = src[j]
-                            j += 1
-                    self.assertEqual(dest, dest2, atol=0, rtol=0)
 
-                    # make source bigger than number of 1s in mask
-                    src = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1], dtype=dt, device=device)
-                    dest.masked_scatter_(mask, src)
-
-                    # make src smaller. this should fail
-                    src = torch.zeros(num_copy - 1, dtype=dt, device=device)
-                    with self.assertRaises(RuntimeError):
-                        dest.masked_scatter_(mask, src)
-
-        if self.device_type == 'cuda':
-            # Since CUDA supports Half.
-            self.assertEqual(len(w), 29)
-        else:
-            self.assertEqual(len(w), 27)
+        self.assertEqual(len(w), 3)
 
         warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
         for wi in w:
