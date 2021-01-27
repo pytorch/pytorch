@@ -20,11 +20,12 @@ endif()
 set(USE_VULKAN OFF)
 if(DEFINED ENV{USE_VULKAN})
   if($ENV{USE_VULKAN} STREQUAL "1")
-    message(STATUS "USE_VULKAN ON")
+    message(STATUS "XXX USE_VULKAN ON")
     set(USE_VULKAN ON)
   endif()
 endif()
 
+message(STATUS "XXX USE_VULKAN ${USE_VULKAN}")
 set(pytorch_android_DIR ${CMAKE_CURRENT_LIST_DIR}/src/main/cpp)
 
 if(ANDROID_ABI)
@@ -153,7 +154,9 @@ else()
 
 endif()
 
+message(STATUS "XXX PA USE_VULKAN:${USE_VULKAN}")
 if(USE_VULKAN)
+  message(STATUS "XXX Vulkan_LIBS:${Vulkan_LIBS}")
   list(APPEND pytorch_jni_LIBS ${Vulkan_LIBS})
 endif()
 

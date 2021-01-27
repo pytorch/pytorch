@@ -138,6 +138,7 @@ if [ "${ANDROID_DEBUG_SYMBOLS:-}" == '1' ]; then
 fi
 
 if [ -n "${USE_VULKAN}" ]; then
+  echo "XXX if -n USE_VULKAN => CMAKE_ARGS += -DUSE_VULKAN=ON"
   CMAKE_ARGS+=("-DUSE_VULKAN=ON")
 fi
 
@@ -149,6 +150,8 @@ BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_android"}
 INSTALL_PREFIX=${BUILD_ROOT}/install
 mkdir -p $BUILD_ROOT
 cd $BUILD_ROOT
+
+echo "XXX CMAKE_ARGS:${CMAKE_ARGS[@]}"
 cmake "$CAFFE2_ROOT" \
     -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX \
     -DCMAKE_BUILD_TYPE=Release \
