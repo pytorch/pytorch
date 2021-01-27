@@ -15,6 +15,11 @@ else
   export VC_YEAR=2019
 fi
 
+# Use split CUDA build to alleviate linker issues for CUDA 11.1
+if [[ "$CUDA_VERSION" == "111" ]]; then
+  export BUILD_SPLIT_CUDA=ON
+fi
+
 set +x
 export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}
 export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_SCCACHE_S3_BUCKET_V4:-}
