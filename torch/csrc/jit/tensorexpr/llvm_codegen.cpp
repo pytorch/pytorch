@@ -1325,7 +1325,9 @@ LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(
     llvm::Type* basetype,
     Arity arity,
     int lanes) {
-  std::string name = "Sleef_" + basename + std::to_string(lanes);
+  std::string typeSuffix = basetype == DoubleTy_ ? "d" : "";
+  std::string name = "Sleef_" + basename + typeSuffix + std::to_string(lanes);
+
   llvm::Type* type;
   bool use_simd;
   if (jit_->hasSymbol(name)) {
@@ -1347,7 +1349,7 @@ LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(
   }
   FunctionCallee callee = module_->getOrInsertFunction(name, fntype, {});
   applyMathFunctionAttributes(llvm::cast<llvm::Function>(callee.getCallee()));
-  return {callee.getFunctionType(), callee.getCallee(), use_simd};
+  return SimdCallee{callee.getFunctionType(), callee.getCallee(), use_simd};
 }
 
 void LLVMCodeGenImpl::visit(const Intrinsics* v) {
