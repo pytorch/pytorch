@@ -437,7 +437,7 @@ static inline void diff_check_compatible_shape(const Tensor& self, const c10::op
 
     for (int i = 0; i < other.value().dim(); i++) {
       TORCH_CHECK(
-          other.value().size(i) == self.size(i) || i == wrapped_dim
+          other.value().size(i) == self.size(i) || i == wrapped_dim,
           "diff expects the shape of tensor to prepend or append to match that of"
           " input except along the differencing dimension;"
           " input.size(", i, ") = ", self.size(i), ", but got"
