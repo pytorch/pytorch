@@ -799,28 +799,28 @@ class ForeachUnaryFuncInfo(OpInfo):
         self.ref = ref
 
 class ForeachBinaryFuncInfo(OpInfo):
-    """Early version of a specialized OpInfo for foreach unary functions"""
+    """Early version of a specialized OpInfo for foreach binary functions"""
     def __init__(self,
                  name,
                  method,
                  inplace,
                  ref,  # torch reference function
-                 ref_name, # torch reference function name
+                 ref_name,  # torch reference function name
                  dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                  dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                  dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                  dtypesIfROCM=None,
-                 promotes_integers_to_float=False,
+                 safe_casts_outputs=False,
                  sample_inputs_func=sample_inputs_foreach,
                  **kwargs):
         super(ForeachBinaryFuncInfo, self).__init__(name,
-                                                   dtypes=dtypes,
-                                                   dtypesIfCPU=dtypesIfCPU,
-                                                   dtypesIfCUDA=dtypesIfCUDA,
-                                                   dtypesIfROCM=dtypesIfROCM,
-                                                   promotes_integers_to_float=promotes_integers_to_float,
-                                                   sample_inputs_func=sample_inputs_func,
-                                                   **kwargs)
+                                                    dtypes=dtypes,
+                                                    dtypesIfCPU=dtypesIfCPU,
+                                                    dtypesIfCUDA=dtypesIfCUDA,
+                                                    dtypesIfROCM=dtypesIfROCM,
+                                                    safe_casts_outputs=safe_casts_outputs,
+                                                    sample_inputs_func=sample_inputs_func,
+                                                    **kwargs)
         self.method_variant = method
         self.inplace_variant = inplace
         self.ref = ref
@@ -1065,7 +1065,7 @@ foreach_binary_op_db: List[OpInfo] = [
                           inplace=torch._foreach_div_,
                           ref=torch.div,
                           ref_name='div',
-                          promotes_integers_to_float=True),
+                          safe_casts_outputs=True),
 ]
 
 foreach_unary_op_db: List[OpInfo] = [

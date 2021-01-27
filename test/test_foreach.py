@@ -226,7 +226,7 @@ class TestForeach(TestCase):
                 inplace = op.get_inplace()
 
                 try:
-                    ref_res = [op.ref(t, s) for t,s in zip(tensors, scalar_list)]
+                    ref_res = [op.ref(t, s) for t, s in zip(tensors, scalar_list)]
                 except Exception:
                     torch_exeption = True
 
