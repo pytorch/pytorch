@@ -1326,11 +1326,7 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_slogdet,
            output_func=itemgetter(1),
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
-           skips=(
-               # These tests do not work with output_func=itemgetter(1)
-               # TODO: remove this once https://github.com/pytorch/pytorch/issues/49326 is resolved
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),)),
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     UnaryUfuncInfo('log',
                    ref=np.log,
                    domain=(0, float('inf')),
