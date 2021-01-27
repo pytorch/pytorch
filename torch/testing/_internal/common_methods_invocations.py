@@ -1774,6 +1774,29 @@ if TEST_SCIPY:
             return (1 / (1 + np.exp(-x)))
         return scipy.special.expit(x)
 
+    def reference_lgamma(x):
+        # scipy.special.gammaln returns `-inf` when input is `-inf`.
+        # While Pytorch, C and C++, all return `inf` when input is `-inf`.
+        # Reference:
+        # https://en.cppreference.com/w/cpp/numeric/math/lgamma
+        # https://en.cppreference.com/w/c/numeric/math/lgamma
+
+        # To handle the above discrepancy,
+        # we replace -inf with inf so values
+        # that were originally -inf map to inf as expected
+        if x.dtype.kind == 'f':
+            x = np.where(x == float('-inf'), np.array(float('inf'), dtype=x.dtype), x)
+
+        out = scipy.special.gammaln(x)
+
+        if x.dtype == np.float16:
+            # `scipy.special.gammaln` returns output of float32 when input is float16,
+            # while `torch.lgamma` preserves `float16`. But due to smaller range of float16,
+            # Pytorch version outputs `inf` while SciPy returns finite values.
+            out = out.astype(np.float16)
+
+        return out
+
     op_db_scipy_reference: List[OpInfo] = [
         UnaryUfuncInfo('sigmoid',
                        ref=reference_sigmoid,
@@ -1851,6 +1874,27 @@ if TEST_SCIPY:
                                     dtypes=[torch.bfloat16]),
                        )
                        ),
+        UnaryUfuncInfo('lgamma',
+                       ref=reference_lgamma,
+                       decorators=(precisionOverride({torch.float16: 7e-1}),),
+                       dtypes=all_types_and(torch.bool),
+                       dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
+                       dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                       skips=(
+                           # Reference: https://github.com/pytorch/pytorch/pull/50140#discussion_r552615345
+                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                    dtypes=[torch.bfloat16]),
+                           # Reference: https://github.com/pytorch/pytorch/pull/50140#issuecomment-756150214
+                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                    dtypes=[torch.float32, torch.float64], active_if=IS_WINDOWS),
+                           # Backward of `lgamma` uses `digamma` but `digamma`
+                           # is not implemented for `BFloat16`
+                           # Error Raised:
+                           #   RuntimeError: "digamma" not implemented for 'BFloat16'
+                           SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                    dtypes=[torch.bfloat16]),
+                       ),
+                       safe_casts_outputs=True),
         OpInfo('xlogy',
                dtypes=all_types_and(torch.bool),
                dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
