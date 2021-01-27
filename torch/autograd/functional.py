@@ -214,8 +214,11 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
             Defaults to ``False``.
 
     Returns:
-        vjp (tuple of Tensors or Tensor): result of the dot product with
-        the same shape as the inputs.
+        output (tuple): tuple with:
+            func_output (tuple of Tensors or Tensor): output of ``func(inputs)``
+
+            vjp (tuple of Tensors or Tensor): result of the dot product with
+            the same shape as the inputs.
 
     Example:
 
@@ -298,8 +301,11 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
             Defaults to ``False``.
 
     Returns:
-        jvp (tuple of Tensors or Tensor): result of the dot product with
-        the same shape as the output.
+        output (tuple): tuple with:
+            func_output (tuple of Tensors or Tensor): output of ``func(inputs)``
+
+            jvp (tuple of Tensors or Tensor): result of the dot product with
+            the same shape as the output.
 
     Example:
 

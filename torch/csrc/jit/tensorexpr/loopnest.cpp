@@ -1653,6 +1653,11 @@ bool LoopNest::hasLoopBodyFor(Tensor* t) const {
   return getLoopBodyFor(t) != nullptr;
 }
 
+Stmt* LoopNest::simplify() {
+  root_stmt_ = IRSimplifier::simplify(root_stmt_);
+  return root_stmt_;
+}
+
 Stmt* FlattenIndexes(Stmt* s) {
   IndexFlattener idx_flattener;
   return idx_flattener.flatten(s);
@@ -2296,8 +2301,8 @@ void LoopNest::rfactor(
 
   For* root_for = nullptr;
   For* target_for = nullptr;
-  std::set<const Var*> reduce_args = {reduce_op->reduce_args().begin(),
-                                      reduce_op->reduce_args().end()};
+  std::set<const Var*> reduce_args = {
+      reduce_op->reduce_args().begin(), reduce_op->reduce_args().end()};
 
   // Store loops below the target point.
   std::vector<const For*> output_loops;

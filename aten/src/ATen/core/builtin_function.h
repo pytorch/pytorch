@@ -1,7 +1,11 @@
 #pragma once
 
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/function.h>
+#include <ATen/core/ivalue.h>
+#include <c10/util/Exception.h>
+#include <c10/util/intrusive_ptr.h>
+#include <functional>
+#include <utility>
 
 namespace torch {
 namespace jit {

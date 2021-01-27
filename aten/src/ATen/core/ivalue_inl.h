@@ -133,6 +133,11 @@ inline c10::intrusive_ptr<ivalue::EnumHolder> IValue::toEnumHolder() const& {
   TORCH_INTERNAL_ASSERT(isEnum(), "Expected Enum but got ", tagKind());
   return toIntrusivePtr<ivalue::EnumHolder>();
 }
+inline c10::complex<double> IValue::toComplexDouble() const {
+  TORCH_INTERNAL_ASSERT(isComplexDouble(), "Expected ComplexDouble but got ", tagKind());
+  auto ptr = toIntrusivePtr<ivalue::ComplexHolder>();
+  return (*ptr).val;
+}
 inline at::Tensor IValue::toTensor() && {
   AT_ASSERT(isTensor(), "Expected Tensor but got ", tagKind());
   auto result = std::move(payload.as_tensor);
@@ -406,7 +411,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
 
   // This accessor should only be used if we know that the future is
   // completed() with no error.
-  const IValue& constValue() {
+  const IValue& constValue() const {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
     AT_ASSERT(!eptr_);
@@ -451,7 +456,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
   // Tries to retrieve the error message from std::exception_ptr.
-  std::string tryRetrieveErrorMessage() {
+  std::string tryRetrieveErrorMessage() const {
     TORCH_CHECK(hasError(), "No error present on the future.");
     std::unique_lock<std::mutex> lock(mutex_);
     return tryRetrieveErrorMessageInternal(eptr_);
@@ -543,7 +548,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
   // Tries to retrieve the error message from std::exception_ptr.
-  std::string tryRetrieveErrorMessageInternal(std::exception_ptr eptr) {
+  std::string tryRetrieveErrorMessageInternal(std::exception_ptr eptr) const {
     try {
       std::rethrow_exception(eptr);
     } catch (const std::exception& e) {
@@ -754,6 +759,7 @@ DEFINE_TO(at::Storage, toStorage)
 DEFINE_TO(c10::Stream, toStream)
 DEFINE_TO(float, toDouble)
 DEFINE_TO(double, toDouble)
+DEFINE_TO(c10::complex<double>, toComplexDouble)
 DEFINE_TO(unsigned char, toInt)
 DEFINE_TO(signed char, toInt)
 DEFINE_TO(unsigned short, toInt)
@@ -1222,6 +1228,13 @@ inline IValue::IValue(c10::intrusive_ptr<at::Quantizer> v)
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 
+template <typename T>
+inline IValue::IValue(c10::complex<T> c)
+    : tag(Tag::ComplexDouble), is_intrusive_ptr(true) {
+  auto v = c10::make_intrusive<ivalue::ComplexHolder>(c);
+  payload.u.as_intrusive_ptr = v.release();
+}
+
 inline const std::string& IValue::toStringRef() const {
   AT_ASSERT(isString(), "Expected String but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -1251,6 +1264,14 @@ inline PyObject* IValue::toPyObject() const {
 
 template <typename T>
 inline optional<T> IValue::toOptional() {
+  if (this->isNone()) {
+    return nullopt;
+  }
+  return this->to<T>();
+}
+
+template <typename T>
+inline optional<T> IValue::toOptional() const {
   if (this->isNone()) {
     return nullopt;
   }

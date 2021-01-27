@@ -412,7 +412,8 @@ class TestObserver(QuantizationTestCase):
              MovingAveragePerChannelMinMaxObserver,
              # TODO: enable this (separate PR)
              # HistogramObserver,
-             PlaceholderObserver, RecordingObserver, NoopObserver])
+             PlaceholderObserver, RecordingObserver, NoopObserver,
+             FakeQuantize])
 
         for device_source, device_target, obs_cls in test_cases:
             # calibrated source model
