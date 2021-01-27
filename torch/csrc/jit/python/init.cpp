@@ -209,13 +209,17 @@ void initJITBindings(PyObject* module) {
           PrepareInplaceOpsForONNX)
       .def(
           "_jit_pass_onnx_node_shape_type_inference",
-          [](Node* n, int opset_version) {
-            ONNXShapeTypeInference(n, opset_version);
+          [](Node* n,
+             std::map<std::string, IValue>& params_dict,
+             int opset_version) {
+            ONNXShapeTypeInference(n, params_dict, opset_version);
           })
       .def(
           "_jit_pass_onnx_graph_shape_type_inference",
-          [](std::shared_ptr<Graph>& graph, int opset_version) {
-            ONNXShapeTypeInference(graph, opset_version);
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, IValue>& params_dict,
+             int opset_version) {
+            ONNXShapeTypeInference(graph, params_dict, opset_version);
           })
       .def("_jit_pass_onnx_set_dynamic_input_shape", ONNXSetDynamicInputShape)
       .def("_jit_pass_fuse", FuseGraph)
