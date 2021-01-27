@@ -3517,8 +3517,8 @@ class TestCudaComm(TestCase):
 
         for i, x in enumerate(out):
             self.assertTrue(isinstance(x, type(out2[-1])))  # x must be a tensor
-            cat = torch.cat((outputs[0][i], outputs[1][i]))
-            self.assertTrue(torch.equal(x.to(0), cat.to(0)))
+            cat = torch.cat((outputs[0][i].to('cpu'), outputs[1][i].to('cpu')))
+            self.assertTrue(torch.equal(x, cat))
 
         class TestNamedTupleInput_1(NamedTuple):
             a: torch.tensor
@@ -3537,8 +3537,8 @@ class TestCudaComm(TestCase):
 
         for i, x in enumerate(out):
             self.assertTrue(isinstance(x, type(out2[-1])))  # x must be a tensor
-            cat = torch.cat((outputs[0][i], outputs[1][i]))
-            self.assertTrue(torch.equal(x, cat.to(0)))    
+            cat = torch.cat((outputs[0][i].to(0), outputs[1][i].to(0)))
+            self.assertTrue(torch.equal(x, cat))    
 
 
 if __name__ == '__main__':
