@@ -19,7 +19,7 @@ def augment_model_with_bundled_inputs(
         model: torch.jit.ScriptModule,
         inputs: Optional[Sequence[Tuple[Any, ...]]] = None,
         _receive_inflate_expr: Optional[List[str]] = None,  # For debugging.
-        info: Optional[List[str]]] = None,  # Optional argument to provide info about forward or its inputs
+        info: Optional[List[str]] = None,  # Optional argument to provide info about forward or its inputs
 ) -> None:
     """ Wrapper around augment_many_model_functions_with_bundled_inputs to provide a streamlined api for forward
     which is the only function the vast majority of models need bundled inputs for.
@@ -108,7 +108,7 @@ def augment_many_model_functions_with_bundled_inputs(
     for function, input_list in inputs.items():
         function_name = function.__name__
 
-        function_arg_types = [arg.type for arg in function.schema.arguments[1:]] # type: ignore
+        function_arg_types = [arg.type for arg in function.schema.arguments[1:]]  # type: ignore
         deflated_inputs_type: ListType = ListType(TupleType(function_arg_types))
         inflated_inputs_type: OptionalType[ListType] = OptionalType(deflated_inputs_type)
         model._c._register_attribute("_bundled_inputs_deflated_{name}".format(name=function_name), deflated_inputs_type, [])
