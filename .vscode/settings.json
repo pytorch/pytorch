@@ -1,0 +1,8 @@
+{
+  "python.pythonPath": "${env:HOME}/miniconda3/envs/pytorch/bin/python",
+  "python.linting.flake8Enabled": true,
+  "python.linting.enabled": true,
+  "python.linting.mypyEnabled": true,
+  "python.linting.mypyPath": "${workspaceFolder}/torch/testing/_internal/mypy_wrapper.py",
+  "python.linting.mypyArgs": []
+}

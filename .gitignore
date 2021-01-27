@@ -243,7 +243,6 @@ cmake-build-debug
 # Below files are not deleted by "setup.py clean".
 
 # Visual Studio Code files
-.vscode
 .vs
 
 # YouCompleteMe config file
