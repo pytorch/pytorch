@@ -1,5 +1,4 @@
 import torch
-import io
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.jit_utils import JitTestCase
@@ -14,9 +13,9 @@ class TestComplex(JitTestCase):
         self.checkScript(fn, (3 + 5j,))
 
     def test_pickle(self):
-        class ComplexModule(torch.nn.Module):
+        class ComplexModule(torch.jit.ScriptModule):
             def __init__(self):
-                super(ComplexModule, self).__init__()
+                super().__init__()
                 self.a = 3 + 5j
 
             def forward(self, b: int):
