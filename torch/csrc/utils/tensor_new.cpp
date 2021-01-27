@@ -341,7 +341,8 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
             dispatch_key == c10::DispatchKey::CUDA ||
             dispatch_key == c10::DispatchKey::HIP ||
             dispatch_key == c10::DispatchKey::XLA ||
-            dispatch_key == c10::DispatchKey::XPU,
+            dispatch_key == c10::DispatchKey::XPU ||
+	    dispatch_key == c10::DispatchKey::MkldnnCPU,
         "new(): expected DispatchKey: ",
         c10::DispatchKey::CPU,
         " or ",
@@ -352,6 +353,8 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
         c10::DispatchKey::XLA,
         " or ",
         c10::DispatchKey::XPU,
+	" or ",
+	c10::DispatchKey::MkldnnCPU,
         " but got: ",
         dispatch_key);
   } else if(expected_layout == c10::kSparse) {
