@@ -352,7 +352,7 @@ inline InferredType tryToInferType(py::handle input) {
   auto module_type = py::module::import("torch.nn").attr("Module");
   py::bool_ is_module = py::isinstance(input, module_type);
   if (py::cast<bool>(is_module)) {
-    return InferredType("Cannot infer type of torch.nn.Module");
+    return InferredType("Cannot infer concrete type of torch.nn.Module");
   }
 
   // Try container types

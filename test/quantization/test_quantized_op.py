@@ -2190,6 +2190,12 @@ class TestQuantizedOps(TestCase):
         X = torch.ones((0, 2, 4, 4), dtype=torch.float32)
         qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
                                        dtype=torch.quint8)
+
+        # upsample_nearest2d
+        qY = torch.nn.functional.upsample_nearest(qX, scale_factor=2)
+        np.testing.assert_equal(qY.size(), (0, 2, 8, 8),
+                                "Quantized upsample_nearsest2d with batch size 0 failed.")
+
         # relu
         qY = torch.nn.functional.relu(qX)
         np.testing.assert_equal(qY.size(), qX.size(),
