@@ -378,8 +378,10 @@ bool IsBlockReturnTypeSame(Node* n) {
 }
 
 c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
+  if (n->inputs().size() == 0) {
+    return c10::nullopt;
+  }
   std::vector<at::Tensor> inputTensorValues;
-  std::cout << "node = " << n->output()->debugName() << ", input size =" << n->inputs().size() << std::endl;
   for (auto i = 0; i < n->inputs().size(); i++) {
     if (TensorTypePtr input_type = n->input(i)->type()->cast<TensorType>()) {
       if (!ConstantValueMap::HasValue(n->input(i)->debugName())) {
@@ -389,21 +391,40 @@ c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
       inputTensorValues.emplace_back(tensor_value);
     }
   }
-  std::cout << "inputTensorValues len = " << inputTensorValues.size() << std::endl;
-  return onnx_constant_fold::runTorchBackendForOnnx(n, inputTensorValues, opset_version);  
+  if (inputTensorValues.size() < n->inputs().size()) {
+    return c10::nullopt;
+  }
+  std::cout << "runTorchBackendForOnnx start" << std::endl;
+  try {
+    return onnx_constant_fold::runTorchBackendForOnnx(n, inputTensorValues, opset_version);  
+  } catch (const std::exception& ex) {
+    std::cout << "exception = " << ex.what() << std::endl;    
+    for (auto i = 0; i < n->inputs().size(); i++) {
+      std::cout << "index = " << i << std::endl;
+      std::cout << "tensor input name = " << n->input(i)->debugName() << std::endl;
+      std::cout << "tensor value = " << inputTensorValues[i] << std::endl;
+    }
+    ConstantValueMap::PrintMaps();
+    return c10::nullopt;
+  }
 }
 
 
 void ComputeConstant(Node* n, int opset_version) {
-  std::cout << "ComputeConstant for node " << n->output()->debugName() << " of type " << n->kind() << std::endl;
+  std::cout << "ComputeConstant start" << std::endl;
   if (n->kind() == ::c10::onnx::Constant) {
-    std::cout << "constant node: " << n->output()->debugName() << std::endl; 
-    at::Tensor const_val(n->t(attr::value));
-    ConstantValueMap::SetValue(n->output()->debugName(), const_val);
+    std::cout << "Constant" << std::endl;
+    std::cout << "constant node: " << n->output()->debugName() << std::endl;
+    if (n->kindOf(attr::value) == AttributeKind::t) {
+      at::Tensor const_val = n->t(attr::value);
+      ConstantValueMap::SetValue(n->output()->debugName(), const_val);
+    }
     return;
   }
   if (n->kind() != ::c10::onnx::Shape) {
+    std::cout << "ComputeConstantFolding" << std::endl;
     auto const_fold_val =  ComputeConstantFolding(n, opset_version);
+    std::cout << "FinishConstantFolding" << std::endl;
     if (const_fold_val.has_value()) {
       ConstantValueMap::SetValue(n->output()->debugName(), const_fold_val.value());
     }
@@ -420,11 +441,10 @@ void ComputeConstant(Node* n, int opset_version) {
             shape_value.emplace_back(static_cast<int64_t>(v));
           }
           auto options = c10::TensorOptions().dtype(at::kLong).device(at::kCPU);
-          //at::Tensor f = at::from_blob((void*)shape_value.data(), {(int64_t)shape_value.size()}, options);
-          //at::Tensor f_copy = f;
           auto f = at::from_blob(shape_value.data(), {shape_value.size()}, at::kLong).to(at::kCPU);
-          ConstantValueMap::SetValue(n->output()->debugName(), f);
-          ConstantValueMap::PrintMaps();
+          at::Tensor f_copy = at::empty({shape_value.size()}, options);
+          f_copy.copy_(f);
+          ConstantValueMap::SetValue(n->output()->debugName(), f_copy);
         }
       }
       break;
@@ -434,6 +454,7 @@ void ComputeConstant(Node* n, int opset_version) {
       std::cout << "reshape input node: " << n->input(1)->debugName() << std::endl;
       if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
         auto shape_size = ConstantValueMap::GetValue(n->input(1)->debugName());
+        std::cout << "reshape shape tensor = " << shape_size << std::endl;
         std::vector<int64_t> shape_temp;
         auto shape_size_a = shape_size.accessor<int64_t, 1>();
         for (auto i=0; i<shape_size.size(0); i++) {          
@@ -448,27 +469,27 @@ void ComputeConstant(Node* n, int opset_version) {
     default: {
       break;
     }
-  }
-  std::cout << "after Constant" << std::endl;
-  ConstantValueMap::PrintMaps();
+  }  
 }
 
 void ProcessConstantValueMap(Node* n, int opset_version) {
   auto full_check = false;
-  if (TensorTypePtr output_type = n->output()->type()->cast<TensorType>()) {
-    std::cout << "process node output: " << n->output()->debugName() << std::endl;
-    if (output_type->dim().has_value()) {
-      size_t rank = static_cast<size_t>(output_type->dim().value());
-      ConstantValueMap::SetRank(n->output()->debugName(), rank);
-      auto output_type_size = output_type->sizes();
-      if (output_type_size.concrete_sizes().has_value()) {
-        ConstantValueMap::SetShape(n->output()->debugName(), output_type_size);
+  for (auto i = 0; i < n->outputs().size(); i++) {
+    if (TensorTypePtr output_type = n->output(i)->type()->cast<TensorType>()) {
+      // std::cout << "process node output: " << n->output(i)->debugName() << std::endl;
+      if (output_type->dim().has_value()) {
+        size_t rank = static_cast<size_t>(output_type->dim().value());
+        ConstantValueMap::SetRank(n->output(i)->debugName(), rank);
+        auto output_type_size = output_type->sizes();
+        if (output_type_size.concrete_sizes().has_value()) {
+          ConstantValueMap::SetShape(n->output(i)->debugName(), output_type_size);
+        }
       }
     }
   }
   for (auto i = 0; i < n->inputs().size(); i++) {
     if (TensorTypePtr input_type = n->input(i)->type()->cast<TensorType>()) {
-      std::cout << "process node input: " << n->input(i)->debugName() << std::endl;
+      // std::cout << "process node input: " << n->input(i)->debugName() << std::endl;
       if (input_type->dim().has_value()) {
         size_t rank = static_cast<size_t>(input_type->dim().value());
         ConstantValueMap::SetRank(n->input(i)->debugName(), rank);
@@ -480,8 +501,7 @@ void ProcessConstantValueMap(Node* n, int opset_version) {
     }
   }
   ComputeConstant(n, opset_version);
-  std::cout << "*** Finish ComputeConstant" << std::endl;
-  ConstantValueMap::PrintMaps();
+  // std::cout << "***ProcessConstantValueMap end" << std::endl;
 }
 
 // Any additional post process that are specific to individual node kind.

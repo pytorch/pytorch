@@ -313,6 +313,18 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     auto indices_corr = at::add(indices, inputTensorValues[0].sizes()[axis]);
     auto indices_masked = at::where(less_mask, indices_corr, indices);
     updated_val = at::index_select(inputTensorValues[0], axis, indices_masked);
+    auto q = indices.dim();
+    // Cases where rank of indices > 1 are not currently supported.
+    if (q > 1) {
+      return c10::nullopt;
+    }
+    // If rank of indices is 0, rank of output tensor should be
+    // rank_of_input - 1.
+    if (q < 1) {
+      updated_val = updated_val.squeeze();
+    }
+    std::cout << "Gather node = " << node->output()->debugName() << std::endl;
+    std::cout << updated_val << std::endl;
     return c10::optional<at::Tensor>(updated_val);
   } else {
     return c10::nullopt;
@@ -377,7 +389,7 @@ std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
   return parentNodes;
 }
 
-} // Anonymous namespace
+} // namespace onnx_constant_fold
 
 // This method updates the block in-place to fold all the one-time
 // constant-based computations/ops into an initializer node.
@@ -407,7 +419,7 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
       // Constant folding for multiple-output nodes not supported. Skip it.
       continue;
     }
-    if (!onnx_constant_fold::areNodeInputsConstant(node, valsToParamsMap)) {
+    if (!onnx_constant_fold::areNodeInputsConstant(node, valsToParamsMap)) {    
       // If all the inputs to this node are not either parameter or
       // onnx::Constant, then skip this node.
       continue;

@@ -1315,15 +1315,6 @@ void initJITBindings(PyObject* module) {
       throw std::runtime_error(e.what());
     }
   });
-
-  /*
-  py::class_<TensorShapeMap>(m, "TensorShapeMap")
-      .def("getInstance", &TensorShapeMap::getInstance)
-      .def("SetDim", &TensorShapeMap::SetDim)
-      .def("SetShape", &TensorShapeMap::SetShape)
-      .def("PrintMaps", &TensorShapeMap::PrintMaps);
-  */  
-
 }
 } // namespace jit
 } // namespace torch
