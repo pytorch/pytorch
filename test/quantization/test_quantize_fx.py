@@ -1603,11 +1603,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
             2: torch.nn.functional.conv2d,
             3: torch.nn.functional.conv3d,
         }
+
         class FuncConv(torch.nn.Module):
             def __init__(self, dim, use_bias, has_relu, f_relu):
                 super().__init__()
                 self.dim = dim
-                self.w = torch.randn(tuple([3] * (dim+2)))
+                self.w = torch.randn(tuple([3] * (dim + 2)))
                 self.b = torch.randn(3) if use_bias else None
                 self.stride = tuple([1] * dim)
                 self.padding = tuple([0] * dim)

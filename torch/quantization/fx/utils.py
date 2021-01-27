@@ -192,7 +192,7 @@ def get_qconv_prepack_op(conv_op: Callable) -> Callable:
 def get_qconv_op(conv_op: Callable, has_relu: bool) -> Callable:
     qconv_op = {
         # has relu
-        True:  {
+        True: {
             torch.nn.functional.conv1d: torch.ops.quantized.conv1d_relu,
             torch.nn.functional.conv2d: torch.ops.quantized.conv2d_relu,
             torch.nn.functional.conv3d: torch.ops.quantized.conv3d_relu

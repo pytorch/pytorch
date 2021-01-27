@@ -232,6 +232,7 @@ class ConvRelu(QuantizeHandler):
         # Supported combinations are:
         # quant_type | activation (compute_type) | weight
         #  static       quint8                      qint8
+
         # tuple (activation_dtype, weight_dtype, compute_dtype)
         supported_dtypes = [
             (torch.quint8, torch.qint8, None),
@@ -240,6 +241,7 @@ class ConvRelu(QuantizeHandler):
         # TODO: debug option for conv module
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
+        # leave the op unquantized if the dtype combination is not supported
         if dtypes not in supported_dtypes:
             warnings.warn(
                 "dtype combination: {} is not "
@@ -369,6 +371,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         ]
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
+        # leave the op unquantized if the dtype combination is not supported
         if dtypes not in supported_dtypes:
             warnings.warn(
                 "dtype combination: {} is not "
@@ -537,6 +540,7 @@ class Embedding(QuantizeHandler):
         emb_node = node
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
+        # leave the op unquantized if the dtype combination is not supported
         if dtypes not in supported_dtypes:
             warnings.warn(
                 "dtype combination: {} is not "
@@ -580,6 +584,7 @@ class RNNDynamic(QuantizeHandler):
         assert node.op == 'call_module'
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
+        # leave the op unquantized if the dtype combination is not supported
         if dtypes not in supported_dtypes:
             warnings.warn(
                 "dtype combination: {} is not "
