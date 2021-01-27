@@ -418,7 +418,8 @@ class TestModuleContainers(JitTestCase):
             def forward(self):
                 return len(self.a)
 
-        with self.assertRaisesRegex(RuntimeError, "Could not infer type of list element: Cannot infer type of torch.nn.Module"):
+        error_msg = "Could not infer type of list element: Cannot infer concrete type of torch.nn.Module"
+        with self.assertRaisesRegex(RuntimeError, error_msg):
             torch.jit.script(Mod())
 
     def test_unannotated_module_attribute_error(self):

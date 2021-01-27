@@ -275,7 +275,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             # TODO: could add more detail here. For example, what the user should do
             # when the pytype is `list` or `NoneType`
             inferred_msg = "Its type was inferred; try adding a type annotation for the attribute." if inferred else ""
-            additional_info = f"{attr_type.reason()} {inferred_msg}"
+            additional_info = f"{attr_type.reason()}. {inferred_msg}"
             hint = "(This attribute exists on the Python module, " \
                 f"but we failed to convert Python type: '{torch.typename(type(value))}' " \
                 f"to a TorchScript type. {additional_info})"
