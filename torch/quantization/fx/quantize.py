@@ -332,6 +332,9 @@ class Quantizer:
         self.patterns: Optional[Dict[Pattern, QuantizeHandler]] = None
         self.prepare_custom_config_dict: Dict[str, Any] = {}
 
+        # mapping from node name to the scope of the module which contains the node.
+        self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
+
 
     def _qat_swap_modules(
             self, root: torch.nn.Module,
@@ -347,7 +350,7 @@ class Quantizer:
             qconfig_dict: Any,
             node_name_to_scope: Dict[str, Tuple[str, type]]) -> None:
         global_qconfig = qconfig_dict.get("", None)
-
+        self.node_name_to_scope = node_name_to_scope
         self.qconfig_map = dict()
         for node in input_graph.nodes:
             if node.op == "get_attr":
@@ -567,6 +570,7 @@ class Quantizer:
         observed._qconfig_map = self.qconfig_map  # type: ignore
         observed._prepare_custom_config_dict = \
             self.prepare_custom_config_dict  # type: ignore
+        observed._node_name_to_scope = self.node_name_to_scope  # type: ignore
 
     def restore_state(self, observed: GraphModule) -> None:
         assert is_observed_module(observed), \
@@ -577,6 +581,7 @@ class Quantizer:
         self.qconfig_map = observed._qconfig_map  # type: ignore
         self.prepare_custom_config_dict = \
             observed._prepare_custom_config_dict  # type: ignore
+        self.node_name_to_scope = observed._node_name_to_scope  # type: ignore
 
     def prepare(
             self,
