@@ -1105,6 +1105,7 @@ using NumberTypePtr = std::shared_ptr<NumberType>;
 // Subtype hierarchy for Number Types (NumberType as the base type):
 // IntType <: NumberType
 // FloatType <: NumberType
+// ComplexDoubleType <:NumberType
 struct TORCH_API NumberType : public Type {
   static NumberTypePtr create() {
     return NumberTypePtr(new NumberType()); // NOLINT(modernize-make-shared)
@@ -1153,6 +1154,33 @@ struct TORCH_API FloatType : public NumberType {
   FloatType() : NumberType(TypeKind::FloatType) {}
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     return "float";
+  }
+};
+
+struct ComplexDoubleType;
+using ComplexDoubleTypePtr = std::shared_ptr<ComplexDoubleType>;
+// This type represents a Python float number
+struct TORCH_API ComplexDoubleType : public NumberType {
+  static ComplexDoubleTypePtr create() {
+    return ComplexDoubleTypePtr(new ComplexDoubleType()); // NOLINT(modernize-make-shared)
+  }
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  std::string str() const override {
+    return "complex";
+  }
+  bool isSubtypeOfExt(const TypePtr& rhs, std::ostream* why_not) const override {
+    return rhs->kind() == TypeKind::NumberType || NumberType::isSubtypeOfExt(rhs, why_not);
+  }
+  static const TypeKind Kind = TypeKind::ComplexDoubleType;
+  // global singleton
+  static ComplexDoubleTypePtr get();
+
+ private:
+  ComplexDoubleType() : NumberType(TypeKind::ComplexDoubleType) {}
+  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+    return "complex";
   }
 };
 
@@ -1547,7 +1575,7 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
   auto result = tryScalarTypeFromJitType(type);
   AT_ASSERTM(
       result,
-      "Add new condition, expected Float, Int, or Bool but got",
+      "Add new condition, expected Float, Complex, Int, or Bool but got",
       type->str());
   return *result;
 }
@@ -2125,7 +2153,7 @@ struct TORCH_API ClassType : public NamedType {
   torch::jit::Function* findForwardHook(const std::string& name) const;
   const std::vector<torch::jit::Function*>& getForwardHooks() const;
   const std::vector<torch::jit::Function*>& getForwardPreHooks() const;
-  
+
   void checkForwardPreHookSchema(
       int pre_hook_idx,
       const FunctionSchema& pre_hook_schema) const;
@@ -2206,7 +2234,7 @@ struct TORCH_API ClassType : public NamedType {
   // List of hooks to be run before/after forward.
   std::vector<torch::jit::Function*> forward_hooks_;
   std::vector<torch::jit::Function*> forward_pre_hooks_;
-  
+
   // List of properties exposed by this class.
   std::vector<Property> properties_;
 

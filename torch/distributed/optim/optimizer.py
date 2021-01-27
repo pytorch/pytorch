@@ -7,6 +7,11 @@ import torch.nn as nn
 from torch import Tensor
 from torch.distributed.rpc import RRef
 from .functional_adagrad import _FunctionalAdagrad
+from .functional_adam import _FunctionalAdam
+from .functional_adamw import _FunctionalAdamW
+from .functional_sgd import _FunctionalSGD
+from .functional_adadelta import _FunctionalAdadelta
+from .functional_rmsprop import _FunctionalRMSprop
 import torch.distributed.autograd as dist_autograd
 
 
@@ -181,6 +186,11 @@ class DistributedOptimizer:
     # functional optimizer to user and still provide the same API.
     functional_optim_map = {
         optim.Adagrad: _FunctionalAdagrad,
+        optim.Adam: _FunctionalAdam,
+        optim.AdamW: _FunctionalAdamW,
+        optim.SGD: _FunctionalSGD,
+        optim.Adadelta: _FunctionalAdadelta,
+        optim.RMSprop: _FunctionalRMSprop,
     }
 
     def __init__(self, optimizer_class, params_rref, *args, **kwargs):
@@ -188,7 +198,10 @@ class DistributedOptimizer:
         for param in params_rref:
             per_worker_params_rref[param.owner()].append(param)
 
-        optim_ctor = DistributedOptimizer.functional_optim_map.get(optimizer_class, optimizer_class)
+        if optimizer_class in DistributedOptimizer.functional_optim_map and jit._state._enabled:
+            optim_ctor = DistributedOptimizer.functional_optim_map.get(optimizer_class)
+        else:
+            optim_ctor = optimizer_class
         self.is_functional_optim = (optim_ctor != optimizer_class)
 
         if self.is_functional_optim:

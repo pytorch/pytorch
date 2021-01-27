@@ -411,8 +411,21 @@ void initTensorExprBindings(PyObject* module) {
           },
           py::return_value_policy::reference)
       .def(
+          "flatten",
+          [](const tensorexpr::LoopNest& self,
+             const std::vector<tensorexpr::For*>& loops) {
+            tensorexpr::For* flattened;
+            self.flatten(loops, &flattened);
+            return flattened;
+          },
+          py::return_value_policy::reference)
+      .def(
           "reorder",
           &tensorexpr::LoopNest::reorderAxis,
+          py::return_value_policy::reference)
+      .def(
+          "simplify",
+          &tensorexpr::LoopNest::simplify,
           py::return_value_policy::reference)
       .def(
           "__str__",

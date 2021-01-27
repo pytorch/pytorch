@@ -80,6 +80,8 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case AnyEnumType::Kind:
         // no op, there is nothing to tag
         break;
+      // TODO(@anjali411): Implement serialization/deserialization for complex numbers
+      case ComplexDoubleType::Kind:
       case EnumType::Kind:
         // TODO(gmagogsfm): Implement serialization/deserialization of Enum.
         AT_ASSERT(false);
