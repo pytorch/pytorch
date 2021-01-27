@@ -429,16 +429,18 @@ static inline void diff_check_compatible_shape(const Tensor& self, const c10::op
   // Helper for diff that checks whether the shape of the tensor to prepend or append
   // is compatible with that of input
   if (other.has_value()) {
+    int64_t wrapped_dim = maybe_wrap_dim(dim, self.dim(), false);
+
     TORCH_CHECK(
         other.value().dim() == self.dim(),
         "diff expects prepend or append to be the same dimension as input");
 
     for (int i = 0; i < other.value().dim(); i++) {
       TORCH_CHECK(
-          other.value().size(i) == self.size(i) || i == dim,
+          other.value().size(i) == self.size(i) || i == wrapped_dim
           "diff expects the shape of tensor to prepend or append to match that of"
           " input except along the differencing dimension;"
-          " input.size(", i, ") = ", self.size(i), "but got"
+          " input.size(", i, ") = ", self.size(i), ", but got"
           " tensor.size(", i, ") = ", other.value().size(i));
     }
   }

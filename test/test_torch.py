@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import (
     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
-    wrapDeterministicFlagAPITest, DeterministicGuard)
+    wrapDeterministicFlagAPITest, DeterministicGuard, make_tensor)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -4125,16 +4125,25 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCPU(*torch.testing.get_all_dtypes())
     @dtypesIfCUDA(*torch.testing.get_all_dtypes())
     def test_diff(self, device, dtype):
+        def to_np(t):
+            if t.dtype == torch.bfloat16:
+                return t.to(dtype=torch.float, device="cpu").numpy()
+            else:
+                return t.cpu().numpy()
+
         def _test_diff_numpy(t, dims=None):
             for dim in dims if dims else range(t.dim()):
+                prepend = t.narrow(dim, 0, 1)
+                append = t.narrow(dim, 0, 1)
+                np_t = to_np(t)
+
+                # test when prepend and append's size along dim is 1
+                actual = torch.diff(t, dim=dim, prepend=prepend, append=append)
+                expected = torch.from_numpy(np.diff(np_t, axis=dim, prepend=to_np(prepend), append=to_np(append)))
+                self.assertEqual(actual, expected.to(t.dtype))
+
+                # test when prepend and append's size along dim != 1
                 actual = torch.diff(t, dim=dim, prepend=t, append=t)
-
-                if t.dtype == torch.bfloat16:
-                    np_t = t.to(dtype=torch.float, device="cpu").numpy()
-                else:
-                    np_t = t.cpu().numpy()
-
-                # test when both prepend and append are tensors
                 expected = torch.from_numpy(np.diff(np_t, axis=dim, prepend=np_t, append=np_t))
                 self.assertEqual(actual, expected.to(t.dtype))
 
@@ -4146,10 +4155,10 @@ class TestTorchDeviceType(TestCase):
             (2, 3, 5))
 
         for shape in shapes:
-            contig = _make_tensor(shape, dtype, device)
+            contig = make_tensor(shape, device, dtype, low=-9, high=9)
             _test_diff_numpy(contig)
 
-            non_contig = torch.empty(shape + (2, 2), dtype=dtype)[..., 0]
+            non_contig = torch.empty(shape + (2, 2), device=device, dtype=dtype)[..., 0]
             non_contig = non_contig.select(-1, -1)
             non_contig.copy_(contig)
             self.assertTrue(not non_contig.is_contiguous() or shape == (1,))

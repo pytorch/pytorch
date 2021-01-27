@@ -2646,30 +2646,33 @@ Computes the n-th forward difference along the given dimension.
 The first-order differences are given by `out[i] = input[i + 1] - input[i]`. Higher-order
 differences are calculated by using :func:`torch.diff` recursively.
 
+.. note::  Only `n = 1` is currently supported
+
 Args:
     input (Tensor): the tensor to compute the differences on
-    n (int, optional): the number of times to recursively compute difference
-    dim (int, optional): the dimension with respect to compute the difference.
+    n (int, optional): the number of times to recursively compute the difference
+    dim (int, optional): the dimension to compute the difference along.
         Default is the last dimension.
     prepend, append (Tensor, optional): values to prepend or append to
         :attr:`input` along :attr:`dim` before computing the difference.
-        Its dimension must be equivalent to that of input, and its shape
+        Their dimensions must be equivalent to that of input, and their shapes
         must match input's shape except on :attr:`dim`.
 
 Keyword args:
     {out}
-
-.. note::  only `n = 1` is supported currently
 
 Example::
 
     >>> a = torch.tensor([1, 3, 2])
     >>> torch.diff(a)
     tensor([ 2, -1])
-    >>> b = torch.tensor([[1, 2, 3], [3, 4, 5]])
-    >>> torch.diff(b, dim=0)
+    >>> b = torch.tensor([4, 5])
+    >>> torch.diff(a, append=b)
+    tensor([ 2, -1,  2,  1])
+    >>> c = torch.tensor([[1, 2, 3], [3, 4, 5]])
+    >>> torch.diff(c, dim=0)
     tensor([[2, 2, 2]])
-    >>> torch.diff(b, dim=1)
+    >>> torch.diff(c, dim=1)
     tensor([[1, 1],
             [1, 1]])
 """.format(**common_args))
