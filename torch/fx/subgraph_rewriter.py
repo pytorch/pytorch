@@ -236,7 +236,7 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
         return False
 
     assert matches, ("No matches found between original nn.Module `gm` "
-                    "and pattern `pattern`")
+                     "and pattern `pattern`")
 
     for match in matches:
 
@@ -294,9 +294,9 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
         if subgraph_output.op != "output":
             # `subgraph_output` may have multiple args. The arg that
             # needs to be replaced by `copied_output` must have been
-            # a node that was originally matched as part of `pattern`
+            # a node that was originally matched as part of `pattern`.
             for n in subgraph_output.args:
-                if n in match.nodes_map.values():
+                if n.op != "placeholder" and n in match.nodes_map.values():
                     subgraph_output = n
                     break
             assert subgraph_output.op != "output"
@@ -305,7 +305,7 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
         # original graph, so we need to change the current graph's
         # output Node to reflect the insertion of the replacement graph
         else:
-            subgraph_output.args = [copied_output]
+            subgraph_output.args = [copied_output] * len(subgraph_output.args)
             if type(copied_output) == Node:
                 subgraph_output._input_nodes = {copied_output: None}
             else:
