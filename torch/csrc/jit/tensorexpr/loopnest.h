@@ -122,7 +122,6 @@ class TORCH_API LoopNest {
  private:
   std::vector<Tensor*> findAllNeededTensors(
       const std::vector<Tensor*>& tensors);
-  Stmt* lowerToStmt(Tensor* t);
   Stmt* insertAllocFree(Stmt* stmt);
 
   Stmt* root_stmt_;
