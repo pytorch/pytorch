@@ -158,8 +158,8 @@ class TestMkldnn(TestCase):
 
     def _test_conv_base(self, dim, channels, groups, input):
         conv_module = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
-        options = itertools.product([True, False], [1, 2])
-        for bias, dilation in options:
+        options = itertools.product([True, False], [True, False], [1, 2])
+        for train, bias, dilation in options:
             M = torch.randint(1, 3, (1,)).item() * groups
             conv = conv_module[dim](in_channels=channels,
                                     out_channels=M,
@@ -169,14 +169,36 @@ class TestMkldnn(TestCase):
                                     dilation=dilation,
                                     bias=bias,
                                     groups=groups).float()
-            mkldnn_conv = mkldnn_utils.to_mkldnn(copy.deepcopy(conv))
+            x1 = input.clone()
+            x2 = input.clone().to_mkldnn()
+            if not train:
+                mkldnn_conv = mkldnn_utils.to_mkldnn(copy.deepcopy(conv))
+            elif train and dim != 1:
+                #TODO: enable conv1d training.
+                x1.requires_grad_()
+                x2.requires_grad_()
+                mkldnn_conv = copy.deepcopy(conv)
             with torch.backends.mkldnn.flags(enabled=False):
-                y_aten = conv(input)
-            y_mkldnn = mkldnn_conv(input.to_mkldnn()).to_dense()
-            self.assertEqual(y_aten, y_mkldnn)
-
-            self._test_serialization(mkldnn_conv, (input.to_mkldnn(),))
-            self._test_tracing(mkldnn_conv, (input.to_mkldnn(),))
+                y_aten = conv(x1)
+                if train and dim != 1:
+                    loss1 = y_aten.sum()
+                    loss1.backward()
+            if not train or (train and dim != 1):
+                y_mkldnn = mkldnn_conv(x2).to_dense()
+                self.assertEqual(y_aten, y_mkldnn)
+            if not train:
+                self._test_serialization(mkldnn_conv, (input.to_mkldnn(),))
+                self._test_tracing(mkldnn_conv, (input.to_mkldnn(),))
+            elif train and dim != 1:
+                loss2 = y_mkldnn.sum()
+                loss2.backward()
+                self.assertEqual(x1.grad, x2.grad.to_dense())
+                self.assertEqual(conv.weight.grad,
+                                 mkldnn_conv.weight.grad,
+                                 atol=1e-3,
+                                 rtol=1e-3)
+                if bias:
+                    self.assertEqual(conv.bias.grad, mkldnn_conv.bias.grad)
 
     def test_conv1d(self):
         for groups in [1, 4]:

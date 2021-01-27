@@ -180,6 +180,7 @@ class MkldnnBatchNorm(torch.jit.ScriptModule):
 def to_mkldnn(module, dtype=torch.float):
     assert dtype in [torch.float, torch.bfloat16], \
         "MKLDNN only support float or bfloat16 path now"
+
     def m_fn(m, d):
         if isinstance(m, torch.nn.Linear):
             return MkldnnLinear(m, d)
