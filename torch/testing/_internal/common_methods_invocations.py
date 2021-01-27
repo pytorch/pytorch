@@ -351,7 +351,7 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
         (0, 0, 0),
     ]
 
-    vector_ords = (None, 0, 0.5, 1, 2, 3.5, inf, -0.5, -1, -2, -3.5)
+    vector_ords = (None, 0, 0.5, 1, 2, 3.5, inf, -0.5, -1, -2, -3.5, -inf)
     matrix_ords = (None, 'fro', 'nuc', 1, 2, inf, -1, -2, -inf)
 
     inputs = []
@@ -379,7 +379,7 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
                 # TODO: remove this check when `max` is implemented for
                 #       float16 and bfloat16. Issue:
                 #       https://github.com/pytorch/pytorch/issues/50790
-                if is_vector_norm and is_dtype_half and ord == inf:
+                if is_vector_norm and is_dtype_half and ord in [inf, -inf]:
                     continue
 
                 inputs.append(SampleInput(
