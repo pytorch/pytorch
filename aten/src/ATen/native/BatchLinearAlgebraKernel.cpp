@@ -101,9 +101,12 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, Tensor& infos, int6
 REGISTER_ARCH_DISPATCH(eig_stub, DEFAULT, &eig_kernel_impl);
 REGISTER_AVX_DISPATCH(eig_stub, &eig_kernel_impl);
 REGISTER_AVX2_DISPATCH(eig_stub, &eig_kernel_impl);
+REGISTER_VSX_DISPATCH(eig_stub, &eig_kernel_impl);
 
 REGISTER_ARCH_DISPATCH(orgqr_stub, DEFAULT, &orgqr_kernel_impl);
 REGISTER_AVX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 REGISTER_AVX2_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
+REGISTER_VSX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
+
 
 }} // namespace at::native
