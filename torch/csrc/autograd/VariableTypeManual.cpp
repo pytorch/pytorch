@@ -290,7 +290,7 @@ Tensor& resize_(
 
     auto currentDispatchKeySet = ks & c10::after_autograd_keyset;
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(currentDispatchKeySet.highestPriorityTypeId());
-  kernel.template call<Tensor &, Tensor &, IntArrayRef, c10::optional<MemoryFormat>>(op, currentDispatchKeySet, self_, size, optional_memory_format);
+  Tensor& dummy = kernel.template call<Tensor &, Tensor &, IntArrayRef, c10::optional<MemoryFormat>>(op, currentDispatchKeySet, self_, size, optional_memory_format);
   }
 
   if (self.fw_grad(/* level */ 0).defined()) {
@@ -315,7 +315,7 @@ Tensor& resize_as_(
     static auto op = c10::Dispatcher::singleton()
       .findSchemaOrThrow("aten::resize_as_", "")
       .typed<Tensor & (Tensor &, const Tensor &, c10::optional<MemoryFormat>)>();
-    c10::Dispatcher::singleton()
+    Tensor& dummy = c10::Dispatcher::singleton()
       .redispatch<Tensor &, Tensor &, const Tensor &, c10::optional<MemoryFormat>>(op, ks & c10::after_autograd_keyset, const_cast<Tensor&>(self_), the_template_, optional_memory_format);
   }
 
