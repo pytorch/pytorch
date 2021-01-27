@@ -28,20 +28,22 @@ def augment_model_with_bundled_inputs(
     if not isinstance(model, torch.jit.ScriptModule):
         raise Exception("Only ScriptModule is supported.")
 
+    forward: Callable = model.forward
+
     # Sometimes forward won't have a name attached so just in case
-    if not hasattr(model.forward, "__name__"):
-        model.forward.__name__ = 'forward'
+    if not hasattr(forward, "__name__"):
+        forward.__name__ = 'forward'
     augment_many_model_functions_with_bundled_inputs(
         model,
-        inputs={model.forward : inputs},
+        inputs={forward : inputs},
         _receive_inflate_expr=_receive_inflate_expr,
-        info={model.forward : info} if info is not None else None,
+        info={forward : info} if info is not None else None,
     )
 
 
 def augment_many_model_functions_with_bundled_inputs(
         model: torch.jit.ScriptModule,
-        inputs: Dict[Callable, Sequence[Tuple[Any]]],
+        inputs: Dict[Callable, Optional[Sequence[Tuple[Any]]]],
         _receive_inflate_expr: Optional[List[str]] = None,  # For debugging.
         info: Optional[Dict[Callable, List[str]]] = None,  # Optional argument to provide info about the function or its inputs
 ) -> None:
@@ -106,9 +108,10 @@ def augment_many_model_functions_with_bundled_inputs(
     for function, input_list in inputs.items():
         function_name = function.__name__
 
+        assert(hasattr(function, 'schema'))
         function_arg_types = [arg.type for arg in function.schema.arguments[1:]]
         deflated_inputs_type: ListType = ListType(TupleType(function_arg_types))
-        inflated_inputs_type: ListType = OptionalType(deflated_inputs_type)
+        inflated_inputs_type: OptionalType[ListType] = OptionalType(deflated_inputs_type)
         model._c._register_attribute("_bundled_inputs_deflated_{name}".format(name=function_name), deflated_inputs_type, [])
         model._c._register_attribute("_bundled_inputs_inflated_{name}".format(name=function_name), inflated_inputs_type, None)
 
