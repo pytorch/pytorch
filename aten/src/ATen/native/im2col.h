@@ -1,14 +1,25 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <ATen/LegacyTHFunctionsCPU.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/Utils.h>
-
-#include <algorithm>
+#include <ATen/native/DispatchStub.h>
 
 namespace at {
 namespace native {
+
+using col2im_fn = void (*)(
+    Tensor& im, // im2col: col
+    const Tensor& col, // im2col: im
+    int64_t nbatch,
+    int64_t output_channels,
+    int64_t output_height, int64_t output_width,
+    int64_t input_height, int64_t input_width,
+    int64_t kH, int64_t kW,
+    int64_t pH, int64_t pW,
+    int64_t sH, int64_t sW,
+    int64_t dH, int64_t dW);
+
+DECLARE_DISPATCH(col2im_fn, col2im_channels_last_stub);
+DECLARE_DISPATCH(col2im_fn, im2col_channels_last_stub);
 
 template <typename T>
 static void im2col(
