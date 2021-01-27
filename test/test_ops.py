@@ -355,8 +355,11 @@ class TestCommon(JitCommonTestCase):
         expected, sample = self.compute_expected_output(device, dtype, op)
         # call it with out=... and check we get the expected result
         out_kwargs = sample.kwargs.copy()
-        out_kwargs['out'] = out = torch.empty(0,0, dtype=expected.dtype, device=expected.device)
-        op(*sample.input, *sample.args, **out_kwargs)
+        out_kwargs['out'] = out = torch.empty(0, dtype=expected.dtype, device=expected.device)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            op(*sample.input, *sample.args, **out_kwargs)
+            self.assertEqual(len(w), 0)
         # Verify if the empty out tensor is resized and restrided to whatever
         # striding is natural for the op to produce
         self.assertEqual(expected, out, exact_device=True)
@@ -369,13 +372,12 @@ class TestCommon(JitCommonTestCase):
         out_kwargs = sample.kwargs.copy()
         # Create an empty tensor of different shape than
         # the expected tensor
-        x,y = expected.shape[0], expected.shape[1]
-        out_kwargs['out'] = out = torch.empty((x+1,y+1), dtype=expected.dtype, device=expected.device)
+        out_kwargs['out'] = out = torch.empty((expected.numel() + 1,), dtype=expected.dtype, device=expected.device)
         # Verify that using a tensor shape of incorrrect size to out=
         # raises userwarning.
         self.assertWarnsRegex(UserWarning,
-                            'An output with one or more elements was resized',
-                            lambda: op(*sample.input, *sample.args, **out_kwargs))
+                        'An output with one or more elements was resized',
+                        lambda: op(*sample.input, *sample.args, **out_kwargs))
         # Verify if the out tensor is resized and restrided to whatever
         # striding is natural for the op to produce
         self.assertEqual(expected, out, exact_device=True)
