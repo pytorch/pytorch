@@ -286,6 +286,8 @@ class TestUnaryUfuncs(TestCase):
         else:
             self.assertEqual(actual, expected, msg, exact_device=False, **kwargs)
 
+    # Tests that the function and its (array-accepting) reference produce the same
+    #   values on given tensors
     def _test_reference_numerics(self, dtype, op, tensors, equal_nan=True):
         for t in tensors:
             if dtype is torch.bfloat16:
