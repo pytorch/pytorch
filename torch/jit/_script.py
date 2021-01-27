@@ -273,8 +273,8 @@ if _enabled:
     # which always throws an exception.
 
     class ScriptModule(with_metaclass(ScriptMeta, Module)):  # type: ignore
-        """
-        ``ScriptModule``s wrap a C++ ``torch::jit::Module``. ``ScriptModule``s
+        r"""
+        A wrapper around C++ ``torch::jit::Module``. ``ScriptModule``\s
         contain methods, attributes, parameters, and
         constants. These can be accessed the same as on a normal ``nn.Module``.
         """

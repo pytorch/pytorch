@@ -864,7 +864,7 @@ class TestLinalg(TestCase):
 
         # dtypes should match
         out = torch.empty_like(a).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
+        with self.assertRaisesRegex(RuntimeError, "can't be cast to the desired output type"):
             torch.kron(a, b, out=out)
 
     # This test confirms that torch.linalg.norm's dtype argument works
@@ -996,6 +996,7 @@ class TestLinalg(TestCase):
     # their matrix norm results match
     @skipCUDAIfNoMagma
     @dtypes(torch.float, torch.double)
+    @precisionOverride({torch.float32: 2e-5})
     def test_norm_matrix(self, device, dtype):
         def run_test_case(input, p, dim, keepdim):
             result = torch.linalg.norm(input, ord, dim, keepdim)
@@ -1187,6 +1188,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.cfloat, torch.cdouble)
+    @precisionOverride({torch.cfloat: 2e-4})
     def test_norm_complex(self, device, dtype):
         def gen_error_message(input_size, ord, keepdim, dim=None):
             return "complex norm failed for input size %s, ord=%s, keepdim=%s, dim=%s" % (
@@ -1229,6 +1231,7 @@ class TestLinalg(TestCase):
 
     # Test that linal.norm gives the same result as numpy when inputs
     # contain extreme values (inf, -inf, nan)
+    @skipCUDAIf(True, r"GPU Test is blocking torch.svd https://github.com/pytorch/pytorch/pull/48436")
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_MACOS, "Skipped on MacOS!")
     @skipCUDAIfNoMagma
@@ -1594,7 +1597,7 @@ class TestLinalg(TestCase):
                 expected = np.linalg.norm(xn, p, keepdims=keepdim)
                 msg = gen_error_message(x.size(), p, keepdim)
                 self.assertEqual(res.shape, expected.shape, msg=msg)
-                self.assertEqual(res, expected, msg=msg)
+                self.assertEqual(res, expected, msg=msg, rtol=1.3e-6, atol=3e-4)
 
     # Ensure torch.norm with p='fro' and p=2 give the same results for mutually supported input combinations
     @dtypes(torch.float)
@@ -1732,7 +1735,7 @@ class TestLinalg(TestCase):
         self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
     # ~~~ tests for torch.svd ~~~
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_svd(self, device, dtype):
@@ -1791,7 +1794,7 @@ class TestLinalg(TestCase):
         for dims, some, compute_uv in product(shapes, [True, False], [True, False]):
             run_test(dims, some, compute_uv)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float)
     def test_svd_no_singularvectors(self, device, dtype):
@@ -1801,7 +1804,7 @@ class TestLinalg(TestCase):
             u, s_actual, v = torch.svd(a, compute_uv=False)
             self.assertEqual(s_expect, s_actual, msg="Singular values don't match")
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_svd_lowrank(self, device, dtype):
@@ -1901,44 +1904,44 @@ class TestLinalg(TestCase):
         for x, y in zip(cpu_result, device_result):
             self.assertEqual(x[..., :m].abs(), y[..., :m].abs(), atol=1e-5, rtol=0)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_svd_square(self, device, dtype):
         self._test_svd_helper((10, 10), True, False, device, dtype)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_types())
     def test_svd_square_col_maj(self, device, dtype):
         self._test_svd_helper((10, 10), True, True, device, dtype)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_types())
     def test_svd_tall_some(self, device, dtype):
         self._test_svd_helper((20, 5), True, False, device, dtype)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_types())
     def test_svd_tall_all(self, device, dtype):
         self._test_svd_helper((20, 5), False, False, device, dtype)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_types())
     def test_svd_tall_some_col_maj(self, device, dtype):
         self._test_svd_helper((5, 20), True, True, device, dtype)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_types())
     def test_svd_tall_all_col_maj(self, device, dtype):
         self._test_svd_helper((5, 20), False, True, device, dtype)
 
     # ~~~ tests for torch.linalg.svd ~~~
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_linalg_svd_compute_uv(self, device, dtype):
@@ -1952,7 +1955,10 @@ class TestLinalg(TestCase):
             # check linalg.svd vs numpy
             expected = np.linalg.svd(np_t, full_matrices, compute_uv=True)
             actual = torch.linalg.svd(t, full_matrices, compute_uv=True)
-            self.assertEqual(actual, expected)
+            # sign/phase of the singular vectors is not unique and therefore absolute values are compared
+            self.assertEqual(abs(actual[0]), abs(expected[0]))
+            self.assertEqual(actual[1], expected[1])
+            self.assertEqual(abs(actual[2]), abs(expected[2]))
             # check linalg.svd vs linalg.svd(out=...)
             out = (torch.empty_like(actual[0]),
                    torch.empty_like(actual[1]),
@@ -1961,7 +1967,7 @@ class TestLinalg(TestCase):
             self.assertEqual(actual, out)
             self.assertEqual(actual, out2)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_linalg_svd_no_compute_uv(self, device, dtype):
@@ -1990,7 +1996,7 @@ class TestLinalg(TestCase):
             assert USV.V is out[2]
             self.assertEqual(USV.S, np_s)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @onlyCUDA
     @dtypes(torch.float)
@@ -2177,12 +2183,9 @@ class TestLinalg(TestCase):
 
         for torch_inverse in [torch.inverse, torch.linalg.inv]:
             for batches, n in itertools.product(
-                [[], [0], [1], [4], [2, 3]],
+                [[], [0], [1], [2], [4], [2, 3]],
                 [0, 5, 64]
             ):
-                # large batch size and large matrix size will be tested in test_inverse_many_batches (slow test)
-                if batches and batches[0] == 32 and n == 256:
-                    continue
                 matrices = random_fullrank_matrix_distinct_singular_value(n, *batches, dtype=dtype).to(device)
                 run_test(torch_inverse, matrices, batches, n)
 
@@ -4705,7 +4708,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 should_throw_error = is_cuda10_2_or_higher and not is_config_deterministic
                 script = f"""
 import torch
-torch.set_deterministic(True)
+torch.use_deterministic_algorithms(True)
 fn = torch.{fn_name}
 arg_sizes = {arg_sizes}
 device = '{device}'
