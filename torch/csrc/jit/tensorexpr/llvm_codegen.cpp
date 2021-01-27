@@ -1348,7 +1348,7 @@ LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(
   }
   FunctionCallee callee = module_->getOrInsertFunction(name, fntype, {});
   applyMathFunctionAttributes(llvm::cast<llvm::Function>(callee.getCallee()));
-  return {callee.getFunctionType(), callee.getCallee(), use_simd};
+  return SimdCallee{callee.getFunctionType(), callee.getCallee(), use_simd};
 }
 
 void LLVMCodeGenImpl::visit(const Intrinsics* v) {
