@@ -59,7 +59,9 @@ _large_float_vals = (-501, 501,
                      -1e20, 1e20)
 _float_extremals = (float('inf'), float('-inf'), float('nan'))
 
-
+# [Note generate_numeric_tensors, generate_numeric_tensors_hard,
+#  and generate_numeric_tensors_extremal]
+#
 # Returns an iterable of contiguous tensors with the same storage on the requested
 #   device and with the requested dtype.
 #
@@ -71,12 +73,11 @@ _float_extremals = (float('inf'), float('-inf'), float('nan'))
 #   zero dim (scalar) tensors, small 1D tensors, a medium 1D tensor, and
 #   a large 2D tensor.
 #
-# These tensors will include interesting values. If include_large_values
-#   is true they will include larger values (>500), too, and if
-#   include_extremal_values is true they will include extremal values
-#   like -inf, inf, and nan.
+# These tensors will include interesting values. The generate_numeric_tensors_hard
+#   tests larger values (>500) and generate_numeric_tensors_extremal tests extremal
+#   values like -inf, inf, and nan.
 #
-# The randomly generated values can be constracted by the domain
+# The randomly generated values can be restricted by the domain
 #   argument.
 def generate_numeric_tensors(device, dtype, *,
                              domain=(None, None)):
