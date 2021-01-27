@@ -248,3 +248,11 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         serialized_dict["nodes"] += [node_rep]
 
     return serialized_dict
+
+
+class AcceleratedGraphModule:
+    def __init__(self, fx_module: GraphModule):
+        """Creates the needed data structures to pass to the glow runtime"""
+        self.weights: Dict[str, Any] = {}
+        self.serialized_graph = serialize_module(fx_module, self.weights)
+        self.serialized_graph_json = json.dumps(self.serialized_graph, indent=4)
