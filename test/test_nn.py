@@ -3086,7 +3086,7 @@ class TestNN(NNTestCase):
                     out1 = wrapped_m(input)
                     return out0 + out1
 
-                gradcheck(fn, (input.clone().requires_grad_(),))
+                gradcheck(fn, (input.clone().requires_grad_(),), check_batched_grad=False)
 
                 # test removing
                 pre_remove_out = wrapped_m(input)
