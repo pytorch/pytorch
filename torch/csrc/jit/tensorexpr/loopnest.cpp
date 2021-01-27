@@ -24,6 +24,11 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+LoopNest::LoopNest(const LoopNest& other)
+    : root_stmt_(Stmt::clone(other.root_stmt_)),
+      output_bufs_(other.output_bufs_),
+      intermediate_bufs_(other.intermediate_bufs_) {}
+
 class FunctionCallUseCount : public IRVisitor {
  public:
   std::unordered_map<const Buf*, size_t> findUses(Stmt* s) {
@@ -424,11 +429,7 @@ class DepTracker : public IRVisitor {
  public:
   std::vector<Tensor*> findUsedTensors(Tensor* tensor) {
     used_tensors.clear();
-    if (tensor->body()) {
-      tensor->body()->accept(this);
-    } else {
-      tensor->ElementStmt()->accept(this);
-    }
+    tensor->stmt()->accept(this);
     return used_tensors;
   }
 
@@ -508,7 +509,12 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
 
   std::vector<Stmt*> loops;
   for (Tensor* t : tensors_to_compute) {
-    Stmt* loop = t->lowerToStmt();
+    Stmt* loop = t->stmt();
+    if (loop->get_parent()) {
+      std::cerr << "Error: creating a loopnest from already used Tensors\n";
+      loops = {};
+      break;
+    }
     // Flatten initializers.
     if (Block* block = dynamic_cast<Block*>(loop)) {
       for (auto* s : block->stmts()) {
@@ -544,6 +550,7 @@ class FunctionInliner : public IRMutator {
         throw std::logic_error("cannot inline Buf with compound indices");
       }
       index_vars_.insert(index_var);
+      producer_index_vars_.push_back(index_var);
     }
   }
 
@@ -563,9 +570,9 @@ class FunctionInliner : public IRMutator {
     }
 
     std::vector<const Var*> index_vars;
-    TORCH_INTERNAL_ASSERT(buf->ndim() == t->args().size());
+    TORCH_INTERNAL_ASSERT(buf->ndim() == producer_index_vars_.size());
     for (size_t i = 0; i < buf->ndim(); i++) {
-      const Var* func_callee_arg = dynamic_cast<const Var*>(t->arg(i));
+      const Var* func_callee_arg = producer_index_vars_.at(i);
       const Expr* func_caller_param = v->param(i);
       auto iter = inline_mapping_.find(func_callee_arg);
       if (iter != inline_mapping_.end()) {
@@ -686,6 +693,7 @@ class FunctionInliner : public IRMutator {
 
   // Index Vars present in the producer.
   std::unordered_set<const Var*> index_vars_;
+  std::vector<const Var*> producer_index_vars_;
 
   std::unordered_map<const Var*, const Expr*> inline_mapping_;
 

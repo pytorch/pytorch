@@ -37,6 +37,8 @@ class TORCH_API LoopNest {
         output_bufs_(output_bufs),
         intermediate_bufs_(intermediate_bufs) {}
 
+  LoopNest(const LoopNest& other);
+
   Stmt* root_stmt() const {
     return root_stmt_;
   }
