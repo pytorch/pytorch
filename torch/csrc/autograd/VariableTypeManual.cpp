@@ -245,9 +245,8 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
     static auto op = c10::Dispatcher::singleton()
       .findSchemaOrThrow("aten::copy_", "")
       .typed<Tensor & (Tensor &, const Tensor &, bool)>();
-    //c10::Dispatcher::singleton()
-      //.redispatch<Tensor &, Tensor &, const Tensor &, bool>(op, ks & c10::after_autograd_keyset, self_, src_, non_blocking);
-    op.call(const_cast<Tensor&>(self_), src, non_blocking);
+    c10::Dispatcher::singleton()
+      .call<Tensor &, Tensor &, const Tensor &, bool>(op, self_, src_, non_blocking);
   }
   increment_version(self);
   rebase_history(self , std::move(grad_fn));
@@ -286,7 +285,12 @@ Tensor& resize_(
     static auto op = c10::Dispatcher::singleton()
       .findSchemaOrThrow("aten::resize_", "")
       .typed<Tensor & (Tensor &, IntArrayRef, c10::optional<MemoryFormat>)>();
-    op.redispatch(ks & c10::after_autograd_keyset, const_cast<Tensor&>(self_), size, optional_memory_format);
+    //c10::Dispatcher::singleton()
+      //.redispatch<Tensor &, Tensor &, IntArrayRef, c10::optional<MemoryFormat>>(op, ks & c10::after_autograd_keyset, const_cast<Tensor&>(self_), size, optional_memory_format);
+
+    auto currentDispatchKeySet = ks & c10::after_autograd_keyset;
+  const KernelFunction& kernel = op.operatorIterator_->op.lookup(currentDispatchKeySet.highestPriorityTypeId());
+  kernel.template call<Tensor &, Tensor &, IntArrayRef, c10::optional<MemoryFormat>>(op, currentDispatchKeySet, self_, size, optional_memory_format);
   }
 
   if (self.fw_grad(/* level */ 0).defined()) {
@@ -311,7 +315,8 @@ Tensor& resize_as_(
     static auto op = c10::Dispatcher::singleton()
       .findSchemaOrThrow("aten::resize_as_", "")
       .typed<Tensor & (Tensor &, const Tensor &, c10::optional<MemoryFormat>)>();
-    op.redispatch(ks & c10::after_autograd_keyset, self_, the_template_, optional_memory_format);
+    c10::Dispatcher::singleton()
+      .redispatch<Tensor &, Tensor &, const Tensor &, c10::optional<MemoryFormat>>(op, ks & c10::after_autograd_keyset, const_cast<Tensor&>(self_), the_template_, optional_memory_format);
   }
 
   // Handle fw grad
