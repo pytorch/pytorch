@@ -65,7 +65,7 @@ from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WIT
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
-    _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, \
+    _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, make_global, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
     RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, nn_functional_tests, get_script_args, \
@@ -6609,8 +6609,6 @@ a")
                    .check("in foo").check("in baz").run(str(cm.exception))
 
     def test_error_stacktrace_interface(self):
-        global IFace
-
         @torch.jit.script
         def baz(c, b):
             return c + b
@@ -6633,6 +6631,8 @@ a")
             def one(self, x, y):
                 # type: (Tensor, Tensor) -> Tensor
                 pass
+
+        make_global(IFace)
 
         @torch.jit.script
         def as_interface(x):

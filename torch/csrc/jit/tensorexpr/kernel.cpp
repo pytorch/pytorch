@@ -1350,8 +1350,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::lgamma: {
-      return computeOneOperand(
-          "aten_lgamma", v, [](const ExprHandle& a) { return lgamma(a); });
+      return computeOneOperand("aten_lgamma", v, [](const ExprHandle& a) {
+        return lgamma(promoteIntegerToDefaultType(a));
+      });
     } break;
 
     case prim::ConstantChunk: {
