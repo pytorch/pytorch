@@ -80,7 +80,7 @@ public:
   // table.
   static Dispatcher& realSingleton();
 
-  static Dispatcher& singleton() {
+  C10_ALWAYS_INLINE static Dispatcher& singleton() {
     // Implemented inline so that steady-state code needn't incur
     // function-call overhead. We can't just inline `realSingleton`
     // because the function-local static would get duplicated across

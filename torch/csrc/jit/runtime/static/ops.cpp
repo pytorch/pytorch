@@ -281,8 +281,8 @@ REGISTER_OPERATOR_FUNCTOR_OPT(
     true,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
-        auto weight = p_node->Input(0).toTensor();
-        auto indices = p_node->Input(1).toTensor();
+        auto& weight = p_node->Input(0).toTensor();
+        auto& indices = p_node->Input(1).toTensor();
         auto offsets = p_node->Input(2).toOptional<at::Tensor>();
         auto pruned_weights = p_node->Input(5).toBool();
         auto per_sample_weights = p_node->Input(6).toOptional<at::Tensor>();
@@ -293,7 +293,7 @@ REGISTER_OPERATOR_FUNCTOR_OPT(
           p_node->Output(0) =
               at::empty({0}, weight.options().dtype(at::kFloat));
         }
-        auto out_t = p_node->Output(0).toTensor();
+        auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
         return at::native::embedding_bag_byte_rowwise_offsets_out(
             out_t,
@@ -312,13 +312,13 @@ REGISTER_OPERATOR_FUNCTOR_OPT(
 // The out variant takes precedence over native
 REGISTER_OPERATOR_FUNCTOR(aten::narrow, aten_narrow, [](Node* n) -> SROperator {
   return [](ProcessedNode* p_node) {
-    auto self = p_node->Input(0).toTensor(); // self
+    auto& self = p_node->Input(0).toTensor(); // self
     auto dim = p_node->Input(1).toInt(); // dim
     int64_t start = 0;
     if (p_node->Input(2).isScalar()) {
       start = p_node->Input(2).toInt();
     } else {
-      auto t = p_node->Input(2).toTensor();
+      auto& t = p_node->Input(2).toTensor();
       start = t.item<int64_t>();
     }
     auto length = p_node->Input(3).toInt(); // length
@@ -326,7 +326,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::narrow, aten_narrow, [](Node* n) -> SROperator {
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = create_empty_from(self);
     }
-    auto output = p_node->Output(0).toTensor();
+    auto& output = p_node->Output(0).toTensor();
     output.resize_({0});
     at::native::narrow_copy_dense_cpu_out(self, dim, start, length, output);
   };
