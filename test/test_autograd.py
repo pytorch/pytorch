@@ -3216,20 +3216,15 @@ class TestAutograd(TestCase):
 
         print(prof.function_events)
 
-        second_level_expected_events_and_shapes = [
-            (None, [[30, 20]]),
-            ('aten::addmm', [[30], [128, 20], [20, 30], [], []]),
-            (None, [[40, 30]]),
-            ('aten::addmm', [[40], [128, 30], [30, 40], [], []])
+        top_level_expected_events_and_shapes = [
+            ('aten::linear', [[128, 20], [30, 20], [30]]),
+            ('aten::linear', [[128, 30], [40, 30], [40]])
         ]
 
-        expected_iter = iter(second_level_expected_events_and_shapes)
+        expected_iter = iter(top_level_expected_events_and_shapes)
         last_end = 0
 
         for event in prof.function_events:
-            # skipping top level operation `aten::linear`
-            if event.name == 'aten::linear':
-                continue
             if event.time_range.start > last_end:
                 name_expected, input_shape_expected = next(expected_iter)
                 if name_expected is not None:
