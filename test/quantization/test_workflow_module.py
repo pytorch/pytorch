@@ -1305,6 +1305,7 @@ class TestFakeQuantize(TestCase):
             zero_point_curr.requires_grad_()
 
             for grad_factor in [0.1, 1.0, 10.0]:
+                print(X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max, grad_factor)
                 Y_prime = torch._fake_quantize_learnable_per_channel_affine(
                     X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max, grad_factor).to(device)
 
@@ -1313,8 +1314,8 @@ class TestFakeQuantize(TestCase):
                     dout, X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max, device)
                 Y_prime.backward(dout)
 
-                dX_expected = dX.to(device).detach().cpu()
-                dX_actual = X_curr.to(device).grad.detach().cpu()
+                dX_expected = dX.to(device).detach()
+                dX_actual = X_curr.to(device).grad.detach()
                 dScale_expected = dScale.to(device).detach()
                 dScale_actual = scale_curr.to(device).grad.detach()
                 dZeroPoint_expected = dZeroPoint.to(device).detach()

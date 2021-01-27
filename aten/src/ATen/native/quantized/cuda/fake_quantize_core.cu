@@ -134,7 +134,7 @@ void _fake_quantize_grad_learnable_channel_kernel_cuda(TensorIterator &iter, int
       float dscale_small = quant_min - zero_point_input;
       float dscale_big = quant_max - zero_point_input;
       // Calculate gradients for X.
-      int64_t xqi = std::nearbyint(zero_point_input + x_input * inv_scale);
+      int64_t xqi = std::nearbyint(x_input * inv_scale) + static_cast<int64_t>(zero_point_input);
       dx_output = dy_input * (xqi >= quant_min && xqi <= quant_max);
       // Calculate gradients for scale and zero point.
       float xfqi = static_cast<float>((std::max(std::min(xqi, quant_max), quant_min) - zero_point_input) * scale_input);
