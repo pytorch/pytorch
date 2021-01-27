@@ -813,7 +813,7 @@ static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRe
     auto maxes = at::amax(self, dims, true);
     auto maxes_squeezed = (keepdim ? maxes : squeeze_multiple(maxes, dims));
     maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
-    at::sum_out(result, at::exp(self - maxes), dims, keepdim);
+    at::sum_out(result, (self - maxes).exp_(), dims, keepdim);
     result.log_().add_(maxes_squeezed);
   } else {
     at::sum_out(result, at::exp(self), dims, keepdim);
