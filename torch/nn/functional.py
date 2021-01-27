@@ -4523,6 +4523,11 @@ def _multi_head_attention_forward_checks(
         static_k, static_v,
         num_heads, embed_dim,
         attn_mask, key_padding_mask):
+    r"""Checks the shapes of the tensors and reshapes if necessary.
+    This function is also responsible for the bias concatenation for k and v.
+
+    The argument list types are the same as in the `multi_head_attention_forward`
+    """
     tgt_len, bsz, _ = query.size()
     head_dim = embed_dim // num_heads
     if attn_mask is not None:
@@ -4600,6 +4605,7 @@ def _multi_head_attention_forward_compute_outputs(
         q, k, v,
         attn_mask, key_padding_mask,
         dropout_p, training):
+    r"""Computes the outputs of the multihead attention."""
     head_dim = embed_dim // num_heads
     attn_output_weights = torch.bmm(q, k.transpose(1, 2))
     assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
