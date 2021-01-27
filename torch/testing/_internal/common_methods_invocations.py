@@ -1217,6 +1217,11 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=all_types_and(torch.bfloat16),
                    dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
                    assert_autodiffed=True,
+                   skips=(
+                       # Skip all unary ufuncs tests as we call op(tensor) and min/max args are not passed
+                       # Reference: https://github.com/pytorch/pytorch/issues/51242
+                       SkipInfo('TestUnaryUfuncs'),
+                   ),
                    sample_inputs_func=sample_inputs_clamp),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
@@ -2284,8 +2289,6 @@ def method_tests():
         ('sign', (), NO_ARGS, 'scalar'),
         ('sgn', (S, S, S), NO_ARGS),
         ('sgn', (), NO_ARGS, 'scalar'),
-        ('trunc', (S, S, S), NO_ARGS, '', (True,)),
-        ('trunc', (), NO_ARGS, 'scalar', (True,)),
         ('floor', (S, S, S), NO_ARGS, '', (True,)),
         ('floor', (), NO_ARGS, 'scalar', (True,)),
         ('ceil', (S, S, S), NO_ARGS, '', (True,)),

@@ -2,7 +2,7 @@ from functools import partial, wraps
 
 import torch
 
-from torch.testing import floating_and_complex_types_and, FileCheck
+from torch.testing import FileCheck
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, IS_SANDCASTLE, clone_input_helper)
 from torch.testing._internal.common_methods_invocations import \
