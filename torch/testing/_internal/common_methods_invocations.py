@@ -625,7 +625,7 @@ def sample_inputs_index_fill(op_info, device, dtype, requires_grad):
     t = make_tensor((S, S, S), device, dtype,
                     low=None, high=None,
                     requires_grad=requires_grad)
-    fill_val = torch.tensor(-1+1j if t.is_complex() else -1)
+    fill_val = torch.tensor(-1 + 1j if t.is_complex() else -1)
     # non-contiguous input
     t01 = t.transpose(0, 1)
     t02 = t.transpose(0, 2)
