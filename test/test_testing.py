@@ -557,7 +557,21 @@ def makecase(name, seconds, *, errored=False, failed=False, skipped=False):
         'seconds': seconds,
         'errored': errored,
         'failed': failed,
-        'skipped': skipped
+        'skipped': skipped,
+    }
+
+
+def makereport(tests):
+    suites = {
+        suite_name: {
+            'total_seconds': sum(case['seconds'] for case in cases),
+            'cases': cases,
+        }
+        for suite_name, cases in tests.items()
+    }
+    return {
+        'total_seconds': sum(s['total_seconds'] for s in suites.values()),
+        'suites': suites,
     }
 
 
@@ -584,43 +598,13 @@ Current       total time:    42.00s
 ''',
             regression_info(
                 fakehash('a'),
-                {
-                    'total_seconds': 42,
-                    'suites': {
-                        'Foo': {
-                            'total_seconds': 42,
-                            'cases': [
-                                makecase('test_foo', 42),
-                            ],
-                        },
-                    },
-                },
+                makereport({'Foo': [makecase('test_foo', 42)]}),
                 {
                     fakehash('b'): [
-                        {
-                            'total_seconds': 40,
-                            'suites': {
-                                'Foo': {
-                                    'total_seconds': 40,
-                                    'cases': [
-                                        makecase('test_foo', 40),
-                                    ],
-                                },
-                            },
-                        }
+                        makereport({'Foo': [makecase('test_foo', 40)]}),
                     ],
                     fakehash('c'): [
-                        {
-                            'total_seconds': 43,
-                            'suites': {
-                                'Foo': {
-                                    'total_seconds': 43,
-                                    'cases': [
-                                        makecase('test_foo', 43),
-                                    ],
-                                },
-                            },
-                        }
+                        makereport({'Foo': [makecase('test_foo', 43)]}),
                     ],
                 },
                 stdev_threshold=2,
