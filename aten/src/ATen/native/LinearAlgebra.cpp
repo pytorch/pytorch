@@ -126,6 +126,7 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 }
 
 Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
+  NoTF32Guard disable_tf32;
   ScalarType t = input.scalar_type();
   TORCH_CHECK((t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble)
               && input.dim() >= 2,
