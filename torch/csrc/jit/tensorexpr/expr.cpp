@@ -128,6 +128,61 @@ ExprHandle abs(const ExprHandle& v) {
   return Intrinsics::make(kAbs, v);
 }
 
+// The default tanh is quite slow, use the Eigen version from here:
+// https://bitbucket.org/eigen/eigen/src/94875feeeeb9abe5509b314197da1991ba2070f5/Eigen/src/Core/MathFunctionsImpl.h#lines-26
+ExprHandle fast_tanh(const ExprHandle& v) {
+  Dtype dtype = v.dtype();
+  // TODO: use a dedicated bind-var to make sure v is not evalualted multiple
+  // times. Clamp the input expression to [-9, 9]
+  ExprHandle plus_9 = FloatImm::make(9.0f);
+  ExprHandle minus_9 = FloatImm::make(-9.0f);
+  ExprHandle v1 = Min::make(v, plus_9, false);
+  v1 = Max::make(v1, minus_9, false);
+
+  // The coefficients for the numerator
+  ExprHandle alpha_1 = FloatImm::make(4.89352455891786e-03f);
+  ExprHandle alpha_3 = FloatImm::make(6.37261928875436e-04f);
+  ExprHandle alpha_5 = FloatImm::make(1.48572235717979e-05f);
+  ExprHandle alpha_7 = FloatImm::make(5.12229709037114e-08f);
+  ExprHandle alpha_9 = FloatImm::make(-8.60467152213735e-11f);
+  ExprHandle alpha_11 = FloatImm::make(2.00018790482477e-13f);
+  ExprHandle alpha_13 = FloatImm::make(-2.76076847742355e-16f);
+
+  // The coeffecients for the denominator
+  ExprHandle beta_0 = FloatImm::make(4.89352518554385e-03f);
+  ExprHandle beta_2 = FloatImm::make(2.26843463243900e-03f);
+  ExprHandle beta_4 = FloatImm::make(1.18534705686654e-04f);
+  ExprHandle beta_6 = FloatImm::make(1.19825839466702e-06f);
+
+  // numerator
+  ExprHandle v2 = v1 * v1;
+  ExprHandle p = v2 * alpha_13 + alpha_11;
+  p = v2 * p + alpha_9;
+  p = v2 * p + alpha_7;
+  p = v2 * p + alpha_5;
+  p = v2 * p + alpha_3;
+  p = v2 * p + alpha_1;
+  p = v1 * p;
+
+  // denominator
+  ExprHandle q = v2 * beta_6 + beta_4;
+  q = v2 * q + beta_2;
+  q = v2 * q + beta_0;
+
+  ExprHandle result = p / q;
+  return result;
+}
+
+ExprHandle fast_sigmoid(const ExprHandle& x) {
+  // sigmoid(x) = (tanh(x / 2) + 1) / 2
+  ExprHandle one_v = FloatImm::make(1.f);
+  ExprHandle half_v = FloatImm::make(0.5f);
+  ExprHandle x2 = x * half_v;
+  ExprHandle y{fast_tanh(x2)};
+  ExprHandle z = (y + one_v) * half_v;
+  return z;
+}
+
 ExprHandle fast_log(const ExprHandle& v) {
   // this implementation is taken from sleef:
   // https://github.com/shibatch/sleef/blob/master/src/libm/sleefsp.c#L1131
