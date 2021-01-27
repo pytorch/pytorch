@@ -878,6 +878,7 @@ class SmoothL1Loss(_Loss):
         Smooth L1 loss is closely related to :class:`HuberLoss`, being
         equivalent to :math:`huber(x, y) / beta`. This leads to the following
         differences:
+
         * As beta -> 0, Smooth L1 loss converges to :class:`L1Loss`, while :class:`HuberLoss`
           converges to a constant 0 loss.
         * As beta -> :math:`+\infty`, Smooth L1 loss converges to a constant 0 loss, while
