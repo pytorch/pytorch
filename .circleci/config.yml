@@ -2315,7 +2315,7 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:test"
       - binary_linux_build:
           name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
@@ -2327,7 +2327,7 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:test"
       - binary_linux_build:
           name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
@@ -2339,7 +2339,7 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:test"
       - binary_linux_build:
           name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
@@ -2351,7 +2351,7 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:test"
       - binary_linux_build:
           name: binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           build_environment: "libtorch 3.7m cu111 gcc5.4_cxx11-abi"
@@ -2363,7 +2363,7 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:test"
       - binary_linux_build:
           name: binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
           build_environment: "libtorch 3.7m cu111 gcc5.4_cxx11-abi"
@@ -2375,7 +2375,7 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:test"
       - binary_linux_build:
           name: binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_static-with-deps_build
           build_environment: "libtorch 3.7m cu111 gcc5.4_cxx11-abi"
@@ -2387,7 +2387,7 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:test"
       - binary_linux_build:
           name: binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_static-without-deps_build
           build_environment: "libtorch 3.7m cu111 gcc5.4_cxx11-abi"
@@ -2399,7 +2399,7 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:test"
       - binary_mac_build:
           name: binary_macos_wheel_3_6_cpu_nightly_build
           build_environment: "wheel 3.6 cpu"
@@ -3167,7 +3167,7 @@ workflows:
           libtorch_variant: "shared-with-deps"
           requires:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:test"
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_test
           build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
@@ -3181,7 +3181,7 @@ workflows:
           libtorch_variant: "shared-without-deps"
           requires:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:test"
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_test
           build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
@@ -3195,7 +3195,7 @@ workflows:
           libtorch_variant: "static-with-deps"
           requires:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-with-deps_build
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:test"
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_test
           build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
@@ -3209,7 +3209,7 @@ workflows:
           libtorch_variant: "static-without-deps"
           requires:
             - binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_static-without-deps_build
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:test"
       - binary_linux_test:
           name: binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_shared-with-deps_test
           build_environment: "libtorch 3.7m cu111 gcc5.4_cxx11-abi"
@@ -3223,7 +3223,7 @@ workflows:
           libtorch_variant: "shared-with-deps"
           requires:
             - binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:test"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3239,7 +3239,7 @@ workflows:
           libtorch_variant: "shared-without-deps"
           requires:
             - binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_shared-without-deps_build
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:test"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3255,7 +3255,7 @@ workflows:
           libtorch_variant: "static-with-deps"
           requires:
             - binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_static-with-deps_build
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:test"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3271,7 +3271,7 @@ workflows:
           libtorch_variant: "static-without-deps"
           requires:
             - binary_linux_libtorch_3_7m_cu111_gcc5_4_cxx11-abi_nightly_static-without-deps_build
-          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest"
+          docker_image: "pytorch/pytorch-binary-docker-image-ubuntu16.04:test"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_windows_test:
