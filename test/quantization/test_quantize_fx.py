@@ -1527,11 +1527,13 @@ class TestQuantizeFx(QuantizationTestCase):
 
         m = convert_fx(m)
         keys = m.state_dict().keys()
-
-        scale_count = 0
-        zero_point_count = 0
+        quant_scale_count = quant_zero_point = scale_count = zero_point_count = 0
         for k in keys:
-            if 'scale' in k:
+            if 'quant_scale' in k:
+                quant_scale_count = quant_scale_count + 1
+            elif 'quant_zero_point' in k:
+                quant_zero_point = quant_zero_point + 1
+            elif 'scale' in k:
                 scale_count = scale_count + 1
             elif 'zero_point' in k:
                 zero_point_count = zero_point_count + 1
