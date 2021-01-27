@@ -68,13 +68,13 @@ class SubgraphMatcher:
             # one input Node
             for perm in list(permutations(gn.all_input_nodes)):
                 match_found = all(self._match_nodes(pn_, gn_) for pn_, gn_
-                          in zip(pn.all_input_nodes, perm))
+                                  in zip(pn.all_input_nodes, perm))
                 if match_found:
                     break
         else:
             match_found = (len(pn.all_input_nodes) == len(gn.all_input_nodes)
-                          and all(self._match_nodes(pn_, gn_) for pn_, gn_
-                          in zip(pn.all_input_nodes, gn.all_input_nodes)))
+                           and all(self._match_nodes(pn_, gn_) for pn_, gn_
+                                   in zip(pn.all_input_nodes, gn.all_input_nodes)))
         if not match_found:
             self.nodes_map.pop(pn)
             return False
