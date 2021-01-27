@@ -351,11 +351,20 @@ class TestCommon(JitCommonTestCase):
 
     @ops(op_db)
     def test_out_empty_tensor(self, device, dtype, op):
+<<<<<<< HEAD
         # Compute expected output of op
         expected, sample = self.compute_expected_output(device, dtype, op)
         # call it with out=... and check we get the expected result
         out_kwargs = sample.kwargs.copy()
         out_kwargs['out'] = out = torch.empty(0,0, dtype=expected.dtype, device=expected.device)
+=======
+        # Compute the expected output of op
+        expected, sample = self.compute_expected_output(device, dtype, op)
+        # call it with out=... and check we get the expected result
+        out_kwargs = sample.kwargs.copy()
+        empty_tensor = torch.tensor((0, 0), dtype=expected.dtype, device=expected.device)
+        out_kwargs['out'] = out = torch.empty_like(empty_tensor)
+>>>>>>> 965f76990bb72f9aa0d08370b174dbd6f005d0b3
         op(*sample.input, *sample.args, **out_kwargs)
         # Verify if the empty out tensor is resized and restrided to whatever
         # striding is natural for the op to produce
@@ -391,8 +400,15 @@ class TestCommon(JitCommonTestCase):
         op(*inp, *sample.args, **out_kwargs)
         # Verify if the out tensor is resized and restrided to whatever
         # striding is natural for the op to produce
+<<<<<<< HEAD
         self.assertEqual(out, inp[0], exact_device=True)
         self.assertEqual(expected, out, exact_device=True)
+=======
+        self.assertEqual(out, inp[0])
+        self.assertEqual(expected.dtype, out.dtype)
+        self.assertEqual(expected.device, out.device)
+        self.assertEqual(expected, out)
+>>>>>>> 965f76990bb72f9aa0d08370b174dbd6f005d0b3
 
 instantiate_device_type_tests(TestOpInfo, globals())
 instantiate_device_type_tests(TestGradients, globals())
