@@ -223,7 +223,7 @@ class EventList(list):
                     '"pid": "CPU functions", '
                     '"args": {}}, '
                     % (
-                        evt.name,
+                        evt.trace_name,
                         evt.time_range.start,
                         evt.time_range.elapsed_us(),
                         evt.thread
@@ -241,7 +241,7 @@ class EventList(list):
                             '"pid": "CPU functions", '
                             '"id": %s, '
                             '"cat": "cpu_to_cuda", '
-                            '"args": {}}, ' % (evt.name, evt.time_range.start,
+                            '"args": {}}, ' % (evt.trace_name, evt.time_range.start,
                                                evt.thread, next_id))
                     f.write('{"name": "%s", '
                             '"ph": "f", '
@@ -847,10 +847,11 @@ class FunctionEvent(FormattedTimesMixin):
             self, id, name, thread, start_us, end_us, fwd_thread=None, input_shapes=None,
             stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
             is_remote=False, sequence_nr=-1, node_id=-1, device_type=DeviceType.CPU, device_index=0,
-            is_legacy=False, flops=None):
+            is_legacy=False, flops=None, trace_name=None):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
+        self.trace_name: str = trace_name if trace_name is not None else self.name
         self.time_range: Interval = Interval(start_us, end_us)
         self.thread: int = thread
         self.fwd_thread: Optional[int] = fwd_thread
@@ -1101,6 +1102,14 @@ def filter_name(name):
     ]
     return name in filtered_out_names
 
+def rewrite_name(name, with_wildcard=False):
+    string_table = StringTable()
+    name = string_table[name]
+    if with_wildcard:
+        if name.startswith("ProfilerStep#"):
+            name = "ProfilerStep*"
+    return name
+
 # Parsing of kineto profiler events
 def parse_kineto_results(result):
     # result.events() has most of the events - PyTorch op-level and device-level events
@@ -1120,7 +1129,6 @@ def parse_kineto_results(result):
     assert start_record is not None, "Invalid profiler output, __start_profile is missing"
 
     # Create and return FunctionEvent list
-    string_table = StringTable()
     function_events = []
     cuda_corr_map: Dict[int, List[torch.autograd.KinetoEvent]] = {}
     for kineto_event in result.events():
@@ -1142,7 +1150,8 @@ def parse_kineto_results(result):
         is_async = kineto_event.start_thread_id() != kineto_event.end_thread_id()
         fe = FunctionEvent(
             id=kineto_event.correlation_id(),
-            name=string_table[kineto_event.name()],
+            name=rewrite_name(name=kineto_event.name(), with_wildcard=True),
+            trace_name=rewrite_name(name=kineto_event.name(), with_wildcard=False),
             thread=kineto_event.start_thread_id(),
             start_us=rel_start_us,
             end_us=rel_end_us,
@@ -1193,7 +1202,6 @@ def parse_legacy_records(thread_records):
     cuda_records = {}
     functions = []
     record_stack = []
-    string_table = StringTable()
 
     # cuda start events and the overall profiler start event don't happen
     # at exactly the same time because we need to record an event on each device
@@ -1271,7 +1279,8 @@ def parse_legacy_records(thread_records):
                 fe = FunctionEvent(
                     id=record.handle(),
                     node_id=record.node_id(),
-                    name=string_table[start.name()],
+                    name=rewrite_name(name=start.name(), with_wildcard=True),
+                    trace_name=rewrite_name(name=start.name(), with_wildcard=False),
                     thread=start.thread_id(),
                     start_us=start_record.cpu_elapsed_us(start),
                     end_us=start_record.cpu_elapsed_us(record),
