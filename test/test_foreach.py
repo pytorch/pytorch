@@ -669,11 +669,10 @@ class TestForeach(TestCase):
                                 self.assertEqual(res, tensors)
                 else:
                     # we dont support complex types on CUDA for now
-                    if (dtype in torch.testing.get_all_complex_dtypes()) and \
-                        self.device_type == 'cuda' and \
-                        foreach_bin_op == torch._foreach_sub:
-                            with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"):
-                                foreach_bin_op_(tensors, scalars)
+                    if (dtype in torch.testing.get_all_complex_dtypes()) and self.device_type == 'cuda' and \
+                       foreach_bin_op == torch._foreach_sub:
+                        with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"):
+                            foreach_bin_op_(tensors, scalars)
 
                             with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"):
                                 foreach_bin_op(tensors, scalars)
