@@ -21,7 +21,7 @@ class ExpRelaxedCategorical(Distribution):
     Args:
         temperature (Tensor): relaxation temperature
         probs (Tensor): event probabilities
-        logits (Tensor): the log probability of each event.
+        logits (Tensor): unnormalized log probability for each event
 
     [1] The Concrete Distribution: A Continuous Relaxation of Discrete Random Variables
     (Maddison et al, 2017)
@@ -101,7 +101,7 @@ class RelaxedOneHotCategorical(TransformedDistribution):
     Args:
         temperature (Tensor): relaxation temperature
         probs (Tensor): event probabilities
-        logits (Tensor): the log probability of each event.
+        logits (Tensor): unnormalized log probability for each event
     """
     arg_constraints = {'probs': constraints.simplex,
                        'logits': constraints.real_vector}

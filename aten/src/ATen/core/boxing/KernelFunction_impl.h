@@ -40,9 +40,9 @@ inline void KernelFunction::callBoxed(const OperatorHandle& opHandle, Stack* sta
 
 template<class Return, class... Args>
 inline Return callUnboxedKernelFunction(void* unboxed_kernel_func, OperatorKernel* functor, Args&&... args) {
-    using ActualSignature = Return (Args..., OperatorKernel*);
+    using ActualSignature = Return (OperatorKernel*, Args...);
     ActualSignature* func = reinterpret_cast<ActualSignature*>(unboxed_kernel_func);
-    return (*func)(std::forward<Args>(args)..., functor);
+    return (*func)(functor, std::forward<Args>(args)...);
 }
 
 template<class Return, class... Args>
