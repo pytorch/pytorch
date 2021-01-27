@@ -20,6 +20,10 @@ torch.set_default_dtype(torch.double)
 
 NO_NCCL = not hasattr(torch.distributed, "ProcessGroupNCCL")
 
+# batched grad doesn't support data parallel
+gradcheck = partial(gradcheck, check_batched_grad=False)
+_assertGradAndGradgradChecks = partial(_assertGradAndGradgradChecks, check_batched_grad=False)
+
 class TestDataParallel(TestCase):
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
@@ -42,7 +46,7 @@ class TestDataParallel(TestCase):
         def fn(t):
             return dpm(inp)
 
-        gradcheck(fn, (m.t_rg,), check_batched_grad=False)
+        gradcheck(fn, (m.t_rg,))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_rnn(self):
@@ -588,7 +592,7 @@ class TestDataParallel(TestCase):
         result[0].backward(grad)
         self.assertEqual(x.grad[:2], grad)
         self.assertEqual(x.grad[2:], grad.clone().zero_())
-        _assertGradAndGradgradChecks(self, lambda y: dp.scatter(y, (0, 1)), (x,), check_batched_grad=False)
+        _assertGradAndGradgradChecks(self, lambda y: dp.scatter(y, (0, 1)), (x,))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_scatter_cpu(self):
@@ -636,7 +640,7 @@ class TestDataParallel(TestCase):
         result.backward(grad)
         self.assertEqual(inputs[0].grad, grad[:2])
         self.assertEqual(inputs[1].grad, grad[2:])
-        _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs, check_batched_grad=False)
+        _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs)
 
         # test scalar inputs, should stack into a vector in this case
         inputs = (
@@ -657,7 +661,7 @@ class TestDataParallel(TestCase):
         result.backward(grad)
         self.assertEqual(inputs[0].grad, grad[0])
         self.assertEqual(inputs[1].grad, grad[1])
-        _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs, check_batched_grad=False)
+        _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_gather_cpu(self):
