@@ -14,7 +14,6 @@ struct ScriptClass {
       : class_type_(std::move(class_type)) {}
 
   py::object __call__(py::args args, py::kwargs kwargs);
-
   c10::StrongTypePtr class_type_;
 };
 

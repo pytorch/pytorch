@@ -1,6 +1,6 @@
-#include <torch/csrc/jit/python/python_custom_class.h>
-
+#include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
+#include <torch/csrc/jit/python/python_custom_class.h>
 
 #include <fmt/format.h>
 
@@ -25,11 +25,39 @@ py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
   return py::cast(instance);
 }
 
+struct ScriptClassFunctionPtr {
+  ScriptClassFunctionPtr(Function* function) : function_(function) {
+    TORCH_INTERNAL_ASSERT(function_);
+  }
+  std::shared_ptr<CompilationUnit> cu_;
+  Function* function_;
+};
+
 void initPythonCustomClassBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
+  py::class_<ScriptClassFunctionPtr>(
+      m, "ScriptClassFunction", py::dynamic_attr())
+      .def("__call__", [](py::args args, py::kwargs kwargs) {
+        // see: [pybind11 varargs]
+        auto strongPtr = py::cast<ScriptClassFunctionPtr>(args[0]);
+        Function& callee = *strongPtr.function_;
+        py::object result = invokeScriptFunctionFromPython(
+            callee, tuple_slice(std::move(args), 1), std::move(kwargs));
+        return result;
+      });
+
   py::class_<ScriptClass>(m, "ScriptClass")
       .def("__call__", &ScriptClass::__call__)
+      .def(
+          "__getattr__",
+          [](ScriptClass& self, const std::string& name) {
+            auto type = self.class_type_.type_->castRaw<ClassType>();
+            AT_ASSERT(type);
+            auto* fn = type->findStaticMethod(name);
+            AT_ASSERT(fn);
+            return ScriptClassFunctionPtr(fn);
+          })
       .def_property_readonly("__doc__", [](const ScriptClass& self) {
         return self.class_type_.type_->expectRef<ClassType>().doc_string();
       });

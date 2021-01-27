@@ -138,6 +138,18 @@ struct TORCH_API CompilationUnit {
     return ret;
   }
 
+  Function* create_function(
+      c10::QualifiedName name,
+      std::unique_ptr<Function> function,
+      bool shouldMangle = false) {
+    if (shouldMangle) {
+      name = mangle(name);
+    }
+    auto ret = function.get();
+    register_function(std::move(function));
+    return ret;
+  }
+
   std::vector<Function*> get_functions() const {
     return fmap(functions_, [](const std::unique_ptr<Function>& fn) {
       return fn.get();

@@ -153,6 +153,30 @@ class class_ {
     return *this;
   }
 
+  /// Method regisration API for static methods.
+  template <typename Func>
+  class_& def_static(std::string name, Func func, std::string doc_string = "") {
+    auto qualMethodName = qualClassName + "." + name;
+    auto schema =
+        c10::inferFunctionSchemaSingleReturn<Func>(std::move(name), "");
+
+    auto wrapped_func =
+        [func = std::move(func)](jit::Stack& stack) mutable -> void {
+      using RetType =
+          typename c10::guts::infer_function_traits_t<Func>::return_type;
+      detail::BoxedProxy<RetType, Func>()(stack, func);
+    };
+    auto method = std::make_unique<jit::BuiltinOpFunction>(
+        qualMethodName,
+        std::move(schema),
+        std::move(wrapped_func),
+        std::move(doc_string));
+
+    classTypePtr->addStaticMethod(method.get());
+    registerCustomClassMethod(std::move(method));
+    return *this;
+  }
+
   /// This is an unsafe method registration API added for adding custom JIT backend support via custom
   /// C++ classes. It is not for general purpose use.
   class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema, std::string doc_string = "") {
