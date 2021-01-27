@@ -10,9 +10,7 @@ struct SymbolAddress {
   const char* symbol;
   void* address;
 
-  template <typename Ptr>
-  SymbolAddress(const char* sym, Ptr addr)
-      : symbol(sym), address(reinterpret_cast<void*>(addr)) {}
+  SymbolAddress(const char* sym, void* addr) : symbol(sym), address(addr) {}
 };
 
 c10::ArrayRef<SymbolAddress> getIntrinsicSymbols();
