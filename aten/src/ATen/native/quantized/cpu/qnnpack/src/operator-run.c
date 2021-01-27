@@ -1015,8 +1015,8 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
       const size_t group_input_channels = op->group_input_channels;
       const size_t group_output_channels = op->group_output_channels;
       uint32_t mr, log2_mr, nr, kr, log2_row_block_size;
-      pytorch_q8gemm_dq_sparse_ukernel_function compute_kernel;
-      pytorch_q8gemm_dq_sparse_packedA_ukernel_function prepack_kernel;
+      pytorch_q8gemm_sparse_packA_ukernel_function prepack_kernel;
+      pytorch_q8gemm_dq_sparse_packedA_ukernel_function compute_kernel;
       if (op->sparse_matrix.row_block_size == 1 &&
           op->sparse_matrix.col_block_size == 4) {
         mr = pytorch_qnnp_params.q8gemm_sparse_c1x4.mr;
