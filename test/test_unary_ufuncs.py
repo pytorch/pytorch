@@ -19,7 +19,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU,
     OpDTypes)
 from torch.testing import (
-    floating_types_and, integral_types, all_types_and_complex_and, floating_types)
+    floating_types_and, get_all_complex_dtypes, get_all_fp_dtypes, get_all_int_dtypes, integral_types, all_types_and_complex_and, floating_types)
 
 if TEST_SCIPY:
     import scipy
@@ -78,9 +78,7 @@ _float_extremals = (float('inf'), float('-inf'), float('nan'))
 # The randomly generated values can be constracted by the domain
 #   argument.
 def generate_numeric_tensors(device, dtype, *,
-                             domain=(None, None),
-                             include_large_values=True,
-                             include_extremal_values=True):
+                             domain=(None, None)):
     medium_length = 812
     large_size = (1029, 917)
     offset = 63
@@ -100,9 +98,7 @@ def generate_numeric_tensors(device, dtype, *,
 
     # Acquires dtype-specific vals
     if dtype.is_floating_point or dtype.is_complex:
-        large_vals = _large_float_vals if include_large_values else tuple()
-        extremals = _float_extremals if include_extremal_values else tuple()
-        vals = _float_vals + large_vals + extremals
+        vals = _float_vals
 
         # Converts float -> complex vals if dtype is complex
         if dtype.is_complex:
@@ -111,8 +107,7 @@ def generate_numeric_tensors(device, dtype, *,
         vals = _unsigned_int_vals
     else:  # dtypes is a signed integer type
         assert dtype in (torch.int8, torch.int16, torch.int32, torch.int64)
-        large_vals = _large_int_vals if include_large_values else tuple()
-        vals = _int_vals + large_vals
+        vals = _int_vals
 
     assert len(vals) < medium_length
 
@@ -136,6 +131,57 @@ def generate_numeric_tensors(device, dtype, *,
     empty_tensors = (torch.empty(size, device=device, dtype=dtype) for size in empty_sizes)
 
     return chain(empty_tensors, scalar_tensors, small_tensors, (medium_tensor,), (large_tensor,))
+
+
+def generate_numeric_tensors_hard(device, dtype):
+    assert dtype.is_floating_point or dtype.is_complex or dtype.is_integral
+
+    vals = []
+    if dtype.is_floating_point:
+        vals = _large_float_vals
+    elif dtype.is_complex:
+        vals = tuple(complex(x, y) for x, y in chain(product(_large_float_vals, _large_float_vals),
+                                                     product(_float_vals, _large_float_vals),
+                                                     product(_large_float_vals, _float_vals)))
+    else:  # dtypes is a signed integer type
+        assert dtype in (torch.int8, torch.int16, torch.int32, torch.int64)
+        vals = _large_int_vals
+
+    return [torch.tensor(vals, device=device, dtype=dtype)]
+
+
+def generate_numeric_tensors_extremal(device, dtype):
+    assert dtype.is_floating_point or dtype.is_complex
+
+    vals = []
+    if dtype.is_floating_point:
+        vals = _float_extremals
+    elif dtype.is_complex:
+        vals = tuple(complex(x, y) for x, y in chain(product(_float_extremals, _float_extremals),
+                                                     product(_float_vals, _float_extremals),
+                                                     product(_float_extremals, _float_vals)))
+
+    return [torch.tensor(vals, device=device, dtype=dtype)]
+
+
+def generate_numeric_tensors_extremals(device, dtype):
+    assert dtype.is_floating_point or dtype.is_complex or dtype.is_integral
+
+    # Acquires dtype-specific vals
+    if dtype.is_floating_point or dtype.is_complex:
+        vals = _float_vals + _large_float_vals + _float_extremals
+
+        # Converts float -> complex vals if dtype is complex
+        if dtype.is_complex:
+            vals = tuple(complex(x, y) for x, y in chain(product(vals, vals),
+                                                         product(_float_vals, vals),
+                                                         product(vals, _float_vals)))
+    else:  # dtypes is a signed integer type
+        assert dtype in (torch.int8, torch.int16, torch.int32, torch.int64)
+        vals = _large_int_vals
+
+    return [torch.tensor(vals, device=device, dtype=dtype)]
+
 
 # TODO: port test_unary_out_op_mem_overlap
 # TODO: add out= tests (different devices, dtypes, mismatched sizes,
@@ -253,20 +299,7 @@ class TestUnaryUfuncs(TestCase):
         else:
             self.assertEqual(actual, expected, msg, exact_device=False, **kwargs)
 
-    # Tests that the function and its (array-accepting) reference produce the same
-    #   values on a range of tensors, including empty tensors, scalar tensors,
-    #   1D tensors and a large 2D tensor with interesting and extremal values
-    #   and discontiguities.
-    @suppress_warnings
-    @ops(unary_ufuncs)
-    def test_reference_numerics(self, device, dtype, op):
-        include_extremals = (op.handles_complex_extremals if
-                             dtype in (torch.cfloat, torch.cdouble) else op.handles_extremals)
-
-        tensors = generate_numeric_tensors(device, dtype,
-                                           domain=op.domain,
-                                           include_large_values=op.handles_large_floats,
-                                           include_extremal_values=include_extremals)
+    def _test_reference_numerics(self, dtype, op, tensors, equal_nan=True):
         for t in tensors:
             if dtype is torch.bfloat16:
                 a = t.cpu().to(torch.float32).numpy()
@@ -295,7 +328,38 @@ class TestUnaryUfuncs(TestCase):
                                            exact_dtype=exact_dtype, rtol=1e-3, atol=1e-2)
                     continue
 
-            self.assertEqualHelper(actual, expected, msg, dtype=dtype, equal_nan="relaxed", exact_dtype=exact_dtype)
+            self.assertEqualHelper(actual, expected, msg, dtype=dtype, equal_nan=equal_nan, exact_dtype=exact_dtype)
+
+    # Tests that the function and its (array-accepting) reference produce the same
+    #   values on a range of tensors, including empty tensors, scalar tensors,
+    #   1D tensors and a large 2D tensor with interesting and extremal values
+    #   and discontiguities.
+    @suppress_warnings
+    @ops(unary_ufuncs)
+    def test_reference_numerics(self, device, dtype, op):
+        tensors = generate_numeric_tensors(device, dtype,
+                                           domain=op.domain)
+        self._test_reference_numerics(dtype, op, tensors)
+
+    @suppress_warnings
+    @ops(unary_ufuncs, allowed_dtypes=(*get_all_fp_dtypes(), *get_all_complex_dtypes(), *get_all_int_dtypes()))
+    def test_reference_numerics_hard(self, device, dtype, op):
+        if not op.handles_large_floats:
+            raise unittest.skip("This op does not handle large values")
+
+        tensors = generate_numeric_tensors_hard(device, dtype)
+        self._test_reference_numerics(dtype, op, tensors)
+
+    @suppress_warnings
+    @ops(unary_ufuncs, allowed_dtypes=(*get_all_fp_dtypes(), *get_all_complex_dtypes()))
+    def test_reference_numerics_extremal(self, device, dtype, op):
+        include_extremals = (op.handles_complex_extremals if
+                             dtype in (torch.cfloat, torch.cdouble) else op.handles_extremals)
+        if not include_extremals:
+            raise unittest.skip("This op does not handle extremal values")
+
+        tensors = generate_numeric_tensors_extremal(device, dtype)
+        self._test_reference_numerics(dtype, op, tensors, "relaxed")
 
     # Tests for testing (dis)contiguity consistency
 
