@@ -17,12 +17,12 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-// return false when device arch is supported
-// otherwise, clamp down to highest supported arch and returns true
-TORCH_CUDA_CU_API bool getMajorMinor(
+// query codegen output arch and target
+TORCH_CUDA_CU_API void codegenOutputQuery(
     const cudaDeviceProp* const prop,
     int& major,
-    int& minor);
+    int& minor,
+    bool& compile_to_sass);
 
 // A class holding metadata for an actual CUDA function.
 // Note: CUDA functions are per device.

@@ -69,11 +69,12 @@ static const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
 }
 
-// returns true if arch is not recognized by CUDA toolkit
-static bool getMajorMinor(
+// query codegen output arch and target
+static void codegenOutputQuery(
     const cudaDeviceProp* const prop,
     int& major,
-    int& minor) {
+    int& minor,
+    bool& compile_to_sass) {
   using CudaVersion = std::pair<int, int>;
   CudaVersion nvrtc_version;
   AT_CUDA_NVRTC_CHECK(
@@ -101,7 +102,8 @@ static bool getMajorMinor(
   major = dev_version.first;
   minor = dev_version.second;
 
-  return (major != nvrtc_version.first) || (minor != nvrtc_version.second);
+  // if we are clamping major/minor, sass is not compatible
+  compile_to_sass = (major == prop->major) && (minor == prop->minor);
 }
 
 std::string cudaDtypeCppString(const Dtype& dtype) {
@@ -1188,10 +1190,8 @@ void CudaCodeGen::CompileToNVRTC(
   // calculations)
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int major, minor;
-#if CUDA_VERSION >= 11010
-  const bool supported_arch =
-#endif
-      getMajorMinor(prop, major, minor);
+  bool compile_to_sass;
+  codegenOutputQuery(prop, major, minor, compile_to_sass);
 
   // Creates the NVRTC program
   nvrtcProgram program;
@@ -1208,9 +1208,9 @@ void CudaCodeGen::CompileToNVRTC(
       // (since older driver doesn't necessrily recognize PTX emitted by new
       // toolkit);
       // Meanwhile, for forward compatibility (future device with
-      // `unsupported_arch==True`), since SASS are not necessarily compatible,
+      // `compile_to_sass==false`), since SASS are not necessarily compatible,
       // we fallback to PTX instead.
-      (supported_arch ? "sm_" : "compute_") +
+      (compile_to_sass ? "sm_" : "compute_") +
 #else
       "compute_" +
 #endif
@@ -1238,12 +1238,12 @@ void CudaCodeGen::CompileToNVRTC(
   size_t ptx_size;
   std::vector<char> ptx;
 #if CUDA_VERSION >= 11010
-  // supported_arch determines whether we are generating SASS or PTX, hence
+  // compile_to_sass determines whether we are generating SASS or PTX, hence
   // the different API.
-  const auto getSize = supported_arch
+  const auto getSize = compile_to_sass
       ? at::globalContext().getNVRTC().nvrtcGetCUBINSize
       : at::globalContext().getNVRTC().nvrtcGetPTXSize;
-  const auto getFunc = supported_arch
+  const auto getFunc = compile_to_sass
       ? at::globalContext().getNVRTC().nvrtcGetCUBIN
       : at::globalContext().getNVRTC().nvrtcGetPTX;
 #else

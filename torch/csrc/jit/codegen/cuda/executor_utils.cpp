@@ -262,10 +262,8 @@ NvrtcFunction nvrtcCompile(
   const auto prop = at::cuda::getCurrentDeviceProperties();
 
   int major = 0, minor = 0;
-#if CUDA_VERSION >= 11010
-  const bool supported_arch =
-#endif
-      getMajorMinor(prop, major, minor);
+  bool compile_to_sass = false;
+  codegenOutputQuery(prop, major, minor, compile_to_sass);
 
   nvrtcProgram program; // NOLINT(cppcoreguidelines-init-variables)
 
@@ -293,7 +291,7 @@ NvrtcFunction nvrtcCompile(
       // Meanwhile, for forward compatibility (future device with
       // `unsupported_arch==True`), since SASS are not necessarily compatible,
       // we fallback to PTX instead.
-      (supported_arch ? "sm_" : "compute_") +
+      (compile_to_sass ? "sm_" : "compute_") +
 #else
       "compute_" +
 #endif
@@ -360,12 +358,12 @@ NvrtcFunction nvrtcCompile(
   {
     FUSER_PERF_SCOPE("get PTX");
 #if CUDA_VERSION >= 11010
-    // supported_arch determines whether we are generating SASS or PTX, hence
+    // compile_to_sass determines whether we are generating SASS or PTX, hence
     // the different API.
-    const auto getSize = supported_arch
+    const auto getSize = compile_to_sass
         ? at::globalContext().getNVRTC().nvrtcGetCUBINSize
         : at::globalContext().getNVRTC().nvrtcGetPTXSize;
-    const auto getFunc = supported_arch
+    const auto getFunc = compile_to_sass
         ? at::globalContext().getNVRTC().nvrtcGetCUBIN
         : at::globalContext().getNVRTC().nvrtcGetPTX;
 #else
@@ -386,7 +384,7 @@ NvrtcFunction nvrtcCompile(
   if (prefix_env) {
 #if CUDA_VERSION >= 11010
     TORCH_CHECK(
-        !supported_arch,
+        !compile_to_sass,
         "PYTORCH_NVFUSER_CUBIN cannot be used when compile direct to SASS. Please set PYTORCH_NVFUSER_CUBIN to empty");
 #endif
     FUSER_PERF_SCOPE("load CUBIN");
