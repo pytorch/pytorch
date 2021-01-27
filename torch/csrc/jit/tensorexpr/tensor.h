@@ -90,12 +90,6 @@ class TORCH_API Tensor : KernelScopedObject {
     return reduce_args_[index];
   }
 
-  void initializeTo(const Expr* initializer) {
-    initializer_ = initializer;
-  }
-  const Expr* initializer() const {
-    return initializer_;
-  }
   virtual Stmt* ElementStmt() const;
 
   template <typename... Ts>
@@ -111,8 +105,6 @@ class TORCH_API Tensor : KernelScopedObject {
   const Expr* body_;
   std::vector<const Expr*> reduce_dims_;
   std::vector<const Var*> reduce_args_;
-
-  const Expr* initializer_{nullptr};
 };
 
 class TORCH_API CompoundTensor : public Tensor {
@@ -268,12 +260,12 @@ Tensor* Reduce(
   ExprHandle body =
       Reducer::getReduceBody(body_func, VarVectorToVarHandleVector(all_vars));
   std::vector<const Expr*> output_args(vars.begin(), vars.end());
-  Buf* func_result = new Buf(func_name, dims, body.dtype());
+  const Expr* init_expr = new Cast(body.dtype(), reducer.initializer());
+  Buf* func_result = new Buf(func_name, dims, body.dtype(), init_expr);
   const ReduceOp* reduce_op =
       reducer(func_result, body, output_args, reduce_vars);
   Tensor* t =
       new Tensor(func_result, vars, reduce_dims, reduce_vars, reduce_op);
-  t->initializeTo(new Cast(body.dtype(), reducer.initializer()));
   return t;
 }
 
