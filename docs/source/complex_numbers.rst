@@ -15,7 +15,7 @@ than operations on float tensors mimicking them. Operations involving complex nu
 to use vectorized assembly instructions and specialized kernels (e.g. LAPACK, cuBlas).
 
 .. note::
-     Spectral operations in the `torch.fft module <https://pytorch.org/docs/stable/fft.html#torch-fft>`_ supports
+     Spectral operations in the `torch.fft module <https://pytorch.org/docs/stable/fft.html#torch-fft>`_ support
      native complex tensors.
 
 .. warning ::
@@ -107,7 +107,7 @@ The angle and absolute values of a complex tensor can be computed using :func:`t
 Linear Algebra
 --------------
 
-We support many linear algebra operations for complex numbers like :func:`torch.matmul`, :func:`torch.svd`, :func:`torch.solve` etc.
+Many linear algebra operations, like :func:`torch.matmul`, :func:`torch.svd`, :func:`torch.solve` etc., support complex numbers.
 If you'd like to request an operation we don't currently support, please `search <https://github.com/pytorch/pytorch/issues?q=is%3Aissue+is%3Aopen+complex>`_
 if an issue has already been filed and if not, `file one <https://github.com/pytorch/pytorch/issues/new/choose>`_.
 
