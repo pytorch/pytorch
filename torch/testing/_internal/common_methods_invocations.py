@@ -8,6 +8,7 @@ import torch
 import numpy as np
 from torch._six import inf, istuple
 from torch.autograd import Variable
+import collections.abc
 
 from typing import List, Tuple, Dict, Any
 
@@ -16,36 +17,60 @@ from torch.testing import \
      floating_and_complex_types, floating_and_complex_types_and,
      all_types_and_complex_and, all_types_and, all_types_and_complex)
 from torch.testing._internal.common_device_type import \
-    (skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl, skipCUDAIfRocm,
-     expectedAlertNondeterministic, precisionOverride)
-from torch.testing._internal.common_cuda import tf32_is_not_fp32
+    (skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
+     skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride)
+from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
      random_symmetric_matrix, random_symmetric_psd_matrix,
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
-     torch_to_numpy_dtype_dict, TEST_WITH_SLOW)
+     torch_to_numpy_dtype_dict, slowTest)
 
 from distutils.version import LooseVersion
 
 if TEST_SCIPY:
     import scipy.special
 
-class SkipInfo(object):
-    """Describes which test, or type of tests, should be skipped when testing
-       an operator. Any test that matches all provided arguments will be skipped.
-       The skip will only be checked if the active_if argument is True."""
 
-    __slots__ = ['cls_name', 'test_name', 'device_type', 'dtypes', 'active_if']
+class DecorateInfo(object):
+    """Describes which test, or type of tests, should be wrapped in the given
+       decorators when testing an operator. Any test that matches all provided
+       arguments will be decorated. The decorators will only be applied if the
+       active_if argument is True."""
 
-    def __init__(self, cls_name=None, test_name=None, *,
+    __slots__ = ['decorators', 'cls_name', 'test_name', 'device_type', 'dtypes', 'active_if']
+
+    def __init__(self, decorators, cls_name=None, test_name=None, *,
                  device_type=None, dtypes=None, active_if=True):
+        self.decorators = list(decorators) if isinstance(decorators, collections.abc.Sequence) else [decorators]
         self.cls_name = cls_name
         self.test_name = test_name
         self.device_type = device_type
         self.dtypes = dtypes
         self.active_if = active_if
+
+    def is_active(self, cls_name, test_name, device_type, dtype):
+        return (
+            self.active_if and
+            (self.cls_name is None or self.cls_name == cls_name) and
+            (self.test_name is None or self.test_name == test_name) and
+            (self.device_type is None or self.device_type == device_type) and
+            (self.dtypes is None or dtype in self.dtypes)
+        )
+
+
+class SkipInfo(DecorateInfo):
+    """Describes which test, or type of tests, should be skipped when testing
+       an operator. Any test that matches all provided arguments will be skipped.
+       The skip will only be checked if the active_if argument is True."""
+
+    def __init__(self, cls_name=None, test_name=None, *,
+                 device_type=None, dtypes=None, active_if=True):
+        super().__init__(decorators=skipIf(True, "Skipped!"), cls_name=cls_name,
+                         test_name=test_name, device_type=device_type, dtypes=dtypes,
+                         active_if=active_if)
 
 class SampleInput(object):
     """Represents sample inputs to a function."""
@@ -204,18 +229,8 @@ class OpInfo(object):
 
     # Returns True if the test should be skipped and False otherwise
     def should_skip(self, cls_name, test_name, device_type, dtype):
-        for si in self.skips:
-            if not si.active_if:
-                continue
-
-            cls_name_match = si.cls_name is None or cls_name == si.cls_name
-            name_match = si.test_name is None or test_name == si.test_name
-            device_type_match = si.device_type is None or device_type == si.device_type
-            dtype_match = si.dtypes is None or dtype in si.dtypes
-            if cls_name_match and name_match and device_type_match and dtype_match:
-                return True
-
-        return False
+        return any(si.is_active(cls_name, test_name, device_type, dtype)
+                   for si in self.skips)
 
     def supported_dtypes(self, device_type):
         if device_type == 'cpu':
@@ -680,21 +695,18 @@ class SpectralFuncInfo(OpInfo):
                  ref=None,  # Reference implementation (probably in np.fft namespace)
                  dtypes=floating_and_complex_types(),
                  ndimensional: bool,  # Whether dim argument can be a tuple
-                 skips=None,
                  decorators=None,
                  **kwargs):
-        skips = skips if skips is not None else []
-
-        # gradgrad is quite slow
-        if not TEST_WITH_SLOW:
-            skips.append(SkipInfo('TestGradients', 'test_fn_gradgrad'))
-
-        decorators = decorators if decorators is not None else []
-        decorators += [skipCPUIfNoMkl, skipCUDAIfRocm]
+        decorators = list(decorators) if decorators is not None else []
+        decorators += [
+            skipCPUIfNoMkl,
+            skipCUDAIfRocm,
+            # gradgrad is quite slow
+            DecorateInfo(slowTest, 'TestGradients', 'test_fn_gradgrad'),
+        ]
 
         super().__init__(name=name,
                          dtypes=dtypes,
-                         skips=skips,
                          decorators=decorators,
                          **kwargs)
         self.ref = ref if ref is not None else _getattr_qual(np, name)
@@ -846,15 +858,25 @@ def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_sv
     """
     from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
-    # svd and linalg.svd returns V and V.T, respectively. So we need to slice
+    # svd and linalg.svd returns V and V.conj().T, respectively. So we need to slice
     # along different dimensions when needed (this is used by
     # test_cases2:wide_all and wide_all_batched below)
     if is_linalg_svd:
         def slice_V(v):
             return v[..., :(S - 2), :]
+
+        def uv_loss(usv):
+            u00 = usv[0][0, 0]
+            v00_conj = usv[2][0, 0]
+            return u00 * v00_conj
     else:
         def slice_V(v):
             return v[..., :, :(S - 2)]
+
+        def uv_loss(usv):
+            u00 = usv[0][0, 0]
+            v00_conj = usv[2][0, 0].conj()
+            return u00 * v00_conj
 
     test_cases1 = (  # some=True (default)
         # loss functions for complex-valued svd have to be "gauge invariant",
@@ -866,12 +888,10 @@ def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_sv
             lambda usv: abs(usv[0])),  # 'check_grad_u'
         (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
             lambda usv: abs(usv[2])),  # 'check_grad_v'
-        # TODO: replace lambda usv: usv[0][0, 0] * usv[2][0, 0] with lambda usv: usv[0][0, 0] * usv[2][0, 0].conj()
-        # once https://github.com/pytorch/pytorch/issues/45821 is resolved
         # this test is important as it checks the additional term that is non-zero only for complex-valued inputs
         # and when the loss function depends both on 'u' and 'v'
         (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
-            lambda usv: usv[0][0, 0] * usv[2][0, 0]),  # 'check_grad_uv'
+            uv_loss),  # 'check_grad_uv'
         (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:(S - 2)],
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2][..., :, :(S - 2)]))),  # 'wide'
         (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:, :(S - 2)],
@@ -1015,8 +1035,9 @@ op_db: List[OpInfo] = [
     OpInfo('addmm',
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           # BFloat16 support on CUDA requires CUDA 11 and SM53
            dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
-                                           *[torch.bfloat16] if tf32_is_not_fp32() else []),
+                                           *[torch.bfloat16] if CUDA11OrLater else []),
            dtypesIfROCM=floating_types_and(torch.half),
            assert_autodiffed=True,
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
@@ -1584,13 +1605,16 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_svd,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
-           skips=(
+           decorators=[
+               skipCUDAIfNoMagma,
+               skipCPUIfNoLapack,
                # gradgrad checks are slow
-               SkipInfo('TestGradients', 'test_fn_gradgrad', active_if=(not TEST_WITH_SLOW)),
+               DecorateInfo(slowTest, 'TestGradients', 'test_fn_gradgrad'),
+           ],
+           skips=(
                # cuda gradchecks are very slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'))),
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
     OpInfo('linalg.svd',
            op=torch.linalg.svd,
            aten_name='linalg_svd',
@@ -1598,13 +1622,16 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_linalg_svd,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
-           skips=(
+           decorators=[
+               skipCUDAIfNoMagma,
+               skipCPUIfNoLapack,
                # gradgrad checks are slow
-               SkipInfo('TestGradients', 'test_fn_gradgrad', active_if=(not TEST_WITH_SLOW)),
+               DecorateInfo(slowTest, 'TestGradients', 'test_fn_gradgrad'),
+           ],
+           skips=(
                # cuda gradchecks are very slow
                # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
-               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'))),
+               SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
     OpInfo('pinverse',
            op=torch.pinverse,
            dtypes=floating_and_complex_types(),
