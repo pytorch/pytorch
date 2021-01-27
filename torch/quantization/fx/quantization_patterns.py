@@ -32,6 +32,8 @@ from .utils import (
     quantize_node,
     get_per_tensor_qparams,
     get_linear_prepack_op_for_dtype,
+    get_qconv_prepack_op,
+    get_qconv_op,
     create_qparam_nodes,
 )
 
@@ -198,7 +200,10 @@ class Cat(QuantizeHandler):
 @register_quant_pattern(torch.nn.Conv1d)
 @register_quant_pattern(torch.nn.Conv2d)
 @register_quant_pattern(torch.nn.Conv3d)
+@register_quant_pattern(torch.nn.functional.conv1d)
 @register_quant_pattern(torch.nn.functional.conv2d)
+@register_quant_pattern(torch.nn.functional.conv3d)
+# TODO: add qat.Conv1d and qat.Conv3d
 @register_quant_pattern(torch.nn.qat.Conv2d)
 @register_quant_pattern(torch.nn.intrinsic.ConvReLU1d)
 @register_quant_pattern(torch.nn.intrinsic.ConvReLU2d)
@@ -208,8 +213,12 @@ class Cat(QuantizeHandler):
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvBnReLU1d)
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvBnReLU2d)
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvReLU2d)
+@register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.conv1d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.conv2d))
+@register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.conv3d))
+@register_quant_pattern((torch.nn.ReLU, torch.nn.functional.conv1d))
 @register_quant_pattern((torch.nn.ReLU, torch.nn.functional.conv2d))
+@register_quant_pattern((torch.nn.ReLU, torch.nn.functional.conv3d))
 # just for error checks
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Conv2d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
@@ -222,18 +231,43 @@ class ConvRelu(QuantizeHandler):
             self.relu_node = node
             node = node.args[0]  # type: ignore
         self.conv_node = node
-        if node.op == 'call_module':
+        if node.op == "call_module":
             self.conv = quantizer.modules[self.conv_node.target]
+        elif node.op == "call_function":
+            self.conv = node.target
 
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
                 debug: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
+        # Supported combinations are:
+        # quant_type | activation (compute_type) | weight
+        #  static       quint8                      qint8
+
+        # tuple (activation_dtype, weight_dtype, compute_dtype)
+        supported_dtypes = [
+            (torch.quint8, torch.qint8, None),
+        ]
+
         # TODO: debug option for conv module
         qconfig = quantizer.qconfig_map[node.name]
+        dtypes = get_qconfig_dtypes(qconfig)
+        # leave the op unquantized if the dtype combination is not supported
+        if dtypes not in supported_dtypes:
+            warnings.warn(
+                "dtype combination: {} is not "
+                "supported by Conv "
+                "supported dtype combinations are: {}".format(dtypes, supported_dtypes))
+            if self.relu_node:
+                conv_out = quantizer.quantized_graph.node_copy(self.conv_node, load_arg(quantized=False))
+                relu_args = [conv_out]
+                relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
+                relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
+                return quantizer.quantized_graph.create_node(
+                    "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+            else:
+                return quantizer.quantized_graph.node_copy(node, load_arg(quantized=False))
+
         activation_statically_quantized = activation_is_statically_quantized(qconfig)
-        # only static qunatization (for both ptq and qat) is supported for conv
-        if not activation_statically_quantized:
-            return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
         if self.conv_node.op == 'call_module':
             # note that relu should already be fused into conv module in the fusion step
@@ -256,39 +290,58 @@ class ConvRelu(QuantizeHandler):
                 (load_arg(quantized=True)(self.conv_node.args[0]),),
                 {})
         else:  # call_function
-            assert self.conv_node.op == 'call_function'
-            if self.relu_node is not None:
-                raise Exception("functional conv + relu is not supported yet")
+            assert self.conv_node.op == "call_function"
             if debug:
                 args = load_arg(quantized=[0, 1])(self.conv_node.args)
                 args = load_arg(quantized=False)(self.conv_node.args)
                 kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
-                conv_out = quantizer.quantized_graph.create_node(
-                    'call_function', torch.nn.functional.conv2d, args, kwargs)
-                root_module = quantizer.modules['']
-                return quantize_node(
-                    quantizer, conv_out, quantizer.activation_post_process_map[self.conv_node.name], self.conv_node, is_input=False)
+                op_out = quantizer.quantized_graph.create_node(
+                    "call_function", self.conv, args, kwargs)
+                if self.relu_node:
+                    relu_args = [op_out]
+                    relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
+                    relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
+                    op_out = quantizer.quantized_graph.create_node(
+                        "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+
+                if activation_statically_quantized:
+                    root_module = quantizer.modules['']
+                    act_post_process_name = self.relu_node.name if self.relu_node else self.conv_node.name
+                    act_post_process_node = self.relu_node if self.relu_node else self.conv_node
+                    return quantize_node(
+                        quantizer, op_out, quantizer.activation_post_process_map[act_post_process_name], act_post_process_node, is_input=False)
+                else:
+                    # output for dynamically quantized conv op is not quantized
+                    return op_out
             else:
-                assert len(self.conv_node.args) == 7, \
-                    'only conv2d calls with all arguments specified is support right now in debug=False option'
+                assert len(self.conv_node.args) >= 7, \
+                    "only conv2d calls with all arguments specified is supported right now in debug=False option"
                 args = load_arg(quantized=[0, 1])(self.conv_node.args)
                 # pack weight
                 weight = load_arg(quantized=True)(self.conv_node.args[1])
                 other_args = load_arg(quantized=False)(self.conv_node.args[2:])
                 prepack_args = tuple([weight] + list(other_args))
+                prepack_op = get_qconv_prepack_op(self.conv)
                 packed_weight = quantizer.quantized_graph.create_node(
-                    'call_function', torch.ops.quantized.conv2d_prepack, prepack_args, {})
+                    "call_function", prepack_op, prepack_args, {})
+                assert activation_statically_quantized, \
+                    "currently only static quantization is supported for conv"
                 # construct conv input
-                conv_input = load_arg(quantized=True)(self.conv_node.args[0])
-                activation_post_process = quantizer.activation_post_process_map[self.conv_node.name]
-                scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
+                if activation_statically_quantized:
+                    qconv_op = get_qconv_op(self.conv, self.relu_node is not None)
+                    conv_input = load_arg(quantized=True)(self.conv_node.args[0])
+                    act_post_process_name = self.relu_node.name if self.relu_node else self.conv_node.name
+                    activation_post_process = quantizer.activation_post_process_map[act_post_process_name]
+                    scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
+                    scale_node, zero_point_node = create_qparam_nodes(quantizer, self.conv_node.name, scale, zero_point)
+                    qconv_args = (conv_input, packed_weight, scale_node, zero_point_node)
+                    kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
+                    return quantizer.quantized_graph.create_node(
+                        'call_function', qconv_op, qconv_args, kwargs)
+                else:
+                    # conv2d_dyanmic branch
+                    raise Exception("Only static quant is supported for conv")
 
-                scale_node, zero_point_node = create_qparam_nodes(quantizer, self.conv_node.name, scale, zero_point)
-
-                qconv_args = (conv_input, packed_weight, scale_node, zero_point_node)
-                kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
-                return quantizer.quantized_graph.create_node(
-                    'call_function', torch.ops.quantized.conv2d, qconv_args, kwargs)
 
 # handle linear, maybe followed by relu
 @register_quant_pattern(torch.nn.Linear)
@@ -329,6 +382,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         ]
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
+        # leave the op unquantized if the dtype combination is not supported
         if dtypes not in supported_dtypes:
             warnings.warn(
                 "dtype combination: {} is not "
@@ -427,9 +481,9 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 prepack_op = get_linear_prepack_op_for_dtype(weight_dtype(qconfig))
                 packed_weight = quantizer.quantized_graph.create_node(
                     'call_function', prepack_op, prepack_args, {})
-                qlinear_op = torch.ops.quantized.linear_relu if self.relu_node else torch.ops.quantized.linear
                 # construct linear input
                 if activation_statically_quantized:
+                    qlinear_op = torch.ops.quantized.linear_relu if self.relu_node else torch.ops.quantized.linear
                     linear_input = load_arg(quantized=True)(self.linear_node.args[0])
                     act_post_process_name = self.relu_node.name if self.relu_node else self.linear_node.name
                     activation_post_process = \
@@ -502,6 +556,7 @@ class Embedding(QuantizeHandler):
         emb_node = node
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
+        # leave the op unquantized if the dtype combination is not supported
         if dtypes not in supported_dtypes:
             warnings.warn(
                 "dtype combination: {} is not "
@@ -545,6 +600,7 @@ class RNNDynamic(QuantizeHandler):
         assert node.op == 'call_module'
         qconfig = quantizer.qconfig_map[node.name]
         dtypes = get_qconfig_dtypes(qconfig)
+        # leave the op unquantized if the dtype combination is not supported
         if dtypes not in supported_dtypes:
             warnings.warn(
                 "dtype combination: {} is not "
