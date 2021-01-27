@@ -845,6 +845,21 @@ def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False):
     return out
 
 
+def sample_inputs_std_var(op_info, device, dtype, requires_grad):
+    tensor_nd = make_tensor((S, S, S), device=device, dtype=dtype,
+                            low=None, high=None, requires_grad=requires_grad)
+    tensor_1d = make_tensor((S,), device=device, dtype=dtype,
+                            low=None, high=None, requires_grad=requires_grad)
+
+    return [
+        SampleInput(tensor_nd),
+        SampleInput(tensor_nd, kwargs=dict(dim=1)),
+        SampleInput(tensor_nd, kwargs=dict(dim=1, unbiased=True, keepdim=True)),
+        SampleInput(tensor_1d, kwargs=dict(dim=0, unbiased=True, keepdim=True)),
+        SampleInput(tensor_1d, kwargs=dict(dim=0, unbiased=False, keepdim=False)),
+    ]
+
+
 def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_svd=False):
     """
     This function generates input for torch.svd with distinct singular values so that autograd is always stable.
@@ -1437,6 +1452,18 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
+    OpInfo('std',
+           dtypes=floating_types_and(),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_std_var,
+           supports_tensor_out=False,
+           test_complex_grad=False,
+           test_inplace_grad=False,
+           # std has only partial support for complex and half (#51127)
+           skips=(SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
+                           dtypes=[torch.half, torch.complex64, torch.complex128]),),
+           assert_autodiffed=True,
+           ),
     UnaryUfuncInfo('tan',
                    ref=np.tan,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -1726,6 +1753,18 @@ op_db: List[OpInfo] = [
                   supports_tensor_out=False,
                   test_inplace_grad=False,
                   sample_inputs_func=sample_repeat_tile),
+    OpInfo('var',
+           dtypes=floating_types_and(),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_std_var,
+           supports_tensor_out=False,
+           test_complex_grad=False,
+           test_inplace_grad=False,
+           # var has only partial support for complex and half (#51127)
+           skips=(SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
+                           dtypes=[torch.half, torch.complex64, torch.complex128]),),
+           assert_autodiffed=True,
+           ),
 ]
 
 if TEST_SCIPY:
@@ -2294,16 +2333,6 @@ def method_tests():
         ('prod', (torch.tensor(0., requires_grad=True)), NO_ARGS, 'scalar_zero'),
         ('prod', (torch.tensor(0., requires_grad=True)), (0,), 'scalar_dim_zero', (), [0]),
         ('prod', (torch.tensor(0., requires_grad=True)), (0, True,), 'scalar_keepdim_dim_zero', (), [0]),
-        ('var', (S, S, S), NO_ARGS, '', (True,)),
-        ('var', (S, S, S), (1,), 'dim', (True,), [0]),
-        ('var', (S, S, S), (1, True, True), 'keepdim_dim', (True,), [0]),
-        ('var', (S,), (0,), 'dim_1d', (True,), [0]),
-        ('var', (S,), (0, True, True), 'keepdim_dim_1d', (True,), [0]),
-        ('std', (S, S, S), NO_ARGS, '', (True,)),
-        ('std', (S, S, S), (1,), 'dim', (True,), [0]),
-        ('std', (S, S, S), (1, True, True), 'keepdim_dim', (True,), [0]),
-        ('std', (S,), (0,), 'dim_1d', (True,), [0]),
-        ('std', (S,), (0, True, True), 'keepdim_dim_1d', (True,), [0]),
         ('var_mean', (S, S, S), NO_ARGS, ''),
         ('var_mean', (S, S, S), (1,), 'dim', [0]),
         ('var_mean', (S, S, S), (1, True, True), 'keepdim_dim', [0]),
