@@ -828,6 +828,18 @@ class TestLinalg(TestCase):
             # run_test_transposed(a_shape, b_shape)
             run_test_skipped_elements(a_shape, b_shape)
 
+        # Test that kron perserve memory format
+        a = torch.randn(1, 2, 3, 4, dtype=dtype, device=device).contiguous(memory_format=torch.channels_last)
+        b = torch.randn(1, 2, 3, 4, dtype=dtype, device=device).contiguous(memory_format=torch.channels_last)
+        c = torch.kron(a, b)
+        self.assertTrue(c.is_contiguous(memory_format=torch.channels_last))
+        torch.kron(a, b, out=c)
+        self.assertTrue(c.is_contiguous(memory_format=torch.channels_last))
+        c = c.contiguous(memory_format=torch.contiguous_format)
+        torch.kron(a, b, out=c)
+        self.assertTrue(c.is_contiguous(memory_format=torch.contiguous_format))
+
+
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_kron_empty(self, device, dtype):
 
