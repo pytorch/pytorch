@@ -71,6 +71,7 @@ Features described in this documentation are classified by release status:
    onnx
    optim
    complex_numbers
+   pipeline
    quantization
    rpc
    torch.random <random>

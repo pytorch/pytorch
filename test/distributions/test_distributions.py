@@ -878,6 +878,22 @@ class TestDistributions(TestCase):
                 self.assertIn(Dist, distributions_with_examples,
                               "Please add {} to the EXAMPLES list in test_distributions.py".format(Dist.__name__))
 
+    def test_support_attributes(self):
+        for Dist, params in EXAMPLES:
+            for param in params:
+                d = Dist(**param)
+                event_dim = len(d.event_shape)
+                self.assertEqual(d.support.event_dim, event_dim)
+                try:
+                    self.assertEqual(Dist.support.event_dim, event_dim)
+                except NotImplementedError:
+                    pass
+                is_discrete = d.support.is_discrete
+                try:
+                    self.assertEqual(Dist.support.is_discrete, is_discrete)
+                except NotImplementedError:
+                    pass
+
     def test_distribution_expand(self):
         shapes = [torch.Size(), torch.Size((2,)), torch.Size((2, 1))]
         for Dist, params in EXAMPLES:
@@ -1495,7 +1511,7 @@ class TestDistributions(TestCase):
     def test_halfcauchy(self):
         scale = torch.ones(5, 5, requires_grad=True)
         scale_1d = torch.ones(1, requires_grad=True)
-        self.assertTrue(is_all_nan(HalfCauchy(scale_1d).mean))
+        self.assertTrue(torch.isinf(HalfCauchy(scale_1d).mean).all())
         self.assertEqual(HalfCauchy(scale_1d).variance, inf)
         self.assertEqual(HalfCauchy(scale).sample().size(), (5, 5))
         self.assertEqual(HalfCauchy(scale).sample((7,)).size(), (7, 5, 5))
@@ -1620,8 +1636,8 @@ class TestDistributions(TestCase):
         self.assertEqual(LogisticNormal(mean, std).sample((7,)).size(), (7, 5, 6))
         self.assertEqual(LogisticNormal(mean_1d, std_1d).sample((1,)).size(), (1, 2))
         self.assertEqual(LogisticNormal(mean_1d, std_1d).sample().size(), (2,))
-        self.assertEqual(LogisticNormal(0.2, .6).sample((1,)).size(), (2,))
-        self.assertEqual(LogisticNormal(-0.7, 50.0).sample((1,)).size(), (2,))
+        self.assertEqual(LogisticNormal(0.2, .6).sample().size(), (2,))
+        self.assertEqual(LogisticNormal(-0.7, 50.0).sample().size(), (2,))
 
         # sample check for extreme value of mean, std
         set_rng_seed(1)
@@ -3832,6 +3848,16 @@ class TestKL(TestCase):
                     'Actual {}'.format(kl.shape),
                 ]))
 
+    def test_kl_transformed(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/34859
+        scale = torch.ones(2, 3)
+        loc = torch.zeros(2, 3)
+        normal = Normal(loc=loc, scale=scale)
+        diag_normal = Independent(normal, reinterpreted_batch_ndims=1)
+        trans_dist = TransformedDistribution(diag_normal, AffineTransform(loc=0., scale=2.))
+        self.assertEqual(kl_divergence(diag_normal, diag_normal).shape, (2,))
+        self.assertEqual(kl_divergence(trans_dist, trans_dist).shape, (2,))
+
     def test_entropy_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for Dist, params in EXAMPLES:
@@ -3915,7 +3941,10 @@ class TestConstraints(TestCase):
                 constraint = dist.support
                 message = '{} example {}/{} sample = {}'.format(
                     Dist.__name__, i + 1, len(params), value)
-                self.assertTrue(constraint.check(value).all(), msg=message)
+                self.assertEqual(constraint.event_dim, len(dist.event_shape), msg=message)
+                ok = constraint.check(value)
+                self.assertEqual(ok.shape, dist.batch_shape, msg=message)
+                self.assertTrue(ok.all(), msg=message)
 
 
 class TestNumericalStability(TestCase):
