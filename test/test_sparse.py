@@ -288,7 +288,7 @@ class TestSparse(TestCase):
             def fn(x):
                 return x.to_dense()
             x.requires_grad_(True)
-            gradcheck(fn, (x,), check_sparse_nnz=True)
+            gradcheck(fn, (x,), check_sparse_nnz=True, check_batched_grad=False)
 
         i = self.index_tensor([
             [0, 1, 2, 2],
@@ -414,7 +414,7 @@ class TestSparse(TestCase):
             def fn(x):
                 return x.to_dense()
             x.requires_grad_(True)
-            gradcheck(fn, (x,), check_sparse_nnz=True)
+            gradcheck(fn, (x,), check_sparse_nnz=True, check_batched_grad=False)
 
         i = self.index_tensor([
             [0, 1, 2, 2],
@@ -1188,7 +1188,7 @@ class TestSparse(TestCase):
 
             def fn(S, D1, D2):
                 return torch.sparse.addmm(D1, S, D2)
-            gradcheck(fn, (S, D1, D2), check_sparse_nnz=True)
+            gradcheck(fn, (S, D1, D2), check_sparse_nnz=True, check_batched_grad=False)
 
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
@@ -1207,7 +1207,7 @@ class TestSparse(TestCase):
 
             def fn(S, D):
                 return torch.sparse.mm(S, D)
-            gradcheck(fn, (S, D), check_sparse_nnz=True)
+            gradcheck(fn, (S, D), check_sparse_nnz=True, check_batched_grad=False)
 
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
@@ -1368,7 +1368,7 @@ class TestSparse(TestCase):
                     if res.is_sparse:
                         res = res.to_dense()
                     return res
-                gradcheck(fn, (S,), check_sparse_nnz=True)
+                gradcheck(fn, (S,), check_sparse_nnz=True, check_batched_grad=False)
 
             else:
                 S_sum = torch.sparse.sum(S, td)
@@ -1380,7 +1380,7 @@ class TestSparse(TestCase):
                     if res.is_sparse:
                         res = res.to_dense()
                     return res
-                gradcheck(fn, (S,), check_sparse_nnz=True)
+                gradcheck(fn, (S,), check_sparse_nnz=True, check_batched_grad=False)
 
         nnz = 10
         sparse_dims = 2
@@ -3134,7 +3134,7 @@ class TestSparse(TestCase):
             # This is because cuSparse sometimes returns approximate zero values like `~e-323`
             # TODO: Check this cuSparse issue. 
             # This happens when you do chain multiplication `torch.sparse.mm` operations 
-            gradcheck(fn, (a, b), check_sparse_nnz=True, nondet_tol=1e-5)
+            gradcheck(fn, (a, b), check_sparse_nnz=True, nondet_tol=1e-5, check_batched_grad=False)
             grad_with_custom_sparsity_pattern_test_helper(sparse_dims, nnz, shape_a, shape_b)
 
         def test_error_cases():
