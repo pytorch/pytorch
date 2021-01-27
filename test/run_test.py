@@ -128,6 +128,7 @@ TESTS = [
     'distributed/pipeline/sync/test_stream',
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
+    'distributed/optim/test_zero_redundancy_optimizer',
 ]
 
 # Tests need to be run with pytest.
@@ -187,6 +188,7 @@ WINDOWS_BLOCKLIST = [
     'distributed/pipeline/sync/test_stream',
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
+    'distributed/optim/test_zero_redundancy_optimizer',
 ]
 
 ROCM_BLOCKLIST = [
@@ -214,6 +216,10 @@ RUN_PARALLEL_BLOCKLIST = [
     'test_tensorexpr',
     'test_cuda_primary_ctx',
 ] + [test for test in TESTS if test.startswith('distributed/')]
+
+WINDOWS_COVERAGE_BLOCKLIST = [
+    'test_dataloader',
+]
 
 
 # These tests are slow enough that it's worth calculating whether the patch
@@ -330,8 +336,8 @@ def print_to_stderr(message):
     print(message, file=sys.stderr)
 
 
-def get_executable_command(options, allow_pytest):
-    if options.coverage:
+def get_executable_command(options, allow_pytest, disable_coverage=False):
+    if options.coverage and not disable_coverage:
         executable = ['coverage', 'run', '--parallel-mode', '--source=torch']
     else:
         executable = [sys.executable]
@@ -361,8 +367,13 @@ def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unit
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
     argv = [test_module + '.py'] + unittest_args
 
+    # Multiprocessing related tests cannot run with coverage.
+    # Tracking issue: https://github.com/pytorch/pytorch/issues/50661 
+    disable_coverage = sys.platform == 'win32' and test_module in WINDOWS_COVERAGE_BLOCKLIST
+
     # Extra arguments are not supported with pytest
-    executable = get_executable_command(options, allow_pytest=not extra_unittest_args)
+    executable = get_executable_command(options, allow_pytest=not extra_unittest_args,
+                                        disable_coverage=disable_coverage)
 
     command = (launcher_cmd or []) + executable + argv
     print_to_stderr('Executing {} ... [{}]'.format(command, datetime.now()))
