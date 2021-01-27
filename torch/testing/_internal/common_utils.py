@@ -382,7 +382,7 @@ if TEST_NUMPY:
 
     # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
     numpy_to_torch_dtype_dict = {
-        np.bool       : torch.bool,
+        np.bool_      : torch.bool,
         np.uint8      : torch.uint8,
         np.int8       : torch.int8,
         np.int16      : torch.int16,
@@ -429,15 +429,15 @@ class DeterministicGuard:
         self.deterministic = deterministic
 
     def __enter__(self):
-        self.deterministic_restore = torch.is_deterministic()
-        torch.set_deterministic(self.deterministic)
+        self.deterministic_restore = torch.are_deterministic_algorithms_enabled()
+        torch.use_deterministic_algorithms(self.deterministic)
 
     def __exit__(self, exception_type, exception_value, traceback):
-        torch.set_deterministic(self.deterministic_restore)
+        torch.use_deterministic_algorithms(self.deterministic_restore)
 
-# This decorator can be used for API tests that call torch.set_deterministic().
-# When the test is finished, it will restore the previous deterministic flag
-# setting.
+# This decorator can be used for API tests that call
+# torch.use_deterministic_algorithms().  When the test is finished, it will
+# restore the previous deterministic flag setting.
 #
 # If CUDA >= 10.2, this will set the environment variable
 # CUBLAS_WORKSPACE_CONFIG=:4096:8 so that the error associated with that
@@ -467,7 +467,7 @@ class DeterministicGuard:
 def wrapDeterministicFlagAPITest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        with DeterministicGuard(torch.is_deterministic()):
+        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
             class CuBLASConfigGuard:
                 cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
 
@@ -596,28 +596,14 @@ def suppress_warnings(fn):
     return wrapper
 
 
-def get_cpu_type(type_name):
-    module, name = type_name.rsplit('.', 1)
-    assert module == 'torch.cuda'
-    return getattr(torch, name)
-
-
-def get_gpu_type(type_name):
-    if isinstance(type_name, type):
-        type_name = '{}.{}'.format(type_name.__module__, type_name.__name__)
-    module, name = type_name.rsplit('.', 1)
-    assert module == 'torch'
-    return getattr(torch.cuda, name)
-
-
 def to_gpu(obj, type_map=None):
     if type_map is None:
         type_map = {}
     if isinstance(obj, torch.Tensor):
         assert obj.is_leaf
-        t = type_map.get(obj.type(), get_gpu_type(obj.type()))
+        t = type_map.get(obj.dtype, obj.dtype)
         with torch.no_grad():
-            res = obj.clone().type(t)
+            res = obj.clone().to(dtype=t, device="cuda")
             res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):
@@ -1556,7 +1542,7 @@ def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
             s[i] = 0
         elif s[i] == 0:
             s[i] = 1
-    return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
+    return u.mm(torch.diag(s).to(dtype)).mm(v.transpose(0, 1))
 
 
 def random_symmetric_matrix(l, *batches, **kwargs):
@@ -1580,6 +1566,17 @@ def random_symmetric_psd_matrix(l, *batches, **kwargs):
     device = kwargs.get('device', 'cpu')
     A = torch.randn(*(batches + (l, l)), dtype=dtype, device=device)
     return torch.matmul(A, A.transpose(-2, -1))
+
+
+def random_hermitian_psd_matrix(matrix_size, *batch_dims, dtype=torch.double, device='cpu'):
+    """
+    Returns a batch of random Hermitian semi-positive-definite matrices.
+    The shape of the result is batch_dims + (matrix_size, matrix_size)
+    The following example creates a tensor of size 2 x 4 x 3 x 3
+    >>> matrices = random_hermitian_psd_matrix(3, 2, 4, dtype=dtype, device=device)
+    """
+    A = torch.randn(*(batch_dims + (matrix_size, matrix_size)), dtype=dtype, device=device)
+    return torch.matmul(A, A.conj().transpose(-2, -1))
 
 
 def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
@@ -1897,11 +1894,11 @@ class BytesIOContext(io.BytesIO):
     def __exit__(self, *args):
         pass
 
-def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
+def _assertGradAndGradgradChecks(test_case, apply_fn, inputs, check_batched_grad=False):
     # call assert function rather than returning a bool since it's nicer
     # if we get whether this failed on the gradcheck or the gradgradcheck.
-    test_case.assertTrue(gradcheck(apply_fn, inputs))
-    test_case.assertTrue(gradgradcheck(apply_fn, inputs))
+    test_case.assertTrue(gradcheck(apply_fn, inputs, check_batched_grad=check_batched_grad))
+    test_case.assertTrue(gradgradcheck(apply_fn, inputs, check_batched_grad=check_batched_grad))
 
 
 @contextmanager

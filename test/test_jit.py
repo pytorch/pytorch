@@ -23,6 +23,7 @@ from jit.test_freezing import TestFreezing, TestFrozenOptimizations  # noqa: F40
 from jit.test_peephole import TestPeephole  # noqa: F401
 from jit.test_save_load import TestSaveLoad  # noqa: F401
 from jit.test_module_containers import TestModuleContainers  # noqa: F401
+from jit.test_python_bindings import TestPythonBindings  # noqa: F401
 from jit.test_python_ir import TestPythonIr  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_remove_mutation import TestRemoveMutation  # noqa: F401
@@ -34,6 +35,7 @@ from jit.test_enum import TestEnum  # noqa: F401
 from jit.test_string_formatting import TestStringFormatting  # noqa: F401
 from jit.test_profiler import TestProfiler  # noqa: F401
 from jit.test_slice import TestSlice  # noqa: F401
+from jit.test_hooks import TestHooks  # noqa: F401
 from jit.test_warn import TestWarn  # noqa: F401
 from jit.test_isinstance import TestIsinstance  # noqa: F401
 from jit.test_cuda import TestCUDA  # noqa: F401
@@ -270,7 +272,7 @@ def get_grad_executor(plan_state, diff_graph_idx=None, skip_check=False):
             nodes = list(filter(lambda n : n.kind() != "prim::BailOut" and n.kind() != "prim::BailoutTemplate", nodes))
             if len(nodes) == 1 or (len(nodes) == 2 and nodes[1].kind() == "prim::TupleConstruct"):
                 pass
-            elif len(nodes) == 2 and nodes[0].kind() == "prim::TypeCheck" and nodes[1].kind() == "prim::If":
+            elif len(nodes) == 2 and nodes[0].kind() == "prim::RequiresGradCheck" and nodes[1].kind() == "prim::If":
                 pass
             else:
                 raise RuntimeError("Can't get a grad_executor for a non-differentiable graph")
@@ -724,6 +726,29 @@ class TestJit(JitTestCase):
 
         self.assertTrue(check(x, y))
 
+    def test_nn_conv(self):
+        class Mod(nn.Module):
+            def __init__(self, conv):
+                super().__init__()
+                self.conv = conv
+
+            def forward(self, input):
+                return self.conv(input)
+
+        inputs = [
+            # Conv
+            (Mod(nn.Conv1d(16, 33, 3, stride=2)), torch.randn(20, 16, 5)),
+            (Mod(nn.Conv2d(16, 33, 3, stride=2)), torch.randn(20, 16, 5, 10)),
+            (Mod(nn.Conv3d(16, 33, 3, stride=2)), torch.randn(20, 16, 3, 5, 4)),
+            # ConvTransposed
+            (Mod(nn.ConvTranspose1d(16, 33, 3, stride=2)), torch.randn(20, 16, 5)),
+            (Mod(nn.ConvTranspose2d(16, 33, 3, stride=2)), torch.randn(20, 16, 5, 10)),
+            (Mod(nn.ConvTranspose3d(16, 33, 3, stride=2)), torch.randn(20, 16, 3, 5, 4)),
+        ]
+
+        for m, inp in inputs:
+            self.checkModule(m, (inp,))
+
     def test_numel(self):
         @torch.jit.script
         def get_numel_script(x):
@@ -741,6 +766,38 @@ class TestJit(JitTestCase):
         x = torch.rand(3, 4)
         element_size = get_element_size_script(x)
         self.assertEqual(element_size, x.element_size())
+
+    def test_Sequential(self):
+        class Seq(nn.Module):
+            def __init__(self):
+                super(Seq, self).__init__()
+                self.seq = nn.Sequential(nn.Linear(10, 20), nn.Linear(20, 30))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                for l in self.seq:
+                    x = l(x)
+                return x
+
+        m = torch.jit.script(Seq())
+        assert m.graph  # ensure jit was able to compile
+
+    def test_ModuleList(self):
+        class Mod(nn.Module):
+            def __init__(self):
+                super(Mod, self).__init__()
+                self.model = nn.ModuleList([nn.Linear(10, 10) for _ in range(10)])
+                self.model += (nn.Linear(10, 20),)
+                self.model.append(nn.Linear(20, 30)) 
+                self.model.extend([nn.Linear(30, 40), nn.Linear(40, 50)])
+
+            def forward(self, v):
+                for m in self.model:
+                    v = m(v)
+                return v
+
+        m = torch.jit.script(Mod())
+        assert m.graph  # ensure jit was able to compile
 
     def test_disabled(self):
         torch.jit._state.disable()
@@ -15829,8 +15886,14 @@ def add_nn_module_test(*args, **kwargs):
             return module(*args)
 
         # Set up inputs from tuple of sizes or constructor fn
+        dtype = torch.double
         if 'input_fn' in kwargs:
             input = kwargs['input_fn']()
+            if isinstance(input, Tensor):
+                input = (input,)
+
+            if all(tensor.is_complex() for tensor in input):
+                dtype = torch.cdouble
         else:
             input = (kwargs['input_size'],)
 
@@ -15847,7 +15910,7 @@ def add_nn_module_test(*args, **kwargs):
         if 'extra_args' in kwargs:
             input = input + kwargs['extra_args']
 
-        args_variable, kwargs_variable = create_input(input)
+        args_variable, kwargs_variable = create_input(input, dtype=dtype)
         f_args_variable = deepcopy(unpack_variables(args_variable))
 
         # Check against Python module as reference

@@ -1,11 +1,3 @@
-// define constants like M_PI and C keywords for MSVC
-#ifdef _MSC_VER
-#ifndef _USE_MATH_DEFINES
-#define _USE_MATH_DEFINES
-#endif
-#include <math.h>
-#endif
-
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
@@ -16,6 +8,7 @@
 
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/native/Math.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NamedTensorUtils.h>
@@ -549,7 +542,6 @@ Tensor signbit(const Tensor& self) {
 }
 
 Tensor& clamp_out(Tensor& result, const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
-  TORCH_CHECK(!self.is_complex(), "clamp does not support complex inputs.");
   if (min && max) {
     TORCH_CHECK(self.layout() == Layout::Strided,
                 "clamp only supports strided layout, got: ", self.layout());
@@ -575,7 +567,6 @@ Tensor& clamp_(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
 }
 
 Tensor& clamp_max_out(Tensor& result, const Tensor& self, Scalar max) {
-  TORCH_CHECK(!self.is_complex(), "clamp does not support complex inputs.");
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_max only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self);
@@ -593,7 +584,6 @@ Tensor& clamp_max_(Tensor& self, Scalar max) {
 }
 
 Tensor& clamp_min_out(Tensor& result, const Tensor& self, Scalar min) {
-  TORCH_CHECK(!self.is_complex(), "clamp does not support complex inputs.");
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_min only supports strided layout, got: ", self.layout());
   auto iter = TensorIterator::unary_op(result, self);
@@ -650,14 +640,14 @@ Tensor mvlgamma(const Tensor& self, int64_t p) {
   mvlgamma_check(self, p);
   Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
-  return args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.);
+  return args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(c10::pi<double>) / 4.);
 }
 
 Tensor& mvlgamma_(Tensor& self, int64_t p) {
   mvlgamma_check(self, p);
   Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
-  return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
+  return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(c10::pi<double>) / 4.));
 }
 
 // NB: If you use this macro, you may also need to add a CUDA forwarding
