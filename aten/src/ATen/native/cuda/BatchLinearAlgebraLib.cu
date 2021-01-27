@@ -66,13 +66,13 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
   } else {
     // cublas batched kernels require input be "device array of device pointers"
     Tensor self_array = at::arange(
-      reinterpret_cast<long>(self_data),
-      reinterpret_cast<long>(&self_data[(batch_size-1) * self_mat_stride]) + 1,
-      static_cast<long>(self_mat_stride * sizeof(scalar_t)), self.options().dtype(at::kLong));
+      reinterpret_cast<int64_t>(self_data),
+      reinterpret_cast<int64_t>(&self_data[(batch_size-1) * self_mat_stride]) + 1,
+      static_cast<int64_t>(self_mat_stride * sizeof(scalar_t)), self.options().dtype(at::kLong));
     Tensor self_inv_array = at::arange(
-      reinterpret_cast<long>(self_inv_data),
-      reinterpret_cast<long>(&self_inv_data[(batch_size-1) * self_inv_mat_stride]) + 1,
-      static_cast<long>(self_inv_mat_stride * sizeof(scalar_t)), self.options().dtype(at::kLong));
+      reinterpret_cast<int64_t>(self_inv_data),
+      reinterpret_cast<int64_t>(&self_inv_data[(batch_size-1) * self_inv_mat_stride]) + 1,
+      static_cast<int64_t>(self_inv_mat_stride * sizeof(scalar_t)), self.options().dtype(at::kLong));
 
     auto dataPtr = allocator.allocate(sizeof(int)*batch_size*lda);
     int* ipiv_array = reinterpret_cast<int*>(dataPtr.get());
@@ -204,8 +204,6 @@ inline static void apply_svd_lib_gesvdj(const Tensor& self, Tensor& U, Tensor& S
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cuda_gesvdj", [&] {
     _apply_svd_lib_gesvdj<scalar_t>(self_working_copy, U, S, VT, infos, compute_uv, some);
   });
-
-  VT = VT.conj();
 }
 
 // call cusolver gesvdj batched function to calculate svd
@@ -256,8 +254,6 @@ inline static void apply_svd_lib_gesvdjBatched(const Tensor& self, Tensor& U, Te
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cuda_gesvdjBatched", [&] {
     _apply_svd_lib_gesvdjBatched<scalar_t>(self_working_copy, U, S, VT, infos, compute_uv);
   });
-
-  VT = VT.conj();
 }
 
 // entrance of calculations of `svd` using cusolver gesvdj and gesvdjBatched
