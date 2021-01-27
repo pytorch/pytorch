@@ -1521,66 +1521,66 @@ class DistAutogradTest(RpcAgentTestFixture):
 
             return input
 
-    # @dist_init
-    # def test_clean_context_during_backward(self):
-    #     """
-    #     This test simulates the situation where the 'backward' call might throw
-    #     an exception locally which would lead to the autograd context being
-    #     cleaned up if we're using the context manager. As a result, the autograd
-    #     context might be cleaned up while some threads are still using the
-    #     autograd context.
-    #
-    #     It is fine for the 'backward' call to throw an exception in this test,
-    #     but the process should not crash.
-    #     """
-    #     initialize_pg(self.file_init_method, self.rank, self.world_size)
-    #
-    #     context = dist_autograd._new_context()
-    #     context_id = context._context_id()
-    #     DistAutogradTest._test_clean_context_backward_context_id = context_id
-    #
-    #     # Send the context id to all nodes.
-    #     for i in range(0, self.world_size):
-    #         if i != self.rank:
-    #             rank_distance = (i - self.rank + self.world_size) % self.world_size
-    #             rpc.rpc_sync(
-    #                 worker_name(i),
-    #                 _set_rpc_done,
-    #                 args=(context_id, rank_distance),
-    #             )
-    #
-    #     dist.barrier()
-    #
-    #     # Verify all context ids have been received.
-    #     self.assertEqual(self.world_size - 1, len(known_context_ids))
-    #
-    #     t1 = torch.rand((3, 3), requires_grad=True)
-    #     for i in range(0, 100):
-    #         dst = self._next_rank()
-    #         t1 = rpc.rpc_sync(worker_name(dst), torch.add, args=(t1, t1))
-    #
-    #     # Call MyBackwardFunc as the first op of the backward pass to
-    #     # ensure we release the context early in the backward pass.
-    #     t1 = DistAutogradTest.MyBackwardFunc.apply(t1)
-    #     self.assertEqual(100, len(context._send_functions()))
-    #
-    #     context_id = 100  # dummy context_id
-    #     with self.assertRaisesRegex(
-    #         RuntimeError,
-    #         "Could not find autograd context with id: {}".format(context_id),
-    #     ):
-    #         dist_autograd.backward(context_id, [t1.sum()])
-    #
-    #     # HACK: Killing workers since otherwise the autograd engine gets stuck on
-    #     # other nodes. The proper fix would be addressing:
-    #     # https://github.com/pytorch/pytorch/issues/27643, which would inform
-    #     # other nodes about the failure.
-    #     # The autograd engine gets stuck on other nodes since they're waiting to
-    #     # receive gradients from the node that received an error (and as a
-    #     # result it didn't execute the rest of the graph).
-    #     dist.barrier()
-    #     rpc.shutdown(graceful=False)
-    #     sys.exit(0)
+    @dist_init
+    def test_clean_context_during_backward(self):
+        """
+        This test simulates the situation where the 'backward' call might throw
+        an exception locally which would lead to the autograd context being
+        cleaned up if we're using the context manager. As a result, the autograd
+        context might be cleaned up while some threads are still using the
+        autograd context.
+
+        It is fine for the 'backward' call to throw an exception in this test,
+        but the process should not crash.
+        """
+        initialize_pg(self.file_init_method, self.rank, self.world_size)
+
+        context = dist_autograd._new_context()
+        context_id = context._context_id()
+        DistAutogradTest._test_clean_context_backward_context_id = context_id
+
+        # Send the context id to all nodes.
+        for i in range(0, self.world_size):
+            if i != self.rank:
+                rank_distance = (i - self.rank + self.world_size) % self.world_size
+                rpc.rpc_sync(
+                    worker_name(i),
+                    _set_rpc_done,
+                    args=(context_id, rank_distance),
+                )
+
+        dist.barrier()
+
+        # Verify all context ids have been received.
+        self.assertEqual(self.world_size - 1, len(known_context_ids))
+
+        t1 = torch.rand((3, 3), requires_grad=True)
+        for i in range(0, 100):
+            dst = self._next_rank()
+            t1 = rpc.rpc_sync(worker_name(dst), torch.add, args=(t1, t1))
+
+        # Call MyBackwardFunc as the first op of the backward pass to
+        # ensure we release the context early in the backward pass.
+        t1 = DistAutogradTest.MyBackwardFunc.apply(t1)
+        self.assertEqual(100, len(context._send_functions()))
+
+        context_id = 100  # dummy context_id
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Could not find autograd context with id: {}".format(context_id),
+        ):
+            dist_autograd.backward(context_id, [t1.sum()])
+
+        # HACK: Killing workers since otherwise the autograd engine gets stuck on
+        # other nodes. The proper fix would be addressing:
+        # https://github.com/pytorch/pytorch/issues/27643, which would inform
+        # other nodes about the failure.
+        # The autograd engine gets stuck on other nodes since they're waiting to
+        # receive gradients from the node that received an error (and as a
+        # result it didn't execute the rest of the graph).
+        dist.barrier()
+        rpc.shutdown(graceful=False)
+        sys.exit(0)
 
     @classmethod
     def _call_remote_embedding(cls, embedding_rref, input, offsets, per_sample_weights):
