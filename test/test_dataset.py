@@ -90,7 +90,7 @@ class TestFunctionalIterableDataset(TestCase):
             y = next(ds_iter)
             self.assertEqual(x, torch.tensor(sum(y), dtype=torch.float))
 
-        collate_ds_nolen = CollateIterableDataset(ds_nolen)
+        collate_ds_nolen = CollateIterableDataset(ds_nolen)  # type: ignore
         with self.assertRaises(NotImplementedError):
             len(collate_ds_nolen)
         ds_nolen_iter = iter(ds_nolen)
@@ -144,7 +144,7 @@ class TestFunctionalIterableDataset(TestCase):
         arrs = range(10)
         ds = IterDatasetWithLen(arrs)
         # Default SequentialSampler
-        sampled_ds = SamplerIterableDataset(ds)
+        sampled_ds = SamplerIterableDataset(ds)  # type: ignore
         self.assertEqual(len(sampled_ds), 10)
         i = 0
         for x in sampled_ds:
@@ -152,7 +152,7 @@ class TestFunctionalIterableDataset(TestCase):
             i += 1
 
         # RandomSampler
-        random_sampled_ds = SamplerIterableDataset(ds, sampler=RandomSampler, replacement=True)
+        random_sampled_ds = SamplerIterableDataset(ds, sampler=RandomSampler, replacement=True)  # type: ignore
 
         # Requires `__len__` to build SamplerDataset
         ds_nolen = IterDatasetWithoutLen(arrs)

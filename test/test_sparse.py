@@ -356,6 +356,11 @@ class TestSparse(TestCase):
         sp, _, _ = self._gen_sparse(2, 10, [3, 3, 3])
         self.assertRaises(RuntimeError, lambda: sp.to_sparse())
 
+    def test_sparse_bool(self):
+        a = self.value_tensor([True, False]).to(torch.bool)
+        b = a.to_sparse().to_dense()
+        self.assertEqual(a, b)
+
     def test_scalar(self):
         # tensor with value
         a = self.sparse_tensor(self.index_tensor([]).unsqueeze(1), 12.3, [])
@@ -670,7 +675,6 @@ class TestSparse(TestCase):
         self.assertEqual(None, x1.grad)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "no multi-GPU")
-    @skipIfRocm
     def test_Sparse_to_Sparse_copy_multi_gpu(self):
         # This is for testing torch.copy_(SparseTensor, SparseTensor) across GPU devices
         sparse_dims = 3
@@ -1226,7 +1230,6 @@ class TestSparse(TestCase):
         test_shape(1000, 100, 0, 0)
         test_shape(1000, 100, 0, 20)
 
-    @skipIfRocm
     def test_hsmm(self):
         def test_shape(di, dj, dk, nnz):
             x = self._gen_sparse(2, nnz, [di, dj])[0]
@@ -1351,7 +1354,6 @@ class TestSparse(TestCase):
                 x.norm(**kwargs)
 
 
-    @skipIfRocm
     def test_sparse_sum(self):
 
         def run_tests(S, td=None):
@@ -2724,7 +2726,6 @@ class TestSparse(TestCase):
         t = torch.sparse_coo_tensor(torch.tensor(([0, 0], [2, 0])), torch.tensor([1, 4]))
         self.assertRaises(TypeError, lambda: t.numpy())
 
-    @skipIfRocm
     def test_softmax(self):
         import torch.nn.functional as F
 
@@ -3016,7 +3017,6 @@ class TestSparse(TestCase):
         test_op(3, 100, [3, 4, 2, 3, 5, 2])
         test_op(4, 100, [3, 4, 2, 3, 5, 2])
 
-    @skipIfRocm
     def test_sparse_matmul(self):
         """
         This function test `torch.sparse.mm` when both the mat1 and mat2 are sparse tensors. 
@@ -3167,6 +3167,14 @@ class TestSparse(TestCase):
         test_sparse_matmul(2, 0, [0, 0], [0, 0])
         test_sparse_matmul(2, 0, [0, 10], [10, 0])
         test_error_cases()
+
+    def test_assign(self):
+        def assign_to(a):
+            a, i_a, v_a = self._gen_sparse(2, 5, [2, 3])
+            a[0] = 100
+
+        self.assertRaises(TypeError, assign_to)
+
 
 class TestUncoalescedSparse(TestSparse):
     def setUp(self):

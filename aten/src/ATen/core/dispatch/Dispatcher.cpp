@@ -43,7 +43,7 @@ Dispatcher::Dispatcher()
 
 Dispatcher::~Dispatcher() {}
 
-C10_EXPORT Dispatcher& Dispatcher::singleton() {
+C10_EXPORT Dispatcher& Dispatcher::realSingleton() {
   static Dispatcher _singleton;
   return _singleton;
 }
@@ -293,12 +293,6 @@ void Dispatcher::checkInvariants() const {
   for (const auto& op : operators_) {
     op.op.checkInvariants();
   }
-}
-
-void Dispatcher::setManuallyBoxedKernelFor_(const OperatorHandle& op, KernelFunction::InternalBoxedKernelFunction* func) {
-  std::lock_guard<std::mutex> lock(mutex_);
-  op.operatorIterator_->op.setManuallyBoxedKernel_(*this, func);
-  // NB: Do not need to set manually boxed kernel for backend fallbacks
 }
 
 std::vector<OperatorHandle> Dispatcher::findDanglingImpls() const {

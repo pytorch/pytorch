@@ -207,6 +207,8 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         torch._C._jit_pass_onnx_scalar_type_analysis(graph)
         torch._C._jit_pass_lint(graph)
 
+        torch._C._jit_pass_onnx_fold_if(graph)
+
         from torch.onnx.symbolic_helper import _export_onnx_opset_version
         torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version, fixed_batch_size)
         torch._C._jit_pass_lint(graph)
@@ -435,7 +437,7 @@ def _model_to_graph(model, args, verbose=False,
         args = (args, )
 
     if isinstance(example_outputs, torch.Tensor):
-        example_outputs = [example_outputs]
+        example_outputs = (example_outputs,)
 
     graph, params, torch_out = _create_jit_graph(model, args,
                                                  _retain_param_name,
@@ -454,14 +456,22 @@ def _model_to_graph(model, args, verbose=False,
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
         assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule or " \
                                             "ScriptFunction."
-        out_vars, _ = torch.jit._flatten(tuple(example_outputs))
-        torch._C._jit_pass_onnx_assign_output_shape(graph, out_vars, _onnx_shape_inference)
+        if isinstance(example_outputs, list):
+            example_outputs = [example_outputs]
+
+        out_vars, desc = torch.jit._flatten(tuple(example_outputs))
+        torch._C._jit_pass_onnx_assign_output_shape(graph, out_vars, desc, _onnx_shape_inference)
 
     # NB: ONNX requires complete information about output types, which might be
     # erased by some optimizations, so we need to set it explicitly again.
     if torch_out is not None:
-        output_tensors, _ = torch._C._jit_flatten(torch_out)
-        torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, _onnx_shape_inference)
+        if not (isinstance(torch_out, list) or isinstance(torch_out, tuple)):
+            output_wrapped = [torch_out]  # type: ignore
+        else:
+            output_wrapped = torch_out  # type: ignore
+
+        output_tensors, out_desc = torch._C._jit_flatten(tuple(output_wrapped))
+        torch._C._jit_pass_onnx_assign_output_shape(graph, output_tensors, out_desc, _onnx_shape_inference)
 
     _set_input_and_output_names(graph, input_names, output_names)
 
@@ -1136,9 +1146,9 @@ def register_custom_op_symbolic(symbolic_name, symbolic_fn, opset_version):
         raise RuntimeError("Failed to register operator {}. The domain {} is already a used domain."
                            .format(symbolic_name, ns))
     import torch.onnx.symbolic_registry as sym_registry
-    from torch.onnx.symbolic_helper import _onnx_stable_opsets
+    from torch.onnx.symbolic_helper import _onnx_stable_opsets, _onnx_main_opset
 
-    for version in _onnx_stable_opsets:
+    for version in _onnx_stable_opsets + [_onnx_main_opset]:
         if version >= opset_version:
             sym_registry.register_op(op_name, symbolic_fn, ns, version)
 

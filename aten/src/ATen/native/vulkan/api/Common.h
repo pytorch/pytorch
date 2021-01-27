@@ -6,10 +6,17 @@
 
 #ifdef USE_VULKAN_SHADERC_RUNTIME
 #include <ATen/native/vulkan/glsl.h>
-#define VK_KERNEL(name) { name##_glsl, }
+#define VK_KERNEL(name)                          \
+  ::at::native::vulkan::api::Shader::Descriptor{ \
+    name##_glsl,                                 \
+  }
 #else
 #include <ATen/native/vulkan/spv.h>
-#define VK_KERNEL(name) { name##_spv, name##_spv_len, }
+#define VK_KERNEL(name)                          \
+  ::at::native::vulkan::api::Shader::Descriptor{ \
+    name##_spv,                                  \
+    name##_spv_len,                              \
+  }
 #endif /* USE_VULKAN_SHADERC_RUNTIME */
 
 #ifdef USE_VULKAN_WRAPPER

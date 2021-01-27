@@ -169,7 +169,7 @@ void max_pool2d_with_indices_out_cpu_template(
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
     inputHeight, inputWidth,
-    outputHeight, outputWidth);
+    outputHeight, outputWidth, input_.suggest_memory_format());
 
   /* get contiguous input */
   Tensor input = input_.contiguous();
@@ -360,7 +360,8 @@ Tensor& max_pool2d_with_indices_backward_out_cpu_template(
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
     nInputPlane,
     inputHeight, inputWidth,
-    outputHeight_for_shape_check, outputWidth_for_shape_check);
+    outputHeight_for_shape_check, outputWidth_for_shape_check,
+    input.suggest_memory_format());
 
   /* backprop */
   if (input.ndimension() == 3)

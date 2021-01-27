@@ -2606,8 +2606,9 @@ TEST(LoopNest, UnrollMultipleStatements) {
       x,
       0,
       kTotalSize,
-      Block::make({Store::make(a_buf, {x}, x * 2),
-                   Store::make(b_buf, {x}, Load::make(a_buf, {x}, 1))}));
+      Block::make(
+          {Store::make(a_buf, {x}, x * 2),
+           Store::make(b_buf, {x}, Load::make(a_buf, {x}, 1))}));
   Block::make({f});
   Stmt* unrolled = nullptr;
   LoopNest::unroll(f, &unrolled);
@@ -2658,9 +2659,10 @@ TEST(LoopNest, UnrollWithLet) {
       x,
       0,
       kTotalSize,
-      Block::make({Let::make(e, 7),
-                   Store::make(a_buf, {x}, e),
-                   Store::make(b_buf, {x}, e + 1)}));
+      Block::make(
+          {Let::make(e, 7),
+           Store::make(a_buf, {x}, e),
+           Store::make(b_buf, {x}, e + 1)}));
   Block::make({f});
   Stmt* unrolled = nullptr;
   LoopNest::unroll(f, &unrolled);
@@ -2700,9 +2702,9 @@ TEST(LoopNest, NormalizeStartPositive) {
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
-  auto for_body =
-      Block::make({Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
-                   Store::make(b_buf, {x}, x * 2)});
+  auto for_body = Block::make(
+      {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
+       Store::make(b_buf, {x}, x * 2)});
   auto for_stmt = For::make(x, 50, 100, for_body);
   Block::make({for_stmt});
 
@@ -2768,9 +2770,9 @@ TEST(LoopNest, NormalizeStartZero) {
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
-  auto for_body =
-      Block::make({Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
-                   Store::make(b_buf, {x}, x * 2)});
+  auto for_body = Block::make(
+      {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
+       Store::make(b_buf, {x}, x * 2)});
   auto for_stmt = For::make(x, 0, 100, for_body);
   Block::make({for_stmt});
 
@@ -2803,9 +2805,9 @@ TEST(LoopNest, NormalizeStartVariable) {
   BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
   VarHandle x("x", kInt);
   VarHandle y("y", kInt);
-  auto for_body =
-      Block::make({Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
-                   Store::make(b_buf, {x}, x * 2)});
+  auto for_body = Block::make(
+      {Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
+       Store::make(b_buf, {x}, x * 2)});
   auto for_stmt = For::make(x, y, 100, for_body);
   Block::make({for_stmt});
 
@@ -3647,45 +3649,6 @@ TEST(LoopNest, DeadStoreEliminationWithIntermediates) {
   #CHECK:     h[x, y] = f[x * y];
       )IR";
   torch::jit::testing::FileCheck().run(expected_ir2, oss.str());
-}
-
-TEST(LoopNest, InlineOutputBuffers) {
-  KernelScope kernel_scope;
-  const int M = 4;
-  const int N = 5;
-  const int K = 6;
-  Placeholder a_buf("a", kFloat, {M, N});
-  Placeholder b_buf("b", kFloat, {N, K});
-  Tensor* c = Compute(
-      "broadcast_add",
-      {{M, "m"}, {N, "n"}, {K, "k"}},
-      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return a_buf.load(m, n) + b_buf.load(n, k);
-      });
-  Tensor* out1 = Compute(
-      "out1",
-      {{M, "m"}, {N, "n"}, {K, "k"}},
-      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return c->call(m, n, k) + 1;
-      });
-
-  Tensor* out2 = Compute(
-      "out2",
-      {{M, "m"}, {N, "n"}, {K, "k"}},
-      [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
-        return out1->call(m, n, k) / c->call(m, n, k) * 4;
-      });
-  for (const bool inline_outputs : {true, false}) {
-    LoopNest l({out1, out2});
-    l.inlineIntermediateBufs(inline_outputs);
-    Stmt* stmt1 = l.root_stmt();
-    std::ostringstream oss;
-    oss << *stmt1;
-    size_t num_out1_uses = inline_outputs ? 1 : 2;
-    torch::jit::testing::FileCheck()
-        .check_count("out1", num_out1_uses, /*exactly*/ true)
-        ->run(oss.str());
-  }
 }
 
 TEST(LoopNest, CompoundTensorSimple) {

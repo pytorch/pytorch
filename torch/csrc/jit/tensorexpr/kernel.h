@@ -205,11 +205,24 @@ class TORCH_API TensorExprKernel {
     std::vector<ShapeArg> strideArgs_;
   };
 
+  struct UnpackedTensorOptions {
+    c10::optional<c10::ScalarType> dtype;
+    c10::optional<c10::Layout> layout;
+    c10::optional<c10::Device> device;
+    c10::optional<bool> pinned_memory;
+
+    UnpackedTensorOptions(const c10::TensorOptions& opts)
+        : dtype(optTypeMetaToScalarType(opts.dtype_opt())),
+          layout(opts.layout_opt()),
+          device(opts.device_opt()),
+          pinned_memory(opts.pinned_memory_opt()) {}
+  };
+
   int64_t nInputs_ = 0;
   std::vector<KernelArg> kernelArgs_;
   std::vector<std::vector<int64_t>> tensorOutputSizes_;
   std::vector<std::vector<int64_t>> tensorOutputStrides_;
-  std::vector<c10::TensorOptions> tensorOutputTensorOptions_;
+  std::vector<UnpackedTensorOptions> tensorOutputTensorOptions_;
   std::vector<Tensor*> tensorOutputs_;
   std::unordered_map<int64_t, Tensor*> tensors_;
   std::unordered_map<int64_t, VarHandle> scalars_;

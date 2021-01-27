@@ -62,7 +62,7 @@ def load_derivatives(derivatives_yaml_path: str, native_yaml_path: str) -> Seque
 
 @with_native_function
 def cpp_arguments(f: NativeFunction) -> Sequence[Binding]:
-    return CppSignatureGroup.from_schema(f.func, method=False).signature.arguments()
+    return CppSignatureGroup.from_native_function(f, method=False).signature.arguments()
 
 def create_derivative(f: NativeFunction, formula: str, var_names: Tuple[str, ...]) -> Derivative:
     arguments = cpp_arguments(f)

@@ -10,8 +10,10 @@ from torch.quantization import (
     PlaceholderObserver,
     NoopObserver,
     FakeQuantize,
+    FixedQParamsFakeQuantize,
     default_debug_qconfig,
     default_observer,
+    default_histogram_observer,
     default_per_channel_weight_observer,
     default_affine_fixed_qparams_fake_quant,
     get_observer_dict,
@@ -410,7 +412,8 @@ class TestObserver(QuantizationTestCase):
              MovingAveragePerChannelMinMaxObserver,
              # TODO: enable this (separate PR)
              # HistogramObserver,
-             PlaceholderObserver, RecordingObserver, NoopObserver])
+             PlaceholderObserver, RecordingObserver, NoopObserver,
+             FakeQuantize])
 
         for device_source, device_target, obs_cls in test_cases:
             # calibrated source model
@@ -503,6 +506,20 @@ class TestObserver(QuantizationTestCase):
 
             self.assertEqual(x.device, scale.device)
             self.assertEqual(x.device, zero_point.device)
+
+    def test_zero_numel(self):
+        obs_list = [MinMaxObserver, MovingAverageMinMaxObserver,
+                    PerChannelMinMaxObserver,
+                    MovingAveragePerChannelMinMaxObserver, HistogramObserver,
+                    FakeQuantize, FixedQParamsFakeQuantize]
+        for obs_cls in obs_list:
+            if obs_cls is FixedQParamsFakeQuantize:
+                obs = obs_cls(0.1, 0)
+            else:
+                obs = obs_cls()
+            x = torch.Tensor()
+            # verify no crash
+            x = obs(x)
 
 
 # HistogramObserver that works like it does on master
@@ -679,6 +696,29 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         buf.seek(0)
         loaded = torch.jit.load(buf)
         self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
+
+class TestHistogramObserver(QuantizationTestCase):
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+           qscheme=st.sampled_from(
+               (torch.per_tensor_affine, torch.per_tensor_symmetric))
+           )
+    def test_observer_scriptable(self, qdtype, qscheme):
+        ob_list = [
+            HistogramObserver(dtype=qdtype, qscheme=qscheme),
+            default_histogram_observer()
+        ]
+        for obs in ob_list:
+            scripted = torch.jit.script(obs)
+
+            x = torch.rand(3, 4)
+            obs(x)
+            scripted(x)
+            self.assertTrue(torch.equal(obs.histogram, scripted.histogram))
+            buf = io.BytesIO()
+            torch.jit.save(scripted, buf)
+            buf.seek(0)
+            loaded = torch.jit.load(buf)
+            self.assertTrue(torch.equal(obs.histogram, scripted.histogram))
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),

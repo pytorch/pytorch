@@ -28,6 +28,8 @@ struct TestCPUGenerator : public c10::GeneratorImpl {
   void set_current_seed(uint64_t seed) override { throw std::runtime_error("not implemented"); }
   uint64_t current_seed() const override { throw std::runtime_error("not implemented"); }
   uint64_t seed() override { throw std::runtime_error("not implemented"); }
+  void set_state(const c10::TensorImpl& new_state) override { throw std::runtime_error("not implemented"); }
+  c10::intrusive_ptr<c10::TensorImpl> get_state() const override { throw std::runtime_error("not implemented"); }
   TestCPUGenerator* clone_impl() const override { throw std::runtime_error("not implemented"); }
 
   static DeviceType device_type() { return DeviceType::CPU; }

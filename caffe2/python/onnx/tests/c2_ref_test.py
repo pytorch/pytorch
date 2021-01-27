@@ -6,7 +6,6 @@
 
 
 
-import json
 import os
 import unittest
 
@@ -17,7 +16,7 @@ import onnx
 from onnx.helper import make_node, make_graph, make_tensor, make_tensor_value_info, make_model
 from caffe2.python.onnx.helper import c2_native_run_net, c2_native_run_op
 
-from onnx import defs, mapping
+from onnx import mapping
 import caffe2.python.onnx.frontend as c2_onnx
 import caffe2.python.onnx.backend as c2
 

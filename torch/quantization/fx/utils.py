@@ -9,7 +9,7 @@ from torch.fx.graph import (
     Node,
 )
 
-from typing import Callable, Optional, List, Dict, Any
+from typing import Callable, Optional, List, Dict, Any, Set
 
 # turn foo.bar -> ['foo', 'bar']
 def _parent_name(target):
@@ -140,7 +140,7 @@ def quantize_node(root_module, graph, node, activation_post_process):
         inputs.append(graph.create_node('get_attr', qparam_full_path))
     return graph.create_node('call_function', quantize_op, tuple(inputs), {})
 
-def get_custom_module_class_keys(custom_config_dict, custom_config_dict_key):
+def get_custom_module_class_keys(custom_config_dict, custom_config_dict_key) -> List[Any]:
     r""" Get all the unique custom module keys in the custom config dict
     e.g.
     Input:
@@ -163,7 +163,7 @@ def get_custom_module_class_keys(custom_config_dict, custom_config_dict_key):
     [CustomModule1, CustomModule2, CustomModule3]
     """
     # using set to dedup
-    float_custom_module_classes = set()
+    float_custom_module_classes : Set[Any] = set()
     custom_module_mapping = custom_config_dict.get(custom_config_dict_key, {})
     for quant_mode in ["static", "dynamic", "weight_only"]:
         quant_mode_custom_module_config = custom_module_mapping.get(quant_mode, {})

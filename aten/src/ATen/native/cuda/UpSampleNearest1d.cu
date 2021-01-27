@@ -197,19 +197,21 @@ static void upsample_nearest1d_backward_out_cuda_template(
 } // namespace
 
 TORCH_IMPL_FUNC(upsample_nearest1d_out_cuda) (
-    Tensor& output,
     const Tensor& input,
     IntArrayRef output_size,
-    c10::optional<double> scales) {
+    c10::optional<double> scales,
+    Tensor& output
+) {
   upsample_nearest1d_out_cuda_template(output, input, output_size, scales);
 }
 
 TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_cuda) (
-    Tensor& grad_input,
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    c10::optional<double> scales) {
+    c10::optional<double> scales,
+    Tensor& grad_input
+) {
   upsample_nearest1d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, scales);
 }

@@ -66,19 +66,21 @@ TORCH_META_FUNC(upsample_nearest1d_backward) (
 namespace native {
 
 TORCH_IMPL_FUNC(upsample_nearest1d_out_cpu) (
-    Tensor& output,
     const Tensor& input,
     IntArrayRef output_size,
-    c10::optional<double> scales) {
+    c10::optional<double> scales,
+    Tensor& output
+) {
   upsample_nearest1d_kernel(kCPU, output, input, scales);
 }
 
 TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_cpu) (
-    Tensor& grad_input,
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    c10::optional<double> scales) {
+    c10::optional<double> scales,
+    Tensor& grad_input
+) {
   grad_input.zero_();
   upsample_nearest1d_backward_kernel(kCPU, grad_input, grad_output, scales);
 }
