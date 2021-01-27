@@ -6985,6 +6985,19 @@ class TestTensorDeviceOps(TestCase):
 class TestTorch(AbstractTestCases._TestTorchMixin):
     exact_dtype = True
 
+    def test_deepcopy_gradient(self):
+        from copy import deepcopy
+        a = torch.zeros(10)
+        a.grad = torch.ones(10)
+        self.assertEqual(a.grad, deepcopy(a).grad)
+        s = torch.zeros(10).to_sparse()
+        s.grad = torch.ones(10).to_sparse()
+        self.assertEqual(s.grad, deepcopy(s).grad)
+
+        # ensure sharing is not broken
+        c = deepcopy([a, a.grad])
+        self.assertTrue(c[0].grad is c[1])
+
 # TODO: this empy class is temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
 class TestViewOps(TestCase):

@@ -19,7 +19,7 @@ from torch.testing import \
 from torch.testing._internal.common_device_type import \
     (skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
      skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride)
-from torch.testing._internal.common_cuda import tf32_is_not_fp32
+from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
      random_symmetric_matrix, random_symmetric_psd_matrix,
@@ -879,15 +879,25 @@ def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_sv
     """
     from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
-    # svd and linalg.svd returns V and V.T, respectively. So we need to slice
+    # svd and linalg.svd returns V and V.conj().T, respectively. So we need to slice
     # along different dimensions when needed (this is used by
     # test_cases2:wide_all and wide_all_batched below)
     if is_linalg_svd:
         def slice_V(v):
             return v[..., :(S - 2), :]
+
+        def uv_loss(usv):
+            u00 = usv[0][0, 0]
+            v00_conj = usv[2][0, 0]
+            return u00 * v00_conj
     else:
         def slice_V(v):
             return v[..., :, :(S - 2)]
+
+        def uv_loss(usv):
+            u00 = usv[0][0, 0]
+            v00_conj = usv[2][0, 0].conj()
+            return u00 * v00_conj
 
     test_cases1 = (  # some=True (default)
         # loss functions for complex-valued svd have to be "gauge invariant",
@@ -899,12 +909,10 @@ def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_sv
             lambda usv: abs(usv[0])),  # 'check_grad_u'
         (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
             lambda usv: abs(usv[2])),  # 'check_grad_v'
-        # TODO: replace lambda usv: usv[0][0, 0] * usv[2][0, 0] with lambda usv: usv[0][0, 0] * usv[2][0, 0].conj()
-        # once https://github.com/pytorch/pytorch/issues/45821 is resolved
         # this test is important as it checks the additional term that is non-zero only for complex-valued inputs
         # and when the loss function depends both on 'u' and 'v'
         (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device),
-            lambda usv: usv[0][0, 0] * usv[2][0, 0]),  # 'check_grad_uv'
+            uv_loss),  # 'check_grad_uv'
         (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:(S - 2)],
             lambda usv: (abs(usv[0]), usv[1], abs(usv[2][..., :, :(S - 2)]))),  # 'wide'
         (random_fullrank_matrix_distinct_singular_value(S, dtype=dtype).to(device)[:, :(S - 2)],
@@ -1048,8 +1056,9 @@ op_db: List[OpInfo] = [
     OpInfo('addmm',
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           # BFloat16 support on CUDA requires CUDA 11 and SM53
            dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
-                                           *[torch.bfloat16] if tf32_is_not_fp32() else []),
+                                           *[torch.bfloat16] if CUDA11OrLater else []),
            dtypesIfROCM=floating_types_and(torch.half),
            assert_autodiffed=True,
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
