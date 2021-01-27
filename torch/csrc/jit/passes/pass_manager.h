@@ -52,10 +52,6 @@ TORCH_API void clearAllPrePasses();
 // LEGACY CALL
 struct TORCH_API RegisterPostPass {
   RegisterPostPass(GraphPass p);
-  ~RegisterPostPass();
-
- private:
-  GraphPassNameType id_;
 };
 
 using RegisterPass = RegisterPostPass;

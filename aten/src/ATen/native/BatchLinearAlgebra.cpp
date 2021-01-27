@@ -82,6 +82,22 @@ extern "C" void ssyevd_(char *jobz, char *uplo, int *n, float *a, int *lda, floa
 // geev
 extern "C" void dgeev_(char *jobvl, char *jobvr, int *n, double *a, int *lda, double *wr, double *wi, double* vl, int *ldvl, double *vr, int *ldvr, double *work, int *lwork, int *info);
 extern "C" void sgeev_(char *jobvl, char *jobvr, int *n, float *a, int *lda, float *wr, float *wi, float* vl, int *ldvl, float *vr, int *ldvr, float *work, int *lwork, int *info);
+extern "C" void cgeev_(char *jobvl, char *jobvr, int *n,
+             std::complex<float> *a, int *lda,
+             std::complex<float> *w,
+             std::complex<float> *vl, int *ldvl,
+             std::complex<float> *vr, int *ldvr,
+             std::complex<float> *work, int *lwork,
+             float *rwork,
+             int *info);
+extern "C" void zgeev_(char *jobvl, char *jobvr, int *n,
+             std::complex<double> *a, int *lda,
+             std::complex<double> *w,
+             std::complex<double> *vl, int *ldvl,
+             std::complex<double> *vr, int *ldvr,
+             std::complex<double> *work, int *lwork,
+             double *rwork,
+             int *info);
 
 // gesdd
 extern "C" void zgesdd_(char *jobz, int *m, int *n, std::complex<double> *a, int *lda,
@@ -307,12 +323,42 @@ template<> void lapackSyevd<float>(char jobz, char uplo, int n, float *a, int ld
   ssyevd_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, iwork, &liwork, info);
 }
 
-template<> void lapackEig<double>(char jobvl, char jobvr, int n, double *a, int lda, double *wr, double *wi, double* vl, int ldvl, double *vr, int ldvr, double *work, int lwork, int *info) {
+template<> void lapackEig<double>(char jobvl, char jobvr, int n, double *a, int lda, double *w, double* vl, int ldvl, double *vr, int ldvr, double *work, int lwork, double *rwork, int *info) {
+  // lapack [sd]geev wants to separate output arrays: wr and wi for the real
+  // and imaginary parts
+  double *wr = w;
+  double *wi = w + n;
+  (void)rwork; // unused
   dgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
 
-template<> void lapackEig<float>(char jobvl, char jobvr, int n, float *a, int lda, float *wr, float *wi, float* vl, int ldvl, float *vr, int ldvr, float *work, int lwork, int *info) {
+template<> void lapackEig<float>(char jobvl, char jobvr, int n, float *a, int lda, float *w, float* vl, int ldvl, float *vr, int ldvr, float *work, int lwork, float *rwork, int *info) {
+  // lapack [sd]geev wants to separate output arrays: wr and wi for the real
+  // and imaginary parts
+  float *wr = w;
+  float *wi = w + n;
+  (void)rwork; // unused
   sgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
+}
+
+template<> void lapackEig<c10::complex<double>, double>(char jobvl, char jobvr, int n, c10::complex<double> *a, int lda, c10::complex<double> *w, c10::complex<double> *vl, int ldvl, c10::complex<double> *vr, int ldvr, c10::complex<double> *work, int lwork, double *rwork, int *info) {
+  zgeev_(&jobvl, &jobvr, &n,
+         reinterpret_cast<std::complex<double>*>(a), &lda,
+         reinterpret_cast<std::complex<double>*>(w),
+         reinterpret_cast<std::complex<double>*>(vl), &ldvl,
+         reinterpret_cast<std::complex<double>*>(vr), &ldvr,
+         reinterpret_cast<std::complex<double>*>(work), &lwork,
+         rwork, info);
+}
+
+template<> void lapackEig<c10::complex<float>, float>(char jobvl, char jobvr, int n, c10::complex<float> *a, int lda, c10::complex<float> *w, c10::complex<float> *vl, int ldvl, c10::complex<float> *vr, int ldvr, c10::complex<float> *work, int lwork, float *rwork, int *info) {
+  cgeev_(&jobvl, &jobvr, &n,
+         reinterpret_cast<std::complex<float>*>(a), &lda,
+         reinterpret_cast<std::complex<float>*>(w),
+         reinterpret_cast<std::complex<float>*>(vl), &ldvl,
+         reinterpret_cast<std::complex<float>*>(vr), &ldvr,
+         reinterpret_cast<std::complex<float>*>(work), &lwork,
+         rwork, info);
 }
 
 template<> void lapackSvd<c10::complex<double>, double>(char jobz, int m, int n, c10::complex<double> *a, int lda,
@@ -1441,7 +1487,11 @@ std::tuple<Tensor&, Tensor&> eig_out(Tensor& e, Tensor& v, const Tensor& self, b
       TORCH_CHECK(v.dtype() == self.dtype(), "Expected 'v' to have dtype ", self.dtype(), " but got ", v.dtype());
   int64_t n = self.size(-1);
 
-  at::native::resize_output(e, {n, 2});
+  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
+      at::native::resize_output(e, {n});
+  } else {
+      at::native::resize_output(e, {n, 2});
+  }
   if (eigenvectors) {
       at::native::resize_output(v, self.sizes());
   }

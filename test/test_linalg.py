@@ -24,7 +24,7 @@ from torch.testing._internal.common_device_type import \
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
      onlyCUDA)
 from torch.testing import floating_and_complex_types, floating_types, all_types
-from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32
+from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
 from torch.autograd import gradcheck, gradgradcheck
 
 # Protects against includes accidentally setting the default dtype
@@ -34,9 +34,6 @@ assert torch.get_default_dtype() is torch.float32
 
 if TEST_SCIPY:
     import scipy
-
-# TODO: make this common and import it
-AMPERE_OR_ROCM = TEST_WITH_ROCM or tf32_is_not_fp32()
 
 # See #49409, we should remove these if we end up with a global gradcheck setting
 gradcheck = partial(gradcheck, check_batched_grad=True)
@@ -1377,7 +1374,7 @@ class TestLinalg(TestCase):
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
-    @dtypes(torch.double, torch.float)
+    @dtypes(*floating_and_complex_types())
     def test_eig_basic(self, device, dtype):
         a = torch.tensor([[1.96, 0.00, 0.00, 0.00, 0.00],
                           [-6.49, 3.80, 0.00, 0.00, 0.00],
@@ -1398,11 +1395,25 @@ class TestLinalg(TestCase):
         #
         # compare with numpy
         np_e, np_v = np.linalg.eig(a.cpu().numpy())
-        # np_e.shape == (n, 2), where each column contain the real and
-        # imaginary parts of the result
-        self.assertEqual(ee[:, 0], np_e)  # real part
-        self.assertEqual(ee[:, 1], torch.zeros(ee.shape[0], dtype=dtype))  # imaginary part
+        if dtype.is_complex:
+            self.assertEqual(ee, np_e)
+        else:
+            # np_e.shape == (n, 2), where each column contain the real and
+            # imaginary parts of the result
+            self.assertEqual(ee[:, 0], np_e)  # real part
+            self.assertEqual(ee[:, 1], torch.zeros(ee.shape[0], dtype=dtype))  # imaginary part
         self.assertEqual(vv, np_v)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.complex64, torch.complex128)
+    def test_eig_backward_complex(self, device, dtype):
+        # torch.eig's backward is not supported yet for complex types. We
+        # should kill this test once it's implemented.
+        a = torch.tensor([[1., 2], [3, 4]], device=device, dtype=dtype, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError,
+                                    "eig does not support automatic differentiation for outputs with complex dtype"):
+            e, v = torch.eig(a, True)
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
@@ -3828,12 +3839,12 @@ class TestLinalg(TestCase):
             self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
     @skipCUDAIfRocm
-    @dtypesIfCUDA(*(torch.float, torch.double, torch.cfloat, torch.cdouble) +
-                  # This test is disabled on CUDA 9, due to:
-                  # See: https://github.com/pytorch/pytorch/issues/31006
-                  ((torch.half,) if torch.version.cuda and not torch.version.cuda.startswith('9.') else ()))
+    @dtypesIfCUDA(torch.cfloat, torch.cdouble,
+                  *torch.testing.get_all_fp_dtypes(include_half=not CUDA9, include_bfloat16=(CUDA11OrLater and SM53OrLater)))
     @dtypes(*(set(torch.testing.get_all_dtypes()) - {torch.half, torch.bool}))
     def test_blas_alpha_beta_empty(self, device, dtype):
+        # This test is disabled on CUDA 9 due to:
+        # See: https://github.com/pytorch/pytorch/issues/31006
         if dtype is torch.bfloat16 and self.device_type == 'xla':
             # TODO (@zasdfgbnm): this causes the following error on test
             # TestTorchDeviceTypeXLA.test_blas_alpha_beta_empty_xla_bfloat16:
@@ -4453,8 +4464,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @precisionOverride({torch.bfloat16: 1e-0, torch.half: 5e-4, torch.float: 1e-4, torch.double: 1e-8,
                         torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(),
-                  *([torch.float32, torch.float64, torch.bfloat16]
-                    if TEST_WITH_ROCM else torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM)))
+                  *torch.testing.get_all_fp_dtypes(include_bfloat16=(TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater)),
+                                                   include_half=(not TEST_WITH_ROCM)))
     @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
     def test_addmv(self, device, dtype):
         # have to use torch.randn(...).to(bfloat16) instead of
@@ -4488,8 +4499,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for m, v in itertools.product(ms, vs):
             self._test_addmm_addmv(torch.addmv, t, m, v, beta=0)
 
-    @dtypesIfCUDA(*([torch.half, torch.float, torch.double]
-                    + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
+    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes(include_bfloat16=(TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater))))
     @dtypes(torch.float, torch.double)
     def test_addmv_rowmajor_colmajor_incx_incy_lda(self, device, dtype):
         # tests (o, s)*(s).  o is output size, s is summed size.
@@ -4520,7 +4530,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
-    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes(include_bfloat16=AMPERE_OR_ROCM))
+    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(),
+                  *torch.testing.get_all_fp_dtypes(include_bfloat16=(TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater))))
     @dtypes(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes())
     @tf32_on_and_off(0.05)
     def test_addmm(self, device, dtype):
@@ -4695,19 +4706,25 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypes(*torch.testing.get_all_fp_dtypes(), *torch.testing.get_all_complex_dtypes())
     @tf32_on_and_off(0.05)
     def test_bmm(self, device, dtype):
+        if self.device_type == 'cuda' and dtype is torch.bfloat16 and CUDA11OrLater and not SM53OrLater:
+            # cuBLAS does not guarantee BFloat16 support on SM < 53.
+            # So on PyTorch, we consider BFloat16 support on SM < 53 as
+            # undefined bahavior
+            return
+
         num_batches = 10
         M, N, O = 23, 8, 12
         numpy_dtype = dtype if dtype != torch.bfloat16 else torch.float32
 
-        if self.device_type == 'cpu':
-            is_supported = True
-        elif self.device_type == 'cuda':
-            is_supported = True if dtype != torch.bfloat16 else AMPERE_OR_ROCM
+        is_supported = True
+        if dtype == torch.bfloat16 and self.device_type == 'cuda':
+            is_supported = TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater)
 
         if not is_supported:
             b1 = torch.randn(num_batches, M, N, device=device).to(dtype)
             b2 = torch.randn(num_batches, N, O, device=device).to(dtype)
-            self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|Ampere", lambda: torch.bmm(b1, b2))
+            self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
+                                   lambda: torch.bmm(b1, b2))
             return
 
         def invert_perm(p):
@@ -4870,21 +4887,28 @@ else:
     @dtypes(*torch.testing.get_all_fp_dtypes(), *torch.testing.get_all_complex_dtypes())
     @tf32_on_and_off(0.05)
     def test_addbmm(self, device, dtype):
+        if self.device_type == 'cuda' and dtype is torch.bfloat16 and CUDA11OrLater and not SM53OrLater:
+            # cuBLAS does not guarantee BFloat16 support on SM < 53.
+            # So on PyTorch, we consider BFloat16 support on SM < 53 as
+            # undefined bahavior
+            return
+
         num_batches = 2
         M, N, O = 2, 3, 4
 
-        if self.device_type == 'cpu':
-            is_supported = True
-            if dtype == torch.bfloat16:
+        is_supported = True
+        if dtype == torch.bfloat16:
+            if self.device_type == 'cpu':
                 self.precision = 1  # 43 vs 43.75
-        else:
-            is_supported = (dtype != torch.bfloat16 or AMPERE_OR_ROCM)
+            else:
+                is_supported = TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater)
 
         if not is_supported:
             b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
             b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
             t = make_tensor((M, O), device, dtype, low=-1, high=1)
-            self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|Ampere", lambda: torch.addbmm(t, b1, b2))
+            self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
+                                   lambda: torch.addbmm(t, b1, b2))
             return
 
         def invert_perm(p):
@@ -4936,19 +4960,25 @@ else:
     @dtypes(*torch.testing.get_all_fp_dtypes(), *torch.testing.get_all_complex_dtypes())
     @tf32_on_and_off(0.05)
     def test_baddbmm(self, device, dtype):
+        if self.device_type == 'cuda' and dtype is torch.bfloat16 and CUDA11OrLater and not SM53OrLater:
+            # cuBLAS does not guarantee BFloat16 support on SM < 53.
+            # So on PyTorch, we consider BFloat16 support on SM < 53 as
+            # undefined bahavior
+            return
+
         num_batches = 10
         M, N, O = 12, 8, 5
 
-        if self.device_type == 'cpu':
-            is_supported = True
-        elif self.device_type == 'cuda':
-            is_supported = True if dtype != torch.bfloat16 else AMPERE_OR_ROCM
+        is_supported = True
+        if dtype == torch.bfloat16 and self.device_type == 'cuda':
+            is_supported = TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater)
 
         if not is_supported:
             b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
             b2 = make_tensor((num_batches, N, O), device, dtype, low=-1, high=1)
             t = make_tensor((num_batches, M, O), device, dtype, low=-1, high=1)
-            self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|Ampere", lambda: torch.baddbmm(t, b1, b2))
+            self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
+                                   lambda: torch.baddbmm(t, b1, b2))
             return
 
         def invert_perm(p):
