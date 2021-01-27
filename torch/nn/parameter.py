@@ -115,7 +115,7 @@ class UninitializedParameter(Parameter):
             '`module.share_memory()`.')
 
     def __repr__(self):
-        return 'Uninitialized parameter'
+        return '<UninitializedParameter>'
 
     def __reduce_ex__(self, proto):
         # See Note [Don't serialize hooks]
@@ -137,4 +137,99 @@ class UninitializedParameter(Parameter):
             'This error happens when you are using a `LazyModule` or '
             'explicitly manipulating `torch.nn.parameter.UninitializedParameter` '
             'objects. When using LazyModules Call `forward` with a dummy batch ' 
+            'to initialize the parameters before calling torch functions'.format(func))
+
+
+class UninitializedBuffer(torch.Tensor):
+    r"""A parameter that is not initialized.
+
+    Unitialized Buffer is a a special case of :class:`torch.Tensor`
+    where the shape of the data is still unknown.
+
+    Unlikely a :class:`torch.Tensor`, uninitialized parameters
+    hold no data and attempting to access some properties, like their shape,
+    will throw a runtime error. The only operations that can be performed on a uninitialized
+    parameter are changing its datatype, moving it to a different device and
+    converting it to a regular :class:`torch.Tensor`.
+    """
+    _allowed_methods = [
+        torch.Tensor.__hash__,
+        torch.Tensor.size,
+        torch.Tensor.copy_,
+        torch.Tensor.is_floating_point,
+        torch.Tensor.half,
+        torch.Tensor.float,
+        torch.Tensor.double,
+        torch.Tensor.char,
+        torch.Tensor.short,
+        torch.Tensor.int,
+        torch.Tensor.long,
+        torch.Tensor.cuda,
+        torch.Tensor.cpu,
+        torch.Tensor.to,
+        torch.Tensor.get_device,
+        torch._has_compatible_shallow_copy_type
+    ]
+
+    def __new__(cls, requires_grad=False):
+        data = torch.Tensor()
+        return torch.Tensor._make_subclass(cls, data, requires_grad)
+
+    def materialize(self, shape, device=None, dtype=None):
+        r"""Create a Tensor with the same properties of the uninitialized one.
+        Given a shape, it materializes a parameter in the same device
+        and with the same `dtype` as the current one or the specified ones in the
+        arguments.
+
+        Args:
+            shape : (tuple): the shape for the materialized tensor.
+            device (:class:`torch.device`): the desired device of the parameters
+                and buffers in this module. Optional.
+            dtype (:class:`torch.dtype`): the desired floating point type of
+                the floating point parameters and buffers in this module. Optional.
+        """
+        if device is None:
+            device = self.data.device
+        if dtype is None:
+            dtype = self.data.dtype
+        self.data = torch.empty(shape, device=device, dtype=dtype)
+        self.__class__ = torch.Tensor
+
+    @property
+    def shape(self):
+        raise RuntimeError(
+            'Can\'t access the shape of an uninitialized parameter. '
+            'This error usually happens in `load_state_dict` when trying to load '
+            'an uninitialized parameter into an initialized one. '
+            'Call `forward` to initialize the parameters before accessing their attributes.')
+
+    def share_memory_(self):
+        raise RuntimeError(
+            'Can\'t share memory on an uninitialized parameter. '
+            'Call `forward` to initialize the parameters before calling '
+            '`module.share_memory()`.')
+
+    def __repr__(self):
+        return '<UninitializedBuffer>'
+
+    def __reduce_ex__(self, proto):
+        # See Note [Don't serialize hooks]
+        return (
+            UninitializedBuffer,
+            (self.requires_grad,)
+        )
+
+    @classmethod
+    def __torch_function__(cls, func, types, args=(), kwargs=None):
+        # method-wrapper is to detect access to Tensor properties that are
+        # wrapped in descriptors
+        if func in cls._allowed_methods or func.__class__.__name__ == 'method-wrapper':
+            if kwargs is None:
+                kwargs = {}
+            return super().__torch_function__(func, types, args, kwargs)
+        raise ValueError(
+            'Attempted to use an uninitialized parameter in {}. '
+            'This error happens when you are using a `LazyModule` or '
+            'explicitly manipulating `torch.nn.parameter.UninitializedBuffer` '
+            'objects. When using LazyModules Call `forward` with a dummy batch '
             'to initialize the parameters before calling torch functions'.format(func))

@@ -3,7 +3,7 @@ from typing_extensions import Protocol
 import warnings
 
 import torch
-from ..parameter import UninitializedParameter
+from ..parameter import UninitializedParameter, UninitializedBuffer
 
 
 class _LazyProtocol(Protocol):
@@ -187,7 +187,10 @@ class LazyModuleMixin:
                     destination[prefix + name] = param if keep_vars else param.detach()
         for name, buf in self._buffers.items():
             if buf is not None and name not in self._non_persistent_buffers_set:
-                destination[prefix + name] = buf if keep_vars else buf.detach()
+                if isinstance(buf, UninitializedBuffer):
+                    destination[prefix + name] = buf
+                else:
+                    destination[prefix + name] = buf if keep_vars else buf.detach()
 
     def _lazy_load_hook(
             self: _LazyProtocol, state_dict, prefix, local_metadata, strict,
@@ -201,15 +204,14 @@ class LazyModuleMixin:
         See comment in ``torch.nn.Module._register_load_state_dict_pre_hook``
         for the details of the hook specification.
         """
-        local_state = {k: v for k, v in self._parameters.items() if v is not None}
-        for name, param in local_state.items():
+        for name, param in itertools.chain(self._parameters.items(), self._buffers.items()):
             key = prefix + name
-            if key in state_dict:
+            if key in state_dict and param is not None:
                 input_param = state_dict[key]
-                if isinstance(param, UninitializedParameter): 
+                if isinstance(param, (UninitializedParameter, UninitializedBuffer)):
                     # The current parameter is not initialized but the one being loaded one is
                     # create a new parameter based on the uninitialized one
-                    if not isinstance(input_param, UninitializedParameter):
+                    if not isinstance(input_param, (UninitializedParameter, UninitializedBuffer)):
                         with torch.no_grad():
                             param.materialize(input_param.shape)
 
@@ -226,8 +228,9 @@ class LazyModuleMixin:
         # This is to avoid the JIT to track this parameter and force
         # custom modules __setstate__ to add it
         params = self._parameters.values()
-        for param in itertools.chain(params):
-            if isinstance(param, (UninitializedParameter)):
+        buffers = self._buffers.values()
+        for param in itertools.chain(params, buffers):
+            if isinstance(param, (UninitializedParameter, UninitializedBuffer)):
                 return True
         return False
 
