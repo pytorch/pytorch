@@ -104,9 +104,6 @@ class TestSubgraphRewriter(JitTestCase):
 
     def test_subgraph_rewriter_multiple_pattern_match(self):
         class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, w1, w2):
                 m1 = torch.cat([w1, w2]).sum()
                 m2 = torch.cat([w1, w2]).sum()
@@ -140,9 +137,6 @@ class TestSubgraphRewriter(JitTestCase):
 
     def test_subgraph_rewriter_graph_argument_order(self):
         class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y):
                 return torch.mm(x, y)
 
@@ -164,4 +158,148 @@ class TestSubgraphRewriter(JitTestCase):
 
         ref_outs = comparison_fn(x, y)
         test_outs = traced_module.forward(x, y)
+        self.assertEqual(ref_outs, test_outs)
+
+    def test_subgraph_rewriter_correct_output_replacement(self):
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                val = torch.neg(y) + torch.relu(x)
+                return torch.add(val, val)
+
+        def pattern(x):
+            return torch.relu(x)
+
+        def replacement(x):
+            return torch.neg(x)
+
+        def comparison(x, y):
+            val = torch.neg(y) + torch.neg(x)
+            return torch.add(val, val)
+
+        traced_module = symbolic_trace(M())
+        comparison_fn = symbolic_trace(comparison)
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+
+        subgraph_rewriter.replace_pattern(traced_module, pattern, replacement)
+
+        traced_module.graph.lint(traced_module)
+
+        ref_outs = comparison_fn(x, y)
+        test_outs = traced_module.forward(x, y)
+        self.assertEqual(ref_outs, test_outs)
+
+    def test_subgraph_rewriter_traced_module_as_callable(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                val = torch.neg(x) + torch.relu(x)
+                return torch.add(val, val)
+
+        class Pattern(torch.nn.Module):
+            def forward(self, x):
+                return torch.neg(x) + torch.relu(x)
+
+        class Replacement(torch.nn.Module):
+            def forward(self, x):
+                return torch.sigmoid(x)
+
+        def comparison(x):
+            val = torch.sigmoid(x)
+            return torch.add(val, val)
+
+        traced_module = symbolic_trace(M())
+        traced_pattern = symbolic_trace(Pattern())
+        traced_replacement = symbolic_trace(Replacement())
+        comparison_fn = symbolic_trace(comparison)
+
+        x = torch.randn(3, 4)
+
+        subgraph_rewriter.replace_pattern(traced_module, traced_pattern, traced_replacement)
+
+        traced_module.graph.lint(traced_module)
+
+        ref_outs = comparison_fn(x)
+        test_outs = traced_module.forward(x)
+        self.assertEqual(ref_outs, test_outs)
+
+    def test_subgraph_rewriter_container_output(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                a = torch.neg(x)
+                return x, torch.add(a, a)
+
+        def pattern(x):
+            a = torch.neg(x)
+            return x, torch.add(a, a)
+
+        def replacement(x):
+            a = torch.sigmoid(x)
+            return torch.cat([a, a])
+
+        traced_module = symbolic_trace(M())
+        comparison_fn = symbolic_trace(replacement)
+
+        x = torch.randn(3, 4)
+
+        subgraph_rewriter.replace_pattern(traced_module, pattern, replacement)
+
+        traced_module.graph.lint(traced_module)
+
+        ref_outs = comparison_fn(x)
+        test_outs = traced_module.forward(x)
+        self.assertEqual(ref_outs, test_outs)
+
+    def test_subgraph_rewriter_nested_container_output(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                a = torch.neg(x)
+                return x, (a, x), torch.add(a, a)
+
+        def pattern(x):
+            a = torch.neg(x)
+            return x, (a, x), torch.add(a, a)
+
+        def replacement(x):
+            a = torch.sigmoid(x)
+            return torch.cat([a, a])
+
+        traced_module = symbolic_trace(M())
+        comparison_fn = symbolic_trace(replacement)
+
+        x = torch.randn(3, 4)
+
+        subgraph_rewriter.replace_pattern(traced_module, pattern, replacement)
+
+        traced_module.graph.lint(traced_module)
+
+        ref_outs = comparison_fn(x)
+        test_outs = traced_module.forward(x)
+        self.assertEqual(ref_outs, test_outs)
+
+    def test_subgraph_rewriter_pattern_is_entire_graph(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                a = torch.neg(x)
+                return torch.add(a, a)
+
+        def pattern(x):
+            a = torch.neg(x)
+            return torch.add(a, a)
+
+        def replacement(x):
+            a = torch.sigmoid(x)
+            return torch.cat([a, a])
+
+        traced_module = symbolic_trace(M())
+        comparison_fn = symbolic_trace(replacement)
+
+        x = torch.randn(3, 4)
+
+        subgraph_rewriter.replace_pattern(traced_module, pattern, replacement)
+
+        traced_module.graph.lint(traced_module)
+
+        ref_outs = comparison_fn(x)
+        test_outs = traced_module.forward(x)
         self.assertEqual(ref_outs, test_outs)
