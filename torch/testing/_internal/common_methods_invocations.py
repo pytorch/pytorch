@@ -1012,6 +1012,17 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad):
     )
     return [SampleInput(tensor) for tensor in tensors]
 
+def sample_inputs_clamp(op_info, device, dtype, requires_grad):
+    tensors = (
+        make_tensor((S, M, S), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((S, 0, M), device, dtype, low=None, high=None, requires_grad=requires_grad)
+    )
+    if dtype is torch.uint8:
+        min_max_vals = ((2, 5), (3, 7))
+    else:
+        min_max_vals = ((0.0, 1.0), (-1.0, 1.0))
+    return [SampleInput(tensor, args=vals) for tensor, vals in product(tensors, min_max_vals)]
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -1072,6 +1083,7 @@ op_db: List[OpInfo] = [
                    )),
     # NOTE: the derivative for inplace acosh is not implemented
     UnaryUfuncInfo('acosh',
+                   aliases=('arccosh', ),
                    ref=np.arccosh,
                    domain=(1, float('inf')),
                    dtypes=all_types_and_complex_and(torch.bool),
@@ -1141,6 +1153,7 @@ op_db: List[OpInfo] = [
                    )),
     # NOTE: derivative for inplace asinh is not implemented
     UnaryUfuncInfo('asinh',
+                   aliases=('arcsinh', ),
                    ref=np.arcsinh,
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool),
@@ -1159,6 +1172,7 @@ op_db: List[OpInfo] = [
                                 active_if=IS_WINDOWS),
                    )),
     UnaryUfuncInfo('atan',
+                   aliases=('arctan', ),
                    ref=np.arctan,
                    dtypes=all_types_and_complex_and(torch.bool),
                    dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -1175,6 +1189,7 @@ op_db: List[OpInfo] = [
                                 active_if=IS_WINDOWS),
                    )),
     UnaryUfuncInfo('atanh',
+                   aliases=('arctanh', ),
                    ref=np.arctanh,
                    domain=(-1, 1),
                    dtypes=all_types_and_complex_and(torch.bool),
@@ -1195,6 +1210,14 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_broadcast_to),
+    UnaryUfuncInfo('clamp',
+                   aliases=('clip', ),
+                   ref=np.clip,
+                   dtypes=all_types_and(torch.half, torch.bfloat16),
+                   dtypesIfCPU=all_types_and(torch.bfloat16),
+                   dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
+                   assert_autodiffed=True,
+                   sample_inputs_func=sample_inputs_clamp),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -1442,6 +1465,7 @@ op_db: List[OpInfo] = [
                                 dtypes=[torch.cfloat, torch.cdouble]),
                    )),
     UnaryUfuncInfo('neg',
+                   aliases=('negative', ),
                    ref=np.negative,
                    skip_bfloat16_grad=True,
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
@@ -1556,6 +1580,13 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_tensor_split,),
+    UnaryUfuncInfo('trunc',
+                   aliases=('fix', ),
+                   ref=np.trunc,
+                   dtypes=floating_types_and(torch.bfloat16),
+                   dtypesIfCPU=floating_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.float16),
+                   assert_autodiffed=True),
     UnaryUfuncInfo('exp2',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp2),
                    dtypes=all_types_and(torch.bool, torch.half),
@@ -2242,13 +2273,6 @@ def method_tests():
         ('view_as_real', (S, S, S), NO_ARGS, 'complex'),
         ('view_as_complex', (S, S, 2), NO_ARGS),
         ('complex', (S, S, S), ((S, S, S),), ''),
-        ('clamp', (S, S, S), (0, 1), '', (True,)),
-        ('clamp', (S, S, S), (None, 0.5), 'min', (True,)),
-        ('clamp', (S, S, S), (0.5, None), 'max', (True,)),
-        ('clamp', (), (0, 1), 'scalar', (True,)),
-        ('clamp', (), (None, 0.5), 'min_scalar', (True,)),
-        ('clamp', (), (0.5, None), 'max_scalar', (True,)),
-        ('clamp', (S, S), (), 'max_scalar_kwarg', (True,), (), (), ident, {'max': 1}),
         ('atan2', (S, S, S), ((S, S, S),)),
         ('atan2', (), ((),), 'scalar'),
         ('atan2', (S, S, S), ((S,),), 'broadcast_rhs'),

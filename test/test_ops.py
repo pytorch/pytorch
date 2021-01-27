@@ -371,10 +371,13 @@ class TestCommon(JitCommonTestCase):
         sample = samples[0]
 
         # Prepare data for test scripting
-        args = [f"t{i}" for i in range(len(sample.input))] + \
-               [f"s{i}" for i in range(len(sample.args))]
-        args_annot_kw = args + [f"{k}: {type(v).__name__} = {v}" for k, v in sample.kwargs.items()]
-        args_kw = args + [f"{k}={v}" for k, v in sample.kwargs.items()]
+        args = [f"t{i}" for i in range(len(sample.input))]
+        args_annot_kw = args + \
+            [f"s{i}: {type(v).__name__}" for i, v in enumerate(sample.args)] + \
+            [f"{k}: {type(v).__name__} = {v}" for k, v in sample.kwargs.items()]
+        args_kw = args + \
+            [f"s{i}" for i in range(len(sample.args))] + \
+            [f"{k}={v}" for k, v in sample.kwargs.items()]
 
         # Prepare data for test tracing
         sample_args_kwargs = ()
