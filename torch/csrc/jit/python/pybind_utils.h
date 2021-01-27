@@ -61,7 +61,10 @@ IValue toIValue(
 py::object toPyObject(IValue ivalue);
 
 // Wrap Python function to guard deref
-struct PythonFunctionGuard {
+// NB: Need VISIBILITY_HIDDEN for silencing compiler error,
+// 'torch::jit::PythonFunctionGuard' declared with greater visibility than the
+// type of its field 'torch::jit::PythonFunctionGuard::func_'
+struct VISIBILITY_HIDDEN PythonFunctionGuard {
   explicit PythonFunctionGuard(py::function func) : func_(std::move(func)) {}
 
   ~PythonFunctionGuard() {
