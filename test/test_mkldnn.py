@@ -17,6 +17,10 @@ import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryFileName, gradcheck, gradgradcheck
 
+# batched grad doesn't support mkldnn
+gradcheck = partial(gradcheck, check_batched_grad=False)
+gradgradcheck = partial(gradgradcheck, check_batched_grad=False)
+
 types = [torch.float, torch.bfloat16]
 
 # Comment the line below to find out the CI machines having MKL-DNN build disabled
@@ -107,10 +111,10 @@ class TestMkldnn(TestCase):
         # these numbers are just empirical results that seem to work.
         self.assertWarnsRegex(UserWarning,
                               'double precision floating point',
-                              lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2, check_batched_grad=False))
+                              lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2))
         self.assertWarnsRegex(UserWarning,
                               'double precision floating point',
-                              lambda: gradgradcheck(func, [root], atol=4e-2, rtol=1e-2, check_batched_grad=False))
+                              lambda: gradgradcheck(func, [root], atol=4e-2, rtol=1e-2))
 
     def test_autograd_from_mkldnn(self):
         # MKLDNN only supports float32
@@ -123,7 +127,7 @@ class TestMkldnn(TestCase):
         # these numbers are just empirical results that seem to work.
         self.assertWarnsRegex(UserWarning,
                               'double precision floating point',
-                              lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2, check_batched_grad=False))
+                              lambda: gradcheck(func, [root], atol=4e-2, rtol=1e-2))
 
     def test_detach(self):
         root = torch.randn(4, 5, dtype=torch.float32).to_mkldnn().requires_grad_()
