@@ -420,7 +420,7 @@ bool test_upsampling_nearest2d_vec() {
   __block std::vector<int64_t> size{1, 48, 24, 24};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
     auto X1 = torch::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-    auto Y1 = torch::native::upsample_nearest2d_cpu(
+    auto Y1 = at::native::upsample_nearest2d(
         X1,
         c10::optional<at::IntArrayRef>({}),
         c10::optional<at::ArrayRef<double>>({2, 2}));
