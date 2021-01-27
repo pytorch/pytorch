@@ -2344,9 +2344,6 @@ class RpcTest(RpcAgentTestFixture):
 
         def launched_rpc(events):
             expected_name = f"rpc_{RPCExecMode.ASYNC.value}#_rref_typeof_on_owner"
-            # print(f"expected_name {expected_name}")
-            # for e in events:
-            #     print(f"event name {e.name}")
             return any([e.name.startswith(expected_name) for e in events])
 
         dst = worker_name((self.rank + 1) % self.world_size)
@@ -2362,11 +2359,16 @@ class RpcTest(RpcAgentTestFixture):
         self.assertEqual(t, expected_type)
 
         futs = []
+
+        def verify(fut):
+            self.assertEqual(fut.value(), expected_type)
+
         with torch.autograd.profiler.profile() as p:
             for _ in range(10):
                 t = rref._get_type(blocking=blocking)
                 if not blocking:
                     futs.append(t)
+                    t.add_done_callback(verify)
                     t = t.wait()
                 self.assertEqual(t, expected_type)
 
@@ -2379,7 +2381,7 @@ class RpcTest(RpcAgentTestFixture):
         # Ensure we never launch another RPC, other than for the very
         # first call.
         self.assertFalse(launched_rpc(p.function_events))
-        # self.assertEqual(t, type(torch.ones(2)))
+        self.assertEqual(t, type(torch.ones(2)))
 
         rref = rpc.remote(dst, MyClass, args=(0,))
         rref_type = rref._get_type(blocking=blocking)
