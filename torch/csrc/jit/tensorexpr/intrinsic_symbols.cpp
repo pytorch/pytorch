@@ -126,7 +126,6 @@ __m256d Sleef_fmodd4(__m256d, __m256d);
 #endif // __cplusplus
 #endif // _MSC_VER
 
-
 namespace torch {
 namespace jit {
 namespace tensorexpr {
