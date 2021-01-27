@@ -5742,6 +5742,18 @@ else:
             with self.assertRaisesRegex(RuntimeError, "does not match input device"):
                 torch.cholesky_inverse(a, out=out)
 
+        # cholesky_inverse raises an error for invalid inputs on CPU
+        # for example if at least one diagonal element is zero
+        a = torch.randn(3, 3, device=device, dtype=dtype)
+        a[1, 1] = 0
+        if self.device_type == 'cpu':
+            with self.assertRaisesRegex(RuntimeError, r"cholesky_inverse: U\(2,2\) is zero, singular U\."):
+                torch.cholesky_inverse(a)
+        # cholesky_inverse on GPU does not raise an error for this case
+        elif self.device_type == 'cuda':
+            out = torch.cholesky_inverse(a)
+            self.assertTrue(out.isinf().any() or out.isnan().any())
+
     def _select_broadcastable_dims(self, dims_full=None):
         # select full dimensionality
         if dims_full is None:
