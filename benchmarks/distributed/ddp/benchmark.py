@@ -9,7 +9,6 @@
 #
 
 import argparse
-import io
 import itertools
 import json
 import os
