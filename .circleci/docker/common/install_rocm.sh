@@ -37,18 +37,19 @@ install_ubuntu() {
       DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENKERNELS}
     fi
 
-    # install hipMAGMA into /opt/rocm/magma
-    pushd /opt/rocm
+    # "install" hipMAGMA into /opt/rocm/magma by copying after build
     git clone https://bitbucket.org/icl/magma.git -b hipMAGMA
-    cd magma
+    pushd magma
     cp make.inc-examples/make.inc.hip-mkl-gcc make.inc
-    export PATH=${PATH}:/opt/rocm/bin
-    export MKLROOT=/opt/conda
-    export LD_LIBRARY_PATH=${MKLROOT}/lib
-    echo "LIBDIR += -L${MKLROOT}/lib" >> make.inc
+    echo 'LIBDIR += -L$(MKLROOT)/lib' >> make.inc
+    echo 'LIB += -Wl,--enable-new-dtags -Wl,--rpath,/opt/rocm/lib -Wl,--rpath,$(MKLROOT)/lib -Wl,--rpath,/opt/rocm/magma/lib' >> make.inc
+    echo 'DEVCCFLAGS += --amdgpu-target=gfx803 --amdgpu-target=gfx900 --amdgpu-target=gfx906 --amdgpu-target=gfx908' >> make.inc
+    export PATH="${PATH}:/opt/rocm/bin"
     make -f make.gen.hipMAGMA -j $(nproc)
-    make lib/libmagma.so -j $(nproc)
+    make lib/libmagma.so -j $(nproc) MKLROOT=/opt/conda
+    make testing/testing_dgemm -j $(nproc) MKLROOT=/opt/conda
     popd
+    mv magma /opt/rocm
 
     # Cleanup
     apt-get autoclean && apt-get clean
