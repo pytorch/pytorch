@@ -255,6 +255,10 @@ class TORCH_API PytorchLLVMJITImpl {
     return assertSuccess(LLJ->lookup(Name));
   }
 
+  bool hasSymbol(const std::string& Name) {
+    return (bool)LLJ->lookup(Name);
+  }
+
   TargetMachine& getTargetMachine() {
     return *TM;
   }
@@ -330,6 +334,11 @@ class TORCH_API PytorchLLVMJITImpl {
     return CompileLayer.findSymbol(MangledNameStream.str(), true);
   }
 
+  bool hasSymbol(const std::string& Name) {
+    MangleAndInterner mangle(ES, DL);
+    return (bool)ES.lookup({mangle(Name)});
+  }
+
   JITTargetAddress getSymbolAddress(const std::string Name) {
     return assertSuccess(findSymbol(Name).getAddress());
   }
@@ -360,6 +369,10 @@ void PytorchLLVMJIT::addModule(
 
 JITSymbol PytorchLLVMJIT::findSymbol(const std::string Name) {
   return impl_->findSymbol(std::move(Name));
+}
+
+bool PytorchLLVMJIT::hasSymbol(const std::string& Name) {
+  return impl_->hasSymbol(Name);
 }
 
 TargetMachine& PytorchLLVMJIT::getTargetMachine() {

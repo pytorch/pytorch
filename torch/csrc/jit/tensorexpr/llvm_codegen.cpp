@@ -1325,18 +1325,17 @@ LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(
     llvm::Type* basetype,
     Arity arity,
     int lanes) {
-  std::string name;
+  std::string name = "Sleef_" + basename + std::to_string(lanes);
   llvm::Type* type;
   bool use_simd;
-#if defined(__AVX__) && !defined(_MSC_VER)
-  name = "Sleef_" + basename + std::to_string(lanes);
-  type = llvm::VectorType::get(basetype, ElementCount(lanes));
-  use_simd = true;
-#else
-  name = basename;
-  type = basetype;
-  use_simd = false;
-#endif
+  if (jit_->hasSymbol(name)) {
+    type = llvm::VectorType::get(basetype, ElementCount(lanes));
+    use_simd = true;
+  } else {
+    name = basename;
+    type = basetype;
+    use_simd = false;
+  }
   llvm::FunctionType* fntype;
   switch (arity) {
     case Unary:
