@@ -551,12 +551,13 @@ class CudaKernelGenerator : private kir::IrVisitor {
       const kir::ReductionOp* rop,
       const ParallelTypeBitmap& thread_pred) {
     const auto par_domains = rop->getParallelReductionDomains();
-    const std::array<ParallelType, 6> ptypes{ParallelType::BIDx,
-                                             ParallelType::BIDy,
-                                             ParallelType::BIDz,
-                                             ParallelType::TIDx,
-                                             ParallelType::TIDy,
-                                             ParallelType::TIDz};
+    const std::array<ParallelType, 6> ptypes{
+        ParallelType::BIDx,
+        ParallelType::BIDy,
+        ParallelType::BIDz,
+        ParallelType::TIDx,
+        ParallelType::TIDy,
+        ParallelType::TIDz};
     std::stringstream flags;
     for (const ParallelType pt : ptypes) {
       const bool parallel_reduction = par_domains.find(pt) != par_domains.end();

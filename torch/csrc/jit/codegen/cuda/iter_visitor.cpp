@@ -54,8 +54,8 @@ std::vector<Statement*> IterVisitor::next(Val* v) {
 
 std::vector<Statement*> IterVisitor::next(Expr* expr) {
   FusionGuard::getCurFusion()->assertInFusion(expr, "Cannot traverse expr, ");
-  std::vector<Statement*> next_stmts{expr->inputs().begin(),
-                                     expr->inputs().end()};
+  std::vector<Statement*> next_stmts{
+      expr->inputs().begin(), expr->inputs().end()};
   return next_stmts;
 }
 

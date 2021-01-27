@@ -6,12 +6,13 @@ namespace fuser {
 namespace cuda {
 
 const std::unordered_map<ParallelType, int, TypeHash>
-    ParallelTypeBitmap::pt_to_offset_{{ParallelType::BIDx, 0},
-                                      {ParallelType::BIDy, 1},
-                                      {ParallelType::BIDz, 2},
-                                      {ParallelType::TIDx, 3},
-                                      {ParallelType::TIDy, 4},
-                                      {ParallelType::TIDz, 5}};
+    ParallelTypeBitmap::pt_to_offset_{
+        {ParallelType::BIDx, 0},
+        {ParallelType::BIDy, 1},
+        {ParallelType::BIDz, 2},
+        {ParallelType::TIDx, 3},
+        {ParallelType::TIDy, 4},
+        {ParallelType::TIDz, 5}};
 
 const std::unordered_map<int, ParallelType> ParallelTypeBitmap::offset_to_pt_ =
     {{0, ParallelType::BIDx},

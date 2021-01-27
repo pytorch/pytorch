@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
+#include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 
@@ -91,7 +91,11 @@ class KernelIrScanner : private kir::IrVisitor {
   void visit(const kir::GridReduction* grid_reduction) final {
     ++summary_.number_of_grid_reductions;
 
-    const auto fuser_tv = grid_reduction->reduction_op()->out()->as<kir::TensorIndex>()->view()->fuserTv();
+    const auto fuser_tv = grid_reduction->reduction_op()
+                              ->out()
+                              ->as<kir::TensorIndex>()
+                              ->view()
+                              ->fuserTv();
     for (size_t i = 0; i < fuser_tv->nDims(); ++i) {
       const auto id = fuser_tv->getComputeAtAxis(i).first;
       summary_.has_grid_reduction_in_loop =

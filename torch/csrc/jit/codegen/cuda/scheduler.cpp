@@ -1078,8 +1078,9 @@ void organizeAxes(
   const size_t kInnerMostAxis = first_reduction_tv->domain()->nDims() - 1;
   if (merged_reduction_axis != int(kInnerMostAxis)) {
     for (auto tv : all_tv) {
-      tv->reorder({{merged_reduction_axis, kInnerMostAxis},
-                   {kInnerMostAxis, merged_reduction_axis}});
+      tv->reorder(
+          {{merged_reduction_axis, kInnerMostAxis},
+           {kInnerMostAxis, merged_reduction_axis}});
     }
   }
 }
