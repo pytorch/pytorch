@@ -80,6 +80,9 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case AnyEnumType::Kind:
         // no op, there is nothing to tag
         break;
+      // TODO(@anjali411): Implement serialization/deserialization for complex
+      // numbers
+      case ComplexDoubleType::Kind:
       case EnumType::Kind:
         // TODO(gmagogsfm): Implement serialization/deserialization of Enum.
         AT_ASSERT(false);
@@ -432,7 +435,8 @@ PickleOpCode Unpickler::readInstruction() {
         tensor = at::empty({0}, options).set_(storage);
       }
 
-      if (device.type() == DeviceType::CUDA) {
+      if (device.type() == DeviceType::CUDA ||
+          device.type() == DeviceType::XPU) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(

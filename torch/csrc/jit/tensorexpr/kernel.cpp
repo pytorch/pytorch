@@ -1052,7 +1052,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::relu: {
       return computeOneOperand("aten_relu", v, [](const ExprHandle& a) {
         auto zero = Cast::make(a.dtype(), 0);
-        return ifThenElse(CompareSelect::make(a, zero, kLT), zero, a);
+        return CompareSelect::make(a, zero, zero, a, kLT);
       });
     } break;
 
@@ -1716,7 +1716,7 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
       break;
     }
     case TypeKind::FloatType: {
-      VarHandle v("v" + input->debugName(), kFloat);
+      VarHandle v("v" + input->debugName(), kDouble);
       kernelArgs_.emplace_back(v);
       scalars_.emplace(input->unique(), v);
       break;
@@ -1728,7 +1728,7 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
       break;
     }
     case TypeKind::IntType: {
-      VarHandle v("v" + input->debugName(), kInt);
+      VarHandle v("v" + input->debugName(), kLong);
       kernelArgs_.emplace_back(v);
       scalars_.emplace(input->unique(), v);
       break;
@@ -2196,9 +2196,9 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
   for (size_t i = 0, e = inputs.size(); i < e; i++) {
     auto const& input = inputs[i];
     if (input.isInt()) {
-      runArgs.emplace_back((int32_t)input.toInt());
+      runArgs.emplace_back(input.toInt());
     } else if (input.isDouble()) {
-      runArgs.emplace_back((float)input.toDouble());
+      runArgs.emplace_back(input.toDouble());
     } else if (input.isTensor()) {
       runArgs.emplace_back(input.toTensor().data_ptr());
     }
