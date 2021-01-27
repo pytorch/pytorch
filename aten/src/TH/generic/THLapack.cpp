@@ -41,20 +41,6 @@ void THLapack_(geqrf)(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_
 #endif
 }
 
-/* Build Q from output of geqrf */
-void THLapack_(orgqr)(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info)
-{
-#ifdef  USE_LAPACK
-#if defined(TH_REAL_IS_DOUBLE)
-  dorgqr_(&m, &n, &k, a, &lda, tau, work, &lwork, info);
-#else
-  sorgqr_(&m, &n, &k, a, &lda, tau, work, &lwork, info);
-#endif
-#else
-  THError("orgqr: Lapack library not found in compile time\n");
-#endif
-}
-
 /* Multiply Q with a matrix using the output of geqrf */
 void THLapack_(ormqr)(char side, char trans, int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *c, int ldc, scalar_t *work, int lwork, int *info)
 {

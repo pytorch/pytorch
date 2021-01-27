@@ -40,8 +40,6 @@ std::tuple<Tensor &,Tensor &> _th_gels_out(Tensor & res1, Tensor & res2, const T
 std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A);
 std::tuple<Tensor &,Tensor &> _th_geqrf_out(Tensor & res1, Tensor & res2, const Tensor & self);
 std::tuple<Tensor,Tensor> _th_geqrf(const Tensor & self);
-Tensor & _th_orgqr_out(Tensor & result, const Tensor & self, const Tensor & input2);
-Tensor _th_orgqr(const Tensor & self, const Tensor & input2);
 Tensor & _th_ormqr_out(Tensor & result, const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose);
 Tensor _th_ormqr(const Tensor & self, const Tensor & input2, const Tensor & input3, bool left, bool transpose);
 
