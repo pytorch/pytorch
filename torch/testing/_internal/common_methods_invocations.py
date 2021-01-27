@@ -1050,17 +1050,17 @@ foreach_pointwise_op_db: List[OpInfo] = [
                          method=torch._foreach_addcmul,
                          inplace=torch._foreach_addcmul_,
                          ref=torch.addcmul,
-                         dtypes=all_types(),
-                         dtypesIfCPU=all_types(),
-                         dtypesIfCUDA=all_types()),
+                         dtypes=floating_and_complex_types(),
+                         dtypesIfCPU=floating_and_complex_types(),
+                         dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.half)),
 
     ForeachFuncInfo('_foreach_addcdiv',
                          method=torch._foreach_addcdiv,
                          inplace=torch._foreach_addcdiv_,
                          ref=torch.addcdiv,
-                         dtypes=floating_types(),
-                         dtypesIfCPU=floating_types(),
-                         dtypesIfCUDA=floating_types()),
+                         dtypes=floating_and_complex_types(),
+                         dtypesIfCPU=floating_and_complex_types(),
+                         dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.half)),
 ]
 
 # Foreach min/max ops
