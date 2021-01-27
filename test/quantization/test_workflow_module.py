@@ -1326,12 +1326,14 @@ class TestFakeQuantize(TestCase):
                         dX_expected, dX_actual, X_curr, scale_curr, zero_point_curr, dout, n_bits))
                 self.assertTrue(
                     torch.allclose(dScale_expected * grad_factor, dScale_actual, rtol=tolerance, atol=tolerance),
-                    "Expected dScale={} to match scale.grad={}, X={}, s={}, z={}, dout={}, n_bits={}".format(dScale_expected * grad_factor, dScale_actual,
-                    X_curr, scale_curr, zero_point_curr, dout, n_bits))
+                    "Expected dScale={} to match scale.grad={}, X={}, s={}, z={}, dout={}, n_bits={}".format(
+                        dScale_expected * grad_factor, dScale_actual,
+                        X_curr, scale_curr, zero_point_curr, dout, n_bits))
                 self.assertTrue(
                     torch.allclose(dZeroPoint_expected * grad_factor, dZeroPoint_actual, rtol=tolerance, atol=tolerance),
-                    "Expected dZeroPoint={} to match zero_point.grad={}, X={}, s={}, z={}, dout={}, n_bits={}".format(dZeroPoint_expected * grad_factor, dZeroPoint_actual,
-                    X_curr, scale_curr, zero_point_curr, dout, n_bits))
+                    "Expected dZeroPoint={} to match zero_point.grad={}, X={}, s={}, z={}, dout={}, n_bits={}".format(
+                        dZeroPoint_expected * grad_factor, dZeroPoint_actual,
+                        X_curr, scale_curr, zero_point_curr, dout, n_bits))
                 X_curr.grad.data.zero_()
                 scale_curr.grad.data.zero_()
                 zero_point_curr.grad.data.zero_()
@@ -1359,6 +1361,64 @@ class TestFakeQuantize(TestCase):
         zero_point_base = torch.normal(mean=0, std=128, size=(channel_size,))
         self._test_learnable_backward_per_channel(
             X_base, 'cuda', scale_base, zero_point_base, axis)
+
+    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    def test_backward_per_channel_cuda_debug(self):
+        X = torch.tensor(
+            [
+                [0.9372, -0.6003, 0.7599, 0.3244, -0.5678],
+                [-0.7616, -0.2766, -0.9666, 0.7006, 0.9239],
+            ]
+        ).to('cuda')
+        s = torch.tensor([6.8104e-01, 1.0000e-04]).to('cuda')
+        z = torch.tensor([15, 0.], dtype=torch.int64).to('cuda')
+        dout = torch.tensor(
+            [
+                [0.7291, 0.4305, 0.2764, 0.3478, 0.5510],
+                [0.2707, 0.6633, 0.2541, 0.9235, 0.5398],
+            ]
+        ).to('cuda')
+        n_bits = 4
+        X.requires_grad_()
+        Y_prime = torch.fake_quantize_per_channel_affine(X, s, z, 0, 0, 15)
+        Y_prime.backward(dout)
+        Xgrad_ref = torch.tensor(
+            [
+                [0.0000, 0.4305, 0.0000, 0.3478, 0.5510],
+                [0.0000, 0.0000, 0.0000, 0.0000, 0.0000]
+            ]
+        ).to('cuda')
+        print(X.grad)
+        self.assertTrue(torch.allclose(X.grad, Xgrad_ref), "X.grad={}".format(X.grad))
+
+    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    def test_learnable_backward_per_channel_cuda_debug(self):
+        X = torch.tensor(
+            [
+                [0.9372, -0.6003, 0.7599, 0.3244, -0.5678],
+                [-0.7616, -0.2766, -0.9666, 0.7006, 0.9239],
+            ]
+        ).to('cuda')
+        s = torch.tensor([6.8104e-01, 1.0000e-04]).to('cuda')
+        z = torch.tensor([15, 0.0]).to('cuda')
+        dout = torch.tensor(
+            [
+                [0.7291, 0.4305, 0.2764, 0.3478, 0.5510],
+                [0.2707, 0.6633, 0.2541, 0.9235, 0.5398],
+            ]
+        ).to('cuda')
+        n_bits = 4
+        X.requires_grad_()
+        Y_prime = torch._fake_quantize_learnable_per_channel_affine(X, s, z, 0, 0, 15, 1.0)
+        Y_prime.backward(dout)
+        Xgrad_ref = torch.tensor(
+            [
+                [0.0000, 0.4305, 0.0000, 0.3478, 0.5510],
+                [0.0000, 0.0000, 0.0000, 0.0000, 0.0000]
+            ]
+        ).to('cuda')
+        print(X.grad)
+        self.assertTrue(torch.allclose(X.grad, Xgrad_ref), "X.grad={}".format(X.grad))
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),

@@ -1,8 +1,6 @@
 # type: ignore
 import torch
-import torch.nn as nn
 from torch.nn.parameter import Parameter
-from .observer import _with_args
 
 
 class _LearnableFakeQuantize(torch.quantization.FakeQuantizeBase):
