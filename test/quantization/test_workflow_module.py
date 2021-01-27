@@ -13,6 +13,7 @@ from torch.quantization import (
     FixedQParamsFakeQuantize,
     default_debug_qconfig,
     default_observer,
+    default_histogram_observer,
     default_per_channel_weight_observer,
     default_affine_fixed_qparams_fake_quant,
     get_observer_dict,
@@ -695,6 +696,29 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         buf.seek(0)
         loaded = torch.jit.load(buf)
         self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
+
+class TestHistogramObserver(QuantizationTestCase):
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+           qscheme=st.sampled_from(
+               (torch.per_tensor_affine, torch.per_tensor_symmetric))
+           )
+    def test_observer_scriptable(self, qdtype, qscheme):
+        ob_list = [
+            HistogramObserver(dtype=qdtype, qscheme=qscheme),
+            default_histogram_observer()
+        ]
+        for obs in ob_list:
+            scripted = torch.jit.script(obs)
+
+            x = torch.rand(3, 4)
+            obs(x)
+            scripted(x)
+            self.assertTrue(torch.equal(obs.histogram, scripted.histogram))
+            buf = io.BytesIO()
+            torch.jit.save(scripted, buf)
+            buf.seek(0)
+            loaded = torch.jit.load(buf)
+            self.assertTrue(torch.equal(obs.histogram, scripted.histogram))
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
