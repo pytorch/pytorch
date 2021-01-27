@@ -2144,10 +2144,6 @@ def method_tests():
         ('sgn', (), NO_ARGS, 'scalar'),
         ('trunc', (S, S, S), NO_ARGS, '', (True,)),
         ('trunc', (), NO_ARGS, 'scalar', (True,)),
-        ('floor', (S, S, S), NO_ARGS, '', (True,)),
-        ('floor', (), NO_ARGS, 'scalar', (True,)),
-        ('ceil', (S, S, S), NO_ARGS, '', (True,)),
-        ('ceil', (), NO_ARGS, 'scalar', (True,)),
         ('rad2deg', (S, S, S), NO_ARGS),
         ('deg2rad', (S, S, S), NO_ARGS),
         # Removing the 'rsqrt' entries leads to failure in
