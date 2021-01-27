@@ -883,9 +883,7 @@ Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
   TORCH_CHECK(result.device() == input.device(),
     "result device ", result.device(), " does not match input device ", input.device());
 
-  // Single matrix MAGMA routine requires 'infos' to reside in CPU memory,
-  // therefore we create 'infos' only on CPU for now.
-  // This should be changed once batched version for CUDA is implemented.
+  // MAGMA requires 'infos' to reside in CPU memory, therefore we create 'infos' only on CPU for now.
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt).device(kCPU));
 
   // if result is not empty and not in batched column major format we have to allocate a temporary tensor
