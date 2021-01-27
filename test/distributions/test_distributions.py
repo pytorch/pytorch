@@ -1511,7 +1511,7 @@ class TestDistributions(TestCase):
     def test_halfcauchy(self):
         scale = torch.ones(5, 5, requires_grad=True)
         scale_1d = torch.ones(1, requires_grad=True)
-        self.assertTrue(is_all_nan(HalfCauchy(scale_1d).mean))
+        self.assertTrue(torch.isinf(HalfCauchy(scale_1d).mean).all())
         self.assertEqual(HalfCauchy(scale_1d).variance, inf)
         self.assertEqual(HalfCauchy(scale).sample().size(), (5, 5))
         self.assertEqual(HalfCauchy(scale).sample((7,)).size(), (7, 5, 5))
