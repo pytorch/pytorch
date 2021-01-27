@@ -224,8 +224,8 @@ class TestBundledInputs(TestCase):
             torch.utils.bundled_inputs.augment_many_model_functions_with_bundled_inputs(
                 nn,
                 inputs={
-                    mm.forward : samples,
-                    mm.foo : samples,
+                    nn.forward : samples,
+                    nn.foo : samples,
                 },
             )
         except Exception:
@@ -238,9 +238,9 @@ class TestBundledInputs(TestCase):
 
         # Test Failure Case neither defined
         try:
-            nn = torch.jit.script(MultipleMethodModel())
+            mm = torch.jit.script(MultipleMethodModel())
             torch.utils.bundled_inputs.augment_many_model_functions_with_bundled_inputs(
-                nn,
+                mm,
                 inputs={
                     mm.forward : None,
                     mm.foo : samples,
