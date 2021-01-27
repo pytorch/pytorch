@@ -95,11 +95,11 @@ static void logit_nnc_sleef(benchmark::State& state) {
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   auto clamp = 1e-6f;
-	tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
     auto A_elem = [&]() {
-			auto elem = A.load(i);
-			auto min = FloatImm::make(clamp);
-			auto max = FloatImm::make(1.0f - clamp);
+      auto elem = A.load(i);
+      auto min = FloatImm::make(clamp);
+      auto max = FloatImm::make(1.0f - clamp);
       elem = CompareSelect::make(elem, min, min, elem, kLT);
       return CompareSelect::make(elem, max, max, elem, kGT);
     }();
@@ -132,11 +132,11 @@ static void logit_nnc_fast(benchmark::State& state) {
   auto N = VarHandle("N", kInt);
   Placeholder A("A", kFloat, {N});
   auto clamp = 1e-6f;
-	tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
+  tensorexpr::Tensor* B = Compute("B", {N}, [&](const VarHandle& i) {
     auto A_elem = [&]() {
-			auto elem = A.load(i);
-			auto min = FloatImm::make(clamp);
-			auto max = FloatImm::make(1.0f - clamp);
+      auto elem = A.load(i);
+      auto min = FloatImm::make(clamp);
+      auto max = FloatImm::make(1.0f - clamp);
       elem = CompareSelect::make(elem, min, min, elem, kLT);
       return CompareSelect::make(elem, max, max, elem, kGT);
     }();
@@ -249,7 +249,7 @@ static void tanh_caffe2(benchmark::State& state) {
   at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
   at::Tensor B_t = torch::randn({state.range(0)});
   at::Tensor B_ref = torch::randn({state.range(0)});
-  
+
   auto N = state.range(0);
   auto X = A_t.data_ptr<float>();
   auto Y = B_t.data_ptr<float>();
