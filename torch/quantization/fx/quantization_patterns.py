@@ -267,7 +267,7 @@ class ConvRelu(QuantizeHandler):
                     'call_function', torch.nn.functional.conv2d, args, kwargs)
                 root_module = quantizer.modules['']
                 return quantize_node(
-                    root_module, quantizer.quantized_graph, conv_out, quantizer.activation_post_process_map[self.conv_node.name])
+                    quantizer, conv_out, quantizer.activation_post_process_map[self.conv_node.name], self.conv_node, is_input=False)
             else:
                 assert len(self.conv_node.args) == 7, \
                     'only conv2d calls with all arguments specified is support right now in debug=False option'
@@ -393,11 +393,13 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     # quantize output for statically quantized linear op
                     root_module = quantizer.modules['']
                     act_post_process_name = self.relu_node.name if self.relu_node else self.linear_node.name
+                    act_post_process_node = self.relu_node if self.relu_node else self.linear_node
                     return quantize_node(
-                        root_module,
-                        quantizer.quantized_graph,
+                        quantizer,
                         op_out,
-                        quantizer.activation_post_process_map[act_post_process_name])
+                        quantizer.activation_post_process_map[act_post_process_name],
+                        act_post_process_node,
+                        is_input=False)
                 else:
                     # output for dynamically quantized linear op is not quantized
                     return op_out
@@ -746,9 +748,8 @@ class DefaultQuantizeHandler(QuantizeHandler):
         assert self.all_node_args
         root_module = quantizer.modules['']
         return quantize_node(
-            root_module,
-            quantizer.quantized_graph,
-            node, quantizer.activation_post_process_map[node.name])
+            quantizer,
+            node, quantizer.activation_post_process_map[node.name], node, is_input=False)
 
 class CustomModuleQuantizeHandler(QuantizeHandler):
     def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
