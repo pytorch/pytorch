@@ -2742,6 +2742,7 @@ class TestONNXRuntime(unittest.TestCase):
                 self.register_buffer("weight", torch.ones(5))
 
             def forward(self, x):
+                # shape is of rank 0
                 shape = self.weight.shape[0]
                 m = 5 - shape
                 return x.clamp(min=m)
@@ -2755,6 +2756,7 @@ class TestONNXRuntime(unittest.TestCase):
                 self.register_buffer("weight", torch.ones(2))
 
             def forward(self, x):
+                # shape is of rank 0
                 shape = self.weight.shape[0]
                 pad = [1, shape, shape, shape]
                 zero_pad = torch.nn.ZeroPad2d(pad)
