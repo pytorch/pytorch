@@ -6,8 +6,6 @@ import torch.nn.quantized as nnq
 from torch import Tensor
 from typing import Optional, Tuple
 
-import warnings
-
 class MultiheadAttention(nn.MultiheadAttention):
     _FLOAT_MODULE = nn.MultiheadAttention
 
@@ -321,65 +319,15 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         q = self.q_scaling_product.mul_scalar(q, scaling)
 
-        if attn_mask is not None:
-            assert attn_mask.dtype == torch.float32 or attn_mask.dtype == torch.float64 or \
-                attn_mask.dtype == torch.float16 or attn_mask.dtype == torch.uint8 or attn_mask.dtype == torch.bool, \
-                'Only float, byte, and bool types are supported for attn_mask, not {}'.format(attn_mask.dtype)
-            if attn_mask.dtype == torch.uint8:
-                warnings.warn("Byte tensor for attn_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")
-                attn_mask = attn_mask.to(torch.bool)
-
-            if attn_mask.dim() == 2:
-                attn_mask = attn_mask.unsqueeze(0)
-                if list(attn_mask.size()) != [1, query.size(0), key.size(0)]:
-                    raise RuntimeError('The size of the 2D attn_mask is not correct.')
-            elif attn_mask.dim() == 3:
-                if list(attn_mask.size()) != [bsz * self.num_heads, query.size(0), key.size(0)]:
-                    raise RuntimeError('The size of the 3D attn_mask is not correct.')
-            else:
-                raise RuntimeError("attn_mask's dimension {} is not supported".format(attn_mask.dim()))
-            # attn_mask's dim is 3 now.
-
-        # convert ByteTensor key_padding_mask to bool
-        if key_padding_mask is not None and key_padding_mask.dtype == torch.uint8:
-            warnings.warn("Byte tensor for key_padding_mask in nn.MultiheadAttention is deprecated. Use bool tensor instead.")
-            key_padding_mask = key_padding_mask.to(torch.bool)
-        if self.bias_k is not None and self.bias_v is not None:
-            if static_k is None and static_v is None:
-                k = torch.cat([k, self.bias_k.repeat(1, bsz, 1)])
-                v = torch.cat([v, self.bias_v.repeat(1, bsz, 1)])
-                if attn_mask is not None:
-                    attn_mask = nnF.pad(attn_mask, (0, 1))
-                if key_padding_mask is not None:
-                    key_padding_mask = nnF.pad(key_padding_mask, (0, 1))
-            else:
-                assert static_k is None, "bias cannot be added to static key."
-                assert static_v is None, "bias cannot be added to static value."
-        else:
-            assert self.bias_k is None
-            assert self.bias_v is None
-
-        q = q.contiguous().view(tgt_len, bsz * self.num_heads, head_dim).transpose(0, 1)
-        if k is not None:
-            k = k.contiguous().view(-1, bsz * self.num_heads, head_dim).transpose(0, 1)
-        if v is not None:
-            v = v.contiguous().view(-1, bsz * self.num_heads, head_dim).transpose(0, 1)
-
-        if static_k is not None:
-            assert static_k.size(0) == bsz * self.num_heads
-            assert static_k.size(2) == head_dim
-            k = static_k
-
-        if static_v is not None:
-            assert static_v.size(0) == bsz * self.num_heads
-            assert static_v.size(2) == head_dim
-            v = static_v
-
+        q, k, v, attn_mask, key_padding_mask = nnF._multi_head_attention_forward_checks(
+            query, key, value,
+            q, k, v,
+            self.bias_k, self.bias_v,
+            static_k, static_v,
+            self.num_heads, self.embed_dim,
+            attn_mask, key_padding_mask
+        )
         src_len = k.size(1)
-
-        if key_padding_mask is not None:
-            assert key_padding_mask.size(0) == bsz
-            assert key_padding_mask.size(1) == src_len
 
         if self.add_zero_attn:
             src_len += 1
@@ -401,30 +349,12 @@ class MultiheadAttention(nn.MultiheadAttention):
         q = self.dequant_q(q)
         k = self.dequant_k(k)
         v = self.dequant_v(v)
-        attn_output_weights = torch.bmm(q, k.transpose(1, 2))
-        assert list(attn_output_weights.size()) == [bsz * self.num_heads, tgt_len, src_len]
 
-        if attn_mask is not None:
-            if attn_mask.dtype == torch.bool:
-                attn_output_weights.masked_fill_(attn_mask, float('-inf'))
-            else:
-                attn_output_weights += attn_mask
-
-        if key_padding_mask is not None:
-            attn_output_weights = attn_output_weights.view(bsz, self.num_heads, tgt_len, src_len)
-            attn_output_weights = attn_output_weights.masked_fill(
-                key_padding_mask.unsqueeze(1).unsqueeze(2),
-                float('-inf'),
-            )
-            attn_output_weights = attn_output_weights.view(bsz * self.num_heads, tgt_len, src_len)
-
-        attn_output_weights = nnF.softmax(
-            attn_output_weights, dim=-1)
-        attn_output_weights = nnF.dropout(attn_output_weights, p=self.dropout, training=self.training)
-
-        attn_output = torch.bmm(attn_output_weights, v)
-        assert list(attn_output.size()) == [bsz * self.num_heads, tgt_len, head_dim]
-        attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bsz, self.embed_dim)
+        attn_output, attn_output_weights = nnF._multi_head_attention_forward_compute_outputs(
+            query.size(1), self.num_heads, self.embed_dim, tgt_len, src_len,
+            q, k, v,
+            attn_mask, key_padding_mask,
+            self.dropout, self.training)
 
         # Reentering the quantized zone
         attn_output = self.quant_attn_output(attn_output)
