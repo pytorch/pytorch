@@ -544,10 +544,7 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
     return body;
   }
 
-  const Expr* initializer = t->initializer();
-  if (initializer) {
-    buf_initializers_[t->buf()] = initializer;
-  }
+  const Expr* init_expr = t->buf()->initializer();
 
   std::vector<const Expr*> indices(t->args().begin(), t->args().end());
 
@@ -561,8 +558,8 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
           t->reduce_dim(dim_index),
           body);
     }
-    if (initializer) {
-      Store* init = new Store(t->buf(), indices, initializer, new IntImm(1));
+    if (init_expr) {
+      Store* init = new Store(t->buf(), indices, init_expr, new IntImm(1));
       body = new Block({init, body});
     }
   }
@@ -2352,8 +2349,9 @@ void LoopNest::rfactor(
   }
 
   std::vector<const Expr*> new_dims = {};
-  Buf* tmp_buf =
-      new Buf(new Var("tmp_buf", kHandle), new_dims, reduce_op->dtype());
+  const Expr* init = reduce_op->accumulator()->initializer();
+  TORCH_INTERNAL_ASSERT(init);
+  Buf* tmp_buf = new Buf("tmp_buf", new_dims, reduce_op->dtype(), init);
 
   auto old_acc = reduce_op->accumulator();
   auto new_inner = reduce_op->reduce_args();
@@ -2425,26 +2423,17 @@ void LoopNest::rfactor(
     throw std::runtime_error("TODO: enable non-root insertion points");
   }
 
-  // From this point forward any errors cannot be handled silently.
-  auto init_it = buf_initializers_.find(reduce_op->accumulator());
-  if (init_it != buf_initializers_.end()) {
-    buf_initializers_[tmp_buf] = init_it->second;
-    Stmt* init_stmt =
-        new Store(tmp_buf, new_outer, init_it->second, new IntImm(1));
+  Stmt* init_stmt = new Store(tmp_buf, new_outer, init, new IntImm(1));
 
-    // Wrap it in any loops lower than the insertion point of the new reduction.
-    for (auto* ol : output_loops) {
-      init_stmt = ol->cloneWithNewBody(init_stmt);
-    }
+  // Wrap it in any loops lower than the insertion point of the new reduction.
+  for (auto* ol : output_loops) {
+    init_stmt = ol->cloneWithNewBody(init_stmt);
+  }
 
-    if (output_contains_target) {
-      parent_block->insert_stmt_before(init_stmt, new_root_for);
-    } else {
-      new_root_for->body()->prepend_stmt(init_stmt);
-    }
+  if (output_contains_target) {
+    parent_block->insert_stmt_before(init_stmt, new_root_for);
   } else {
-    // We may support this but not possible now.
-    throw std::runtime_error("can't rfactor reduction with no initializer\n");
+    new_root_for->body()->prepend_stmt(init_stmt);
   }
 
   auto second_buf = dynamic_cast<const Buf*>(second_reduce->accumulator());
