@@ -174,7 +174,7 @@ class TestMkldnn(TestCase):
             if not train:
                 mkldnn_conv = mkldnn_utils.to_mkldnn(copy.deepcopy(conv))
             elif train and dim != 1:
-                #TODO: enable conv1d training.
+                # TODO: enable conv1d training.
                 x1.requires_grad_()
                 x2.requires_grad_()
                 mkldnn_conv = copy.deepcopy(conv)
