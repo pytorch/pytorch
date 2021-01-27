@@ -2369,6 +2369,8 @@ class RpcTest(RpcAgentTestFixture):
                 if not blocking:
                     futs.append(t)
                     t.add_done_callback(verify)
+                    t = t.wait()
+                self.assertEqual(t, expected_type)
 
         if not blocking:
             # Note that cached calls with blocking=False all return the same
