@@ -785,7 +785,6 @@ class ForeachFuncInfo(OpInfo):
                  dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                  dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                  dtypesIfROCM=None,
-                 safe_casts_outputs=True,
                  sample_inputs_func=sample_inputs_foreach,
                  **kwargs):
         super(ForeachFuncInfo, self).__init__(name,
@@ -793,7 +792,6 @@ class ForeachFuncInfo(OpInfo):
                                               dtypesIfCPU=dtypesIfCPU,
                                               dtypesIfCUDA=dtypesIfCUDA,
                                               dtypesIfROCM=dtypesIfROCM,
-                                              safe_casts_outputs=safe_casts_outputs,
                                               sample_inputs_func=sample_inputs_func,
                                               **kwargs)
         self.method_variant = method
@@ -813,7 +811,6 @@ class ForeachBinaryFuncInfo(OpInfo):
                  dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                  dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                  dtypesIfROCM=None,
-                 safe_casts_outputs=False,
                  sample_inputs_func=sample_inputs_foreach,
                  supports_alpha_param=False,
                  **kwargs):
@@ -822,7 +819,6 @@ class ForeachBinaryFuncInfo(OpInfo):
                                                     dtypesIfCPU=dtypesIfCPU,
                                                     dtypesIfCUDA=dtypesIfCUDA,
                                                     dtypesIfROCM=dtypesIfROCM,
-                                                    safe_casts_outputs=safe_casts_outputs,
                                                     sample_inputs_func=sample_inputs_func,
                                                     **kwargs)
         self.method_variant = method
@@ -1118,8 +1114,7 @@ foreach_binary_op_db: List[OpInfo] = [
                           method=torch._foreach_div,
                           inplace=torch._foreach_div_,
                           ref=torch.div,
-                          ref_name='div',
-                          safe_casts_outputs=True),
+                          ref_name='div'),
 ]
 
 # Foreach unary ops
@@ -1128,9 +1123,7 @@ foreach_unary_op_db: List[OpInfo] = [
                     method=torch._foreach_neg,
                     inplace=torch._foreach_neg_,
                     ref=torch.neg,
-                    ref_name="neg",
-                    sample_inputs_func=sample_inputs_foreach,
-                    safe_casts_outputs=False),
+                    ref_name="neg"),
 
     ForeachFuncInfo('_foreach_sqrt',
                     method=torch._foreach_sqrt,

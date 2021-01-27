@@ -300,6 +300,7 @@ class TestForeach(TestCase):
                 foreach_exception = False
                 torch_exception = False
                 method = op.get_method()
+                inplace = op.get_inplace()
                 tensors = op.sample_inputs(device, dtype, N)
                 tensors1 = op.sample_inputs(device, dtype, N)
                 tensors2 = op.sample_inputs(device, dtype, N)
@@ -329,53 +330,15 @@ class TestForeach(TestCase):
 
                 self.assertEqual(torch_exception, foreach_exception)
                 if not torch_exception:
+                    # test inplace
+                    inplace(tensors, tensors1, tensors2, vals)
+
                     if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
                         self.assertEqual(fe_res, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
+                        self.assertEqual(tensors, expected, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
                     else:
                         self.assertEqual(fe_res, expected)
-
-    @ops(foreach_pointwise_op_db)
-    def test_pointwise_ops_inplace(self, device, dtype, op):
-        for N in N_values:
-            values = [2 + i for i in range(N)]
-            for vals in [values[0], values]:
-                tensors = op.sample_inputs(device, dtype, N)
-                tensors1 = op.sample_inputs(device, dtype, N)
-                tensors2 = op.sample_inputs(device, dtype, N)
-
-                tensors_copy = [t.clone() for t in tensors]
-                tensors_copy1 = [t.clone() for t in tensors1]
-                tensors_copy2 = [t.clone() for t in tensors2]
-
-                foreach_exception = False
-                torch_exception = False
-                inplace = op.get_inplace()
-
-                try:
-                    inplace(tensors, tensors1, tensors2, vals)
-                except Exception:
-                    foreach_exception = True
-
-                try:
-                    # get torch inplace reference function
-                    inplace_name = op.ref_name + "_"
-                    torch_inplace = getattr(torch.Tensor, inplace_name, None)
-
-                    if not isinstance(vals, list):
-                        for t, t1, t2 in zip(tensors_copy, tensors_copy1, tensors_copy2):
-                            torch_inplace(t, t1, t2, value=vals)
-                    else:
-                        for t, t1, t2, v in zip(tensors_copy, tensors_copy1, tensors_copy2, vals):
-                            torch_inplace(t, t1, t2, value=v)
-                except Exception:
-                    torch_exception = True
-
-                self.assertEqual(torch_exception, foreach_exception)
-                if not torch_exception:
-                    if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
-                        self.assertEqual(tensors, tensors_copy, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
-                    else:
-                        self.assertEqual(tensors, tensors_copy, atol=1.e-3, rtol=1.e-3)
+                        self.assertEqual(tensors, expected)
 
     @ops(foreach_pointwise_op_db)
     def test_pointwise_ops_error_cases(self, device, dtype, op):
@@ -584,7 +547,6 @@ class TestForeach(TestCase):
         res = torch._foreach_add([tensor1], [tensor2])
         torch._foreach_add_([tensor1], [tensor2])
         self.assertEqual(res, [tensor1])
-
 
 instantiate_device_type_tests(TestForeach, globals())
 
