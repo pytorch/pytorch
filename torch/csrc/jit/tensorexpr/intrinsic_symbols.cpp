@@ -2,7 +2,11 @@
 #include <torch/csrc/jit/tensorexpr/intrinsic_symbols.h>
 #include <cmath>
 
+#if defined(_MSC_VER)
+#include <intrin.h>
+#else
 #include <x86intrin.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
