@@ -364,13 +364,14 @@ class ZeroRedundancyOptimizer(Optimizer):
         # - get the pytorch compliant parameter indexing
         state_dict = super().state_dict()
 
+        # - get an id map which links the parameter id to the index in the reference state
+        global_id_map = {id(p): i for i, p in enumerate(chain(*(g["params"] for g in self.param_groups)))}
+
         # - go through the per-shard states, which are all indexed locally
-        unordered_state = {}
         for rank, s in enumerate(self._all_states):
             # -- match the local indexing and the global partition, update the corresponding saved state globally
             for local_pg, global_pg in zip(s["param_groups"], self.partition_parameters()[rank]):
                 # Go through the parameters indexed locally, pick up the global corresponding param
-                # NOTE: Contents of the state_dict changes in between torch1.5 and torch1.6+
                 local_index_to_param_id = {
                     i_param: id(global_pg["params"][i]) for i, i_param in enumerate(local_pg["params"])
                 }
@@ -378,12 +379,8 @@ class ZeroRedundancyOptimizer(Optimizer):
                 for local_param_index in local_pg["params"]:
                     # Update the state, if any
                     if local_param_index in s["state"].keys():
-                        unordered_state[local_index_to_param_id[local_param_index]] = s["state"][local_param_index]
-
-        # - save the states in the expected order, meaning the one from the param_groups
-        for i, param in enumerate(chain(*(g["params"] for g in self.param_groups))):
-            if id(param) in unordered_state.keys():
-                state_dict["state"][i] = unordered_state[id(param)]
+                        global_id = global_id_map[local_index_to_param_id[local_param_index]]
+                        state_dict["state"][global_id] = s["state"][local_param_index]
 
         return state_dict
 
@@ -398,9 +395,6 @@ class ZeroRedundancyOptimizer(Optimizer):
             in between the ranks. The actual per-rank optimizer will thus only effectively work on a subset
             of the parameters.
         """
-
-        # NOTE: PyTorch 1.5 does not index linearly but with the id(params) at saving time
-        # we work around that here by using the fact that the params are ordered as in the param_groups
 
         # Param index to param map
         index_to_param = {i: p for i, p in enumerate(chain(*(g["params"] for g in self.param_groups)))}
