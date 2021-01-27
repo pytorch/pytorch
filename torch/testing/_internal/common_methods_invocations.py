@@ -800,7 +800,7 @@ class ForeachFuncInfo(OpInfo):
         self.ref = ref
 
 class ForeachBinaryFuncInfo(OpInfo):
-    """Early version of a specialized OpInfo for foreach unary functions"""
+    """Early version of a specialized OpInfo for foreach binary functions"""
     def __init__(self,
                  name,
                  method,
