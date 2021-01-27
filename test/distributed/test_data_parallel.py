@@ -42,7 +42,7 @@ class TestDataParallel(TestCase):
         def fn(t):
             return dpm(inp)
 
-        gradcheck(fn, (m.t_rg,))
+        gradcheck(fn, (m.t_rg,), check_batched_grad=False)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_rnn(self):
