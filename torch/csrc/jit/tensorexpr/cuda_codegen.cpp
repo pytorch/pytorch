@@ -1190,7 +1190,7 @@ void CudaCodeGen::CompileToNVRTC(
   // calculations)
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int major, minor;
-  bool compile_to_sass;
+  bool compile_to_sass = false;
   codegenOutputQuery(prop, major, minor, compile_to_sass);
 
   // Creates the NVRTC program

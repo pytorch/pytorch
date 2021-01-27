@@ -112,7 +112,7 @@ FusedKernelCUDA::FusedKernelCUDA(
   // calculations)
   prop_ = at::cuda::getCurrentDeviceProperties();
   int major, minor;
-  bool compile_to_sass;
+  bool compile_to_sass = false;
   codegenOutputQuery(prop_, major, minor, compile_to_sass);
 
   // Creates the NVRTC program
