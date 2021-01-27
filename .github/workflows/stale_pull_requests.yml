@@ -14,7 +14,7 @@ jobs:
           stale-pr-message: >
             Looks like this PR hasn't been updated in a while! Going to go ahead and mark this as `stale`.
             Feel free to update / remove the `stale` label if you feel this is a mistake
-            `stale` pull requests will automatically be closed 15 days after being marked `stale`
+            `stale` pull requests will automatically be closed 30 days after being marked `stale`
           exempt-pr-labels: "no-stale"
-          days-before-stale: 30
-          days-before-close: 15
+          days-before-stale: 150
+          days-before-close: 180
