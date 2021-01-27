@@ -1653,6 +1653,11 @@ bool LoopNest::hasLoopBodyFor(Tensor* t) const {
   return getLoopBodyFor(t) != nullptr;
 }
 
+Stmt* LoopNest::simplify() {
+  root_stmt_ = IRSimplifier::simplify(root_stmt_);
+  return root_stmt_;
+}
+
 Stmt* FlattenIndexes(Stmt* s) {
   IndexFlattener idx_flattener;
   return idx_flattener.flatten(s);

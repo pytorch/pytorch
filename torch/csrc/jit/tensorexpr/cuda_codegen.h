@@ -185,7 +185,7 @@ class CudaPrinter : public IRPrinter {
 
 // Construct Cuda C from the buffer and tensor input, and invoke the kernel
 // when real arguments are provided.
-class TORCH_CUDA_API CudaCodeGen : public CodeGen {
+class TORCH_CUDA_CU_API CudaCodeGen : public CodeGen {
  public:
   template <typename... Ts>
   CudaCodeGen(Stmt* stmt, Ts... ts)
