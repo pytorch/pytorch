@@ -640,6 +640,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(2, 3)
         self.run_test(NoOptionalModel(), (y, {}))
 
+    @disableScriptTest()
     def test_optional_inputs_with_mixed_optionals(self):
         class MixedModel(torch.nn.Module):
             def forward(self, x, y=None, z=None):
@@ -661,6 +662,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MixedModel(), (x, {'z': z}))
         self.run_test(MixedModel(), (x, {'y': y}))
 
+    @disableScriptTest()
     def test_optional_inputs_with_all_optionals(self):
         class AllOptionalModel(torch.nn.Module):
             def forward(self, y=None, z=None):
@@ -675,6 +677,7 @@ class TestONNXRuntime(unittest.TestCase):
         # With optional arguments dictionary
         self.run_test(AllOptionalModel(), {'y': y, 'z': None})
 
+    @disableScriptTest()
     def test_input_names_with_optional_args(self):
         class NoOptionalModel(torch.nn.Module):
             def forward(self, input):
@@ -1746,11 +1749,13 @@ class TestONNXRuntime(unittest.TestCase):
     def test_index_put_loop(self):
         @torch.jit.script
         def ngram_attention_bias(sequence_length: int, ngram: int, device: torch.device, dtype: torch.dtype):
-            bias = torch.ones((ngram, sequence_length), device=device, dtype=dtype) * float("-inf")
+            bias_1 = torch.zeros((ngram, sequence_length), device=device, dtype=dtype) * float("-inf")
+            bias_2 = torch.ones((ngram, sequence_length), device=device, dtype=dtype) * float("-inf") * 2
             for stream_idx in range(ngram):
                 for i in range(sequence_length):
-                    bias[stream_idx, i] = 5
-            return bias
+                    bias_1[stream_idx, i] = 5
+                    bias_2[stream_idx, i] = 10
+            return bias_1, bias_2
 
         class ScriptModel(torch.nn.Module):
             def __init__(self):
@@ -1760,11 +1765,11 @@ class TestONNXRuntime(unittest.TestCase):
 
             def forward(self, hidden_states):
                 seq_length, batch_size = hidden_states.shape[:2]
-                predict_causal_mask = ngram_attention_bias(
+                predict_causal_mask_1, predict_causal_mask_2 = ngram_attention_bias(
                     self.max_target_positions, self.ngram, hidden_states.device, hidden_states.dtype
                 )
-                predict_causal_mask = predict_causal_mask[:, :seq_length]
-                return predict_causal_mask
+                predict_causal_mask_2 = predict_causal_mask_2[:, :seq_length]
+                return predict_causal_mask_1, predict_causal_mask_2
 
         x = torch.randn(6, 2)
         y = torch.randn(4, 1)
@@ -3661,6 +3666,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(SplitModel2(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    @disableScriptTest()
     def test_chunk(self):
         class ChunkModel(torch.nn.Module):
             def __init__(self):
@@ -6232,10 +6238,10 @@ class TestONNXRuntime(unittest.TestCase):
                 self.conv.bias = torch.nn.Parameter(torch.zeros(3, 10, 3))
 
             def set_cell_anchors(self, anchors):
-                self.conv.weight = torch.zeros(10, 3)
+                self.conv.weight = torch.ones(3, 10)
                 if self.conv.bias is not None:
                     self.conv.bias = torch.randn(3, 10, 3)
-                    self.conv.weight = anchors
+                    self.conv.weight = anchors + self.conv.weight
 
             def forward(self, anchors) -> torch.Tensor:
                 self.set_cell_anchors(anchors)
@@ -6292,10 +6298,10 @@ class TestONNXRuntime(unittest.TestCase):
             state = torch.zeros(state_size, device=input_data.device)
             state_copy = torch.zeros(state_size, device=input_data.device)
             if prev_state.size(0) == 0:
-                state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) + state[:]
-                state_copy[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1)
+                state[:] = torch.zeros(batch_size, hidden_size, spatial_size_0, spatial_size_1) + state[:]
+                state_copy[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 2
             else:
-                state[:] = torch.randn(batch_size, hidden_size, spatial_size_0, spatial_size_1)
+                state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 4
             return state, state_copy
 
         class Example(torch.nn.Module):
@@ -6325,13 +6331,13 @@ class TestONNXRuntime(unittest.TestCase):
             state = torch.zeros(state_size, device=input_data.device)
             state_copy = torch.zeros(state_size, device=input_data.device)
             if prev_state.size(0) == 0:
-                state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1)
+                state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 3
+                state_copy[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 2
             elif prev_state.size(0) == 1:
                 s = state[:]
                 state[:] = prev_state + s
             elif prev_state.size(0) == 2:
-                state[:] = torch.randn(batch_size, hidden_size, spatial_size_0, spatial_size_1)
-                state_copy[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1)
+                state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 4
             return state, state_copy
 
         class Example(torch.nn.Module):

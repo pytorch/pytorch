@@ -1013,13 +1013,13 @@ void PrepareInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
 
 void RemoveInplaceOpsForONNX(
     const std::shared_ptr<Graph>& graph,
-    Module* module = nullptr) {
+    Module* model = nullptr) {
   MutationRemover mr(graph);
   PrepareForRemoveMutations(mr, graph->block());
   RemoveTensorMutation(graph);
   RemoveListMutation(graph);
-  if (module)
-    RegisterInplaceOpAsBlockOutputs(mr, module, graph);
+  if (model)
+    RegisterInplaceOpAsBlockOutputs(mr, model, graph);
 }
 
 } // namespace jit
