@@ -150,6 +150,7 @@ class Future(object):
   def add_done_callback(self, callback: Callable) -> None: ...
   def then(self, callback: Callable) -> Future: ...
   def set_result(self, result: Any) -> None: ...
+  def _set_unwrap_func(self, callback: Callable) -> None: ...
 
 def _jit_set_num_profiled_runs(num: _size) -> _size: ...
 
@@ -654,7 +655,7 @@ class _TensorBase(object):
     output_nr: _int
     _version: _int
     _base: Optional[Tensor]
-    _cdata: _int 
+    _cdata: _int
     grad_fn: Any
     _grad_fn: Any
     _grad: Optional[Tensor]
@@ -825,6 +826,10 @@ class BoolType(JitType):
 class FloatType(JitType):
     @staticmethod
     def get() -> FloatType: ...
+
+class ComplexDoubleType(JitType):
+    @staticmethod
+    def get() -> ComplexDoubleType: ...
 
 class IntType(JitType):
     @staticmethod

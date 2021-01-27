@@ -16,7 +16,7 @@ class TestFuture(TestCase):
         error_msg = "Intentional Value Error"
         value_error = ValueError(error_msg)
 
-        f = Future()
+        f = Future[int]()
         # Set exception
         f.set_exception(value_error)
         # Exception should throw on wait
@@ -39,7 +39,7 @@ class TestFuture(TestCase):
             with self.assertRaisesRegex(ValueError, "Intentional"):
                 f.wait()
 
-        f = Future()
+        f = Future[int]()
         t = threading.Thread(target=wait_future, args=(f, ))
         t.start()
         f.set_exception(value_error)
