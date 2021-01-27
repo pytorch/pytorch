@@ -25,6 +25,7 @@ if(DEFINED ENV{USE_VULKAN})
   endif()
 endif()
 
+message(STATUS "XXX USE_VULKAN ${USE_VULKAN}")
 set(pytorch_android_DIR ${CMAKE_CURRENT_LIST_DIR}/src/main/cpp)
 
 if(ANDROID_ABI)
@@ -154,6 +155,7 @@ else()
 endif()
 
 if(USE_VULKAN)
+  message(STATUS "XXX Vulkan_LIBS:${Vulkan_LIBS}")
   list(APPEND pytorch_jni_LIBS ${Vulkan_LIBS})
 endif()
 

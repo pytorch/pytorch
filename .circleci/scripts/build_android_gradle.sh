@@ -82,7 +82,7 @@ if [ -n "{GRADLE_OFFLINE:-}" ]; then
     GRADLE_PARAMS+=" --offline"
 fi
 
-$GRADLE_PATH $GRADLE_PARAMS
+USE_VULKAN=1 $GRADLE_PATH $GRADLE_PARAMS
 
 find . -type f -name "*.a" -exec ls -lh {} \;
 
