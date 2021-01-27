@@ -13,18 +13,19 @@ class Interpreter:
 
     Methods in the Interpreter class can be overridden to customize
     the behavior of execution. The map of overrideable methods
-    in terms of call hierarchy:
+    in terms of call hierarchy::
 
-    run()
-        +-- run_node
-            +-- placeholder()
-            +-- get_attr()
-            +-- call_function()
-            +-- call_method()
-            +-- call_module
-            +-- output()
+        run()
+            +-- run_node
+                +-- placeholder()
+                +-- get_attr()
+                +-- call_function()
+                +-- call_method()
+                +-- call_module()
+                +-- output()
 
     Example:
+
         Suppose we want to swap all instances of ``torch.neg`` with
         ``torch.sigmoid`` and vice versa (including their ``Tensor``
         method equivalents). We could subclass Interpreter like so::
@@ -272,6 +273,7 @@ class Transformer(Interpreter):
     entirely symbolically.
 
     Example:
+
         Suppose we want to swap all instances of ``torch.neg`` with
         ``torch.sigmoid`` and vice versa (including their ``Tensor``
         method equivalents). We could subclass ``Transformer`` like so::
