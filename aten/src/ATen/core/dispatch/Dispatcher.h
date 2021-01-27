@@ -347,7 +347,7 @@ public:
     c10::Dispatcher::singleton().redispatchBoxed(*this, ks, stack);
   }
 
-private:
+//private:
   explicit OperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
   : operatorIterator_(std::move(operatorIterator)) {}
   friend class Dispatcher;
