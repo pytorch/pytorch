@@ -1333,7 +1333,8 @@ LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(
   // Determine whether to use vectorized intrinsic.
   auto const& featureString = jit_->getTargetMachine().getTargetFeatureString();
   bool hasAVX = featureString.find("+avx") != llvm::StringRef::npos;
-  std::string sleefName = "Sleef_" + basename + std::to_string(lanes);
+  std::string typeSuffix = basetype == DoubleTy_ ? "d" : "";
+  std::string sleefName = "Sleef_" + basename + typeSuffix + std::to_string(lanes);
   if (hasAVX && jit_->hasSymbol(sleefName)) {
     name = std::move(sleefName);
     type = llvm::VectorType::get(basetype, ElementCount(lanes));
@@ -1356,7 +1357,7 @@ LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(
   }
   FunctionCallee callee = module_->getOrInsertFunction(name, fntype, {});
   applyMathFunctionAttributes(llvm::cast<llvm::Function>(callee.getCallee()));
-  return {callee.getFunctionType(), callee.getCallee(), useSimd};
+  return SimdCallee{callee.getFunctionType(), callee.getCallee(), useSimd};
 }
 
 void LLVMCodeGenImpl::visit(const Intrinsics* v) {
