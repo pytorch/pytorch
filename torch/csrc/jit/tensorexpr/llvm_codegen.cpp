@@ -1324,8 +1324,16 @@ void LLVMCodeGenImpl::emitIsNan(const Intrinsics* v) {
 static bool wantSleef(const std::string& name) {
   // Using sleef on these ops is slower than libm.
   static std::unordered_set<std::string> noSleef = {
-    "sqrt", "ceil", "trunc", "fabs", "floor",
-    "sqrtf", "ceilf", "truncf", "fabsf", "floorf",
+      "sqrt",
+      "ceil",
+      "trunc",
+      "fabs",
+      "floor",
+      "sqrtf",
+      "ceilf",
+      "truncf",
+      "fabsf",
+      "floorf",
   };
   return noSleef.find(name) == noSleef.end();
 }
