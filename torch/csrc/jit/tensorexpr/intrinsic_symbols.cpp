@@ -2,11 +2,8 @@
 #include <torch/csrc/jit/tensorexpr/intrinsic_symbols.h>
 #include <cmath>
 
-#if defined(_MSC_VER)
-#include <intrin.h>
-#else
+#if !defined(_MSC_VER)
 #include <x86intrin.h>
-#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,7 +37,6 @@ __m128 Sleef_atan2f4_u10(__m128, __m128);
 __m128 Sleef_powf4_u10(__m128, __m128);
 __m128 Sleef_fmodf4(__m128, __m128);
 
-#if !defined(_MSC_VER)
 __m256 Sleef_acosf8_u10(__m256);
 __m256 Sleef_asinf8_u10(__m256);
 __m256 Sleef_atanf8_u10(__m256);
@@ -68,7 +64,6 @@ __m256 Sleef_lgammaf8_u10(__m256);
 __m256 Sleef_atan2f8_u10(__m256, __m256);
 __m256 Sleef_powf8_u10(__m256, __m256);
 __m256 Sleef_fmodf8(__m256, __m256);
-#endif
 
 __m128d Sleef_acosd2_u10(__m128d);
 __m128d Sleef_asind2_u10(__m128d);
@@ -98,7 +93,6 @@ __m128d Sleef_atan2d2_u10(__m128d, __m128d);
 __m128d Sleef_powd2_u10(__m128d, __m128d);
 __m128d Sleef_fmodd2(__m128d, __m128d);
 
-#if !defined(_MSC_VER)
 __m256d Sleef_acosd4_u10(__m256d);
 __m256d Sleef_asind4_u10(__m256d);
 __m256d Sleef_atand4_u10(__m256d);
@@ -167,6 +161,7 @@ c10::ArrayRef<SymbolAddress> getIntrinsicSymbols() {
     {"__gnu_h2f_ieee", &c10::detail::fp16_ieee_to_fp32_value},
     {"__gnu_f2h_ieee", &c10::detail::fp16_ieee_from_fp32_value},
 
+#if !defined(_MSC_VER)
     // FP32 Sleef functions -- SSE
     {"Sleef_acosf4", &Sleef_acosf4_u10},
     {"Sleef_asinf4", &Sleef_asinf4_u10},
@@ -196,8 +191,7 @@ c10::ArrayRef<SymbolAddress> getIntrinsicSymbols() {
     {"Sleef_powf4", &Sleef_powf4_u10},
     {"Sleef_fmodf4", &Sleef_fmodf4},
 
-  // FP32 Sleef functions -- AVX2
-#if !defined(_MSC_VER)
+    // FP32 Sleef functions -- AVX2
     {"Sleef_acosf8", &Sleef_acosf8_u10},
     {"Sleef_asinf8", &Sleef_asinf8_u10},
     {"Sleef_atanf8", &Sleef_atanf8_u10},
@@ -225,7 +219,6 @@ c10::ArrayRef<SymbolAddress> getIntrinsicSymbols() {
     {"Sleef_atan2f8", &Sleef_atan2f8_u10},
     {"Sleef_powf8", &Sleef_powf8_u10},
     {"Sleef_fmodf8", &Sleef_fmodf8},
-#endif
 
     // FP64 Sleef functions -- SSE
     {"Sleef_acosd2", &Sleef_acosd2_u10},
@@ -256,8 +249,7 @@ c10::ArrayRef<SymbolAddress> getIntrinsicSymbols() {
     {"Sleef_powd2", &Sleef_powd2_u10},
     {"Sleef_fmodd2", &Sleef_fmodd2},
 
-  // FP64 Sleef functions -- AVX2
-#if !defined(_MSC_VER)
+    // FP64 Sleef functions -- AVX2
     {"Sleef_acosd4", &Sleef_acosd4_u10},
     {"Sleef_asind4", &Sleef_asind4_u10},
     {"Sleef_atand4", &Sleef_atand4_u10},

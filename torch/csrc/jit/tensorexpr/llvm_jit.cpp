@@ -233,7 +233,7 @@ PytorchLLVMJIT::~PytorchLLVMJIT() = default;
 void PytorchLLVMJIT::addModule(
     std::unique_ptr<Module> M,
     std::unique_ptr<LLVMContext> C) {
-  return impl_->addModule(std::move(M), std::move(C));
+  impl_->addModule(std::move(M), std::move(C));
 }
 
 JITSymbol PytorchLLVMJIT::findSymbol(const std::string Name) {

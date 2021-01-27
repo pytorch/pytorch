@@ -13,9 +13,9 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Verifier.h>
+#include <llvm/MC/MCSubtargetInfo.h>
 #include <llvm/Support/Host.h>
 #include <llvm/Support/TargetSelect.h>
-#include "llvm/MC/MCSubtargetInfo.h"
 
 #if LLVM_VERSION_MAJOR >= 10
 #include <llvm/Support/CodeGen.h>
@@ -1334,7 +1334,8 @@ LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(
   auto const& featureString = jit_->getTargetMachine().getTargetFeatureString();
   bool hasAVX = featureString.find("+avx") != llvm::StringRef::npos;
   std::string typeSuffix = basetype == DoubleTy_ ? "d" : "";
-  std::string sleefName = "Sleef_" + basename + typeSuffix + std::to_string(lanes);
+  std::string sleefName =
+      "Sleef_" + basename + typeSuffix + std::to_string(lanes);
   if (hasAVX && jit_->hasSymbol(sleefName)) {
     name = std::move(sleefName);
     type = llvm::VectorType::get(basetype, ElementCount(lanes));
