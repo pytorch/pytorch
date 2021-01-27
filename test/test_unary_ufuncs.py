@@ -165,25 +165,6 @@ def generate_numeric_tensors_extremal(device, dtype):
     return [torch.tensor(vals, device=device, dtype=dtype)]
 
 
-def generate_numeric_tensors_extremals(device, dtype):
-    assert dtype.is_floating_point or dtype.is_complex or dtype.is_integral
-
-    # Acquires dtype-specific vals
-    if dtype.is_floating_point or dtype.is_complex:
-        vals = _float_vals + _large_float_vals + _float_extremals
-
-        # Converts float -> complex vals if dtype is complex
-        if dtype.is_complex:
-            vals = tuple(complex(x, y) for x, y in chain(product(vals, vals),
-                                                         product(_float_vals, vals),
-                                                         product(vals, _float_vals)))
-    else:  # dtypes is a signed integer type
-        assert dtype in (torch.int8, torch.int16, torch.int32, torch.int64)
-        vals = _large_int_vals
-
-    return [torch.tensor(vals, device=device, dtype=dtype)]
-
-
 # TODO: port test_unary_out_op_mem_overlap
 # TODO: add out= tests (different devices, dtypes, mismatched sizes,
 #                       correct sizes, 0 size, broadcasted out)
