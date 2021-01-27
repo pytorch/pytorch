@@ -22,11 +22,7 @@ class TestComplex(JitTestCase):
             def forward(self, b: int):
                 return b
 
-        scripted = torch.jit.script(ComplexModule())
-        buffer = io.BytesIO()
-        torch.jit.save(scripted, buffer)
-        buffer.seek(0)
-        loaded = torch.jit.load(buffer)
+        loaded = self.getExportImportCopy(ComplexModule())
         self.assertEqual(loaded.a, 3 + 5j)
 
 class TestComplexTensor(TestCase):

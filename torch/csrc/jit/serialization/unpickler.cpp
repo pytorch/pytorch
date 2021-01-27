@@ -520,8 +520,6 @@ void Unpickler::readGlobal(
         elem_type = TensorType::get();
       } else if (class_name == "build_doublelist") {
         elem_type = FloatType::get();
-      } else if (class_name == "build_complexdoublelist") {
-        elem_type = ComplexDoubleType::get();
       } else if (class_name == "build_boollist") {
         elem_type = BoolType::get();
       } else {
