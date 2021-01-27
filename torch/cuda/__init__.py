@@ -325,18 +325,15 @@ class StreamContext(object):
     Arguments:
         Stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
-    .. note:: Streams are per-device. If the selected stream is not on the
-    current device, this function will also change the current device to
-    match the stream.
+    .. note:: Streams are per-device.
     """
     cur_stream : Optional['torch.classes.cuda.Stream']  # type: ignore
-    cur_stream_device: Optional[_device]
 
     def __init__(self, stream: Optional['torch.classes.cuda.Stream']):  # type: ignore
         self.idx = -1
         self.stream = stream
-        self.prev_stream_device_index = -1
-        self.cur_stream_device_index = -1
+        self.prev_stream_device = torch.device("cuda")
+        self.cur_stream_device = torch.device("cuda")
         # Initialize the below streams to default stream on the current device
         self.device_index = _get_device_index(device=None, optional=True)
         self.src_prev_stream = torch.cuda.default_stream(self.device_index)
@@ -359,25 +356,22 @@ class StreamContext(object):
         # vary. Hence, we have to check the mode we are in and call the respective API.
         #
         # Note: The API's don't differ in functionality, only differ at the API level.
-        # In Eager Mode, the stream object doesn't have a function to access device index,
-        # hence we use `_get_device_index`. In script mode, device_index is easily
-        # accessible by calling stream.device_index(). With device, in Eager mode to access
-        # device of the stream can be accessed by stream.device while in JIT we need to use
-        # stream.device(). But both return the device object of type `torch.device`
+        # In Eager to access device of the stream can be accessed by stream.device
+        # while in JIT we need to use stream.device(). But both return device
+        # object of type `torch.device`
         if torch.jit.is_scripting():
-            self.prev_stream_device_index = self.src_prev_stream.device_index()  # type: ignore
-            self.cur_stream_device_index = cur_stream.device_index()
-            cur_stream_device = cur_stream.device()
+            self.cur_stream_device = cur_stream.device()
+            self.prev_stream_device = self.src_prev_stream.device()
         else:
-            self.prev_stream_device_index = _get_device_index(self.src_prev_stream.device, optional=True)
-            self.cur_stream_device_index = _get_device_index(cur_stream.device, optional=True)
-            cur_stream_device = cur_stream.device
+            self.cur_stream_device = cur_stream.device
+            self.prev_stream_device = self.src_prev_stream.device
 
-        # If the stream is not on the current device, then change the device
-        # and set the current stream on the device
-        if self.prev_stream_device_index != self.cur_stream_device_index:
-            with device(cur_stream_device):
-                self.dst_prev_stream = torch.cuda.current_stream(self.cur_stream_device_index)
+        # If the stream is not on the current device, then
+        # set the current stream on the device
+        if self.prev_stream_device != self.cur_stream_device:
+            with device(self.cur_stream_device):
+                cur_stream_device_index = _get_device_index(self.cur_stream_device)
+                self.dst_prev_stream = torch.cuda.current_stream(cur_stream_device_index)
         torch.cuda.set_stream(cur_stream)  # type: ignore
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
@@ -387,17 +381,16 @@ class StreamContext(object):
         if cur_stream is None or self.idx == -1:
             return
 
-        # If the stream was not on the current device, restore the previous stream on
-        # the destination device and also reset the current device to the previous device.
-        # Set the current stream on the device to the src_prev_stream
-        if self.prev_stream_device_index != self.cur_stream_device_index:
+        # Reset the stream on the original device
+        # and destination device
+        if self.prev_stream_device != self.cur_stream_device:
             torch.cuda.set_stream(self.dst_prev_stream)  # type: ignore
         torch.cuda.set_stream(self.src_prev_stream)  # type: ignore
 
 def stream(stream: Optional['torch.classes.cuda.Stream']) -> StreamContext:  # type: ignore
-    r"""Wrapper around the Context-manager that selects a given stream.
-    All CUDA kernels queued within its context will be enqueued on a selected
-    stream.
+    r"""Wrapper around the Context-manager StreamContextthat
+        selects a given stream.
+
     Arguments:
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
