@@ -135,17 +135,16 @@ def generate_numeric_tensors(device, dtype, *,
 
 
 def generate_numeric_tensors_hard(device, dtype):
-    assert dtype.is_floating_point or dtype.is_complex or dtype.is_integral
+    is_signed_integral = dtype in (torch.int8, torch.int16, torch.int32, torch.int64)
+    assert dtype.is_floating_point or dtype.is_complex or is_signed_integral
 
-    vals = []
     if dtype.is_floating_point:
         vals = _large_float_vals
     elif dtype.is_complex:
         vals = tuple(complex(x, y) for x, y in chain(product(_large_float_vals, _large_float_vals),
                                                      product(_float_vals, _large_float_vals),
                                                      product(_large_float_vals, _float_vals)))
-    else:  # dtypes is a signed integer type
-        assert dtype in (torch.int8, torch.int16, torch.int32, torch.int64)
+    else:
         vals = _large_int_vals
 
     return [torch.tensor(vals, device=device, dtype=dtype)]
@@ -324,10 +323,11 @@ class TestUnaryUfuncs(TestCase):
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
-    @ops(unary_ufuncs, allowed_dtypes=(*get_all_fp_dtypes(), *get_all_complex_dtypes(), *get_all_int_dtypes()))
+    @ops(unary_ufuncs, allowed_dtypes=(*get_all_fp_dtypes(), *get_all_complex_dtypes(),
+                                       torch.int8, torch.int16, torch.int32, torch.int64))
     def test_reference_numerics_hard(self, device, dtype, op):
         if not op.handles_large_floats:
-            raise unittest.skip("This op does not handle large values")
+            raise self.skipTest("This op does not handle large values")
 
         tensors = generate_numeric_tensors_hard(device, dtype)
         self._test_reference_numerics(dtype, op, tensors)
@@ -338,7 +338,7 @@ class TestUnaryUfuncs(TestCase):
         include_extremals = (op.handles_complex_extremals if
                              dtype in (torch.cfloat, torch.cdouble) else op.handles_extremals)
         if not include_extremals:
-            raise unittest.skip("This op does not handle extremal values")
+            raise self.skipTest("This op does not handle extremal values")
 
         tensors = generate_numeric_tensors_extremal(device, dtype)
         self._test_reference_numerics(dtype, op, tensors, "relaxed")
