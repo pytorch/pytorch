@@ -5,7 +5,6 @@
 namespace c10d {
 namespace tcputil {
 
-#define AF_SELECTED AF_INET
 #define CONNECT_SOCKET_OFFSET 1
 
 inline void closeSocket(int socket) { ::closesocket(socket); }

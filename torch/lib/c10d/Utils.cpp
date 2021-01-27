@@ -1,18 +1,18 @@
 #ifdef _WIN32
 #include <c10d/WinSockUtils.hpp>
 #else
+#include <arpa/inet.h>
 #include <c10d/UnixSockUtils.hpp>
 #include <netdb.h>
-#include <sys/poll.h>
-#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <sys/poll.h>
 #include <unistd.h>
 #endif
 
+#include <fcntl.h>
 #include <algorithm>
 #include <cstring>
-#include <fcntl.h>
 #include <memory>
 #include <string>
 #include <thread>
@@ -81,13 +81,18 @@ std::pair<int, PortType> listen(PortType port) {
   struct ::addrinfo hints, *res = NULL;
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG;
-  hints.ai_family = AF_SELECTED; // IPv4 on Windows, IPv4/6 on Linux
+  hints.ai_family = AF_INET6; // default to IPv6
   hints.ai_socktype = SOCK_STREAM; // TCP
 
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
-  //  by editing `/etc/gai.conf`. so there is no need to manual sorting
+  // by editing `/etc/gai.conf`. so there is no need to manual sorting
   // or protocol preference.
   int err = ::getaddrinfo(nullptr, std::to_string(port).data(), &hints, &res);
+  if ADDR_NOT_SUPPORTED (err) {
+    // IPv6 is disabled or invalid for this host, fallback to IPv4
+    hints.ai_family = AF_INET;
+    err = ::getaddrinfo(nullptr, std::to_string(port).data(), &hints, &res);
+  }
   if (err != 0 || !res) {
     throw std::invalid_argument(
         "cannot find host to listen on: " + std::string(gai_strerror(err)));
@@ -195,18 +200,36 @@ int connect(
     PortType port,
     bool wait,
     const std::chrono::milliseconds& timeout) {
-  struct ::addrinfo hints, *res = NULL;
+  struct ::addrinfo hints {
+  }, *ipv4res = nullptr, *res = nullptr;
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_NUMERICSERV; // specifies that port (service) is numeric
-  hints.ai_family = AF_SELECTED; // IPv4 on Windows, IPv4/6 on Linux
+  hints.ai_family = AF_INET6; // default to IPv6
   hints.ai_socktype = SOCK_STREAM; // TCP
 
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
   // by editing `/etc/gai.conf`. so there is no need to manual sorting
   // or protcol preference.
-  int err =
+  int ipv6err =
       ::getaddrinfo(address.data(), std::to_string(port).data(), &hints, &res);
-  if (err != 0 || !res) {
+  // Append all the IPv4 addresses, we loop over them anyway
+  hints.ai_family = AF_INET;
+  int ipv4err = ::getaddrinfo(
+      address.data(), std::to_string(port).data(), &hints, &ipv4res);
+  if (!res) {
+    res = ipv4res;
+  } else {
+    struct ::addrinfo* nres = res;
+    for (; nres->ai_next != nullptr; nres = nres->ai_next) {
+    }
+    nres->ai_next = ipv4res;
+  }
+  if ((ipv4err != 0 && !ADDR_NOT_SUPPORTED(ipv4err)) ||
+      (ipv6err != 0 && !ADDR_NOT_SUPPORTED(ipv6err)) || !res) {
+    int err = ipv4err;
+    if (err == 0 || ADDR_NOT_SUPPORTED(ipv4err)) {
+      err = ipv6err;
+    }
     throw std::invalid_argument(
         "host not found: " + std::string(gai_strerror(err)));
   }
