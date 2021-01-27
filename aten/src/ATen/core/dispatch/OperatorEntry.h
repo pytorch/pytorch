@@ -167,8 +167,10 @@ public:
 
   const KernelFunction& lookup(DispatchKey k) const {
     const auto& kernel = dispatchTable_[static_cast<uint8_t>(k)];
-    if (C10_UNLIKELY(!kernel.isValid())) {
-      reportError(k);
+    if (C10_UNLIKELY(!kernel.isValidUnboxed())) {
+      if (!kernel.isValid()) {
+        reportError(k);
+      }
     }
     return kernel;
   }
