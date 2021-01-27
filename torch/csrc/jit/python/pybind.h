@@ -30,6 +30,12 @@ namespace jit {
 // workaround offered in https://github.com/pybind/pybind11/issues/2751
 template <typename T>
 class unwrapping_shared_ptr {
+  static_assert(
+      std::is_same<T, torch::jit::Value>::value ||
+          std::is_same<T, torch::jit::Node>::value ||
+          std::is_same<T, torch::jit::Block>::value,
+      "unwrapping type only defined for Graph object types");
+
  private:
   std::shared_ptr<torch::jit::Wrap<T>> impl;
 
