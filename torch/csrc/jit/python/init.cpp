@@ -1159,19 +1159,6 @@ void initJITBindings(PyObject* module) {
         return std::make_shared<PythonFutureWrapper>(
             c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get()));
       }))
-      .def(py::init([](py::function unwrapFunc) {
-        auto functionGuard = std::make_shared<torch::jit::PythonFunctionGuard>(
-            std::move(unwrapFunc));
-
-        std::function<void(py::object)> pf =
-            [functionGuard(std::move(functionGuard))](const py::object& inp) {
-              return functionGuard->func_(inp);
-            };
-
-        return std::make_shared<PythonFutureWrapper>(
-            c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get()),
-            std::move(pf));
-      }))
       .def(
           "done",
           // Intentionally not releasing GIL
@@ -1196,6 +1183,21 @@ void initJITBindings(PyObject* module) {
           "set_result",
           // Intentionally not releasing GIL
           &PythonFutureWrapper::markCompleted)
+      .def(
+          "_set_unwrap_func",
+          // Intentionally not releasing GIL as this just does an assign
+          [](PythonFutureWrapper& self, py::function unwrapFunc) {
+            auto functionGuard =
+                std::make_shared<torch::jit::PythonFunctionGuard>(
+                    std::move(unwrapFunc));
+
+            std::function<void(py::object)> pf =
+                [functionGuard(std::move(functionGuard))](
+                    const py::object& inp) {
+                  return functionGuard->func_(inp);
+                };
+            self.unwrap_func = std::move(pf);
+          })
       .def(
           py::pickle(
               /* __getstate__ */

@@ -11,44 +11,39 @@ def add_one(fut):
 
 
 class TestFuture(TestCase):
-
-    def test_unwrap(self) -> None:
-        # Test that we can run a lambda function while setting result.
-        set_by_unwrap = None
-
-        def set_tensor(t):
-            nonlocal set_by_unwrap
-            set_by_unwrap = t
-
-        f = Future[torch.Tensor](lambda res: set_tensor(res))
-        f.set_result(torch.ones(2, 2))
-        f.wait()
-
-        self.assertEqual(set_by_unwrap, torch.ones(2, 2))
-
-    def test_unwrap_throw_error(self) -> None:
+    def test_set_exception(self) -> None:
         # This test is to ensure errors can propagate across futures.
         error_msg = "Intentional Value Error"
         value_error = ValueError(error_msg)
 
-        def processing(fut_result):
-            if isinstance(fut_result, ValueError):
-                raise fut_result
-
-            return fut_result
-
-        f = Future(processing)
+        f = Future()
         # Set exception
-        f.set_result(value_error)
+        f.set_exception(value_error)
         # Exception should throw on wait
         with self.assertRaisesRegex(ValueError, "Intentional"):
             f.wait()
 
         # Exception should also throw on value
-        f = Future(processing)
-        f.set_result(value_error)
+        f = Future()
+        f.set_exception(value_error)
         with self.assertRaisesRegex(ValueError, "Intentional"):
             f.value()
+
+    def test_set_exception_multithreading(self) -> None:
+        # Ensure errors can propagate when one thread waits on future result
+        # and the other sets it with an error.
+        error_msg = "Intentional Value Error"
+        value_error = ValueError(error_msg)
+
+        def wait_future(f):
+            with self.assertRaisesRegex(ValueError, "Intentional"):
+                f.wait()
+
+        f = Future()
+        t = threading.Thread(target=wait_future, args=(f, ))
+        t.start()
+        f.set_exception(value_error)
+        t.join()
 
     def test_done(self) -> None:
         f = Future[torch.Tensor]()

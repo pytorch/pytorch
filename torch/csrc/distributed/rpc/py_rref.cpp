@@ -261,7 +261,7 @@ py::object PyRRef::getRRefType(float timeout, bool blocking) {
     type_ = isOwner() ? typeFuncs.onOwner_(*this, blocking)
                       : typeFuncs.onUser_(*this, timeout, blocking);
   }
-  // Returns py::object that can Python type or future.
+  // Returns py::object that can be Python type or future.
   return *type_;
 }
 
