@@ -4,6 +4,7 @@ import unittest
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
+import functools
 
 import torch
 from torch import nn
@@ -21,8 +22,8 @@ torch.set_default_dtype(torch.double)
 NO_NCCL = not hasattr(torch.distributed, "ProcessGroupNCCL")
 
 # batched grad doesn't support data parallel
-gradcheck = partial(gradcheck, check_batched_grad=False)
-_assertGradAndGradgradChecks = partial(_assertGradAndGradgradChecks, check_batched_grad=False)
+gradcheck = functools.partial(gradcheck, check_batched_grad=False)
+_assertGradAndGradgradChecks = functools.partial(_assertGradAndGradgradChecks, check_batched_grad=False)
 
 class TestDataParallel(TestCase):
 

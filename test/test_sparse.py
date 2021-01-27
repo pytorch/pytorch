@@ -28,8 +28,7 @@ if TEST_SCIPY:
 load_tests = load_tests
 
 # batched grad doesn't support sparse
-gradcheck = partial(gradcheck, check_batched_grad=False)
-gradgradcheck = partial(gradgradcheck, check_batched_grad=False)
+gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 
 def cpu_only(inner):
     @functools.wraps(inner)
