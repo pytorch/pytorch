@@ -245,12 +245,10 @@ class TORCH_API PytorchLLVMJITImpl {
     registerIntrinsics(JD, Mangle);
   }
 
-  Error addModule(std::unique_ptr<Module> M, std::unique_ptr<LLVMContext> C) {
-    if (auto Err =
-            LLJ->addIRModule(ThreadSafeModule(std::move(M), std::move(C)))) {
-      return Err;
-    }
-    return Error::success();
+  void addModule(std::unique_ptr<Module> M, std::unique_ptr<LLVMContext> C) {
+    assertSuccess(
+        LLJ->addIRModule(ThreadSafeModule(std::move(M), std::move(C))),
+        "Failed to add module to compile layer");
   }
 
   JITSymbol findSymbol(const std::string Name) {
@@ -265,29 +263,6 @@ class TORCH_API PytorchLLVMJITImpl {
     return LLJ->getDataLayout();
   }
 };
-
-PytorchLLVMJIT::PytorchLLVMJIT()
-    : impl_(std::make_unique<PytorchLLVMJITImpl>()) {}
-
-PytorchLLVMJIT::~PytorchLLVMJIT() = default;
-
-Error PytorchLLVMJIT::addModule(
-    std::unique_ptr<Module> M,
-    std::unique_ptr<LLVMContext> C) {
-  return impl_->addModule(std::move(M), std::move(C));
-}
-
-JITSymbol PytorchLLVMJIT::findSymbol(const std::string Name) {
-  return impl_->findSymbol(std::move(Name));
-}
-
-TargetMachine& PytorchLLVMJIT::getTargetMachine() {
-  return impl_->getTargetMachine();
-}
-
-const DataLayout& PytorchLLVMJIT::getDataLayout() {
-  return impl_->getDataLayout();
-}
 
 #elif LLVM_VERSION_MAJOR == 8 && LLVM_VERSION_PATCH == 20181009
 
@@ -340,13 +315,12 @@ class TORCH_API PytorchLLVMJITImpl {
     return *TM;
   }
 
-  VModuleKey addModule(std::unique_ptr<Module> M) {
+  void addModule(std::unique_ptr<Module> M, std::unique_ptr<LLVMContext> C) {
     // Add the module to the JIT with a new VModuleKey.
     auto K = ES.allocateVModule();
     assertSuccess(
         CompileLayer.addModule(K, std::move(M)),
         "Failed to add module to compile layer");
-    return K;
   }
 
   JITSymbol findSymbol(const std::string Name) {
@@ -369,16 +343,19 @@ class TORCH_API PytorchLLVMJITImpl {
   }
 };
 
+#else // LLVM_VERSION_MAJOR
+#error Only LLVM versions 8 through 12 are supported.
+#endif
+
 PytorchLLVMJIT::PytorchLLVMJIT()
     : impl_(std::make_unique<PytorchLLVMJITImpl>()) {}
 
 PytorchLLVMJIT::~PytorchLLVMJIT() = default;
 
-Error PytorchLLVMJIT::addModule(
+void PytorchLLVMJIT::addModule(
     std::unique_ptr<Module> M,
     std::unique_ptr<LLVMContext> C) {
-  impl_->addModule(std::move(M));
-  return Error::success();
+  return impl_->addModule(std::move(M), std::move(C));
 }
 
 JITSymbol PytorchLLVMJIT::findSymbol(const std::string Name) {
@@ -392,10 +369,6 @@ TargetMachine& PytorchLLVMJIT::getTargetMachine() {
 const DataLayout& PytorchLLVMJIT::getDataLayout() {
   return impl_->getDataLayout();
 }
-
-#else // LLVM_VERSION_MAJOR
-#error Only LLVM versions 8 through 12 are supported.
-#endif
 
 } // end namespace orc
 } // end namespace llvm
