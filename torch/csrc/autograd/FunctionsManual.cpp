@@ -808,14 +808,9 @@ Tensor repeat_backward(Tensor grad, IntArrayRef repeats, IntArrayRef input_shape
   return grad;
 }
 
-// p1m == 1 - p
-Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
-  if (grad.requires_grad()) {
-    // Use autograd-friendly backward if double backward is required
-    return grad * (mask.type_as(grad) * (1. / p1m));
-  } else {
-    return at::_masked_scale(grad, mask, 1. / p1m);
-  }
+// scale == (1 / (1 - prob))
+Tensor infinitely_differentiable_native_dropout_backward(Tensor grad, Tensor mask, double scale) {
+  return grad * (mask.type_as(grad) * scale);
 }
 
 Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tensor & value) {

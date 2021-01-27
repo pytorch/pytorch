@@ -172,6 +172,27 @@ class NaiveTypePropagator {
         node->output()->setType(promoted_type);
         break;
       }
+      case aten::dropout: {
+        auto out_type = node->input(0)->type()->cast<TensorType>();
+        node->output()->setType(out_type);
+        break;
+      }
+      case aten::native_dropout: {
+        auto out_type = node->input(0)->type()->cast<TensorType>();
+        node->output(0)->setType(out_type);
+
+        auto mask_type = TensorType::create(
+            at::ScalarType::Bool, *out_type->device(), *out_type->dim(), false);
+
+        node->output(1)->setType(mask_type);
+
+        break;
+      }
+      case aten::native_dropout_backward: {
+        auto out_type = node->input(0)->type()->cast<TensorType>();
+        node->output()->setType(out_type);
+        break;
+      }
       case aten::batch_norm: {
         auto out_type = node->input(0)->type()->cast<TensorType>();
         node->output()->setType(out_type);

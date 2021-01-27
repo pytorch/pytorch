@@ -77,7 +77,6 @@ _(aten, _expm1) \
 _(aten, _fft_with_size) \
 _(aten, _fill) \
 _(aten, _floor) \
-_(aten, _fused_dropout) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
 _(aten, _ldexp) \
@@ -517,6 +516,8 @@ _(aten, narrow) \
 _(aten, narrow_copy) \
 _(aten, native_batch_norm) \
 _(aten, native_batch_norm_backward) \
+_(aten, native_dropout) \
+_(aten, native_dropout_backward) \
 _(aten, native_layer_norm) \
 _(aten, native_layer_norm_backward) \
 _(aten, native_clone) \

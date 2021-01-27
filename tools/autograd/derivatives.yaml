@@ -421,8 +421,8 @@
   self: handle_r_to_c(self.scalar_type(), grad.conj() * other)
   other: handle_r_to_c(other.scalar_type(), grad * self)
 
-- name: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
-  self: _fused_dropout_backward(grad, result1, p)
+- name: native_dropout(Tensor input, float p, float scale, bool train) -> (Tensor, Tensor)
+  input: "GradMode::is_enabled() ? infinitely_differentiable_native_dropout_backward(grad, result1, scale) : native_dropout_backward(grad, result1, scale)"
 
 - name: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
   self: eig_backward(grads, self, eigenvectors, eigenvalues, eigenvectors_return)

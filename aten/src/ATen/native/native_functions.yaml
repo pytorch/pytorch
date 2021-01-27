@@ -153,15 +153,16 @@
 - func: _debug_has_internal_overlap(Tensor self) -> int
   variants: function
 
-- func: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
+- func: native_dropout(Tensor input, float p, float scale, bool train) -> (Tensor, Tensor)
   variants: function
   dispatch:
-    CUDA: fused_dropout_cuda
+    CPU: native_dropout_cpu
+    CUDA: native_dropout_cuda
 
-- func: _masked_scale(Tensor self, Tensor mask, float scale) -> Tensor
-  variants: function
+- func: native_dropout_backward(Tensor grad, Tensor mask, float scale) -> Tensor
   dispatch:
-    CUDA: masked_scale_cuda
+    CPU: native_dropout_backward_cpu
+    CUDA: native_dropout_backward_cuda
 
 - func: _sobol_engine_draw(Tensor quasi, int n, Tensor sobolstate, int dimension, int num_generated, ScalarType? dtype) -> (Tensor, Tensor)
 

@@ -839,7 +839,8 @@ struct CudaGraphFuser {
           fmap(tensor_inputs, [&](Value* v) { return shape_of.at(v); });
       AT_ASSERT(!shapes.empty());
       shape_of.emplace(
-          n->output(), shapes.size() == 1 ? shapes[0] : broadcastSizes(shapes));
+          n->output(0),
+          shapes.size() == 1 ? shapes[0] : broadcastSizes(shapes));
     }
     return shape_of;
   }

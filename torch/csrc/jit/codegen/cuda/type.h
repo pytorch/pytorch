@@ -31,7 +31,7 @@ enum class ValType {
   NamedScalar,
 };
 
-enum class DataType { Bool, Double, Float, Half, Int, Int32, Null };
+enum class DataType { Double, Float, Half, Int, Int32, Bool, Null };
 
 // Returns if the datatype is a floating point type
 bool isFloatingPointType(DataType dtype);
