@@ -25,11 +25,9 @@ using namespace ::c10::onnx;
 //   ...
 
 // A map of names and values of referenced attributes, to avoid duplicates.
-std::unordered_map<std::string, Value*> attrValues = {};
+std::unordered_map<std::string, Value*> attrValues;
 // A list of IValue's of parameters referenced as attributes, to return.
-std::vector<IValue> parameterIValues = {};
-// Replaced nodes to be delete
-std::vector<Node*> toDestory = {};
+std::vector<IValue> parameterIValues;
 
 std::deque<std::string> findSubModuleAttr(
     Value* input,
@@ -41,6 +39,7 @@ std::deque<std::string> findSubModuleAttr(
 
   // Loop starts from inner submodule and follows the chain until reaches the
   // top module.
+
   while (node->outputs().at(0)->type() != graph->inputs().at(0)->type()) {
     if (node->kind() == prim::GetAttr) {
       moduleNames.push_front(node->s(attr::name));
@@ -71,50 +70,15 @@ Value* addParamAsArgument(Function* function, std::string& name, IValue& attr) {
   return function->graph()->addInput(name)->setType(attr.type());
 }
 
-Node* insertCloneBeforeNode(
-    std::shared_ptr<Graph> graph,
-    Value* orig_data,
-    Node* node) {
-  auto* noneNode = graph->create(prim::Constant);
-  noneNode->output()->setType(NoneType::get());
-  auto cloneNode = graph->create(aten::clone, /*num_outputs =*/1);
-  cloneNode->addInput(orig_data);
-
-  cloneNode->addInput(noneNode->output());
-  cloneNode->output()->setType(orig_data->type());
-
-  cloneNode->insertBefore(node);
-  noneNode->insertBefore(cloneNode);
-  return cloneNode;
-}
-
-Value* registerSetAttrInIfBlock(
-    std::shared_ptr<Graph> graph,
-    Block* block,
-    Value* orig_data) {
-  auto cloneNode =
-      insertCloneBeforeNode(graph, orig_data, block->return_node());
-  auto next_node = block->owningNode();
-
-  RegisterInplaceNodeInIfBlocks(
-      orig_data, cloneNode->output(), block, next_node);
-
-  return block->owningNode()->outputs().at(
-      block->owningNode()->outputs().size() - 1);
-}
-
-std::unordered_map<std::string, Value*> getParamAttributes(
+void getParamAttributes(
     Block* block,
     std::shared_ptr<Graph>& graph,
     const Module& module_,
-    Function* function_,
-    std::unordered_map<std::string, Value*> setAttrValues) {
+    Function* function_) {
   auto isEval = !module_.hasattr("training") || !module_.is_training();
 
   Node* m = *block->nodes().begin();
   WithInsertPoint guard(m);
-
-  std::unordered_map<std::string, Value*> nextSetAttrValues = {};
 
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node* n = *it;
@@ -165,6 +129,7 @@ std::unordered_map<std::string, Value*> getParamAttributes(
           }
           parameterIValues.emplace_back(attr.toTensor());
           paramConst = addParamAsArgument(function_, fullName, attr);
+          attrValues.insert({fullName, paramConst});
         } else if (attr.isObject() && !attr.toObjectRef().type()->is_module()) {
           // Only below registered torch classes are supported.
           try {
@@ -178,96 +143,27 @@ std::unordered_map<std::string, Value*> getParamAttributes(
                 << " This class type does not extend __getstate__ method.";
           }
         } else if (attr.isNone() || attr.isBool()) { // TODO: Handle float/int
-                                                     // attributes
           auto attrVal = tryInsertConstant(*graph, attr);
-          paramConst = *attrVal;
+          n->output()->replaceAllUsesWith(*attrVal);
+          n->destroy();
         }
-
-        attrValues.insert({fullName, paramConst});
-      }
-
-      if (n->kind() == prim::SetAttr) { // Handle SetAttr node
-        if (n->s(attr::name) ==
-            "num_batches_tracked") { // This attr is not used in ONNX
-          toDestory.emplace_back(n);
-          return nextSetAttrValues;
-        }
-        if (attrModule.hasattr(name)) {
-          // SetAttr writes a value to an attr. Keep this in the setAttrValues
-          // map.
-          setAttrValues[fullName] = n->inputs().at(1);
-          if (n->owningBlock()->owningNode() &&
-              n->owningBlock()->owningNode()->kind() == prim::If) {
-            nextSetAttrValues[fullName] = n->inputs().at(1);
-          }
-          toDestory.emplace_back(n);
-          GRAPH_UPDATE("Folding SetAttr node %", n->outputs()[0]->debugName());
-        }
-      } else if (n->kind() == prim::GetAttr) { // Handle GetAttr node
-        if (setAttrValues.find(fullName) != setAttrValues.end()) {
-          // Attr has been set earlier in the graph. Read its value from
-          // setAttrValues map.
-          auto set_attr_node_input = setAttrValues[fullName];
-
-          if (set_attr_node_input->type()->kind() == TypeKind::ListType) {
-            // Create an aten::list to clone the list in graph inputs
-            auto newNode = graph->create(aten::list, /*num_outputs =*/1);
-            newNode->addInput(set_attr_node_input);
-            newNode->output()->setType(set_attr_node_input->type());
-            newNode->insertBefore(n);
-            n->output()->replaceAllUsesAfterNodeWith(n, newNode->output());
-          } else if (
-              set_attr_node_input->type()->kind() == TypeKind::TensorType) {
-            // Create an aten::clone to clone the list in graph inputs
-            auto cloneNode =
-                insertCloneBeforeNode(graph, set_attr_node_input, n);
-            n->output()->replaceAllUsesAfterNodeWith(n, cloneNode->output());
-          }
-          // TODO: Handle float/int attributes
-          toDestory.emplace_back(n);
-
-        } else if (paramConst) {
-          // Attr has not been set earlier in the graph. Replace it with the
-          // graph parameter if exists.
-          n->output()->replaceAllUsesWith(paramConst);
-          n->removeAllInputs();
-          toDestory.emplace_back(n);
-        }
-        GRAPH_UPDATE("Folding GetAttr node %", n->outputs()[0]->debugName());
-      }
-    } else if (n->kind() == prim::If) {
-      std::unordered_map<std::string, Value*>::iterator mapIt;
-
-      // Get the list of attributes set in each block
-      std::vector<std::unordered_map<std::string, Value*>> attrValueMaps = {
-          getParamAttributes(
-              n->blocks().at(0), graph, module_, function_, setAttrValues),
-          getParamAttributes(
-              n->blocks().at(1), graph, module_, function_, setAttrValues)};
-
-      // Consolidate the attributes set in different blocks
-      for (size_t i = 0; i < n->blocks().size(); i++) {
-        for (mapIt = attrValueMaps[i].begin(); mapIt != attrValueMaps[i].end();
-             mapIt++) {
-          auto blockOutput =
-              registerSetAttrInIfBlock(graph, n->blocks().at(i), mapIt->second);
-          auto name = mapIt->first;
-          setAttrValues[name] = blockOutput;
-          auto attrValue = (setAttrValues.find(name) != setAttrValues.end())
-              ? setAttrValues[name]
-              : attrValues[name];
-          if (attrValueMaps[i ^ 1].find(name) == attrValueMaps[i ^ 1].end()) {
-            MatchIfBlocksOutputForValue(attrValue, n->blocks().at(i));
-          }
-        }
-      }
-    } else {
-      for (Block* sub_block : n->blocks()) {
-        getParamAttributes(sub_block, graph, module_, function_, setAttrValues);
       }
     }
+
+    for (Block* sub_block : n->blocks()) {
+      getParamAttributes(sub_block, graph, module_, function_);
+    }
   }
-  return nextSetAttrValues;
+  return;
+}
+
+void insertMainModuleAsConstant(std::shared_ptr<Graph> graph) {
+  auto* constNode = graph->create(prim::Constant);
+  constNode->output()->setType(graph->inputs().at(0)->type());
+  auto it = graph->nodes().begin();
+  constNode->insertBefore(*it);
+  graph->inputs().at(0)->replaceAllUsesWith(constNode->output());
+  graph->eraseInput(0);
 }
 
 std::pair<Module, std::vector<IValue>> list_module_parameters(
@@ -279,16 +175,11 @@ std::pair<Module, std::vector<IValue>> list_module_parameters(
 
   parameterIValues.clear();
   attrValues.clear();
-  toDestory.clear();
 
   GRAPH_DEBUG("Fetch attributes for function: " + function->name());
-  getParamAttributes(graph->block(), graph, moduleClone, function, {});
-  for (Node* n : toDestory) {
-    n->destroy();
-  }
-
-  GRAPH_DEBUG("Cleaning up module");
-  EliminateDeadCode(graph->block());
+  getParamAttributes(graph->block(), graph, moduleClone, function);
+  insertMainModuleAsConstant(graph);
+  GRAPH_DEBUG("Listed parameters as inputs: ", *graph);
 
   return std::make_pair(moduleClone, parameterIValues);
 }
