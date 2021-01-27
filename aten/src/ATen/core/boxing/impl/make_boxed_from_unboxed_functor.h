@@ -400,7 +400,7 @@ namespace impl {
     static_assert(std::is_same<guts::typelist::typelist<ParameterTypes...>, typename guts::infer_function_traits_t<KernelFunctor>::parameter_types>::value,
       "Parameter types mismatch");
 
-    static ReturnType call(OperatorKernel* functor, ParameterTypes... args) {
+    static ReturnType call(ParameterTypes... args, OperatorKernel* functor) {
       KernelFunctor* functor_ = static_cast<KernelFunctor*>(functor);
       return (*functor_)(std::forward<ParameterTypes>(args)...);
     }
