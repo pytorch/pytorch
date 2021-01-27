@@ -72,7 +72,7 @@ Module codegen_backend_module(const std::string& backend_name,
   // Generate LoweredModule.
   Module loweredModule(
       "torch.jit." + backend_name + "LoweredModule",
-      get_python_cu(),
+      std::make_shared<CompilationUnit>(),
       /*shouldMangle=*/true);
 
   // Generate attributes.
