@@ -82,10 +82,107 @@ Examples::
     True
 """)
 
+inv = _add_docstr(_linalg.linalg_inv, r"""
+linalg.inv(input, *, out=None) -> Tensor
+
+This function computes the "multiplicative inverse" matrix of a square matrix, or batch of such matrices, :attr:`input`.
+The result satisfies the relation
+
+``matmul(inv(input), input) = matmul(input, inv(input)) = eye(input.shape[0]).expand_as(input)``.
+
+Supports input of float, double, cfloat and cdouble data types.
+
+.. note:: If :attr:`input` is a non-invertible matrix or non-square matrix, or batch with at least one such matrix,
+          then a RuntimeError will be thrown.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+Args:
+    input (Tensor): the square :math:`n \times n` matrix or the batch
+                    of such matrices of size :math:`(*, n, n)` where `*` is one or more batch dimensions.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if None. Default: None
+
+Examples::
+
+    >>> x = torch.rand(4, 4)
+    >>> y = torch.linalg.inv(x)
+    >>> z = torch.mm(x, y)
+    >>> z
+    tensor([[ 1.0000, -0.0000, -0.0000,  0.0000],
+            [ 0.0000,  1.0000,  0.0000,  0.0000],
+            [ 0.0000,  0.0000,  1.0000,  0.0000],
+            [ 0.0000, -0.0000, -0.0000,  1.0000]])
+    >>> torch.max(torch.abs(z - torch.eye(4))) # Max non-zero
+    tensor(1.1921e-07)
+
+    >>> # Batched inverse example
+    >>> x = torch.randn(2, 3, 4, 4)
+    >>> y = torch.linalg.inv(x)
+    >>> z = torch.matmul(x, y)
+    >>> torch.max(torch.abs(z - torch.eye(4).expand_as(x))) # Max non-zero
+    tensor(1.9073e-06)
+
+    >>> x = torch.rand(4, 4, dtype=torch.cdouble)
+    >>> y = torch.linalg.inv(x)
+    >>> z = torch.mm(x, y)
+    >>> z
+    tensor([[ 1.0000e+00+0.0000e+00j, -1.3878e-16+3.4694e-16j,
+            5.5511e-17-1.1102e-16j,  0.0000e+00-1.6653e-16j],
+            [ 5.5511e-16-1.6653e-16j,  1.0000e+00+6.9389e-17j,
+            2.2204e-16-1.1102e-16j, -2.2204e-16+1.1102e-16j],
+            [ 3.8858e-16-1.2490e-16j,  2.7756e-17+3.4694e-17j,
+            1.0000e+00+0.0000e+00j, -4.4409e-16+5.5511e-17j],
+            [ 4.4409e-16+5.5511e-16j, -3.8858e-16+1.8041e-16j,
+            2.2204e-16+0.0000e+00j,  1.0000e+00-3.4694e-16j]],
+        dtype=torch.complex128)
+    >>> torch.max(torch.abs(z - torch.eye(4, dtype=torch.cdouble))) # Max non-zero
+    tensor(7.5107e-16, dtype=torch.float64)
+""")
+
 det = _add_docstr(_linalg.linalg_det, r"""
 linalg.det(input) -> Tensor
 
 Alias of :func:`torch.det`.
+""")
+
+slogdet = _add_docstr(_linalg.linalg_slogdet, r"""
+linalg.slogdet(input) -> (Tensor, Tensor)
+
+Calculates the sign and natural logarithm of the absolute value of a square matrix's determinant,
+or of the absolute values of the determinants of a batch of square matrices :attr`input`.
+The determinant can be computed with ``sign * exp(logabsdet)``.
+
+Supports input of float, double, cfloat and cdouble datatypes.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: For matrices that have zero determinant, this returns ``(0, -inf)``.
+          If :attr:`input` is batched then the entries in the result tensors corresponding to matrices with
+          the zero determinant have sign 0 and the natural logarithm of the absolute value of the determinant -inf.
+
+Arguments:
+    input (Tensor): the input matrix of size :math:`(n, n)` or the batch of matrices of size :math:`(*, n, n)`
+                    where `*` is one or more batch dimensions.
+
+Returns:
+    A namedtuple (sign, logabsdet) containing the sign of the determinant and the natural logarithm
+    of the absolute value of determinant, respectively.
+
+Example::
+
+    >>> A = torch.randn(3, 3)
+    >>> A
+    tensor([[ 0.0032, -0.2239, -1.1219],
+            [-0.6690,  0.1161,  0.4053],
+            [-1.6218, -0.9273, -0.0082]])
+    >>> torch.linalg.det(A)
+    tensor(-0.7576)
+    >>> torch.linalg.logdet(A)
+    tensor(nan)
+    >>> torch.linalg.slogdet(A)
+    torch.return_types.linalg_slogdet(sign=tensor(-1.), logabsdet=tensor(-0.2776))
 """)
 
 eigh = _add_docstr(_linalg.linalg_eigh, r"""
@@ -431,8 +528,9 @@ always be real-valued, even if :attr:`input` is complex.
           then the singular values of each matrix in the batch is returned in descending order.
 
 .. note:: The implementation of SVD on CPU uses the LAPACK routine `?gesdd` (a divide-and-conquer
-          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the MAGMA routine
-          `gesdd` as well.
+          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the cuSOLVER routines
+          `gesvdj` and `gesvdjBatched` on CUDA 10.1.243 and later, and uses the MAGMA routine `gesdd`
+          on earlier versions of CUDA.
 
 .. note:: The returned matrix `U` will be transposed, i.e. with strides
           :code:`U.contiguous().transpose(-2, -1).stride()`.
@@ -446,6 +544,10 @@ always be real-valued, even if :attr:`input` is complex.
 
 .. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is True.
 
+.. note:: Since `U` and `V` of an SVD is not unique, each vector can be multiplied by
+          an arbitrary phase factor :math:`e^{i \phi}` while the SVD result is still correct.
+          Different platforms, like Numpy, or inputs on different device types, may produce different
+          `U` and `V` tensors.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
@@ -573,6 +675,91 @@ Examples::
     tensor([ 5.9175, 48.4590,  5.6443])
     >>> LA.cond(a, 1)
     >>> tensor([ 11.6734+0.j, 105.1037+0.j,  10.1978+0.j])
+""")
+
+pinv = _add_docstr(_linalg.linalg_pinv, r"""
+linalg.pinv(input, rcond=1e-15, hermitian=False) -> Tensor
+
+Computes the pseudo-inverse (also known as the Moore-Penrose inverse) of a matrix :attr:`input`,
+or of each matrix in a batched :attr:`input`.
+The pseudo-inverse is computed using singular value decomposition (see :func:`torch.svd`) by default.
+If :attr:`hermitian` is ``True``, then :attr:`input` is assumed to be Hermitian (symmetric if real-valued),
+and the computation of the pseudo-inverse is done by obtaining the eigenvalues and eigenvectors
+(see :func:`torch.linalg.eigh`).
+The singular values (or the absolute values of the eigenvalues when :attr:`hermitian` is ``True``) that are below
+the specified :attr:`rcond` threshold are treated as zero and discarded in the computation.
+
+Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` datatypes.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: If singular value decomposition or eigenvalue decomposition algorithms do not converge
+          then a RuntimeError will be thrown.
+
+Args:
+    input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`
+                    where `*` is one or more batch dimensions.
+    rcond (float, Tensor, optional): the tolerance value to determine the cutoff for small singular values. Default: 1e-15
+                                     :attr:`rcond` must be broadcastable to the singular values of :attr:`input`
+                                     as returned by :func:`torch.svd`.
+    hermitian(bool, optional): indicates whether :attr:`input` is Hermitian. Default: ``False``
+
+Examples::
+
+    >>> input = torch.randn(3, 5)
+    >>> input
+    tensor([[ 0.5495,  0.0979, -1.4092, -0.1128,  0.4132],
+            [-1.1143, -0.3662,  0.3042,  1.6374, -0.9294],
+            [-0.3269, -0.5745, -0.0382, -0.5922, -0.6759]])
+    >>> torch.linalg.pinv(input)
+    tensor([[ 0.0600, -0.1933, -0.2090],
+            [-0.0903, -0.0817, -0.4752],
+            [-0.7124, -0.1631, -0.2272],
+            [ 0.1356,  0.3933, -0.5023],
+            [-0.0308, -0.1725, -0.5216]])
+
+    Batched linalg.pinv example
+    >>> a = torch.randn(2, 6, 3)
+    >>> b = torch.linalg.pinv(a)
+    >>> torch.matmul(b, a)
+    tensor([[[ 1.0000e+00,  1.6391e-07, -1.1548e-07],
+            [ 8.3121e-08,  1.0000e+00, -2.7567e-07],
+            [ 3.5390e-08,  1.4901e-08,  1.0000e+00]],
+
+            [[ 1.0000e+00, -8.9407e-08,  2.9802e-08],
+            [-2.2352e-07,  1.0000e+00,  1.1921e-07],
+            [ 0.0000e+00,  8.9407e-08,  1.0000e+00]]])
+
+    Hermitian input example
+    >>> a = torch.randn(3, 3, dtype=torch.complex64)
+    >>> a = a + a.t().conj()  # creates a Hermitian matrix
+    >>> b = torch.linalg.pinv(a, hermitian=True)
+    >>> torch.matmul(b, a)
+    tensor([[ 1.0000e+00+0.0000e+00j, -1.1921e-07-2.3842e-07j,
+            5.9605e-08-2.3842e-07j],
+            [ 5.9605e-08+2.3842e-07j,  1.0000e+00+2.3842e-07j,
+            -4.7684e-07+1.1921e-07j],
+            [-1.1921e-07+0.0000e+00j, -2.3842e-07-2.9802e-07j,
+            1.0000e+00-1.7897e-07j]])
+
+    Non-default rcond example
+    >>> rcond = 0.5
+    >>> a = torch.randn(3, 3)
+    >>> torch.linalg.pinv(a)
+    tensor([[ 0.2971, -0.4280, -2.0111],
+            [-0.0090,  0.6426, -0.1116],
+            [-0.7832, -0.2465,  1.0994]])
+    >>> torch.linalg.pinv(a, rcond)
+    tensor([[-0.2672, -0.2351, -0.0539],
+            [-0.0211,  0.6467, -0.0698],
+            [-0.4400, -0.3638, -0.0910]])
+
+    Matrix-wise rcond example
+    >>> a = torch.randn(5, 6, 2, 3, 3)
+    >>> rcond = torch.rand(2)  # different rcond values for each matrix in a[:, :, 0] and a[:, :, 1]
+    >>> torch.linalg.pinv(a, rcond)
+    >>> rcond = torch.randn(5, 6, 2) # different rcond value for each matrix in 'a'
+    >>> torch.linalg.pinv(a, rcond)
 """)
 
 solve = _add_docstr(_linalg.linalg_solve, r"""

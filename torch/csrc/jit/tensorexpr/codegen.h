@@ -66,6 +66,17 @@ class TORCH_API CodeGen {
 
   virtual void call(const std::vector<CallArg>& args) = 0;
 
+  virtual at::Tensor empty_strided(
+      c10::IntArrayRef size,
+      c10::IntArrayRef stride,
+      c10::optional<c10::ScalarType> dtype_opt,
+      c10::optional<c10::Layout> layout_opt,
+      c10::optional<c10::Device> device_opt,
+      c10::optional<bool> pin_memory_opt) {
+    return at::empty_strided(
+        size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
+  }
+
   const std::string& kernel_func_name() const {
     return kernel_func_name_;
   }

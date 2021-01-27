@@ -1,6 +1,6 @@
-import torch.testing._internal.expecttest as expecttest
+from torch.testing._internal import expecttest
+from torch.testing._internal.common_utils import TestCase, run_tests
 
-import unittest
 import string
 import textwrap
 import doctest
@@ -17,7 +17,7 @@ def text_lineno(draw):
     return (t, lineno)
 
 
-class TestExpectTest(expecttest.TestCase):
+class TestExpectTest(TestCase):
     @hypothesis.given(text_lineno())
     def test_nth_line_ref(self, t_lineno):
         t, lineno = t_lineno
@@ -103,4 +103,4 @@ def load_tests(loader, tests, ignore):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

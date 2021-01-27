@@ -1,9 +1,10 @@
 import os
 import re
 import yaml
-import unittest
 import textwrap
 import torch
+
+from torch.testing._internal.common_utils import TestCase, run_tests
 from collections import namedtuple
 
 
@@ -13,11 +14,11 @@ all_operators_with_namedtuple_return = {
     'max', 'min', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
     'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'lstsq',
     'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "unpack_dual", 'linalg_qr',
-    '_svd_helper', 'linalg_svd',
+    '_svd_helper', 'linalg_svd', 'linalg_slogdet',
 }
 
 
-class TestNamedTupleAPI(unittest.TestCase):
+class TestNamedTupleAPI(TestCase):
 
     def test_native_functions_yaml(self):
         operators_found = set()
@@ -66,6 +67,7 @@ class TestNamedTupleAPI(unittest.TestCase):
             op(operators=['triangular_solve'], input=(a,), names=('solution', 'cloned_coefficient'), hasout=True),
             op(operators=['lstsq'], input=(a,), names=('solution', 'QR'), hasout=True),
             op(operators=['linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
+            op(operators=['linalg_slogdet'], input=(), names=('sign', 'logabsdet'), hasout=True),
             op(operators=['unpack_dual'], input=(0,), names=('primal', 'tangent'), hasout=False),
         ]
 
@@ -108,4 +110,4 @@ class TestNamedTupleAPI(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

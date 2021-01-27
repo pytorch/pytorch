@@ -1,10 +1,3 @@
-// define constants like M_PI and C keywords for MSVC
-#ifdef _MSC_VER
-#ifndef _USE_MATH_DEFINES
-#define _USE_MATH_DEFINES
-#endif
-#include <math.h>
-#endif
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Dispatch.h>
@@ -247,7 +240,7 @@ Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool lo
     }
 
     if (full) {
-        auto stirling_term = target * at::log(target) - target + 0.5 * at::log(2 * M_PI * target);
+        auto stirling_term = target * at::log(target) - target + 0.5 * at::log(2 * c10::pi<double> * target);
         loss += stirling_term.masked_fill(target <= 1, 0);
     }
 
@@ -390,22 +383,24 @@ Tensor& mse_loss_backward_out(Tensor& grad_input, const Tensor& grad_output,
 }
 
 Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
-  auto loss = input.sub(target).abs_();
-  return apply_loss_reduction(loss, reduction);
+  const auto float_type = c10::toValueType(input.scalar_type());
+  Tensor result = at::empty({0}, input.options().dtype(float_type));
+  return at::l1_loss_out(result, input, target, reduction);
 }
 
-Tensor& l1_loss_out(Tensor&result, const Tensor& input, const Tensor& target, int64_t reduction) {
+Tensor& l1_loss_out(Tensor& result, const Tensor& input, const Tensor& target, int64_t reduction) {
   if (reduction != Reduction::None) {
-    auto loss = input.sub(target).abs_();
+    auto diff = at::sub(input, target);
+    auto loss = diff.is_complex() ? diff.abs() : diff.abs_();
     if (reduction == Reduction::Mean) {
-      at::mean_out(result, loss, 0);
+      return at::mean_out(result, loss, IntArrayRef{});
     } else {
-      at::sum_out(result, loss, 0);
+      return at::sum_out(result, loss, IntArrayRef{});
     }
   } else {
-    at::sub_out(result, input, target).abs_();
+    auto diff = input.is_complex() ? at::sub(input, target) : at::sub_out(result, input, target);
+    return at::abs_out(result, diff);
   }
-  return result;
 }
 
 Tensor l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
@@ -416,8 +411,7 @@ Tensor l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Te
 Tensor& l1_loss_backward_out(Tensor& grad_input, const Tensor& grad_output,
     const Tensor& input, const Tensor& target, int64_t reduction) {
   auto norm = reduction == Reduction::Mean ? grad_output / input.numel() : grad_output;
-  at::sub_out(grad_input, input, target).sign_().mul_(norm);
-  return grad_input;
+  return at::sub_out(grad_input, input, target).sgn_().mul_(norm);
 }
 
 }}  // namespace at::native
