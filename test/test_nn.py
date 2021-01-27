@@ -30,7 +30,7 @@ from torch.nn.utils import clip_grad_norm_, clip_grad_value_
 import torch.nn.utils.prune as prune
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.nn import Parameter
-from torch.nn.parameter import UninitializedParameter
+from torch.nn.parameter import UninitializedParameter, UninitializedBuffer
 from torch.nn.parallel._functions import Broadcast
 from torch.testing import get_all_fp_dtypes
 from torch.testing._internal.common_utils import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, skipIfRocm, \
@@ -14276,9 +14276,40 @@ class TestLazyModules(TestCase):
         self.assertTrue(module.has_uninitialized_params())
 
     @suppress_warnings
+    def test_lazy_module_buffer(self):
+        module = LazyModule()
+        module.register_buffer('test_buffer', UninitializedBuffer())
+        self.assertTrue(module.has_uninitialized_params())
+        state_dict = module.state_dict()
+        self.assertIsInstance(state_dict['test_buffer'], UninitializedBuffer)
+        new_module = LazyModule()
+        # An error is raised when there is an attempt to replace an existing parameter
+        # with an uninitialized one
+        new_module.register_buffer('test_buffer', torch.ones(5, 5))
+        with self.assertRaisesRegex(RuntimeError, 'shape of an uninitialized'):
+            new_module.load_state_dict(state_dict)
+        # Uninitialized parameters are overriden when the state dict to be loaded contains a valid one
+        new_module = LazyModule()
+        new_module.register_buffer('test_buffer', torch.ones(5, 5))
+        module.load_state_dict(new_module.state_dict())
+        self.assertEqual(module.test_buffer, torch.ones((5, 5)))
+
+        # Uninitialized parameters are left unchanged
+        module = LazyModule()
+        module.register_buffer('test_buffer', UninitializedBuffer())
+        self.assertTrue(module.has_uninitialized_params())
+
+        new_module = LazyModule()
+        new_module.register_buffer('test_buffer', UninitializedBuffer())
+        module.load_state_dict(new_module.state_dict())
+        module.load_state_dict(new_module.state_dict())
+        self.assertTrue(module.has_uninitialized_params())
+
+    @suppress_warnings
     def test_lazy_module_jit(self):
         module = LazyModule()
         module.register_parameter('test_param', UninitializedParameter())
+        module.register_buffer('test_buffer', UninitializedBuffer())
         self.assertTrue(module.has_uninitialized_params())
         with self.assertRaisesRegex(RuntimeError, 'run a forward pass'):
             torch.jit.script(module)
@@ -14287,6 +14318,7 @@ class TestLazyModules(TestCase):
     def test_lazy_share_memory(self):
         module = LazyModule()
         module.register_parameter('test_param', UninitializedParameter())
+        module.register_buffer('test_buffer', UninitializedBuffer())
         self.assertTrue(module.has_uninitialized_params())
         with self.assertRaisesRegex(RuntimeError, 'share memory on an uninitialized'):
             module.share_memory()
