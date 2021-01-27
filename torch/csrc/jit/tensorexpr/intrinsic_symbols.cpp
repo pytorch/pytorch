@@ -7,7 +7,7 @@
 
 #ifdef __cplusplus
 extern "C" {
-#endif
+#endif // __cplusplus
 
 __m128 Sleef_acosf4_u10(__m128);
 __m128 Sleef_asinf4_u10(__m128);
@@ -120,11 +120,12 @@ __m256d Sleef_lgammad4_u10(__m256d);
 __m256d Sleef_atan2d4_u10(__m256d, __m256d);
 __m256d Sleef_powd4_u10(__m256d, __m256d);
 __m256d Sleef_fmodd4(__m256d, __m256d);
-#endif
 
 #ifdef __cplusplus
 }
-#endif
+#endif // __cplusplus
+#endif // _MSC_VER
+
 
 namespace torch {
 namespace jit {
