@@ -319,7 +319,7 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         q = self.q_scaling_product.mul_scalar(q, scaling)
 
-        q, k, v, attn_mask, key_padding_mask = nnF._multi_head_attention_forward_checks(
+        q, k, v, attn_mask, key_padding_mask = nnF._multi_head_attention_forward_checks(  # type: ignore
             query, key, value,
             q, k, v,
             self.bias_k, self.bias_v,
@@ -350,7 +350,7 @@ class MultiheadAttention(nn.MultiheadAttention):
         k = self.dequant_k(k)
         v = self.dequant_v(v)
 
-        attn_output, attn_output_weights = nnF._multi_head_attention_forward_compute_outputs(
+        attn_output, attn_output_weights = nnF._multi_head_attention_forward_compute_outputs(  # type: ignore
             query.size(1), self.num_heads, self.embed_dim, tgt_len, src_len,
             q, k, v,
             attn_mask, key_padding_mask,
