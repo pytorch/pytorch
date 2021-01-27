@@ -72,7 +72,7 @@ file(GLOB metal_h "metal/*.h")
 file(GLOB metal_cpp "metal/*.cpp")
 file(GLOB_RECURSE native_metal_h "native/metal/*.h")
 file(GLOB metal_test_srcs "native/metal/mpscnn/tests/*.mm")
-file(GLOB_RECURSE native_metal_srcs "native/metal/*.mm", "native/metal/*.cpp")
+file(GLOB_RECURSE native_metal_srcs "native/metal/*.mm" "native/metal/*.cpp")
 EXCLUDE(native_metal_srcs "${native_metal_srcs}" ${metal_test_srcs})
 file(GLOB metal_prepack_h "native/metal/MetalPrepackOpContext.h")
 file(GLOB metal_prepack_cpp "native/metal/MetalPrepackOpRegister.cpp")
@@ -325,6 +325,7 @@ if(USE_CUDA AND NOT USE_ROCM)
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static_nocallback.a
       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/liblapack_static.a     # needed for libcusolver_static
       )
   else()
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS

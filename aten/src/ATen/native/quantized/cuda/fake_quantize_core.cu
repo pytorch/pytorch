@@ -34,17 +34,16 @@ void fake_quantize_tensor_kernel_cuda(
     .add_output(output)
     .add_input(input)
     .build();
-  gpu_kernel(iter,
-    [=] GPU_LAMBDA (float input_val) -> float {
-      return (fminf(
+  gpu_kernel(iter, [=] GPU_LAMBDA(float input_val) -> float {
+    return (fminf(
                 quant_max,
                 fmaxf(
                     quant_min,
-                    static_cast<int64_t>(std::nearbyint(
-                        input_val * inv_scale + zero_point)))) -
+                    static_cast<int64_t>(
+                        std::nearbyint(input_val * inv_scale) + zero_point))) -
             zero_point) *
-          scale;
-    });
+        scale;
+  });
 }
 
 void fake_quantize_grad_tensor_kernel_cuda(
@@ -63,11 +62,10 @@ void fake_quantize_grad_tensor_kernel_cuda(
     .add_input(output_grad)
     .add_input(input)
     .build();
-  gpu_kernel(iter,
-    [=] GPU_LAMBDA (float dy, float x) -> float {
-      int64_t Xq = std::nearbyint(x * inv_scale + zero_point);
-      return (Xq >= quant_min && Xq <= quant_max) * dy;
-    });
+  gpu_kernel(iter, [=] GPU_LAMBDA(float dy, float x) -> float {
+    int64_t Xq = std::nearbyint(x * inv_scale) + zero_point;
+    return (Xq >= quant_min && Xq <= quant_max) * dy;
+  });
 }
 
 void _fake_quantize_grad_learnable_tensor_kernel_cuda(
@@ -82,7 +80,7 @@ void _fake_quantize_grad_learnable_tensor_kernel_cuda(
   gpu_kernel_multiple_outputs(
     iter, [=] GPU_LAMBDA (float XInput, float dYInput) -> thrust::tuple<float, float, float> {
       float dXOutput, dZeroPointOutput, dScaleOutput;
-      int64_t xq = std::nearbyint(zero_point + XInput * inv_scale);
+      int64_t xq = std::nearbyint(XInput * inv_scale) + zero_point;
       dXOutput = dYInput * (xq >= quant_min && xq <= quant_max);
       xq = std::max(std::min(xq, quant_max), quant_min);
       float xfq = static_cast<float>((xq - zero_point) * scale);
@@ -108,12 +106,13 @@ void fake_quant_per_channel_cuda(TensorIterator &iter, int64_t quant_min, int64_
     [=] GPU_LAMBDA (float input_val, float scale, int64_t zero_point) -> float {
       float inv_scale = 1.0f / scale;
       return (fminf(
-                quant_max,
-                fmaxf(
-                    quant_min,
-                    static_cast<int64_t>(std::nearbyint(
-                        input_val * inv_scale + zero_point)))) -
-            zero_point) *
+                  quant_max,
+                  fmaxf(
+                      quant_min,
+                      static_cast<int64_t>(
+                          std::nearbyint(input_val * inv_scale) +
+                          zero_point))) -
+              zero_point) *
           scale;
     });
 }
@@ -122,7 +121,7 @@ void fake_quant_grad_per_channel_cuda(TensorIterator &iter, int64_t quant_min, i
   gpu_kernel(iter,
     [=] GPU_LAMBDA (float x, float dy, float scale, int64_t zero_point) -> float {
       float inv_scale = 1.0f / scale;
-      int64_t Xq = std::nearbyint(x * inv_scale + zero_point);
+      int64_t Xq = std::nearbyint(x * inv_scale) + zero_point;
       return (Xq >= quant_min && Xq <= quant_max) * dy;
     });
 }

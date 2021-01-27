@@ -60,7 +60,7 @@ static LeakyStreamInternals default_streams[C10_COMPILE_TIME_MAX_GPUS];
 // in the pool to be returned when a stream is requested (round-robin fashion
 // , see the note in CUDAStream.h).
 //
-// unique_ptr<T[]> is used instead of vector<T> because T might be non-moveable
+// unique_ptr<T[]> is used instead of vector<T> because T might be non-movable
 // and non-copyable.
 static std::once_flag device_flags[C10_COMPILE_TIME_MAX_GPUS];
 static std::atomic<uint32_t> low_priority_counters[C10_COMPILE_TIME_MAX_GPUS];

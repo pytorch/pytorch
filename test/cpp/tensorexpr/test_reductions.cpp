@@ -1382,8 +1382,8 @@ TEST(Reductions, ReduceInlineConsumer) {
   Stmt* stmt1 = IRSimplifier::simplify(l1.root_stmt());
   Stmt* stmt2 = IRSimplifier::simplify(l2.root_stmt());
 
-  SimpleIREvaluator eval1(stmt1, a_buf, b_buf, y);
-  SimpleIREvaluator eval2(stmt2, a_buf, b_buf, y);
+  SimpleIREvaluator eval1(stmt1, {a_buf, b_buf, y});
+  SimpleIREvaluator eval2(stmt2, {a_buf, b_buf, y});
 
   PaddedBuffer<float> y_1(M);
   PaddedBuffer<float> y_2(M);
@@ -1440,8 +1440,8 @@ TEST(Reductions, ReduceInlineReducerInternal) {
   Stmt* stmt1 = IRSimplifier::simplify(l1.root_stmt());
   Stmt* stmt2 = IRSimplifier::simplify(l2.root_stmt());
 
-  SimpleIREvaluator eval1(stmt1, a_buf, b_buf, y);
-  SimpleIREvaluator eval2(stmt2, a_buf, b_buf, y);
+  SimpleIREvaluator eval1(stmt1, {a_buf, b_buf, y});
+  SimpleIREvaluator eval2(stmt2, {a_buf, b_buf, y});
 
   PaddedBuffer<float> y_1(M);
   PaddedBuffer<float> y_2(M);
@@ -1583,7 +1583,7 @@ TEST(Reductions, ReductionCacheBodyAccess) {
   oss << *result;
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(scale_local, float, {1, 32, 12});
+#CHECK: Allocate(scale_local, float, {384});
 #CHECK: for (int j = 0; j < 32; j++) {
 #CHECK:   for (int k = 0; k < 12; k++) {
 #CHECK:     scale_local[k + 12 * j] = scale[(k + 384 * l1) + 12 * j];

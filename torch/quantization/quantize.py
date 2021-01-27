@@ -5,6 +5,7 @@ import warnings
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
+import torch.nn.quantizable as nnqa
 from torch.nn.intrinsic import _FusedModule
 
 from .quantization_mappings import (
@@ -48,6 +49,8 @@ def _propagate_qconfig_helper(module, qconfig_dict, allow_list=None,
     module_qconfig = qconfig_dict.get(type(module), qconfig_parent)
     module_qconfig = qconfig_dict.get(prefix, module_qconfig)
     module_qconfig = getattr(module, 'qconfig', module_qconfig)
+
+    torch.quantization.qconfig.assert_valid_qconfig(module_qconfig, module)
 
     module.qconfig = module_qconfig
     for name, child in module.named_children():
@@ -126,7 +129,8 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
         """ Adds an activation post process module and register
         a post hook that calls the module
         """
-        if needs_observation(m):
+        # We don't insert observer/fake_quantize for DeQuantStub
+        if needs_observation(m) and not isinstance(m, DeQuantStub):
             # observer and hook will be gone after we swap the module
             m.add_module('activation_post_process', get_activation_post_process(m.qconfig, device, special_act_post_process))
             # Register observer as the first entry in the hook list
@@ -151,7 +155,10 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
         elif needs_observation(child) and type(child) in custom_module_class_mapping:
             observed_child = custom_module_class_mapping[type(child)].from_float(child)
             setattr(module, name, observed_child)
-            insert_activation_post_process(observed_child)
+            # TODO: These are the modules that cannot be observed
+            #       Once there are more, we should move them to a separate list
+            if custom_module_class_mapping[type(child)] != nnqa.LSTM:
+                insert_activation_post_process(observed_child)
         else:
             add_observer_(child, qconfig_propagation_list, non_leaf_module_list, device, custom_module_class_mapping)
 
@@ -251,9 +258,12 @@ def _remove_activation_post_process(module):
         delattr(module, 'activation_post_process')
 
     # remove activation_post_proceess hook
+    handle_ids_to_remove = set()
     for handle_id, hook_fn in module._forward_hooks.items():
         if hook_fn is _observer_forward_hook:
-            module._forward_hooks.pop(handle_id)
+            handle_ids_to_remove.add(handle_id)
+    for handle_id in handle_ids_to_remove:
+        module._forward_hooks.pop(handle_id)
 
 # TODO: rename to something more general
 def _remove_qconfig(module):
@@ -515,8 +525,7 @@ def swap_module(mod, mapping, custom_module_class_mapping):
         The corresponding quantized module of `mod`
     """
     new_mod = mod
-    # Always replace dequantstub with dequantize
-    if hasattr(mod, 'qconfig') and mod.qconfig is not None or type(mod) == DeQuantStub:
+    if hasattr(mod, 'qconfig') and mod.qconfig is not None:
         swapped = False
         if type(mod) in custom_module_class_mapping:
             new_mod = custom_module_class_mapping[type(mod)].from_observed(mod)

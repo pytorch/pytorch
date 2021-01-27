@@ -201,7 +201,7 @@ def _run_function(python_udf):
 
 def _handle_exception(result):
     if isinstance(result, RemoteException):
-        raise result.exception_type(result.msg)
+        raise result.exception_type(result.msg.encode("utf-8").decode("unicode_escape"))
 
 
 def _build_rpc_profiling_key(
@@ -211,7 +211,7 @@ def _build_rpc_profiling_key(
     Builds the key that RPC calls are profiled with using the autograd profiler.
     This will be the name of the corresponding Event recorded in the profiler.
 
-    Arguments:
+    Args:
         exec_type (RPCExecMode): Type of RPC/RRef call
         func_name (str): Name of function being profiled.
         current_worker_name (str): Name of current worker.
@@ -236,7 +236,7 @@ def _start_record_function(exec_type, func_name, current_worker_name, dest_worke
     callbacks that start the profiling, though the user is responsible for
     running the appropriate callbacks when the function to be profiled finishes.
 
-    Arguments:
+    Args:
         exec_type (RPCExecMode): Type of RPC/RRef call
         func_name (str): Name of function being profiled.
         current_worker_name (str): Name of current worker.

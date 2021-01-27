@@ -140,6 +140,7 @@ nn_functional_tests = [
     ('multilabel_soft_margin_loss', (3, S), (non_differentiable(torch.rand(3, S)),),),
     ('cosine_embedding_loss', (S, S), ((S, S), non_differentiable(torch.rand(S,))),),
     ('pixel_shuffle', (1, 9, 4, 4), (3,),),
+    ('pixel_unshuffle', (1, 1, 12, 12), (3,),),
     ('affine_grid', (S, 2, 3), (torch.Size([S, 1, 7, 7]),),),
     ('pad', (3, 3, 4, 2), ([1, 1],),),
     ('pairwise_distance', (S, S), ((S, S),),),
@@ -229,8 +230,15 @@ def the_method({}):
     return {}
 '''
 
+def value_to_literal(value):
+    if isinstance(value, str):
+        # Quotes string and escapes special characters
+        return ascii(value)
+    else:
+        return str(value)
+
 def get_call(method_name, func_type, args, kwargs):
-    kwargs_str = ', '.join([k + '=' + str(v) for k, v in kwargs.items()])
+    kwargs_str = ', '.join([k + '=' + value_to_literal(v) for k, v in kwargs.items()])
     self_arg = args[0]
     if(func_type == 'method'):
         args = args[1:]
@@ -461,12 +469,12 @@ def create_script_module(self, nn_module, constructor_args, *args, **kwargs):
         return module
     return script_module
 
-def check_alias_annotation(method_name, args, kwargs):
+def check_alias_annotation(method_name, args, kwargs, *, aten_name, func_type='method'):
     formals, tensors, actuals = get_script_args(args)
-    call = get_call(method_name, 'method', actuals, kwargs)
+    call = get_call(method_name, func_type, actuals, kwargs)
     script = script_template.format(', '.join(formals), call)
     CU = torch.jit.CompilationUnit(script)
-    torch._C._jit_check_alias_annotation(CU.the_method.graph, tuple(tensors), method_name)
+    torch._C._jit_check_alias_annotation(CU.the_method.graph, tuple(tensors), aten_name)
 
 def get_nn_module_name_from_kwargs(**kwargs):
     if 'module_name' in kwargs:
@@ -519,8 +527,14 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
         constructor_args = kwargs.get('constructor_args', ())
 
     # Set up inputs from tuple of sizes or constructor fn
+    input_dtype = torch.double
     if 'input_fn' in kwargs:
         input = kwargs['input_fn']()
+        if isinstance(input, torch.Tensor):
+            input = (input,)
+
+        if all(tensor.is_complex() for tensor in input):
+            input_dtype = torch.cdouble
     else:
         input = (kwargs['input_size'],)
 
@@ -535,7 +549,7 @@ def try_get_nn_module_compiled_mod_and_inputs(*args, **kwargs):
             input = (input,)
         input = input + (kwargs['target_fn'](),)
 
-    args_variable, kwargs_variable = create_input(input)
+    args_variable, kwargs_variable = create_input(input, dtype=input_dtype)
     f_args_variable = deepcopy(unpack_variables(args_variable))
     out_var = deepcopy(f_args_variable)
 

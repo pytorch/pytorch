@@ -97,6 +97,14 @@ std::string used_cpu_capability() {
   ss << "CPU capability usage: ";
   auto capability = native::get_cpu_capability();
   switch (capability) {
+#ifdef HAVE_VSX_CPU_DEFINITION
+    case native::CPUCapability::DEFAULT:
+      ss << "DEFAULT";
+      break;
+    case native::CPUCapability::VSX:
+      ss << "VSX";
+      break;
+#else
     case native::CPUCapability::DEFAULT:
       ss << "NO AVX";
       break;
@@ -106,6 +114,7 @@ std::string used_cpu_capability() {
     case native::CPUCapability::AVX2:
       ss << "AVX2";
       break;
+#endif      
     default:
       break;
   }
@@ -163,6 +172,10 @@ std::string show_config() {
 #if AT_NNPACK_ENABLED()
   // TODO: No version; c.f. https://github.com/Maratyszcza/NNPACK/issues/165
   ss << "  - NNPACK is enabled\n";
+#endif
+
+#ifdef CROSS_COMPILING_MACOSX
+  ss << "  - Cross compiling on MacOSX\n";
 #endif
 
   ss << "  - "<< used_cpu_capability() << "\n";

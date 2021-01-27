@@ -196,41 +196,24 @@ static void upsample_nearest1d_backward_out_cuda_template(
 
 } // namespace
 
-Tensor& upsample_nearest1d_out_cuda(
-    Tensor& output,
+TORCH_IMPL_FUNC(upsample_nearest1d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
-    c10::optional<double> scales) {
+    c10::optional<double> scales,
+    Tensor& output
+) {
   upsample_nearest1d_out_cuda_template(output, input, output_size, scales);
-  return output;
 }
 
-Tensor upsample_nearest1d_cuda(const Tensor& input, IntArrayRef output_size, c10::optional<double> scales) {
-  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  upsample_nearest1d_out_cuda_template(output, input, output_size, scales);
-  return output;
-}
-
-Tensor& upsample_nearest1d_backward_out_cuda(
-    Tensor& grad_input,
+TORCH_IMPL_FUNC(upsample_nearest1d_backward_out_cuda) (
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
-    c10::optional<double> scales) {
+    c10::optional<double> scales,
+    Tensor& grad_input
+) {
   upsample_nearest1d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, scales);
-  return grad_input;
-}
-
-Tensor upsample_nearest1d_backward_cuda(
-    const Tensor& grad_output,
-    IntArrayRef output_size,
-    IntArrayRef input_size,
-    c10::optional<double> scales) {
-  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  upsample_nearest1d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size, scales);
-  return grad_input;
 }
 
 using at::native::upsample::compute_output_size;

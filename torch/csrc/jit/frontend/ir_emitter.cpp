@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/frontend/convert_to_ssa.h>
+#include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
@@ -21,6 +22,7 @@
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/runtime/slice_indices_adjust.h>
 #include <torch/csrc/jit/testing/hooks_for_testing.h>
 
 #include <torch/csrc/jit/ir/constants.h>
@@ -945,49 +947,51 @@ struct to_ir {
   }
 
   void emitDelete(const Delete& stmt) {
-    if (stmt.expr().kind() == TK_SUBSCRIPT) {
-      Subscript subscript(stmt.expr());
-      const List<Expr>& subscript_exprs = subscript.subscript_exprs();
-      if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-        throw ErrorReport(stmt.range())
-            << "del statements only support deletion at a single index, "
-               "slicing is not supported"
-               " (see https://github.com/pytorch/pytorch/issues/31430)";
-      }
-      const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
-      const SourceRange& val_range = subscript.value().range();
-      Value* idx = emitExpr(subscript_exprs[0]);
-      Value* val = sv->asValue(val_range, method);
-
-      // If val is a class instance, this is a method call to a type-specific
-      // implementation of del defined in a __delitem__ method.
-      if (auto cls = val->type()->cast<ClassType>()) {
-        if (!cls->findMethod("__delitem__")) {
-          throw ErrorReport(stmt.range())
-              << "Class does not define __delitem__";
+    for (const auto& target : stmt.targets()) {
+      if (target.kind() == TK_SUBSCRIPT) {
+        Subscript subscript(target);
+        const List<Expr>& subscript_exprs = subscript.subscript_exprs();
+        if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
+          throw ErrorReport(target.range())
+              << "del statements only support deletion at a single index, "
+                 "slicing is not supported"
+                 " (see https://github.com/pytorch/pytorch/issues/31430)";
         }
+        const SugaredValuePtr sv = emitSugaredExpr(subscript.value(), 1);
+        const SourceRange& val_range = subscript.value().range();
+        Value* idx = emitExpr(subscript_exprs[0]);
+        Value* val = sv->asValue(val_range, method);
 
-        // Use MethodValue to call the method to handle recursion.
-        MethodValue(val, "__delitem__")
-            .call(stmt.range(), method, {idx}, {}, 0);
+        // If val is a class instance, this is a method call to a type-specific
+        // implementation of del defined in a __delitem__ method.
+        if (auto cls = val->type()->cast<ClassType>()) {
+          if (!cls->findMethod("__delitem__")) {
+            throw ErrorReport(target.range())
+                << "Class does not define __delitem__";
+          }
+
+          // Use MethodValue to call the method to handle recursion.
+          MethodValue(val, "__delitem__")
+              .call(stmt.range(), method, {idx}, {}, 0);
+        } else {
+          auto node = graph->create(aten::Delete, {val, idx}, 0)
+                          ->setSourceRange(target.range());
+          graph->insertNode(node);
+        }
+      } else if (target.kind() == TK_VAR) {
+        Var var(target);
+        environment_stack->removeVar(var.name(), /*check_if_removed=*/true);
       } else {
-        auto node = graph->create(aten::Delete, {val, idx}, 0)
-                        ->setSourceRange(stmt.range());
-        graph->insertNode(node);
+        throw ErrorReport(target.range())
+            << "del statements are only supported for deleting"
+               " list and dict items and variables";
       }
-    } else if (stmt.expr().kind() == TK_VAR) {
-      Var var(stmt.expr());
-      environment_stack->removeVar(var.name(), /*check_if_removed=*/true);
-    } else {
-      throw ErrorReport(stmt.range())
-          << "del statements are only supported for deleting"
-             " list and dict items and variables";
     }
   }
 
   void emitReturn(const Return& stmt) {
-    Value* result = emitExpr(stmt.expr());
     TypePtr result_type = def_stack_.back().declared_return_type_;
+    Value* result = emitExpr(stmt.expr(), result_type);
     // result type is annotated, every return must convert to that type
     if (result_type) {
       // this guard skips implicit conversion from None -> Tensor for the return
@@ -1125,8 +1129,7 @@ struct to_ir {
     // propagate further in all loaded models. The handling of
     // unwrap_optional will fail in these cases since export did
     // not expect that the input would be none and an unannotated None.
-    // cannot be passed to unwrapoptional To enable this,
-    // we need to (1) implement a real casting operator
+    // To enable this, we need to (1) implement a real casting operator
     // annotated(T, X) that stays in the graph and does the cast
     // and (2) only enable this OPTIONAL_NONE when loading newer
     // graphs because it is incompatible with older graphs.
@@ -1221,8 +1224,11 @@ struct to_ir {
         }
         auto expr_out = emitToBool(expr.range(), emitExpr(expr));
         c10::optional<bool> static_if = c10::nullopt;
-        if (expr_out->node()->kind() == aten::is_scripting) {
+        auto kind = expr_out->node()->kind();
+        if (kind == aten::is_scripting) {
           static_if = true;
+        } else if (kind == aten::has_torch_function) {
+          static_if = false;
         }
         // MetaCompile on boolean literals and constants
         if (auto maybe_ivalue = toIValue(expr_out)) {
@@ -1248,10 +1254,12 @@ struct to_ir {
     return graph->create(kind, n_outputs)->setSourceRange(loc);
   }
 
-  Value* emitTernaryIf(const TernaryIf& expr) {
+  Value* emitTernaryIf(
+      const TernaryIf& expr,
+      const TypePtr& type_hint = nullptr) {
     CondValue cond_value = emitCondExpr(expr.cond());
-    auto true_expr = [&] { return emitExpr(expr.true_expr()); };
-    auto false_expr = [&] { return emitExpr(expr.false_expr()); };
+    auto true_expr = [&] { return emitExpr(expr.true_expr(), type_hint); };
+    auto false_expr = [&] { return emitExpr(expr.false_expr(), type_hint); };
     return emitIfExpr(expr.range(), cond_value, true_expr, false_expr);
   }
 
@@ -1277,10 +1285,10 @@ struct to_ir {
       type_set = true;
     }
 
-    // comprehension introduces it's own scope. no variable assigned
+    // comprehension introduces its own scope. no variable assigned
     // leaks into the rest of the graph
     Node* n =
-        graph->insertNode(create(prim::ListComprehensionScope, lc.range(), 0));
+        graph->insertNode(create(prim::ComprehensionScope, lc.range(), 0));
     auto* comprehension_block = n->addBlock();
     pushFrame(comprehension_block);
     WithInsertPoint guard(comprehension_block);
@@ -1297,6 +1305,52 @@ struct to_ir {
     emitFor(targets_list, itrs, loc, emit_body);
     popFrame();
     return list_value;
+  }
+
+  Value* emitDictComprehension(const DictComp& dc, const TypePtr& type_hint) {
+    const auto loc = dc.range();
+    const auto targets_list = List<Expr>::create(dc.range(), {dc.target()});
+    const auto itrs = List<Expr>::create(dc.range(), {dc.iter()});
+
+    Value* dict_value =
+        graph->insertNode(graph->create(prim::DictConstruct, 1))->output();
+    // Set the default type to be Dict[Str, Tensor]
+    dict_value->setType(DictType::create(StringType::get(), TensorType::get()));
+    bool type_set = false;
+    if (type_hint) {
+      if (!type_hint->cast<DictType>()) {
+        throw ErrorReport(loc)
+            << "Expected Dict type annotation for dict comprehension"
+               ", found "
+            << type_hint->repr_str();
+      }
+      dict_value->setType(type_hint);
+      type_set = true;
+    }
+
+    // A dict comprehension introduces its own scope. No variable assigned
+    // may leak into the rest of the graph
+    Node* n =
+        graph->insertNode(create(prim::ComprehensionScope, dc.range(), 0));
+    auto* comprehension_block = n->addBlock();
+    pushFrame(comprehension_block);
+    WithInsertPoint guard(comprehension_block);
+    auto emit_body = [&]() {
+      auto k = emitExpr(dc.key());
+      auto v = emitExpr(dc.value());
+      if (!type_set) {
+        dict_value->setType(DictType::create(k->type(), v->type()));
+        type_set = true;
+      }
+      NamedValue self = NamedValue(loc, "self", dict_value);
+      NamedValue input_k = NamedValue(loc, "", k);
+      NamedValue input_v = NamedValue(loc, "", v);
+      emitBuiltinCall(
+          loc, *graph, aten::_set_item, {self, input_k, input_v}, {});
+    };
+    emitFor(targets_list, itrs, loc, emit_body);
+    popFrame();
+    return dict_value;
   }
 
   // Insert subtyping refinements
@@ -2000,6 +2054,18 @@ struct to_ir {
         return use_inplace_op ? aten::mul_ : aten::mul;
       case '%':
         return use_inplace_op ? aten::fmod_ : aten::fmod;
+      case '|':
+        return use_inplace_op ? aten::bitwise_or : aten::__or__;
+      case '&':
+        return use_inplace_op ? aten::bitwise_and : aten::__and__;
+      case '^':
+        return use_inplace_op ? aten::bitwise_xor : aten::__xor__;
+      case TK_LSHIFT:
+        return use_inplace_op ? aten::__lshift__ : aten::__lshift__;
+      case TK_RSHIFT:
+        return use_inplace_op ? aten::__irshift__ : aten::__rshift__;
+      case TK_POW:
+        return aten::pow;
       default:
         throw ErrorReport(stmt)
             << "Unknown augmented assignment: " << kindToString(stmt.aug_op());
@@ -2910,7 +2976,7 @@ struct to_ir {
           return std::make_shared<SimpleValue>(
               graph
                   ->insertNode(graph->createList(
-                      type->expect<ListType>()->getElementType(), {}))
+                      type->expectRef<ListType>().getElementType(), {}))
                   ->output());
         }
         // list(iter) desugars to [_elem for _elem in iter]
@@ -2951,7 +3017,15 @@ struct to_ir {
     // Push the source range of a call in case compiling this function
     // triggers an error
     ErrorReport::CallStack::update_pending_range(tree.range());
-    return emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
+    Value* out_val =
+        emitSugaredExpr(tree, 1, type_hint)->asValue(tree.range(), method);
+    // AnyType is the only user-exposed type which we don't unify to from
+    // its subtypes, so we add a cast for use cases like
+    // x : Any = 1 if cond else "str"
+    if (type_hint == AnyType::get() && out_val->type() != AnyType::get()) {
+      out_val = graph->insertUncheckedCast(out_val, type_hint);
+    }
+    return out_val;
   }
 
   NodeKind reverseComparision(NodeKind kind) {
@@ -3286,7 +3360,7 @@ struct to_ir {
         return graph->insertConstant(IValue(), tree->range());
       } break;
       case TK_IF_EXPR: {
-        return emitTernaryIf(TernaryIf(tree));
+        return emitTernaryIf(TernaryIf(tree), type_hint);
       } break;
       case TK_STRINGLITERAL: {
         return emitStringLiteral(StringLiteral(tree));
@@ -3302,7 +3376,7 @@ struct to_ir {
         TypePtr elem_type = TensorType::get();
         if (type_hint) {
           if (type_hint->kind() == TypeKind::ListType) {
-            elem_type = type_hint->expect<ListType>()->getElementType();
+            elem_type = type_hint->expectRef<ListType>().getElementType();
           } else {
             // If the type hint was not a List[T] throw an error
             throw ErrorReport(tree)
@@ -3394,6 +3468,10 @@ struct to_ir {
         auto lc = ListComp(tree);
         return emitListComprehension(lc, type_hint);
       } break;
+      case TK_DICT_COMP: {
+        auto dc = DictComp(tree);
+        return emitDictComprehension(dc, type_hint);
+      } break;
       default:
         throw ErrorReport(tree) << "Cannot emit expr for: " << tree;
     }
@@ -3441,7 +3519,25 @@ struct to_ir {
     } else {
       AT_ASSERT(!sliceable->type()->isSubtypeOf(TensorType::get()));
     }
+    // TODO for now let's deal with TupleType first. Ideally all list, tensor,
+    // string, and tuple slicing should be same (tugsbayasgalan)
+    if (sliceable->type()->cast<TupleType>()) {
+      std::vector<at::optional<NamedValue>> tuple_args;
+      // since we are only dealing with tuple slicing for now, we try to keep
+      // tuple args seperate for now
+      tuple_args.reserve(3);
 
+      start ? tuple_args.emplace_back(start)
+            : tuple_args.emplace_back(c10::nullopt);
+      end ? tuple_args.emplace_back(end)
+          : tuple_args.emplace_back(c10::nullopt);
+      step ? tuple_args.emplace_back(step)
+           : tuple_args.emplace_back(c10::nullopt);
+
+      return emitTupleSlice(loc, args[0], tuple_args);
+    }
+
+    // TODO this needs to be cleaned for list slicing
     // Default value for start is 0.
     if (!start) {
       start = graph->insertConstant(0, loc);
@@ -3450,19 +3546,6 @@ struct to_ir {
 
     if (end) {
       args.emplace_back(loc, "end", end);
-    }
-    if (sliceable->type()->cast<TupleType>()) {
-      if (step) {
-        // TODO: add support for slicing tuples with a step
-        throw ErrorReport(loc)
-            << "Unsupported operation: slicing tuples with a step isn't supported";
-      }
-
-      if (end) {
-        return emitTupleSlice(loc, args[0], args[1], /*end*/ args[2]);
-      } else {
-        return emitTupleSlice(loc, args[0], args[1], c10::nullopt);
-      }
     }
 
     if (!step) {
@@ -3826,28 +3909,37 @@ struct to_ir {
   Value* emitTupleSlice(
       const SourceRange& loc,
       const NamedValue& tuple_val,
-      const NamedValue& beg_val,
-      const at::optional<NamedValue>& end_val) {
+      const std::vector<at::optional<NamedValue>>& tuple_args) {
     auto tuple_type = tuple_val.value(*graph)->type()->expect<TupleType>();
-    int64_t beg = getAdjTupleIndex(
-        loc,
-        tuple_type,
-        getSliceInd(beg_val.value(*graph), loc),
-        /*allow_out_of_bounds*/ true);
-    int64_t end;
     int64_t tuple_len = tuple_type->elements().size();
+    auto beg_val = tuple_args[0];
+    auto end_val = tuple_args[1];
+    auto step = tuple_args[2];
+
+    int64_t step_size = 1;
+    if (step) {
+      auto val = toIValue(step->value(*graph));
+      TORCH_CHECK(val->isInt(), "Step size should always be an integer");
+      step_size = val->to<int64_t>();
+    }
+
+    int64_t beg = std::numeric_limits<int64_t>::max();
+    if (beg_val) {
+      beg = getAdjTupleIndex(
+          loc, tuple_type, getSliceInd(beg_val->value(*graph), loc), true);
+    }
+
+    int64_t end = std::numeric_limits<int64_t>::max();
     if (end_val) {
       end = getAdjTupleIndex(
           loc, tuple_type, getSliceInd(end_val->value(*graph), loc), true);
-    } else {
-      end = tuple_len;
     }
-    // slicing does not throw out of bounds errors
-    end = std::min(std::max((int64_t)0, end), tuple_len);
-    beg = std::min(std::max((int64_t)0, beg), tuple_len);
+
+    int64_t num_values = slice_indices_adjust(tuple_len, &beg, &end, step_size);
 
     return graph
-        ->insertNode(graph->createTupleSlice(tuple_val.value(*graph), beg, end))
+        ->insertNode(graph->createTupleSlice(
+            tuple_val.value(*graph), beg, step_size, num_values))
         ->output();
   }
 
@@ -3871,19 +3963,25 @@ struct to_ir {
         auto s_tuple_val =
             sv->asTupleValue(val_range, method)->asValue(val_range, method);
         const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
+        std::vector<at::optional<NamedValue>> tuple_args;
+        tuple_args.reserve(3);
         auto begin =
             NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0))));
+        tuple_args.emplace_back(begin);
         if (slice.end().present()) {
           auto end =
               NamedValue(val_range, "end", emitExpr(Expr(slice.end().get())));
-          auto tupleSliceValue =
-              emitTupleSlice(val_range, s_tuple_val, begin, end);
-          return std::make_shared<SimpleValue>(tupleSliceValue);
+          tuple_args.emplace_back(end);
+
         } else {
-          auto tupleSliceValue =
-              emitTupleSlice(val_range, s_tuple_val, begin, c10::nullopt);
-          return std::make_shared<SimpleValue>(tupleSliceValue);
+          tuple_args.emplace_back(c10::nullopt);
         }
+        // pushing step_size to match the tuple_args
+        tuple_args.emplace_back(c10::nullopt);
+
+        auto tupleSliceValue =
+            emitTupleSlice(val_range, s_tuple_val, tuple_args);
+        return std::make_shared<SimpleValue>(tupleSliceValue);
       } else {
         return std::make_shared<SimpleValue>(emitBasicSlice(
             range, sv->asValue(val_range, method), subscript_exprs));
@@ -4023,7 +4121,8 @@ std::unique_ptr<Function> CompilationUnit::define(
     const ResolverPtr& resolver,
     const Self* self,
     const std::unordered_map<std::string, Function*>& function_table,
-    bool shouldMangle) const {
+    bool shouldMangle,
+    CompilationUnit::FunctionType type) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -4059,7 +4158,13 @@ std::unique_ptr<Function> CompilationUnit::define(
       std::move(name), std::make_shared<Graph>(), creator);
   if (self) {
     // Register this as a method on `self`'s type
-    self->getClassType()->addMethod(fn.get());
+    if (type == CompilationUnit::FunctionType::Hook) {
+      self->getClassType()->addForwardHook(fn.get());
+    } else if (type == CompilationUnit::FunctionType::PreHook) {
+      self->getClassType()->addForwardPreHook(fn.get());
+    } else {
+      self->getClassType()->addMethod(fn.get());
+    }
   }
   return fn;
 }
@@ -4112,7 +4217,8 @@ std::vector<Function*> CompilationUnit::define(
         defResolvers[i],
         self,
         function_table,
-        shouldMangle);
+        shouldMangle,
+        CompilationUnit::FunctionType::Method);
 
     record_function(std::move(fn));
   }
@@ -4130,6 +4236,111 @@ std::vector<Function*> CompilationUnit::define(
   }
 
   return functions;
+}
+
+void CompilationUnit::define_hooks(
+    const c10::optional<c10::QualifiedName>& prefix,
+    const std::vector<Def>& hookDefs,
+    const std::vector<ResolverPtr>& hookResolvers,
+    const std::vector<Def>& preHookDefs,
+    const std::vector<ResolverPtr>& preHookResolvers,
+    const Self* self,
+    bool shouldMangle) {
+  TORCH_INTERNAL_ASSERT(hookDefs.size() == hookResolvers.size());
+  TORCH_INTERNAL_ASSERT(preHookDefs.size() == preHookResolvers.size());
+  std::vector<Function*> functions;
+  std::unordered_map<std::string, Function*> function_table;
+
+  // check hook for name collisions and redefinition
+  auto check_collisions = [&](const Def& hook) -> Function* {
+    auto name = prefix ? QualifiedName(*prefix, hook.name().name()).name()
+                       : QualifiedName(hook.name().name()).name();
+    // check if hook is already defined for this module
+    auto found_hook = function_table.find(name);
+    auto existing_hook =
+        found_hook != function_table.end() ? found_hook->second : nullptr;
+    // check if hook name is already defined on module as method
+    if (existing_hook == nullptr) {
+      TORCH_CHECK(
+          self->getClassType()->findMethod(name) == nullptr &&
+              self->getClassType()->findHook(name) == nullptr,
+          "Can't define hook: ",
+          name,
+          " on class: ",
+          self->getClassType()->repr_str(),
+          " because a method or hook with that name already exists.");
+    }
+    return existing_hook;
+  };
+
+  // build_schema for checking
+  auto build_schema = [&](const Def& hook_def,
+                          const ResolverPtr& hook_res) -> FunctionSchema {
+    ScriptTypeParser typeParser(hook_res);
+    FunctionSchema schema =
+        typeParser.parseSchemaFromDef(hook_def, true /* skip_self*/);
+    // need to add self as the first because we skipped it
+    std::vector<Argument> arguments;
+    arguments.emplace_back(Argument(
+        hook_def.decl().params()[0].ident().name(), self->getClassType()));
+    arguments.insert(
+        arguments.end(), schema.arguments().begin(), schema.arguments().end());
+    return schema.cloneWithArguments(arguments);
+  };
+
+  // define hooks
+  for (size_t i = 0; i < hookDefs.size(); i++) {
+    // check to see if already defined this hook
+    auto existing_fn = check_collisions(hookDefs[i]);
+    if (existing_fn != nullptr) {
+      // add it to class type again so it's called
+      self->getClassType()->addForwardHook(existing_fn);
+      continue;
+    }
+    // define hook
+    auto fn = define(
+        prefix,
+        hookDefs[i],
+        hookResolvers[i],
+        self,
+        function_table,
+        shouldMangle,
+        CompilationUnit::FunctionType::Hook);
+
+    function_table[fn->name()] = fn.get();
+    functions.emplace_back(fn.get());
+    this->register_function(std::move(fn));
+    self->getClassType()->checkForwardHookSchema(
+        i, build_schema(hookDefs[i], hookResolvers[i]));
+    functions.back()->ensure_defined();
+  }
+
+  // define pre_hooks
+  for (size_t i = 0; i < preHookDefs.size(); i++) {
+    // check to see if already defined this hook
+    auto existing_fn = check_collisions(preHookDefs[i]);
+    if (existing_fn != nullptr) {
+      // add it to class type again so it's called
+      self->getClassType()->addForwardPreHook(existing_fn);
+      continue;
+    }
+    // define pre_hook
+    auto fn = define(
+        prefix,
+        preHookDefs[i],
+        preHookResolvers[i],
+        self,
+        function_table,
+        shouldMangle,
+        CompilationUnit::FunctionType::PreHook);
+
+    function_table[fn->name()] = fn.get();
+    functions.emplace_back(fn.get());
+    this->register_function(std::move(fn));
+    self->getClassType()->checkForwardPreHookSchema(
+        i, build_schema(preHookDefs[i], preHookResolvers[i]));
+    functions.back()->ensure_defined();
+  }
 }
 
 std::vector<Function*> CompilationUnit::define(
@@ -4229,10 +4440,28 @@ void CompilationUnit::define_interface(
     arguments.insert(
         arguments.end(), schema.arguments().begin(), schema.arguments().end());
     iface->addMethod(schema.cloneWithArguments(std::move(arguments)));
-    if (method_def.statements().size() != 1 ||
-        method_def.statements()[0].kind() != TK_PASS) {
+    // we need to make sure everything but the last element is just string
+    // literals (aka comments) unless there is "pass" in between
+    auto stmts_size = method_def.statements().size();
+    for (size_t i = 0; i < stmts_size - 1; i++) {
+      auto cur_statement = method_def.statements()[i];
+      if (cur_statement.kind() == TK_EXPR_STMT) {
+        auto expr = ExprStmt(cur_statement).expr();
+        if (expr.kind() != TK_STRINGLITERAL) {
+          throw ErrorReport(method_def.range())
+              << "interfaces declarations should only contain a single 'pass' statement.";
+        }
+      }
+      // if we see a "pass", we just stop there
+      if (cur_statement.kind() == TK_PASS) {
+        this->register_type(iface);
+        return;
+      }
+    }
+
+    if (method_def.statements()[stmts_size - 1].kind() != TK_PASS) {
       throw ErrorReport(method_def.range())
-          << "interfaces declarations should only contain a single 'pass' statement.";
+          << "interfaces declarations should contain 'pass' statement.";
     }
   }
   this->register_type(iface);

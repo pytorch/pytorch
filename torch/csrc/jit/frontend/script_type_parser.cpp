@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/script_type_parser.h>
+
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/custom_class.h>
@@ -209,6 +210,13 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
       if (auto typePtr = resolver_->resolveType(type_name, expr.range())) {
         return typePtr;
       }
+    }
+
+    // Check if the type is a custom class. This is done by checking
+    // if type_name starts with "torch.classes."
+    if (type_name.find("torch.classes.") == 0) {
+      auto custom_class_type = getCustomClass("__torch__." + type_name);
+      return custom_class_type;
     }
 
     throw ErrorReport(expr) << "Unknown type name '" << type_name << "'";

@@ -1,11 +1,10 @@
 import torch
 import numpy as np
-import unittest
 import inspect
 import functools
 import pprint
 
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -563,6 +562,8 @@ def generate_tensor_like_override_tests(cls):
                     func_args.append(instance_gen())
                 elif t == 'TensorList':
                     func_args.append([instance_gen(), instance_gen()])
+                elif t == 'c10::List<c10::optional<Tensor>>':
+                    func_args.append([instance_gen(), instance_gen()])
                 elif t == 'IntArrayRef':
                     size = arg.get('size', 2)
                     if size == 1:
@@ -877,5 +878,72 @@ class TestWrapTorchFunction(TestCase):
 
         self.assertEqual(f(A()), -1)
 
+class TestIndexing(TestCase):
+    """ Regression tests for gh-46277 """
+    def test_getitem(self):
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                return -1
+
+        t = torch.tensor([5])
+        self.assertEqual(t[A()], -1)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_getitem_subclass(self):
+        class A(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                return -1
+
+        t = torch.tensor([5])
+        self.assertEqual(t[A()], -1)
+        self.assertEqual(t[5, A()], -1)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_setitem(self):
+        triggered = set()
+
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                triggered.add(func)
+                return -1
+
+        t = torch.tensor([5])
+        t[A()] = 1
+        t[5, A()] = 1
+        self.assertIn(Tensor.__setitem__, triggered)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_setitem_val(self):
+        triggered = set()
+
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                triggered.add(func)
+                return -1
+
+        t = torch.tensor([5])
+        t[0] = A()
+        self.assertIn(Tensor.__setitem__, triggered)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_setitem_subclass(self):
+        triggered = set()
+
+        class A(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                triggered.add(func)
+                return -1
+
+        t = torch.tensor([5])
+        t[A()] = 1
+        t[5, A()] = 1
+        self.assertIn(Tensor.__setitem__, triggered)
+        self.assertEqual(t, torch.tensor([5]))
+
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

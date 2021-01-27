@@ -356,6 +356,6 @@ class TestEnum(JitTestCase):
             .check_same("Color.BLUE") \
             .run(str(scripted.graph))
 
-        # PURPLE always appear last because we follow Python's Enum definition order.
+        # PURPLE always appears last because we follow Python's Enum definition order.
         self.assertEqual(scripted(Color.RED), [Color.GREEN.value, Color.BLUE.value])
         self.assertEqual(scripted(Color.GREEN), [Color.RED.value, Color.BLUE.value])

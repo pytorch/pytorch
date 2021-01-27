@@ -1,6 +1,6 @@
 #pragma once
 
-#include <aten/src/ATen/Context.h>
+#include <ATen/Context.h>
 #include <c10/core/DeviceType.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>

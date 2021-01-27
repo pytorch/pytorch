@@ -8,13 +8,28 @@ import keyword
 import re
 
 def _shadows_builtin_name(name: str) -> bool:
-    return name in builtins.__dict__ or name in keyword.kwlist or name in {'inf', 'nan'}
+    return name in builtins.__dict__ or name in keyword.kwlist or name in {'inf', 'nan', 'NoneType'}
 
 def _is_magic(x: str) -> bool:
     return x.startswith('__') and x.endswith('__')
 
 def _snake_case(s: str) -> str:
-    return ''.join(['_' + i.lower() if i.isupper() else i for i in s]).lstrip('_')
+    """
+    Transforms the given string ``s`` to a Python-style variable name
+
+    Examples:
+        ``mod.snake_case`` -> ``mod.snake_case``
+        ``mod.pascalCase``-> ``mod.pascal_case``
+        ``mod.ALL_CAPS`` -> ``mod.all_caps``
+    """
+    chars = []
+    prev_lower = False
+    for c in s:
+        if prev_lower and c.isupper():
+            chars.append('_')
+        chars.append(c.lower())
+        prev_lower = c.islower()
+    return ''.join(chars)
 
 def get_qualified_name(func: Callable[..., Any]) -> str:
     # things like getattr just appear in builtins
@@ -141,33 +156,14 @@ class Graph:
 
         graph(x):
             %linear_weight : [#users=1] = self.linear.weight
-            %add_1 : [#users=1] = call_function[target=<built-in function add>](args = (%x, %linear_weight), kwargs = {})
+            %add_1 : [#users=1] = call_function[target=operator.add](args = (%x, %linear_weight), kwargs = {})
             %linear_1 : [#users=1] = call_module[target=linear](args = (%add_1,), kwargs = {})
             %relu_1 : [#users=1] = call_method[target=relu](args = (%linear_1,), kwargs = {})
-            %sum_1 : [#users=1] = call_function[target=<built-in method sum of type object at 0x7ff2da9dc300>](args = (%relu_1,), kwargs = {dim: -1}) # noqa: B950
-            %topk_1 : [#users=1] = call_function[target=<built-in method topk of type object at 0x7ff2da9dc300>](args = (%sum_1, 3), kwargs = {}) # noqa: B950
+            %sum_1 : [#users=1] = call_function[target=torch.sum](args = (%relu_1,), kwargs = {dim: -1})
+            %topk_1 : [#users=1] = call_function[target=torch.topk](args = (%sum_1, 3), kwargs = {})
             return topk_1
 
-    The Node semantics are as follows:
-
-    - ``placeholder`` represents a function input. The ``name`` attribute specifies the name this value will take on.
-      ``target`` is similarly the name of the argument. ``args`` holds either: 1) nothing, or 2) a single argument
-      denoting the default parameter of the function input. ``kwargs`` is don't-care. Placeholders correspond to
-      the function parameters (e.g. ``x``) in the graph printout.
-    - ``get_attr`` retrieves a parameter from the module hierarchy. ``name`` is similarly the name the result of the
-      fetch is assigned to. ``target`` is the fully-qualified name of the parameter's position in the module hierarchy.
-      ``args`` and ``kwargs`` are don't-care
-    - ``call_function`` applies a free function to some values. ``name`` is similarly the name of the value to assign
-      to. ``target`` is the function to be applied. ``args`` and ``kwargs`` represent the arguments to the function,
-      following the Python calling convention
-    - ``call_module`` applies a module in the module hierarchy's ``forward()`` method to given arguments. ``name`` is
-      as previous. ``target`` is the fully-qualified name of the module in the module hierarchy to call.
-      ``args`` and ``kwargs`` represent the arguments to invoke the module on, *including the self argument*.
-    - ``call_method`` calls a method on a value. ``name`` is as similar. ``target`` is the string name of the method
-      to apply to the ``self`` argument. ``args`` and ``kwargs`` represent the arguments to invoke the module on,
-      *including the self argument*
-    - ``output`` contains the output of the traced function in its ``args[0]`` attribute. This corresponds to the "return" statement
-      in the Graph printout.
+    For the semantics of operations represented in the ``Graph``, please see :class:`Node`.
     """
     def __init__(self):
         """
@@ -266,6 +262,8 @@ class Graph:
         assert op in ('call_function', 'call_method', 'get_attr', 'call_module', 'placeholder', 'output')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
+        assert isinstance(args, tuple), "args must be a tuple"
+        assert isinstance(kwargs, dict), "kwargs must be a dict"
         unique_name = self._create_unique_name(name if name is not None else self._target_to_str(target))
         n = Node(self, unique_name, op, target, args, kwargs, type_expr)
         self._insert(n)
@@ -434,7 +432,7 @@ class Graph:
                     type_expr: Optional[Any] = None) -> Node:
         """
         Insert a ``call_method`` ``Node`` into the ``Graph``. A ``call_method`` node
-        represents a call to a given method on the 0th element of `args.
+        represents a call to a given method on the 0th element of ``args``.
 
         Args:
 
@@ -568,7 +566,7 @@ class Graph:
                 _shadows_builtin_name(name)
 
         while candidate in self._used_names or illegal_shadowing_name(candidate):
-            match = re.match(r"(.*)_(\d+)", candidate)
+            match = re.match(r"(.*)_(\d+)$", candidate)
             if match is None:
                 candidate = candidate + '_1'
             else:
@@ -594,7 +592,9 @@ class Graph:
         free_vars: List[str] = []
         modules_used : Set[str] = set()
         body: List[str] = []
-        maybe_return_annotation : str = ''
+
+        # Wrap string in list to pass by reference
+        maybe_return_annotation : List[str] = ['']
 
         def register_modules_used(qualified_name : str):
             if '.' in qualified_name:
@@ -636,10 +636,17 @@ class Graph:
             not used in the remainder of the code are freed and the memory usage
             of the code is optimal.
             """
+            if user.op == 'placeholder':
+                return
+            if user.op == 'output':
+                body.append('\n')
+                return
             nodes_to_delete = user_to_last_uses.get(user, [])
             if len(nodes_to_delete):
                 to_delete_str = ' = '.join([n.name for n in nodes_to_delete] + ['None'])
-                body.append(f'{to_delete_str}\n')
+                body.append(f';  {to_delete_str}\n')
+            else:
+                body.append('\n')
 
         def emit_node(node : Node):
             if node.op == 'placeholder':
@@ -655,14 +662,14 @@ class Graph:
                 assert isinstance(node.target, str)
                 body.append(
                     f'{node.name} = {_format_target(repr(node.args[0]), node.target)}'
-                    f'({_format_args(node.args[1:], node.kwargs)})\n')
+                    f'({_format_args(node.args[1:], node.kwargs)})')
                 return
             elif node.op == 'call_function':
                 assert callable(node.target)
                 # pretty print operators
                 if node.target.__module__ == '_operator' and node.target.__name__ in magic_methods:
                     assert isinstance(node.args, tuple)
-                    body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}\n')
+                    body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
                     return
                 qualified_name = get_qualified_name(node.target)
                 register_modules_used(qualified_name)
@@ -671,26 +678,28 @@ class Graph:
                    isinstance(node.args[1], str) and \
                    node.args[1].isidentifier():
                     # pretty print attribute access
-                    body.append(f'{node.name} = {_format_target(repr(node.args[0]), node.args[1])}\n')
+                    body.append(f'{node.name} = {_format_target(repr(node.args[0]), node.args[1])}')
                     return
-                body.append(f'{node.name} = {qualified_name}({_format_args(node.args, node.kwargs)})\n')
+                body.append(f'{node.name} = {qualified_name}({_format_args(node.args, node.kwargs)})')
                 return
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
-                body.append(f'{node.name} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})\n')
+                body.append(f'{node.name} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})')
                 return
             elif node.op == 'get_attr':
                 assert isinstance(node.target, str)
-                body.append(f'{node.name} = {_format_target(root_module, node.target)}\n')
+                body.append(f'{node.name} = {_format_target(root_module, node.target)}')
                 return
             elif node.op == 'output':
                 if node.type is not None:
-                    maybe_return_annotation = f" -> {type_repr(node.type)}"
-                body.append(f'return {repr(node.args[0])}\n')
+                    maybe_return_annotation[0] = f" -> {type_repr(node.type)}"
+                body.append(f'return {repr(node.args[0])}')
                 return
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
         for node in self.nodes:
+            # NOTE: emit_node does not emit a string with newline. It depends
+            # on delete_unused_values to append one
             emit_node(node)
             delete_unused_values(node)
 
@@ -699,13 +708,18 @@ class Graph:
         import_strs = [f'import {name}' for name in sorted(modules_used)]
         import_block = '\n'.join(import_strs)
 
+        if len(body) == 0:
+            # If the Graph has no non-placeholder nodes, no lines for the body
+            # have been emitted. To continue to have valid Python code, emit a
+            # single pass statement
+            body.append('pass\n')
+
         code = ''.join(body)
-        code = '\n'.join('    ' + line for line in code.split('\n')) + '\n'
+        code = '\n'.join('    ' + line for line in code.split('\n'))
         fn_code = f"""\
 {import_block}
-def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
-{code}
-"""
+def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
+{code}"""
 
         return fn_code
 
@@ -736,6 +750,28 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
             else:
                 return str(arg)
 
+        def pretty_print_target(target):
+            """
+            Make target printouts more user-friendly.
+            1) builtins will be printed as `builtins.xyz`
+            2) operators will be printed as `operator.xyz`
+            3) other callables will be printed with qualfied name, e.g. torch.add
+            """
+            if isinstance(target, str):
+                return target
+            if hasattr(target, '__module__'):
+                if not hasattr(target, '__name__'):
+                    # Just to be defensive, if we don't have `__name__`, get the
+                    # qualname. Not sure if this happens for any members of `operator`
+                    # or `builtins`. This fallback path is not as good, since e.g.
+                    # things in `operator` have `_operator` as their __module__.
+                    return get_qualified_name(target)
+                if target.__module__ == 'builtins':
+                    return f'builtins.{target.__name__}'
+                elif target.__module__ == '_operator':
+                    return f'operator.{target.__name__}'
+            return get_qualified_name(target)
+
         def format_node(n : Node) -> Optional[str]:
             if n.op == 'placeholder':
                 assert isinstance(n.target, str)
@@ -752,7 +788,7 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
                 return f'return {n.args[0]}'
             else:
                 maybe_typename = f'{_type_repr(n.type)} ' if n.type is not None else ''
-                return f'%{n.name} : {maybe_typename}[#users={len(n.users)}] = {n.op}[target={n.target}](' \
+                return f'%{n.name} : {maybe_typename}[#users={len(n.users)}] = {n.op}[target={pretty_print_target(n.target)}](' \
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
 
 
@@ -764,13 +800,29 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation}:
                 s += '\n    ' + node_str
         return s
 
+    def print_tabular(self):
+        """
+        Prints the intermediate representation of the graph in tabular
+        format.
+        """
+        try:
+            from tabulate import tabulate
+        except ImportError:
+            print("`print_tabular` relies on the library `tabulate`, "
+                  "which could not be found on this machine. Run `pip "
+                  "install tabulate` to install the library.")
+        node_specs = [[n.op, n.name, n.target, n.args, n.kwargs]
+                      for n in self.nodes]
+        print(tabulate(node_specs,
+              headers=['opcode', 'name', 'target', 'args', 'kwargs']))
+
     def lint(self, root : Optional[torch.nn.Module] = None):
         """
         Runs various checks on this Graph to make sure it is well-formed. In
         particular:
-            - Checks Nodes have correct ownership (owned by this graph)
-            - Checks Nodes appear in topological order
-            - If ``root`` is provided, checks that targets exist in ``root``
+        - Checks Nodes have correct ownership (owned by this graph)
+        - Checks Nodes appear in topological order
+        - If ``root`` is provided, checks that targets exist in ``root``
 
         Args:
 

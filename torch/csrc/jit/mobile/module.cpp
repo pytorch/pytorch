@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/mobile/module.h>
+
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
@@ -116,6 +117,14 @@ bool Module::is_training() const {
   return true;
 }
 
+const std::vector<Method> Module::get_methods() const {
+  std::vector<Method> methods;
+  for (std::unique_ptr<Function>& fn : cu_->methods()) {
+    methods.emplace_back(this, fn.get());
+  }
+  return methods;
+}
+
 Method::Method(const Module* owner, Function* function)
     : owner_(owner), function_(function) {}
 
@@ -172,7 +181,7 @@ void Method::run(Stack& stack) {
   }
 }
 
-c10::IValue Method::operator()(std::vector<IValue> stack) {
+c10::IValue Method::operator()(std::vector<c10::IValue> stack) {
   run(stack);
   TORCH_INTERNAL_ASSERT(!stack.empty());
   return stack.front();

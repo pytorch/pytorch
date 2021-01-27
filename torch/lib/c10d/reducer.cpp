@@ -48,7 +48,8 @@ Reducer::Reducer(
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
       divFactor_(kUnsetDivFactor),
-      comm_hook_(nullptr) {
+      comm_hook_(nullptr),
+      ddp_logging_data_(std::move(std::make_unique<c10::DDPLoggingData>())) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
@@ -1036,6 +1037,19 @@ void Reducer::prepare_for_backward(
           unused_parameters_.end(), indices.begin(), indices.end());
     }
   }
+
+  // Warn user about unnecessary perf hit if all parameters were used.
+  if (unused_parameters_.empty()) {
+    TORCH_WARN_ONCE(
+      "find_unused_parameters=True was specified in DDP constructor, "
+      "but did not find any unused parameters. This flag results in an extra "
+      "traversal of the autograd graph every iteration, which can adversely "
+      "affect performance. If your model indeed never has any unused "
+      "parameters, consider turning this flag off. Note that this warning may "
+      "be a false positive your model has flow control causing later iterations "
+      "to have unused parameters."
+    );
+  }
 }
 
 void Reducer::copy_bucket_to_grad(
@@ -1450,6 +1464,27 @@ void Reducer::ensure_prior_reduction_finished() {
         "value of `forward` of your module when reporting this issue (e.g. ",
         "list, dict, iterable).");
   }
+}
+
+void Reducer::set_construction_logging_data(
+  const std::string& module_name,
+  const std::vector<int>& device_ids,
+  int output_device,
+  bool broadcast_buffers
+) {
+  ddp_logging_data_->module_name = module_name;
+  ddp_logging_data_->device_ids = device_ids;
+  ddp_logging_data_->output_device = output_device;
+  ddp_logging_data_->broadcast_buffers = broadcast_buffers;
+  ddp_logging_data_->world_size = process_group_->getSize();
+  ddp_logging_data_->rank = process_group_->getRank();
+  ddp_logging_data_->bucket_cap_mb = bucket_bytes_cap_ / (1024 * 1024);
+  ddp_logging_data_->find_unused_parameters = find_unused_parameters_;
+  ddp_logging_data_->gradient_as_bucket_view = gradient_as_bucket_view_;
+}
+
+c10::DDPLoggingData Reducer::get_ddp_logging_data() {
+  return *ddp_logging_data_;
 }
 
 namespace {

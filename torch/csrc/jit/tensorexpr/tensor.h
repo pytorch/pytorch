@@ -12,7 +12,7 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
-class Tensor : KernelScopedObject {
+class TORCH_API Tensor : KernelScopedObject {
  public:
   Tensor(
       const std::string& name,
@@ -27,7 +27,7 @@ class Tensor : KernelScopedObject {
       : buf_(buf), args_(args), body_(body) {}
 
   Tensor(
-      Buf* buf,
+      const Buf* buf,
       const std::vector<const Var*>& args,
       const std::vector<const Expr*>& reduce_dims,
       const std::vector<const Var*>& reduce_args,
@@ -37,6 +37,8 @@ class Tensor : KernelScopedObject {
         body_(body),
         reduce_dims_(reduce_dims),
         reduce_args_(reduce_args) {}
+
+  virtual ~Tensor() {}
 
   // Wrappers over accessors to fields of the underlying function
   const Expr* body() const {
@@ -94,7 +96,7 @@ class Tensor : KernelScopedObject {
   const Expr* initializer() const {
     return initializer_;
   }
-  Stmt* ElementStmt();
+  virtual Stmt* ElementStmt() const;
 
   template <typename... Ts>
   inline ExprHandle operator()(const Ts&... ts);
@@ -111,6 +113,24 @@ class Tensor : KernelScopedObject {
   std::vector<const Var*> reduce_args_;
 
   const Expr* initializer_{nullptr};
+};
+
+class TORCH_API CompoundTensor : public Tensor {
+ public:
+  CompoundTensor(
+      const Buf* buf,
+      const std::vector<const Var*>& args,
+      Stmt* stmt)
+      : Tensor(buf, args, {}, {}, nullptr), stmt_(stmt) {}
+
+  virtual ~CompoundTensor() {}
+
+  Stmt* ElementStmt() const override {
+    return stmt_;
+  }
+
+ private:
+  Stmt* stmt_;
 };
 
 class Placeholder {
@@ -306,7 +326,7 @@ class FunctionCall : public CallNode<FunctionCall> {
   }
 
   FunctionCall(Tensor* tensor, const std::vector<const Expr*>& params)
-      : BaseClass(tensor->body()->dtype(), kFunctionCall, params),
+      : BaseClass(tensor->buf()->dtype(), kFunctionCall, params),
         tensor_(tensor) {}
 
  private:

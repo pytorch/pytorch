@@ -52,7 +52,7 @@ def gen_annotated(native_yaml_path: str, out: str, autograd_dir: str) -> None:
 @with_native_function
 def gen_annotated_args(f: NativeFunction) -> str:
     out_args: List[Dict[str, Any]] = []
-    for arg in f.func.arguments.positional:
+    for arg in f.func.arguments.flat_positional:
         if arg.default is not None:
             continue
         out_arg: Dict[str, Any] = {}

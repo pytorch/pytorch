@@ -18,49 +18,6 @@ build_to_cmake () {
 
 
 SCCACHE="$(which sccache)"
-if [ "$(which gcc)" != "/root/sccache/gcc" ]; then
-  # Setup SCCACHE
-  ###############################################################################
-  # Setup sccache if SCCACHE_BUCKET is set
-  if [ -n "${SCCACHE_BUCKET}" ]; then
-    mkdir -p ./sccache
-
-    SCCACHE="$(which sccache)"
-    if [ -z "${SCCACHE}" ]; then
-      echo "Unable to find sccache..."
-      exit 1
-    fi
-
-    # Setup wrapper scripts
-    wrapped="cc c++ gcc g++ x86_64-linux-gnu-gcc"
-    if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
-        wrapped="$wrapped nvcc"
-    fi
-    for compiler in $wrapped; do
-      (
-        echo "#!/bin/sh"
-
-        # TODO: if/when sccache gains native support for an
-        # SCCACHE_DISABLE flag analogous to ccache's CCACHE_DISABLE,
-        # this can be removed. Alternatively, this can be removed when
-        # https://github.com/pytorch/pytorch/issues/13362 is fixed.
-        #
-        # NOTE: carefully quoted - we want `which compiler` to be
-        # resolved as we execute the script, but SCCACHE_DISABLE and
-        # $@ to be evaluated when we execute the script
-        echo 'test $SCCACHE_DISABLE && exec '"$(which $compiler)"' "$@"'
-
-        echo "exec $SCCACHE $(which $compiler) \"\$@\""
-      ) > "./sccache/$compiler"
-      chmod +x "./sccache/$compiler"
-    done
-
-    export CACHE_WRAPPER_DIR="$PWD/sccache"
-
-    # CMake must find these wrapper scripts
-    export PATH="$CACHE_WRAPPER_DIR:$PATH"
-  fi
-fi
 
 # Setup ccache if configured to use it (and not sccache)
 if [ -z "${SCCACHE}" ] && which ccache > /dev/null; then

@@ -1,6 +1,7 @@
 import warnings
 import importlib
 from inspect import getmembers, isfunction
+from typing import Dict, Tuple, Any, Union
 
 # The symbolic registry "_registry" is a dictionary that maps operators
 # (for a specific domain and opset version) to their symbolic functions.
@@ -8,11 +9,11 @@ from inspect import getmembers, isfunction
 # The keys are tuples (domain, version), (where domain is a string, and version is an int),
 # and the operator's name (string).
 # The map's entries are as follows : _registry[(domain, version)][op_name] = op_symbolic
-_registry = {}
+_registry: Dict[Tuple[str, int], Dict] = {}
 
-_symbolic_versions = {}
-from torch.onnx.symbolic_helper import _onnx_stable_opsets
-for opset_version in _onnx_stable_opsets:
+_symbolic_versions: Dict[Union[int, str], Any] = {}
+from torch.onnx.symbolic_helper import _onnx_stable_opsets, _onnx_main_opset
+for opset_version in _onnx_stable_opsets + [_onnx_main_opset]:
     module = importlib.import_module('torch.onnx.symbolic_opset{}'.format(opset_version))
     _symbolic_versions[opset_version] = module
 
@@ -90,7 +91,7 @@ def is_registered_op(opname, domain, version):
 
 def get_op_supported_version(opname, domain, version):
     iter_version = version
-    while iter_version <= _onnx_stable_opsets[-1]:
+    while iter_version <= _onnx_main_opset:
         ops = [op[0] for op in get_ops_in_version(iter_version)]
         if opname in ops:
             return iter_version

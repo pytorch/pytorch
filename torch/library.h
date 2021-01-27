@@ -59,7 +59,6 @@
 /// ```
 
 #include <c10/core/DispatchKey.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/op_whitelist.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #if defined(EXPOSE_C2_OPS) || !defined(CAFFE2_IS_XPLAT_BUILD)
@@ -81,7 +80,7 @@ class class_;
 ///
 /// This class erases the type of the passed in function, but durably records
 /// the type via an inferred schema for the function.
-class CAFFE2_API CppFunction final {
+class TORCH_API CppFunction final {
   // TODO: This is morally the same thing as KernelRegistrationConfig, but it's
   // opaque to the user.
 
@@ -115,19 +114,6 @@ public:
     , schema_(c10::detail::inferFunctionSchemaFromFunctor<c10::impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>())
     , debug_()
     {}
-
-  /// This static factory lets you create CppFunctions that (1) don't have boxing
-  /// wrappers (because we don't support it yet) and (2) don't have schema
-  /// inference (because some ops don't support it).
-  template <typename Func>
-  static CppFunction makeUnboxedOnly(Func* f) {
-    // TODO: Eliminate the necessity for this function entirely.
-    return CppFunction(
-      c10::KernelFunction::makeFromUnboxedOnlyRuntimeFunction(f),
-      /* cpp_signature */ c10::impl::CppSignature::make<Func>(),
-      /* schema */ nullptr
-    );
-  }
 
   /// This creates a fallthrough function.  Fallthrough functions
   /// immediately redispatch to the next available dispatch key,
@@ -168,6 +154,22 @@ public:
       /* cpp_signature */ c10::nullopt, // not known for boxed functions
       /* schema */ nullptr
     );
+  }
+
+  /// Create a function from an unboxed kernel function.
+  /// This is typically used to register common operators.
+  template<typename FuncPtr, std::enable_if_t<c10::guts::is_function_type<FuncPtr>::value, std::nullptr_t> = nullptr>
+  static CppFunction makeFromUnboxedFunction(FuncPtr* f) {
+    return CppFunction(f);
+  }
+
+  /// Create a function from a compile time unboxed kernel function pointer.
+  /// This is typically used to register common operators.
+  /// Compile time function pointers can be used to allow the compiler
+  /// to optimize (e.g. inline) calls to it.
+  template<typename FuncPtr, std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, std::nullptr_t> = nullptr>
+  static CppFunction makeFromUnboxedFunction(FuncPtr f) {
+    return CppFunction(f);
   }
 
   CppFunction&& debug(std::string d) && {
@@ -367,7 +369,7 @@ namespace detail {
 /// }
 /// ```
 ///
-class CAFFE2_API Library final {
+class TORCH_API Library final {
 public:
   /// \private
   ///
@@ -496,20 +498,10 @@ public:
     return impl(name, dispatch(std::forward<Dispatch>(key), std::forward<Func>(raw_f)));
   }
 
-  /// \private
-  ///
-  /// Convenience overload for unboxed only kernels; kernels whose type
-  /// signatures are not supported by our template based metaprogramming
-  /// system.  These are currently quite common but will be eventually
-  /// eliminated.
-  ///
-  /// This is equivalent to calling CppFunction::makeUnboxedOnly() on
-  /// the function, but this name for the function makes it easy to grep for.
   template <typename Name, typename Func>
   Library& impl_UNBOXED(Name name, Func* raw_f) & {
-    // TODO: Remove this overload once the makeUnboxedOnly incidence rate
-    // goes way down
-    return impl(name, CppFunction::makeUnboxedOnly(raw_f));
+    static_assert(c10::guts::false_t<Func>(), ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
+    return *this;
   }
 
   // These overloads cover cases when a SelectiveStr (see Note [Selective build])
@@ -531,7 +523,10 @@ public:
   template <typename Dispatch, typename Func>
   Library& impl(detail::SelectiveStr<false>, Dispatch&& key, Func&& raw_f) & { return *this; }
   template <typename Func>
-  Library& impl_UNBOXED(detail::SelectiveStr<false> name, Func* raw_f) & { return *this; }
+  Library& impl_UNBOXED(detail::SelectiveStr<false> name, Func* raw_f) & {
+    static_assert(c10::guts::false_t<Func>(), ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
+    return *this;
+  }
 
   template <typename Func>
   Library& impl(detail::SelectiveStr<true> name, Func&& raw_f) & {
@@ -543,7 +538,8 @@ public:
   }
   template <typename Func>
   Library& impl_UNBOXED(detail::SelectiveStr<true> name, Func* raw_f) & {
-    return impl(name.operator const char*(), CppFunction::makeUnboxedOnly(raw_f));
+    static_assert(c10::guts::false_t<Func>(), ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
+    return *this;
   }
 
   /// Register a fallback implementation for all operators which will be used
@@ -643,7 +639,7 @@ public:
 /// for any given namespace.
 #define TORCH_LIBRARY(ns, m) \
   static void TORCH_LIBRARY_init_ ## ns (torch::Library&); \
-  static torch::detail::TorchLibraryInit TORCH_LIBRARY_static_init_ ## ns ( \
+  static const torch::detail::TorchLibraryInit TORCH_LIBRARY_static_init_ ## ns ( \
     torch::Library::DEF, \
     &TORCH_LIBRARY_init_ ## ns, \
     #ns, c10::nullopt, __FILE__, __LINE__ \
@@ -669,7 +665,7 @@ public:
 /// that it can only be called once for a given namespace.
 #define _TORCH_LIBRARY_FRAGMENT(ns, m, uid) \
   static void C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _, uid) (torch::Library&); \
-  static torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _, uid) ( \
+  static const torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_static_init_ ## ns ## _, uid) ( \
     torch::Library::FRAGMENT, \
     &C10_CONCATENATE(TORCH_LIBRARY_FRAGMENT_init_ ## ns ## _, uid), \
     #ns, c10::nullopt, __FILE__, __LINE__ \
@@ -725,7 +721,7 @@ public:
 /// and dispatch key in the same translation unit.
 #define _TORCH_LIBRARY_IMPL(ns, k, m, uid) \
   static void C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid) (torch::Library&); \
-  static torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ## _, uid) ( \
+  static const torch::detail::TorchLibraryInit C10_CONCATENATE(TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ## _, uid) ( \
     torch::Library::IMPL, \
     c10::guts::if_constexpr<c10::impl::dispatch_key_whitelist_check(c10::DispatchKey::k)>( \
       []() { return & C10_CONCATENATE(TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k ## _, uid); }, \

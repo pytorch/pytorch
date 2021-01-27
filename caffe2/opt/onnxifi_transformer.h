@@ -18,7 +18,7 @@ class OnnxExporter;
 
 // Split SparseLengthsSumSparse into SparseLengthsSumSparseLookup +
 // SparseLengthsSum
-CAFFE2_API void splitSparseLengthsSumSparse(NetDef* net, const Workspace& ws);
+TORCH_API void splitSparseLengthsSumSparse(NetDef* net, const Workspace& ws);
 
 struct OnnxifiTransformerOptions final : public BackendTransformOptions {
   explicit OnnxifiTransformerOptions() : BackendTransformOptions() {}
@@ -49,7 +49,7 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
   std::unordered_map<int, ShapeInfoMap> shape_hints_per_bs;
 };
 
-class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
+class TORCH_API OnnxifiTransformer final : public BackendTransformerBase {
  public:
   explicit OnnxifiTransformer(const OnnxifiTransformerOptions& opts);
   ~OnnxifiTransformer() override;
@@ -60,6 +60,17 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       const std::vector<std::string>& weight_names,
       const ShapeInfoMap& shape_hints,
       const std::unordered_set<int>& blocklisted_ops) override;
+
+  // Query whether an operator is supported by passing C2 protobuf
+  bool supportOpC2(
+      const caffe2::OperatorDef& op,
+      const ShapeInfoMap& shape_hints,
+      const std::unordered_set<std::string>& weights,
+      const std::unordered_set<int>& blocklisted_ops,
+      onnxBackendID backend_id) const;
+
+  // Determine backend id
+  std::vector<onnxBackendID> getBackendId();
 
  private:
   // Since we create new tensors during the conversion process, we actually need
@@ -81,6 +92,12 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       const std::unordered_set<std::string>& weights_in_ws,
       const ShapeInfoMap& shape_hints_max_bs,
       const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs);
+
+  // Check that output shape hints are present to ensure we can pass them to
+  // OnnxifiOp
+  bool canPassOutputShapeHintsPerBs(
+      const OperatorDef& op,
+      const std::unordered_map<int, ShapeInfoMap>& shape_hints_per_bs) const;
 
   // We already have all the ops and external inputs and outputs!
   OperatorDef buildOnnxifiOp(
@@ -107,14 +124,6 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       const std::unordered_set<int>& blocklisted_ops,
       ShapeInfoMap* shape_hints_max_bs,
       const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs);
-
-  // Query whether an operator is supported by passing C2 protobuf
-  bool supportOpC2(
-      const caffe2::OperatorDef& op,
-      const ShapeInfoMap& shape_hints,
-      const std::unordered_set<std::string>& weights,
-      const std::unordered_set<int>& blocklisted_ops,
-      onnxBackendID backend_id) const;
 
   // Query whether an operator is supported by passing ONNX protobuf
   bool supportOpOnnx(
@@ -145,9 +154,6 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       const ShapeInfoMap& shape_hints,
       const std::unordered_set<std::string>& weights,
       std::unordered_set<int>* blocklisted_ops) const;
-
-  // Determine backend id
-  void getBackendId();
 
   // Extract partition info from the original net
   void extractPartitionInfo(const NetDef& net);

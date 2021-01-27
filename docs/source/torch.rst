@@ -1,7 +1,7 @@
 torch
 =====
 The torch package contains data structures for multi-dimensional
-tensors and mathematical operations over these are defined.
+tensors and defines mathematical operations over these tensors.
 Additionally, it provides many utilities for efficient serializing of
 Tensors and arbitrary types, and other useful utilities.
 
@@ -97,6 +97,8 @@ Indexing, Slicing, Joining, Mutating Ops
     nonzero
     reshape
     row_stack
+    scatter
+    scatter_add
     split
     squeeze
     stack
@@ -340,6 +342,7 @@ Pointwise Ops
     sign
     signbit
     sin
+    sinc
     sinh
     sqrt
     square
@@ -349,6 +352,7 @@ Pointwise Ops
     tanh
     true_divide
     trunc
+    xlogy
 
 Reduction Ops
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -360,6 +364,8 @@ Reduction Ops
     argmin
     amax
     amin
+    all
+    any
     max
     min
     dist
@@ -410,6 +416,8 @@ Comparison Ops
     less
     maximum
     minimum
+    fmax
+    fmin
     ne
     not_equal
     sort
@@ -445,6 +453,7 @@ Other Operations
     bincount
     block_diag
     broadcast_tensors
+    broadcast_to
     broadcast_shapes
     bucketize
     cartesian_prod
@@ -548,7 +557,7 @@ Utilities
     result_type
     can_cast
     promote_types
-    set_deterministic
-    is_deterministic
+    use_deterministic_algorithms
+    are_deterministic_algorithms_enabled
     vmap
     _assert

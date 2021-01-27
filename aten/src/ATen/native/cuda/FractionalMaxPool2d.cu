@@ -273,8 +273,8 @@ void fractional_max_pool2d_backward_out_cuda_template(
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
         devGradInput, devGradOutput, devIndices);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
-      }
-    );
+    }
+  );
 }
 
 }// namespace

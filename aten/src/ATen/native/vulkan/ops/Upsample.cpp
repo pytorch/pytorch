@@ -36,11 +36,11 @@ Tensor upsample_nearest2d(
     input.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if (v_input.has_image()) {
-      const struct {
+    if C10_LIKELY(v_input.has_image()) {
+      const struct Block final {
         uvec3 extents;
         uint32_t _;
         ivec2 iextents;
@@ -92,8 +92,7 @@ Tensor upsample_nearest2d(
       TORCH_CHECK(false, "Not implemented!");
     }
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
   return convert(v_output);
 }

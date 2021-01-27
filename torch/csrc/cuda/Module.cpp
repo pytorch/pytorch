@@ -17,6 +17,7 @@
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
+#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/cuda/python_comm.h>
 #include <torch/csrc/Generator.h>
@@ -77,7 +78,32 @@ PyObject * THCPModule_getDevice_wrap(PyObject *self, PyObject *noargs)
   HANDLE_TH_ERRORS
   torch::utils::cuda_lazy_init();
   auto device = static_cast<int>(c10::cuda::current_device());
-  return PyLong_FromLong(device);
+  return THPUtils_packInt32(device);
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject * THCPModule_canDeviceAccessPeer_wrap(PyObject *self, PyObject *args)
+{
+  HANDLE_TH_ERRORS
+  PyObject* arg1 = nullptr;
+  PyObject* arg2 = nullptr;
+  if(!PyArg_ParseTuple(args, "OO", &arg1, &arg2)) {
+    THPUtils_invalidArguments(
+        args,
+        nullptr,
+        "can_device_peer_access",
+        1,
+        "(int device, int peer_device);");
+    return nullptr;
+  }
+  THPUtils_assert(THPUtils_checkLong(arg1), "invalid argument to canDeviceAccessPeer");
+  THPUtils_assert(THPUtils_checkLong(arg2), "invalid argument to canDeviceAccessPeer");
+  int64_t device = THPUtils_unpackLong(arg1);
+  int64_t peer_device = THPUtils_unpackLong(arg2);
+
+  torch::utils::cuda_lazy_init();
+  auto can_access = at::cuda::canDeviceAccessPeer(device, peer_device);
+  return PyBool_FromLong(can_access);
   END_HANDLE_TH_ERRORS
 }
 
@@ -85,7 +111,7 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   poison_fork();
-  return PyLong_FromLong(at::cuda::device_count());
+  return THPUtils_packUInt64(at::cuda::device_count());
   END_HANDLE_TH_ERRORS
 }
 
@@ -150,7 +176,7 @@ PyObject * THCPModule_setStream_wrap(PyObject *self, PyObject *obj)
 
 PyObject * THCPModule_getCompiledVersion(PyObject *self, PyObject *noargs)
 {
-  return PyLong_FromLong((long) CUDA_VERSION);
+  return THPUtils_packInt64((int64_t) CUDA_VERSION);
 }
 
 PyObject * THCPModule_cudaHostAllocator(PyObject *_unused, PyObject *noargs)
@@ -510,6 +536,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_setDevice",   THCPModule_setDevice_wrap,   METH_O,       nullptr},
   {"_cuda_getDevice",   THCPModule_getDevice_wrap,   METH_NOARGS,  nullptr},
   {"_cuda_getDeviceCount", THCPModule_getDeviceCount_wrap, METH_NOARGS, nullptr},
+  {"_cuda_canDeviceAccessPeer", THCPModule_canDeviceAccessPeer_wrap, METH_VARARGS, nullptr},
   {"_cuda_getArchFlags", THCPModule_getArchFlags, METH_NOARGS, nullptr},
   {"_cuda_isInBadFork", THCPModule_isInBadFork, METH_NOARGS, nullptr},
   {"_cuda_getCurrentStream",

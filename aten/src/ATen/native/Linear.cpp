@@ -145,18 +145,20 @@ Tensor einsum(std::string equation, TensorList operands) {
   TORCH_CHECK(!operands.empty(), "einsum() must provide at least one operand");
   checkDeviceType("einsum()", operands, operands[0].device().type());
 
-  // Code for encoding ellipsis ("...") with labels
+  // Code used to identify ELLIPSIS ("...")
   constexpr int ELLIPSIS = '.';
 
   // Find arrow (->) to split equation into lhs and rhs
   const auto arrow_pos = equation.find("->");
   const auto lhs = equation.substr(0, arrow_pos);
 
+  const auto num_ops = operands.size();
+
   // Convert labels for input operands into an index in [0, 25] and store
-  // them in op_labels for each operand along with ELLIPSIS.
-  std::vector<std::vector<int>> op_labels(operands.size());
+  // them in op_labels for each operand along with ELLIPSIS if present.
+  std::vector<std::vector<int>> op_labels(num_ops);
   bool found_ell = false;
-  std::string::size_type curr_op = 0;
+  std::size_t curr_op = 0;
   for (auto i = decltype(lhs.length()){0}; i < lhs.length(); ++i) {
     switch (lhs[i]) {
       case ' ':
@@ -184,7 +186,7 @@ Tensor einsum(std::string equation, TensorList operands) {
         // Move onto next operand
         ++curr_op;
         TORCH_CHECK(
-            curr_op < operands.size(),
+            curr_op < num_ops,
             "einsum() fewer operands were provided than specified in the equation");
         found_ell = false;
         break;
@@ -203,7 +205,7 @@ Tensor einsum(std::string equation, TensorList operands) {
   }
 
   TORCH_CHECK(
-      curr_op == operands.size() - 1,
+      curr_op == num_ops - 1,
       "einsum() more operands were provided than specified in the equation");
 
   // Labels must be within [a, z].
@@ -217,14 +219,14 @@ Tensor einsum(std::string equation, TensorList operands) {
   // Compute label frequency and number of dimensions covered by ellipsis
   // We do this after parsing labels to make it more readable and simpler
   // to compute the number of dimensions covered by ellipsis.
-  for (std::size_t i = 0; i < operands.size(); ++i) {
-    const Tensor operand = operands[i];
-    std::vector<int> labels = op_labels[i];
+  for (auto i = decltype(num_ops){0}; i < num_ops; ++i) {
+    const auto operand = operands[i];
+    const auto labels = op_labels[i];
+    const int64_t ndims = operand.dim();
     int64_t nlabels = labels.size();
-    int64_t ndims = operand.dim();
     bool has_ellipsis = false;
 
-    for (int label : labels) {
+    for (const auto& label : labels) {
       if (label == ELLIPSIS) {
         --nlabels;
         has_ellipsis = true;
@@ -246,12 +248,13 @@ Tensor einsum(std::string equation, TensorList operands) {
         has_ellipsis ? "" : " and no ellipsis was given");
   }
 
-  // Mapping of label to index in the permuted tensors (out_dims + sum_dims)
-  // This will be used for aligning the dimensions of all input operands
-  std::vector<int> label_perm_index(TOTAL_LABELS, -1);
+  // We want to align the dimensions of every input tensor to have
+  // shape out_dims + sum_dims. For this, we create a mapping of label
+  // to index into the permuted shape.
+  std::vector<int64_t> label_perm_index(TOTAL_LABELS, -1);
   
   // Current index in the permuted shape
-  int perm_index = 0;
+  int64_t perm_index = 0;
 
   // Start index of ellipsis dimensions in the permuted shape
   int64_t ell_index = 0;
@@ -268,8 +271,8 @@ Tensor einsum(std::string equation, TensorList operands) {
     }
   } else {
     // Parse explicit output
-    const std::string rhs = equation.substr(arrow_pos + 2);
-    for (std::size_t i = 0; i < rhs.length(); ++i) {
+    const auto rhs = equation.substr(arrow_pos + 2);
+    for (auto i = decltype(rhs.length()){0}; i < rhs.length(); ++i) {
       switch (rhs[i]) {
         case ' ':
           // Ignore spaces
@@ -291,32 +294,31 @@ Tensor einsum(std::string equation, TensorList operands) {
 
         default:
           TORCH_CHECK(
+              // Labels must be in [a, z]
               rhs[i] >= 'a' && rhs[i] <= 'z',
               "einsum() subscripts must be in range [a, z] but found ",
               rhs[i],
               " for the output");
+          const auto label = rhs[i] - 'a';
           TORCH_CHECK(
               // Ensure label appeared at least once for some input operand and at
               // most once for the output
-              label_count[rhs[i] - 'a'] > 0,
+              label_count[label] > 0 && label_perm_index[label] == -1,
               "einsum() output subscript ",
               rhs[i],
-              label_count[rhs[i] - 'a'] == -1
+              label_perm_index[label] > -1
                   ? " appears more than once in the output"
                   : " does not appear in the equation for any input operand");
-          label_perm_index[rhs[i] - 'a'] = perm_index++;
-          
-          // Set to -1 to mark that this label already appeared in the output
-          label_count[rhs[i] - 'a'] = -1;
+          label_perm_index[label] = perm_index++;
       }
     }
   }
 
-  // Save output size before adding sum dims
-  const int out_size = perm_index;
+  // Save output size before adding contraction dims (dims to sum out)
+  const int64_t out_size = perm_index;
 
   // If ellipsis is not part of the output, add to contraction dimensions
-  if (ell_num_dim > 0 && !found_ell) {
+  if (!found_ell) {
     ell_index = perm_index;
     perm_index += ell_num_dim;
   }
@@ -333,20 +335,20 @@ Tensor einsum(std::string equation, TensorList operands) {
   // same operand. Finally we permute the operands to align dimensions as 
   // per the perm_out_index we computed above.
   std::vector<Tensor> permuted_operands;
-  for (std::size_t i = 0; i < operands.size(); ++i) {
+  for (auto i = decltype(num_ops){0}; i < num_ops; ++i) {
     std::vector<int64_t> perm_shape(perm_index, -1);
     std::vector<int64_t> label_dim(TOTAL_LABELS, -1);
-    const std::vector<int> labels = op_labels[i];
     Tensor operand = operands[i];
-    const auto sizes = operand.sizes();
-    std::size_t j = 0;
+    const auto labels = op_labels[i];
+    const auto original_sizes = operand.sizes();
 
-    for (int label : labels) {
+    std::size_t j = 0;
+    for (const auto& label : labels) {
       if (label == ELLIPSIS) {
-        // Add missing dimensions under ellipsis
-        int64_t num_dim_diff =
-            ell_num_dim - (operand.dim() - labels.size() + 1);
-        for (int64_t k = 0; k < num_dim_diff; ++k) {
+        // Add missing dimensions covered by the ellipsis
+        const int64_t num_missing_dim =
+            ell_num_dim - (original_sizes.size() - labels.size() + 1);
+        for (int64_t k = 0; k < num_missing_dim; ++k) {
           operand = operand.unsqueeze(j);
         }
         for (int64_t k = 0; k < ell_num_dim; ++k) {
@@ -354,18 +356,18 @@ Tensor einsum(std::string equation, TensorList operands) {
         }
       } else if (label_dim[label] != -1) {
         // Repeated label, take diagonal
-        int64_t dim = label_dim[label];
+        const auto dim = label_dim[label];
         TORCH_CHECK(
-            sizes[j] == sizes[dim],
+            operand.size(j) == operand.size(dim),
             "einsum() subscript ",
             char(label + 'a'),
             " is repeated for operand ",
             i,
             " but the sizes don't match, ",
-            sizes[j],
+            operand.size(j),
             " != ",
-            sizes[dim]);
-        operand = operand.diagonal(0, j, dim).movedim(-1, dim);
+            operand.size(dim));
+        operand = operand.diagonal(0, dim, j).movedim(-1, dim);
       } else {
         // Lookup output index for label
         label_dim[label] = j;
@@ -388,14 +390,14 @@ Tensor einsum(std::string equation, TensorList operands) {
   // dimension size != 1 for optimizing reductions
   std::vector<std::size_t> dim_last_op(perm_index, 0);
   bool has_zero_size_dim = false;
-  for (int dim = 0; dim < perm_index; ++dim) {
-    int64_t broadcast_size = permuted_operands[0].size(dim);
-    for (std::size_t i = 1; i < permuted_operands.size(); ++i) {
-      int64_t dim_size = permuted_operands[i].size(dim);
+  for (int64_t dim = 0; dim < perm_index; ++dim) {
+    auto broadcast_size = permuted_operands[0].size(dim);
+    for (auto i = decltype(num_ops){1}; i < num_ops; ++i) {
+      const auto dim_size = permuted_operands[i].size(dim);
       if (broadcast_size != dim_size && broadcast_size != 1 && dim_size != 1) {
         std::ostringstream msg;
         msg << "einsum() operands do not broadcast with remapped shapes [original->remapped]:";
-        for (std::size_t j = 0; j < operands.size(); ++j) {
+        for (auto j = decltype(num_ops){0}; j < num_ops; ++j) {
           msg << " " << operands[j].sizes() << "->"
               << permuted_operands[j].sizes();
         }
@@ -415,15 +417,15 @@ Tensor einsum(std::string equation, TensorList operands) {
   // Fast path for when an operand has zero sized dim
   if (has_zero_size_dim) {
     std::vector<int64_t> out_shape(out_size);
-    for (int i = 0; i < out_size; ++i) {
+    for (int64_t i = 0; i < out_size; ++i) {
       out_shape[i] = permuted_operands[dim_last_op[i]].size(i);
     }
     return at::zeros(out_shape, result.options());
   }
 
   // Sum out or squeeze dimensions that are size 1 for all later operands
-  int dim = out_size;
-  for (int i = dim; i < perm_index; ++i, ++dim) {
+  int64_t dim = out_size;
+  for (int64_t i = dim; i < perm_index; ++i, ++dim) {
     if (dim_last_op[i] == 0) {
       if (result.size(dim) == 1) {
         result = result.squeeze(dim--);
@@ -433,13 +435,13 @@ Tensor einsum(std::string equation, TensorList operands) {
     }
   }
 
-  for (std::size_t i = 1; i < permuted_operands.size(); ++i) {
+  for (auto i = decltype(num_ops){1}; i < num_ops; ++i) {
     Tensor operand = permuted_operands[i];
     std::vector<int64_t> sum_dims;
 
     // Sum out or squeeze dimensions that are size 1 for all later operands
     dim = out_size;
-    for (int j = dim; j < perm_index; ++j, ++dim) {
+    for (int64_t j = dim; j < perm_index; ++j, ++dim) {
       if (dim_last_op[j] < i) {
         operand = operand.squeeze(dim);
         --dim;

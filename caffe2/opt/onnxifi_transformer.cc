@@ -506,6 +506,31 @@ OnnxifiTransformer::~OnnxifiTransformer() {
   }
 }
 
+bool OnnxifiTransformer::canPassOutputShapeHintsPerBs(
+    const OperatorDef& op,
+    const std::unordered_map<int, ShapeInfoMap>& shape_hints_per_bs) const {
+  if (shape_hints_per_bs.empty()) {
+    return false;
+  }
+
+  for (int bs = 1; bs < opts_.bound_shape_spec.max_batch_size; ++bs) {
+    auto shape_hints_search = shape_hints_per_bs.find(bs);
+    if (shape_hints_search == shape_hints_per_bs.end()) {
+      return false;
+    }
+    const auto& shape_hints = shape_hints_search->second;
+
+    for (int output_idx = 0; output_idx < op.output_size(); ++output_idx) {
+      auto shape_hint_search = shape_hints.find(op.output(output_idx));
+      if (shape_hint_search == shape_hints.end()) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
 OperatorDef OnnxifiTransformer::buildOnnxifiOp(
     const std::string& onnx_model_str,
     const std::unordered_set<std::string>& initialization_list,
@@ -583,31 +608,31 @@ OperatorDef OnnxifiTransformer::buildOnnxifiOp(
     }
   }
 
-  // Add output size hints for per batch size
-  AddArgument("use_passed_output_shapes", shape_hints_per_bs.empty() ? 0 : 1, &op);
-  if (!shape_hints_per_bs.empty()) {
-    for (int bs = 1; bs < opts_.bound_shape_spec.max_batch_size; ++bs) {
-      auto it = shape_hints_per_bs.find(bs);
-      CAFFE_ENFORCE(it != shape_hints_per_bs.end());
-      const auto& shape_hints_current_bs = it->second;
+  // Add output size hints per batch size
+  if (canPassOutputShapeHintsPerBs(op, shape_hints_per_bs)) {
+    VLOG(2) << "Passing in output shape hints for batch sizes in [1, " << opts_.bound_shape_spec.max_batch_size << ")";
+    AddArgument("use_passed_output_shapes", 1, &op);
 
+    for (int bs = 1; bs < opts_.bound_shape_spec.max_batch_size; ++bs) {
       auto* output_shape_arg = op.add_arg();
       output_shape_arg->set_name("output_shapes_bs_" + caffe2::to_string(bs));
       auto* output_qshape_arg = op.add_arg();
       output_qshape_arg->set_name("output_qshapes_bs_" + caffe2::to_string(bs));
 
+      const auto& shape_hints = shape_hints_per_bs.find(bs)->second;
+
       for (int output_idx = 0; output_idx < op.output_size(); ++output_idx) {
         const auto& output_name = op.output(output_idx);
-        auto it_output = shape_hints_current_bs.find(output_name);
-        if (it_output != shape_hints_current_bs.end()) {
-          if (!it_output->second.is_quantized) {
-            output_shape_arg->mutable_tensors()->Add()->CopyFrom(wrapShapeInfoIntoTensorProto(output_name, it_output->second));
-          } else {
-            output_shape_arg->mutable_qtensors()->Add()->CopyFrom(wrapShapeInfoIntoQTensorProto(output_name, it_output->second));
-          }
+        const auto& shape_hint = shape_hints.find(output_name)->second;
+        if (!shape_hint.is_quantized) {
+          output_shape_arg->mutable_tensors()->Add()->CopyFrom(wrapShapeInfoIntoTensorProto(output_name, shape_hint));
+        } else {
+          output_shape_arg->mutable_qtensors()->Add()->CopyFrom(wrapShapeInfoIntoQTensorProto(output_name, shape_hint));
         }
       }
     }
+  } else {
+    AddArgument("use_passed_output_shapes", 0, &op);
   }
 
   // Tell Onnxifi op that the model is in onnx or c2 proto format
@@ -897,7 +922,7 @@ bool OnnxifiTransformer::supportOpOnnx(
     int pos =
         ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
     if (blocklisted_ops.count(pos)) {
-      LOG(INFO) << "Skipping blacklisted op " << op.type() << " at pos " << pos;
+      LOG(INFO) << "Skipping blocklisted op " << op.type() << " at pos " << pos;
       return false;
     }
     const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
@@ -1170,11 +1195,11 @@ void OnnxifiTransformer::applyFilteringRules(
   blocklistCpuPartition(net, blocklisted_ops);
 }
 
-void OnnxifiTransformer::getBackendId() {
+std::vector<onnxBackendID> OnnxifiTransformer::getBackendId() {
   idx_ = 0;
 
   if (opts_.use_onnx) {
-    return;
+    return backend_ids_;
   }
   // Try to find a backend that support Caffe2 proto. Note that this is quite
   // opportunistic as we don't officially support Caffe2 proto.
@@ -1189,6 +1214,7 @@ void OnnxifiTransformer::getBackendId() {
       break;
     }
   }
+  return backend_ids_;
 }
 
 NetDef OnnxifiTransformer::TransformViaC2(
