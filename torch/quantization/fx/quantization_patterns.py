@@ -329,6 +329,9 @@ class ConvRelu(QuantizeHandler):
                     kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
                     op = quantizer.quantized_graph.create_node(
                         'call_function', qconv_op, qconv_args, kwargs)
+                    # Store the name of the fused op to get the path of node after fusion as well.
+                    # TODO: may need to change the key to Node regenerate the map in each transformation,
+                    # since we might not be able to rely on the name
                     quantizer.node_name_to_scope[op.name] = quantizer.node_name_to_scope[self.conv_node.name]
                     return op
                 else:
@@ -488,6 +491,9 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     qlinear_args = (linear_input, packed_weight, scale_node, zero_point_node)
                     op = quantizer.quantized_graph.create_node(
                         "call_function", qlinear_op, qlinear_args, kwargs)
+                    # Store the name of the fused op to get the path of node after fusion as well.
+                    # TODO: may need to change the key to Node regenerate the map in each transformation,
+                    # since we might not be able to rely on the name
                     quantizer.node_name_to_scope[op.name] = quantizer.node_name_to_scope[self.linear_node.name]
                     return op
                 else:
@@ -495,6 +501,9 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     qlinear_args = (linear_input, packed_weight)  # type: ignore
                     op_out = quantizer.quantized_graph.create_node(
                         "call_function", torch.ops.quantized.linear_dynamic, qlinear_args, kwargs)
+                    # Store the name of the dynamic op to get the path of node after replacement as well.
+                    # TODO: may need to change the key to Node regenerate the map in each transformation,
+                    # since we might not be able to rely on the name
                     quantizer.node_name_to_scope[op_out.name] = quantizer.node_name_to_scope[self.linear_node.name]
                     if self.relu_node:
                         op_out = quantizer.quantized_graph.create_node("call_function", torch.nn.functional.relu, (op_out,), {})
