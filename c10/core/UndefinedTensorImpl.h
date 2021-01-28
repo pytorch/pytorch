@@ -17,11 +17,9 @@ struct C10_API UndefinedTensorImpl final : public TensorImpl {
 #endif
     return &_singleton;
   }
-  IntArrayRef sizes() const override;
   IntArrayRef strides() const override;
   int64_t size(int64_t d) const override;
   int64_t stride(int64_t d) const override;
-  int64_t dim() const override;
   bool has_storage() const override;
   const Storage& storage() const override;
   int64_t storage_offset() const override;

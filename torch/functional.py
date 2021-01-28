@@ -713,14 +713,14 @@ def _unique_impl(input: Tensor, sorted: bool = True,
         tensor([ 2,  3,  1])
 
         >>> output, inverse_indices = torch.unique(
-                torch.tensor([1, 3, 2, 3], dtype=torch.long), sorted=True, return_inverse=True)
+        ...     torch.tensor([1, 3, 2, 3], dtype=torch.long), sorted=True, return_inverse=True)
         >>> output
         tensor([ 1,  2,  3])
         >>> inverse_indices
         tensor([ 0,  2,  1,  2])
 
         >>> output, inverse_indices = torch.unique(
-                torch.tensor([[1, 3], [2, 3]], dtype=torch.long), sorted=True, return_inverse=True)
+        ...     torch.tensor([[1, 3], [2, 3]], dtype=torch.long), sorted=True, return_inverse=True)
         >>> output
         tensor([ 1,  2,  3])
         >>> inverse_indices

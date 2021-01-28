@@ -434,7 +434,7 @@ void initPythonIRBindings(PyObject* module_) {
       .VS(requires_grad)
       .def(
           "requiresGrad",
-          [](Value& n) { n.type()->expect<TensorType>()->requiresGrad(); })
+          [](Value& n) { n.type()->expectRef<TensorType>().requiresGrad(); })
       .def("toIValue", [](Value& n) { return toIValue(&n); })
       .def("type", [](Value& v) { return v.type(); });
 #undef VS
@@ -502,6 +502,17 @@ void initPythonIRBindings(PyObject* module_) {
           "inputs",
           [](Node& n) {
             return py::make_iterator(n.inputs().begin(), n.inputs().end());
+          })
+      .def(
+          "schema",
+          [](Node& n) {
+            std::stringstream ss;
+            if (auto sch = n.maybeSchema()) {
+              ss << n.schema();
+            } else {
+              ss << "(no schema)";
+            }
+            return ss.str();
           })
       .def(
           "outputs",
@@ -675,7 +686,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "dim",
           [](Type& t) {
-            auto vshape = t.shared_from_this()->expect<TensorType>()->sizes();
+            auto vshape = t.shared_from_this()->expectRef<TensorType>().sizes();
             return vshape.size() ? py::cast(*vshape.size())
                                  : py::cast<py::none>(Py_None);
           })
@@ -683,7 +694,7 @@ void initPythonIRBindings(PyObject* module_) {
           "undefined",
           [](Type& t) {
             auto undef =
-                t.shared_from_this()->expect<TensorType>()->undefined();
+                t.shared_from_this()->expectRef<TensorType>().undefined();
             return undef.has_value() ? py::cast(*undef)
                                      : py::cast<py::none>(Py_None);
           })
@@ -721,13 +732,13 @@ void initPythonIRBindings(PyObject* module_) {
           "contiguous",
           [](Type& t) {
             return std::static_pointer_cast<Type>(
-                t.expect<TensorType>()->contiguous());
+                t.expectRef<TensorType>().contiguous());
           })
       .def(
           "scalarType",
           [](Type& t) {
             auto scalar_type =
-                t.shared_from_this()->expect<TensorType>()->scalarType();
+                t.shared_from_this()->expectRef<TensorType>().scalarType();
             return (scalar_type) ? toString(*scalar_type) : nullptr;
           })
       .def(
@@ -758,6 +769,9 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &IntType::get);
   py::class_<FloatType, Type, std::shared_ptr<FloatType>>(m, "FloatType")
       .def_static("get", &FloatType::get);
+  py::class_<ComplexDoubleType, Type, std::shared_ptr<ComplexDoubleType>>(
+      m, "ComplexDoubleType")
+      .def_static("get", &ComplexDoubleType::get);
   py::class_<TensorType, Type, std::shared_ptr<TensorType>>(m, "TensorType")
       .def_static("get", &TensorType::get)
       .def_static("getInferred", &TensorType::getInferred);
@@ -855,6 +869,27 @@ void initPythonIRBindings(PyObject* module_) {
           names.emplace_back(fn.name());
         }
         return names;
+      });
+  using ::c10::InferredType;
+  py::class_<InferredType, std::shared_ptr<InferredType>>(m, "InferredType")
+      .def(py::init([](std::shared_ptr<Type> type) {
+        return std::make_shared<InferredType>(std::move(type));
+      }))
+      .def(py::init([](std::string reason) {
+        return std::make_shared<InferredType>(std::move(reason));
+      }))
+      .def(
+          "type",
+          [](const std::shared_ptr<InferredType>& self) {
+            return self->type();
+          })
+      .def(
+          "success",
+          [](const std::shared_ptr<InferredType>& self) {
+            return self->success();
+          })
+      .def("reason", [](const std::shared_ptr<InferredType>& self) {
+        return self->reason();
       });
 
   py::class_<Use>(m, "Use")
