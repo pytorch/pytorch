@@ -2,7 +2,7 @@
 #include <torch/csrc/jit/tensorexpr/intrinsic_symbols.h>
 #include <cmath>
 
-#if !defined(_MSC_VER)
+#if !defined(_MSC_VER) && defined(__x86_64__)
 #include <x86intrin.h>
 
 #ifdef __cplusplus
@@ -124,7 +124,7 @@ __m256d Sleef_fmodd4(__m256d, __m256d);
 #ifdef __cplusplus
 }
 #endif // __cplusplus
-#endif // _MSC_VER
+#endif // !defined(_MSC_VER) && defined(__x86_64__)
 
 namespace torch {
 namespace jit {
@@ -163,7 +163,7 @@ c10::ArrayRef<SymbolAddress> getIntrinsicSymbols() {
     {"__gnu_f2h_ieee",
      reinterpret_cast<void*>(&c10::detail::fp16_ieee_from_fp32_value)},
 
-#if !defined(_MSC_VER)
+#if !defined(_MSC_VER) && defined(__x86_64__)
     // FP32 Sleef functions -- SSE
     {"Sleef_acosf4", reinterpret_cast<void*>(&Sleef_acosf4_u10)},
     {"Sleef_asinf4", reinterpret_cast<void*>(&Sleef_asinf4_u10)},
