@@ -1,3 +1,4 @@
+#ifdef TORCH_ENABLE_LLVM
 #include <c10/util/Half.h>
 #include <torch/csrc/jit/tensorexpr/intrinsic_symbols.h>
 #include <cmath>
@@ -287,3 +288,4 @@ c10::ArrayRef<SymbolAddress> getIntrinsicSymbols() {
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
+#endif // TORCH_ENABLE_LLVM
