@@ -118,9 +118,9 @@ def fake_quantize_per_channel_affine(g, inputs, scale, zero_point, axis, quant_m
 
     # ONNX defines zero_point to be int8 or uint8
     if quant_min == 0:
-        zero_point = g.op("Cast", zero_point, to_i=cast_pytorch_to_onnx['Byte'])
+        zero_point = g.op("Cast", zero_point, to_i=sym_help.cast_pytorch_to_onnx['Byte'])
     else:
-        zero_point = g.op("Cast", zero_point, to_i=cast_pytorch_to_onnx['Char'])
+        zero_point = g.op("Cast", zero_point, to_i=sym_help.cast_pytorch_to_onnx['Char'])
     return g.op(
         "DequantizeLinear",
         g.op("QuantizeLinear", inputs, scale, zero_point, axis_i=axis),
