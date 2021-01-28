@@ -77,6 +77,7 @@ static void registerIntrinsics(
   SymbolMap symbols;
   for (auto const& sym : getIntrinsicSymbols()) {
     symbols.insert(entry(sym.symbol, sym.address));
+    intrinsics.insert(sym.symbol);
   }
   assertSuccess(JD.define(absoluteSymbols(symbols)));
 }
