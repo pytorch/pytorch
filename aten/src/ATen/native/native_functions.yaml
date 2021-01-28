@@ -5153,12 +5153,6 @@
   dispatch:
     CPU, CUDA: __irshift__
 
-- func: lgamma_(Tensor(a!) self) -> Tensor(a!)
-  variants: method
-  dispatch:
-    CPU: _lgamma__cpu
-    CUDA: _lgamma__cuda
-
 - func: atan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
   dispatch:
@@ -5984,8 +5978,12 @@
 - func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
   dispatch:
-    CPU: _lgamma_out_cpu
-    CUDA: _lgamma_out_cuda
+    CPU, CUDA: lgamma_out
+
+- func: lgamma_(Tensor(a!) self) -> Tensor(a!)
+  variants: method
+  dispatch:
+    CPU, CUDA: lgamma_
 
 - func: lgamma(Tensor self) -> Tensor
   variants: method, function
