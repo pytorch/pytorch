@@ -94,6 +94,7 @@ void div_trunc_kernel_cuda(TensorIterator& iter) {
 }
 
 void div_floor_kernel_cuda(TensorIterator& iter) {
+  // See NOTE: [Floor Division in Python]
   const auto dtype = iter.common_dtype();
   if (dtype == kByte) {
     // In the special case of unsigned integer division, floor division is
