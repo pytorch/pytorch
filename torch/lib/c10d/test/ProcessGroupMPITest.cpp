@@ -336,7 +336,7 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
 
 void testBackendName() {
   auto pg = c10d::ProcessGroupMPI::createProcessGroupMPI();
-  if (pg->getBackendName() != MPI_BACKEND_NAME) {
+  if (pg->getBackendName() != c10d::MPI_BACKEND_NAME) {
     throw std::runtime_error("BOOM!");
   }
 }
