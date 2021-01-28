@@ -5737,7 +5737,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(6, 4, 3, 3)
         self.run_test(FakeQuantizePerChannelModel(), (x))
 
-    @skipIfUnsupportedOpsetVersion([13])
     def test_batchnorm_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
