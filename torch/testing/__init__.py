@@ -5,6 +5,7 @@ The testing package contains testing-specific utilities.
 import torch
 import random
 import math
+import cmath
 from typing import cast, List, Optional, Tuple, Union
 from .check_kernel_launches import check_cuda_kernel_launches, check_code_for_cuda_kernel_launches
 
@@ -142,9 +143,6 @@ def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, e
 
         return (True, None)
 
-    if equal_nan == "relaxed":
-        equal_nan = True
-
     # All other comparisons use torch.allclose directly
     if torch.allclose(a, b, rtol=rtol, atol=atol, equal_nan=bool(equal_nan)):
         return (True, None)
@@ -217,11 +215,10 @@ def _compare_scalars_internal(a, b, *, rtol: float, atol: float, equal_nan: Unio
         b = complex(b)
 
         if equal_nan == "relaxed":
-            if math.isnan(a.real) or math.isnan(a.imag):
+            if cmath.isnan(a):
                 a = complex(math.nan, math.nan)
-            if math.isnan(b.real) or math.isnan(b.imag):
+            if cmath.isnan(b):
                 b = complex(math.nan, math.nan)
-            equal_nan = True
 
         result, msg = _helper(a.real, b.real, " the real part ")
 
@@ -229,9 +226,6 @@ def _compare_scalars_internal(a, b, *, rtol: float, atol: float, equal_nan: Unio
             return (False, msg)
 
         return _helper(a.imag, b.imag, " the imaginary part ")
-
-    if equal_nan == "relaxed":
-        equal_nan = True
 
     return _helper(a, b, " ")
 
