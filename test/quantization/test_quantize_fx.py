@@ -1701,14 +1701,21 @@ class TestQuantizeFxOps(QuantizationTestCase):
     def test_functional_conv(self):
         """ Test for function conv and functional conv + relu
         """
+        convs = {
+            1: torch.nn.functional.conv1d,
+            2: torch.nn.functional.conv2d,
+            3: torch.nn.functional.conv3d,
+        }
+
         class FuncConv(torch.nn.Module):
-            def __init__(self, use_bias, has_relu, f_relu):
+            def __init__(self, dim, use_bias, has_relu, f_relu):
                 super().__init__()
-                self.w = torch.randn(3, 3, 3, 3)
+                self.dim = dim
+                self.w = torch.randn(tuple([3] * (dim + 2)))
                 self.b = torch.randn(3) if use_bias else None
-                self.stride = (1, 1)
-                self.padding = (0, 0)
-                self.dilation = (1, 1)
+                self.stride = tuple([1] * dim)
+                self.padding = tuple([0] * dim)
+                self.dilation = tuple([1] * dim)
                 self.groups = 1
                 self.use_bias = use_bias
                 if has_relu:
@@ -1720,11 +1727,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
                     self.relu = torch.nn.Identity()
 
             def forward(self, x):
-                x = F.conv2d(x, self.w, self.b, self.stride, self.padding, self.dilation, self.groups)
+                x = convs[self.dim](x, self.w, self.b, self.stride, self.padding, self.dilation, self.groups)
                 x = self.relu(x)
                 return x
-
-        data = (torch.randn((2, 3, 4, 4), dtype=torch.float),)
 
         quant_type_to_prepare_expected_node_occurrence = {
             QuantType.DYNAMIC: {},
@@ -1739,31 +1744,50 @@ class TestQuantizeFxOps(QuantizationTestCase):
             },
         }
         quant_type_to_qconv_fun = {
-            QuantType.STATIC: ns.call_function(torch.ops.quantized.conv2d),
-            QuantType.QAT: ns.call_function(torch.ops.quantized.conv2d),
+            QuantType.STATIC: {
+                1: ns.call_function(torch.ops.quantized.conv1d),
+                2: ns.call_function(torch.ops.quantized.conv2d),
+                3: ns.call_function(torch.ops.quantized.conv3d)
+            },
+            QuantType.QAT: {
+                1: ns.call_function(torch.ops.quantized.conv1d),
+                2: ns.call_function(torch.ops.quantized.conv2d),
+                3: ns.call_function(torch.ops.quantized.conv3d)
+            },
         }
         quant_type_to_qconv_relu_fun = {
-            QuantType.STATIC: ns.call_function(torch.ops.quantized.conv2d_relu),
-            QuantType.QAT: ns.call_function(torch.ops.quantized.conv2d_relu),
+            QuantType.STATIC: {
+                1: ns.call_function(torch.ops.quantized.conv1d_relu),
+                2: ns.call_function(torch.ops.quantized.conv2d_relu),
+                3: ns.call_function(torch.ops.quantized.conv3d_relu)
+            },
+            QuantType.QAT: {
+                1: ns.call_function(torch.ops.quantized.conv1d_relu),
+                2: ns.call_function(torch.ops.quantized.conv2d_relu),
+                3: ns.call_function(torch.ops.quantized.conv3d_relu)
+            },
         }
 
         options = itertools.product(
+            [1, 2, 3],  # dims
             self.static_quant_types,
             (True, False),  # use_bias
             (True, False),  # has_relu
             (True, False),  # functional relu
         )
-        for quant_type, use_bias, has_relu, f_relu in options:
-            model = FuncConv(use_bias, has_relu, f_relu)
+        for dim, quant_type, use_bias, has_relu, f_relu in options:
+            data_dims = [2, 3] + [4] * dim
+            data = (torch.randn(tuple(data_dims), dtype=torch.float),)
+            model = FuncConv(dim, use_bias, has_relu, f_relu)
             if has_relu:
-                qconv_fun = quant_type_to_qconv_relu_fun[quant_type]
+                qconv_fun = quant_type_to_qconv_relu_fun[quant_type][dim]
             else:
-                qconv_fun = quant_type_to_qconv_fun[quant_type]
+                qconv_fun = quant_type_to_qconv_fun[quant_type][dim]
 
             convert_node_occurrence = {
-                ns.call_function(torch.quantize_per_tensor): 1 if quant_type != QuantType.DYNAMIC else 0,
+                ns.call_function(torch.quantize_per_tensor): 1,
                 qconv_fun: 1,
-                ns.call_method("dequantize"): 1 if quant_type != QuantType.DYNAMIC else 0
+                ns.call_method("dequantize"): 1
             }
             prepare_expected_node_occurrence = \
                 quant_type_to_prepare_expected_node_occurrence[quant_type]
