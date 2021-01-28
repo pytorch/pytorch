@@ -12,7 +12,6 @@ jobs:
       - uses: actions/stale@v3
         with:
           stale-pr-message: >
-            \## Stale alert!
             Looks like this PR hasn't been updated in a while so we're going to go ahead and mark this as `Stale`. <br>
             Feel free to remove the `Stale` label if you feel this was a mistake. <br>
             `Stale` pull requests will automatically be closed 30 days after being marked `Stale` <br>
@@ -26,7 +25,6 @@ jobs:
       - uses: actions/stale@v3
         with:
           stale-pr-message: >
-            \## Stale alert!
             Looks like this PR hasn't been updated in a while so we're going to go ahead and mark this as `Stale`. <br>
             Feel free to remove the `Stale` label if you feel this was a mistake. <br>
             If you are unable to remove the `Stale` label please contact a maintainer in order to do so. <br>
