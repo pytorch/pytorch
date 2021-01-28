@@ -930,7 +930,6 @@ class TestUnaryUfuncs(TestCase):
         self._helper_test_igamma(loglo, loghi, device, dtype,
                                  torch.igamma, scipy.special.gammainc)
 
-    @skipCUDAIfRocm
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
@@ -1114,8 +1113,8 @@ class TestUnaryUfuncs(TestCase):
 
         cpu_tensor.requires_grad = True
         for n in [0, 1, 2, 3, 4, 5]:
-            torch.autograd.gradcheck(lambda x: x.polygamma(n),
-                                     cpu_tensor)
+            torch.autograd.gradcheck(lambda x: x.polygamma(n), cpu_tensor,
+                                     check_batched_grad=True)
 
     # TODO: update to compare against NumPy by rationalizing with OpInfo
     @onlyCUDA
@@ -1685,8 +1684,6 @@ torch_op_tests = [
     _TorchMathTestMeta('frac', reffn='fmod', refargs=lambda x: (x.numpy(), 1)),
     _TorchMathTestMeta('trunc'),
     _TorchMathTestMeta('round'),
-    # FIXME lgamma produces different result compared to scipy at -inf
-    _TorchMathTestMeta('lgamma', reffn='gammaln', ref_backend='scipy', replace_inf_with_nan=True),
     _TorchMathTestMeta('polygamma', args=[0], substr='_0', reffn='polygamma',
                        refargs=lambda x: (0, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
                        ref_backend='scipy'),
