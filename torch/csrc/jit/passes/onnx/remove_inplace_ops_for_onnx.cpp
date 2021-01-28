@@ -41,7 +41,11 @@ Node* addDummyCloneToBlock(Block* b, Value* orig_data) {
     newNode->addInput(orig_data);
     newNode->output()->setType(orig_data->type());
     b->prependNode(newNode);
-  } else if (orig_data->type()->kind() == TypeKind::TensorType) {
+  } else if (
+      orig_data->type()->kind() == TypeKind::TensorType ||
+      orig_data->type()->kind() == TypeKind::IntType ||
+      orig_data->type()->kind() == TypeKind::FloatType ||
+      orig_data->type()->kind() == TypeKind::BoolType) {
     newNode = graph->create(aten::clone, /*num_outputs =*/1);
     newNode->addInput(orig_data);
     auto* noneNode = graph->create(prim::Constant);
@@ -50,8 +54,7 @@ Node* addDummyCloneToBlock(Block* b, Value* orig_data) {
     newNode->output()->setType(orig_data->type());
     b->prependNode(newNode);
     noneNode->insertBefore(newNode);
-  } // TODO: Handle float/int attributes
-
+  }
   return newNode;
 }
 
@@ -531,7 +534,7 @@ std::deque<std::string> findSubModuleAttr(
       moduleNames.push_front(node->s(attr::name));
       node = node->inputs()[0]->node();
     } else {
-      return moduleNames;
+      return break;
     }
   }
   // Assign the inner module to attrModule.
@@ -565,7 +568,11 @@ Node* insertCloneBeforeNode(
     newNode->addInput(orig_data);
     newNode->output()->setType(orig_data->type());
     newNode->insertBefore(node);
-  } else if (orig_data->type()->kind() == TypeKind::TensorType) {
+  } else if (
+      orig_data->type()->kind() == TypeKind::TensorType ||
+      orig_data->type()->kind() == TypeKind::IntType ||
+      orig_data->type()->kind() == TypeKind::FloatType ||
+      orig_data->type()->kind() == TypeKind::BoolType) {
     auto* noneNode = graph->create(prim::Constant);
     noneNode->output()->setType(NoneType::get());
     newNode = graph->create(aten::clone, /*num_outputs =*/1);
@@ -575,7 +582,7 @@ Node* insertCloneBeforeNode(
     newNode->output()->setType(orig_data->type());
     newNode->insertBefore(node);
     noneNode->insertBefore(newNode);
-  } // TODO: Handle float/int attributes
+  }
   return newNode;
 }
 
