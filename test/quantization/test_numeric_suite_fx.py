@@ -212,25 +212,22 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             expected_ob_dict_keys,
         )
 
-    # TODO: merge with eager mode compare_and_validate_results
-    @override_qengines
-    def compare_and_validate_model_outputs_results_fx(
-        self, float_model, q_model, data, expected_ob_dict_keys
-    ):
-        act_compare_dict = compare_model_outputs_fx(float_model, q_model, data)
-
-        self.assertTrue(act_compare_dict.keys() == expected_ob_dict_keys)
-        for k, v in act_compare_dict.items():
-            self.assertTrue(len(v["float"]) == 1)
-            self.assertTrue(len(v["float"]) == len(v["quantized"]))
-            for i, val in enumerate(v["quantized"]):
-                self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
-
     @override_qengines
     def test_compare_model_outputs_conv_static_fx(self):
         r"""Compare the output of conv layer in static quantized model and corresponding
         output of conv layer in float model
         """
+
+        def compare_and_validate_results(float_model, q_model, data):
+            act_compare_dict = compare_model_outputs_fx(float_model, q_model, data)
+            expected_ob_dict_keys = {"x.stats", "conv.stats"}
+
+            self.assertTrue(act_compare_dict.keys() == expected_ob_dict_keys)
+            for k, v in act_compare_dict.items():
+                self.assertTrue(len(v["float"]) == 1)
+                self.assertTrue(len(v["float"]) == len(v["quantized"]))
+                for i, val in enumerate(v["quantized"]):
+                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         qengine = torch.backends.quantized.engine
         qconfig = get_default_qconfig(qengine)
@@ -247,12 +244,8 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             test_only_eval_fn(prepared_model, self.img_data_2d)
             q_model = convert_fx(prepared_model)
 
-            expected_ob_dict_keys = {"x.stats", "conv.stats"}
-            self.compare_and_validate_model_outputs_results_fx(
-                backup_prepared_model,
-                q_model,
-                self.img_data_2d[0][0],
-                expected_ob_dict_keys,
+            compare_and_validate_results(
+                backup_prepared_model, q_model, self.img_data_2d[0][0]
             )
 
     @override_qengines
@@ -260,6 +253,17 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         r"""Compare the output of linear layer in static quantized model and corresponding
         output of linear layer in float model
         """
+
+        def compare_and_validate_results(float_model, q_model, data):
+            act_compare_dict = compare_model_outputs_fx(float_model, q_model, data)
+            expected_ob_dict_keys = {"x.stats", "fc1.stats"}
+
+            self.assertTrue(act_compare_dict.keys() == expected_ob_dict_keys)
+            for k, v in act_compare_dict.items():
+                self.assertTrue(len(v["float"]) == 1)
+                self.assertTrue(len(v["float"]) == len(v["quantized"]))
+                for i, val in enumerate(v["quantized"]):
+                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
         float_model = SingleLayerLinearModel()
         float_model.eval()
@@ -277,8 +281,4 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         q_model = convert_fx(prepared_model)
 
         linear_data = self.calib_data[0][0]
-
-        expected_ob_dict_keys = {"x.stats", "fc1.stats"}
-        self.compare_and_validate_model_outputs_results_fx(
-            backup_prepared_model, q_model, linear_data, expected_ob_dict_keys
-        )
+        compare_and_validate_results(backup_prepared_model, q_model, linear_data)

@@ -37,6 +37,7 @@ allow_list = [
     ("aten::ifft", datetime.date(2021, 1, 31)),
     ("aten::irfft", datetime.date(2021, 1, 31)),
     ("aten::rfft", datetime.date(2021, 1, 31)),
+    ("aten::_svd_helper", datetime.date(2021, 1, 31)),
     ("aten::_cudnn_rnn_flatten_weight", datetime.date(2020, 12, 31)),
     ("aten::_cudnn_rnn", datetime.date(2020, 12, 31)),
     ("aten::_cudnn_rnn_backward", datetime.date(2020, 12, 31)),
@@ -51,6 +52,10 @@ allow_list = [
     ("aten::set_", datetime.date(2021, 1, 31)),
     ("aten::native_layer_norm", datetime.date(2021, 1, 31)),
     ("aten::native_layer_norm_backward", datetime.date(2021, 1, 31)),
+    ("aten::elu_backward", datetime.date(2021, 1, 31)),
+    ("aten::_multinomial_alias_setup", datetime.date(2021, 1, 31)),
+    ("aten::_multinomial_alias_draw", datetime.date(2021, 1, 31)),
+    ("prim::profile_optional", datetime.date(2021, 1, 31)),
 ]
 
 def allow_listed(schema, allow_list):

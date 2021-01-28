@@ -4,7 +4,6 @@ import torch
 from torch.fx import GraphModule  # type: ignore
 from torch.fx import map_arg  # type: ignore
 from torch.fx.graph import Graph
-from torch.fx.node import Node
 from torch.quantization import get_default_compare_output_module_list
 from torch.quantization._numeric_suite import (
     _find_match,
@@ -15,32 +14,21 @@ from torch.quantization._numeric_suite import (
     OutputLogger,
     ShadowLogger,
 )
-from torch.quantization.fx.quantization_patterns import QuantizeHandler
 from torch.quantization.fx.quantize import _remove_qconfig, is_activation_post_process
 from torch.quantization.quantize_fx import prepare_fx
-from torch.quantization.fx.quantization_types import QuantizerCls
+from torch.quantization.fx.quantization_patterns import QuantizeHandler
 
-from typing import Callable
 
 class NumericSuiteQuantizeHandler(QuantizeHandler):
-    """QuantizeHanlder used for float and qunantized module for numeric suite.
-    This handler is passed in as additioanl quant pattern in prepare_fx in
-    order to match the pattern for quantized module.
+    """ QuantizeHanlder used for float and qunantized module for numeric suite
     """
-
     def __init__(self, quantizer: QuantizerCls, node: Node):
         super().__init__(quantizer, node)
 
-    def convert(
-        self,
-        quantizer: QuantizerCls,
-        node: Node,
-        load_arg: Callable,
-        debug: bool = False,
-        convert_custom_config_dict: Dict[str, Any] = None,
-    ) -> Node:
+    def convert(self, quantizer: QuantizerCls, node: Node, load_arg: Callable,
+                debug: bool = False,
+                convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         return NotImplemented
-
 
 def remove_qconfig_observer_fx(model):
     # remove activation post process
@@ -70,16 +58,6 @@ def remove_qconfig_observer_fx(model):
 
 
 def _get_logger_dict_helper_fx(model, target_dict):
-    r"""This is the helper fucntion for get_logger_dict_fx
-        Traverse the model graph and keep track of logger stats for activatioin
-        before applying quantized op and after applying quantized op
-
-    Args:
-        model: float or quantized model that we want to keep track of
-               logger stats for
-        target_dict: the dictionary used to save all logger stats
-    """
-
     modules = dict(model.named_modules())
 
     for node in model.graph.nodes:
@@ -102,19 +80,6 @@ def _get_logger_dict_helper_fx(model, target_dict):
 
 
 def get_logger_dict_fx(model):
-    r"""Traverse the graph module of the float or quantized model
-        and save all logger stats into target dict.
-    This is mainly used for quantization accuracy debug.
-
-    Type of loggers supported:
-        OutputLogger: used to log the outputs of the modules
-
-    Args:
-        model:  float or quantized model that we want to save the logger stats for
-    Return:
-        target_dict : the dictionary used to save all logger stats
-    """
-
     torch._C._log_api_usage_once("quantization_api._numeric_suite.get_logger_dict_fx")
     target_dict: Dict[str, Dict] = {}
     _get_logger_dict_helper_fx(model, target_dict)

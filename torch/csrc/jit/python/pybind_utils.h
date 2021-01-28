@@ -4,6 +4,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/stack.h>
+#include <pybind11/complex.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Device.h>
@@ -122,7 +123,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
         // Capture a copy of the ivalue::Future instead of the `this` pointer
         // because the PythonFutureWrapper object could have been deleted
         // when the callbacks are fired. For example, RPC only captures the
-        // ivalue::Future instead of PythonFutureWrapper in FutureMessage's
+        // ivalue::Future instead of PythonFutureWrapper in JitFuture's
         // callback functions. Hence, if user code does not hold a reference to
         // this PythonFutureWrapper object, there is no guarantee that the
         // PythonFutureWrapper is still valid when running the callback.
@@ -636,6 +637,9 @@ inline py::object toPyObject(IValue ivalue) {
     return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
+  } else if (ivalue.isComplexDouble()) {
+    return py::cast(
+        static_cast<std::complex<double>>(std::move(ivalue).toComplexDouble()));
   } else if (ivalue.isInt()) {
     return py::cast(std::move(ivalue).toInt());
   } else if (ivalue.isBool()) {

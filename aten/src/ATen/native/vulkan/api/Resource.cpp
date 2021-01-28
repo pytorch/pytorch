@@ -192,6 +192,11 @@ VkFence Resource::Fence::handle(const bool add_to_waitlist) const {
       "Invalid Vulkan fence!");
 
   const VkFence fence = pool->fence_.pool[id].get();
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      fence,
+      "Invalid Vulkan fence!");
+
   if (add_to_waitlist) {
     pool->fence_.waitlist.push_back(fence);
   }
@@ -360,14 +365,13 @@ Resource::Pool::Pool(
   : device_(gpu.device),
     allocator_(
         create_allocator(
-          gpu.adapter->runtime->instance(),
-          gpu.adapter->handle,
-          device_),
+            gpu.adapter->runtime->instance(),
+            gpu.adapter->handle,
+            device_),
         vmaDestroyAllocator),
     memory_{
       std::move(policy),
     },
-    buffer_{},
     image_{
       .sampler = Image::Sampler{gpu},
     },
@@ -375,6 +379,31 @@ Resource::Pool::Pool(
   buffer_.pool.reserve(Configuration::kReserve);
   image_.pool.reserve(Configuration::kReserve);
   fence_.pool.reserve(Configuration::kReserve);
+}
+
+Resource::Pool::Pool(Pool&& pool)
+  : device_(std::move(pool.device_)),
+    allocator_(std::move(pool.allocator_)),
+    memory_(std::move(pool.memory_)),
+    buffer_(std::move(pool.buffer_)),
+    image_(std::move(pool.image_)),
+    fence_(std::move(pool.fence_)) {
+  pool.invalidate();
+}
+
+Resource::Pool& Resource::Pool::operator=(Pool&& pool) {
+  if (&pool != this) {
+    device_ = std::move(pool.device_);
+    allocator_ = std::move(pool.allocator_);
+    memory_ = std::move(pool.memory_);
+    buffer_ = std::move(pool.buffer_);
+    image_ = std::move(pool.image_);
+    fence_ = std::move(pool.fence_);
+
+    pool.invalidate();
+  };
+
+  return *this;
 }
 
 Resource::Pool::~Pool() {
@@ -392,31 +421,6 @@ Resource::Pool::~Pool() {
     LOG(WARNING)
         << "Vulkan: Resource pool destructor raised an unknown exception!";
   }
-}
-
-Resource::Pool::Pool(Pool&& pool)
-  : device_(std::move(pool.device_)),
-    allocator_(std::move(pool.allocator_)),
-    memory_(std::move(pool.memory_)),
-    buffer_(std::move(pool.buffer_)),
-    image_(std::move(pool.image_)),
-    fence_(std::move(pool.fence_)) {
-  pool.device_ = VK_NULL_HANDLE;
-}
-
-Resource::Pool& Resource::Pool::operator=(Pool&& pool) {
-  if (&pool != this) {
-    device_ = std::move(pool.device_);
-    allocator_ = std::move(pool.allocator_);
-    memory_ = std::move(pool.memory_);
-    buffer_ = std::move(pool.buffer_);
-    image_ = std::move(pool.image_);
-    fence_ = std::move(pool.fence_);
-
-    pool.device_ = VK_NULL_HANDLE;
-  };
-
-  return *this;
 }
 
 Resource::Buffer Resource::Pool::buffer(
@@ -676,6 +680,11 @@ void Resource::Pool::purge() {
   fence_.in_use = 0u;
   image_.pool.clear();
   buffer_.pool.clear();
+}
+
+void Resource::Pool::invalidate() {
+  device_ = VK_NULL_HANDLE;
+  allocator_.reset();
 }
 
 } // namespace api

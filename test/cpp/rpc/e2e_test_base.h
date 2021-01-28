@@ -64,19 +64,21 @@ class TestE2EBase : public ::testing::Test {
 
     ScriptRemoteCall scriptRemoteCall(
         op, {t1, t2, 1}, ownerRRef->rrefId(), ownerRRef->rrefId());
-    auto fm = autograd::sendMessageWithAutograd(
+    auto jitFuture = autograd::sendMessageWithAutograd(
         *rpcAgent,
         rpcAgent->getWorkerInfo("worker"),
         std::move(scriptRemoteCall).toMessage(),
         false);
 
-    ownerRRef->registerOwnerCreationFuture(fm);
+    ownerRRef->registerOwnerCreationFuture(jitFuture);
 
     // Builtin operators does not return py::object, and hence does not require
     // GIL for destructing the potentially deleted OwerRRef.
-    fm->addCallback(
-        [ownerRRefId = ownerRRef->rrefId()](const FutureMessage& fm) {
-          callback::finishCreatingOwnerRRef(fm, ownerRRefId);
+    std::weak_ptr<JitFuture> wp = jitFuture;
+    jitFuture->addCallback(
+        [wp, ownerRRefId = ownerRRef->rrefId()]() {
+          auto jitFuture = wp.lock();
+          callback::finishCreatingOwnerRRef(*jitFuture, ownerRRefId);
         });
     return ownerRRef;
   }
@@ -89,12 +91,14 @@ class TestE2EBase : public ::testing::Test {
 
     // Send the RPC and return result.
     auto response = autograd::sendMessageWithAutograd(
-                        *rpcAgent,
-                        rpcAgent->getWorkerInfo("worker"),
-                        std::move(scriptCall).toMessage())
-                        ->wait();
+        *rpcAgent,
+        rpcAgent->getWorkerInfo("worker"),
+        std::move(scriptCall).toMessage());
+    response->waitAndThrow();
+
     MessageType messageType = MessageType::FORWARD_AUTOGRAD_RESP;
-    auto wrappedResponse = deserializeResponse(response, messageType);
+    auto wrappedResponse = deserializeResponse(
+        std::move(*response->value().toCustomClass<Message>()), messageType);
     return static_cast<ScriptResp&>(*wrappedResponse).value().toTensor();
   }
 

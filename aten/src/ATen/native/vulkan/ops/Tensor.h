@@ -157,10 +157,10 @@ class vTensor final {
   */
 
   template<typename Type>
-  Future<Type, Access::Read> host() const &;
+  Future<Type, Access::Read> host(api::Command::Buffer&) const &;
 
   template<typename Type, Access::Flags kAccess>
-  Future<Type, kAccess> host() &;
+  Future<Type, kAccess> host(api::Command::Buffer&) &;
 
   /*
     Device access - these functions will be expensive if they trigger a buffer
@@ -178,14 +178,10 @@ class vTensor final {
     predictability of usage and efficiency.
   */
 
-  Buffer::Object buffer(Stage::Flags) const &;
-  Buffer::Object buffer(Stage::Flags, Access::Flags) &;
   Buffer::Object buffer(api::Command::Buffer&, Stage::Flags) const &;
   Buffer::Object buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) &;
 
   bool has_image() const;
-  Image::Object image(Stage::Flags) const &;
-  Image::Object image(Stage::Flags, Access::Flags) &;
   Image::Object image(api::Command::Buffer&, Stage::Flags) const &;
   Image::Object image(api::Command::Buffer&, Stage::Flags, Access::Flags) &;
 
@@ -210,26 +206,22 @@ class vTensor final {
     Host
   */
 
-  const vTensor* host() const;
-  vTensor* host(Access::Flags access);
+  const vTensor* host(api::Command::Buffer&) const;
+  vTensor* host(api::Command::Buffer&, Access::Flags);
 
   template<typename Type>
-  Future<Type, Access::Read> host() const && = delete;
+  Future<Type, Access::Read> host(api::Command::Buffer&) const && = delete;
 
   template<typename Type, Access::Flags kAccess>
-  Future<Type, kAccess> host() && = delete;
+  Future<Type, kAccess> host(api::Command::Buffer&) && = delete;
 
   /*
     Device
   */
 
-  Buffer::Object buffer(Stage::Flags) const && = delete;
-  Buffer::Object buffer(Stage::Flags, Access::Flags) && = delete;
   Buffer::Object buffer(api::Command::Buffer&, Stage::Flags) const && = delete;
   Buffer::Object buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) && = delete;
 
-  Image::Object image(Stage::Flags) const && = delete;
-  Image::Object image(Stage::Flags, Access::Flags) && = delete;
   Image::Object image(api::Command::Buffer&, Stage::Flags) const && = delete;
   Image::Object image(api::Command::Buffer&, Stage::Flags, Access::Flags) && = delete;
 
@@ -249,21 +241,22 @@ class vTensor final {
     ~View() = default;
 
     /*
-      Device
+      Buffer
     */
 
-    Buffer& buffer(Stage::Flags, Access::Flags) const;
     Buffer& buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
 
+    /*
+      Image
+    */
+
     bool has_image() const;
-    Image& image(Stage::Flags, Access::Flags) const;
     Image& image(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
 
     /*
       Host
     */
 
-    Buffer& staging(Stage::Flags, Access::Flags) const;
     Buffer& staging(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
     vTensor::Memory& wait() const;
 
@@ -343,7 +336,7 @@ class vTensor final {
     Image& image(CMD&, Stage::Flags, Access::Flags) const;
     Buffer& staging() const;
     Buffer& staging(CMD&, Stage::Flags, Access::Flags) const;
-    Fence& fence() const;
+    Fence& fence(Access::Flags) const;
 
     // Validation
     void verify() const;
@@ -485,13 +478,15 @@ vTensor::Future<Type, kAccess>::wait() const & {
 }
 
 template<typename Type>
-inline vTensor::Future<Type, vTensor::Access::Read> vTensor::host() const & {
-  return Future<Type, vTensor::Access::Read>(host());
+inline vTensor::Future<Type, vTensor::Access::Read>
+vTensor::host(api::Command::Buffer& command_buffer) const & {
+  return Future<Type, vTensor::Access::Read>(host(command_buffer));
 }
 
 template<typename Type, vTensor::Access::Flags kAccess>
-inline vTensor::Future<Type, kAccess> vTensor::host() & {
-  return Future<Type, kAccess>(host(kAccess));
+inline vTensor::Future<Type, kAccess>
+vTensor::host(api::Command::Buffer& command_buffer) & {
+  return Future<Type, kAccess>(host(command_buffer, kAccess));
 }
 
 inline bool vTensor::has_image() const {
