@@ -802,6 +802,11 @@ def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False, vect
         (1,) - same as () but explicit
         (3,) - solve for 3 vectors.
     Zeros in dimensions are edge cases in the implementation and important to test for in order to avoid unexpected crashes.
+    'vector_rhs_allowed' controls whether to include nrhs = () to the list of SampleInputs.
+    torch.solve / triangular_solve / cholesky_solve (opposed to torch.linalg.solve) do not allow
+    1D tensors (vectors) as the right-hand-side.
+    Once torch.solve / triangular_solve / cholesky_solve and its testing are removed,
+    'vector_rhs_allowed' may be removed here as well.
     """
     from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
@@ -1471,7 +1476,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_legacy_solve,
            check_batched_gradgrad=False,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
-           # cuda gradchecks are slow
+           # CUDA gradchecks are slow and triangular solve backward is a composite operation
            # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
            skips=(SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
     UnaryUfuncInfo('exp2',
