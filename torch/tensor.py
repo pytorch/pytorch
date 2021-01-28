@@ -1,7 +1,7 @@
 from collections import OrderedDict
 import functools
 from numbers import Number
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union, List
 import warnings
 import weakref
 

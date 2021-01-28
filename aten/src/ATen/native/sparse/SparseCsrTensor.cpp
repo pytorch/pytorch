@@ -48,6 +48,24 @@ Tensor sparse_csr_tensor(const Tensor& crow_indices, const Tensor& col_indices,
   return self;
 }
 
+Tensor sparse_csr_tensor(const Tensor& crow_indices, const Tensor& col_indices,
+                         const Tensor& values, const TensorOptions& options) {
+  TORCH_CHECK(!options.has_layout() || options.layout() == kSparseCsr, 
+    "expected sparse CSR layout, but got layout ", options.layout());
+  
+  std::vector<int64_t> size(2);
+  size[0] = crow_indices.numel() - 1;
+  Tensor max_col_indices = std::get<0>(col_indices.max(1, false));
+  auto max_col_indices_accessor = max_col_indices.accessor<int64_t, 1>();
+  size[1] = max_col_indices_accessor[0];
+
+  SparseTensor self = new_csr_tensor(options);
+  get_sparse_csr_impl(self)->resize_and_clear_(values.numel(), size);
+  get_sparse_csr_impl(self)->set_member_tensors_unsafe(crow_indices, col_indices, values);
+
+  return self;
+}
+
 // Access members of CSR tensors.
 int64_t _nnz_sparse_csr(const SparseTensor& self) {
   return get_sparse_csr_impl(self)->nnz();

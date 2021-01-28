@@ -47,6 +47,29 @@ class TestSparseCSR(TestCase):
         self.assertEqual(str(torch.sparse_csr), 'torch.sparse_csr')
         self.assertEqual(type(torch.sparse_csr), torch.layout)
 
+    def test_sparse_csr_constructor_shape_inference(self):
+        crow_indices = [0, 3, 6, 9]
+        col_indices = [0, 1, 0, 1]
+        values = [1, 2, 3, 4]
+        sparse = torch.sparse_csr_tensor(torch.tensor(crow_indices, dtype=torch.int64), 
+                                         torch.tensor(col_indices, dtype=torch.int64), 
+                                         torch.tensor(values), dtype=torch.double)
+
+        self.assertEqual(torch.tensor(crow_indices, dtype=torch.int64), sparse.crow_indices())
+        self.assertEqual((len(crow_indices) - 1, max(col_indices) + 1), sparse.shape())
+
+    def test_sparse_csr_constructor(self):
+        crow_indices = [0, 3, 6, 9]
+        col_indices = [0, 1, 0, 1]
+        values = [1, 2, 3, 4]
+
+        sparse = torch.sparse_csr_tensor(torch.tensor(crow_indices, dtype=torch.int32),
+                                         torch.tensor(col_indices, dtype=torch.int32),
+                                         torch.tensor(values), size=(3, 10), dtype=torch.float)
+
+        self.assertEqual((3, 10), sparse.shape())
+        self.assertEqual(torch.tensor(crow_indices, dtype=torch.int32), sparse.crow_indices())
+        
     def test_sparse_csr_from_dense(self):
         sp = torch.tensor([[1, 2], [3, 4]]).to_sparse_csr()
         self.assertEqual(torch.tensor([0, 2, 4], dtype=torch.int32), sp.crow_indices())
