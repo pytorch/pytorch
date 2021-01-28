@@ -140,9 +140,19 @@ class FakeQuantize(FakeQuantizeBase):
                 X = torch.fake_quantize_per_channel_affine(X, self.scale, self.zero_point,
                                                            self.ch_axis, self.quant_min, self.quant_max)
             else:
-                X = torch.fake_quantize_per_tensor_affine(X, float(self.scale),
-                                                          int(self.zero_point), self.quant_min,
-                                                          self.quant_max)
+                if self.training:
+                    # During training, use the memory optimized fake_quant
+                    # forward. It has a reduced memory overhead in the backward
+                    # pass compared to fake_quantize_per_tensor_affine.
+                    X, _mask = torch.fake_quantize_per_tensor_affine_cachemask(
+                        X, float(self.scale), int(self.zero_point),
+                        self.quant_min, self.quant_max)
+                else:
+                    # During inference, use the fastest fake_quant
+                    # which does not compute any extra info for the backward.
+                    X = torch.fake_quantize_per_tensor_affine(
+                        X, float(self.scale), int(self.zero_point),
+                        self.quant_min, self.quant_max)
         return X
 
     @torch.jit.export
