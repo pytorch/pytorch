@@ -14,7 +14,22 @@ def _is_magic(x: str) -> bool:
     return x.startswith('__') and x.endswith('__')
 
 def _snake_case(s: str) -> str:
-    return ''.join(['_' + i.lower() if i.isupper() else i for i in s]).lstrip('_')
+    """
+    Transforms the given string ``s`` to a Python-style variable name
+
+    Examples:
+        ``mod.snake_case`` -> ``mod.snake_case``
+        ``mod.pascalCase``-> ``mod.pascal_case``
+        ``mod.ALL_CAPS`` -> ``mod.all_caps``
+    """
+    chars = []
+    prev_lower = False
+    for c in s:
+        if prev_lower and c.isupper():
+            chars.append('_')
+        chars.append(c.lower())
+        prev_lower = c.islower()
+    return ''.join(chars)
 
 def get_qualified_name(func: Callable[..., Any]) -> str:
     # things like getattr just appear in builtins
@@ -784,6 +799,22 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
             if node_str:
                 s += '\n    ' + node_str
         return s
+
+    def print_tabular(self):
+        """
+        Prints the intermediate representation of the graph in tabular
+        format.
+        """
+        try:
+            from tabulate import tabulate
+        except ImportError:
+            print("`print_tabular` relies on the library `tabulate`, "
+                  "which could not be found on this machine. Run `pip "
+                  "install tabulate` to install the library.")
+        node_specs = [[n.op, n.name, n.target, n.args, n.kwargs]
+                      for n in self.nodes]
+        print(tabulate(node_specs,
+              headers=['opcode', 'name', 'target', 'args', 'kwargs']))
 
     def lint(self, root : Optional[torch.nn.Module] = None):
         """

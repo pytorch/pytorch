@@ -55,6 +55,8 @@ allow_list = [
     ("aten::elu_backward", datetime.date(2021, 1, 31)),
     ("aten::_multinomial_alias_setup", datetime.date(2021, 1, 31)),
     ("aten::_multinomial_alias_draw", datetime.date(2021, 1, 31)),
+    ("prim::profile_optional", datetime.date(2021, 1, 31)),
+    ("aten::fake_quantize_per_tensor_affine_backward", datetime.date(2021, 2, 20)),
 ]
 
 def allow_listed(schema, allow_list):

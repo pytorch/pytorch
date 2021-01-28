@@ -273,6 +273,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
   # TODO: Move this to Dockerfile.
 
   pip_install lark-parser
+  pip_install cloud-tpu-client
 
   sudo apt-get -qq update
   sudo apt-get -qq install npm nodejs
