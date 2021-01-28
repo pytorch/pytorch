@@ -7,7 +7,7 @@
 namespace torch {
 namespace jit {
 
-class TORCH_API ConstantValueMap {
+class ConstantValueMap {
 public:
   static ConstantValueMap& getInstance();
 
