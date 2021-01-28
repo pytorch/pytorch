@@ -73,7 +73,7 @@ struct TORCH_API Operator {
  public:
   Operator(c10::OperatorHandle opHandle, Operation operation)
       : op_(c10::make_left<C10Operator, JitOnlyOperator>(
-            C10Operator{std::move(opHandle), std::move(operation)})) {}
+            C10Operator{opHandle, std::move(operation)})) {}
 
   Operator(
       std::string schema,
@@ -102,8 +102,7 @@ struct TORCH_API Operator {
       : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
             c10::make_right<FunctionSchema, UnparsedFunctionSchema>(
                 UnparsedFunctionSchema{std::move(schema), alias_analysis}),
-            c10::make_right<Operation, OperationCreator>(
-                std::move(op_creator))})) {}
+            c10::make_right<Operation, OperationCreator>(op_creator)})) {}
 
   // Helper constructor to register `op` to run
   // run for _every_ IR Node where n.kind() == name, regardless of arguments.
@@ -116,8 +115,7 @@ struct TORCH_API Operator {
       : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
             c10::make_left<FunctionSchema, UnparsedFunctionSchema>(
                 varArgSchemaWithName(name, alias_analysis)),
-            c10::make_right<Operation, OperationCreator>(
-                std::move(op_creator))})) {}
+            c10::make_right<Operation, OperationCreator>(op_creator)})) {}
 
   Operation getOperation(const Node* node = nullptr) const {
     return op_.fold<Operation>(

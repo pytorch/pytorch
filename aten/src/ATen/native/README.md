@@ -268,8 +268,8 @@ dispatch:
 ```
 
 This specifies the actual name of the function you want to dispatch to, so you
-can dispatch to different functions depending on whether or not you have CPU or
-CUDA tensors.  Technically, it is also possible to write `dispatch: func_name`
+can dispatch to different functions depending on which backend the passed tensors
+belong to.  Technically, it is also possible to write `dispatch: func_name`
 to unconditionally dispatch to a native function whose name is different than
 the name in the public ATen API, but this is generally frowned upon (just name
 them the same thing!)
@@ -277,17 +277,55 @@ them the same thing!)
 If two backends have the same dispatch function, you can write `CPU, CUDA: func`
 to reuse the same function name in both cases.
 
-Available backend options can be found at
-https://github.com/pytorch/pytorch/blob/master/tools/codegen/gen.py#L970.
-In addition to the backends above, we also support the keywords:
+Available backend options can be found by searching `dispatch_keys` in
+[codegen](https://github.com/pytorch/pytorch/blob/master/tools/codegen/gen.py).
+Among the supported backends, there're a few alias keys that maps to a set of backends:
   - `DefaultBackend`: an alias that maps to all backends. Functions registered to
     `DefaultBackend` should work for any backend inference.
   - `Math`: an alias that maps to all backend and autograd backend keys. Functions
     registered to `Math` key should be plain mathematical composition of other
     `at::` functions and support training and inference for any backend.
 
-If you add `dispatch` section to any API that didn't have it before, you **have to** move
-the old implementation to `Math` field so that it's still available for other backends to use.
+`DefaultBackend` and `Math` keys act as defaults: for example, you can specify a custom
+kernel for a particular backend using a backend-specific dispatch key, and use
+`DefaultBackend` or `Math` to specify a generic kernel for the others.
+
+Note that like those registered to `Math`, kernels registered to `DefaultBackend` are
+very often implemented as mathematical expressions built up from calls to other `at::`
+functions.  This is because in both cases, the kernel needs to delegate backend-specific
+computation to the functions it calls.  The difference between `DefaultBackend` and `Math`
+is that a `Math` kernel also implicitly defines a derivative formula: to do this, it must
+call only functions that themselves support autograd.
+
+For example, suppose `my_op` can be implemented in the following way:
+```
+at::Tensor my_op(const Tensor& self, const Tensor& other) {
+  return self + 2 * other;
+}
+```
+
+If we already know inference kernels and derivative formulas for operators `+` and `*` in our system,
+you can just register `my_op` to `Math` and both inference & autograd will just work.
+Although it seems we only write down the inference formula here, PyTorch autograd system would correctly
+set up the backward for `my_op` using the chain formula and derivatives of `+` & `*` operators.
+In other words `d_out/d_self = 1; d_out/d_other = 2` can be derived automatically from
+the `my_op` inference kernel. Of course if we don't have derivative formula defined for either `+` or `*`,
+backward of `my_op` can no longer be derived automatically.
+
+Whether to use `Math` or `DefaultBackend` for your kernel can be decided by the following steps:
+1. If you can, always start with a `Math` kernel that's composable from existing operators.
+2. If you don't want to use the derived gradient formula from `Math` kernel for autograd, either to
+   get better performance or better numerical stability, you should put the kernel in `DefaultBackend`
+   so that it's only used in inference.
+   Later for autograd, depending on whether your autograd kernel works for all backends or not,
+   you can put them in alias `Autograd` or specific keys like `AutogradCPU`.
+3. If you prefer to write backend-specific kernels, use reserved dispatch keys for your backend instead,
+   e.g. `CPU/AutogradCPU`.
+
+**Important**: because a `Math` kernel is implicitly registered for ops with no `dispatch:` section,
+when you add a backend-specific kernel (and hence a `dispatch:` section) to one of these, you **must** also
+add a `Math:` entry that names the old kernel implementation (it's named after the op, with _<overload name>
+added if applicable), so that it's still available for other backends to use.
 
 If you implemented a native function in C++ and want to find out which dispatch keyword
 should be used in native_functions.yaml, please [follow steps in dispatch keywords](#choosing-the-right-dispatch-keyword)
@@ -335,22 +373,28 @@ set of reviewers.
 ### `use_c10_dispatcher`
 
 ```
-use_c10_dispatcher: 'with_codegenerated_unboxing_wrapper'
 use_c10_dispatcher: 'hacky_wrapper_for_legacy_signatures'
-use_c10_dispatcher: 'full'
 ```
 
-This will indicate the level of integration with the c10 dispatcher.
-If setting this to 'full' works for your operator, please do.
-This will enabled the full templated boxing and unboxing for your operator.
-Some ops use features that aren't supported by those templates yet,
-and enabling `use_c10_dispatcher: full` for those will result in a compiler error.
-For those, use `use_c10_dispatcher: 'with_codegenerated_unboxing_wrapper'` instead,
-or just omit the argument because 'with_codegenerated_unboxing_wrapper' is the default.
-`use_c10_dispatcher: hacky_wrapper_for_legacy_signatures` is similar to `full`
-but adds a wrapper around the kernel before registering it with the dispatcher
-to support some legacy function signatures for kernels that we didn't migrate to
-the new signatures yet.
+This will indicate that the operator implementation is still using a legacy operator signature.
+For any new ops, please don't set this.
+The new, non-legacy operator signature requires the operator function signature to be aligned with the
+function schema in native_functions.yaml, i.e.
+- out arguments have to be in the end of the argument list instead of in the beginning
+- TensorOptions are taken as separate arguments
+```
+  const c10::optional<ScalarType>& dtype,
+  const c10::optional<Layout>& layout,
+  const c10::optional<Device>& device,
+  const c10::optional<bool>& pin_memory
+```
+  instead of one `TensorOptions` argument
+- optional tensors are taken as `const c10::optional<Tensor>&` instead of `Tensor`
+Some of our kernels are still written in a legacy way, not doing those things,
+and need an adapter to work with the dispatcher calling convention. For those, we use
+`use_c10_dispatcher: hacky_wrapper_for_legacy_signatures` to codegenerate a corresponding
+adapter around them in the operator registration call. Over time, we will migrate all
+those kernels to the new calling convention and hacky_wrapper will die.
 
 ### `manual_kernel_registration`
 
@@ -468,14 +512,25 @@ Here're steps to follow to decide the right dispatch keyword:
 
       Note: current plan on record for ops using this boilerplate is to replace `at::` with `at::native` in
       the implementations and add dispatch section with device keywords instead.
+3. Validate the computed dispatch table matches what you want. You can use `PythonDispatcher` provided in
+[torch/_python_dispatcher.py](https://github.com/pytorch/pytorch/blob/master/torch/_python_dispacher.py).
+It shows for a certain operator, what the computed dispatch table looks like after your registrations.
 
-3. TODO: AutogradCPUOrCUDA
+    ```
+    dispatcher = PythonDispatcher()
+    dispatcher.register(["CPU", "XLA", "AutogradCPU", "Math"])
+    print(dispatcher.dispatchTable()) # Tells you exactly which kernel is used for certain backend.
+    ```
+
+4. TODO: AutogradCPUOrCUDA
 
 Note that in native_functions.yaml you can mix using backend keywords and alias keywords above for one op:
   - direct registration to backend always has higher precendence than alias
   - DO NOT provide multiple alias keywords to the same op: alias keywords have precedence `DefaultBackend > Math`,
     e.g. adding both `Math` and `DefaultBackend` kernels for one op will completely ignore `Math` kernel for
     both inference and training. Thus this will trigger an error when native_functions.yaml is parsed.
+
+
 
 ### Will this function be exposed to python? What are the namespaces?
 

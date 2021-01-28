@@ -55,7 +55,7 @@ class Sampler(Generic[T_co]):
 class SequentialSampler(Sampler[int]):
     r"""Samples elements sequentially, always in the same order.
 
-    Arguments:
+    Args:
         data_source (Dataset): dataset to sample from
     """
     data_source: Sized
@@ -74,7 +74,7 @@ class RandomSampler(Sampler[int]):
     r"""Samples elements randomly. If without replacement, then sample from a shuffled dataset.
     If with replacement, then user can specify :attr:`num_samples` to draw.
 
-    Arguments:
+    Args:
         data_source (Dataset): dataset to sample from
         replacement (bool): samples are drawn on-demand with replacement if ``True``, default=``False``
         num_samples (int): number of samples to draw, default=`len(dataset)`. This argument
@@ -131,7 +131,7 @@ class RandomSampler(Sampler[int]):
 class SubsetRandomSampler(Sampler[int]):
     r"""Samples elements randomly from a given list of indices, without replacement.
 
-    Arguments:
+    Args:
         indices (sequence): a sequence of indices
         generator (Generator): Generator used in sampling.
     """

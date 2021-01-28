@@ -112,6 +112,7 @@ class DeterminationTest(unittest.TestCase):
                 "distributed/test_distributed_fork",
                 "test_cpp_extensions_aot_ninja",
                 "test_cpp_extensions_aot_no_ninja",
+                "test_utils",
                 "test_determination",
             ],
         )

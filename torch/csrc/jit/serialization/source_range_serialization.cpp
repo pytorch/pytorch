@@ -87,8 +87,8 @@ SourceRangePickler::SourceRangePickler() : srs(new SourceRangeSerializer()) {}
 std::vector<char> SourceRangePickler::pickle(const SourceRangeRecords& ranges) {
   std::vector<c10::IValue> ivalues;
   for (const auto& range : ranges) {
-    std::vector<c10::IValue> row_elems{(int64_t)range.bytes,
-                                       srs->serialize(range.range)};
+    std::vector<c10::IValue> row_elems{
+        (int64_t)range.bytes, srs->serialize(range.range)};
     ivalues.emplace_back(c10::ivalue::Tuple::create(std::move(row_elems)));
   }
   std::vector<at::Tensor> table;

@@ -779,17 +779,17 @@ void ComputeUnit::createComputePipeline(
   {
     uint32_t offset = 0;
     size_t size = sizeof(WorkGroupSize::x);
-    spMapEntries[0].constantID = 1;
+    spMapEntries[0].constantID = 0;
     spMapEntries[0].offset = offset;
     spMapEntries[0].size = size;
     offset += size;
     size = sizeof(WorkGroupSize::y);
-    spMapEntries[1].constantID = 2;
+    spMapEntries[1].constantID = 1;
     spMapEntries[1].offset = offset;
     spMapEntries[1].size = size;
     offset += size;
     size = sizeof(WorkGroupSize::z);
-    spMapEntries[2].constantID = 3;
+    spMapEntries[2].constantID = 2;
     spMapEntries[2].offset = offset;
     spMapEntries[2].size = size;
   }

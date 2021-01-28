@@ -7,7 +7,8 @@
 
 #ifdef _WIN32
 #include <WinError.h>
-#include <Windows.h>
+#include <c10/util/Unicode.h>
+#include <c10/util/win32-headers.h>
 #include <fcntl.h>
 #include <io.h>
 #include <process.h>
@@ -27,15 +28,15 @@ namespace fuser {
 namespace cpu {
 
 #ifdef _MSC_VER
-int mkstemps(char* tmpl, int suffix_len) {
+int wmkstemps(wchar_t* tmpl, int suffix_len) {
   int len;
-  char* name;
+  wchar_t* name;
   int fd = -1;
   int save_errno = errno;
 
-  len = strlen(tmpl);
+  len = wcslen(tmpl);
   if (len < 6 + suffix_len ||
-      strncmp(&tmpl[len - 6 - suffix_len], "XXXXXX", 6)) {
+      wcsncmp(&tmpl[len - 6 - suffix_len], L"XXXXXX", 6)) {
     return -1;
   }
 
@@ -47,7 +48,7 @@ int mkstemps(char* tmpl, int suffix_len) {
       name[i] = "abcdefghijklmnopqrstuvwxyz0123456789"[rd() % 36];
     }
 
-    fd = _open(tmpl, _O_RDWR | _O_CREAT | _O_EXCL, _S_IWRITE | _S_IREAD);
+    fd = _wopen(tmpl, _O_RDWR | _O_CREAT | _O_EXCL, _S_IWRITE | _S_IREAD);
   } while (errno == EEXIST);
 
   if (fd >= 0) {
@@ -63,20 +64,25 @@ struct TempFile {
   TH_DISALLOW_COPY_AND_ASSIGN(TempFile);
 
   TempFile(const std::string& t, int suffix) {
+#ifdef _MSC_VER
+    auto wt = c10::u8u16(t);
+    std::vector<wchar_t> tt(wt.c_str(), wt.c_str() + wt.size() + 1);
+    int fd = wmkstemps(tt.data(), suffix);
+    AT_ASSERT(fd != -1);
+    file_ = _wfdopen(fd, L"r+");
+    auto wname = std::wstring(tt.begin(), tt.end() - 1);
+    name_ = c10::u16u8(wname);
+#else
     // mkstemps edits its first argument in places
     // so we make a copy of the string here, including null terminator
     std::vector<char> tt(t.c_str(), t.c_str() + t.size() + 1);
     int fd = mkstemps(tt.data(), suffix);
     AT_ASSERT(fd != -1);
-#ifdef _MSC_VER
-    file_ = _fdopen(fd, "r+");
-#else
     file_ = fdopen(fd, "r+");
-#endif
-
     // - 1 because tt.size() includes the null terminator,
     // but std::string does not expect one
     name_ = std::string(tt.begin(), tt.end() - 1);
+#endif
   }
 
   const std::string& name() const {
@@ -110,8 +116,9 @@ struct TempFile {
     if (file_ != nullptr) {
       fclose(file_);
     }
-    if (!name_.empty() && _access(name_.c_str(), 0) != -1) {
-      _unlink(name_.c_str());
+    auto wname = c10::u8u16(name_);
+    if (!wname.empty() && _waccess(wname.c_str(), 0) != -1) {
+      _wunlink(wname.c_str());
     }
 #else
     if (file_ != nullptr) {

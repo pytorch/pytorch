@@ -31,3 +31,4 @@
 #include <c10/util/Exception.h>
 #include <ATen/core/UnsafeFromTH.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type.h>

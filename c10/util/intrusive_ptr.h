@@ -159,6 +159,29 @@ TTarget* assign_ptr_(TTarget* rhs) {
     return rhs;
   }
 }
+
+// Increment needs to be acquire-release to make use_count() and
+// unique() reliable.
+inline size_t atomic_refcount_increment(std::atomic<size_t>& refcount) {
+  return refcount.fetch_add(1, std::memory_order_acq_rel) + 1;
+}
+
+// weak_use_count() is only used for testing, so we don't need it to
+// be reliable. Relaxed should be fine.
+inline size_t atomic_weakcount_increment(std::atomic<size_t>& weakcount) {
+  return weakcount.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
+// Both decrements need to be acquire-release for correctness. See
+// e.g. std::shared_ptr implementation.
+inline size_t atomic_refcount_decrement(std::atomic<size_t>& refcount) {
+  return refcount.fetch_sub(1, std::memory_order_acq_rel) - 1;
+}
+
+inline size_t atomic_weakcount_decrement(std::atomic<size_t>& weakcount) {
+  return weakcount.fetch_sub(1, std::memory_order_acq_rel) - 1;
+}
+
 } // namespace detail
 
 template <class TTarget, class NullType>
@@ -183,7 +206,7 @@ class intrusive_ptr final {
       "NullType must have a constexpr singleton() method");
 #endif
   static_assert(
-      std::is_same<TTarget*, decltype(NullType::singleton())>::value,
+      std::is_base_of<TTarget, typename std::remove_pointer<decltype(NullType::singleton())>::type>::value,
       "NullType::singleton() must return a element_type* pointer");
 
   TTarget* target_;
@@ -204,7 +227,7 @@ class intrusive_ptr final {
 
   void retain_() {
     if (target_ != NullType::singleton()) {
-      size_t new_refcount = ++target_->refcount_;
+      size_t new_refcount = detail::atomic_refcount_increment(target_->refcount_);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           new_refcount != 1,
           "intrusive_ptr: Cannot increase refcount after it reached zero.");
@@ -212,7 +235,7 @@ class intrusive_ptr final {
   }
 
   void reset_() noexcept {
-    if (target_ != NullType::singleton() && --target_->refcount_ == 0) {
+    if (target_ != NullType::singleton() && detail::atomic_refcount_decrement(target_->refcount_) == 0) {
       // justification for const_cast: release_resources is basically a destructor
       // and a destructor always mutates the object, even for const objects.
       const_cast<std::remove_const_t<TTarget>*>(target_)->release_resources();
@@ -221,7 +244,7 @@ class intrusive_ptr final {
       // weakcount is one larger than the actual number of weak references.
       // So we need to decrement it here.
       if (target_->weakcount_.load(std::memory_order_acquire) == 1 ||
-          --target_->weakcount_ == 0) {
+          detail::atomic_weakcount_decrement(target_->weakcount_) == 0) {
         delete target_;
       }
     }
@@ -249,8 +272,8 @@ class intrusive_ptr final {
       // We can't use retain_(), because we also have to increase weakcount
       // and because we allow raising these values from 0, which retain_()
       // has an assertion against.
-      ++target_->refcount_;
-      ++target_->weakcount_;
+      detail::atomic_refcount_increment(target_->refcount_);
+      detail::atomic_weakcount_increment(target_->weakcount_);
     }
   }
 
@@ -355,14 +378,14 @@ class intrusive_ptr final {
     if (target_ == NullType::singleton()) {
       return 0;
     }
-    return target_->refcount_.load();
+    return target_->refcount_.load(std::memory_order_acquire);
   }
 
   size_t weak_use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
-    return target_->weakcount_.load();
+    return target_->weakcount_.load(std::memory_order_acquire);
   }
 
   bool unique() const noexcept {
@@ -486,7 +509,7 @@ class weak_intrusive_ptr final {
       "NullType must have a constexpr singleton() method");
 #endif
   static_assert(
-      std::is_same<TTarget*, decltype(NullType::singleton())>::value,
+      std::is_base_of<TTarget, typename std::remove_pointer<decltype(NullType::singleton())>::type>::value,
       "NullType::singleton() must return a element_type* pointer");
 
   TTarget* target_;
@@ -496,7 +519,7 @@ class weak_intrusive_ptr final {
 
   void retain_() {
     if (target_ != NullType::singleton()) {
-      size_t new_weakcount = ++target_->weakcount_;
+      size_t new_weakcount = detail::atomic_weakcount_increment(target_->weakcount_);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           new_weakcount != 1,
           "weak_intrusive_ptr: Cannot increase weakcount after it reached zero.");
@@ -504,7 +527,7 @@ class weak_intrusive_ptr final {
   }
 
   void reset_() noexcept {
-    if (target_ != NullType::singleton() && --target_->weakcount_ == 0) {
+    if (target_ != NullType::singleton() && detail::atomic_weakcount_decrement(target_->weakcount_) == 0) {
       delete target_;
     }
     target_ = NullType::singleton();
@@ -629,14 +652,14 @@ class weak_intrusive_ptr final {
     if (target_ == NullType::singleton()) {
       return 0;
     }
-    return target_->refcount_.load(); // refcount, not weakcount!
+    return target_->refcount_.load(std::memory_order_acquire); // refcount, not weakcount!
   }
 
   size_t weak_use_count() const noexcept {
     if (target_ == NullType::singleton()) {
       return 0;
     }
-    return target_->weakcount_.load();
+    return target_->weakcount_.load(std::memory_order_acquire);
   }
 
   bool expired() const noexcept {
@@ -647,7 +670,7 @@ class weak_intrusive_ptr final {
     if (expired()) {
       return intrusive_ptr<TTarget, NullType>();
     } else {
-      auto refcount = target_->refcount_.load();
+      auto refcount = target_->refcount_.load(std::memory_order_seq_cst);
       do {
         if (refcount == 0) {
           // Object already destructed, no strong references left anymore.
@@ -677,7 +700,7 @@ class weak_intrusive_ptr final {
   /**
    * Takes an owning (but must be weakly referenced) pointer to TTarget* and
    * creates a weak_intrusive_ptr that takes over ownership.
-   * Thas means the weakcount is not increased.
+   * This means that the weakcount is not increased.
    * This is the counter-part to weak_intrusive_ptr::release() and the pointer
    * passed in *must* have been created using weak_intrusive_ptr::release().
    */
@@ -758,7 +781,7 @@ namespace intrusive_ptr {
   // NullType::singleton to this function
   inline void incref(intrusive_ptr_target* self) {
     if (self) {
-      ++self->refcount_;
+      detail::atomic_refcount_increment(self->refcount_);
     }
   }
 
@@ -792,7 +815,7 @@ namespace intrusive_ptr {
 namespace weak_intrusive_ptr {
 
   inline void incref(weak_intrusive_ptr_target* self) {
-    ++self->weakcount_;
+    detail::atomic_weakcount_increment(self->weakcount_);
   }
 
   inline void decref(weak_intrusive_ptr_target* self) {

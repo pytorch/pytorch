@@ -11,13 +11,13 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-from types import ModuleType
 from typing import (
     cast, Any, Callable, DefaultDict, Dict, Generator, List, NamedTuple,
     Optional, Tuple, Union, TYPE_CHECKING)
 
 import torch
-from torch.utils.benchmark.utils import common
+from torch.utils.benchmark.utils import common, cpp_jit
+from torch.utils.benchmark.utils._stubs import CallgrindModuleType
 
 
 __all__ = ["FunctionCount", "FunctionCounts", "CallgrindStats", "CopyIfCallgrind"]
@@ -444,17 +444,14 @@ class GlobalsBridge:
 
 class _ValgrindWrapper(object):
     def __init__(self) -> None:
-        self._bindings_module: Optional[ModuleType] = None
+        self._bindings_module: Optional[CallgrindModuleType] = None
         if hasattr(torch._C, "_valgrind_supported_platform"):
             self._supported_platform: bool = torch._C._valgrind_supported_platform()
 
         else:
             print("Callgrind bindings are not present in `torch._C`. JIT-ing bindings.")
-            # This import will JIT the Callgrind control bindings, so don't
-            # invoke unless we know we'll need it.
-            from torch.utils.benchmark.utils.valgrind_wrapper.compat_bindings import bindings
-            self._bindings_module = bindings
-            self._supported_platform = bindings._valgrind_supported_platform()
+            self._bindings_module = cpp_jit.get_compat_bindings()
+            self._supported_platform = self._bindings_module._valgrind_supported_platform()
 
         self._commands_available: Dict[str, bool] = {}
         if self._supported_platform:
@@ -486,10 +483,13 @@ class _ValgrindWrapper(object):
         task_spec: common.TaskSpec,
         globals: Dict[str, Any],
         number: int,
-        collect_baseline: bool
+        collect_baseline: bool,
+        is_python: bool,
     ) -> CallgrindStats:
         """Collect stats, and attach a reference run which can be used to filter interpreter overhead."""
         self._validate()
+        assert is_python or not collect_baseline
+
         baseline_inclusive_stats = FunctionCounts((), inclusive=True)
         baseline_exclusive_stats = FunctionCounts((), inclusive=False)
         if collect_baseline:
@@ -499,15 +499,17 @@ class _ValgrindWrapper(object):
                     common.TaskSpec(
                         stmt="pass",
                         setup="pass",
-                        num_threads=task_spec.num_threads
+                        num_threads=task_spec.num_threads,
                     ),
                     globals={},
                     number=number,
+                    is_python=True,
                 )
             baseline_inclusive_stats, baseline_exclusive_stats = \
                 self._baseline_cache[cache_key]
 
-        stmt_inclusive_stats, stmt_exclusive_stats = self._invoke(task_spec, globals, number)
+        stmt_inclusive_stats, stmt_exclusive_stats = self._invoke(
+            task_spec, globals, number, is_python)
         return CallgrindStats(
             task_spec=task_spec,
             number_per_run=number,
@@ -523,6 +525,7 @@ class _ValgrindWrapper(object):
         task_spec: common.TaskSpec,
         globals: Dict[str, Any],
         number: int,
+        is_python: bool,
     ) -> Tuple[FunctionCounts, FunctionCounts]:
         """Core invocation method for Callgrind collection.
 
@@ -568,20 +571,34 @@ class _ValgrindWrapper(object):
                 f_stdout_stderr.close()
 
         try:
-            if self._bindings_module is not None:
-                shutil.copy(
-                    self._bindings_module.__file__,
-                    os.path.join(working_dir, os.path.split(self._bindings_module.__file__)[1])
-                )
+            if is_python:
+                if self._bindings_module is not None:
+                    shutil.copy(
+                        self._bindings_module.__file__,
+                        os.path.join(working_dir, os.path.split(self._bindings_module.__file__)[1])
+                    )
 
-            with open(script_file, "wt") as f:
-                f.write(self._construct_script(
-                    task_spec,
-                    globals=GlobalsBridge(globals, data_dir),
-                    number=number,
-                    error_log=error_log,
-                    stat_log=stat_log,
-                    bindings=self._bindings_module))
+                script_file = os.path.join(working_dir, "timer_callgrind.py")
+                with open(script_file, "wt") as f:
+                    f.write(self._construct_script(
+                        task_spec,
+                        globals=GlobalsBridge(globals, data_dir),
+                        number=number,
+                        error_log=error_log,
+                        stat_log=stat_log,
+                        bindings=self._bindings_module))
+                run_loop_cmd = ["python", script_file]
+            else:
+                run_loop_exec = cpp_jit.compile_callgrind_template(
+                    task_spec.stmt,
+                    task_spec.setup,
+                )
+                run_loop_cmd = [
+                    run_loop_exec,
+                    "--number", str(number),
+                    "--number_warmup", str(min(number, 10)),
+                    "--number_threads", str(task_spec.num_threads),
+                ]
 
             valgrind_invocation, valgrind_invocation_output = run([
                 "valgrind",
@@ -591,9 +608,7 @@ class _ValgrindWrapper(object):
                 "--dump-instr=yes",
                 "--instr-atstart=yes",
                 "--collect-atstart=no",
-                "python",
-                script_file,
-            ])
+            ] + run_loop_cmd)
 
             if valgrind_invocation.returncode:
                 error_report = ""
@@ -643,7 +658,7 @@ class _ValgrindWrapper(object):
         number: int,
         error_log: str,
         stat_log: str,
-        bindings: Optional[ModuleType],
+        bindings: Optional[CallgrindModuleType],
     ) -> str:
         # The naive template looks something like:
         #   "for _ in range({number}): {stmt}"

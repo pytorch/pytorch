@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/backends/backend_init.h>
+
 #include <torch/csrc/jit/backends/backend_detail.h>
 #include <torch/csrc/jit/backends/backend_resolver.h>
 #include <torch/csrc/jit/frontend/code_template.h>
@@ -130,11 +131,12 @@ void initJitBackendBindings(PyObject* module) {
   auto codegen_lambda = [=](const std::string& backend_name,
                             const Module& orig_module,
                             const py::dict& method_compile_spec) {
-    const c10::QualifiedName qual_backend_name({"__torch__",
-                                                "torch",
-                                                "classes",
-                                                detail::kBackendsNamespace,
-                                                backend_name});
+    const c10::QualifiedName qual_backend_name(
+        {"__torch__",
+         "torch",
+         "classes",
+         detail::kBackendsNamespace,
+         backend_name});
     // TODO: Validate method_compile_spec.
 
     // Clone orig_module to make sure backend transformation is

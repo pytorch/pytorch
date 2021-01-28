@@ -65,10 +65,10 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
 }
 
 // Internal only, do not use directly, use Python's record_function()
-static auto registry =
-    RegisterOperators()
-        .op("profiler::_record_function_enter", &record_function_enter)
-        .op("profiler::_record_function_exit", &record_function_exit);
+TORCH_LIBRARY_FRAGMENT(profiler, m) {
+    m.def("_record_function_enter", &record_function_enter);
+    m.def("_record_function_exit", &record_function_exit);
+}
 
 // Needed to register JIT operator in operator registry below
 c10::AliasAnalysisKind aliasAnalysisFromSchema() {

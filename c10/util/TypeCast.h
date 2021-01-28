@@ -44,7 +44,7 @@ struct static_cast_with_inter_type {
 // Note: Converting from negative float values to unsigned integer types is
 // undefined behavior in C++, and current CPU and GPU compilers exhibit
 // divergent behavior. Casting from negative float values to signed
-// integer types and then to unsigned integer types is not undefiend,
+// integer types and then to unsigned integer types is not undefined,
 // however, so this cast improves the consistency of type conversions
 // to uint8 across compilers.
 // Further note: Type conversions across compilers still have other undefined
@@ -170,3 +170,5 @@ To checked_convert(From f, const char* name) {
 }
 
 }  // namespace c10
+
+// Trigger tests for D25440771. TODO: Remove this line any time you want.

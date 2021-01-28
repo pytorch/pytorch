@@ -112,7 +112,7 @@ serialized as well.
 `PythonPrint` works by walking a `Graph` (the IR representation of either a
 `ClassType`'s method or raw `Function`) and emitting Python code that
 corresponds to it. The rules for emitting Python code are mostly
-straightforward uninteresting. There are some extra pieces of information
+straightforward and uninteresting. There are some extra pieces of information
 that `PythonPrint` tracks, however:
 
 **Class dependencies**. While walking the graph, `PythonPrint` keeps track of

@@ -14,6 +14,7 @@ import sys
 import platform
 import textwrap
 import ctypes
+import warnings
 
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
@@ -35,7 +36,8 @@ __all__ = [
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
-    'lobpcg', 'set_deterministic', 'is_deterministic'
+    'lobpcg', 'use_deterministic_algorithms', 'set_deterministic',
+    'are_deterministic_algorithms_enabled', 'is_deterministic'
 ]
 
 ################################################################################
@@ -325,7 +327,7 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
-def set_deterministic(d):
+def use_deterministic_algorithms(d):
     r""" Sets whether PyTorch operations must use "deterministic"
     algorithms. That is, algorithms which, given the same input, and when
     run on the same software and hardware, always produce the same output.
@@ -359,11 +361,13 @@ def set_deterministic(d):
         * :class:`torch.nn.FractionalMaxPool2d` when called on a CUDA tensor that requires grad
         * :class:`torch.nn.FractionalMaxPool3d` when called on a CUDA tensor that requires grad
         * :func:`torch.nn.functional.interpolate` when called on a CUDA tensor that requires grad
-            and one of the following modes is used:
-            - `linear`
-            - `bilinear`
-            - `bicubic`
-            - `trilinear`
+          and one of the following modes is used:
+
+          - `linear`
+          - `bilinear`
+          - `bicubic`
+          - `trilinear`
+
         * :class:`torch.nn.ReflectionPad1d` when called on a CUDA tensor that requires grad
         * :class:`torch.nn.ReflectionPad2d` when called on a CUDA tensor that requires grad
         * :class:`torch.nn.ReplicationPad1d` when called on a CUDA tensor that requires grad
@@ -374,10 +378,13 @@ def set_deterministic(d):
         * :class:`torch.nn.EmbeddingBag` when called on a CUDA tensor that requires grad
         * :func:`torch.scatter_add_` when called on a CUDA tensor
         * :func:`torch.index_add_` when called on a CUDA tensor
+        * :func:`torch.index_copy`
         * :func:`torch.index_select` when called on a CUDA tensor that requires grad
         * :func:`torch.repeat_interleave` when called on a CUDA tensor that requires grad
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor
+        * :func:`torch.kthvalue` with called on a CUDA tensor
+        * :func:`torch.median` with indices output when called on a CUDA tensor
 
     A handful of CUDA operations are nondeterministic if the CUDA version is
     10.2 or greater, unless the environment variable `CUBLAS_WORKSPACE_CONFIG=:4096:8`
@@ -397,13 +404,33 @@ def set_deterministic(d):
         d (:class:`bool`): If True, force operations to be deterministic.
                            If False, allow non-deterministic operations.
     """
-    _C._set_deterministic(d)
+    _C._set_deterministic_algorithms(d)
+
+def set_deterministic(d):
+    r"""This function is deprecated and will be removed in a future release.
+    Please use :func:`torch.use_deterministic_algorithms` instead.
+    """
+    warnings.warn((
+        "torch.set_deterministic is deprecated and will be removed in a future "
+        "release. Please use torch.use_deterministic_algorithms instead"))
+
+    use_deterministic_algorithms(d)
+
+def are_deterministic_algorithms_enabled():
+    r"""Returns True if the global deterministic flag is turned on. Refer to
+    :func:`torch.use_deterministic_algorithms` documentation for more details.
+    """
+    return _C._get_deterministic_algorithms()
 
 def is_deterministic():
-    r"""Returns True if the global deterministic flag is turned on. Refer to
-    :func:`torch.set_deterministic` documentation for more details.
+    r"""This function is deprecated and will be removed in a future release.
+    Please use :func:`torch.are_deterministic_algorithms_enabled` instead.
     """
-    return _C._get_deterministic()
+    warnings.warn((
+        "torch.is_deterministic is deprecated and will be removed in a future "
+        "release. Please use torch.are_deterministic_algorithms_enabled instead"))
+    return are_deterministic_algorithms_enabled()
+
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -565,10 +592,11 @@ def _assert(condition, message):
 import torch.cuda
 import torch.autograd
 from torch.autograd import no_grad, enable_grad, set_grad_enabled
-# import torch.fft  # TODO: enable once torch.fft() is removed
+import torch.fft
 import torch.futures
 import torch.nn
 import torch.nn.intrinsic
+import torch.nn.quantizable
 import torch.nn.quantized
 import torch.optim
 import torch.optim._multi_tensor
@@ -591,6 +619,7 @@ import torch.quantization
 import torch.utils.data
 import torch.__config__
 import torch.__future__
+import torch.profiler
 
 _C._init_names(list(torch._storage_classes))
 
