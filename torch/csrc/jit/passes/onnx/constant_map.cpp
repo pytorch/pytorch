@@ -13,48 +13,39 @@ namespace onnx {
 using namespace ::c10::onnx;
 }
 
-std::mutex constantValueMutex;
-
-class ConstantValueMap;
-
-ConstantValueMap* ConstantValueMap::instance= nullptr;
-
+// Meyer’s Singleton for C++ 14
 ConstantValueMap& ConstantValueMap::getInstance(){
-  std::lock_guard<std::mutex> myLock(constantValueMutex);
-  if ( !instance ){
-      instance= new ConstantValueMap();
-  }
-  // volatile int dummy{};
-  return *instance;
+  static ConstantValueMap s;
+  return s;
 }
 
-void ConstantValueMap::SetRank(std::string tensorName, size_t rankValue) {
+void ConstantValueMap::SetRank(const std::string& tensorName, size_t rankValue) {
   ConstantValueMap::getInstance().rankMap.emplace(tensorName, rankValue);
 }
 
-void ConstantValueMap::SetShape(std::string tensorName, c10::VaryingShape<int64_t>& shapeValue) {
+void ConstantValueMap::SetShape(const std::string& tensorName, c10::VaryingShape<int64_t>& shapeValue) {
   ConstantValueMap::getInstance().shapeMap.emplace(tensorName, shapeValue);
 }
 
-bool ConstantValueMap::HasShape(std::string tensorName) {
+bool ConstantValueMap::HasShape(const std::string& tensorName) {
   return ConstantValueMap::getInstance().shapeMap.find(tensorName) != 
     ConstantValueMap::getInstance().shapeMap.end();
 }
 
-c10::VaryingShape<int64_t> ConstantValueMap::GetShape(std::string tensorName) {
+c10::VaryingShape<int64_t> ConstantValueMap::GetShape(const std::string& tensorName) {
   return ConstantValueMap::getInstance().shapeMap[tensorName];
 }
 
-void ConstantValueMap::SetValue(std::string tensorName, at::Tensor value) {
+void ConstantValueMap::SetValue(const std::string& tensorName, at::Tensor value) {
   ConstantValueMap::getInstance().tensorValueMap.emplace(tensorName, value);
 }
 
-bool ConstantValueMap::HasValue(std::string tensorName) {
+bool ConstantValueMap::HasValue(const std::string& tensorName) {
   return ConstantValueMap::getInstance().tensorValueMap.find(tensorName) != 
     ConstantValueMap::getInstance().tensorValueMap.end();
 }
 
-at::Tensor ConstantValueMap::GetValue(std::string tensorName) {
+at::Tensor ConstantValueMap::GetValue(const std::string& tensorName) {
   return ConstantValueMap::getInstance().tensorValueMap[tensorName];
 }
 

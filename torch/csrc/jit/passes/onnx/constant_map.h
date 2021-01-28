@@ -11,24 +11,23 @@ class ConstantValueMap {
 public:
   static ConstantValueMap& getInstance();
 
-  static void SetRank(std::string tensorName, size_t rankValue);
+  static void SetRank(const std::string& tensorName, size_t rankValue);
 
-  static void SetShape(std::string tensorName, c10::VaryingShape<int64_t>& shapeValue);
-  static bool HasShape(std::string tensorName);
-  static c10::VaryingShape<int64_t> GetShape(std::string tensorName);
+  static void SetShape(const std::string& tensorName, c10::VaryingShape<int64_t>& shapeValue);
+  static bool HasShape(const std::string& tensorName);
+  static c10::VaryingShape<int64_t> GetShape(const std::string& tensorName);
 
-  static void SetValue(std::string tensorName, at::Tensor value);
-  static bool HasValue(std::string tensorName);
-  static at::Tensor GetValue(std::string tensorName);
+  static void SetValue(const std::string& tensorName, at::Tensor value);
+  static bool HasValue(const std::string& tensorName);
+  static at::Tensor GetValue(const std::string& tensorName);
 
   static void PrintMaps();
   static void ClearMaps();
   ~ConstantValueMap()= default;
+
 private:
   ConstantValueMap() {};
   ConstantValueMap& operator=(const ConstantValueMap&)= delete;
-
-  static ConstantValueMap* instance;
 
   std::unordered_map<std::string, size_t> rankMap;
   std::unordered_map<std::string, c10::VaryingShape<int64_t>> shapeMap;
