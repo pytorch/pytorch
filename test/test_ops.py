@@ -8,7 +8,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, dtypes, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
+    (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.autograd.gradcheck import gradcheck, gradgradcheck
 
@@ -43,7 +43,6 @@ class TestOpInfo(TestCase):
     # Verifies that ops have their supported dtypes
     #   registered correctly by testing that each claimed supported dtype
     #   does NOT throw a runtime error
-    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @ops(op_db, dtypes=OpDTypes.supported)
     def test_supported_dtypes(self, device, dtype, op):
@@ -54,6 +53,11 @@ class TestOpInfo(TestCase):
         # NOTE: only tests on first sample
         sample = samples[0]
         op(*sample.input, *sample.args, **sample.kwargs)
+
+
+# gradcheck requires double precision
+_gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,
+                         allowed_dtypes=[torch.double, torch.cdouble])
 
 
 class TestGradients(TestCase):
@@ -83,16 +87,23 @@ class TestGradients(TestCase):
                     return out_fn(variant(*args, **kwargs))
             else:
                 variant_out_fn = variant
-            partial_fn = partial(variant_out_fn, **sample.kwargs)
+
+            def fn(*inputs):
+                output = variant_out_fn(*inputs, **sample.kwargs)
+                return op.output_func(output)
+
             if check == 'gradcheck':
-                self.assertTrue(gradcheck(partial_fn, (*sample.input,) + sample.args,
+                self.assertTrue(gradcheck(fn, (*sample.input,) + sample.args,
+                                          check_batched_grad=op.check_batched_grad,
                                           check_grad_dtypes=True))
             elif check == 'gradgradcheck':
-                self.assertTrue(gradgradcheck(partial_fn, (*sample.input,) + sample.args,
+                self.assertTrue(gradgradcheck(fn, (*sample.input,) + sample.args,
                                               gen_non_contig_grad_outputs=False,
+                                              check_batched_grad=op.check_batched_gradgrad,
                                               check_grad_dtypes=True))
-                self.assertTrue(gradgradcheck(partial_fn, (*sample.input,) + sample.args,
+                self.assertTrue(gradgradcheck(fn, (*sample.input,) + sample.args,
                                               gen_non_contig_grad_outputs=True,
+                                              check_batched_grad=op.check_batched_gradgrad,
                                               check_grad_dtypes=True))
             else:
                 self.assertTrue(False, msg="Unknown check requested!")
@@ -108,22 +119,19 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! complex grad tests marked to skip.")
 
     # Tests that gradients are computed correctly
-    @dtypes(torch.double, torch.cdouble)
-    @ops(op_db)
+    @_gradcheck_ops(op_db)
     def test_fn_grad(self, device, dtype, op):
         self._skip_helper(op, dtype)
         self._grad_test_helper(device, dtype, op, op.get_op())
 
     # Method grad (and gradgrad, see below) tests are disabled since they're
     #   costly and redundant with function grad (and gradgad) tests
-    # @dtypes(torch.double, torch.cdouble)
-    # @ops(op_db)
+    # @_gradcheck_ops(op_db)
     # def test_method_grad(self, device, dtype, op):
     #     self._skip_helper(op, dtype)
     #     self._grad_test_helper(device, dtype, op, op.get_method())
 
-    @dtypes(torch.double, torch.cdouble)
-    @ops(op_db)
+    @_gradcheck_ops(op_db)
     def test_inplace_grad(self, device, dtype, op):
         self._skip_helper(op, dtype)
         if not op.test_inplace_grad:
@@ -131,22 +139,19 @@ class TestGradients(TestCase):
         self._grad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
     # Test that gradients of gradients are computed correctly
-    @dtypes(torch.double, torch.cdouble)
-    @ops(op_db)
+    @_gradcheck_ops(op_db)
     def test_fn_gradgrad(self, device, dtype, op):
         self._skip_helper(op, dtype)
         self._gradgrad_test_helper(device, dtype, op, op.get_op())
 
     # Method gradgrad (and grad, see above) tests are disabled since they're
     #   costly and redundant with function gradgrad (and grad) tests
-    # @dtypes(torch.double, torch.cdouble)
-    # @ops(op_db)
+    # @_gradcheck_ops(op_db)
     # def test_method_gradgrad(self, device, dtype, op):
     #     self._skip_helper(op, dtype)
     #     self._gradgrad_test_helper(device, dtype, op, op.get_method())
 
-    @dtypes(torch.double, torch.cdouble)
-    @ops(op_db)
+    @_gradcheck_ops(op_db)
     def test_inplace_gradgrad(self, device, dtype, op):
         self._skip_helper(op, dtype)
         if not op.test_inplace_grad:
@@ -215,8 +220,7 @@ class TestCommon(JitCommonTestCase):
             for variant in variants:
                 # Verifies that inplace operations that promote int->float fail
                 #   on tensors with integer dtypes.
-                if (variant is inplace and op.promotes_integers_to_float and
-                        dtype in (torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)):
+                if (variant is inplace and not torch.can_cast(expected_forward.dtype, dtype)):
                     try:
                         variant_forward = variant(*(clone_input_helper(input) for input in sample.input),
                                                   *sample.args,

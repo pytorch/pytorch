@@ -15,6 +15,7 @@
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/Mangler.h>
 #include <llvm/Support/DynamicLibrary.h>
+#include <llvm/Support/Host.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Target/TargetMachine.h>
 
@@ -31,6 +32,34 @@ using namespace torch::jit::tensorexpr;
 template <typename T>
 static llvm::JITTargetAddress toAddress(T* Ptr) {
   return static_cast<llvm::JITTargetAddress>(reinterpret_cast<uintptr_t>(Ptr));
+}
+
+static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder() {
+#if 0
+  // FIXME: Switch to using detectHost() rather than setting up the JTMB manually
+  // once LLVM 10 is available.
+  return assertSuccess(llvm::orc::JITTargetMachineBuilder::detectHost());
+#else
+  llvm::orc::JITTargetMachineBuilder JTMB(
+      (llvm::Triple(llvm::sys::getProcessTriple())));
+
+  // Retrieve host CPU name and sub-target features and add them to builder.
+  // Relocation model, code model and codegen opt level are kept to default
+  // values.
+  llvm::SubtargetFeatures SubtargetFeatures;
+  llvm::StringMap<bool> FeatureMap;
+  llvm::sys::getHostCPUFeatures(FeatureMap);
+  for (auto& Feature : FeatureMap) {
+    SubtargetFeatures.AddFeature(Feature.first(), Feature.second);
+  }
+
+  JTMB.setCodeGenOptLevel(llvm::CodeGenOpt::Default);
+  JTMB.setCPU(llvm::sys::getHostCPUName().str());
+  JTMB.addFeatures(SubtargetFeatures.getFeatures());
+  JTMB.getOptions().AllowFPOpFusion = llvm::FPOpFusion::Fast;
+
+  return JTMB;
+#endif
 }
 
 static void registerIntrinsics(
@@ -189,10 +218,16 @@ namespace orc {
 #if LLVM_VERSION_MAJOR >= 9 && LLVM_VERSION_MAJOR <= 12
 class TORCH_API PytorchLLVMJITImpl {
  private:
+  std::unique_ptr<TargetMachine> TM;
   std::unique_ptr<LLJIT> LLJ;
 
  public:
-  PytorchLLVMJITImpl() : LLJ(assertSuccess(LLJITBuilder().create())) {
+  PytorchLLVMJITImpl()
+      : TM(assertSuccess(makeTargetMachineBuilder().createTargetMachine())),
+        LLJ(assertSuccess(
+            LLJITBuilder()
+                .setJITTargetMachineBuilder(makeTargetMachineBuilder())
+                .create())) {
     auto ProcSymbolsGenerator =
         assertSuccess(DynamicLibrarySearchGenerator::GetForCurrentProcess(
             LLJ->getDataLayout().getGlobalPrefix()));
@@ -222,6 +257,10 @@ class TORCH_API PytorchLLVMJITImpl {
     return assertSuccess(LLJ->lookup(Name));
   }
 
+  TargetMachine& getTargetMachine() {
+    return *TM;
+  }
+
   const DataLayout& getDataLayout() {
     return LLJ->getDataLayout();
   }
@@ -240,6 +279,10 @@ Error PytorchLLVMJIT::addModule(
 
 JITSymbol PytorchLLVMJIT::findSymbol(const std::string Name) {
   return impl_->findSymbol(std::move(Name));
+}
+
+TargetMachine& PytorchLLVMJIT::getTargetMachine() {
+  return impl_->getTargetMachine();
 }
 
 const DataLayout& PytorchLLVMJIT::getDataLayout() {
@@ -278,7 +321,7 @@ class TORCH_API PytorchLLVMJITImpl {
             [](Error Err) {
               assertSuccess(std::move(Err), "lookupFlags failed");
             })),
-        TM(EngineBuilder().selectTarget()),
+        TM(assertSuccess(makeTargetMachineBuilder().createTargetMachine())),
         DL(TM->createDataLayout()),
         ObjectLayer(
             ES,
@@ -340,6 +383,10 @@ Error PytorchLLVMJIT::addModule(
 
 JITSymbol PytorchLLVMJIT::findSymbol(const std::string Name) {
   return impl_->findSymbol(std::move(Name));
+}
+
+TargetMachine& PytorchLLVMJIT::getTargetMachine() {
+  return impl_->getTargetMachine();
 }
 
 const DataLayout& PytorchLLVMJIT::getDataLayout() {

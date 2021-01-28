@@ -153,15 +153,9 @@ def _lazy_init():
         # immediately, while we are still guaranteed to have the GIL, because some
         # of the C calls we make below will release the GIL
         if _is_in_bad_fork():
-            from sys import version_info
-            if version_info < (3, 4):
-                msg = ("To use CUDA with multiprocessing, you must use Python "
-                       "3.4+ and the 'spawn' start method")
-            else:
-                msg = ("To use CUDA with multiprocessing, you must use the "
-                       "'spawn' start method")
             raise RuntimeError(
-                "Cannot re-initialize CUDA in forked subprocess. " + msg)
+                "Cannot re-initialize CUDA in forked subprocess. To use CUDA with "
+                "multiprocessing, you must use the 'spawn' start method")
         if not hasattr(torch._C, '_cuda_getDeviceCount'):
             raise AssertionError("Torch not compiled with CUDA enabled")
         if _cudart is None:
@@ -310,6 +304,18 @@ def get_device_properties(device: _device_t) -> _CudaDeviceProperties:
     if device < 0 or device >= device_count():
         raise AssertionError("Invalid device id")
     return _get_device_properties(device)  # type: ignore[name-defined]
+
+def can_device_access_peer(device: _device_t, peer_device: _device_t) -> bool:
+    r"""Checks if peer access between two devices is possible.
+    """
+    _lazy_init()
+    device = _get_device_index(device, optional=True)
+    peer_device = _get_device_index(peer_device)
+    if device < 0 or device >= device_count():
+        raise AssertionError("Invalid device id")
+    if peer_device < 0 or peer_device >= device_count():
+        raise AssertionError("Invalid peer device id")
+    return torch._C._cuda_canDeviceAccessPeer(device, peer_device)
 
 
 @contextlib.contextmanager

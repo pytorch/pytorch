@@ -9,9 +9,4 @@
 #include <THC/generic/THCTensorRandom.h>
 #include <THC/THCGenerateBoolType.h>
 
-#include <ATen/CUDAGeneratorImpl.h>
-
-TORCH_CUDA_API void THCRandom_getRNGState(at::Generator gen_, THByteTensor *rng_state);
-TORCH_CUDA_API void THCRandom_setRNGState(at::Generator gen_, THByteTensor *rng_state);
-
 #endif

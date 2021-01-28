@@ -302,6 +302,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       add_dependencies(process_group_agent torch c10d)
 
       add_library(tensorpipe_agent
+        "${TORCH_SRC_DIR}/csrc/distributed/rpc/macros.h"
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.h"
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.cpp"
@@ -340,9 +341,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(GENERATED_CXX_TORCH
     "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_0.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_1.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_2.cpp"
     )
 
   if(NOT INTERN_DISABLE_AUTOGRAD)
@@ -432,10 +430,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/gen_variable_factories.py"
     "${TOOLS_PATH}/autograd/gen_variable_type.py"
     "${TOOLS_PATH}/autograd/load_derivatives.py"
-    "${TOOLS_PATH}/autograd/nested_dict.py"
-    "${TOOLS_PATH}/autograd/utils.py"
-    "${TOOLS_PATH}/jit/gen_unboxing_wrappers.py"
-    "${TOOLS_PATH}/jit/templates/generated_unboxing_wrappers.cpp"
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
 
@@ -724,6 +718,7 @@ elseif(USE_CUDA)
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
+  target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
   if(USE_NCCL)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
@@ -1253,7 +1248,7 @@ if(USE_ROCM)
   get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
   if(MY_DEFINITIONS)
     foreach(_item ${MY_DEFINITIONS})
-      list(APPEND HIP_HCC_FLAGS "-D${_item}")
+      list(APPEND HIP_CLANG_FLAGS "-D${_item}")
     endforeach()
   endif()
 
@@ -1324,8 +1319,18 @@ if(BUILD_TEST)
         list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
         list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
         separate_arguments(FLAGS UNIX_COMMAND "${FLAGS}")
-        add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}")
-        target_link_libraries(${test_name}_${CPU_CAPABILITY} torch_library gtest_main)
+        # Build vec256 with minimal dependencies on all platforms but Windows
+        if(NOT MSVC)
+          add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}" ../aten/src/ATen/native/quantized/affine_quantizer_base.cpp)
+          # TODO: Get rid of c10 dependency (which is only needed for the implementation of AT_ERROR)
+          target_link_libraries(${test_name}_${CPU_CAPABILITY} c10 sleef gtest_main)
+          if(USE_FBGEMM)
+            target_link_libraries(${test_name}_${CPU_CAPABILITY} fbgemm)
+          endif()
+        else()
+          add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}")
+          target_link_libraries(${test_name}_${CPU_CAPABILITY} torch_library gtest_main)
+        endif()
         target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE $<INSTALL_INTERFACE:include>)
         target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
         target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE ${ATen_CPU_INCLUDE})

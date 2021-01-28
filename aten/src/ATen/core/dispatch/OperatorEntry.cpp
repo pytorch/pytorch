@@ -21,7 +21,6 @@ OperatorEntry::OperatorEntry(OperatorName&& operator_name)
 , schema_()
 , dispatchTable_()
 , dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized())
-, manuallyBoxedKernel_()
 , kernels_()
 , cpp_signature_()
 , is_observed_(ObservedOperators::isObserved(name_))
@@ -120,10 +119,6 @@ std::list<AnnotatedKernel>::iterator OperatorEntry::registerKernel(
                "  previous kernel: ", (cpp_signature_.has_value() ? cpp_signature_->debug : "no debug info"), "\n",
                "       new kernel: ", debug
     );
-  }
-
-  if (manuallyBoxedKernel_.has_value()) {
-    kernel.setManuallyBoxedKernel_(*manuallyBoxedKernel_);
   }
 
   k.emplace_front(std::move(kernel), std::move(inferred_function_schema), std::move(debug));
@@ -329,19 +324,6 @@ void OperatorEntry::updateDispatchTableFull_(const c10::Dispatcher& dispatcher) 
   for (uint8_t iter = 0; iter != static_cast<uint8_t>(DispatchKey::NumDispatchKeys); ++iter) {
     updateDispatchTable_(dispatcher, static_cast<DispatchKey>(iter));
   }
-}
-
-void OperatorEntry::setManuallyBoxedKernel_(const c10::Dispatcher& dispatcher, KernelFunction::InternalBoxedKernelFunction* func) {
-  TORCH_INTERNAL_ASSERT(!manuallyBoxedKernel_);
-  manuallyBoxedKernel_ = func;
-
-  for (auto& kv : kernels_) {
-    for (auto& k : kv.second) {
-      k.kernel.setManuallyBoxedKernel_(func);
-    }
-  }
-  // Refresh entries in dispatchTable_
-  updateDispatchTableFull_(dispatcher);
 }
 
 void OperatorEntry::checkInvariants() const {

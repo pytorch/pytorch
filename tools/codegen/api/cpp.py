@@ -1,6 +1,5 @@
 from tools.codegen.model import *
 from tools.codegen.api.types import *
-import tools.codegen.local as local
 from typing import Optional, Sequence, Union, List, Set
 
 # This file describes the translation of JIT schema to the public C++
@@ -88,10 +87,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
             if mutable:
                 return MutRefCType(BaseCType('Tensor', binds))  # TODO: fix this discrepancy
             else:
-                if local.use_c10_dispatcher().dispatcher_uses_new_style():
-                    return ConstRefCType(OptionalCType(BaseCType('Tensor', binds)))
-                else:
-                    return ConstRefCType(BaseCType('Tensor', binds))
+                return ConstRefCType(OptionalCType(BaseCType('Tensor', binds)))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return OptionalCType(elem)
     elif isinstance(t, ListType):
@@ -105,10 +101,7 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
         elif str(t.elem) == 'Dimname':
             return BaseCType("DimnameList", binds)
         elif str(t.elem) == 'Tensor?':
-            if local.use_c10_dispatcher().dispatcher_uses_new_style():
-                return ConstRefCType(BaseCType("c10::List<c10::optional<Tensor>>", binds))
-            else:
-                return BaseCType("TensorList", binds)
+            return ConstRefCType(BaseCType("c10::List<c10::optional<Tensor>>", binds))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         # TODO: explicitly qualify namespace here
         return BaseCType(f"ArrayRef<{elem.cpp_type()}>", binds)

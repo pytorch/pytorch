@@ -167,6 +167,34 @@ SparseTensor& asin_sparse_(SparseTensor& t) {
 }
 
 // --------------------------------------------------------------------
+// sqrt(SparseTensor)
+// --------------------------------------------------------------------
+
+// TODO: add in-place variant
+
+SparseTensor& sqrt_out_sparse(SparseTensor& r, const SparseTensor& t_) {
+  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
+  TORCH_CHECK(t_.is_sparse(), "Tensor should be sparse");
+
+  // This coalesce is why we can't easily provide an inplace variant
+  SparseTensor t = t_.coalesce();
+
+  r.resize_as_(t);
+  auto indices = r._indices();
+  indices.resize_as_(t._indices());
+  indices.copy_(t._indices());
+  Tensor r_values = r._values();
+  at::sqrt_out(r_values, t._values());
+  get_sparse_impl(r)->set_nnz_and_narrow(t._nnz());
+  return r._coalesced_(t.is_coalesced());
+}
+
+SparseTensor sqrt_sparse(const SparseTensor& t) {
+  SparseTensor r = get_result_tensor_for_unary_op(t);
+  sqrt_out_sparse(r, t);
+  return r;
+}
+// --------------------------------------------------------------------
 // pow(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 
@@ -650,7 +678,7 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
       dstBuffer.add_(srcBuffer, value);
     }
   } else {
-    AT_DISPATCH_ALL_TYPES(
+    AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Bool,
         commonDtype, "add_dense_sparse", [&] {
           add_dense_sparse_worker_cpu<scalar_t>(resultBuffer, value, sparse, indices, valuesBuffer);
         });

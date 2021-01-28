@@ -1,13 +1,14 @@
-import os
-import io
-import pathlib
-import sys
-import random
-import torch
 from itertools import product as product
+from typing import NamedTuple, Optional
+import io
+import os
+import pathlib
+import random
+import sys
+
 from torch import Tensor
 from torch.testing._internal.common_utils import TemporaryFileName
-from typing import NamedTuple, Optional
+import torch
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -681,8 +682,7 @@ class TestSaveLoad(JitTestCase):
         """
         @torch.jit.interface
         class MyInterface(object):
-            def bar(self, x):
-                # type: (Tensor) -> Tensor
+            def bar(self, x: Tensor) -> Tensor:
                 pass
 
         @torch.jit.script
@@ -712,8 +712,7 @@ class TestSaveLoad(JitTestCase):
 
         @torch.jit.interface
         class MyInterface(object):
-            def not_bar(self, x):
-                # type: (Tensor) -> Tensor
+            def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
         @torch.jit.script  # noqa: F811
@@ -768,8 +767,7 @@ class TestSaveLoad(JitTestCase):
 
         @torch.jit.interface
         class MyInterface(object):
-            def bar(self, x):
-                # type: (Tensor) -> Tensor
+            def bar(self, x: Tensor) -> Tensor:
                 pass
 
         @torch.jit.script
@@ -810,8 +808,7 @@ class TestSaveLoad(JitTestCase):
 
         @torch.jit.interface
         class MyInterface(object):
-            def not_bar(self, x):
-                # type: (Tensor) -> Tensor
+            def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
         @torch.jit.script   # noqa F811

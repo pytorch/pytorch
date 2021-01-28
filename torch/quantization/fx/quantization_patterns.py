@@ -367,19 +367,27 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 args = load_arg(quantized=quantized_input_idxs)(self.linear_node.args)
                 args = load_arg(quantized=False)(self.linear_node.args)
                 kwargs = load_arg(quantized=False)(self.linear_node.kwargs)
-                linear_out = quantizer.quantized_graph.create_node(
-                    'call_function', torch.nn.functional.linear, args, kwargs)
+                op_out = quantizer.quantized_graph.create_node(
+                    "call_function", torch.nn.functional.linear, args, kwargs)
+                if self.relu_node:
+                    relu_args = [op_out]
+                    relu_args.extend(load_arg(quantized=False)(self.relu_node.args[1:]))
+                    relu_kwargs = load_arg(quantized=False)(self.relu_node.kwargs)
+                    op_out = quantizer.quantized_graph.create_node(
+                        "call_function", torch.nn.functional.relu, tuple(relu_args), relu_kwargs)
+
                 if activation_statically_quantized:
                     # quantize output for statically quantized linear op
                     root_module = quantizer.modules['']
+                    act_post_process_name = self.relu_node.name if self.relu_node else self.linear_node.name
                     return quantize_node(
                         root_module,
                         quantizer.quantized_graph,
-                        linear_out,
-                        quantizer.activation_post_process_map[self.linear_node.name])
+                        op_out,
+                        quantizer.activation_post_process_map[act_post_process_name])
                 else:
                     # output for dynamically quantized linear op is not quantized
-                    return linear_out
+                    return op_out
             else:  # non-debug option
                 # linear args
                 # (x, weight, bias, ...)
@@ -404,20 +412,25 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 prepack_op = get_linear_prepack_op_for_dtype(weight_dtype(qconfig))
                 packed_weight = quantizer.quantized_graph.create_node(
                     'call_function', prepack_op, prepack_args, {})
+                qlinear_op = torch.ops.quantized.linear_relu if self.relu_node else torch.ops.quantized.linear
                 # construct linear input
                 if activation_statically_quantized:
                     linear_input = load_arg(quantized=True)(self.linear_node.args[0])
+                    act_post_process_name = self.relu_node.name if self.relu_node else self.linear_node.name
                     activation_post_process = \
-                        quantizer.activation_post_process_map[self.linear_node.name]
+                        quantizer.activation_post_process_map[act_post_process_name]
                     scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
                     qlinear_args = (linear_input, packed_weight, scale, zero_point)
                     return quantizer.quantized_graph.create_node(
-                        'call_function', torch.ops.quantized.linear, qlinear_args, kwargs)
+                        "call_function", qlinear_op, qlinear_args, kwargs)
                 else:
                     linear_input = load_arg(quantized=False)(self.linear_node.args[0])
                     qlinear_args = (linear_input, packed_weight)  # type: ignore
-                    return quantizer.quantized_graph.create_node(
-                        'call_function', torch.ops.quantized.linear_dynamic, qlinear_args, kwargs)
+                    op_out = quantizer.quantized_graph.create_node(
+                        "call_function", torch.ops.quantized.linear_dynamic, qlinear_args, kwargs)
+                    if self.relu_node:
+                        op_out = quantizer.quantized_graph.create_node("call_function", torch.nn.functional.relu, (op_out,), {})
+                    return op_out
 
 @register_quant_pattern(torch.nn.BatchNorm2d)
 @register_quant_pattern(torch.nn.BatchNorm3d)

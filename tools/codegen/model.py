@@ -49,11 +49,9 @@ Variant = Enum('Variant', ('function', 'method'))
 
 class UseC10Dispatcher(Enum):
     full = 0
-    with_codegenerated_unboxing_wrapper = 1
-    hacky_wrapper_for_legacy_signatures = 2
+    hacky_wrapper_for_legacy_signatures = 1
 
-    def dispatcher_uses_new_style(self) -> bool:
-        return self in [UseC10Dispatcher.full, UseC10Dispatcher.hacky_wrapper_for_legacy_signatures]
+STRUCTURED_DISPATCH_KEYS = {'CUDA', 'CPU'}
 
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
@@ -77,7 +75,7 @@ class NativeFunction:
     func: 'FunctionSchema'
 
     # Corresponds to the 'use_c10_dispatcher' field.  The default
-    # is 'with_codegenerated_unboxing_wrapper'
+    # is 'full'
     use_c10_dispatcher: UseC10Dispatcher
 
     # Whether or not to omit automatic generation of a DeviceGuard
@@ -178,15 +176,15 @@ class NativeFunction:
         cpp_no_default_args = set(cpp_no_default_args_list)
 
         use_c10_dispatcher_s = e.pop('use_c10_dispatcher', None)
+        assert use_c10_dispatcher_s != 'full', \
+            "There is no need to specify 'use_c10_dispatcher: full' anymore. This is the default now. Just remove the line."
         if use_c10_dispatcher_s is None:
-            use_c10_dispatcher = UseC10Dispatcher.full
-        elif use_c10_dispatcher_s == 'full':
             use_c10_dispatcher = UseC10Dispatcher.full
         elif use_c10_dispatcher_s == 'hacky_wrapper_for_legacy_signatures':
             use_c10_dispatcher = UseC10Dispatcher.hacky_wrapper_for_legacy_signatures
         else:
             raise AssertionError(
-                f'use_c10_dispatcher must be unset or set to full, got {use_c10_dispatcher}')
+                f'use_c10_dispatcher must be full or hacky_wrapper_for_legacy_signatures, got {use_c10_dispatcher}')
 
         variants_s = e.pop('variants', 'function')
         assert isinstance(variants_s, str)
@@ -240,7 +238,7 @@ class NativeFunction:
                 assert isinstance(v, str), e
                 for k in ks.split(","):
                     dispatch[k.strip()] = v
-        else:
+        elif not structured and structured_delegate is None:
             from tools.codegen.api import cpp
             dispatch['Math'] = cpp.name(func)
 
@@ -309,6 +307,13 @@ class NativeFunction:
         if self.structured or self.structured_delegate:
             assert self.use_c10_dispatcher is UseC10Dispatcher.full, \
                 "Structured kernels MUST be use_c10_dispatcher: full; port your argument order"
+        if self.structured_inherits is not None:
+            assert self.structured, "structured_inherits must also imply structured: True"
+        if self.structured_delegate is not None:
+            for k in STRUCTURED_DISPATCH_KEYS:
+                assert k not in self.dispatch, \
+                    f"if structured_delegate, then must not have {k} in dispatch dictionary " \
+                    "(it is delegated!)"
 
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
