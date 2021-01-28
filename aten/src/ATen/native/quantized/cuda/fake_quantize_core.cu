@@ -20,54 +20,6 @@ Returns:
 */
 namespace at {
 namespace native {
-void fake_quantize_tensor_kernel_cuda(
-    Tensor& output,
-    const Tensor& input,
-    float scale,
-    int64_t zero_point,
-    int64_t quant_min,
-    int64_t quant_max) {
-  // scalar type of this function is guaranteed to be float
-  float inv_scale = 1.0f / scale;
-  auto iter = TensorIteratorConfig()
-    .check_all_same_dtype(false)
-    .add_output(output)
-    .add_input(input)
-    .build();
-  gpu_kernel(iter, [=] GPU_LAMBDA(float input_val) -> float {
-    return (fminf(
-                quant_max,
-                fmaxf(
-                    quant_min,
-                    static_cast<int64_t>(
-                        std::nearbyint(input_val * inv_scale) + zero_point))) -
-            zero_point) *
-        scale;
-  });
-}
-
-void fake_quantize_grad_tensor_kernel_cuda(
-    Tensor& input_grad,
-    const Tensor& input,
-    const Tensor& output_grad,
-    float scale,
-    int64_t zero_point,
-    int64_t quant_min,
-    int64_t quant_max) {
-  // scalar type of this function is guaranteed to be float
-  float inv_scale = 1.0f / scale;
-  auto iter = TensorIteratorConfig()
-    .check_all_same_dtype(false)
-    .add_output(input_grad)
-    .add_input(output_grad)
-    .add_input(input)
-    .build();
-  gpu_kernel(iter, [=] GPU_LAMBDA(float dy, float x) -> float {
-    int64_t Xq = std::nearbyint(x * inv_scale) + zero_point;
-    return (Xq >= quant_min && Xq <= quant_max) * dy;
-  });
-}
-
 void fake_quantize_tensor_cachemask_kernel_cuda(
     Tensor& output,
     Tensor& mask,
@@ -126,9 +78,7 @@ void _fake_quantize_grad_learnable_tensor_kernel_cuda(
   });
 }
 
-REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel_cuda);
 REGISTER_DISPATCH(fake_quant_tensor_cachemask_stub, &fake_quantize_tensor_cachemask_kernel_cuda);
-REGISTER_DISPATCH(fake_quant_grad_tensor_stub, &fake_quantize_grad_tensor_kernel_cuda);
 REGISTER_DISPATCH(fake_quant_grad_learnable_tensor_stub, &_fake_quantize_grad_learnable_tensor_kernel_cuda);
 
 // Fake quantize per channel

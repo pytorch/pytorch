@@ -4637,10 +4637,7 @@
 - func: fake_quantize_per_tensor_affine(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor
   variants: function
   dispatch:
-    CPU, CUDA: fake_quantize_per_tensor_affine
-
-- func: fake_quantize_per_tensor_affine_backward(Tensor grad, Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> Tensor
-  variants: function
+    Math: fake_quantize_per_tensor_affine
 
 - func: fake_quantize_per_tensor_affine_cachemask(Tensor self, float scale, int zero_point, int quant_min, int quant_max) -> (Tensor output, Tensor mask)
   variants: function
