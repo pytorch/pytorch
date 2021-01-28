@@ -228,7 +228,7 @@ class TestMkldnn(TestCase):
                     y_bf16 = mkldnn_conv_bf16(x_bf16.to_mkldnn()).to_dense(torch.float32)
 
     def test_conv1d_bf16(self):
-       self._test_conv_bf16_base(dim=1)
+        self._test_conv_bf16_base(dim=1)
 
     def test_conv2d_bf16(self):
         self._test_conv_bf16_base(dim=2)
