@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 using namespace torch::jit::tensorexpr;
@@ -64,7 +65,8 @@ static llvm::orc::JITTargetMachineBuilder makeTargetMachineBuilder() {
 
 static void registerIntrinsics(
     llvm::orc::JITDylib& JD,
-    llvm::orc::MangleAndInterner& Mangle) {
+    llvm::orc::MangleAndInterner& Mangle,
+    std::unordered_set<std::string>& intrinsics) {
   using namespace llvm;
   using namespace llvm::orc;
 
@@ -220,6 +222,7 @@ class TORCH_API PytorchLLVMJITImpl {
  private:
   std::unique_ptr<TargetMachine> TM;
   std::unique_ptr<LLJIT> LLJ;
+  std::unordered_set<std::string> intrinsics;
 
  public:
   PytorchLLVMJITImpl()
@@ -242,7 +245,7 @@ class TORCH_API PytorchLLVMJITImpl {
     MangleAndInterner Mangle(LLJ->getExecutionSession(), LLJ->getDataLayout());
 
     // Register implementations of intrinsics
-    registerIntrinsics(JD, Mangle);
+    registerIntrinsics(JD, Mangle, intrinsics);
   }
 
   void addModule(std::unique_ptr<Module> M, std::unique_ptr<LLVMContext> C) {
@@ -256,7 +259,7 @@ class TORCH_API PytorchLLVMJITImpl {
   }
 
   bool hasSymbol(const std::string& Name) {
-    return (bool)LLJ->lookup(Name);
+    return intrinsics.find(Name) != intrinsics.end();
   }
 
   TargetMachine& getTargetMachine() {
@@ -278,6 +281,7 @@ class TORCH_API PytorchLLVMJITImpl {
   const DataLayout DL;
   RTDyldObjectLinkingLayer ObjectLayer;
   IRCompileLayer<decltype(ObjectLayer), SimpleCompiler> CompileLayer;
+  std::unordered_set<std::string> intrinsics;
 
  public:
   PytorchLLVMJITImpl()
@@ -311,7 +315,7 @@ class TORCH_API PytorchLLVMJITImpl {
         CompileLayer(ObjectLayer, SimpleCompiler(*TM)) {
     auto& JD = ES.getMainJITDylib();
     MangleAndInterner Mangle(ES, DL);
-    registerIntrinsics(JD, Mangle);
+    registerIntrinsics(JD, Mangle, intrinsics);
     llvm::sys::DynamicLibrary::LoadLibraryPermanently(nullptr);
   }
 
@@ -335,8 +339,7 @@ class TORCH_API PytorchLLVMJITImpl {
   }
 
   bool hasSymbol(const std::string& Name) {
-    MangleAndInterner mangle(ES, DL);
-    return (bool)ES.lookup({mangle(Name)});
+    return intrinsics.find(Name) != intrinsics.end();
   }
 
   JITTargetAddress getSymbolAddress(const std::string Name) {
