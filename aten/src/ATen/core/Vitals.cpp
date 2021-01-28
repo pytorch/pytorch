@@ -1,6 +1,9 @@
 #include <ATen/core/Vitals.h>
 #include <cstdlib>
 
+namespace at {
+namespace vitals {
+
 TorchVitalAttr& TorchVital::create(const std::string& attr) {
   if (!torchVitalEnabled()) {
     static TorchVitalAttr disabled;
@@ -26,3 +29,6 @@ bool torchVitalEnabled() {
   }();
   return enabled;
 }
+
+} // namespace at
+} // namespace vitals
