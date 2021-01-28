@@ -483,6 +483,8 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double, torch.cdouble)
+    # NOTE: This test, and many others in this file that use magma, are currently skipped for ROCm.
+    # See: https://github.com/pytorch/pytorch/issues/51303
     @skipCUDAIfRocm
     def test_det(self, device, dtype):
         tensors = (
