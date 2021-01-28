@@ -186,7 +186,7 @@ def cat(g, tensor_list, dim):
 
 @parse_args('v', 'i')
 def stack(g, tensor_list, dim):
-    unsqueezed = [g.op("Unsqueeze", t, axes_i=[dim]) for t in sym_help._unpack_list(tensor_list)]
+    unsqueezed = [sym_help._unsqueeze_helper(g, t, [dim]) for t in sym_help._unpack_list(tensor_list)]
     return g.op("Concat", *unsqueezed, axis_i=dim)
 
 
@@ -592,7 +592,7 @@ def unbind(g, self, dim=0, _outputs=None):
 
     outputs = g.op("Split", self, split_i=[1] * _outputs, axis_i=dim, outputs=_outputs)
     outputs = [outputs] if _outputs == 1 else outputs
-    squeezed_outputs = [g.op("Squeeze", out, axes_i=[dim]) for out in outputs]
+    squeezed_outputs = [sym_help._squeeze_helper(g, out, [dim]) for out in outputs]
     return squeezed_outputs
 
 
@@ -605,7 +605,7 @@ def select(g, self, dim, index):
         else:
             end_index = index + 1
         slice_node = sym_help._slice_helper(g, self, axes=[dim], starts=[index], ends=[end_index])
-        return g.op("Squeeze", slice_node, axes_i=[dim])
+        return sym_help._squeeze_helper(g, slice_node, [dim])
     else:
         return g.op("Gather", self, index, axis_i=dim)
 
@@ -640,7 +640,7 @@ def squeeze(g, self, dim=None):
                       "is not 1, the ONNX model will return an error. Opset version 11 supports squeezing on " +
                       "non-singleton dimensions, it is recommended to export this model using opset " +
                       "version 11 or higher.")
-        return g.op("Squeeze", self, axes_i=[squeeze_dim])
+        return sym_help._squeeze_helper(g, self, axes_i=[squeeze_dim])
     if dim_size > 1:
         warnings.warn("This model contains a squeeze operation on dimension " + str(squeeze_dim) + ". The size of " +
                       "this dimension in the given input is " + str(dim_size) + ". The model will " +
@@ -651,12 +651,12 @@ def squeeze(g, self, dim=None):
 
     warnings.warn("This model contains a squeeze operation on dimension " + str(squeeze_dim) + ". If the model is " +
                   "intended to be used with dynamic input shapes, please use opset version 11 to export the model.")
-    return g.op("Squeeze", self, axes_i=[squeeze_dim])
+    return sym_help._squeeze_helper(g, self, axes_i=[squeeze_dim])
 
 def prelu(g, self, weight):
     self_rank = sym_help._get_tensor_rank(self)
     if self_rank is not None and self_rank > 2:
-        weight = g.op("Unsqueeze", weight, axes_i=list(range(1, self_rank - 1)))
+        weight = sym_help._unsqueeze_helper(g, weight, list(range(1, self_rank - 1)))
     return g.op("PRelu", self, weight)
 
 
@@ -674,7 +674,7 @@ def floor(g, input):
 
 def _len(g, self):
     sz_0 = size(g, self, g.op("Constant", value_t=torch.LongTensor([0])))
-    return g.op('Squeeze', sz_0, axes_i=[0])
+    return sym_help._squeeze_helper(g, sz_0, [0])
 
 
 @parse_args('v', 't', 't')
@@ -1356,7 +1356,7 @@ def unfold(g, input, dimension, size, step):
         ndim = len(sizes)
         perm = list(range(0, ndim))
         perm.append(perm.pop(dimension))
-        unsqueeze = [g.op("Unsqueeze", g.op("Transpose", t, perm_i=perm), axes_i=[dimension]) for t in stack]
+        unsqueeze = [sym_help._unsqueeze_helper(g, g.op("Transpose", t, perm_i=perm), [dimension]) for t in stack]
         return g.op("Concat", *unsqueeze, axis_i=dimension)
     else:
         return _unimplemented("Unfold", "input size not accessible")
@@ -1732,14 +1732,14 @@ def eye(g, *args):
     if len(args) == 5:
         # aten::eye(n, dtype, layout, device, pin_memory)
         n, dtype, layout, device, pin_memory = args
-        dim_size = g.op("Unsqueeze", n, axes_i=[0])
+        dim_size = sym_help._unsqueeze_helper(g, n, [0])
         shape = g.op("Concat", dim_size, dim_size, axis_i=0)
         tensor = zeros(g, shape, dtype, layout, device)
         return g.op("EyeLike", tensor)
     elif len(args) == 6:
         # aten::eye(n, m, dtype, layout, device, pin_memory)
         n, m, dtype, layout, device, pin_memory = args
-        shape = g.op("Concat", g.op("Unsqueeze", n, axes_i=[0]), g.op("Unsqueeze", m, axes_i=[0]), axis_i=0)
+        shape = g.op("Concat", sym_help._unsqueeze_helper(g, n, [0]), sym_help._unsqueeze_helper(g, m, [0]), axis_i=0)
         tensor = zeros(g, shape, dtype, layout, device)
         return g.op("EyeLike", tensor)
     else:
@@ -1760,9 +1760,9 @@ def slice(g, self, *args):
                                    'is a deprecated experimental op. Please use statically allocated '
                                    'variables or export to a higher opset version.')
             else:
-                start_unsqueezed = g.op("Unsqueeze", start, axes_i=[0])
-                end_unsqueezed = g.op("Unsqueeze", end, axes_i=[0])
-                dim_unsqueezed = g.op("Unsqueeze", dim, axes_i=[0])
+                start_unsqueezed = sym_help._unsqueeze_helper(g, start, [0])
+                end_unsqueezed = sym_help._unsqueeze_helper(g, end, [0])
+                dim_unsqueezed = sym_help._unsqueeze_helper(g, dim, [0])
                 return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
         else:
             start = _parse_arg(start, 'i')
@@ -1814,7 +1814,7 @@ def unsqueeze(g, self, dim):
         else:
             return _unimplemented('unsqueeze', 'negative axis with unknown input rank')
 
-    return g.op("Unsqueeze", self, axes_i=[dim])
+    return sym_help._unsqueeze_helper(g, self, axes_i=[dim])
 
 
 @parse_args('v', 'i', 'i', 'none')
@@ -1973,7 +1973,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
         elif variant == 'GRU' or variant == 'LSTM':
             weight_ih, weight_hh = \
                 [reform_weights(g, w, hidden_size, reform_permutation) for w in weights]
-        return tuple(g.op('Unsqueeze', x, axes_i=[0]) for x in (weight_ih, weight_hh))
+        return tuple(sym_help._unsqueeze_helper(g, x, [0]) for x in (weight_ih, weight_hh))
 
     def transform_weights(layer_index):
         weights = layer_weights[layer_index]
@@ -1983,7 +1983,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
             weight_ih, weight_hh, bias_ih, bias_hh = \
                 [reform_weights(g, w, hidden_size, reform_permutation) for w in weights]
         bias_concat = g.op('Concat', bias_ih, bias_hh, axis_i=0)
-        return tuple(g.op('Unsqueeze', x, axes_i=[0]) for x in (weight_ih, weight_hh, bias_concat))
+        return tuple(sym_help._unsqueeze_helper(g, x, [0]) for x in (weight_ih, weight_hh, bias_concat))
 
     def retrieve_state(x, start, end):
         return x if num_layers == 1 else sym_help._slice_helper(g, x, axes=[0], starts=[start], ends=[end])
@@ -2050,7 +2050,7 @@ def _generic_rnn(g, variant, input, initial_states, all_weights, has_biases,
             prev_output = g.op('Transpose', prev_output, perm_i=[0, 2, 1, 3])
             prev_output = g.op('Reshape', prev_output, g.op('Constant', value_t=torch.LongTensor([0, 0, -1])))
         else:
-            prev_output = g.op('Squeeze', prev_output, axes_i=[1])
+            prev_output = sym_help._squeeze_helper(g, prev_output, [1])
 
         h_outs.append(h_out)
         if variant == 'LSTM':
@@ -2382,7 +2382,7 @@ def gather(g, self, dim, index, sparse_grad=False):
     values = g.op("Constant", value_t=torch.LongTensor([0, 1]))
     depth = size(g, self, g.op("Constant", value_t=torch.LongTensor([dim])))
     index = g.op("Cast", g.op("OneHot", index, depth, values, axis_i=dim), to_i=sym_help.cast_pytorch_to_onnx[dtype])
-    mul = g.op("Mul", g.op("Unsqueeze", self, axes_i=[dim + 1]), index)
+    mul = g.op("Mul", sym_help._unsqueeze_helper(g, self, [dim + 1]), index)
     return g.op("ReduceSum", mul, axes_i=[dim], keepdims_i=0)
 
 
@@ -2477,42 +2477,42 @@ def arange(g, *args):
 
     if len(args) == 2:
         # aten::arange(Scalar end, Tensor out)
-        end = g.op("Unsqueeze", args[0], axes_i=[0])
+        end = sym_help._unsqueeze_helper(g, args[0], [0])
         dtype = 4  # default to int64
-        arange_tensor = g.op("Squeeze", nonzero(g, ones(g, end, dtype, None, None)), axes_i=[1])
+        arange_tensor = sym_help._squeeze_helper(g, nonzero(g, ones(g, end, dtype, None, None)), [1])
         return g.op("Cast", arange_tensor, to_i=sym_help.scalar_type_to_onnx[dtype])
     elif len(args) == 4:
         # aten::arange(Scalar start, Scalar end, Scalar step, Tensor out)
         dtype = 4  # default to int64
-        step = g.op("Unsqueeze", args[2], axes_i=[0])
-        end = g.op("Unsqueeze", args[1], axes_i=[0])
-        start = g.op("Unsqueeze", args[0], axes_i=[0])
+        step = sym_help._unsqueeze_helper(g, args[2], [0])
+        end = sym_help._unsqueeze_helper(g, args[1], [0])
+        start = sym_help._unsqueeze_helper(g, args[0], [0])
         range_tensor = g.op("Div", g.op("Sub", end, start), step)
-        arange_tensor = g.op("Squeeze", nonzero(g, ones(g, range_tensor, None, None, None)), axes_i=[1])
+        arange_tensor = sym_help._squeeze_helper(g, nonzero(g, ones(g, range_tensor, None, None, None)), [1])
         arange_tensor = g.op("Add", g.op("Mul", arange_tensor, step), start)
         return g.op("Cast", arange_tensor, to_i=sym_help.scalar_type_to_onnx[dtype])
     elif len(args) == 5:
         # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
         dtype = _get_arange_dtype(args[1])
-        end = g.op("Unsqueeze", args[0], axes_i=[0])
-        arange_tensor = g.op("Squeeze", nonzero(g, ones(g, end, dtype, *(args[2:]))), axes_i=[1])
+        end = sym_help._unsqueeze_helper(g, args[0], [0])
+        arange_tensor = sym_help._squeeze_helper(g, nonzero(g, ones(g, end, dtype, *(args[2:]))), [1])
         return g.op("Cast", arange_tensor, to_i=sym_help.scalar_type_to_onnx[dtype])
     elif len(args) == 6:
         # aten::arange(Scalar start, Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
         dtype = _get_arange_dtype(args[2])
-        end = g.op("Unsqueeze", args[1], axes_i=[0])
-        start = g.op("Unsqueeze", args[0], axes_i=[0])
+        end = sym_help._unsqueeze_helper(g, args[1], [0])
+        start = sym_help._unsqueeze_helper(g, args[0], [0])
         range_tensor = g.op("Sub", end, start)
-        arange_tensor = g.op("Add", g.op("Squeeze", nonzero(g, ones(g, range_tensor, dtype, *(args[3:]))), axes_i=[1]), start)
+        arange_tensor = g.op("Add", sym_help._squeeze_helper(g, nonzero(g, ones(g, range_tensor, dtype, *(args[3:]))), [1]), start)
         return g.op("Cast", arange_tensor, to_i=sym_help.scalar_type_to_onnx[dtype])
     elif len(args) == 7:
         # aten::arange(Scalar start, Scalar end, Scalar step, ScalarType dtype, Layout, Device, bool pin_memory)
         dtype = _get_arange_dtype(args[3])
-        step = g.op("Unsqueeze", args[2], axes_i=[0])
-        end = g.op("Unsqueeze", args[1], axes_i=[0])
-        start = g.op("Unsqueeze", args[0], axes_i=[0])
+        step = sym_help._unsqueeze_helper(g, args[2], [0])
+        end = sym_help._unsqueeze_helper(g, args[1], [0])
+        start = sym_help._unsqueeze_helper(g, args[0], [0])
         range_tensor = g.op("Div", g.op("Sub", end, start), step)
-        arange_tensor = g.op("Squeeze", nonzero(g, ones(g, range_tensor, dtype, *(args[4:]))), axes_i=[1])
+        arange_tensor = sym_help._squeeze_helper(g, nonzero(g, ones(g, range_tensor, dtype, *(args[4:]))), [1])
         arange_tensor = g.op("Add", g.op("Mul", arange_tensor, step), start)
         return g.op("Cast", arange_tensor, to_i=sym_help.scalar_type_to_onnx[dtype])
     else:
@@ -2541,7 +2541,7 @@ def index(g, self, index):
             warnings.warn("Exporting aten::index operator with indices of type Byte. "
                           "Only 1-D indices are supported. In any other case, "
                           "this will produce an incorrect ONNX graph.")
-            index = squeeze(g, nonzero(g, index), dim=1)
+            index = sym_help._squeeze_helper(g, nonzero(g, index), [1])
         return index
 
     indices = [try_mask_to_index(idx) for idx in indices]
@@ -2730,7 +2730,7 @@ def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
 
     # Norm has shape [N, C, *] so we reshape weight and bias to [C, *]
     axes = list(range(1, input_rank - 1))
-    return add(g, mul(g, norm, g.op("Unsqueeze", weight, axes_i=axes)), g.op("Unsqueeze", bias, axes_i=axes))
+    return add(g, mul(g, norm, sym_help._unsqueeze_helper(g, weight, axes)), sym_help._unsqueeze_helper(g, bias, axes))
 
 
 @parse_args('v', 'v', 'i')

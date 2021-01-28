@@ -76,7 +76,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
             index = add(g, index, ind)
         broadcast_index_shape = g.op("Shape", index)
         indices_list = [
-            g.op("Unsqueeze", expand(g, ind, broadcast_index_shape, None), axes_i=[-1]) for ind in indices_list
+            sym_help._unsqueeze_helper(g, expand(g, ind, broadcast_index_shape, None), [-1]) for ind in indices_list
         ]
         index = g.op("Concat", *indices_list, axis_i=-1)
     else:
@@ -180,7 +180,7 @@ def index_put(g, self, indices_list_value, values, accumulate=False):
                 return masked_fill(g, self, bool_inp, values)
             return masked_scatter(g, self, bool_inp, values)
         broadcast_index_shape = g.op("Shape", index)
-        index = g.op("Unsqueeze", index, axes_i=[-1])
+        index = sym_help._unsqueeze_helper(g, index, [-1])
     sub_data_shape = sym_help._slice_helper(
         g, g.op("Shape", self), axes=[0], starts=[len(indices_list)], ends=[maxsize])
     values_shape = g.op("Concat", broadcast_index_shape, sub_data_shape, axis_i=0)
@@ -284,7 +284,7 @@ def __interpolate(g, input, size, scale_factor, mode, align_corners, recompute_s
             if rank is None:
                 return sym_help._unimplemented("interpolate (with a scalar output_size)",
                                                "missing input shape (try giving an array of output_size values)")
-            size = unsqueeze(g, size, 0)
+            size = sym_help._unsqueeze_helper(g, size, [0])
             size = [size for i in range(rank - 2)]
             size = g.op("Concat", *size, axis_i=0)
         size = g.op("Cast", size, to_i=sym_help.cast_pytorch_to_onnx['Long'])
@@ -376,7 +376,7 @@ def _len(g, self):
     if _is_tensor_list(self) or self.node().kind() == "onnx::SplitToSequence":
         return g.op("SequenceLength", self)
     sz_0 = size(g, self, g.op("Constant", value_t=torch.LongTensor([0])))
-    return g.op('Squeeze', sz_0, axes_i=[0])
+    return sym_help._squeeze_helper(g, sz_0, [0])
 
 
 def __getitem_(g, self, i):
@@ -489,7 +489,7 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
             return split_out
         # Convert to multiple slice nodes iff number of splits and number of outputs are statically known.
         if sym_help._is_packed_list(split_size_or_sizes) and len(sym_help._unpack_list(split_size_or_sizes)) == _outputs:
-            split_sizes = [g.op("Unsqueeze", v, axes_i=[0]) for v in sym_help._unpack_list(split_size_or_sizes)]
+            split_sizes = [sym_help._unsqueeze_helper(g, v, [0]) for v in sym_help._unpack_list(split_size_or_sizes)]
             start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
             axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
             res = []
@@ -658,7 +658,7 @@ def squeeze(g, self, dim=None):
         if_node_outputs = g.op("If", cond)
         if_node = if_node_outputs.node()
         if_block = torch.onnx.utils._add_block(if_node)
-        squeeze_ = if_block.op("Squeeze", self, axes_i=[dim])
+        squeeze_ = sym_help._squeeze_helper(if_block, self, [dim])
         torch.onnx.utils._add_output_to_block(if_block, squeeze_)
         else_block = torch.onnx.utils._add_block(if_node)
         identity_ = else_block.op("Identity", self)
@@ -673,13 +673,12 @@ def squeeze(g, self, dim=None):
                       "be exported without the squeeze node. If the model is intended to be used with dynamic " +
                       "input shapes, please export with dynamic_axes argument.")
         return self
-    return g.op("Squeeze", self, axes_i=[dim])
+    return sym_help._squeeze_helper(g, self, [dim])
 
 
 @parse_args('v', 'i')
 def unsqueeze(g, self, dim):
-    return g.op("Unsqueeze", self, axes_i=[dim])
-
+    return sym_help._unsqueeze_helper(g, self, [dim])
 
 def mm(g, self, other):
     return g.op("Gemm", self, other, beta_f=0.0, alpha_f=1.0)
@@ -782,7 +781,7 @@ def _get_im2col_indices_along_dim(g, input_d, kernel_size_d, dilation_d, padding
 
     # Broadcast and add kernel staring positions (indices) with
     # kernel_grid along dim d, to get block indices along dim d
-    blocks_d_indices = g.op('Unsqueeze', blocks_d_indices, axes_i=[0])  # Reshape to [1, -1]
+    blocks_d_indices = sym_help._unsqueeze_helper(g, blocks_d_indices, [0])  # Reshape to [1, -1]
     kernel_mask = g.op('Reshape', kernel_grid, g.op('Constant', value_t=torch.tensor([-1, 1])))
     block_mask = g.op("Add", blocks_d_indices, kernel_mask)
 
@@ -804,8 +803,8 @@ def _get_im2col_output_shape(g, input, kernel_h, kernel_w):
                             g.op("Constant", value_t=torch.tensor(kernel_h * kernel_w)))
 
     return g.op("Concat",
-                g.op("Unsqueeze", batch_dim, axes_i=[0]),
-                g.op("Unsqueeze", channel_unfolded, axes_i=[0]),
+                sym_help._unsqueeze_helper(g, batch_dim, [0]),
+                sym_help._unsqueeze_helper(g, channel_unfolded, [0]),
                 g.op("Constant", value_t=torch.tensor([-1])), axis_i=0)
 
 
@@ -901,9 +900,9 @@ def embedding_bag(g,
     loop_condition = g.op("Cast", loop_condition, to_i=9)
     zero = g.op("Constant", value_t=torch.tensor([0]))
 
-    indices_len = g.op("Unsqueeze",
-                       sym_help._size_helper(g, indices, g.op("Constant", value_t=torch.tensor(0))),
-                       axes_i=[0])
+    indices_len = sym_help._unsqueeze_helper(g,
+                                             sym_help._size_helper(g, indices, g.op("Constant", value_t=torch.tensor(0))),
+                                             [0])
     if not include_last_offset:
         offsets = [offsets, indices_len]
         offsets = g.op("Concat", *offsets, axis_i=0)
@@ -923,8 +922,8 @@ def embedding_bag(g,
 
     indices_start = loop_block.op("Gather", offsets_starts, block_input_iter, axis_i=0)
     indices_end = loop_block.op("Gather", offsets_ends, block_input_iter, axis_i=0)
-    indices_start = loop_block.op("Unsqueeze", indices_start, axes_i=[0])
-    indices_end = loop_block.op("Unsqueeze", indices_end, axes_i=[0])
+    indices_start = sym_help._unsqueeze_helper(loop_block, indices_start, [0])
+    indices_end = sym_help._unsqueeze_helper(loop_block, indices_end, [0])
 
     indices_row = loop_block.op("Slice", indices, indices_start, indices_end, zero)
     embeddings = loop_block.op("Gather", embedding_matrix, indices_row, axis_i=0)
@@ -933,7 +932,7 @@ def embedding_bag(g,
                                                indices_start,
                                                indices_end,
                                                zero)
-        per_sample_weights_row = loop_block.op("Unsqueeze", per_sample_weights_row, axes_i=[1])
+        per_sample_weights_row = sym_help._unsqueeze_helper(loop_block, per_sample_weights_row, [1])
         embeddings = loop_block.op("Mul", embeddings, per_sample_weights_row)
     if mode == 0:
         embeddings = loop_block.op("ReduceSum", embeddings, axes_i=[0], keepdims_i=0)

@@ -321,9 +321,19 @@ def _interpolate_warning(interpolate_mode):
                   "to support Pytorch's behavior (like coordinate_transformation_mode and nearest_mode).\n"
                   "We recommend using opset 11 and above for models using this operator. ")
 
-def _unsqueeze_helper(g, input, dim):
-    from torch.onnx.symbolic_opset9 import unsqueeze
-    return unsqueeze(g, input, dim)
+def _unsqueeze_helper(g, input, axes_i):
+    if _export_onnx_opset_version >= 13:
+        axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
+        return g.op("Unsqueeze", input, axes)
+    else:
+        return g.op("Unsqueeze", input, axes_i=axes_i)
+
+def _squeeze_helper(g, input, axes_i):
+    if _export_onnx_opset_version >= 13:
+        axes = g.op("Constant", value_t=torch.tensor(axes_i, dtype=torch.long))
+        return g.op("Squeeze", input, axes)
+    else:
+        return g.op("Squeeze", input, axes_i=axes_i)
 
 def _interpolate_size_to_scales(g, input, output_size, dim):
     output_size = _maybe_get_const(output_size, 'is')
@@ -371,7 +381,7 @@ def _interpolate_get_scales(g, scale_factor, dim):
     if isinstance(scale_factor.type(), torch._C.ListType) or (scale_factor_rank is not None and scale_factor_rank > 0):
         return g.op("Concat", offsets, scale_factor, axis_i=0)
     else:
-        scale_factor = _unsqueeze_helper(g, scale_factor, 0)
+        scale_factor = _unsqueeze_helper(g, scale_factor, [0])
         scale_factor = g.op("Cast", scale_factor, to_i=cast_pytorch_to_onnx["Float"])
         scales = [scale_factor for i in range(dim - 2)]
     scale_factor = g.op("Concat", offsets, *scales, axis_i=0)
@@ -400,7 +410,7 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode , align_
         if not _is_packed_list(size):
             is_scalar = ((_maybe_get_const(size, 't').dim() == 0))
             if is_scalar:
-                size = _unsqueeze_helper(g, size, 0)
+                size = _unsqueeze_helper(g, size, [0])
                 size = [size for i in range(dim - 2)]
                 size = g.op("Concat", *size, axis_i=0)
         scale_factor = _interpolate_size_to_scales(g, input, size, dim)
@@ -477,9 +487,9 @@ def _index_fill_reshape_helper(g, self, dim, index):
         return _unimplemented("index_fill", "input rank not accesible")
     self_dim = self.type().dim()
     dim_value = _parse_arg(dim, 'i')
-    unsqueezed_index = g.op("Unsqueeze", index, axes_i=[i for i in range(self_dim) if i != dim_value])
+    unsqueezed_index = _unsqueeze_helper(g, index, [i for i in range(self_dim) if i != dim_value])
     expanded_index_shape = scatter(g, g.op("Shape", self), 0,
-                                   g.op("Unsqueeze", dim, axes_i=[0]), g.op("Shape", index))
+                                   _unsqueeze_helper(g, dim, [0]), g.op("Shape", index))
     expanded_index = expand(g, unsqueezed_index, expanded_index_shape, None)
     return expanded_index_shape, expanded_index
 

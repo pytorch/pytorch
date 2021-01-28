@@ -201,7 +201,10 @@ bool IsSupportedNode(const Node* n) {
   return true;
 }
 
-Value* CloneValueFromListConstruct(Value* v, std::shared_ptr<Graph> n_graph) {
+Value* CloneValueFromListConstruct(
+    Value* v,
+    std::shared_ptr<Graph> n_graph,
+    int opset_version) {
   auto lc_node = v->node();
   TORCH_INTERNAL_ASSERT(lc_node->kind() == ::c10::prim::ListConstruct);
   // In jit/passes/onnx/peephole.cpp::eraseListConstruct,
@@ -221,12 +224,10 @@ Value* CloneValueFromListConstruct(Value* v, std::shared_ptr<Graph> n_graph) {
     // order to be consumed as inputs
     std::vector<Value*> unsqueezed;
     for (auto* input : lc_node->inputs()) {
-      Node* unsqueezed_node =
-          n_graph->insertNode(n_graph->create(::c10::onnx::Unsqueeze, 1));
       auto new_input = n_graph->addInput();
       new_input->copyMetadata(input);
-      unsqueezed_node->addInput(new_input);
-      unsqueezed_node->is_(attr::axes, {0});
+      Node* unsqueezed_node = createONNXUnsqueeze(
+          n_graph.get(), n_graph->return_node(), new_input, 0, opset_version);
       unsqueezed.emplace_back(unsqueezed_node->output());
     }
     Node* concat_node =
@@ -261,11 +262,12 @@ Value* CloneValueFromListConstruct(Value* v, std::shared_ptr<Graph> n_graph) {
 Node* CloneNodeToGraph(
     Node* n,
     std::shared_ptr<Graph> n_graph,
-    const ParamMap& params_dict) {
+    const ParamMap& params_dict,
+    int opset_version) {
   auto vals_to_params_map =
       buildValueToParamsMap(n->owningGraph()->block(), params_dict);
-  auto clone_node =
-      n_graph->createClone(n, [&n_graph, &vals_to_params_map](Value* v) {
+  auto clone_node = n_graph->createClone(
+      n, [&n_graph, &vals_to_params_map, opset_version](Value* v) {
         auto v_n = v->node();
         switch (v_n->kind()) {
           case ::c10::onnx::Constant: {
@@ -275,7 +277,7 @@ Node* CloneNodeToGraph(
             return constant_n->output();
           }
           case ::c10::prim::ListConstruct: {
-            return CloneValueFromListConstruct(v, n_graph);
+            return CloneValueFromListConstruct(v, n_graph, opset_version);
           }
           case ::c10::prim::PackPadded: {
             auto input = n_graph->addInput();
@@ -476,7 +478,7 @@ void ONNXShapeTypeInference(
   // Create a Graph containing only the single node n.
   // This graph is later converted to ONNX to run shape inference.
   auto n_graph = std::make_shared<Graph>();
-  auto clone_node = CloneNodeToGraph(n, n_graph, params_dict);
+  auto clone_node = CloneNodeToGraph(n, n_graph, params_dict, opset_version);
   n_graph->insertNode(clone_node);
 
   // Register all node outputs as graph outputs.
@@ -507,12 +509,16 @@ void ONNXShapeTypeInference(
     } catch (std::runtime_error& ex) {
       // TODO: include this as warning once we have a more consolidated warning
       // system.
+      GRAPH_DEBUG(
+          "ONNX shape inference fails with: ",
+          ex.what(),
+          " on graph: ",
+          n_graph->toString());
       const char shape_err[] = "ShapeInferenceError";
       const char type_err[] = "TypeInferenceError";
       if ((strstr(ex.what(), shape_err) == NULL) &&
           (strstr(ex.what(), type_err) == NULL))
         throw;
-      GRAPH_DEBUG("ONNX shape inference fails with: ", ex.what());
     }
     GRAPH_DEBUG(
         "ONNX graph after shape inference: ", prettyPrint(*model_proto));
