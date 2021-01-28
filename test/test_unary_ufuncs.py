@@ -1679,8 +1679,6 @@ _types_no_half = [
 torch_op_tests = [
     _TorchMathTestMeta('floor'),
     _TorchMathTestMeta('ceil'),
-    _TorchMathTestMeta('rad2deg'),
-    _TorchMathTestMeta('deg2rad'),
     _TorchMathTestMeta('frac', reffn='fmod', refargs=lambda x: (x.numpy(), 1)),
     _TorchMathTestMeta('trunc'),
     _TorchMathTestMeta('round'),
