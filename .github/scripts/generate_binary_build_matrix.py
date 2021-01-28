@@ -39,6 +39,16 @@ WHEEL_CONTAINER_IMAGES = {
     "cpu": "pytorch/manylinux-cpu"
 }
 
+CONDA_CONTAINER_IMAGES = {
+    **{
+        # TODO: Re-do manylinux CUDA image tagging scheme to be similar to
+        #       ROCM so we don't have to do this replacement
+        gpu_arch: f"pytorch/conda-builder:cuda{gpu_arch}"
+        for gpu_arch in CUDA_ARCHES
+    },
+    "cpu": "pytorch/conda-builder:cpu"
+}
+
 FULL_PYTHON_VERSIONS = [
     "3.6",
     "3.7",
@@ -52,14 +62,17 @@ def is_pull_request():
 
 def generate_matrix(include_cuda=True, include_rocm=False):
     python_versions = FULL_PYTHON_VERSIONS
+    cuda_versions = CUDA_ARCHES
+    rocm_versions = ROCM_ARCHES
     arches = ["cpu"]
-    if include_cuda:
-        arches += CUDA_ARCHES
-    if include_rocm:
-        arches += ROCM_ARCHES
     if is_pull_request():
         python_versions = [python_versions[-1]]
-        arches = ["cpu", CUDA_ARCHES[-1], ROCM_ARCHES[-1]]
+        cuda_versions = [cuda_versions[-1]]
+        rocm_versions = [rocm_versions[-1]]
+    if include_cuda:
+        arches += cuda_versions
+    if include_rocm:
+        arches += rocm_versions
     matrix = []
     for item in itertools.product(python_versions, arches):
         python_version, arch_version = item
@@ -73,7 +86,12 @@ def generate_matrix(include_cuda=True, include_rocm=False):
             "python_version": python_version,
             "gpu_arch_type": gpu_arch_type,
             "gpu_arch_version": arch_version,
-            "wheel_container_image": WHEEL_CONTAINER_IMAGES[arch_version]
+            "wheel_container_image": WHEEL_CONTAINER_IMAGES.get(
+                arch_version, ""
+            ),
+            "conda_container_image": CONDA_CONTAINER_IMAGES.get(
+                arch_version, ""
+            )
         })
     return json.dumps({"include": matrix})
 
