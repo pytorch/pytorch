@@ -20,11 +20,13 @@ from torch.testing._internal.common_utils import TestCase, \
 
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 
+
+# For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
+# avx512vl, and avx512dq at least. So we will skip the test case if one processor
+# is not meet the requirement.
 def has_bf16_support():
     import subprocess
     try:
-        # for bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
-        # avx512vl, and avx512dq.
         cmd = "grep avx512bw /proc/cpuinfo | grep avx512vl | grep avx512dq"
         subprocess.check_output(cmd, shell=True)
         return True
@@ -156,12 +158,17 @@ class TestMkldnn(TestCase):
         self.assertTrue("layout=torch._mkldnn" in str(torch.randn((1, 2, 3, 4),
                                                                   dtype=torch.float, device=torch.device('cpu')).to_mkldnn()))
 
-    def _test_conv_base(self, dim, channels, groups, input):
+    def _test_conv_base(self, dim):
         conv_module = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
-        options = itertools.product([True, False], [1, 2])
-        for bias, dilation in options:
+        input_shapes = {1: (224,), 2: (224, 224), 3: (55, 55, 55)}
+        options = itertools.product([True, False], [1, 2], [1, 4])
+        for bias, dilation, groups in options:
+            N = torch.randint(3, 10, (1,)).item()
             M = torch.randint(1, 3, (1,)).item() * groups
-            conv = conv_module[dim](in_channels=channels,
+            C = torch.randint(1, 3, (1,)).item() * groups
+            x_shape = (N, C) + input_shapes[dim]
+            x = torch.randn(x_shape, dtype=torch.float32)
+            conv = conv_module[dim](in_channels=C,
                                     out_channels=M,
                                     kernel_size=3,
                                     stride=2,
@@ -171,41 +178,35 @@ class TestMkldnn(TestCase):
                                     groups=groups).float()
             mkldnn_conv = mkldnn_utils.to_mkldnn(copy.deepcopy(conv))
             with torch.backends.mkldnn.flags(enabled=False):
-                y_aten = conv(input)
-            y_mkldnn = mkldnn_conv(input.to_mkldnn()).to_dense()
+                y_aten = conv(x)
+            y_mkldnn = mkldnn_conv(x.to_mkldnn()).to_dense()
             self.assertEqual(y_aten, y_mkldnn)
 
-            self._test_serialization(mkldnn_conv, (input.to_mkldnn(),))
-            self._test_tracing(mkldnn_conv, (input.to_mkldnn(),))
+            self._test_serialization(mkldnn_conv, (x.to_mkldnn(),))
+            self._test_tracing(mkldnn_conv, (x.to_mkldnn(),))
 
     def test_conv1d(self):
-        for groups in [1, 4]:
-            N = torch.randint(3, 10, (1,)).item()
-            C = torch.randint(1, 3, (1,)).item() * groups
-            x = torch.randn(N, C, 224, dtype=torch.float32)
-            self._test_conv_base(dim=1, channels=C, groups=groups, input=x)
+        self._test_conv_base(dim=1)
 
     def test_conv2d(self):
-        for groups in [1, 4]:
-            N = torch.randint(3, 10, (1,)).item()
-            C = torch.randint(1, 3, (1,)).item() * groups
-            x = torch.randn(N, C, 224, 224, dtype=torch.float32)
-            self._test_conv_base(dim=2, channels=C, groups=groups, input=x)
+        self._test_conv_base(dim=2)
 
     def test_conv3d(self):
-        for groups in [1, 4]:
-            N = torch.randint(3, 10, (1,)).item()
-            C = torch.randint(1, 3, (1,)).item() * groups
-            x = torch.randn(N, C, 55, 55, 55, dtype=torch.float32)
-            self._test_conv_base(dim=3, channels=C, groups=groups, input=x)
+        self._test_conv_base(dim=3)
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
-    def _test_conv_bf16_base(self, dim, channels, groups, input):
+    def _test_conv_bf16_base(self, dim):
         conv_module = {1: torch.nn.Conv1d, 2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
-        options = itertools.product([True, False], [1, 2])
-        for bias, dilation in options:
+        input_shapes = {1: (224,), 2: (224, 224), 3: (55, 55, 55)}
+        options = itertools.product([True, False], [1, 2], [1, 4])
+        for bias, dilation, groups in options:
+            N = torch.randint(3, 10, (1,)).item()
             M = torch.randint(1, 3, (1,)).item() * groups
-            conv = conv_module[dim](in_channels=channels,
+            C = torch.randint(1, 3, (1,)).item() * groups
+            x_shape = (N, C) + input_shapes[dim]
+            x = torch.randn(x_shape, dtype=torch.float32)
+
+            conv = conv_module[dim](in_channels=C,
                                     out_channels=M,
                                     kernel_size=3,
                                     stride=2,
@@ -213,46 +214,27 @@ class TestMkldnn(TestCase):
                                     dilation=dilation,
                                     bias=bias,
                                     groups=groups).float()
-            x_bf16 = input.bfloat16()
+            x_bf16 = x.bfloat16()
             if has_bf16_support():
                 mkldnn_conv = mkldnn_utils.to_mkldnn(copy.deepcopy(conv))
                 mkldnn_conv_bf16 = mkldnn_utils.to_mkldnn(copy.deepcopy(conv), torch.bfloat16)
-                y = mkldnn_conv(input.to_mkldnn()).to_dense()
+                y = mkldnn_conv(x.to_mkldnn()).to_dense()
                 y_bf16 = mkldnn_conv_bf16(x_bf16.to_mkldnn()).to_dense(torch.float32)
                 self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
             else:
-                if dim != 1:
-                    msg = "mkldnn_reorder_conv%dd_weight: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq" % dim
-                    self.assertRaisesRegex(RuntimeError,
-                                           msg,
-                                           lambda: mkldnn_utils.to_mkldnn(copy.deepcopy(conv), torch.bfloat16))
-                else:
-                    msg = "mkldnn_convolution: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
+                msg = r"bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
+                with self.assertRaisesRegex(RuntimeError, msg):
                     mkldnn_conv_bf16 = mkldnn_utils.to_mkldnn(copy.deepcopy(conv), torch.bfloat16)
-                    self.assertRaisesRegex(RuntimeError,
-                                           msg,
-                                           lambda: mkldnn_conv_bf16(x_bf16.to_mkldnn()))
+                    y_bf16 = mkldnn_conv_bf16(x_bf16.to_mkldnn()).to_dense(torch.float32)
 
     def test_conv1d_bf16(self):
-        for groups in [1, 4]:
-            N = torch.randint(3, 10, (1,)).item()
-            C = torch.randint(1, 3, (1,)).item() * groups
-            x = torch.randn(N, C, 224, dtype=torch.float32)
-            self._test_conv_bf16_base(dim=1, channels=C, groups=groups, input=x)
+       self._test_conv_bf16_base(dim=1)
 
     def test_conv2d_bf16(self):
-        for groups in [1, 4]:
-            N = torch.randint(3, 10, (1,)).item()
-            C = torch.randint(1, 3, (1,)).item() * groups
-            x = torch.randn(N, C, 224, 224, dtype=torch.float32)
-            self._test_conv_bf16_base(dim=2, channels=C, groups=groups, input=x)
+        self._test_conv_bf16_base(dim=2)
 
     def test_conv3d_bf16(self):
-        for groups in [1, 4]:
-            N = torch.randint(3, 10, (1,)).item()
-            C = torch.randint(1, 3, (1,)).item() * groups
-            x = torch.randn(N, C, 55, 55, 55, dtype=torch.float32)
-            self._test_conv_bf16_base(dim=3, channels=C, groups=groups, input=x)
+        self._test_conv_bf16_base(dim=3)
 
     def test_conv2d_legacy_jit_model(self):
         """
@@ -290,32 +272,25 @@ class TestMkldnn(TestCase):
         self.assertEqual(torch.relu_(x1), torch.relu_(x2).to_dense())
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
-    def test_relu_bf16(self):
+    def _test_relu_bf16_base(self, name):
         x = torch.randn((4, 5), dtype=torch.float32) * 10
         x_bf16 = x.bfloat16()
+        fn = getattr(torch, name)
         if has_bf16_support():
-            y = torch.relu(x.to_mkldnn()).to_dense()
-            y_bf16 = torch.relu(x_bf16.to_mkldnn()).to_dense(torch.float32)
+            y = fn(x.to_mkldnn()).to_dense()
+            y_bf16 = fn(x_bf16.to_mkldnn()).to_dense(torch.float32)
             self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
         else:
-            msg = "mkldnn_relu: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
+            msg = r"bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
             self.assertRaisesRegex(RuntimeError,
                                    msg,
-                                   lambda: torch.relu(x_bf16.to_mkldnn()))
+                                   lambda: fn(x_bf16.to_mkldnn()))
 
-    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_relu_bf16(self):
+        self._test_relu_bf16_base("relu")
+
     def test_relu_inplace_bf16(self):
-        x = torch.randn((4, 5), dtype=torch.float32) * 10
-        x_bf16 = x.clone().bfloat16()
-        if has_bf16_support():
-            y = torch.relu_(x.to_mkldnn()).to_dense()
-            y_bf16 = torch.relu_(x_bf16.to_mkldnn()).to_dense(torch.float32)
-            self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
-        else:
-            msg = "mkldnn_relu_: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
-            self.assertRaisesRegex(RuntimeError,
-                                   msg,
-                                   lambda: torch.relu_(x_bf16.to_mkldnn()))
+        self._test_relu_bf16_base("relu_")
 
     def _test_max_pool_base(self, dim, input):
         pool_module = {2: torch.nn.MaxPool2d, 3: torch.nn.MaxPool3d}
