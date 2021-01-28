@@ -2702,10 +2702,9 @@ def remainder(g, input, other):
 
 def gelu(g, self):
     _sqrt2 = 1.4142135623730951
-    erf = g.op('Erf', g.op('Div', self, torch.tensor(_sqrt2)))
-    erf_plusone = add(g, erf, g.op('Constant', value_t=torch.tensor(1, dtype=torch.float)))
-    return mul(g, mul(g, self, erf_plusone), g.op('Constant', value_t=torch.tensor(0.5, dtype=torch.float)))
-
+    erf = g.op('Erf', g.op('Div', self, torch.tensor(_sqrt2, dtype=torch.double)))
+    erf_plusone = add(g, erf, g.op('Constant', value_t=torch.tensor(1, dtype=torch.double)))
+    return mul(g, mul(g, self, erf_plusone), g.op('Constant', value_t=torch.tensor(0.5, dtype=torch.double)))
 
 @parse_args('v', 'i', 'v', 'v', 'f', 'i')
 def group_norm(g, input, num_groups, weight, bias, eps, cudnn_enabled):
