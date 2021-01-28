@@ -11,7 +11,6 @@ using namespace torch::jit;
 
 namespace {
 
-
 struct DefaultArgs : torch::CustomClassHolder {
   int x;
   DefaultArgs(int64_t start = 3) : x(start) {}
