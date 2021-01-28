@@ -52,8 +52,6 @@ class TORCH_API PytorchLLVMJIT {
 
   JITSymbol findSymbol(const std::string Name);
 
-  bool hasSymbol(const std::string& Name);
-
   TargetMachine& getTargetMachine();
 
   const DataLayout& getDataLayout();
