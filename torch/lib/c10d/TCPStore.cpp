@@ -16,7 +16,7 @@ namespace c10d {
 
 namespace {
 
-enum class QueryType : uint8_t { SET, GET, ADD, CHECK, WAIT, GETNUMKEYS, DELETE_KEY };
+enum class QueryType : uint8_t { SET, COMPARE_AND_SET, GET, ADD, CHECK, WAIT, GETNUMKEYS, DELETE_KEY };
 
 enum class CheckResponseType : uint8_t { READY, NOT_READY };
 
@@ -116,6 +116,9 @@ void TCPStoreDaemon::query(int socket) {
   if (qt == QueryType::SET) {
     setHandler(socket);
 
+  } else if (qt == QueryType::COMPARE_AND_SET) {
+    compareAndSetHandler(socket);
+
   } else if (qt == QueryType::ADD) {
     addHandler(socket);
 
@@ -157,6 +160,12 @@ void TCPStoreDaemon::setHandler(int socket) {
   tcpStore_[key] = tcputil::recvVector<uint8_t>(socket);
   // On "set", wake up all clients that have been waiting
   wakeupWaitingClients(key);
+}
+
+void TCPStoreDaemon::compareAndSetHandler(int socket) {
+  std::string key = tcputil::recvString(socket);
+  std::vector<uint8_t> data1 = tcputil::recvVector<uint8_t>(socket);
+  std::vector<uint8_t> data2 = tcputil::recvVector<uint8_t>(socket);
 }
 
 void TCPStoreDaemon::addHandler(int socket) {
@@ -433,6 +442,14 @@ void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {
   tcputil::sendValue<QueryType>(storeSocket_, QueryType::SET);
   tcputil::sendString(storeSocket_, regKey, true);
   tcputil::sendVector<uint8_t>(storeSocket_, data);
+}
+
+void TCPStore::compareAndSet(const std::string& key, const std::vector<uint8_t>& newData, const std::vector<uint8_t>& oldData) {
+  std::string regKey = regularPrefix_ + key;
+  tcputil::sendValue<QueryType>(storeSocket_, QueryType::COMPARE_AND_SET);
+  tcputil::sendString(storeSocket_, regKey, true);
+  tcputil::sendVector<uint8_t>(storeSocket_, newData);
+  tcputil::sendVector<uint8_t>(storeSocket_, oldData);
 }
 
 std::vector<uint8_t> TCPStore::get(const std::string& key) {

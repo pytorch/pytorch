@@ -29,6 +29,7 @@ class TCPStoreDaemon {
   void query(int socket);
 
   void setHandler(int socket);
+  void compareAndSetHandler(int socket);
   void addHandler(int socket);
   void getHandler(int socket) const;
   void checkHandler(int socket) const;
@@ -73,6 +74,8 @@ class TCPStore : public Store {
   virtual ~TCPStore();
 
   void set(const std::string& key, const std::vector<uint8_t>& value) override;
+
+  void compareAndSet(const std::string& key, const std::vector<uint8_t>& newValue, const std::vector<uint8_t>& oldValue);
 
   std::vector<uint8_t> get(const std::string& key) override;
 
