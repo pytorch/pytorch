@@ -14,6 +14,12 @@
 #include <ATen/cuda/CUDAMultiStreamGuard.h>
 #endif
 
+#if TENSORPIPE_HAS_SHM_TRANSPORT
+// Needed for ::getpid(), which is used to create a unique address.
+#include <sys/types.h>
+#include <unistd.h>
+#endif
+
 namespace torch {
 namespace distributed {
 namespace rpc {
@@ -32,6 +38,42 @@ const std::string kNumIdleThreads = "agent.num_idle_threads";
 const std::string kClientActiveCalls = "agent.client_active_calls";
 const std::string kServerActiveCalls = "agent.server_active_calls";
 const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
+
+std::vector<c10::DeviceIndex> getDevicesForTensors(
+    const std::vector<torch::Tensor>& tensors,
+    const tensorpipe::DeviceMap& deviceMap,
+    const std::string& remoteName) {
+  // If the deviceMap is overridden, use that instead.
+  const auto errStr = c10::str(
+      "TensorPipe RPC backend only supports CPU tensors by default, please "
+      "move your tensors to CPU before sending them over RPC, or call "
+      "`set_device_map` on `TensorPipeRpcBackendOptions` to explicitly "
+      "configure device mapping. ",
+      "Request device mapping is not available for destination ",
+      remoteName);
+  std::vector<c10::DeviceIndex> deviceIndices;
+  deviceIndices.reserve(tensors.size());
+  bool hasCudaTensor = false;
+  for (const auto& t : tensors) {
+    if (t.device().is_cpu()) {
+      deviceIndices.push_back(-1);
+    } else {
+      const auto deviceIter = deviceMap.find(t.device().index());
+      TORCH_CHECK(
+          deviceIter != deviceMap.end(),
+          errStr,
+          " for device ",
+          t.device(),
+          " but received a tensor on that device.");
+      deviceIndices.push_back(deviceIter->second);
+      hasCudaTensor = true;
+    }
+  }
+  if (!hasCudaTensor) {
+    deviceIndices.clear();
+  }
+  return deviceIndices;
+}
 
 } // namespace
 
@@ -569,7 +611,9 @@ void TensorPipeAgent::pipeWrite(
     Message&& rpcMessage,
     std::vector<c10::DeviceIndex>&& devices,
     std::shared_ptr<LazyStreamContext> ctx,
-    std::function<void(const tensorpipe::Error&)> fn) noexcept {
+    std::function<void(const tensorpipe::Error&)> fn,
+    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>&
+        deviceMap) noexcept {
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers tpBuffers;
 
@@ -609,7 +653,7 @@ void TensorPipeAgent::sendCompletedResponseMessage(
     responseMessage.setId(messageId);
     std::vector<c10::DeviceIndex> devices;
     try {
-      devices = getDevicesForTensors(pipe->getRemoteName(), responseMessage);
+      devices = getDevicesForRemote(pipe->getRemoteName(), responseMessage);
     } catch (const std::exception& e) {
       responseMessage = createExceptionResponse(e.what(), messageId);
     }
@@ -743,7 +787,8 @@ void TensorPipeAgent::respond(std::shared_ptr<tensorpipe::Pipe>& pipe) {
 std::shared_ptr<JitFuture> TensorPipeAgent::send(
     const WorkerInfo& toWorkerInfo,
     Message&& requestMessage,
-    const float rpcTimeoutSeconds) {
+    const float rpcTimeoutSeconds,
+    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap) {
   TORCH_CHECK(
       requestMessage.isRequest(),
       "TensorPipeAgent::send(..) is only for sending requests.");
@@ -783,8 +828,15 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
 
   // Get devices for tensors in the request message. This can throw if device
   // maps are not configured properly for this request.
-  auto devices =
-      getDevicesForTensors(clientPipe.pipe_->getRemoteName(), requestMessage);
+  std::vector<c10::DeviceIndex> devices;
+  if (deviceMap.empty()) {
+    devices =
+        getDevicesForRemote(clientPipe.pipe_->getRemoteName(), requestMessage);
+  } else {
+    // If deviceMap is specified, use that instead.
+    devices = getDevicesForTensors(
+        requestMessage.tensors(), deviceMap, clientPipe.pipe_->getRemoteName());
+  }
 
   futureResponseMessage->jitFuture->addCallback([this]() {
     TORCH_INTERNAL_ASSERT(
@@ -928,7 +980,8 @@ std::shared_ptr<JitFuture> TensorPipeAgent::send(
                     std::move(ctx));
               }
             });
-      });
+      },
+      deviceMap);
 
   return futureResponseMessage->jitFuture;
 }
@@ -1218,7 +1271,7 @@ void TensorPipeAgent::markFutureWithError(
   }
 }
 
-std::vector<c10::DeviceIndex> TensorPipeAgent::getDevicesForTensors(
+std::vector<c10::DeviceIndex> TensorPipeAgent::getDevicesForRemote(
     const std::string& remoteName,
     const Message& message) const {
   const auto& deviceMaps =
@@ -1244,30 +1297,16 @@ std::vector<c10::DeviceIndex> TensorPipeAgent::getDevicesForTensors(
     }
     return {};
   } else {
-    std::vector<c10::DeviceIndex> deviceIndices;
-    deviceIndices.reserve(message.tensors().size());
-    const auto& deviceMap = iter->second;
-    bool hasCudaTensor = false;
-    for (const auto& t : message.tensors()) {
-      if (t.device().is_cpu()) {
-        deviceIndices.push_back(-1);
-      } else {
-        const auto deviceIter = deviceMap.find(t.device().index());
-        TORCH_CHECK(
-            deviceIter != deviceMap.end(),
-            errStr,
-            " for device ",
-            t.device(),
-            " but received a tensor on that device.");
-        deviceIndices.push_back(deviceIter->second);
-        hasCudaTensor = true;
-      }
-    }
-    if (!hasCudaTensor) {
-      deviceIndices.clear();
-    }
-    return deviceIndices;
+    return getDevicesForTensors(message.tensors(), iter->second, errStr);
   }
+}
+
+tensorpipe::DeviceMap TensorPipeAgent::getDeviceMap(const WorkerInfo& dest) {
+  auto it = opts_.deviceMaps.find(dest.name_);
+  if (it == opts_.deviceMaps.end()) {
+    return {};
+  }
+  return it->second;
 }
 
 size_t TensorPipeAgent::timeoutMapSize() {

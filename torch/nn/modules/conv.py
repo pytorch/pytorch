@@ -1020,7 +1020,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
         # has_uninitialized_params is defined in parent class and it is using a protocol on self
         if not self.has_uninitialized_params() and self.in_channels != 0:  # type: ignore[misc]
             # "type:ignore[..]" is required because mypy thinks that "reset_parameters" is undefined
-            # super class. Turns out that it is defined in _ConvND which is inherited by any class
+            # in super class. Turns out that it is defined in _ConvND which is inherited by any class
             # that also inherits _LazyConvXdMixin
             super().reset_parameters()  # type: ignore[misc]
 
@@ -1031,6 +1031,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
             self.in_channels = input.shape[1]
             if self.in_channels % self.groups != 0:
                 raise ValueError('in_channels must be divisible by groups')
+            assert isinstance(self.weight, UninitializedParameter)
             if self.transposed:
                 self.weight.materialize((
                     self.in_channels, self.out_channels // self.groups, *self.kernel_size))
