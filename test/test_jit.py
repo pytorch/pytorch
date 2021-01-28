@@ -23,6 +23,7 @@ from jit.test_freezing import TestFreezing, TestFrozenOptimizations  # noqa: F40
 from jit.test_peephole import TestPeephole  # noqa: F401
 from jit.test_save_load import TestSaveLoad  # noqa: F401
 from jit.test_module_containers import TestModuleContainers  # noqa: F401
+from jit.test_python_bindings import TestPythonBindings  # noqa: F401
 from jit.test_python_ir import TestPythonIr  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_remove_mutation import TestRemoveMutation  # noqa: F401
@@ -34,6 +35,7 @@ from jit.test_enum import TestEnum  # noqa: F401
 from jit.test_string_formatting import TestStringFormatting  # noqa: F401
 from jit.test_profiler import TestProfiler  # noqa: F401
 from jit.test_slice import TestSlice  # noqa: F401
+from jit.test_hooks import TestHooks  # noqa: F401
 from jit.test_warn import TestWarn  # noqa: F401
 from jit.test_isinstance import TestIsinstance  # noqa: F401
 from jit.test_cuda import TestCUDA  # noqa: F401
@@ -63,7 +65,7 @@ from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WIT
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
-    _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, \
+    _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, make_global, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
     RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, nn_functional_tests, get_script_args, \
@@ -6607,8 +6609,6 @@ a")
                    .check("in foo").check("in baz").run(str(cm.exception))
 
     def test_error_stacktrace_interface(self):
-        global IFace
-
         @torch.jit.script
         def baz(c, b):
             return c + b
@@ -6631,6 +6631,8 @@ a")
             def one(self, x, y):
                 # type: (Tensor, Tensor) -> Tensor
                 pass
+
+        make_global(IFace)
 
         @torch.jit.script
         def as_interface(x):
@@ -15680,7 +15682,7 @@ def add_autograd_test(
                 def fn(*inputs, **kwargs):
                     attr = getattr(inputs[0], name)
                     output = attr(*inputs[1:], **kwargs)
-                    return output_process_fn(output)
+                    return output
 
                 check_types = test_name not in EXCLUDE_TYPE_CHECK
                 # XXX: this test should always run with disable_autodiff_subgraph_inlining(True),
@@ -15696,7 +15698,7 @@ def add_autograd_test(
                             traced_fn = create_traced_fn(self, fn)
 
                             check_against_reference(self, traced_fn,
-                                                    fn, (self_variable,) + args_variable, kwargs_variable,
+                                                    fn, output_process_fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
                             if IS_SANDCASTLE:
                                 autodiff_nodes = autodiff_nodes + fusible_nodes
@@ -15706,9 +15708,9 @@ def add_autograd_test(
                                 self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
                         if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
-                            script_fn = create_script_fn(self, name, 'method', output_process_fn)
+                            script_fn = create_script_fn(self, name, 'method')
                             check_against_reference(self, script_fn,
-                                                    fn, (self_variable,) + args_variable, kwargs_variable,
+                                                    fn, output_process_fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
 
                             if IS_SANDCASTLE:
@@ -15723,21 +15725,20 @@ def add_autograd_test(
                     # functional interface tests
                     if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
                         def fn(*inputs, **kwargs):
-                            output = getattr(torch, name)(*inputs, **kwargs)
-                            return output_process_fn(output)
+                            return getattr(torch, name)(*inputs, **kwargs)
 
                         f_args_variable = (self_variable,) + args_variable
                         f_args_tensor = (self_tensor,) + args_tensor
 
                         if not is_inplace and test_name not in EXCLUDE_TRACED:
                             check_against_reference(self,
-                                                    create_traced_fn(self, fn),
-                                                    fn, f_args_variable, kwargs_variable, check_types=check_types)
+                                                    create_traced_fn(self, fn), fn, output_process_fn,
+                                                    f_args_variable, kwargs_variable, check_types=check_types)
 
                         if not is_inplace and test_name not in EXCLUDE_SCRIPT:
                             check_against_reference(self,
-                                                    create_script_fn(self, name, 'functional', output_process_fn),
-                                                    fn, f_args_variable, kwargs_variable,
+                                                    create_script_fn(self, name, 'functional'),
+                                                    fn, output_process_fn, f_args_variable, kwargs_variable,
                                                     check_types=check_types)
 
                 # alias annotation testing
@@ -15779,8 +15780,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
             output_variable = getattr(F, name)(self_variable, *args_variable, **kwargs_variable)
 
         def fn(*inputs, **kwargs):
-            output = getattr(F, name)(*inputs, **kwargs)
-            return output_process_fn(output)
+            return getattr(F, name)(*inputs, **kwargs)
 
         f_args_variable = (self_variable,) + args_variable
         f_args_tensor = (self_tensor,) + args_tensor
@@ -15791,8 +15791,9 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
                 # XXX: this test should always run with disable_autodiff_subgraph_inlining(True),
                 #      so that we don't regress on autodiff support.
                 with disable_autodiff_subgraph_inlining():
-                    script_fn = create_script_fn(self, name, 'nn_functional', output_process_fn)
-                    check_against_reference(self, script_fn, fn, f_args_variable, kwargs_variable, no_grad=no_grad)
+                    script_fn = create_script_fn(self, name, 'nn_functional')
+                    check_against_reference(self, script_fn, fn, output_process_fn, 
+                                            f_args_variable, kwargs_variable, no_grad=no_grad)
                     # For tests we disabled AD subgraph inlining, make sure it's not falling back to autograd
                     if (doAutodiffCheck(test_name)):
                         self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
@@ -15884,8 +15885,14 @@ def add_nn_module_test(*args, **kwargs):
             return module(*args)
 
         # Set up inputs from tuple of sizes or constructor fn
+        dtype = torch.double
         if 'input_fn' in kwargs:
             input = kwargs['input_fn']()
+            if isinstance(input, Tensor):
+                input = (input,)
+
+            if all(tensor.is_complex() for tensor in input):
+                dtype = torch.cdouble
         else:
             input = (kwargs['input_size'],)
 
@@ -15902,11 +15909,12 @@ def add_nn_module_test(*args, **kwargs):
         if 'extra_args' in kwargs:
             input = input + kwargs['extra_args']
 
-        args_variable, kwargs_variable = create_input(input)
+        args_variable, kwargs_variable = create_input(input, dtype=dtype)
         f_args_variable = deepcopy(unpack_variables(args_variable))
 
         # Check against Python module as reference
-        check_against_reference(self, create_script_module, create_nn_module, f_args_variable, no_grad=no_grad)
+        check_against_reference(self, create_script_module, create_nn_module, 
+                                lambda x: x, f_args_variable, no_grad=no_grad)
 
     if 'slowTest' in kwargs:
         do_test = slowTest(do_test)

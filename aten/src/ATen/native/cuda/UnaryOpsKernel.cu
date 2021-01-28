@@ -6,6 +6,7 @@
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
+#include <ATen/native/Math.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -109,7 +110,8 @@ void sinc_kernel_cuda(TensorIterator& iter) {
       if (a == scalar_t(0)) {
         return scalar_t(1);
       } else {
-        scalar_t product = scalar_t(M_PI) * a;
+        // NVCC says constexpr var is not accessible from device
+        scalar_t product = c10::detail::pi<scalar_t>() * a;
         return std::sin(product) / product;
       }
     });
