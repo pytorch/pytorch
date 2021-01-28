@@ -52,6 +52,34 @@ def nll_loss2d(g, self, target, weight, reduction, ignore_index):
     return nll_loss(g, self, target, weight, reduction, ignore_index)
 
 
+@parse_args('v', 'v', 'v', 'v', 'i')
+def binary_cross_entropy_with_logits(g, input, target, weight, pos_weight, reduction):
+    from torch.onnx.symbolic_opset9 import sigmoid, log, sub, neg, mul, add
+    p = g.op("Constant", value_t=torch.tensor([1]))
+    sig_x = sigmoid(g, input)
+    log_sig_x = log(g, sig_x)
+    sub_1_x = sub(g, p, sig_x)
+    sub_1_y = sub(g, p, target)
+    log_1_x = log(g, sub_1_x)
+    if pos_weight is None or sym_help._is_none(pos_weight):
+        output = neg(g, add(g, mul(g, target, log_sig_x), mul(g, sub_1_y, log_1_x)))
+    else:
+        output = neg(g, add(g, mul(g, mul(g, target, log_sig_x), pos_weight), mul(g, sub_1_y, log_1_x)))
+
+    if weight is not None and not sym_help._is_none(weight):
+        output = mul(g, weight, output)
+
+    reduction = sym_help._maybe_get_const(reduction, 'i')
+    if reduction == 0:
+        return output
+    elif reduction == 1:
+        return g.op("ReduceMean", output)
+    elif reduction == 2:
+        return g.op("ReduceSum", output)
+    else:
+        return sym_help._onnx_unsupported("binary_cross_entropy_with_logits with reduction other than none, mean, or sum")
+
+
 def celu(g, self, alpha):
     alpha = sym_help._maybe_get_const(alpha, 'f')
     # if the input is of type double cast it to float
@@ -132,11 +160,11 @@ def unfold(g, input, dimension, size, step):
         starts = loop_block.op("Gather", low_indices, block_input_iter)
         ends = loop_block.op("Gather", hi_indices, block_input_iter)
         axes = loop_block.op("Constant", value_t=torch.tensor([2]))
-        starts = loop_block.op("Unsqueeze", starts, axes_i=[0])
-        ends = loop_block.op("Unsqueeze", ends, axes_i=[0])
+        starts = sym_help._unsqueeze_helper(loop_block, starts, [0])
+        ends = sym_help._unsqueeze_helper(loop_block, ends, [0])
         stack = loop_block.op("Slice", input, starts, ends, axes)
 
-        unsqueeze = loop_block.op("Unsqueeze", loop_block.op("Transpose", stack, perm_i=perm), axes_i=[dimension])
+        unsqueeze = sym_help._unsqueeze_helper(loop_block, loop_block.op("Transpose", stack, perm_i=perm), [dimension])
         unsqueeze_list.append(unsqueeze)
         concat = loop_block.op("Concat", *unsqueeze_list, axis_i=0)
 
@@ -148,7 +176,7 @@ def unfold(g, input, dimension, size, step):
         perm = [0, 1, 2, 3, 4]
         perm[0], perm[dimension + 1] = perm[dimension + 1], perm[0]
         transpose = g.op("Transpose", loop_output, perm_i=perm)
-        squeeze = g.op("Squeeze", transpose, axes_i=[0])
+        squeeze = sym_help._squeeze_helper(g, transpose, [0])
 
         return squeeze
     else:
