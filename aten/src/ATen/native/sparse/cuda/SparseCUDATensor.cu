@@ -217,16 +217,20 @@ Tensor sparse_mask_helper_cuda(
   auto full_size = t.sizes();
   auto vsize = t_values.sizes().vec();
   vsize[0] = r_nnz;
-  Tensor r_values = at::zeros({vsize}, t_values.options());
 
+ 
+  if (t.sparse_dim() == 0) {
+    Tensor t_values_expand = t_values;
+    t_values_expand = t_values_expand.expand(vsize).clone(at::MemoryFormat::Contiguous);
+    return t_values_expand;
+  } 
+  Tensor r_values = at::zeros({vsize}, t_values.options());
   auto t_indices = t._indices().contiguous();
   auto t_nnz = t._nnz();
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
-
-  auto t_n_cols = t.size(1);
 
   // Step 1: flatten the sparse indices `t._indices()` tensor into a 1D indices
   // tensor `t_flatten_indices`.
@@ -251,7 +255,7 @@ Tensor sparse_mask_helper_cuda(
       t_indices_pos.data_ptr<int64_t>());
 
   // Step 4: Copy the Filtered `t._values()` using the matches at `t_indices_pos`
-  if (r_nnz > 0) {
+  if (r_nnz > 0 && t_values.numel() > 0) {
     const dim3 block = dim3(
         std::min(static_cast<int64_t>(cuda::getApplyBlock().x), r_nnz));
     dim3 grid;

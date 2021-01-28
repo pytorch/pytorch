@@ -2906,7 +2906,7 @@ Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
 }
 
 Tensor sparse_constructor_values_backward(const Tensor& sparse_grad_out, const Tensor& indices) {
-  return _sparse_mask_helper(sparse_grad_out, indices.contiguous());
+  return _sparse_mask_helper(sparse_grad_out.coalesce(), indices.contiguous());
 }
 
 // Because the backward of pad(input, pads) is just pad(grad_output, [-p for p in pads])
