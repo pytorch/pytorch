@@ -870,6 +870,11 @@ def skipCPUIfNoMkl(fn):
 def skipCUDAIfNoMagma(fn):
     return skipCUDAIf('no_magma', "no MAGMA library detected")(skipCUDANonDefaultStreamIf(True)(fn))
 
+def skipCUDAIfNoCusolver(fn):
+    # TODO: there should be torch.cuda.has_cusolver
+    version = _get_torch_cuda_version()
+    return skipCUDAIf(version < [10, 2], "PyTorch compiled without cuSOLVER")(skipCUDANonDefaultStreamIf(True)(fn))
+
 def skipCUDAIfNoMagmaAndNoCusolver(fn):
     version = _get_torch_cuda_version()
     if version >= [10, 2]:

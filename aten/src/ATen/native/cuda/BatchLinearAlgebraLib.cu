@@ -10,6 +10,7 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
 
+#include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/cuda/BatchLinearAlgebraLib.h>
@@ -295,6 +296,82 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_lib(const Tensor& self, bool
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
 
+/*
+  The orgqr function allows reconstruction of an orthogonal (or unitary) matrix Q,
+  from a sequence of elementary reflectors, such as produced by the geqrf function.
+
+  Args:
+  * `self` - Tensor with the directions of the elementary reflectors below the diagonal,
+              it will be overwritten with the result
+  * `tau` - Tensor containing the magnitudes of the elementary reflectors
+  * `infos` - Tensor to store cuSOLVER's error codes
+  * `n_columns` - The number of columns of Q to be computed
+
+  For further details, please see the cuSOLVER documentation for ORGQR and UNGQR.
+*/
+template <typename scalar_t>
+inline void apply_orgqr_cusolver(Tensor& self, const Tensor& tau, Tensor& infos, int64_t n_columns) {
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+  auto self_data = self.data_ptr<scalar_t>();
+  auto tau_data = tau.data_ptr<scalar_t>();
+  auto infos_data = infos.data_ptr<int>();
+  auto self_matrix_stride = matrixStride(self);
+  auto batchsize = cuda_int_cast(batchCount(self), "batch size");
+  auto m = cuda_int_cast(self.size(-2), "m");
+  auto n = cuda_int_cast(n_columns, "n");
+  auto k = cuda_int_cast(tau.size(-1), "m");
+  auto tau_stride = std::max<int>(1, n);
+  auto lda = std::max<int>(1, m);
+
+  // LAPACK's requirement
+  TORCH_INTERNAL_ASSERT(m >= n);
+  TORCH_INTERNAL_ASSERT(n >= k);
+
+  // get the optimal work size and allocate workspace tensor
+  int lwork;
+  at::cuda::solver::orgqr_buffersize<scalar_t>(
+    at::cuda::getCurrentCUDASolverDnHandle(), m, n, k, self_data, lda, tau_data, &lwork);
+  Tensor work = at::empty({lwork}, self.options());
+  auto work_data = work.data_ptr<scalar_t>();
+
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
+  for (int i = 0; i < batchsize; i++) {
+    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+    scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
+    int* info_working_ptr = &infos_data[i];
+    at::cuda::solver::orgqr<scalar_t>(
+      handle, m, n, k,
+      self_working_ptr,
+      lda,
+      tau_working_ptr,
+      work_data,
+      lwork,
+      info_working_ptr
+    );
+  }
+}
+
 }} // namespace at::native
 
 #endif  // USE_CUSOLVER
+
+namespace at {
+namespace native {
+
+// This is a type dispatching helper function for 'apply_orgqr'
+Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns) {
+#ifdef USE_CUSOLVER
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "orgqr_cuda", [&]{
+    apply_orgqr_cusolver<scalar_t>(result, tau, infos, n_columns);
+  });
+  return result;
+#else
+  TORCH_CHECK(false, "Calling torch.orgqr on a CUDA tensor requires compiling ",
+    "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER support.");
+#endif
+}
+
+REGISTER_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
+
+}} // namespace at::native
