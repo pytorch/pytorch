@@ -152,13 +152,6 @@ Tensor& add_sparse_csr_(Tensor& self, const Tensor& other, Scalar alpha) {
   return at::add_out(self, self, other, alpha);  // redispatch!
 }
 
-int32_t csr_to_strided_index_convert(int32_t irow, int32_t icol, Tensor& out,
-                                     const SparseTensor& src) {
-  int32_t index = out.storage_offset();
-  index += irow * out.strides()[0] + icol * out.strides()[1];
-  return index;
-}
-
 Tensor& add_out_dense_sparse_csr_cpu(Tensor& out, const Tensor& dense,
                                      const SparseTensor& src, Scalar alpha) {
   AT_ASSERT(dense.layout() == kStrided);
@@ -202,10 +195,12 @@ Tensor& add_out_dense_sparse_csr_cpu(Tensor& out, const Tensor& dense,
     for (int32_t irow = 0; irow < src_crow_indices.size(0)-1; ++irow) {
       int32_t start_index = crow_indices_accessor[irow];
       int32_t end_index = crow_indices_accessor[irow + 1];
+      auto out_strides0 = out.strides()[0];
+      auto out_strides1 = out.strides()[1];
 
       for (int i = start_index; i < end_index; ++i) {
         auto icol = col_indices_accessor[i];
-        auto index = csr_to_strided_index_convert(irow, icol, out, src);
+        auto index = out.storage_offset() + irow * out_strides0 + icol * out_strides1;
         out_ptr[index] += cast_value * values_accessor[i];
       }
     }
