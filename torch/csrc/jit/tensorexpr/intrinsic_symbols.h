@@ -1,5 +1,6 @@
 #pragma once
 
+#ifdef TORCH_ENABLE_LLVM
 #include <c10/util/ArrayRef.h>
 
 namespace torch {
@@ -18,3 +19,4 @@ c10::ArrayRef<SymbolAddress> getIntrinsicSymbols();
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
+#endif // TORCH_ENABLE_LLVM
