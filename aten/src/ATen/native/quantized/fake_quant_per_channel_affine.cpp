@@ -12,6 +12,7 @@ namespace native {
 // Use REGISTER_DISPATCH to run CPU and CUDA backend.
 DEFINE_DISPATCH(fake_quant_per_channel_stub);
 DEFINE_DISPATCH(fake_quant_grad_per_channel_stub);
+DEFINE_DISPATCH(fake_quant_per_channel_cachemask_stub);
 DEFINE_DISPATCH(fake_quant_grad_learnable_channel_stub);
 
 /* Per channel fake-quantizes the 'inputs' tensor.
@@ -79,6 +80,96 @@ Tensor fake_quantize_per_channel_affine(
   fake_quant_per_channel_stub(iter.device_type(), iter, quant_min, quant_max);
 
   return Y;
+}
+
+std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
+    const Tensor& self,
+    const Tensor& scale,
+    const Tensor& zero_point,
+    int64_t axis,
+    int64_t quant_min,
+    int64_t quant_max) {
+  TORCH_CHECK(self.scalar_type() == ScalarType::Float);
+  TORCH_CHECK(scale.scalar_type() == ScalarType::Float,
+              "Scale must be Float, found ", scale.scalar_type());
+  TORCH_CHECK(zero_point.scalar_type() == ScalarType::Long,
+              "Zero-point must be Long, found ", zero_point.scalar_type());
+  TORCH_CHECK(scale.dim() == 1, "scale should be a 1-D tensor");
+  TORCH_CHECK(zero_point.dim() == 1, "zero point should be a 1-D tensor");
+  TORCH_CHECK(
+      scale.numel() == zero_point.numel(),
+      "scale and zero-point need to have the same dimensions");
+  TORCH_CHECK(
+      scale.numel() == self.size(axis),
+      "dimensions of scale and zero-point are not consistent with input tensor")
+
+  TORCH_CHECK(
+      quant_min <= quant_max,
+      "`quant_min` should be less than or \
+        equal to `quant_max`.");
+
+  TORCH_CHECK(
+      at::min(zero_point).item().toLong() >= quant_min &&
+          at::max(zero_point).item().toLong() <= quant_max,
+      "`zero_point` must be between `quant_min` and `quant_max`.");
+
+  TORCH_CHECK(
+      axis >= 0 && axis <= self.dim(),
+      "`axis` must be between 0 and number of dimensions of input");
+
+  auto Y = at::empty_like(self, self.options(), MemoryFormat::Preserve);
+  auto mask = at::empty_like(self, at::kBool, MemoryFormat::Preserve);
+
+  std::vector<int64_t> expected_shape(self.dim(), 1);
+  expected_shape[axis] = self.size(axis);
+
+  TensorIterator iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(Y)
+    .add_input(self)
+    .add_input(native::_unsafe_view(scale, expected_shape))
+    .add_input(native::_unsafe_view(zero_point, expected_shape))
+    .build();
+
+  // TODO(future, optional): read once, write twice.  Not done at the moment
+  //   for simplicity, as we do not expect this to be a bottleneck.
+  TensorIterator iter_mask = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(mask)
+    .add_input(self)
+    .add_input(native::_unsafe_view(scale, expected_shape))
+    .add_input(native::_unsafe_view(zero_point, expected_shape))
+    .build();
+
+  // TODO(future, optional): look into packing the mask further (BoolTensor uses
+  //   1 byte per element, we only need 1 bit per element).
+  fake_quant_per_channel_cachemask_stub(iter.device_type(), iter, iter_mask, quant_min, quant_max);
+  return std::make_tuple(Y, mask);
+}
+
+/* Backward path to fake-quantize the 'inputs' tensor per channel, with mask.
+
+Args:
+  dY: output grad.
+  mask: mask tensor from the forward pass.
+
+Returns:
+  dX (input grad).
+*/
+Tensor fake_quantize_per_channel_affine_cachemask_backward(
+    const Tensor& dY,
+    const Tensor& mask) {
+  TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
+  TORCH_CHECK(mask.scalar_type() == ScalarType::Bool);
+  TORCH_CHECK(mask.numel() == dY.numel(),
+      "`mask` and `dY` are not the same size: ",
+      "`mask` is size ", mask.numel(), " and `dY` is size ", dY.numel());
+  if (dY.numel() <= 0) {
+    return dY;
+  }
+  // Note: no additional kernels needed, since mask is pre-computed
+  // and we can use the existing tensor multiplication kernels.
+  return dY * mask;
 }
 
 /* Backward path for per-channel fake-quantization of the 'inputs' tensor.

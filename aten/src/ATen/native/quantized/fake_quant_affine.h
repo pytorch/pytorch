@@ -34,8 +34,15 @@ using fake_quant_per_channel_fn = void (*)(
     int64_t quant_min,
     int64_t quant_max);
 
+using fake_quant_per_channel_cachemask_fn = void (*)(
+    TensorIterator &iter,
+    TensorIterator &iter_mask,
+    int64_t quant_min,
+    int64_t quant_max);
+
 DECLARE_DISPATCH(fake_quant_per_channel_fn, fake_quant_per_channel_stub);
 DECLARE_DISPATCH(fake_quant_per_channel_fn, fake_quant_grad_per_channel_stub);
+DECLARE_DISPATCH(fake_quant_per_channel_cachemask_fn, fake_quant_per_channel_cachemask_stub);
 DECLARE_DISPATCH(fake_quant_per_channel_fn, fake_quant_grad_learnable_channel_stub);
 
 } // namespace native
