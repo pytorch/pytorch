@@ -21,23 +21,4 @@ TORCH_CUDA_CU_API void THCTensor_(maskedFillByte)(
     THByteTensor* mask,
     scalar_t value);
 
-TORCH_CUDA_CU_API void THCTensor_(maskedCopy)(
-    THCState* state,
-    THCTensor* tensor,
-    THCudaByteTensor* mask,
-    THCTensor* src);
-
-TORCH_CUDA_CU_API void THCTensor_(maskedCopyBool)(
-    THCState* state,
-    THCTensor* tensor,
-    THCudaBoolTensor* mask,
-    THCTensor* src);
-
-// FIXME: remove now that we have THCudaByteTensor?
-TORCH_CUDA_CU_API void THCTensor_(maskedCopyByte)(
-    THCState* state,
-    THCTensor* tensor,
-    THByteTensor* mask,
-    THCTensor* src);
-
 #endif
