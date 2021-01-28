@@ -193,13 +193,25 @@ def print_regressions(obj, *, n, stdev_threshold):
         encoding="ascii",
     ).strip()
 
+    count_spec = f"{base}..{sha1}"
+    intermediate_commits = int(subprocess.check_output(
+        ["git", "rev-list", "--count", count_spec],
+        encoding="ascii"
+    ))
+    ancestry_path = int(subprocess.check_output(
+        ["git", "rev-list", "--ancestry-path", "--count", count_spec],
+        encoding="ascii",
+    ))
+
     # if current commit is already on master, we need to exclude it from
     # this history; otherwise we include the merge-base
     commits = subprocess.check_output(
         ["git", "rev-list", f"--max-count={n+1}", base],
         encoding="ascii",
     ).splitlines()
+    on_master = False
     if base == sha1:
+        on_master = True
         commits = commits[1:]
     else:
         commits = commits[:-1]
@@ -223,10 +235,14 @@ def print_regressions(obj, *, n, stdev_threshold):
 
     print()
     print(stats_utils.regression_info(
-        sha1,
-        obj,
-        objects,
+        head_sha=sha1,
+        head_report=obj,
+        base_reports=objects,
         stdev_threshold=stdev_threshold,
+        job_name=job,
+        on_master=on_master,
+        ancestry_path=ancestry_path - 1,
+        other_ancestors=intermediate_commits - ancestry_path,
     ), end="")
 
 def positive_integer(value):
