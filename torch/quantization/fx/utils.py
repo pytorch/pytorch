@@ -9,7 +9,8 @@ from torch.fx.graph import (
     Node,
 )
 
-from typing import Callable, Optional, List, Dict, Any, Set
+from typing import Callable, Optional, List, Dict, Any, Set, Tuple
+from .quantization_types import QuantizerCls
 
 # turn foo.bar -> ['foo', 'bar']
 def _parent_name(target):
@@ -185,6 +186,8 @@ def get_linear_prepack_op_for_dtype(dtype):
 # >> new_name = get_new_observer_name(module)
 # new_name will be an unused attribute name on module, e.g. `_observer_1`
 def get_new_attr_name_with_prefix(prefix: str) -> Callable:
+    prefix = prefix.replace(".", "_")
+
     def get_new_attr_name(module: torch.nn.Module):
         def get_attr_name(i: int):
             return prefix + str(i)
@@ -260,3 +263,26 @@ def assert_and_get_unique_device(module: torch.nn.Module) -> Any:
     )
     device = next(iter(devices)) if len(devices) > 0 else None
     return device
+
+def create_getattr_from_value(module: GraphModule, graph: Graph, prefix: str, value: Any) -> Node:
+    """
+    Given a value of any type, creates a getattr node corresponding to the value and
+    registers the value as a buffer to the module.
+    """
+    get_new_attr_name = get_new_attr_name_with_prefix(prefix)
+    attr_name = get_new_attr_name(module)
+    module.register_buffer(attr_name, torch.tensor(value))
+    # Create get_attr with value
+    attr_node = graph.create_node("get_attr", attr_name)
+    return attr_node
+
+def create_qparam_nodes(quantizer: QuantizerCls, node_name: str, scale: Any, zero_point: Any) -> Tuple[Node, Node]:
+    """
+    Create getattr nodes in the quantizer graph for scale and zero point values.
+    The nodes are registered with the root_module of the model.
+    """
+    root_module = quantizer.modules['']
+    module_path, _ = quantizer.node_name_to_scope[node_name]
+    scale_node = create_getattr_from_value(root_module, quantizer.quantized_graph, (module_path + "_scale_"), scale)
+    zero_point_node = create_getattr_from_value(root_module, quantizer.quantized_graph, (module_path + "_zero_point_"), zero_point)
+    return (scale_node, zero_point_node)
