@@ -401,16 +401,19 @@ we can use ``to_folder``.
     y = Bar()
 
 After running the above example, we can then look at the code within
-``foo/module.py`` and modify it as desired to debug the generated code.
+``foo/module.py`` and modify it as desired (e.g. adding ``print``
+statements or using ``pdb``) to debug the generated code.
 
-Debugging the Transformation
+Debugging Symbolic Tracing
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-First, read the FX
-documentation. Understand the most important classes (:class:`Node`,
-:class:`Graph`, :class:`Proxy`, and :class:`Tracer`), and determine which
-class attributes might give you the best representation of your
-program’s intermediate state.
+Now that we've identified that a transformation is creating incorrect
+code, it's time to debug the transformation itself. Our goal is to
+figure out what went wrong during symbolic tracing. First, we need to
+read the FX documentation. Once we understand the most important classes
+(:class:`Node`, :class:`Graph`, :class:`Proxy`, and :class:`Tracer`), we
+can determine which class attributes might give us the best
+representation of our program’s intermediate state.
 
 There are several ways to examine what ``symbolic_tracing`` produces:
 
