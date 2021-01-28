@@ -3234,7 +3234,6 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.parameter_size, param_size)
             self.assertEqual(ddp_logging_data.num_parameters, num_params)
             self.assertEqual(ddp_logging_data.bucket_sizes, str(param_size) + ", ")
-            self.assertEqual(ddp_logging_data.nccl_version, str(torch.cuda.nccl.version()))
             self.assertEqual(ddp_logging_data.master_port, parse_env("MASTER_PORT"))
             self.assertEqual(ddp_logging_data.master_addr, parse_env("MASTER_ADDR"))
             self.assertEqual(ddp_logging_data.cuda_visible_devices, parse_env("CUDA_VISIBLE_DEVICES"))

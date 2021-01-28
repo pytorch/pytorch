@@ -1197,7 +1197,6 @@ Arguments:
       .def_readwrite("parameter_size", &c10::DDPLoggingData::parameter_size)
       .def_readwrite("num_parameters", &c10::DDPLoggingData::num_parameters)
       .def_readwrite("bucket_sizes", &c10::DDPLoggingData::bucket_sizes)
-      .def_readwrite("nccl_version", &c10::DDPLoggingData::nccl_version)
       .def_readwrite("master_port", &c10::DDPLoggingData::master_port)
       .def_readwrite("master_addr", &c10::DDPLoggingData::master_addr)
       .def_readwrite("cuda_visible_devices", &c10::DDPLoggingData::cuda_visible_devices)

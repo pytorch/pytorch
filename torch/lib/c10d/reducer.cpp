@@ -13,7 +13,6 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
-#include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace c10d {
@@ -1478,7 +1477,6 @@ void Reducer::ensure_prior_reduction_finished() {
 
 void Reducer::set_env_variables() {
   // Environment variables
-  ddp_logging_data_->nccl_version = std::to_string(torch::cuda::nccl::version());
   ddp_logging_data_->master_port = parse_env("MASTER_PORT");
   ddp_logging_data_->master_addr = parse_env("MASTER_ADDR");
   ddp_logging_data_->cuda_visible_devices = parse_env("CUDA_VISIBLE_DEVICES");

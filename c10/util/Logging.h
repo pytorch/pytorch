@@ -327,7 +327,6 @@ struct DDPLoggingData {
 
 
   // Environment variables
-  std::string nccl_version;
   std::string master_port;
   std::string master_addr;
   std::string cuda_visible_devices;
