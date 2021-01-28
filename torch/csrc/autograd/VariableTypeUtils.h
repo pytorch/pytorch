@@ -137,6 +137,8 @@ template<typename... Args> inline variable_list flatten_tensor_args(Args&&... ar
 inline Tensor as_view(const Tensor & base, const Tensor & tensor, bool is_bw_differentiable,
         bool is_fw_differentiable, std::function<Tensor(const Tensor&)> view_func=nullptr,
         CreationMeta creation_meta=CreationMeta::DEFAULT, bool allow_tensor_metadata_change=true) {
+  TORCH_CHECK(!base.unsafeGetTensorImpl()->version_counter().inference_only(),
+          "Tensor created in InferenceOnlyMode cannot participate in autogad of view ops.");
   if (!isForwardADEnabled()) {
     // Fast codepath for backward only code
     // It is useful as it avoids the creation of the temporary c10<optional> which makes

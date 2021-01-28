@@ -73,6 +73,8 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
       device_opt_(device_opt) {
 
   init_bitfields();
+  bool inference_mode = c10::impl::tls_local_dispatch_key_set().excluded_.isSupersetOf(c10::autograd_dispatch_keyset);
+  version_counter_ = VariableVersion(inference_mode ? -1 : 0);
 
   if (!key_set.empty()) {
     TORCH_INTERNAL_ASSERT(data_type == ScalarType::Undefined || device_opt_.has_value());
