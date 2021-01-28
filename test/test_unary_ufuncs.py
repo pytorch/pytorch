@@ -19,7 +19,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU,
     OpDTypes)
 from torch.testing import (
-    floating_types_and, all_types_and_complex_and, floating_types, get_all_complex_dtypes, get_all_fp_dtypes)
+    floating_types_and, all_types_and_complex_and, floating_types)
 
 if TEST_SCIPY:
     import scipy
@@ -331,8 +331,9 @@ class TestUnaryUfuncs(TestCase):
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
-    @ops(unary_ufuncs, allowed_dtypes=(*get_all_fp_dtypes(), *get_all_complex_dtypes(),
-                                       torch.int8, torch.int16, torch.int32, torch.int64))
+    @ops(unary_ufuncs, allowed_dtypes=floating_and_complex_types_and(
+        torch.bfloat16, torch.half, torch.int8, torch.int16, torch.int32, torch.int64
+    ))
     def test_reference_numerics_hard(self, device, dtype, op):
         if not op.handles_large_floats:
             raise self.skipTest("This op does not handle large values")
@@ -342,7 +343,9 @@ class TestUnaryUfuncs(TestCase):
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
-    @ops(unary_ufuncs, allowed_dtypes=(*get_all_fp_dtypes(), *get_all_complex_dtypes()))
+    @ops(unary_ufuncs, allowed_dtypes=floating_and_complex_types_and(
+        torch.bfloat16, torch.half, torch.int8, torch.int16, torch.int32, torch.int64
+    ))
     def test_reference_numerics_extremal(self, device, dtype, op):
         handles_extremals = (op.handles_complex_extremals if
                              dtype in (torch.cfloat, torch.cdouble) else op.handles_extremals)
