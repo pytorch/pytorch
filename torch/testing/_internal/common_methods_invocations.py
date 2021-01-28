@@ -993,6 +993,49 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad):
     )
     return [SampleInput(tensor) for tensor in tensors]
 
+def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad):
+    samples = (
+        SampleInput(make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        args=(torch.randn(M, M, device=device) > 0, make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+
+        SampleInput(make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        args=(torch.randn((M,), device=device) > 0, make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+
+        SampleInput(make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        args=(bernoulli_scalar().to(device), make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+        # Inplace variants fail
+        # SampleInput(make_tensor((M,), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        # args=(torch.randn(M, M, device=device) > 0, make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+    )
+
+    return samples
+
+def sample_inputs_masked_select(op_info, device, dtype, requires_grad):
+    samples = (
+        SampleInput(make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        args=(torch.randn(M, M, device=device) > 0,)),
+
+        SampleInput(make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        args=(torch.randn((M,), device=device) > 0,)),
+
+        SampleInput(make_tensor((M,), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        args=(torch.randn((M, M), device=device) > 0,)),
+
+        SampleInput(make_tensor((M, 1, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        args=(torch.randn((M, M), device=device) > 0,)),
+
+        SampleInput(make_tensor((), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        args=(torch.tensor(1, device=device, dtype=torch.bool),)),
+
+        SampleInput(make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        args=(torch.tensor(1, device=device, dtype=torch.bool),)),
+
+        SampleInput(make_tensor((), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        args=(torch.randn((M, M), device=device) > 0,)),
+    )
+
+    return samples
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
@@ -1388,6 +1431,32 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.cfloat, torch.cdouble]),
                    )),
+    OpInfo('masked_scatter',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_masked_scatter,
+           skips=(
+               # _th_masked_fill_bool_ not supported for Complex Types.
+               SkipInfo('TestGradients', 'test_fn_grad',
+                        device_type='cuda', dtypes=[torch.complex128]),
+               SkipInfo('TestGradients', 'test_fn_gradgrad',
+                        device_type='cuda', dtypes=[torch.complex128]),
+               SkipInfo('TestGradients', 'test_inplace_grad',
+                        device_type='cuda', dtypes=[torch.complex128]),
+               SkipInfo('TestGradients', 'test_inplace_gradgrad',
+                        device_type='cuda', dtypes=[torch.complex128]),
+               SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                        dtypes=[torch.cfloat, torch.cdouble]),
+           ),
+           supports_tensor_out=False),
+    OpInfo('masked_select',
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypesIfCPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_masked_select,
+           test_inplace_grad=False,
+           supports_tensor_out=True),
     UnaryUfuncInfo('neg',
                    ref=np.negative,
                    skip_bfloat16_grad=True,
@@ -2793,14 +2862,6 @@ def method_tests():
         ('scatter_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim0', (), [0]),
         ('scatter_add', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'alert_nondeterministic', (), [0],
             [expectedAlertNondeterministic('scatter_add_cuda_kernel', 'cuda')]),
-        ('masked_select', (M, M), (mask_not_all_zeros((M, M)),)),
-        ('masked_select', (M, M), (mask_not_all_zeros((M,)),), 'broadcast_rhs'),
-        ('masked_select', (M,), (mask_not_all_zeros((M, M)),), 'broadcast_lhs'),
-        ('masked_select', (M, 1, M), (mask_not_all_zeros((M, M)),),
-         'broadcast_all'),
-        ('masked_select', (), (torch.tensor(1, dtype=torch.bool),), 'scalar'),
-        ('masked_select', (M, M), (torch.tensor(1, dtype=torch.bool),), 'scalar_broadcast_rhs'),
-        ('masked_select', (), (mask_not_all_zeros((M, M)),), 'scalar_broadcast_lhs'),
         ('masked_fill', (M, M), (torch.BoolTensor(M, M).bernoulli_(), 10)),
         ('masked_fill', (M, M), (torch.BoolTensor(M, M).bernoulli_(), ()), 'tensor'),
         ('masked_fill', (M,), (torch.BoolTensor(M, M).bernoulli_(), 10), 'broadcast_lhs'),
@@ -2810,14 +2871,8 @@ def method_tests():
          'scalar_variable'),
         ('masked_fill', (M, M), (torch.tensor(0, dtype=torch.bool).bernoulli_(), 10),
          'scalar_broadcast_rhs'),
-        ('masked_scatter', (M, M), (torch.BoolTensor(M, M).bernoulli_(), (M, M))),
         ('masked_scatter', (M,), (torch.BoolTensor(M, M).bernoulli_(), (M, M)),
          'broadcast_lhs'),
-        ('masked_scatter', (M, M), (torch.BoolTensor(M,).bernoulli_(), (M, M)),
-         'broadcast_rhs'),
-        ('masked_scatter', (M, M), (bernoulli_scalar(), (M, M)), 'scalar'),
-        ('masked_scatter', (M, M), (bernoulli_scalar(), (M, M)),
-         'scalar_broadcast_rhs'),
         ('maximum', (S, S), ((S, S),)),
         ('minimum', (S, S), ((S, S),)),
         ('fmax', (S, S), ((S, S),)),
