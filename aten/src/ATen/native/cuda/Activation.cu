@@ -112,7 +112,7 @@ Tensor prelu_cuda(const Tensor& self, const Tensor& weight_) {
         input_stride0,
         input_stride1,
         input_numel);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   }
   return result;
@@ -230,7 +230,7 @@ std::tuple<Tensor, Tensor> prelu_backward_cuda(const Tensor& grad_out_, const Te
         input_stride0,
         input_stride1,
         input_numel);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
     // update weight_grad
     std::vector<int64_t> reduce_dims;
@@ -328,13 +328,17 @@ void elu_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scalar input_s
   });
 }
 
-void elu_backward_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scalar input_scale) {
+void elu_backward_kernel(TensorIterator& iter, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "elu_backward_cuda", [&]() {
     auto negcoef = alpha.to<scalar_t>() * scale.to<scalar_t>();
     auto poscoef = scale.to<scalar_t>();
     auto negiptcoef = input_scale.to<scalar_t>();
-    gpu_kernel(iter, [negcoef, poscoef, negiptcoef]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
-      return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
+    gpu_kernel(iter, [negcoef, poscoef, negiptcoef, is_result]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      if (is_result) {
+        return b <= scalar_t(0) ? a * negiptcoef * (b + negcoef) : a * poscoef;
+      } else {
+        return b <= scalar_t(0) ? a * negiptcoef * negcoef * (static_cast<scalar_t>(std::exp(b * negiptcoef))) : a * poscoef;
+      }
     });
   });
 }

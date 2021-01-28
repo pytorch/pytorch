@@ -20,7 +20,7 @@ namespace detail {
  * Keeps track of forward and backward gradient workspaces in stack,
  * reuses previously created workspaces, non-thread safe
  */
-class CAFFE2_API WorkspaceStack {
+class TORCH_API WorkspaceStack {
  public:
   explicit WorkspaceStack() : parent_ws_(nullptr), top_(-1) {}
 

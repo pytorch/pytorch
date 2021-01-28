@@ -113,7 +113,7 @@ class MultivariateNormal(Distribution):
                        'covariance_matrix': constraints.positive_definite,
                        'precision_matrix': constraints.positive_definite,
                        'scale_tril': constraints.lower_cholesky}
-    support = constraints.real
+    support = constraints.real_vector
     has_rsample = True
 
     def __init__(self, loc, covariance_matrix=None, precision_matrix=None, scale_tril=None, validate_args=None):
@@ -122,25 +122,27 @@ class MultivariateNormal(Distribution):
         if (covariance_matrix is not None) + (scale_tril is not None) + (precision_matrix is not None) != 1:
             raise ValueError("Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified.")
 
-        loc_ = loc.unsqueeze(-1)  # temporarily add dim on right
         if scale_tril is not None:
             if scale_tril.dim() < 2:
                 raise ValueError("scale_tril matrix must be at least two-dimensional, "
                                  "with optional leading batch dimensions")
-            self.scale_tril, loc_ = torch.broadcast_tensors(scale_tril, loc_)
+            batch_shape = torch.broadcast_shapes(scale_tril.shape[:-2], loc.shape[:-1])
+            self.scale_tril = scale_tril.expand(batch_shape + (-1, -1))
         elif covariance_matrix is not None:
             if covariance_matrix.dim() < 2:
                 raise ValueError("covariance_matrix must be at least two-dimensional, "
                                  "with optional leading batch dimensions")
-            self.covariance_matrix, loc_ = torch.broadcast_tensors(covariance_matrix, loc_)
+            batch_shape = torch.broadcast_shapes(covariance_matrix.shape[:-2], loc.shape[:-1])
+            self.covariance_matrix = covariance_matrix.expand(batch_shape + (-1, -1))
         else:
             if precision_matrix.dim() < 2:
                 raise ValueError("precision_matrix must be at least two-dimensional, "
                                  "with optional leading batch dimensions")
-            self.precision_matrix, loc_ = torch.broadcast_tensors(precision_matrix, loc_)
-        self.loc = loc_[..., 0]  # drop rightmost dim
+            batch_shape = torch.broadcast_shapes(precision_matrix.shape[:-2], loc.shape[:-1])
+            self.precision_matrix = precision_matrix.expand(batch_shape + (-1, -1))
+        self.loc = loc.expand(batch_shape + (-1,))
 
-        batch_shape, event_shape = self.loc.shape[:-1], self.loc.shape[-1:]
+        event_shape = self.loc.shape[-1:]
         super(MultivariateNormal, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
         if scale_tril is not None:

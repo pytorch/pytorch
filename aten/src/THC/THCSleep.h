@@ -5,6 +5,6 @@
 #include <time.h>
 
 // enqueues a kernel that spins for the specified number of cycles
-THC_API void THC_sleep(THCState* state, int64_t cycles);
+TORCH_CUDA_CU_API void THC_sleep(THCState* state, int64_t cycles);
 
 #endif

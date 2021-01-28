@@ -7,7 +7,7 @@
 
 namespace caffe2 {
 
-class CAFFE2_API Caffe2Annotation : public nom::repr::Annotation {
+class TORCH_API Caffe2Annotation : public nom::repr::Annotation {
  public:
   Caffe2Annotation() : Annotation(AnnotationKind::Caffe2) {}
   Caffe2Annotation(std::string device)

@@ -74,6 +74,7 @@ void renormRows(Tensor& t) {
         <<<grid, block, block.x * sizeof(scalar_t),
         at::cuda::getCurrentCUDAStream()>>>(t.data_ptr<scalar_t>(),
             rows, cols);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   });
 }
 
@@ -299,7 +300,11 @@ sampleMultinomialOnce(int64_t* dest,
   }
 }
 
-void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n_sample, const bool with_replacement, c10::optional<Generator> generator) {
+void multinomial_with_replacement_kernel_impl(
+    Tensor& result,
+    const Tensor& self,
+    const int64_t n_sample,
+    c10::optional<Generator> generator) {
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(generator, cuda::detail::getDefaultCUDAGenerator());
 
   int inputSize = self.dim();
@@ -348,6 +353,7 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
                   self_v.stride(0),
                   self_v.stride(1)
           );
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       // Generic, slow implementation with memory allocations
 
@@ -369,7 +375,6 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
 
       PhiloxCudaState rng_engine_inputs;
 
-      if (with_replacement) {
         // Binary search is warp divergent (so effectively we're running
         // with just a single thread), but for better utilization,
         // we need each block to have at least 4 warps.
@@ -399,11 +404,9 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
                 numDist, numCategories,
                 prefixSum.data_ptr<scalar_t>(),
                 normDist.data_ptr<scalar_t>());
-      }
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   });
-
-  AT_CUDA_CHECK(cudaGetLastError());
 
   if (inputSize == 1) {
     result.resize_({n_sample});
@@ -411,6 +414,7 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
 }
 }
 
-REGISTER_DISPATCH(multinomial_stub, &multinomial_kernel_impl);
-
+REGISTER_DISPATCH(
+    multinomial_with_replacement_stub,
+    &multinomial_with_replacement_kernel_impl);
 }}

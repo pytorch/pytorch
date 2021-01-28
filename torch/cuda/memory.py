@@ -29,7 +29,7 @@ def caching_allocator_alloc(size, device: Union[Device, int] = None, stream=None
     frameworks. Allocated memory is released through
     :func:`~torch.cuda.caching_allocator_delete`.
 
-    Arguments:
+    Args:
         size (int): number of bytes to be allocated.
         device (torch.device or int, optional): selected device. If it is
             ``None`` the default CUDA device is used.
@@ -62,7 +62,7 @@ def caching_allocator_delete(mem_ptr):
     is freed here. The associated device and stream are tracked inside
     the allocator.
 
-    Arguments:
+    Args:
         mem_ptr (int): memory address to be freed by the allocator.
 
     .. note::
@@ -70,6 +70,33 @@ def caching_allocator_delete(mem_ptr):
         management.
     """
     torch._C._cuda_cudaCachingAllocator_raw_delete(mem_ptr)
+
+
+def set_per_process_memory_fraction(fraction, device: Union[Device, int] = None) -> None:
+    r"""Set memory fraction for a process.
+    The fraction is used to limit an caching allocator to allocated memory on a CUDA device.
+    The allowed value equals the total visible memory multiplied fraction.
+    If trying to allocate more than the allowed value in a process, will raise an out of
+    memory error in allocator.
+
+    Args:
+        fraction(float): Range: 0~1. Allowed memory equals total_memory * fraction.
+        device (torch.device or int, optional): selected device. If it is
+            ``None`` the default CUDA device is used.
+    .. note::
+        In general, the total available free memory is less than the total capacity.
+    """
+    _lazy_init()
+    if device is None:
+        device = torch.cuda.current_device()
+    device = _get_device_index(device)
+    if not isinstance(fraction, float):
+        raise TypeError('Invalid type for fraction argument, must be `float`')
+    if fraction < 0 or fraction > 1:
+        raise ValueError('Invalid fraction value: {}. '
+                         'Allowed range: 0~1'.format(fraction))
+
+    torch._C._cuda_setMemoryFraction(fraction, device)
 
 
 def empty_cache() -> None:
@@ -137,7 +164,7 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
       result in a cache flush and retry.
     - ``"num_ooms"``: number of out-of-memory errors thrown.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             statistics for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
@@ -177,7 +204,7 @@ def reset_accumulated_memory_stats(device: Union[Device, int] = None) -> None:
     the `"allocated"` and `"freed"` keys in each individual stat dict, as well as
     `"num_alloc_retries"` and `"num_ooms"`.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             statistic for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
@@ -196,7 +223,7 @@ def reset_peak_memory_stats(device: Union[Device, int] = None) -> None:
     See :func:`~torch.cuda.memory_stats` for details. Peak stats correspond to the
     `"peak"` key in each individual stat dict.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             statistic for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
@@ -215,7 +242,7 @@ def reset_max_memory_allocated(device: Union[Device, int] = None) -> None:
 
     See :func:`~torch.cuda.max_memory_allocated` for details.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             statistic for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
@@ -241,7 +268,7 @@ def reset_max_memory_cached(device: Union[Device, int] = None) -> None:
 
     See :func:`~torch.cuda.max_memory_cached` for details.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             statistic for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
@@ -265,7 +292,7 @@ def memory_allocated(device: Union[Device, int] = None) -> int:
     r"""Returns the current GPU memory occupied by tensors in bytes for a given
     device.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             statistic for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
@@ -289,7 +316,7 @@ def max_memory_allocated(device: Union[Device, int] = None) -> int:
     functions can measure the peak allocated memory usage of each iteration in a
     training loop.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             statistic for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
@@ -305,7 +332,7 @@ def memory_reserved(device: Union[Device, int] = None) -> int:
     r"""Returns the current GPU memory managed by the caching allocator in bytes
     for a given device.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             statistic for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
@@ -327,7 +354,7 @@ def max_memory_reserved(device: Union[Device, int] = None) -> int:
     can measure the peak cached memory amount of each iteration in a training
     loop.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             statistic for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
@@ -375,7 +402,7 @@ def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False)
     This can be useful to display periodically during training, or when
     handling out-of-memory exceptions.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             printout for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
@@ -476,7 +503,7 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
     This can be useful to display periodically during training, or when
     handling out-of-memory exceptions.
 
-    Arguments:
+    Args:
         device (torch.device or int, optional): selected device. Returns
             printout for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).

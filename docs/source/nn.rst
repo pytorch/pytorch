@@ -65,6 +65,12 @@ Convolution Layers
     nn.ConvTranspose1d
     nn.ConvTranspose2d
     nn.ConvTranspose3d
+    nn.LazyConv1d
+    nn.LazyConv2d
+    nn.LazyConv3d
+    nn.LazyConvTranspose1d
+    nn.LazyConvTranspose2d
+    nn.LazyConvTranspose3d
     nn.Unfold
     nn.Fold
 
@@ -270,6 +276,7 @@ Loss Functions
     nn.CTCLoss
     nn.NLLLoss
     nn.PoissonNLLLoss
+    nn.GaussianNLLLoss
     nn.KLDivLoss
     nn.BCELoss
     nn.BCEWithLogitsLoss
@@ -293,6 +300,7 @@ Vision Layers
     :template: classtemplate.rst
 
     nn.PixelShuffle
+    nn.PixelUnshuffle
     nn.Upsample
     nn.UpsamplingNearest2d
     nn.UpsamplingBilinear2d

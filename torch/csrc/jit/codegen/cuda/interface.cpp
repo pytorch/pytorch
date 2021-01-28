@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/cuda/interface.h>
+
 #include <ATen/core/dispatch/OperatorOptions.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
@@ -36,9 +37,9 @@ void runFusionGroup(const Node* fusion_node, Stack& stack) {
 
 void fuseGraph(std::shared_ptr<Graph>& graph) {
   TORCH_CHECK(
-      getFuserInterface()->fn_fuse_graph != nullptr,
+      getFuserInterface()->fn_fuse_graph_ != nullptr,
       "Running the CUDA fuser requires a CUDA build.");
-  getFuserInterface()->fn_fuse_graph(graph);
+  getFuserInterface()->fn_fuse_graph_(graph);
 }
 
 bool canFuseNode(const Node* node) {
@@ -89,7 +90,8 @@ bool complyWith(
   // check a. if num_dimension check fails or scalar type check fails
   if (*guard_tensor_type->dim() != static_cast<size_t>(tensor.ndimension()) ||
       (guard_tensor_type->scalarType().has_value() &&
-       (guard_tensor_type->scalarType().value() != tensor.scalar_type()))) {
+       (guard_tensor_type->scalarType().value() != tensor.scalar_type())) ||
+      tensor.requires_grad()) {
     return false;
   }
 

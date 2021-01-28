@@ -46,7 +46,7 @@ struct ConvParams {
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const;
   bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const;
-  bool use_nnpack(const at::Tensor& input) const;
+  bool use_nnpack(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
@@ -177,14 +177,10 @@ auto ConvParams::needs_64bit_indexing_no_split(const at::Tensor& input, const at
   int64_t outsize = 1;
   if (transposed) {
     std::vector<int64_t> o = conv_input_size(input.sizes(), weight.sizes(), padding, output_padding, stride, dilation, groups);
-    for (int64_t i = 1; i < o.size(); i++) {
-      outsize *= o[i];
-    }
+    outsize = prod_intlist(o.begin() + 1, o.end());
   } else {
     std::vector<int64_t> o = conv_output_size(input.sizes(), weight.sizes(), padding, stride, dilation);
-    for (int64_t i = 1; i < o.size(); i++) {
-      outsize *= o[i];
-    }
+    outsize = prod_intlist(o.begin() + 1, o.end());
   }
   return outsize > int_max;
 }
@@ -247,15 +243,17 @@ auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) c
   return false;
 }
 
-auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
+auto ConvParams::use_nnpack(const at::Tensor& input, const at::Tensor& weight) const -> bool {
 #if AT_NNPACK_ENABLED()
   return at::_nnpack_available() &&
          input.options().backend() == at::Backend::CPU &&
          input.scalar_type() == kFloat && // only on CPU Float Tensors
          !is_dilated() && // or dilation
          !transposed &&   // or transposed tensors
-         input.ndimension() == 4 // must be in NCHW format
-#if !defined(C10_MOBILE) && !defined(CAFFE2_FB_LIMITED_MOBILE_CAPABILITY)
+         input.ndimension() == 4 && // must be in NCHW format
+         weight.ndimension() == 4 &&
+         (weight.size(2) < 17) && (weight.size(3) < 17) // NNPACK only supports kernels up to 16x16
+#if !defined(C10_MOBILE)
          && input.size(0) >= 16 // ensure large enough batch size to ensure perf, tuneable
 #endif
      ;
@@ -590,7 +588,7 @@ at::Tensor convolution(
     bool transposed, IntArrayRef output_padding, int64_t groups) {
   auto& ctx = at::globalContext();
   // See Note [Enabling Deterministic Operations]
-  bool deterministic = ctx.deterministicCuDNN() || ctx.deterministic();
+  bool deterministic = ctx.deterministicCuDNN() || ctx.deterministicAlgorithms();
   return at::_convolution(input, weight, bias, stride, padding, dilation,
                           transposed, output_padding, groups,
                           ctx.benchmarkCuDNN(), deterministic, ctx.userEnabledCuDNN(), ctx.allowTF32CuDNN());
@@ -853,7 +851,7 @@ at::Tensor _convolution_nogroup(
             input, weight, kernel_size, bias,
             stride, padding, dilation);
       } else {  /* dim == 4, non-dilated */
-        if (params.use_nnpack(input)) {
+        if (params.use_nnpack(input, weight)) {
 #if AT_NNPACK_ENABLED()
           return at::_nnpack_spatial_convolution(
               input, weight, bias, padding, stride);

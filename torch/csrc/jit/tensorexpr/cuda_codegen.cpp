@@ -287,8 +287,12 @@ void CudaPrinter::visit(const Intrinsics* v) {
   if (returnType == ScalarType::Half || returnType == ScalarType::Float) {
     func_name = func_name + "f";
   }
-  if (v->op_type() == IntrinsicsOp::kFabs && is_integral(returnType)) {
-    func_name = "abs";
+  if (v->op_type() == IntrinsicsOp::kAbs && !is_integral(returnType)) {
+    // since kAbs's func_name is `abs`, prefix `f` for floating point
+    func_name = "f" + func_name;
+  }
+  if (v->op_type() == IntrinsicsOp::kIsNan) {
+    func_name = "isnan";
   }
 
   os() << func_name << "(";
@@ -1144,6 +1148,18 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
   if (prior_device != this->device().index()) {
     at::cuda::set_device(prior_device);
   }
+}
+
+at::Tensor CudaCodeGen::empty_strided(
+    c10::IntArrayRef size,
+    c10::IntArrayRef stride,
+    c10::optional<c10::ScalarType> dtype_opt,
+    c10::optional<c10::Layout> layout_opt,
+    c10::optional<c10::Device> device_opt,
+    c10::optional<bool> pin_memory_opt) {
+  c10::DeviceGuard device_guard(device_opt.value());
+  return at::native::empty_strided_cuda(
+      size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
 void CudaCodeGen::CompileToNVRTC(

@@ -144,7 +144,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
 
   // CPU threads are dedicated to processing CPU work for the backward they invoked.
   // So any given graph task maintains its own cpu_ready_queue_ where you should send
-  // work for it to be done. We memorize the cpu_ready_queue_ per GraphTask so that
+  // work for it to be done. We memoize the cpu_ready_queue_ per GraphTask so that
   // we know which ready queue we should push to if we are on device thread (i.e. GPU)
   // and but next NodeTask should be run on CPU.
   std::shared_ptr<ReadyQueue> cpu_ready_queue_;

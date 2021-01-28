@@ -194,20 +194,24 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         # Test JIT
         self.checkScriptable(qlinear, [[X_q]], check_save_load=True)
 
-        # Test from_float.
-        float_linear = torch.nn.Linear(in_features, out_features).float()
-        float_linear.qconfig = torch.quantization.default_qconfig
-        torch.quantization.prepare(float_linear, inplace=True)
-        float_linear(X.float())
-        # Sequential allows swapping using "convert".
-        quantized_float_linear = torch.nn.Sequential(float_linear)
-        quantized_float_linear = torch.quantization.convert(quantized_float_linear, inplace=True)
+        # Make sure `from_float` works for all linear variants
+        modules_under_test = [torch.nn.Linear, torch.nn.modules.linear._LinearWithBias]
 
-        # Smoke test to make sure the module actually runs
-        quantized_float_linear(X_q)
+        for mut in modules_under_test:
+            # Test from_float.
+            float_linear = mut(in_features, out_features).float()
+            float_linear.qconfig = torch.quantization.default_qconfig
+            torch.quantization.prepare(float_linear, inplace=True)
+            float_linear(X.float())
+            # Sequential allows swapping using "convert".
+            quantized_float_linear = torch.nn.Sequential(float_linear)
+            quantized_float_linear = torch.quantization.convert(quantized_float_linear, inplace=True)
 
-        # Smoke test extra_repr
-        self.assertTrue('QuantizedLinear' in str(quantized_float_linear))
+            # Smoke test to make sure the module actually runs
+            quantized_float_linear(X_q)
+
+            # Smoke test extra_repr
+            self.assertTrue('QuantizedLinear' in str(quantized_float_linear))
 
     def test_quant_dequant_api(self):
         r = torch.tensor([[1., -1.], [1., -1.]], dtype=torch.float)
@@ -928,16 +932,18 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         # Test JIT
         self.checkScriptable(qlinear, [[X]], check_save_load=True)
 
-        # Test from_float
-        float_linear = torch.nn.Linear(in_features, out_features).float()
-        if use_default_observer:
-            float_linear.qconfig = torch.quantization.default_dynamic_qconfig
-        prepare_dynamic(float_linear)
-        float_linear(X.float())
-        quantized_float_linear = nnqd.Linear.from_float(float_linear)
+        modules_under_test = [torch.nn.Linear, torch.nn.modules.linear._LinearWithBias]
+        for mut in modules_under_test:
+            # Test from_float
+            float_linear = mut(in_features, out_features).float()
+            if use_default_observer:
+                float_linear.qconfig = torch.quantization.default_dynamic_qconfig
+            prepare_dynamic(float_linear)
+            float_linear(X.float())
+            quantized_float_linear = nnqd.Linear.from_float(float_linear)
 
-        # Smoke test to make sure the module actually runs
-        quantized_float_linear(X)
+            # Smoke test to make sure the module actually runs
+            quantized_float_linear(X)
 
         # Smoke test extra_repr
         self.assertTrue('QuantizedLinear' in str(quantized_float_linear))
@@ -1015,6 +1021,55 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
             x = torch.randn(10, 20, 3)
             self.check_eager_serialization(cell_dq, ref_dq, [x])
             self.check_weight_bias_api(cell_dq, weight_keys, bias_keys)
+
+    @override_qengines
+    def test_gru_api(self):
+        r"""Test execution and serialization for dynamic quantized lstm modules on int8 and fp16
+        """
+        # Check that module matches the numerics of the op and ensure that module can be
+        # instantiated for all engines and dtypes
+
+        for dtype in [torch.qint8, torch.float16]:
+            if dtype == torch.float16 and torch.backends.quantized.engine == "qnnpack":
+                # fp16 dynamic quant is not supported for qnnpack
+                continue
+                # Test default instantiation
+            seq_len = 4
+            batch = 2
+            input_size = 3
+            hidden_size = 7
+            num_layers = 2
+            bias = True
+            bidirectional = False
+
+            x = torch.rand(seq_len, batch, input_size)
+            h = torch.rand(num_layers * (bidirectional + 1), batch, hidden_size)
+
+
+            cell_dq = torch.nn.quantized.dynamic.GRU(input_size=input_size,
+                                                     hidden_size=hidden_size,
+                                                     num_layers=num_layers,
+                                                     bias=bias,
+                                                     batch_first=False,
+                                                     dropout=0.0,
+                                                     bidirectional=bidirectional,
+                                                     dtype=dtype)
+
+            _all_params = ([m.param for m in cell_dq._all_weight_values])
+            result = torch.quantized_gru(x,
+                                         h,
+                                         _all_params,
+                                         cell_dq.bias,
+                                         cell_dq.num_layers,
+                                         float(cell_dq.dropout),
+                                         False,
+                                         bidirectional,
+                                         False)
+
+
+            y, h = cell_dq(x, h)
+            self.assertEqual(result[0], y, msg="GRU module API failed")
+            self.assertEqual(result[1], h, msg="GRU module API failed")
 
     @given(
         dtype=st.sampled_from([torch.qint8, torch.float16]),

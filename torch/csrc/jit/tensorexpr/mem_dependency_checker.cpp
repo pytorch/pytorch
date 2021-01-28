@@ -20,6 +20,10 @@ const char* AccessToString(AccessType a) {
       return "Call";
     case AccessType::AtomicAdd:
       return "AtomicAdd";
+    case AccessType::Alloc:
+      return "Alloc";
+    case AccessType::Free:
+      return "Free";
     default:
       break;
   }
@@ -135,6 +139,8 @@ bool AccessInfo::isWrite() const {
     case AccessType::Input:
     case AccessType::Store:
     case AccessType::AtomicAdd:
+    case AccessType::Alloc:
+    case AccessType::Free:
       return true;
     default:
       break;
@@ -173,7 +179,8 @@ void AccessInfo::print() const {
 }
 
 void AccessInfo::dumpDOT(std::ostream& os) const {
-  if (type_ == AccessType::Input || type_ == AccessType::Output) {
+  if (type_ == AccessType::Input || type_ == AccessType::Output ||
+      type_ == AccessType::Alloc) {
     os << "n" << id_ << " [\n";
     os << "label = \"" << AccessToString(type_) << "\\n " << *var_ << "[";
     if (bounds_.size() > 0) {
@@ -233,6 +240,9 @@ const char* AccessInfo::AccessTypeColour() const {
       return "dodgerblue";
     case AccessType::Call:
       return "violet";
+    case AccessType::Alloc:
+    case AccessType::Free:
+      return "sandybrown";
     default:
       break;
   }
@@ -619,6 +629,10 @@ bool executionSafetyCheck(
     const std::vector<const Expr*>& aStrides,
     const std::vector<const Expr*>& oStrides,
     bool parallelized) {
+  if (aStrides.empty() || oStrides.empty()) {
+    return false;
+  }
+  TORCH_INTERNAL_ASSERT(info->bounds().size() == other->bounds().size());
   for (size_t b = 0; b < info->bounds().size(); ++b) {
     const Expr* aIndexStride = aStrides[b];
     const Expr* oIndexStride = oStrides[b];
@@ -829,11 +843,24 @@ void MemDependencyChecker::visit(const For* v) {
   bool parallelized = v->loop_options().is_gpu_block_index() ||
       v->loop_options().is_gpu_thread_index();
 
+  // Store buffers allocated at this scope.
+  std::unordered_set<const Var*> local_intermediates;
+
   // Scanning from the top of the loop, we look for accesses which may depend
   // on a previous or parallel loop iteration.
   for (size_t a = 0; a < currentScope_->accesses_.size(); ++a) {
     auto& info = currentScope_->accesses_[a];
+    if (info->type() == AccessType::Alloc) {
+      local_intermediates.insert(info->var());
+      continue;
+    }
+
     if (!info->isRead()) {
+      continue;
+    }
+
+    // Vars that don't carry outside this scope can't have loop self dependence.
+    if (local_intermediates.count(info->var())) {
       continue;
     }
 
@@ -1122,6 +1149,51 @@ void MemDependencyChecker::visit(const Let* v) {
 // and a write. It's only inserted during Cuda codegen so this should be okay.
 void MemDependencyChecker::visit(const AtomicAdd* v) {
   throw std::runtime_error("MemDependencyChecker AtomicAdd unimplemented");
+}
+
+void MemDependencyChecker::visit(const Allocate* v) {
+  const Stmt* last = lastStmt_;
+  lastStmt_ = v;
+
+  IRVisitor::visit(v);
+
+  const Var* var = v->buffer_var();
+  IndexBounds bounds;
+  for (auto* d : v->dims()) {
+    bounds.push_back(
+        {new IntImm(0), IRSimplifier::simplify(new Sub(d, new IntImm(1)))});
+  }
+  auto info = std::make_shared<AccessInfo>(
+      nextAccess_++, AccessType::Alloc, nullptr, var, bounds);
+
+  intermediates_[var] = info;
+
+  auto& history = currentScope_->openWrites_[var];
+  history.emplace_back(std::make_pair(info->bounds(), info));
+  currentScope_->accesses_.push_back(info);
+
+  lastStmt_ = last;
+}
+
+void MemDependencyChecker::visit(const Free* v) {
+  const Stmt* last = lastStmt_;
+  lastStmt_ = v;
+
+  IRVisitor::visit(v);
+
+  const Var* var = v->buffer_var();
+  auto it = intermediates_.find(var);
+  TORCH_INTERNAL_ASSERT(it != intermediates_.end());
+
+  IndexBounds bounds = it->second->bounds();
+  auto info = std::make_shared<AccessInfo>(
+      nextAccess_++, AccessType::Free, nullptr, var, bounds);
+
+  auto& history = currentScope_->openWrites_[var];
+  updateWriteHistory(history, info, info->id());
+  currentScope_->accesses_.push_back(info);
+
+  lastStmt_ = last;
 }
 
 void MemDependencyChecker::updateWriteHistory(

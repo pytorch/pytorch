@@ -235,7 +235,7 @@ Tensor embedding_backward_cuda_kernel(
               segment_offsets.data_ptr<index_t>(),
               num_of_segments,
               numel);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
     // In order to compute `partial_segment_offset`, which is the start index
@@ -263,7 +263,7 @@ Tensor embedding_backward_cuda_kernel(
               partials_per_segment_offset.data_ptr<index_t>(),
               segment_offsets.data_ptr<index_t>(),
               num_of_segments);
-      TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
 
     const int stride_warped = ceil_div(stride, C10_WARP_SIZE)*C10_WARP_SIZE;
@@ -272,59 +272,57 @@ Tensor embedding_backward_cuda_kernel(
 
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
       grad.scalar_type(), "embedding_bag_backward_cuda_compute_grad_weight", [&] {
-        AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "embedding_bag_backward_cuda_compute_grad_weight", [&] {
-          // For numerical stability, the dtype of `grad_weight_per_segment`
-          // should match `acc_type`
-          using partial_weight_t = acc_type<scalar_t, true>;
-          TensorOptions op;
-          if(grad.dtype() == at::kHalf || grad.dtype() == at::kBFloat16) {
-              op = grad.options().dtype(at::kFloat);
-          } else {
-              op = grad.options();
-          }
-          auto grad_weight_per_segment = at::empty({num_of_partial_segments, stride}, op);
-          // Compute the sum of each partial-segment and handle bags
-          if (offset2bag.defined()) {
-                compute_grad_weight_bags<scalar_t><<<grid, block, 0, stream>>>(
-                  orig_indices.data_ptr<index_t>(),
-                  grad.data_ptr<scalar_t>(),
-                  offset2bag.data_ptr<index_t>(),
-                  count.defined() ? count.data_ptr<index_t>() : nullptr, numel, stride,
-                  mode_mean, bag_size.data_ptr<index_t>(),
-                  per_sample_weights.defined() ? per_sample_weights.data_ptr<scalar_t>() : NULL,
-                  per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
-                  partial_segment_offset.data_ptr<index_t>(),
-                  num_of_partial_segments, grad_weight_per_segment.data_ptr<partial_weight_t>(),
-                  stride_warped);
-                TORCH_CUDA_KERNEL_LAUNCH_CHECK();
-          } else {
-                compute_grad_weight<scalar_t><<<grid, block, 0, stream>>>(
-                  orig_indices.data_ptr<index_t>(),
-                  grad.data_ptr<scalar_t>(),
-                  count.defined() ? count.data_ptr<index_t>() : nullptr,
-                  numel, stride,
-                  partial_segment_offset.data_ptr<index_t>(),
-                  num_of_partial_segments,
-                  grad_weight_per_segment.data_ptr<partial_weight_t>(),
-                  stride_warped);
-                TORCH_CUDA_KERNEL_LAUNCH_CHECK();
-          }
-
-          // Finally, we sum all the partial-sums and scatter them
-          // into `grad_weight`.
-          const int grid2 = ceil_div(num_of_segments*stride_warped, block);
-              sum_and_scatter<scalar_t><<<grid2, block, 0, stream>>>(
-                sorted_indices.data_ptr<index_t>(),
-                grad_weight.data_ptr<scalar_t>(),
-                stride,
-                segment_offsets.data_ptr<index_t>(),
-                num_of_segments, grad_weight_per_segment.data_ptr<partial_weight_t>(),
-                partials_per_segment_offset.data_ptr<index_t>(),
-                num_of_partial_segments,
-                padding_idx,
+        // For numerical stability, the dtype of `grad_weight_per_segment`
+        // should match `acc_type`
+        using partial_weight_t = acc_type<scalar_t, true>;
+        TensorOptions op;
+        if(grad.dtype() == at::kHalf || grad.dtype() == at::kBFloat16) {
+            op = grad.options().dtype(at::kFloat);
+        } else {
+            op = grad.options();
+        }
+        auto grad_weight_per_segment = at::empty({num_of_partial_segments, stride}, op);
+        // Compute the sum of each partial-segment and handle bags
+        if (offset2bag.defined()) {
+              compute_grad_weight_bags<scalar_t><<<grid, block, 0, stream>>>(
+                orig_indices.data_ptr<index_t>(),
+                grad.data_ptr<scalar_t>(),
+                offset2bag.data_ptr<index_t>(),
+                count.defined() ? count.data_ptr<index_t>() : nullptr, numel, stride,
+                mode_mean, bag_size.data_ptr<index_t>(),
+                per_sample_weights.defined() ? per_sample_weights.data_ptr<scalar_t>() : NULL,
+                per_sample_weights.defined() ? per_sample_weights.stride(0) : 0,
+                partial_segment_offset.data_ptr<index_t>(),
+                num_of_partial_segments, grad_weight_per_segment.data_ptr<partial_weight_t>(),
                 stride_warped);
-          TORCH_CUDA_KERNEL_LAUNCH_CHECK();
-      });
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+        } else {
+              compute_grad_weight<scalar_t><<<grid, block, 0, stream>>>(
+                orig_indices.data_ptr<index_t>(),
+                grad.data_ptr<scalar_t>(),
+                count.defined() ? count.data_ptr<index_t>() : nullptr,
+                numel, stride,
+                partial_segment_offset.data_ptr<index_t>(),
+                num_of_partial_segments,
+                grad_weight_per_segment.data_ptr<partial_weight_t>(),
+                stride_warped);
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
+        }
+
+        // Finally, we sum all the partial-sums and scatter them
+        // into `grad_weight`.
+        const int grid2 = ceil_div(num_of_segments*stride_warped, block);
+            sum_and_scatter<scalar_t><<<grid2, block, 0, stream>>>(
+              sorted_indices.data_ptr<index_t>(),
+              grad_weight.data_ptr<scalar_t>(),
+              stride,
+              segment_offsets.data_ptr<index_t>(),
+              num_of_segments, grad_weight_per_segment.data_ptr<partial_weight_t>(),
+              partials_per_segment_offset.data_ptr<index_t>(),
+              num_of_partial_segments,
+              padding_idx,
+              stride_warped);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
     });
   });
   return grad_weight;

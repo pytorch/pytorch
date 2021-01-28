@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "THC/generic/THCTensorMathMagma.cu"
 #else
 
+#include <c10/cuda/CUDAException.h>
+
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
 
 #ifdef USE_MAGMA
@@ -171,8 +173,10 @@ void THCTensor_(potri)(THCState *state, THCTensor *ra_, THCTensor *a, bool upper
   dim3 threads(128);
   if (uplo == 'U') {
     THCTensor_(copyUpperSymmetric)<<<blocks, threads, 0, stream>>>(input_data, n, len);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
     THCTensor_(copyLowerSymmetric)<<<blocks, threads, 0, stream>>>(input_data, n, len);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 
   THCTensor_(freeCopyTo)(state, input, ra_);

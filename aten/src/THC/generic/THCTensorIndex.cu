@@ -3,6 +3,8 @@
 #else
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/MemoryOverlap.h>
+#include <c10/cuda/CUDAException.h>
 
 // Check tensor dimensions for index operations, and return the slice size.
 // src can be nullptr in case of indexFill: in that case it is ignored.
@@ -126,11 +128,12 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
-#define SMALL_INDEX(TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM) \
-  indexCopySmallIndex<TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM>       \
-    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(           \
-      dstInfo, srcInfo, indicesInfo,                            \
-      dstCopyDim, srcCopyDim, sliceSize, dstCopyDimSize);
+#define SMALL_INDEX(TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM)    \
+  indexCopySmallIndex<TENSOR_TYPE, TYPE, DST_DIM, SRC_DIM, IDX_DIM>  \
+    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(                \
+      dstInfo, srcInfo, indicesInfo,                                 \
+      dstCopyDim, srcCopyDim, sliceSize, dstCopyDimSize);            \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define LARGE_INDEX(TENSOR_TYPE, TYPE,                         \
                     DST_DIM, SRC_DIM, IDX_DIM, IDX_IS_MAJOR)   \
@@ -140,7 +143,8 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
       dstInfo, srcInfo, indicesInfo,                           \
       dstCopyDim, srcCopyDim, srcTotalSize,                    \
       (IDX_IS_MAJOR) ? sliceSize : numIndices,                 \
-      dstCopyDimSize);
+      dstCopyDimSize);                                         \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
@@ -279,6 +283,13 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   dims = THCudaLongTensor_nDimensionLegacyNoScalars(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
+  at::assert_no_overlap(dst, indices);
+  if (at::has_internal_overlap(dst) == at::MemOverlap::YES) {
+    TORCH_WARN(
+      "Use of index_fill_ on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[mask] = scalar");
+  }
 
   // The `src` is partitioned into two parts:
   // -the size of each slice we are indexing, which is the
@@ -299,11 +310,12 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
 
   int mpc = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
 
-#define SMALL_INDEX(TENSOR_TYPE, TYPE, DST_DIM, IDX_DIM)  \
+#define SMALL_INDEX(TENSOR_TYPE, TYPE, DST_DIM, IDX_DIM)   \
   indexFillSmallIndex<TENSOR_TYPE, TYPE, DST_DIM, IDX_DIM> \
-    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(   \
-      dstInfo, indicesInfo,                             \
-      dstFillDim, sliceSize, dstFillDimSize, val);
+    <<<smallIndexGrid, smallIndexBlock, 0, stream>>>(      \
+      dstInfo, indicesInfo,                                \
+      dstFillDim, sliceSize, dstFillDimSize, val);         \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define LARGE_INDEX(TENSOR_TYPE, TYPE, DST_DIM, IDX_DIM, IDX_IS_MAJOR)   \
   indexFillLargeIndex<TENSOR_TYPE, TYPE, DST_DIM, IDX_DIM, IDX_IS_MAJOR> \
@@ -311,7 +323,8 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
       dstInfo, indicesInfo,                                              \
       dstFillDim, sliceSize * numIndices,                                \
       (IDX_IS_MAJOR) ? sliceSize : numIndices,                           \
-      dstFillDimSize, val);
+      dstFillDimSize, val);                                              \
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));

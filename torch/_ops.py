@@ -94,7 +94,7 @@ class _Ops(types.ModuleType):
         ``torch.ops.loaded_libraries`` attribute, a set that may be inspected
         for the paths of all libraries loaded using this function.
 
-        Arguments:
+        Args:
             path (str): A path to a shared library to load.
         """
         path = torch._utils_internal.resolve_library_path(path)

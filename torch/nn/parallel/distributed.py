@@ -12,9 +12,13 @@ import torch
 from . import comm
 import torch.distributed as dist
 
+RPC_AVAILABLE = False
 if dist.is_available():
     from torch.distributed.distributed_c10d import _get_default_group
     from torch.distributed.distributed_c10d import ReduceOp
+if torch.distributed.rpc.is_available():
+    RPC_AVAILABLE = True
+    from torch.distributed.rpc import RRef
 from ..modules import Module
 from .replicate import replicate
 from .scatter_gather import scatter_kwargs, gather, is_namedtuple
@@ -26,6 +30,12 @@ def _find_tensors(obj):
     r"""
     Recursively find all tensors contained in the specified object.
     """
+    if RPC_AVAILABLE and isinstance(obj, RRef):
+        # If the current node is the owner of the RRef, unwrap it and try to
+        # find Tensors.
+        # TODO: Expand to remote RRefs.
+        if obj.is_owner():
+            return _find_tensors(obj.local_value())
     if isinstance(obj, torch.Tensor):
         return [obj]
     if isinstance(obj, (list, tuple)):
@@ -596,6 +606,14 @@ class DistributedDataParallel(Module):
             self.find_unused_parameters,
             self.gradient_as_bucket_view)
 
+        # Set logging data that can be got during construction time.
+        dist._set_construction_logging_data(
+            self.reducer,
+            self.module.__class__.__name__,
+            [] if self.device_ids is None else self.device_ids,
+            -1 if self.output_device is None else self.output_device,
+            self.broadcast_buffers)
+
         # passing a handle to torch.nn.SyncBatchNorm layer
         self._passing_sync_batchnorm_handle(self._module_copies)
 
@@ -754,6 +772,9 @@ class DistributedDataParallel(Module):
         for module in self._module_copies[1:]:
             module.train(mode)
         return self
+
+    def get_ddp_logging_data(self):
+        return dist._get_ddp_logging_data(self.reducer)
 
     # When running in join mode, schedules an allreduce to match the one in the
     # forward pass to determine the no. of currently active processes and whether
@@ -999,7 +1020,7 @@ class DistributedDataParallel(Module):
         and gradient compression which involve different communication strategies for
         parameter syncs while running Distributed DataParallel training.
 
-        Arguments:
+        Args:
             state (object): state is passed to the hook and can be used to maintain
                             and update any state information that users would like to
                             maintain as part of the training process. Examples: error
@@ -1084,7 +1105,7 @@ class DistributedDataParallel(Module):
         The built-in hooks aim to provide efficient C++ implementations for certain hooks,
         which might not be as efficient if implemented in Python using a Python communication hook.
 
-        Arguments:
+        Args:
             comm_hook_type (dist.BuiltinCommHookType): type of communication hook, such as
             ALLREDUCE, FP16_COMPRESS, etc.
 

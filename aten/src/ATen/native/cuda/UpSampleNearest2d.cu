@@ -204,7 +204,7 @@ static void upsample_nearest2d_out_cuda_template(
                 output_width,
                 height_scale,
                 width_scale);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
 
@@ -286,50 +286,30 @@ static void upsample_nearest2d_backward_out_cuda_template(
                 idata,
                 height_scale,
                 width_scale);
-        TORCH_CUDA_KERNEL_LAUNCH_CHECK();
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 }
 
 } // namespace
 
-Tensor& upsample_nearest2d_out_cuda(
-    Tensor& output,
+TORCH_IMPL_FUNC(upsample_nearest2d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
     c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    c10::optional<double> scales_w,
+    Tensor& output) {
   upsample_nearest2d_out_cuda_template(output, input, output_size, scales_h, scales_w);
-  return output;
 }
 
-Tensor upsample_nearest2d_cuda(const Tensor& input, IntArrayRef output_size, c10::optional<double> scales_h, c10::optional<double> scales_w) {
-  Tensor output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  upsample_nearest2d_out_cuda_template(output, input, output_size, scales_h, scales_w);
-  return output;
-}
-
-Tensor& upsample_nearest2d_backward_out_cuda(
-    Tensor& grad_input,
+TORCH_IMPL_FUNC(upsample_nearest2d_backward_out_cuda) (
     const Tensor& grad_output,
     IntArrayRef output_size,
     IntArrayRef input_size,
     c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    c10::optional<double> scales_w,
+    Tensor& grad_input) {
   upsample_nearest2d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, scales_h, scales_w);
-  return grad_input;
-}
-
-Tensor upsample_nearest2d_backward_cuda(
-    const Tensor& grad_output,
-    IntArrayRef output_size,
-    IntArrayRef input_size,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
-  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  upsample_nearest2d_backward_out_cuda_template(
-      grad_input, grad_output, output_size, input_size, scales_h, scales_w);
-  return grad_input;
 }
 
 using at::native::upsample::compute_output_size;

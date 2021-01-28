@@ -139,6 +139,15 @@ const Expr* IRMutator::mutate(const Cast* v) {
   return new Cast(v->dtype(), src_value_new);
 }
 
+const Expr* IRMutator::mutate(const BitCast* v) {
+  const Expr* src_value = v->src_value();
+  const Expr* src_value_new = src_value->accept_mutator(this);
+  if (src_value_new == v->src_value()) {
+    return v;
+  }
+  return new BitCast(v->dtype(), src_value_new);
+}
+
 const Expr* IRMutator::mutate(const Var* v) {
   return v;
 }

@@ -35,10 +35,6 @@ struct Layout final {
   };
 };
 
-struct Experimentation {
-  static constexpr bool kUseConv2dOldApi = true;
-};
-
 } // namespace ops
 } // namespace vulkan
 } // namespace native

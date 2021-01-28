@@ -302,6 +302,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       add_dependencies(process_group_agent torch c10d)
 
       add_library(tensorpipe_agent
+        "${TORCH_SRC_DIR}/csrc/distributed/rpc/macros.h"
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp"
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.h"
         "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_utils.cpp"
@@ -310,6 +311,17 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
       add_dependencies(tensorpipe_agent torch c10d)
       if(USE_TENSORPIPE)
+        if(USE_CUDA)
+          target_compile_definitions(tensorpipe_agent PUBLIC USE_CUDA)
+        endif()
+
+        if(USE_ROCM)
+          target_compile_definitions(tensorpipe_agent PRIVATE
+            USE_ROCM
+            __HIP_PLATFORM_HCC__
+          )
+        endif()
+
         target_compile_definitions(tensorpipe_agent PUBLIC USE_TENSORPIPE)
         target_link_libraries(tensorpipe_agent PRIVATE tensorpipe)
         add_dependencies(tensorpipe_agent tensorpipe)
@@ -329,9 +341,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(GENERATED_CXX_TORCH
     "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_0.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_1.cpp"
-    "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_2.cpp"
     )
 
   if(NOT INTERN_DISABLE_AUTOGRAD)
@@ -421,10 +430,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/gen_variable_factories.py"
     "${TOOLS_PATH}/autograd/gen_variable_type.py"
     "${TOOLS_PATH}/autograd/load_derivatives.py"
-    "${TOOLS_PATH}/autograd/nested_dict.py"
-    "${TOOLS_PATH}/autograd/utils.py"
-    "${TOOLS_PATH}/jit/gen_unboxing_wrappers.py"
-    "${TOOLS_PATH}/jit/templates/generated_unboxing_wrappers.cpp"
     WORKING_DIRECTORY "${TORCH_ROOT}")
 
 
@@ -468,6 +473,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   # This one needs to be unconditionally added as Functions.cpp is also unconditionally added
   list(APPEND TORCH_SRCS
     ${TORCH_SRC_DIR}/csrc/autograd/FunctionsManual.cpp
+    ${TORCH_SRC_DIR}/csrc/utils/out_types.cpp
   )
 
   if(NOT INTERN_DISABLE_AUTOGRAD)
@@ -504,59 +510,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
 
   if(USE_CUDA OR USE_ROCM)
-    list(APPEND Caffe2_GPU_HIP_JIT_FUSERS_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp
-      ${TORCH_SRC_DIR}/csrc/autograd/profiler_cuda.cpp
-      ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/arith.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/compute_at.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/codegen.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/dispatch.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/expr_evaluator.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor_kernel_arg.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor_launch_params.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor_utils.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/fusion.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/graph_fuser.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/index_compute.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/instrumentation.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_base_nodes.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_cloner.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_graphviz.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_nodes.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/ir_iostream.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/iter_visitor.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_cache.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_ir.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_ir_builder.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_ir_printer.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_index.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_alias_memory.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_insert_syncs.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_loops.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_thread_predicate.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_unroll.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_utils.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_validation.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower2device.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/manager.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/mutator.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/parser.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/partition.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/predicate_compute.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/register_interface.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/scheduler.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/shape_inference.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tensor_view.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_iter.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_replay.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_rfactor.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/type.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/cuda_codegen.cpp
-    )
+    append_filelist("libtorch_cuda_core_sources" Caffe2_GPU_HIP_JIT_FUSERS_SRCS)
   endif()
 
   if(USE_CUDA)
@@ -764,12 +718,56 @@ elseif(USE_CUDA)
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   torch_compile_options(torch_cuda)  # see cmake/public/utils.cmake
+  target_compile_definitions(torch_cuda PRIVATE USE_CUDA)
   if(USE_NCCL)
     target_link_libraries(torch_cuda PRIVATE __caffe2_nccl)
     target_compile_definitions(torch_cuda PRIVATE USE_NCCL)
   endif()
 endif()
 
+if(USE_CUDA OR USE_ROCM)
+  if(USE_CUDA)
+    set(TORCHLIB_FLAVOR torch_cuda)
+  elseif(USE_ROCM)
+    set(TORCHLIB_FLAVOR torch_hip)
+  endif()
+
+  # The list of NVFUSER runtime files
+  list(APPEND NVFUSER_RUNTIME_FILES
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_reduction.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/broadcast.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fp16_support.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_reduction.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/helpers.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/random_numbers.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensor.cu
+  )
+
+  file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/include/nvfuser_resources")
+
+  # "stringify" NVFUSER runtime sources
+  # (generate C++ header files embedding the original input as a string literal)
+  set(NVFUSER_STRINGIFY_TOOL "${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tools/stringify_file.py")
+  foreach(src ${NVFUSER_RUNTIME_FILES})
+    get_filename_component(filename ${src} NAME_WE)
+    set(dst "${CMAKE_BINARY_DIR}/include/nvfuser_resources/${filename}.h")
+    add_custom_command(
+      COMMENT "Stringify NVFUSER runtime source file"
+      OUTPUT ${dst}
+      DEPENDS ${src}
+      COMMAND ${PYTHON_EXECUTABLE} ${NVFUSER_STRINGIFY_TOOL} -i ${src} -o ${dst}
+    )
+    add_custom_target(nvfuser_rt_${filename} DEPENDS ${dst})
+    add_dependencies(${TORCHLIB_FLAVOR} nvfuser_rt_${filename})
+
+    # also generate the resource headers during the configuration step
+    # (so tools like clang-tidy can run w/o requiring a real build)
+    execute_process(COMMAND
+      ${PYTHON_EXECUTABLE} ${NVFUSER_STRINGIFY_TOOL} -i ${src} -o ${dst})
+  endforeach()
+
+  target_include_directories(${TORCHLIB_FLAVOR} PRIVATE "${CMAKE_BINARY_DIR}/include")
+endif()
 
 if(NOT MSVC AND USE_XNNPACK)
   TARGET_LINK_LIBRARIES(torch_cpu PRIVATE fxdiv)
@@ -1250,7 +1248,7 @@ if(USE_ROCM)
   get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
   if(MY_DEFINITIONS)
     foreach(_item ${MY_DEFINITIONS})
-      list(APPEND HIP_HCC_FLAGS "-D${_item}")
+      list(APPEND HIP_CLANG_FLAGS "-D${_item}")
     endforeach()
   endif()
 
@@ -1321,8 +1319,18 @@ if(BUILD_TEST)
         list(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
         list(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
         separate_arguments(FLAGS UNIX_COMMAND "${FLAGS}")
-        add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}")
-        target_link_libraries(${test_name}_${CPU_CAPABILITY} torch_library gtest_main)
+        # Build vec256 with minimal dependencies on all platforms but Windows
+        if(NOT MSVC)
+          add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}" ../aten/src/ATen/native/quantized/affine_quantizer_base.cpp)
+          # TODO: Get rid of c10 dependency (which is only needed for the implementation of AT_ERROR)
+          target_link_libraries(${test_name}_${CPU_CAPABILITY} c10 sleef gtest_main)
+          if(USE_FBGEMM)
+            target_link_libraries(${test_name}_${CPU_CAPABILITY} fbgemm)
+          endif()
+        else()
+          add_executable(${test_name}_${CPU_CAPABILITY} "${test_src}")
+          target_link_libraries(${test_name}_${CPU_CAPABILITY} torch_library gtest_main)
+        endif()
         target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE $<INSTALL_INTERFACE:include>)
         target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/include>)
         target_include_directories(${test_name}_${CPU_CAPABILITY} PRIVATE ${ATen_CPU_INCLUDE})
@@ -1476,6 +1484,7 @@ if(BUILD_PYTHON)
   # ---[ Python.
   if(BUILD_CAFFE2)
   add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
+  target_compile_options(caffe2_pybind11_state PRIVATE "-DUSE_NUMPY")
   if(NOT MSVC)
     set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
   endif()
@@ -1506,6 +1515,7 @@ if(BUILD_PYTHON)
 
   if(USE_CUDA)
     add_library(caffe2_pybind11_state_gpu MODULE ${Caffe2_GPU_PYTHON_SRCS})
+    target_compile_options(caffe2_pybind11_state_gpu PRIVATE "-DUSE_NUMPY")
     if(NOT MSVC)
       set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
     endif()
@@ -1534,6 +1544,7 @@ if(BUILD_PYTHON)
 
   if(USE_ROCM)
     add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
+    target_compile_options(caffe2_pybind11_state_hip PRIVATE "-DUSE_NUMPY")
     if(NOT MSVC)
       target_compile_options(caffe2_pybind11_state_hip PRIVATE ${HIP_CXX_FLAGS} -fvisibility=hidden)
     endif()

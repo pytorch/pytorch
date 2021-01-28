@@ -136,11 +136,11 @@ def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_
 
 def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if dynamic_slice:
-        starts = g.op("Unsqueeze", starts, axes_i=[0])
-        ends = g.op("Unsqueeze", ends, axes_i=[0])
+        starts = sym_help._unsqueeze_helper(g, starts, [0])
+        ends = sym_help._unsqueeze_helper(g, ends, [0])
         if isinstance(axes, int):
             axes = g.op("Constant", value_t=torch.tensor(axes))
-        axes = g.op("Unsqueeze", axes, axes_i=[0])
+        axes = sym_help._unsqueeze_helper(g, axes, [0])
     else:
         assert len(starts) == len(ends)
         assert len(starts) == len(axes)
@@ -209,34 +209,35 @@ def embedding_bag(g,
     import warnings
     warnings.warn("Export of embedding_bag with dynamic input/offsets shape is not supported in opset 10. "
                   "Please use opset 11 or higher to export model for dynamic input shape.'")
-    if offsets.type().sizes() is not None:
+    offsets_dim_0 = sym_help._get_tensor_dim_size(offsets, 0)
+    if offsets_dim_0 is not None:
         if include_last_offset:
-            offset_len = offsets.type().sizes()[0] - 1
+            offset_len = offsets_dim_0 - 1
             offsets_extended = offsets
         else:
-            offset_len = offsets.type().sizes()[0]
+            offset_len = offsets_dim_0
             offsets_extended = [offsets, g.op("Constant", value_t=torch.tensor([maxsize]))]
             offsets_extended = g.op("Concat", *offsets_extended, axis_i=0)
         list_ = []
         for i in range(offset_len):
-            start_ = g.op("Unsqueeze", select(g, offsets_extended, torch.tensor(0), torch.tensor(i)), axes_i=[0])
-            end_ = g.op("Unsqueeze", select(g, offsets_extended, torch.tensor(0), torch.tensor(i + 1)), axes_i=[0])
+            start_ = sym_help._unsqueeze_helper(g, select(g, offsets_extended, torch.tensor(0), torch.tensor(i)), [0])
+            end_ = sym_help._unsqueeze_helper(g, select(g, offsets_extended, torch.tensor(0), torch.tensor(i + 1)), [0])
             axes_ = g.op("Constant", value_t=torch.tensor([0]))
             indices_row = g.op("Slice", indices, start_, end_, axes_)
 
             embeddings = g.op("Gather", embedding_matrix, indices_row)
             if not sym_help._is_none(per_sample_weights):
                 per_sample_weights_row = g.op("Slice", per_sample_weights, start_, end_, axes_)
-                per_sample_weights_row = g.op("Unsqueeze", per_sample_weights_row, axes_i=[1])
+                per_sample_weights_row = sym_help._unsqueeze_helper(g, per_sample_weights_row, [1])
                 embeddings = g.op("Mul", embeddings, per_sample_weights_row)
             if mode == 0:
-                embeddings = g.op("ReduceSum", embeddings, axes_i=[0], keepdims_i=0)
+                embeddings = sym_help._reducesum_helper(g, embeddings, axes_i=[0], keepdims_i=0)
             elif mode == 1:
                 embeddings = g.op("ReduceMean", embeddings, axes_i=[0], keepdims_i=0)
             else:
                 embeddings = g.op("ReduceMax", embeddings, axes_i=[0], keepdims_i=0)
 
-            embeddings = g.op("Unsqueeze", embeddings, axes_i=[0])
+            embeddings = sym_help._unsqueeze_helper(g, embeddings, [0])
             list_.append(embeddings)
 
         output = g.op("Concat", *list_, axis_i=0)
