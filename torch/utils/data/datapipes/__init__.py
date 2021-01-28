@@ -1,1 +1,1 @@
-from torch.utils.data.datapipes.iter import *
+import torch.utils.data.datapipes.iter
