@@ -325,7 +325,7 @@ class TestUnaryUfuncs(TestCase):
     #   and discontiguities.
     @suppress_warnings
     @ops(unary_ufuncs)
-    def test_reference_numerics(self, device, dtype, op):
+    def test_reference_numerics_normal(self, device, dtype, op):
         tensors = generate_numeric_tensors(device, dtype,
                                            domain=op.domain)
         self._test_reference_numerics(dtype, op, tensors)
