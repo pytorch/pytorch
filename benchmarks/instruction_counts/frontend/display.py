@@ -51,6 +51,7 @@ LIGHT_GREEN = "\033[1;32m"
 RED = "\033[0;31m"
 GREEN = "\033[0;32m"
 END_CHAR = "\033[0m"
+PYTHON_DIM_THRESHOLD = 0.001  # 0.1%
 COLOR_THRESHOLDS: Tuple[Tuple[str, str, str, str], ...] = (
     ("  0.0%", "{}{}", "", ""),
     ("  0.5%", f"{FAINT}{{}}{{}}{END_CHAR * 2}", LIGHT_GREEN, LIGHT_RED),
@@ -269,6 +270,7 @@ class Label_Cell(Cell):
         autograd_repr = {
             AutogradMode.FORWARD: "Mode: Forward",
             AutogradMode.FORWARD_BACKWARD: "Mode: Forward + Backward",
+            AutogradMode.EXPLICIT: " ",
         }
         return self._label + (
             (autograd_repr[self._autograd],) if render_autograd[i] else ())
@@ -322,6 +324,7 @@ class AB_Cell(Cell):
         self,
         a: ValueType,
         b: ValueType,
+        language: Language,
         display_time: bool = False,
         colorize: bool = False,
     ) -> None:
@@ -341,10 +344,10 @@ class AB_Cell(Cell):
         self._a_times: float = a_t * 1e6
         self._b_times: float = b_t * 1e6
 
-        # For now times are stable enough to be useful, so we only use counts.
         self._a_counts = int(a[0].counts(denoise=True) / a[0].number_per_run)
         self._b_counts = int(b[0].counts(denoise=True) / b[0].number_per_run)
 
+        self._language = language
         self._colorize = colorize
 
     def render(self) -> str:
@@ -358,10 +361,13 @@ class AB_Cell(Cell):
         ]
 
         output: str = f"{i_s0} -> {i_s1}  {i_s2}"
+        instr_abs_delta = abs(self._a_counts - self._b_counts) / ((self._a_counts + self._b_counts) / 2)
+        if self._language == Language.PYTHON and instr_abs_delta < PYTHON_DIM_THRESHOLD:
+            output = f"{FAINT}{output}{END_CHAR}"
         if self._display_time:
             time_str = f"{t_s0} -> {t_s1}  {t_s2}"
             if self._zero_within_noise:
-                time_str = f"\033[2m{time_str}\033[0m"
+                time_str = f"{FAINT}{time_str}{END_CHAR}"
 
             output = f"{output}\n{time_str}\n "
 
@@ -470,7 +476,7 @@ def render_ab(
             Label_Cell(label=label, autograd=autograd),
             NumThreads_Cell(num_threads=num_threads),
         ) + tuple(
-            AB_Cell(*r[lang_rt], display_time, colorize) if lang_rt in r else Null_Cell()
+            AB_Cell(*r[lang_rt], lang_rt[0], display_time, colorize) if lang_rt in r else Null_Cell()
             for lang_rt in column_keys
         ))
 

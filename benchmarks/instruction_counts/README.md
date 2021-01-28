@@ -10,7 +10,7 @@ The benchmark suite is designed to be workflow agnostic. It takes a command
 to specify an environment, and as long as `import torch` works the benchmark
 should as well. For instance, in a git-worktree based workflow the source
 command would be something like
-`cd SOME_PYTORCH_ROOT && source actvate ENV_FOR_THIS_ROOT`, while in an
+`cd SOME_PYTORCH_ROOT && source activate ENV_FOR_THIS_ROOT`, while in an
 "install in separate conda envs" workflow the command would be
 `source activate SOME_CONDA_ENV`.
 
