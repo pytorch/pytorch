@@ -4120,33 +4120,33 @@ class TestTorchDeviceType(TestCase):
                 'expected scalar_type Double but found Float'):
             torch.logcumsumexp(b, axis, out=inplace_out)
 
-    # RngNormal not implemented for type f16 for XLA
-    @dtypes(*torch.testing.get_all_dtypes(include_half=False))
-    @dtypesIfCPU(*torch.testing.get_all_dtypes())
-    @dtypesIfCUDA(*torch.testing.get_all_dtypes())
-    def test_diff(self, device, dtype):
+    def _test_diff_numpy(self, t, dims=None):
+        # Helper for test_diff to compare with NumPy reference implementation
         def to_np(t):
             if t.dtype == torch.bfloat16:
                 return t.to(dtype=torch.float, device="cpu").numpy()
             else:
                 return t.cpu().numpy()
 
-        def _test_diff_numpy(t, dims=None):
-            for dim in dims if dims else range(t.dim()):
-                prepend = t.narrow(dim, 0, 1)
-                append = t.narrow(dim, 0, 1)
-                np_t = to_np(t)
+        for dim in dims if dims else range(t.dim()):
+            prepend = t.narrow(dim, 0, 1)
+            append = t.narrow(dim, 0, 1)
+            np_t = to_np(t)
 
-                # test when prepend and append's size along dim is 1
-                actual = torch.diff(t, dim=dim, prepend=prepend, append=append)
-                expected = torch.from_numpy(np.diff(np_t, axis=dim, prepend=to_np(prepend), append=to_np(append)))
-                self.assertEqual(actual, expected.to(t.dtype))
+            # test when prepend and append's size along dim is 1
+            actual = torch.diff(t, dim=dim, prepend=prepend, append=append)
+            expected = torch.from_numpy(np.diff(np_t, axis=dim, prepend=to_np(prepend), append=to_np(append)))
+            self.assertEqual(actual, expected.to(t.dtype))
 
-                # test when prepend and append's size along dim != 1
-                actual = torch.diff(t, dim=dim, prepend=t, append=t)
-                expected = torch.from_numpy(np.diff(np_t, axis=dim, prepend=np_t, append=np_t))
-                self.assertEqual(actual, expected.to(t.dtype))
+            # test when prepend and append's size along dim != 1
+            actual = torch.diff(t, dim=dim, prepend=t, append=t)
+            expected = torch.from_numpy(np.diff(np_t, axis=dim, prepend=np_t, append=np_t))
+            self.assertEqual(actual, expected.to(t.dtype))
 
+    # All tensors appear contiguous on XLA
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_diff_noncontig(self, device, dtype):
         shapes = (
             (1,),
             (1, 5),
@@ -4156,14 +4156,29 @@ class TestTorchDeviceType(TestCase):
 
         for shape in shapes:
             contig = make_tensor(shape, device, dtype, low=-9, high=9)
-            _test_diff_numpy(contig)
 
             non_contig = torch.empty(shape + (2, 2), device=device, dtype=dtype)[..., 0]
             non_contig = non_contig.select(-1, -1)
             non_contig.copy_(contig)
             self.assertTrue(not non_contig.is_contiguous() or shape == (1,))
 
-            _test_diff_numpy(non_contig)
+            self._test_diff_numpy(non_contig)
+
+    # RngNormal not implemented for type f16 for XLA
+    @dtypes(*torch.testing.get_all_dtypes(include_half=False))
+    @dtypesIfCPU(*torch.testing.get_all_dtypes())
+    @dtypesIfCUDA(*torch.testing.get_all_dtypes())
+    def test_diff(self, device, dtype):
+        shapes = (
+            (1,),
+            (1, 5),
+            (3, 5),
+            (1, 5, 1),
+            (2, 3, 5))
+
+        for shape in shapes:
+            contig = make_tensor(shape, device, dtype, low=-9, high=9)
+            self._test_diff_numpy(contig)
 
         t = torch.ones(2, 3)
 
