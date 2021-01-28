@@ -534,6 +534,16 @@ static void PrepareListAppendAndInsertForONNX(Block* b) {
   }
 }
 
+static void ChangeInputTypeForInplaceOps(Node* inplaceNode) {
+  // TODO: Check if binary op
+  auto newInputNode = inplaceNode->owningGraph()->create(aten::type_as, 1);
+  auto orignalInputs = inplaceNode->inputs();
+  newInputNode->insertBefore(inplaceNode);
+  newInputNode->addInput(orignalInputs[1]);
+  newInputNode->addInput(orignalInputs[0]);
+  inplaceNode->replaceInput(1, newInputNode->outputs()[0]);
+}
+
 // Remove Mutation pass does not handle mutation on block inputs.
 // To fix this, insert a clone node following the graph input:
 // Example for graph input node %0:
@@ -561,6 +571,7 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
       if (!mr.inplaceOpVariant(node)) {
         continue;
       }
+      ChangeInputTypeForInplaceOps(node);
 
       auto it = std::find(node->inputs().begin(), node->inputs().end(), input);
 
