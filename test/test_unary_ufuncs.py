@@ -19,7 +19,7 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU,
     OpDTypes)
 from torch.testing import (
-    floating_types_and, all_types_and_complex_and, floating_types)
+    floating_types_and, all_types_and_complex_and, floating_types, floating_and_complex_types_and)
 
 if TEST_SCIPY:
     import scipy
