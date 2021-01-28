@@ -70,6 +70,12 @@ _compare_return_type = Tuple[bool, Optional[str]]
 #
 #   Bool tensors are equal only if they are identical, regardless of
 #   the rtol and atol values.
+#
+#   The `equal_nan` can be True or False, which maps to the True or False
+#   in `torch.allclose`. `equal_nan` can also be "relaxed", which means
+#   the complex will be compared in the relaxed mode:
+#       2 + nan j == 3 + nan j ---> False when equal_nan=True
+#                                   True when equal_nan="relaxed"
 def _compare_tensors_internal(a: torch.Tensor, b: torch.Tensor, *, rtol, atol, equal_nan: Union[str, bool]) -> _compare_return_type:
     assert equal_nan in {True, False, "relaxed"}
     debug_msg : Optional[str]
