@@ -32,6 +32,7 @@ from .utils import (
     quantize_node,
     get_per_tensor_qparams,
     get_linear_prepack_op_for_dtype,
+    create_qparam_nodes,
 )
 
 from .quantization_types import QuantizerCls
@@ -112,13 +113,17 @@ class Add(QuantizeHandler):
             scale, zero_point = activation_post_process.calculate_qparams()
             scale = float(scale)
             zero_point = int(zero_point)
+            scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
+
             if self.relu_node is not None:
                 op = torch.ops.quantized.add_relu
             else:
                 op = torch.ops.quantized.add
-            kwargs = {**self.add_node.kwargs, 'scale': scale, 'zero_point': zero_point}
-            return quantizer.quantized_graph.create_node(
-                'call_function', op, load_arg(quantized=True)(self.add_node.args), kwargs)
+            kwargs = {**self.add_node.kwargs}
+            add_args = (*load_arg(quantized=True)(self.add_node.args), scale_arg, zero_point_arg)
+            op = quantizer.quantized_graph.create_node(
+                'call_function', op, add_args, kwargs)
+            return op
 
 # TODO: merge with Add
 @register_quant_pattern(operator.mul)
@@ -161,12 +166,16 @@ class Mul(QuantizeHandler):
             scale, zero_point = activation_post_process.calculate_qparams()
             scale = float(scale)
             zero_point = int(zero_point)
+
+            scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
+
             if self.relu_node is not None:
                 op = torch.ops.quantized.mul_relu
             else:
                 op = torch.ops.quantized.mul
-            kwargs = {**self.mul_node.kwargs, 'scale': scale, 'zero_point': zero_point}
-            return quantizer.quantized_graph.create_node('call_function', op, load_arg(quantized=True)(self.mul_node.args), kwargs)
+            kwargs = {**self.mul_node.kwargs}
+            args = (*load_arg(quantized=True)(self.mul_node.args), scale_arg, zero_point_arg)
+            return quantizer.quantized_graph.create_node('call_function', op, args, kwargs)
 
 @register_quant_pattern(torch.cat)
 class Cat(QuantizeHandler):
@@ -179,7 +188,10 @@ class Cat(QuantizeHandler):
         scale, zero_point = activation_post_process.calculate_qparams()
         scale = float(scale)
         zero_point = int(zero_point)
-        kwargs = {**load_arg(quantized=False)(node.kwargs), 'scale': scale, 'zero_point': zero_point}
+
+        scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
+
+        kwargs = {**load_arg(quantized=False)(node.kwargs), 'scale': scale_arg, 'zero_point': zero_point_arg}
         return quantizer.quantized_graph.create_node(
             'call_function', torch.ops.quantized.cat, load_arg(quantized=[0])(node.args), kwargs)
 
@@ -311,7 +323,8 @@ class ConvRelu(QuantizeHandler):
                     act_post_process_name = self.relu_node.name if self.relu_node else self.conv_node.name
                     activation_post_process = quantizer.activation_post_process_map[act_post_process_name]
                     scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
-                    qconv_args = (conv_input, packed_weight, scale, zero_point)
+                    scale_node, zero_point_node = create_qparam_nodes(quantizer, self.conv_node.name, scale, zero_point)
+                    qconv_args = (conv_input, packed_weight, scale_node, zero_point_node)
                     kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
                     return quantizer.quantized_graph.create_node(
                         'call_function', qconv_op, qconv_args, kwargs)
@@ -464,7 +477,10 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     activation_post_process = \
                         quantizer.activation_post_process_map[act_post_process_name]
                     scale, zero_point, _ = get_per_tensor_qparams(activation_post_process)
-                    qlinear_args = (linear_input, packed_weight, scale, zero_point)
+
+                    scale_node, zero_point_node = create_qparam_nodes(quantizer, self.linear_node.name, scale, zero_point)
+
+                    qlinear_args = (linear_input, packed_weight, scale_node, zero_point_node)
                     return quantizer.quantized_graph.create_node(
                         "call_function", qlinear_op, qlinear_args, kwargs)
                 else:
@@ -643,11 +659,13 @@ class DefaultNode(QuantizeHandler):
             scale = float(scale)
             zero_point = int(zero_point)
 
+            scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
+
             assert not isinstance(node.target, str), "Expecting node.target for "
             "call_function to be a function instead of a string"
             quantized_op = get_quantized_operator(node.target)
             args = load_arg(quantized=[0])(node.args)
-            kwargs = {**load_arg(quantized=False)(node.kwargs), "output_scale": scale, "output_zero_point": zero_point}
+            kwargs = {**load_arg(quantized=False)(node.kwargs), "output_scale": scale_arg, "output_zero_point": zero_point_arg}
             if quantized_op in ARGS_TO_SKIP:
                 args_to_skip = ARGS_TO_SKIP[quantized_op]
                 for arg in args_to_skip:
@@ -666,9 +684,12 @@ class ELU(QuantizeHandler):
         scale, zero_point = activation_post_process.calculate_qparams()
         scale = float(scale)
         zero_point = int(zero_point)
+
+        scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
+
         quantized_op = get_quantized_operator(node.target)
         args = load_arg(quantized=[0])(node.args)
-        kwargs = {**load_arg(quantized=False)(node.kwargs), 'output_scale': scale, 'output_zero_point': zero_point}
+        kwargs = {**load_arg(quantized=False)(node.kwargs), 'output_scale': scale_arg, 'output_zero_point': zero_point_arg}
         kwargs.pop('inplace')
         return quantizer.quantized_graph.create_node(
             'call_function', quantized_op, args, kwargs)

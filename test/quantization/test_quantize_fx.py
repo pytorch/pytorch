@@ -1495,6 +1495,58 @@ class TestQuantizeFx(QuantizationTestCase):
             str(context.exception) ==
             'Per channel weight observer is not supported yet for ConvTranspose{n}d.')
 
+    @skipIfNoFBGEMM
+    def test_qparams_buffers(self):
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    Linear(),
+                    Linear()
+                )
+                self.mods2 = Linear()
+
+            def forward(self, x):
+                x = self.mods1(x)
+                x = self.mods2(x)
+                return x
+
+        model = M().eval()
+        qconfig_dict = {"": default_qconfig}
+        m = prepare_fx(model, qconfig_dict)
+        m(torch.rand(5, 5))
+
+        m = convert_fx(m)
+        keys = m.state_dict().keys()
+
+        scale_count = 0
+        zero_point_count = 0
+        for k in keys:
+            if 'scale' in k:
+                scale_count = scale_count + 1
+            elif 'zero_point' in k:
+                zero_point_count = zero_point_count + 1
+
+        # Expect each quantized linear op to have a scale and zero point
+        self.assertTrue(scale_count == 3, "Expect each quantized linear op to have a scale in state_dict")
+        self.assertTrue(zero_point_count == 3, "Expect each quantized linear op to have a zero_point in state_dict")
+        # ensure it runs
+        m(torch.rand(5, 5))
+        # ensure it is scriptable
+        scripted = torch.jit.script(m)
+        scripted_keys = scripted.state_dict().keys()
+        self.assertTrue(scripted_keys == keys, "Expected the scripted model to preserve the state_dict")
+
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
