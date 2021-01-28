@@ -62,7 +62,7 @@ except ImportError:
 
 # These functions require manual Python bindings or are not exposed to Python
 SKIP_PYTHON_BINDINGS = [
-    'alias', 'contiguous', 'is_cuda', 'is_sparse', 'size', 'stride',
+    'alias', 'contiguous', 'is_cuda', 'is_sparse', 'is_sparse_csr', 'size', 'stride',
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
     '.*_forward_out', '_unsafe_view', 'tensor', '_?sparse_coo_tensor.*',
     '_?sparse_csr_tensor.*',
