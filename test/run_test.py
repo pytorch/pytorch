@@ -128,6 +128,7 @@ TESTS = [
     'distributed/pipeline/sync/test_stream',
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
+    'distributed/optim/test_zero_redundancy_optimizer',
 ]
 
 # Tests need to be run with pytest.
@@ -187,6 +188,7 @@ WINDOWS_BLOCKLIST = [
     'distributed/pipeline/sync/test_stream',
     'distributed/pipeline/sync/test_transparency',
     'distributed/pipeline/sync/test_worker',
+    'distributed/optim/test_zero_redundancy_optimizer',
 ]
 
 ROCM_BLOCKLIST = [

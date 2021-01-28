@@ -429,15 +429,15 @@ class DeterministicGuard:
         self.deterministic = deterministic
 
     def __enter__(self):
-        self.deterministic_restore = torch.is_deterministic()
-        torch.set_deterministic(self.deterministic)
+        self.deterministic_restore = torch.are_deterministic_algorithms_enabled()
+        torch.use_deterministic_algorithms(self.deterministic)
 
     def __exit__(self, exception_type, exception_value, traceback):
-        torch.set_deterministic(self.deterministic_restore)
+        torch.use_deterministic_algorithms(self.deterministic_restore)
 
-# This decorator can be used for API tests that call torch.set_deterministic().
-# When the test is finished, it will restore the previous deterministic flag
-# setting.
+# This decorator can be used for API tests that call
+# torch.use_deterministic_algorithms().  When the test is finished, it will
+# restore the previous deterministic flag setting.
 #
 # If CUDA >= 10.2, this will set the environment variable
 # CUBLAS_WORKSPACE_CONFIG=:4096:8 so that the error associated with that
@@ -467,7 +467,7 @@ class DeterministicGuard:
 def wrapDeterministicFlagAPITest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        with DeterministicGuard(torch.is_deterministic()):
+        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
             class CuBLASConfigGuard:
                 cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
 
@@ -1894,11 +1894,11 @@ class BytesIOContext(io.BytesIO):
     def __exit__(self, *args):
         pass
 
-def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
+def _assertGradAndGradgradChecks(test_case, apply_fn, inputs, check_batched_grad=False):
     # call assert function rather than returning a bool since it's nicer
     # if we get whether this failed on the gradcheck or the gradgradcheck.
-    test_case.assertTrue(gradcheck(apply_fn, inputs))
-    test_case.assertTrue(gradgradcheck(apply_fn, inputs))
+    test_case.assertTrue(gradcheck(apply_fn, inputs, check_batched_grad=check_batched_grad))
+    test_case.assertTrue(gradgradcheck(apply_fn, inputs, check_batched_grad=check_batched_grad))
 
 
 @contextmanager

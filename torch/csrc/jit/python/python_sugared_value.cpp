@@ -620,6 +620,96 @@ bool ModuleValue::hasAttr(
   return tryGetAttr(loc, m, field) != nullptr;
 }
 
+std::shared_ptr<SugaredValue> ModuleValue::call(
+    const SourceRange& loc,
+    Function& caller,
+    at::ArrayRef<NamedValue> args,
+    at::ArrayRef<NamedValue> kwargs,
+    size_t n_binders) {
+  c10::ClassTypePtr class_type = concreteType_->getJitType()->cast<ClassType>();
+  bool have_pre_hooks =
+      class_type && class_type->getForwardPreHooks().size() != 0;
+  bool have_hooks = class_type && class_type->getForwardHooks().size() != 0;
+
+  std::vector<Value*> arg_values;
+  std::vector<NamedValue> pre_hook_result;
+  Value* forward_input = nullptr;
+  std::shared_ptr<Graph> calling_graph = caller.graph();
+
+  if (have_pre_hooks || have_hooks) {
+    // convert forward args into tuple for forward hooks
+    // (the input of eager hooks are always tuples)
+    for (const auto& sv : args) {
+      arg_values.push_back(sv.value(*calling_graph));
+    }
+    forward_input =
+        calling_graph->insertNode(calling_graph->createTuple(arg_values))
+            ->output();
+  }
+
+  // call pre_hooks
+  if (have_pre_hooks) {
+    for (const auto& hook : class_type->getForwardPreHooks()) {
+      TORCH_INTERNAL_ASSERT(forward_input != nullptr);
+      Value* pre_hook_output =
+          FunctionValue(hook)
+              .call(
+                  loc,
+                  caller,
+                  {NamedValue(self_), NamedValue(forward_input)},
+                  kwargs,
+                  n_binders)
+              ->asValue(loc, caller);
+      if (pre_hook_output->type() != NoneType::get()) {
+        if (pre_hook_output->type()->kind() != TypeKind::TupleType) {
+          pre_hook_output =
+              calling_graph
+                  ->insertNode(calling_graph->createTuple({pre_hook_output}))
+                  ->output();
+        }
+        forward_input = pre_hook_output;
+      }
+    }
+    // de-tuple pre_hook output for forward
+    at::ArrayRef<Value*> output_nodes =
+        calling_graph
+            ->insertNode(calling_graph->createTupleUnpack(forward_input))
+            ->outputs();
+    for (auto& output_node : output_nodes) {
+      pre_hook_result.emplace_back(NamedValue(output_node));
+    }
+    if (args.size() != 0) { // only replace input if it existed
+      args = pre_hook_result;
+    }
+  }
+
+  // call forward
+  std::shared_ptr<SugaredValue> forwardSV =
+      attr(loc, caller, "forward")->call(loc, caller, args, kwargs, n_binders);
+  Value* forward_output = forwardSV->asValue(loc, caller);
+
+  // call hooks
+  if (have_hooks) {
+    for (const auto& hook : class_type->getForwardHooks()) {
+      Value* forward_hook_output = FunctionValue(hook)
+                                       .call(
+                                           loc,
+                                           caller,
+                                           {NamedValue(self_),
+                                            NamedValue(forward_input),
+                                            NamedValue(forward_output)},
+                                           kwargs,
+                                           n_binders)
+                                       ->asValue(loc, caller);
+      if (forward_hook_output->type() != NoneType::get()) {
+        forward_output = forward_hook_output;
+      }
+    }
+  }
+
+  return std::make_shared<SimpleValue>(forward_output);
+}
+
 // This method controls how we desugar attribute lookups on ScriptModules.
 std::shared_ptr<SugaredValue> ModuleValue::attr(
     const SourceRange& loc,

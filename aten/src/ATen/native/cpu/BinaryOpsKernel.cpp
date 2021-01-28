@@ -128,6 +128,16 @@ void div_trunc_kernel(TensorIterator& iter) {
   }
 }
 
+// NOTE: [Floor Division in Python]
+// Python's __floordiv__ operator is more complicated than just floor(a / b).
+// It aims to maintain the property: a == (a // b) * b + remainder(a, b)
+// which can otherwise fail due to rounding errors in the remainder.
+// So, instead it is calculated as: a // b = (a - remainder(a, b)) / b
+// With some additional fix-ups added to the result.
+//
+// For reference, see CPython's implementation:
+// https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
+
 void div_floor_kernel(TensorIterator& iter) {
   const auto dtype = iter.common_dtype();
   if (dtype == kByte) {
@@ -153,7 +163,7 @@ void div_floor_kernel(TensorIterator& iter) {
       });
     });
   } else {
-    // NOTE: This round-about way of calculating floor(a / b) is needed for exact python compatibility
+    // See NOTE: [Floor Division in Python]
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, dtype, "div_floor_cpu", [&]() {
       using vec_t = Vec256<scalar_t>;
       cpu_kernel_vec(iter,
@@ -582,6 +592,32 @@ void minimum_kernel(TensorIterator& iter) {
   }
 }
 
+void fmax_kernel(TensorIterator& iter) {
+  if (isFloatingType(iter.common_dtype())) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmax_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return std::fmax(a, b);
+        });
+    });
+  } else {
+    maximum_kernel(iter);
+  }
+}
+
+void fmin_kernel(TensorIterator& iter) {
+  if (isFloatingType(iter.common_dtype())) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "fmin_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return std::fmin(a, b);
+        });
+    });
+  } else {
+    minimum_kernel(iter);
+  }
+}
+
 void smooth_l1_kernel(TensorIterator& iter, double beta) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
         kBFloat16, kHalf, iter.dtype(), "smooth_l1_cpu", [&]() {
@@ -933,6 +969,8 @@ REGISTER_DISPATCH(eq_stub, &eq_kernel);
 REGISTER_DISPATCH(ne_stub, &ne_kernel);
 REGISTER_DISPATCH(maximum_stub, &maximum_kernel);
 REGISTER_DISPATCH(minimum_stub, &minimum_kernel);
+REGISTER_DISPATCH(fmax_stub, &fmax_kernel);
+REGISTER_DISPATCH(fmin_stub, &fmin_kernel);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
 REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);
 REGISTER_DISPATCH(logit_backward_stub, &logit_backward_kernel);
