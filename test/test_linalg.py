@@ -828,6 +828,18 @@ class TestLinalg(TestCase):
             # run_test_transposed(a_shape, b_shape)
             run_test_skipped_elements(a_shape, b_shape)
 
+        # Test that kron perserve memory format
+        a = torch.randn(1, 2, 3, 4, dtype=dtype, device=device).contiguous(memory_format=torch.channels_last)
+        b = torch.randn(1, 2, 3, 4, dtype=dtype, device=device).contiguous(memory_format=torch.channels_last)
+        c = torch.kron(a, b)
+        self.assertTrue(c.is_contiguous(memory_format=torch.channels_last))
+        torch.kron(a, b, out=c)
+        self.assertTrue(c.is_contiguous(memory_format=torch.channels_last))
+        c = c.contiguous(memory_format=torch.contiguous_format)
+        torch.kron(a, b, out=c)
+        self.assertTrue(c.is_contiguous(memory_format=torch.contiguous_format))
+
+
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_kron_empty(self, device, dtype):
 
@@ -4715,7 +4727,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # undefined bahavior
             return
 
-        num_batches = 10
+        batch_sizes = [1, 10]
         M, N, O = 23, 8, 12
         numpy_dtype = dtype if dtype != torch.bfloat16 else torch.float32
 
@@ -4724,17 +4736,18 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             is_supported = TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater)
 
         if not is_supported:
-            b1 = torch.randn(num_batches, M, N, device=device).to(dtype)
-            b2 = torch.randn(num_batches, N, O, device=device).to(dtype)
-            self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
-                                   lambda: torch.bmm(b1, b2))
+            for num_batches in batch_sizes:
+                b1 = torch.randn(num_batches, M, N, device=device).to(dtype)
+                b2 = torch.randn(num_batches, N, O, device=device).to(dtype)
+                self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
+                                       lambda: torch.bmm(b1, b2))
             return
 
         def invert_perm(p):
             d = {x: i for i, x in enumerate(p)}
             return (d[0], d[1], d[2])
 
-        def generate_inputs():
+        def generate_inputs(num_batches):
             # transposed tensors
             for perm1, perm2 in itertools.product(itertools.permutations((0, 1, 2)), repeat=2):
                 b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
@@ -4757,21 +4770,22 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 b2 = torch.randn(shape2, dtype=dtype, device=device)
                 yield b1, b2
 
-        for (b1, b2), perm3 in itertools.product(generate_inputs(), itertools.permutations((0, 1, 2))):
-            res1 = torch.bmm(b1, b2)
-            res2 = torch.full((num_batches, M, O), math.nan, dtype=dtype, device=device) \
-                .permute(perm3).contiguous().permute(invert_perm(perm3))
-            torch.bmm(b1, b2, out=res2)
-            expect = torch.from_numpy(
-                b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
-            self.assertEqual(expect, res1)
-            self.assertEqual(expect, res2)
+        for num_batches in batch_sizes:
+            for (b1, b2), perm3 in itertools.product(generate_inputs(num_batches), itertools.permutations((0, 1, 2))):
+                res1 = torch.bmm(b1, b2)
+                res2 = torch.full((num_batches, M, O), math.nan, dtype=dtype, device=device) \
+                    .permute(perm3).contiguous().permute(invert_perm(perm3))
+                torch.bmm(b1, b2, out=res2)
+                expect = torch.from_numpy(
+                    b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
+                self.assertEqual(expect, res1)
+                self.assertEqual(expect, res2)
 
-            if self.device_type == 'cuda':
-                # check that mixed arguments are rejected
-                self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2.cpu()))
-                self.assertRaises(RuntimeError, lambda: torch.bmm(b1.cpu(), b2))
-                self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2, out=res2.cpu()))
+                if self.device_type == 'cuda':
+                    # check that mixed arguments are rejected
+                    self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2.cpu()))
+                    self.assertRaises(RuntimeError, lambda: torch.bmm(b1.cpu(), b2))
+                    self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2, out=res2.cpu()))
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
