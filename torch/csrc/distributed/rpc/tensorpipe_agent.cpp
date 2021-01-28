@@ -213,6 +213,7 @@ std::unique_ptr<TransportRegistration> makeIbvTransport() {
 // issuing a RDMA write for transferring data across machines (plus a send for
 // acknowledging it). It bootstraps using a standard TCP connection to exchange
 // setup information. It is Linux-only.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeTransportRegistry, ibv, makeIbvTransport);
 
 #endif // TENSORPIPE_HAS_IBV_TRANSPORT
