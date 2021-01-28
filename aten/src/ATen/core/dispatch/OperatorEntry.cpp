@@ -369,7 +369,7 @@ void OperatorEntry::reportSignatureError(std::string name) const {
         "    ", (schema_.has_value() ? schema_->debug : "unknown debug info"), "\n",
         "  correct signature:  ", cpp_signature_->signature.name(), "\n",
         "    ", cpp_signature_->debug, "\n",
-        "  accessed/called as: ", CppSignature::make<FuncType>().name(), "\n",
+        "  accessed/called as: ", name, "\n",
         "This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
         "Please make sure that the function signature matches the signature in the operator registration call."
   );
