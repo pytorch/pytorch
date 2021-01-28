@@ -347,10 +347,11 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_dict = {'': qconfig}
         prepared = prepare_fx(m, qconfig_dict)
         quantized = convert_fx(prepared, debug=True)
-        qparams = (quantized._scale_0, quantized._zero_point_0)
+        qparams = (quantized._input_scale_0, quantized._input_zero_point_0)
         weight_obs = qconfig.weight()
         weight_obs(quantized.weight)
-        ref_qparams = weight_obs.calculate_qparams()
+        # Get the actual value to avoid tensor size mismatch error, torch.Size([]) vs torch.Size([1])
+        ref_qparams = (weight_obs.calculate_qparams()[0].item(), weight_obs.calculate_qparams()[1].item())
         self.assertEqual(qparams, ref_qparams)
 
     def test_conv_bn_relu(self):
@@ -1527,11 +1528,13 @@ class TestQuantizeFx(QuantizationTestCase):
 
         m = convert_fx(m)
         keys = m.state_dict().keys()
-
-        scale_count = 0
-        zero_point_count = 0
+        quant_scale_count = quant_zero_point = scale_count = zero_point_count = 0
         for k in keys:
-            if 'scale' in k:
+            if 'input_scale' in k:
+                quant_scale_count = quant_scale_count + 1
+            elif 'input_zero_point' in k:
+                quant_zero_point = quant_zero_point + 1
+            elif 'scale' in k:
                 scale_count = scale_count + 1
             elif 'zero_point' in k:
                 zero_point_count = zero_point_count + 1
@@ -1545,6 +1548,14 @@ class TestQuantizeFx(QuantizationTestCase):
         scripted = torch.jit.script(m)
         scripted_keys = scripted.state_dict().keys()
         self.assertTrue(scripted_keys == keys, "Expected the scripted model to preserve the state_dict")
+        assert hasattr(m, "mods1_0_input_scale_0")
+        assert hasattr(m, "mods1_0_input_zero_point_0")
+        assert hasattr(m, "mods1_0_scale_0")
+        assert hasattr(m, "mods1_0_zero_point_0")
+        assert hasattr(m, "mods1_1_scale_0")
+        assert hasattr(m, "mods1_1_zero_point_0")
+        assert hasattr(m, "mods2_scale_0")
+        assert hasattr(m, "mods2_zero_point_0")
 
 
 @skipIfNoFBGEMM

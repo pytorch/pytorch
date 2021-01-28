@@ -112,33 +112,42 @@ def get_quantize_op_and_qparams(activation_post_process):
         quantize_op = torch.quantize_per_tensor  # type: ignore
     return quantize_op, qparams
 
-def quantize_node(root_module, graph, node, activation_post_process):
-    ''' Add quantization nodes for given node to graph
-    with the qparams calculated from activation_post_process module
+def quantize_node(quantizer, in_node, obs_module, obs_node, is_input):
+    ''' Add quantization nodes (eg. quantize_per_tensor/per_channel) for given node to graph
+    with the qparams calculated from activation_post_process (obs_module).
+    The observer node (obs_node) is used to find the FQN of the user of act_post_process.
     e.g. Given input `node` in `node = self.conv(x)`, insert node:
     `quantized_node = torch.quantize_per_tensor(x, self._scale_0, self._zer_point_0, self._dtype_0)`
     where self._scale_0, self._zero_point_0 and self._dtype_0 are
-    calculated from `activation_post_process`
+    calculated from `obs_module`
     '''
-    def module_has_qparams_attr_with_index(module, qparams, i):
-        for name in qparams.keys():
-            if hasattr(module, name + str(i)):
-                return True
-        return False
+    # Find the first use of the observer node, we use this to get the scope of the module.
+    if is_input:
+        # if the quantize function is at the input of op, then we find the first user of the observer_node
+        # to get the path
+        first_use = list(obs_node.users)[0]
+        prefix = "_input"
+    else:
+        # if the quantize function is at the output of the op, we use the observer input node to get the path
+        first_use = in_node
+        prefix = "_output"
 
-    def get_next_qparams_idx(module, qparams):
-        idx = 0
-        while module_has_qparams_attr_with_index(module, qparams, idx):
-            idx += 1
-        return idx
+    module_path, _ = quantizer.node_name_to_scope[first_use.name]
+    root_module = quantizer.modules['']
+    graph = quantizer.quantized_graph
+    quantize_op, qparams = get_quantize_op_and_qparams(obs_module)
+    inputs = [in_node]
 
-    quantize_op, qparams = get_quantize_op_and_qparams(activation_post_process)
-    idx = get_next_qparams_idx(root_module, qparams)
-    inputs = [node]
     for key, value in qparams.items():
-        setattr(root_module, key + str(idx), value)
-        qparam_full_path = key + str(idx)
-        inputs.append(graph.create_node('get_attr', qparam_full_path))
+        if key in ['_scale_', '_zero_point_']:
+            # For scale and zero_point values we register them as buffers in the root module.
+            qparam_node = create_getattr_from_value(root_module, graph, module_path + prefix + key, value)
+            inputs.append(qparam_node)
+        else:
+            get_new_attr_name = get_new_attr_name_with_prefix(module_path + prefix + key)
+            qparam_full_path = get_new_attr_name(root_module)
+            setattr(root_module, qparam_full_path, value)
+            inputs.append(graph.create_node('get_attr', qparam_full_path))
     return graph.create_node('call_function', quantize_op, tuple(inputs), {})
 
 def get_custom_module_class_keys(custom_config_dict, custom_config_dict_key) -> List[Any]:
