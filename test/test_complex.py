@@ -12,18 +12,6 @@ class TestComplex(JitTestCase):
 
         self.checkScript(fn, (3 + 5j,))
 
-    def test_pickle(self):
-        class ComplexModule(torch.jit.ScriptModule):
-            def __init__(self):
-                super().__init__()
-                self.a = 3 + 5j
-
-            def forward(self, b: int):
-                return b
-
-        loaded = self.getExportImportCopy(ComplexModule())
-        self.assertEqual(loaded.a, 3 + 5j)
-
 class TestComplexTensor(TestCase):
     @dtypes(*torch.testing.get_all_complex_dtypes())
     def test_to_list(self, device, dtype):
