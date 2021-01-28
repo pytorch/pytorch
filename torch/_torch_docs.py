@@ -6514,6 +6514,9 @@ total number of elements in each tensor need to be the same.
 .. note:: When the shapes do not match, the shape of :attr:`mean`
           is used as the shape for the returned output tensor
 
+.. note:: When :attr:`std` is a CUDA tensor, this function synchronizes
+          its device with the CPU.
+
 Args:
     mean (Tensor): the tensor of per-element means
     std (Tensor): the tensor of per-element standard deviations
