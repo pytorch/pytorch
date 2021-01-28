@@ -753,7 +753,7 @@ def softmax(g, input, dim, dtype=None):
     input = g.op('Sub', input, g.op('ReduceMax', input, axes_i=[dim], keepdims_i=1))
 
     exp = g.op('Exp', input)
-    sum = g.op('ReduceSum', exp, axes_i=[dim])
+    sum = sym_help._reducesum_helper(g, exp, axes_i=[dim])
     softmax = g.op('Div', exp, sum)
     if dtype and dtype.node().kind() != 'prim::Constant':
         parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
@@ -2383,7 +2383,7 @@ def gather(g, self, dim, index, sparse_grad=False):
     depth = size(g, self, g.op("Constant", value_t=torch.LongTensor([dim])))
     index = g.op("Cast", g.op("OneHot", index, depth, values, axis_i=dim), to_i=sym_help.cast_pytorch_to_onnx[dtype])
     mul = g.op("Mul", sym_help._unsqueeze_helper(g, self, [dim + 1]), index)
-    return g.op("ReduceSum", mul, axes_i=[dim], keepdims_i=0)
+    return sym_help._reducesum_helper(g, mul, axes_i=[dim], keepdims_i=0)
 
 
 @parse_args('v', 'is', 'b', 'i')
@@ -2639,7 +2639,7 @@ def index(g, self, index):
 @parse_args('v', 'is', 'i')
 def frobenius_norm(g, self, dim=None, keepdim=False):
     sqr = g.op('Mul', self, self)
-    sumsqr = g.op('ReduceSum', sqr, axes_i=dim, keepdims_i=keepdim)
+    sumsqr = sym_help._reducesum_helper(g, sqr, axes_i=dim, keepdims_i=keepdim)
     return g.op('Sqrt', sumsqr)
 
 
@@ -2805,7 +2805,7 @@ def kl_div(g, input, target, reduction, log_target):
     elif reduction == 1:
         return g.op("ReduceMean", output, keepdims_i=0)
     elif reduction == 2:
-        return g.op("ReduceSum", output, keepdims_i=0)
+        return sym_help._reducesum_helper(g, output, keepdims_i=0)
     else:
         return sym_help._onnx_unsupported("kl_div with reduction other than none, mean, or sum. Please open a bug to "
                                           "request ONNX export support for the missing reduction type.")
