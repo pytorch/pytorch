@@ -288,7 +288,7 @@ class TestBinaryUfuncs(TestCase):
 
         if not dtype.is_floating_point:
             # floor(a / b) * b can be < a, so fixup slightly to avoid underflow
-            torch.where(a < 0, a + b, a)
+            a = torch.where(a < 0, a + b, a)
 
         d_true = torch.divide(a, b, rounding_mode='true')
         self.assertTrue(d_true.is_floating_point())
