@@ -81,6 +81,11 @@ struct C10_API Device final {
     return type_ == DeviceType::CUDA;
   }
 
+  /// Return true if the device is of XPU type.
+  bool is_xpu() const noexcept {
+    return type_ == DeviceType::XPU;
+  }
+
   /// Return true if the device is of CPU type.
   bool is_cpu() const noexcept {
     return type_ == DeviceType::CPU;

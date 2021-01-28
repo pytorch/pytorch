@@ -962,8 +962,9 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 self._index_queues[idx].put(_utils.worker._ResumeIteration())
             resume_iteration_cnt = self._num_workers
             while resume_iteration_cnt > 0:
-                data = self._get_data()
-                if isinstance(data, _utils.worker._ResumeIteration):
+                return_idx, return_data = self._get_data()
+                if isinstance(return_idx, _utils.worker._ResumeIteration):
+                    assert return_data is None
                     resume_iteration_cnt -= 1
         # prime the prefetch loop
         for _ in range(self._prefetch_factor * self._num_workers):

@@ -74,9 +74,10 @@ from torch.testing._internal.jit_utils import get_forward_graph
 from torch.jit._recursive import wrap_cpp_module
 
 # Standard library
+from typing import List, Tuple
+import io
 import itertools
 import unittest
-import io
 
 class TestQuantizeJitPasses(QuantizationTestCase):
     """ Test graph mode quantization passes used by quantize_jit
@@ -742,8 +743,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                    .run(m.graph)
 
     def test_insert_observers_propagate_observed_for_function(self):
-        def channel_shuffle(x, groups):
-            # type: (torch.Tensor, int) -> torch.Tensor
+        def channel_shuffle(x: torch.Tensor, groups: int) -> torch.Tensor:
             batchsize, num_channels, height, width = x.data.size()
             channels_per_group = num_channels // groups
             # reshape
@@ -1126,8 +1126,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 self.conv = torch.nn.Conv2d(3, 3, 1).float()
                 self.use_skip = True
 
-            def forward(self, x, cond):
-                # type: (Tensor, bool) -> Tensor
+            def forward(self, x: torch.Tensor, cond: bool) -> torch.Tensor:
                 # to avoid being frozen
                 self.use_skip = cond
                 if self.use_skip:
@@ -1227,8 +1226,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                 super(ComplexModel, self).__init__()
                 self.layers = torch.nn.ModuleList([SimpleLinearLayer() for i in range(2)])
 
-            def forward(self, x):
-                # type: (torch.Tensor) -> List[torch.Tensor]
+            def forward(self, x: torch.Tensor) -> List[torch.Tensor]:
                 states = []
                 for layer in self.layers:
                     val = layer(x)
@@ -1324,8 +1322,7 @@ class TestQuantizeJitPasses(QuantizationTestCase):
 
         @torch.jit.interface
         class ModInterface(torch.nn.Module):
-            def forward(self, x, y):
-                # type:  (Tensor, Tensor) -> Tensor
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 pass
 
         class TestModule(torch.nn.Module):
@@ -2428,8 +2425,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 self.conv1 = torch.nn.Conv2d(3, 3, 3).float()
                 self.conv2 = torch.nn.Conv2d(3, 3, 3).float()
 
-            def forward(self, x):
-                # type: (Tensor) -> Tuple[Tensor, Tensor]
+            def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
                 x1 = self.conv1(x)
                 x2 = self.conv2(x)
                 return x1, x2
@@ -2919,8 +2915,7 @@ class TestQuantizeDynamicJitPasses(QuantizationTestCase):
                 super(Res, self).__init__()
                 self.weight = torch.nn.Parameter(torch.ones(5, 5))
 
-            def forward(self, x, cond):
-                # type: (Tensor, bool) -> Tensor
+            def forward(self, x: torch.Tensor, cond: bool) -> torch.Tensor:
                 if cond:
                     return torch.nn.functional.linear(x, self.weight)
                 else:

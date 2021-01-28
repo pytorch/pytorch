@@ -74,6 +74,9 @@ struct Descriptor final {
     VkDescriptorSet handle() const;
 
    private:
+    void invalidate();
+
+   private:
     struct Item final {
       uint32_t binding;
       VkDescriptorType type;
@@ -114,6 +117,9 @@ struct Descriptor final {
     void purge();
 
    private:
+    void invalidate();
+
+   private:
     struct Configuration final {
       static constexpr uint32_t kQuantum = 16u;
       static constexpr uint32_t kReserve = 64u;
@@ -136,33 +142,6 @@ struct Descriptor final {
     : pool(gpu) {
   }
 };
-
-//
-// Impl
-//
-
-inline Descriptor::Set::Set(Set&& set)
-  : device_(std::move(set.device_)),
-    descriptor_set_(std::move(set.descriptor_set_)),
-    shader_layout_signature_(std::move(set.shader_layout_signature_)),
-    bindings_(std::move(set.bindings_)) {
-  set.device_ = VK_NULL_HANDLE;
-  set.descriptor_set_ = VK_NULL_HANDLE;
-}
-
-inline Descriptor::Set& Descriptor::Set::operator=(Set&& set) {
-  if (&set != this) {
-    device_ = std::move(set.device_);
-    descriptor_set_ = std::move(set.descriptor_set_);
-    shader_layout_signature_ = std::move(set.shader_layout_signature_);
-    bindings_ = std::move(set.bindings_);
-
-    set.device_ = VK_NULL_HANDLE;
-    set.descriptor_set_ = VK_NULL_HANDLE;
-  };
-
-  return *this;
-}
 
 } // namespace api
 } // namespace vulkan

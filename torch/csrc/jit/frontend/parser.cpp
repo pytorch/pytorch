@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/parser.h>
+
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
@@ -267,8 +268,9 @@ struct ParserImpl {
       auto kind = L.cur().kind;
       auto pos = L.cur().range;
       L.next();
-      auto unary_kind =
-          kind == '*' ? TK_STARRED : kind == '-' ? TK_UNARY_MINUS : kind;
+      auto unary_kind = kind == '*' ? TK_STARRED
+          : kind == '-'             ? TK_UNARY_MINUS
+                                    : kind;
       auto subexp = parseExp(unary_prec);
       // fold '-' into constant numbers, so that attributes can accept
       // things like -1

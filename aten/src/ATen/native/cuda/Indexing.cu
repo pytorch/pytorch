@@ -232,17 +232,18 @@ void index_put_accum_kernel(Tensor & self, const c10::List<c10::optional<Tensor>
 
       AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
       value_.scalar_type(), "indexing_backward", [&] {
-      indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
-        sorted_indices.data_ptr<int64_t>(),
-        orig_indices.data_ptr<int64_t>(),
-        value_.data_ptr<scalar_t>(),
-        src_.data_ptr<scalar_t>(),
-        num_indices,
-        sliceSize,
-        strideBefore,
-        nElemBefore);
+        indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
+          sorted_indices.data_ptr<int64_t>(),
+          orig_indices.data_ptr<int64_t>(),
+          value_.data_ptr<scalar_t>(),
+          src_.data_ptr<scalar_t>(),
+          num_indices,
+          sliceSize,
+          strideBefore,
+          nElemBefore);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
+
       if (permuted)
           self.copy_(src_.permute(inversePerm));
   }

@@ -1345,6 +1345,17 @@ class ModelForFusionWithBias(nn.Module):
         x = self.dequant(x)
         return x
 
+class ModelForLinearBNFusion(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc = nn.Linear(20, 10)
+        self.bn = nn.BatchNorm1d(10)
+        nn.init.uniform_(self.bn.weight)
+        nn.init.uniform_(self.bn.bias)
+
+    def forward(self, x):
+        return self.bn(self.fc(x))
+
 class DummyObserver(torch.nn.Module):
     def calculate_qparams(self):
         return 1.0, 0
