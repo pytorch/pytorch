@@ -8,8 +8,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
 from torch.testing._internal import mypy_wrapper
-from torch.testing._internal.stats_utils import \
-    (regression_info)
+from torch.testing._internal import stats_utils
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -578,15 +577,165 @@ def makereport(tests):
 class TestStatsUtils(TestCase):
     maxDiff = None
 
+    def test_graph(self):
+        # HEAD is on master
+        self.assertEqual(
+            '''\
+Commit graph (base is most recent master ancestor with at least one S3 report):
+
+    : (master)
+    |
+    * aaaaaaaaaa (HEAD)              total time   502.99s
+    * bbbbbbbbbb (base)   1 report,  total time    47.84s
+    * cccccccccc          1 report,  total time   332.50s
+    * dddddddddd          0 reports
+    |
+    :
+''',
+            stats_utils.graph(
+                head_sha=fakehash('a'),
+                head_seconds=502.99,
+                base_seconds={
+                    fakehash('b'): [47.84],
+                    fakehash('c'): [332.50],
+                    fakehash('d'): [],
+                },
+                on_master=True,
+            )
+        )
+
+        self.assertEqual(
+            '''\
+Commit graph (base is most recent master ancestor with at least one S3 report):
+
+    : (master)
+    |
+    | * aaaaaaaaaa (HEAD)            total time  9988.77s
+    |/
+    * bbbbbbbbbb (base) 121 reports, total time  7654.32s ±   55.55s
+    * cccccccccc         20 reports, total time  5555.55s ±  253.19s
+    * dddddddddd          1 report,  total time  1234.56s
+    |
+    :
+''',
+            stats_utils.graph(
+                head_sha=fakehash('a'),
+                head_seconds=9988.77,
+                base_seconds={
+                    fakehash('b'): [7598.77] * 60 + [7654.32] + [7709.87] * 60,
+                    fakehash('c'): [5308.77] * 10 + [5802.33] * 10,
+                    fakehash('d'): [1234.56],
+                },
+                on_master=False,
+            )
+        )
+
+        self.assertEqual(
+            '''\
+Commit graph (base is most recent master ancestor with at least one S3 report):
+
+    : (master)
+    |
+    | * aaaaaaaaaa (HEAD)            total time    25.52s
+    | |
+    | : (5 commits)
+    |/
+    * bbbbbbbbbb          0 reports
+    * cccccccccc          0 reports
+    * dddddddddd (base)  15 reports, total time    58.92s ±   25.82s
+    |
+    :
+''',
+            stats_utils.graph(
+                head_sha=fakehash('a'),
+                head_seconds=25.52,
+                base_seconds={
+                    fakehash('b'): [],
+                    fakehash('c'): [],
+                    fakehash('d'): [52.25] * 14 + [152.26],
+                },
+                on_master=False,
+                ancestry_path=5,
+            )
+        )
+
+        self.assertEqual(
+            '''\
+Commit graph (base is most recent master ancestor with at least one S3 report):
+
+    : (master)
+    |
+    | * aaaaaaaaaa (HEAD)            total time     0.08s
+    |/|
+    | : (1 commit)
+    |
+    * bbbbbbbbbb          0 reports
+    * cccccccccc (base)   1 report,  total time     0.09s
+    * dddddddddd          3 reports, total time     0.10s ±    0.05s
+    |
+    :
+''',
+            stats_utils.graph(
+                head_sha=fakehash('a'),
+                head_seconds=0.08,
+                base_seconds={
+                    fakehash('b'): [],
+                    fakehash('c'): [0.09],
+                    fakehash('d'): [0.05, 0.10, 0.15],
+                },
+                on_master=False,
+                other_ancestors=1,
+            )
+        )
+
+        self.assertEqual(
+            '''\
+Commit graph (base is most recent master ancestor with at least one S3 report):
+
+    : (master)
+    |
+    | * aaaaaaaaaa (HEAD)            total time     5.98s
+    | |
+    | : (1 commit)
+    |/|
+    | : (7 commits)
+    |
+    * bbbbbbbbbb (base)   2 reports, total time     6.02s ±    1.71s
+    * cccccccccc          0 reports
+    * dddddddddd         10 reports, total time     5.84s ±    0.92s
+    |
+    :
+''',
+            stats_utils.graph(
+                head_sha=fakehash('a'),
+                head_seconds=5.98,
+                base_seconds={
+                    fakehash('b'): [4.81, 7.23],
+                    fakehash('c'): [],
+                    fakehash('d'): [4.97] * 5 + [6.71] * 5,
+                },
+                on_master=False,
+                ancestry_path=1,
+                other_ancestors=7,
+            )
+        )
+
     def test_regression_info(self):
         self.assertEqual(
             '''\
 Following output is to check this commit for test time regressions:
     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
-Comparing test times against base commit and its 1 most recent ancestors:
-    bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb   1 run  found in S3, total time    40.00s
-    cccccccccccccccccccccccccccccccccccccccc   1 run  found in S3, total time    43.00s
+Commit graph (base is most recent master ancestor with at least one S3 report):
+
+    : (master)
+    |
+    | * aaaaaaaaaa (HEAD)            total time    42.00s
+    |/
+    * bbbbbbbbbb (base)   1 report,  total time    40.00s
+    * cccccccccc          1 report,  total time    43.00s
+    |
+    :
 
 Prior average total time:    41.50s ± 2.12s
 Current       total time:    42.00s
@@ -596,10 +745,10 @@ Current       total time:    42.00s
 
 --- tests whose times changed ---
 ''',
-            regression_info(
-                fakehash('a'),
-                makereport({'Foo': [makecase('test_foo', 42)]}),
-                {
+            stats_utils.regression_info(
+                head_sha=fakehash('a'),
+                head_report=makereport({'Foo': [makecase('test_foo', 42)]}),
+                base_reports={
                     fakehash('b'): [
                         makereport({'Foo': [makecase('test_foo', 40)]}),
                     ],
@@ -608,6 +757,10 @@ Current       total time:    42.00s
                     ],
                 },
                 stdev_threshold=2,
+                job_name='foo_job',
+                on_master=False,
+                ancestry_path=0,
+                other_ancestors=0,
             )
         )
 

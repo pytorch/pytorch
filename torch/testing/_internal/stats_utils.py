@@ -35,12 +35,92 @@ class Report(ReportMeta):
     suites: Dict[str, Suite]
 
 
+def plural(n: int) -> str:
+    return '' if n == 1 else 's'
+
+
+def format_seconds(seconds: List[float]) -> str:
+    s = ''
+    if len(seconds) > 0:
+        s += f'total time {statistics.mean(seconds):8.2f}s'
+        if len(seconds) > 1:
+            s += f' ± {statistics.stdev(seconds):7.2f}s'
+    return s
+
+
+def show_ancestors(num_commits: int) -> str:
+    return f'    | : ({num_commits} commit{plural(num_commits)})'
+
+
+def unlines(lines: List[str]) -> str:
+    return ''.join(f'{line}\n' for line in lines)
+
+
+def graph(
+    *,
+    head_sha: Commit,
+    head_seconds: float,
+    base_seconds: Dict[Commit, List[float]],
+    on_master: bool,
+    ancestry_path: int = 0,
+    other_ancestors: int = 0,
+) -> str:
+    lines = [
+        'Commit graph (base is most recent master ancestor with at least one S3 report):',
+        '',
+        '    : (master)',
+        '    |',
+    ]
+
+    head_time_str = f'           {format_seconds([head_seconds])}'
+    if on_master:
+        lines.append(f'    * {head_sha[:10]} (HEAD)   {head_time_str}')
+    else:
+        lines.append(f'    | * {head_sha[:10]} (HEAD) {head_time_str}')
+
+        if ancestry_path > 0:
+            lines += [
+                '    | |',
+                show_ancestors(ancestry_path),
+            ]
+
+        if other_ancestors > 0:
+            lines += [
+                '    |/|',
+                show_ancestors(other_ancestors),
+                '    |',
+            ]
+        else:
+            lines.append('    |/')
+
+    is_first = True
+    for sha, seconds in base_seconds.items():
+        num_runs = len(seconds)
+        prefix = str(num_runs).rjust(3)
+        base = '(base)' if is_first and num_runs > 0 else '      '
+        if num_runs > 0:
+            is_first = False
+        t = format_seconds(seconds)
+        p = plural(num_runs)
+        if t:
+            p = f'{p}, '.ljust(3)
+        lines.append(f'    * {sha[:10]} {base} {prefix} report{p}{t}')
+
+    lines.extend(['    |', '    :'])
+
+    return unlines(lines)
+
+
 def regression_info(
+    *,
     head_sha: Commit,
     head_report: Report,
     base_reports: Dict[Commit, List[Report]],
-    *,
     stdev_threshold: int,
+    job_name: str,
+    on_master: bool,
+    ancestry_path: int,
+    other_ancestors: int,
 ) -> str:
     """
     Return a human-readable report describing any test time regressions.
@@ -53,27 +133,25 @@ def regression_info(
     list(base_reports)[0]).
     """
 
+    sections = [
+        unlines([
+            'Following output is to check this commit for test time regressions:',
+            f'    {head_sha}',
+        ]),
+        graph(
+            head_sha=head_sha,
+            head_seconds=head_report['total_seconds'],
+            base_seconds={
+                c: [r['total_seconds'] for r in rs]
+                for c, rs in base_reports.items()
+            },
+            on_master=on_master,
+            ancestry_path=ancestry_path,
+            other_ancestors=other_ancestors,
+        ),
+    ]
+
     lines = []
-
-    lines.append('Following output is to check this commit for test time regressions:')
-    lines.append(f'    {head_sha}')
-
-    lines.append('')
-
-    lines.append(f'Comparing test times against base commit and its {len(base_reports)-1} most recent ancestors:')
-    for sha, runs in base_reports.items():
-        num_runs = len(runs)
-        prefix = str(num_runs).rjust(3)
-        plural = ' ' if num_runs == 1 else 's'
-        times = [o['total_seconds'] for o in runs]
-        t = ''
-        if num_runs > 0:
-            t += f', total time {statistics.mean(times):8.2f}s'
-            if num_runs > 1:
-                t += f' ± {statistics.stdev(times):7.2f}s'
-        lines.append(f'    {sha} {prefix} run{plural} found in S3{t}')
-
-    lines.append('')
 
     times = [o['total_seconds'] for runs in base_reports.values() for o in runs]
     total_mean = statistics.mean(times)
@@ -101,7 +179,9 @@ def regression_info(
         for name, suite in run['suites'].items():
             all_tests[name] |= {case['name'] for case in suite['cases']}
 
-    lines.append('')
+    sections.append(unlines(lines))
+    lines = []
+
     lines.append('------ tests added/removed ------')
 
     for suite_name, cases in all_tests.items():
@@ -128,7 +208,9 @@ def regression_info(
                 for missing_commit in missing_commits:
                     lines.append(f'        {missing_commit}')
 
-    lines.append('')
+    sections.append(unlines(lines))
+    lines = []
+
     lines.append('--- tests whose times changed ---')
 
     for suite_name, cases in all_tests.items():
@@ -142,4 +224,7 @@ def regression_info(
             for run in runs:
                 suite_dict = run['suites'].get(suite_name)
 
-    return ''.join(f'{line}\n' for line in lines)
+    sections.append(unlines(lines))
+    lines = []
+
+    return '\n'.join(sections)
