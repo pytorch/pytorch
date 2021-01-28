@@ -405,6 +405,13 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
                   "desired output type ", op.current_dtype);
     }
 
+    // Checks safe casting for inputs if common_dtype was specified by user.
+    if (config.specified_common_dtype.has_value() && !op.is_output && op.current_dtype != common_dtype_) {
+      TORCH_CHECK(canCast(op.current_dtype, common_dtype_),
+                  "input type ", op.current_dtype, " can't be cast to the "
+                  "desired common type ", common_dtype_);
+    }
+
     // Creates temporaries for CPU operations, if needed and requested
     // TODO: reuse temporaries when possible (e.g. for inplace operations)
     if (common_device == kCPU) {
