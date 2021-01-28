@@ -216,7 +216,7 @@ class TestUtilityFuns(TestCase):
         class UnsqueezeModule(torch.nn.Module):
             def forward(self, x):
                 a = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
-                b = torch.unsqueeze(a, 0)
+                b = torch.unsqueeze(a, -2)
                 return b + x
 
         _set_opset_version(self.opset_version)
@@ -225,10 +225,30 @@ class TestUtilityFuns(TestCase):
         graph, _, __ = self._model_to_graph(UnsqueezeModule(), (x, ))
 
         for node in graph.nodes():
-            assert node.kind() != "onnx::Unsqueeeze"
+            assert node.kind() != "onnx::Unsqueeze"
             assert node.kind() != "onnx::Cast"
             assert node.kind() != "onnx::Constant"
         assert len(list(graph.nodes())) == 1
+
+    def test_constant_fold_unsqueeze_multi_axies(self):
+        class PReluModel(torch.nn.Module):
+            def __init__(self):
+                super(PReluModel, self).__init__()
+                self.prelu = torch.nn.PReLU()
+
+            def forward(self, x):
+                a = torch.randn(2, 3, 4, 5, 8, 7)
+                return self.prelu(x) + a
+
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        x = torch.randn(2, 3, 4, 5, 8, 7) 
+        graph, _, __ = self._model_to_graph(PReluModel(), x)
+
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Unsqueeze"
+            assert node.kind() != "onnx::Cast"
+            assert node.kind() != "onnx::Constant"
 
     def test_constant_fold_concat(self):
         class ConcatModule(torch.nn.Module):
@@ -288,7 +308,7 @@ class TestUtilityFuns(TestCase):
         if self.opset_version <= 12:
             assert len(list(graph.nodes())) == 3
         else:
-            # Unsqueeze op parameter 'axie' as an input instand of as an attribute for opset >= 13
+            # Unsqueeze op parameter 'axes' as an input instead of as an attribute when opset version >= 13
             assert len(list(graph.nodes())) == 4
 
     def test_constant_fold_transpose_matmul(self):

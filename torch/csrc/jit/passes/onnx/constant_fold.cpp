@@ -235,7 +235,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     updated_val = at::add(inputTensorValues[0], inputTensorValues[1]);
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Unsqueeze) {
-    if (opset_version == ONNX_OPSET_13){
+    if (opset_version >= ONNX_OPSET_13) {
       assert(inputTensorValues.size() == 2);
       // Checking validity of 'axes' input
       if (inputTensorValues[1].sizes().size() != 1) {
@@ -244,7 +244,14 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
             << "Constant folding not applied." << std::endl;
         return c10::nullopt;
       }
-      auto axes = inputTensorValues[1].accessor<int64_t, 1>();
+      auto axes_a = inputTensorValues[1].accessor<int64_t, 1>();
+      std::vector<int64_t> axes;
+      for (int64_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
+        // ONNX unsqueeze accepts negative axes
+        axes_a[i] += axes_a[i] < 0 ? inputTensorValues[0].sizes().size() : 0;
+        axes.push_back(axes_a[i]);
+      }
+      std::sort(axes.begin(), axes.end());
       updated_val = inputTensorValues[0];
       for (int64_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
         updated_val = at::unsqueeze(updated_val, axes[i]);
@@ -258,11 +265,13 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
         return c10::nullopt;
       }
       updated_val = inputTensorValues[0];
-      for (auto axis : node->is(attr::axes)) {
+      std::vector<int64_t> axesAttr = node->is(attr::axes);
+      std::sort(axesAttr.begin(), axesAttr.end());
+      for (auto axis : axesAttr) {
         updated_val = at::unsqueeze(updated_val, axis);
       }
       return c10::optional<at::Tensor>(updated_val);
-    } else { 
+    } else {
       std::cerr << "Warning: Constant folding - unsupported opset version. "
                 << "Constant folding not applied." << std::endl;
       return c10::nullopt;
@@ -421,14 +430,11 @@ std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
 // nodes can be lifted so we run them earlier, before the usual parameters are
 // known.
 void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
-  if (opset_version != ONNX_OPSET_9 && opset_version != ONNX_OPSET_10 &&
-      opset_version != ONNX_OPSET_11 && opset_version != ONNX_OPSET_12 &&
-      opset_version != ONNX_OPSET_13) {
+  if (opset_version < ONNX_OPSET_9) {
     // Number of elements of 'axes' and 'ends' 1-D input tensors should be the
     // same
-    std::cerr
-        << "Warning: Constant folding supported for only opsets 9, 10, 11, 12 and 13. "
-        << "Constant folding not applied." << std::endl;
+    std::cerr << "Warning: Constant folding supported for only opsets >= 9. "
+              << "Constant folding not applied." << std::endl;
     return;
   }
   AT_ASSERT(b->param_node());
