@@ -1569,6 +1569,14 @@ def build_table(
 
     append(header_sep)
 
+    def trim_path(path, src_column_width):
+        if len(path) > src_column_width:
+            offset = len(path) - src_column_width
+            path = path[offset:]
+            if len(path) > 3:
+                path = "..." + path[3:]
+        return path
+
     event_limit = 0
     for evt in events:
         if event_limit == row_limit:
@@ -1629,14 +1637,14 @@ def build_table(
         if has_stack:
             src_field = ""
             if len(evt.stack) > 0:
-                src_field = evt.stack[0][:src_column_width]
+                src_field = trim_path(evt.stack[0], src_column_width)
             row_values.append(src_field)
         append(row_format.format(*row_values))
 
         if has_stack:
             empty_headers = [""] * (len(headers) - 1)
             for entry in evt.stack[1:MAX_STACK_ENTRY]:
-                append(row_format.format(*(empty_headers + [entry[:src_column_width]])))
+                append(row_format.format(*(empty_headers + [trim_path(entry, src_column_width)])))
             empty_headers.append("")
             append(row_format.format(*empty_headers))
 
