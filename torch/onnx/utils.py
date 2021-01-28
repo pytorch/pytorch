@@ -452,8 +452,8 @@ def _model_to_graph(model, args, verbose=False,
         example_outputs = (example_outputs,)
 
     graph, params, torch_out, module = _create_jit_graph(model, args,
-                                                        _retain_param_name,
-                                                        use_new_jit_passes)
+                                                         _retain_param_name,
+                                                         use_new_jit_passes)
 
     params_dict = _get_named_param_dict(graph, params)
 

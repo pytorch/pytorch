@@ -300,7 +300,6 @@ Value* MatchIfBlocksOutputForValue(
     Value* orig_data,
     Block* outer_block,
     Value* origOutput) {
-
   if (outer_block->owningNode()->kind() != prim::If)
     return nullptr;
 
@@ -876,14 +875,12 @@ Value* registerSetAttrInBlocks(
   return MatchIfBlocksOutputForValue(origValue, block, cloneNode->output());
 }
 
-
 void trackAndRegisterAttributesInBlocks(
     Node* n,
     const std::shared_ptr<Graph>& graph,
     const Module& module_,
     std::unordered_map<std::string, Value*>& setAttrValues,
     std::unordered_map<std::string, Value*>& nextSetAttrValues) {
-
   if (n->kind() != prim::GetAttr && n->kind() != prim::SetAttr)
     return;
 
@@ -925,8 +922,7 @@ void trackAndRegisterAttributesInBlocks(
       if (block_->owningNode() &&
           block_->owningNode()->kind() == prim::If) { // TODO: Add loop
 
-        auto attrValue =
-            (setAttrValues.find(fullName) != setAttrValues.end())
+        auto attrValue = (setAttrValues.find(fullName) != setAttrValues.end())
             ? setAttrValues[fullName]
             : attrValues[fullName];
 
@@ -974,7 +970,8 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
     it++; // node n can be destroyed
 
     if (n->kind() == prim::GetAttr || n->kind() == prim::SetAttr) {
-      trackAndRegisterAttributesInBlocks(n, graph, module_, setAttrValues, nextSetAttrValues);
+      trackAndRegisterAttributesInBlocks(
+          n, graph, module_, setAttrValues, nextSetAttrValues);
     } else if (
         mr.inplaceOpVariant(n) &&
         n->kind() != aten::copy_) { // TODO: create a list of all excluded ops

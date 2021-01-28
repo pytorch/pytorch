@@ -77,7 +77,7 @@ std::vector<IValue> getParamAttributes(
   Node* m = *block->nodes().begin();
   WithInsertPoint guard(m);
 
-	std::vector<IValue> parameterIValues = {};
+  std::vector<IValue> parameterIValues = {};
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     Node* n = *it;
     it++; // node n can be destroyed
@@ -146,8 +146,12 @@ std::vector<IValue> getParamAttributes(
     }
 
     for (Block* sub_block : n->blocks()) {
-      auto nextParameterIValues = getParamAttributes(sub_block, graph, module_, function_);
-      parameterIValues.insert(std::end(parameterIValues), std::begin(nextParameterIValues), std::end(nextParameterIValues));
+      auto nextParameterIValues =
+          getParamAttributes(sub_block, graph, module_, function_);
+      parameterIValues.insert(
+          std::end(parameterIValues),
+          std::begin(nextParameterIValues),
+          std::end(nextParameterIValues));
     }
   }
   return parameterIValues;
@@ -168,11 +172,12 @@ std::pair<Module, std::vector<IValue>> list_module_parameters(
   Method method = moduleClone.get_method("forward");
   auto function = &method.function();
   auto graph = function->graph();
-	std::vector<IValue> parameterIValues = {};
+  std::vector<IValue> parameterIValues = {};
   attrValues.clear();
 
   GRAPH_DEBUG("Fetch attributes for function: " + function->name());
-  parameterIValues = getParamAttributes(graph->block(), graph, moduleClone, function);
+  parameterIValues =
+      getParamAttributes(graph->block(), graph, moduleClone, function);
   insertMainModuleAsConstant(graph);
   GRAPH_DEBUG("Listed parameters as inputs: ", *graph);
 

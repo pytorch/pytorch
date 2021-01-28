@@ -111,7 +111,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         try:
             model_copy = copy.deepcopy(model)
             output = model_copy(*input_args, **input_kwargs)
-        except:
+        except Exception:
             output = model(*input_args, **input_kwargs)
         if isinstance(output, torch.Tensor):
             output = (output,)
