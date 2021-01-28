@@ -90,8 +90,7 @@ public:
   explicit CppFunction(Func* f, std::enable_if_t<c10::guts::is_function_type<Func>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedRuntimeFunction(f))
     , cpp_signature_(c10::impl::CppSignature::make<Func>())
-    // TODO: Don't go through WrapRuntimeKernelFunctor
-    , schema_(c10::detail::inferFunctionSchemaFromFunctor<c10::impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Func>>>())
+    , schema_(c10::detail::inferFunctionSchemaFromFunctor<std::decay_t<Func>>())
     , debug_()
     {}
 
@@ -100,8 +99,7 @@ public:
   explicit CppFunction(FuncPtr f, std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedFunction(f))
     , cpp_signature_(c10::impl::CppSignature::make<typename FuncPtr::FuncType>())
-    // TODO: Don't go through WrapRuntimeKernelFunctor
-    , schema_(c10::detail::inferFunctionSchemaFromFunctor<c10::impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<typename FuncPtr::FuncType>>>())
+    , schema_(c10::detail::inferFunctionSchemaFromFunctor<typename FuncPtr::FuncType>())
     , debug_()
     {}
 
@@ -110,8 +108,7 @@ public:
   explicit CppFunction(Lambda&& f, std::enable_if_t<c10::guts::is_functor<std::decay_t<Lambda>>::value, std::nullptr_t> = nullptr)
     : func_(c10::KernelFunction::makeFromUnboxedLambda(std::forward<Lambda>(f)))
     , cpp_signature_(c10::impl::CppSignature::make<Lambda>())
-    // TODO: Don't go through WrapRuntimeKernelFunctor
-    , schema_(c10::detail::inferFunctionSchemaFromFunctor<c10::impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>())
+    , schema_(c10::detail::inferFunctionSchemaFromFunctor<std::decay_t<Lambda>>())
     , debug_()
     {}
 
