@@ -417,7 +417,9 @@ void ComputeConstant(Node* n, int opset_version) {
     std::cout << "constant node: " << n->output()->debugName() << std::endl;
     if (n->kindOf(attr::value) == AttributeKind::t) {
       at::Tensor const_val = n->t(attr::value);
-      ConstantValueMap::SetValue(n->output()->debugName(), const_val);
+      at::Tensor const_val_copy = at::empty(const_val.sizes(), const_val.options());
+      const_val_copy.copy_(const_val);
+      ConstantValueMap::SetValue(n->output()->debugName(), const_val_copy);
     }
     return;
   }
@@ -426,7 +428,9 @@ void ComputeConstant(Node* n, int opset_version) {
     auto const_fold_val =  ComputeConstantFolding(n, opset_version);
     std::cout << "FinishConstantFolding" << std::endl;
     if (const_fold_val.has_value()) {
-      ConstantValueMap::SetValue(n->output()->debugName(), const_fold_val.value());
+      at::Tensor const_fold_val_copy = at::empty(const_fold_val.value().sizes(), const_fold_val.value().options());
+      const_fold_val_copy.copy_(const_fold_val.value());
+      ConstantValueMap::SetValue(n->output()->debugName(), const_fold_val_copy);
     }
   }
   switch (n->kind()) {
@@ -440,6 +444,7 @@ void ComputeConstant(Node* n, int opset_version) {
           for (const auto& v: shape_size.value()) {
             shape_value.emplace_back(static_cast<int64_t>(v));
           }
+          // TODO: getDevice() ?
           auto options = c10::TensorOptions().dtype(at::kLong).device(at::kCPU);
           auto f = at::from_blob(shape_value.data(), {shape_value.size()}, at::kLong).to(at::kCPU);
           at::Tensor f_copy = at::empty({shape_value.size()}, options);

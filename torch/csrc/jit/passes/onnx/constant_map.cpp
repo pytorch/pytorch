@@ -36,7 +36,10 @@ c10::VaryingShape<int64_t> ConstantValueMap::GetShape(const std::string& tensorN
   return ConstantValueMap::getInstance().shapeMap[tensorName];
 }
 
-void ConstantValueMap::SetValue(const std::string& tensorName, at::Tensor value) {
+void ConstantValueMap::SetValue(const std::string& tensorName, const at::Tensor& value) {
+  //at::Tensor result = at::empty(value.sizes(), value.options());
+  //result.copy_(value);
+  //ConstantValueMap::getInstance().tensorValueMap.emplace(tensorName, result);
   ConstantValueMap::getInstance().tensorValueMap.emplace(tensorName, value);
 }
 

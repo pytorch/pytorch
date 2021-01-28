@@ -17,7 +17,7 @@ public:
   static bool HasShape(const std::string& tensorName);
   static c10::VaryingShape<int64_t> GetShape(const std::string& tensorName);
 
-  static void SetValue(const std::string& tensorName, at::Tensor value);
+  static void SetValue(const std::string& tensorName, const at::Tensor& value);
   static bool HasValue(const std::string& tensorName);
   static at::Tensor GetValue(const std::string& tensorName);
 
