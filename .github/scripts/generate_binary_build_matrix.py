@@ -25,13 +25,7 @@ ROCM_ARCHES = [
     "4.0"
 ]
 
-FULL_ARCHES = [
-    "cpu",
-    *CUDA_ARCHES,
-    *ROCM_ARCHES
-]
-
-CONTAINER_IMAGES = {
+WHEEL_CONTAINER_IMAGES = {
     **{
         # TODO: Re-do manylinux CUDA image tagging scheme to be similar to
         #       ROCM so we don't have to do this replacement
@@ -56,9 +50,13 @@ FULL_PYTHON_VERSIONS = [
 def is_pull_request():
     return os.environ.get("GITHUB_HEAD_REF")
 
-def generate_matrix():
+def generate_matrix(include_cuda=True, include_rocm=False):
     python_versions = FULL_PYTHON_VERSIONS
-    arches = FULL_ARCHES
+    arches = ["cpu"]
+    if include_cuda:
+        arches += CUDA_ARCHES
+    if include_rocm:
+        arches += ROCM_ARCHES
     if is_pull_request():
         python_versions = [python_versions[-1]]
         arches = ["cpu", CUDA_ARCHES[-1], ROCM_ARCHES[-1]]
@@ -67,20 +65,31 @@ def generate_matrix():
         python_version, arch_version = item
         # Not my favorite code here
         gpu_arch_type = "cuda"
-        if "rocm" in CONTAINER_IMAGES[arch_version]:
+        if "rocm" in WHEEL_CONTAINER_IMAGES[arch_version]:
             gpu_arch_type = "rocm"
-        elif "cpu" in CONTAINER_IMAGES[arch_version]:
+        elif "cpu" in WHEEL_CONTAINER_IMAGES[arch_version]:
             gpu_arch_type = "cpu"
         matrix.append({
             "python_version": python_version,
             "gpu_arch_type": gpu_arch_type,
             "gpu_arch_version": arch_version,
-            "container_image": CONTAINER_IMAGES[arch_version]
+            "wheel_container_image": WHEEL_CONTAINER_IMAGES[arch_version]
         })
     return json.dumps({"include": matrix})
 
 def main():
-    print(generate_matrix())
+    include_cuda = True
+    include_rocm = True
+    if os.environ.get("NO_ROCM", False):
+        include_rocm = False
+    if os.environ.get("NO_CUDA", False):
+        include_cuda = False
+    print(
+        generate_matrix(
+            include_cuda=include_cuda,
+            include_rocm=include_rocm
+        )
+    )
 
 if __name__ == "__main__":
     main()
