@@ -10,6 +10,7 @@
 #include <torch/custom_class.h>
 #include <torch/torch.h>
 #include <torch/csrc/jit/backends/backend_detail.h>
+#include <torch/csrc/jit/backends/backend.h>
 
 #include <unordered_set>
 
@@ -350,13 +351,17 @@ TEST(LiteInterpreterTest, ToBackend) {
   fake_dict.insert("", "");
   compile_spec.insert("forward", fake_dict);
   auto any_dict_ty = DictType::create(StringType::get(), AnyType::get());
-  auto lowered_m = torch::jit::detail::codegen_backend_module(
-      "test_backend", m, compile_spec, any_dict_ty);
-//  lowered_m.save("/Users/myuan/models/backend/backend_c.pt");
+  auto lm = torch::jit::detail::codegen_backend_module(
+      "mul_test_backend", m, compile_spec, any_dict_ty);
+
+  std::stringstream lms;
+  lm.save(lms);
+  lm.save("/Users/myuan/models/backend/backend_c.pt");
+  auto loaded_m = load(lms);
 
   auto minput = 5 * torch::ones({});
   auto ref = m.run_method("forward", minput).toTensor().item<float>();
-  auto res = lowered_m.run_method("forward", minput);
+  auto res = lm.run_method("forward", minput);
   double output = res.toTensor().item<float>();
   AT_ASSERT(ref == output);
 }
@@ -851,6 +856,60 @@ static auto reg =
               return c10::make_intrusive<TorchBindLiteInterpreterTestStruct>();
             });
 
+// This test JIT backend is intended to do the minimal amount of work
+// necessary to test that the JIT backend registration endpoints and
+// code generation are working correctly. It is not intended to
+// produce numerically correct results.
+class MulTestBackend : public PyTorchBackendInterface {
+ public:
+  // Constructor.
+  explicit MulTestBackend() {}
+  virtual ~MulTestBackend() = default;
+
+  c10::IValue preprocess(
+      c10::IValue mod,
+      c10::impl::GenericDict method_compile_spec) override {
+    return mod;
+  }
+
+  c10::impl::GenericDict compile(
+      c10::IValue processed,
+      c10::impl::GenericDict method_compile_spec) override {
+    auto spec =
+        c10::impl::toTypedDict<std::string, at::IValue>(method_compile_spec);
+
+    // Return the same string as a value for every key in method_compile_spec.
+    auto handles = c10::Dict<std::string, std::string>();
+    for (const auto& it : spec) {
+      handles.insert(it.key(), it.key());
+    }
+    return c10::impl::toGenericDict(handles);
+  }
+
+  c10::impl::GenericList execute(
+      c10::IValue handle,
+      c10::impl::GenericList inputs) override {
+    TORCH_INTERNAL_ASSERT(handle.isString());
+    TORCH_INTERNAL_ASSERT(inputs.size() > 0);
+
+    c10::List<at::Tensor> output_list;
+
+    c10::IValue value = inputs[0];
+    at::Tensor x = value.toTensor();
+    x = x.clone();
+    at::Tensor output = value.toTensor();
+    output = output.clone();
+
+    if (handle.toStringRef() == "forward") {
+      output = x * 2;
+      output_list.emplace_back(output);
+    }
+
+    return c10::impl::toList(output_list);
+  }
+};
+
+static auto cls = torch::jit::backend<MulTestBackend>("mul_test_backend");
 } // namespace
 
 } // namespace jit
