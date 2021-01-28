@@ -164,8 +164,12 @@ void TCPStoreDaemon::setHandler(int socket) {
 
 void TCPStoreDaemon::compareAndSetHandler(int socket) {
   std::string key = tcputil::recvString(socket);
-  std::vector<uint8_t> data1 = tcputil::recvVector<uint8_t>(socket);
-  std::vector<uint8_t> data2 = tcputil::recvVector<uint8_t>(socket);
+  std::vector<uint8_t> newData = tcputil::recvVector<uint8_t>(socket);
+  std::vector<uint8_t> oldData = tcputil::recvVector<uint8_t>(socket);
+
+  if (tcpStore_.find(key) != tcpStore_.end() && oldData == tcpStore_.at(key)) {
+    tcpStore_[key] = newData;
+  }
 }
 
 void TCPStoreDaemon::addHandler(int socket) {
