@@ -993,6 +993,21 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad):
     )
     return [SampleInput(tensor) for tensor in tensors]
 
+def sample_inputs_logit(op_info, device, dtype, requires_grad):
+    low, high = op_info.domain
+    low = low if low is None else low + op_info._domain_eps
+    high = high if high is None else high - op_info._domain_eps
+
+    samples = (
+        SampleInput(make_tensor((S, S, S), device, dtype, low=low, high=high, requires_grad=requires_grad)),
+        SampleInput(make_tensor((S, S, S), device, dtype, low=low, high=high, requires_grad=requires_grad), args=(0.2,)),
+        SampleInput(torch.rand((), device=device, dtype=dtype, requires_grad=requires_grad)),
+        SampleInput(torch.rand((), device=device, dtype=dtype, requires_grad=requires_grad), args=(0.2,)),
+        SampleInput(make_tensor((), device, dtype, low=low, high=high, requires_grad=requires_grad))
+    )
+
+    return samples
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
@@ -1394,6 +1409,12 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   assert_autodiffed=True,),
+    UnaryUfuncInfo('round',
+                   ref=np.round,
+                   dtypes=floating_types_and(torch.half),
+                   dtypesIfCPU=floating_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.half),
                    assert_autodiffed=True,),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
@@ -1891,6 +1912,20 @@ if TEST_SCIPY:
                                     dtypes=[torch.bfloat16]),
                        ),
                        safe_casts_outputs=True),
+        UnaryUfuncInfo('logit',
+                       ref=scipy.special.logit,
+                       domain=(0, 1),
+                       decorators=(precisionOverride({torch.bfloat16: 5e-1,
+                                                      torch.float16: 5e-1}),),
+                       dtypes=floating_types_and(torch.half),
+                       dtypesIfCPU=floating_types_and(torch.bfloat16),
+                       dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                       sample_inputs_func=sample_inputs_logit,
+                       skips=(
+                           # TODO: Investigate if atol and rtol are relaxed or not.
+                           SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                    dtypes=[torch.float16]),
+                       )),
         OpInfo('xlogy',
                dtypes=all_types_and(torch.bool),
                dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -2203,14 +2238,10 @@ def method_tests():
         ('atan2', (S, S, S), ((S,),), 'broadcast_rhs'),
         ('atan2', (S,), ((S, S, S),), 'broadcast_lhs'),
         ('atan2', (S, 1, S), ((S, S),), 'broadcast_all'),
-        ('round', (S, S, S), NO_ARGS, '', (True,)),
-        ('round', (), NO_ARGS, 'scalar', (True,)),
         ('sign', (S, S, S), NO_ARGS),
         ('sign', (), NO_ARGS, 'scalar'),
         ('sgn', (S, S, S), NO_ARGS),
         ('sgn', (), NO_ARGS, 'scalar'),
-        ('trunc', (S, S, S), NO_ARGS, '', (True,)),
-        ('trunc', (), NO_ARGS, 'scalar', (True,)),
         ('floor', (S, S, S), NO_ARGS, '', (True,)),
         ('floor', (), NO_ARGS, 'scalar', (True,)),
         ('ceil', (S, S, S), NO_ARGS, '', (True,)),
