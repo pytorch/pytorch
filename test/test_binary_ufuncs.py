@@ -13,7 +13,7 @@ from functools import partial
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, iter_indices, TEST_WITH_ASAN, run_tests,
-    torch_to_numpy_dtype_dict, make_tensor, TEST_SCIPY)
+    torch_to_numpy_dtype_dict, make_tensor, TEST_SCIPY, set_default_dtype)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
     dtypesIfCPU, deviceCountAtLeast, precisionOverride, onlyOnCPUAndCUDA,
@@ -272,28 +272,30 @@ class TestBinaryUfuncs(TestCase):
     def test_div_rounding_modes(self, device, dtype):
         if dtype.is_floating_point:
             low, high = -10.0, 10.0
-            eps = 0.1
         else:
             info = torch.iinfo(dtype)
             low, high = info.min, info.max
-            eps = 1
 
-        a = make_tensor((100,), device, dtype, low=low, high=high, requires_grad=requires_grad)
-        b = make_tensor((100,), device, dtype, low=low, high=high, requires_grad=requires_grad)
+        a = make_tensor((100,), device, dtype, low=low, high=high)
+        b = make_tensor((100,), device, dtype, low=low, high=high)
 
         # Avoid division by zero so we can test (a / b) * b == a
-        b[-eps < b & b < eps] = eps
+        if dtype.is_floating_point:
+            eps = 0.1
+            b[(-eps < b) & (b < eps)] = eps
+        else:
+            b[b == 0] = 1
 
         if not dtype.is_floating_point:
             # floor(a / b) * b can be < a, so fixup slightly to avoid underflow
-            a = torch.where(a < 0, a + b, a)
+            torch.where(a < 0, a + b, a)
 
         d_true = torch.divide(a, b, rounding_mode='true')
         self.assertTrue(d_true.is_floating_point())
         self.assertEqual(d_true * b, a.to(d_true.dtype))
 
         d_floor = torch.divide(a, b, rounding_mode='floor')
-        if dtype != torch.bfloat16:
+        if dtype not in (torch.bfloat16, torch.half):
             self.assertEqual(d_floor * b + torch.remainder(a, b), a)
         else:
             self.assertEqual(d_floor * b + torch.remainder(a.float(), b.float()), a,
@@ -305,6 +307,30 @@ class TestBinaryUfuncs(TestCase):
             dtype == torch.bfloat16 and device != 'cpu')
         d_ref = d_true.float() if rounding_unsupported else d_true
         self.assertEqual(d_trunc, d_ref.trunc().to(dtype))
+
+    @dtypes(torch.bfloat16, torch.half, torch.float32, torch.float64)
+    def test_div_rounding_nonfinite(self, device, dtype):
+
+        # Compare division of special floating point values against NumPy
+        x = torch.tensor([1.0, -1.0, 0, 0.1, -0.1, np.pi, -np.pi, np.inf, -np.inf, np.nan],
+                         dtype=dtype)
+
+        a, b = x[None, :].clone(), x[:, None].clone()
+
+        # Compare bfloat16 against NumPy float
+        exact_dtype = dtype != torch.bfloat16
+        if exact_dtype:
+            an, bn = a.cpu().numpy(), b.cpu().numpy()
+        else:
+            an, bn = a.float().cpu().numpy(), b.float().cpu().numpy()
+
+        for mode, np_ref in (("true", np.true_divide), ("floor", np.floor_divide)):
+            with np.errstate(all='ignore'):
+                expect = np_ref(an, bn)
+            with set_default_dtype(torch.double):
+                actual = torch.divide(a, b, rounding_mode=mode)
+            self.assertEqual(actual, torch.from_numpy(expect),
+                             exact_device=False, exact_dtype=exact_dtype)
 
         # Compare contiguous (likely vectorized) against non-contiguous (not vectorized)
         storage = torch.empty((20, 20), dtype=dtype, device=device)
@@ -318,19 +344,21 @@ class TestBinaryUfuncs(TestCase):
 
     @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_complex=False))
     def test_div_rounding_numpy(self, device, dtype):
-        # Compare against NumPy
-        if dtype.is_floating_point:
-            x = torch.tensor([1.0, -1.0, 0, 0.1, -0.1, np.pi, -np.pi, np.inf, -np.inf, np.nan],
-                             dtype=dtype)
-        else:
-            info = torch.iinfo(dtype)
-            low, high = info.min, info.max
-            x = make_tensor((10,), device, dtype, low=low, high=high)
+        info = (torch.finfo(dtype) if dtype.is_floating_point
+                else torch.iinfo(dtype))
+        low, high = info.min, info.max
 
-        # NumPy promotes int to float64, not float32
-        exact_dtype = dtype.is_floating_point and dtype != torch.bfloat16
+        # Compare division of random values against NumPy
+        a = make_tensor((4096,), device, dtype, low=low, high=high)
+        b = make_tensor((4096,), device, dtype, low=low, high=high)
 
-        a, b = x[None, :].clone(), x[:, None].clone()
+        # Avoid integer division by zero which raises
+        if not dtype.is_floating_point:
+            b[b == 0] = 1
+
+        # Compare bfloat16 against NumPy float
+        exact_dtype = dtype != torch.bfloat16
+
         if exact_dtype:
             an, bn = a.cpu().numpy(), b.cpu().numpy()
         else:
@@ -339,7 +367,8 @@ class TestBinaryUfuncs(TestCase):
         for mode, np_ref in (("true", np.true_divide), ("floor", np.floor_divide)):
             with np.errstate(all='ignore'):
                 expect = np_ref(an, bn)
-            actual = torch.divide(a, b, rounding_mode=mode)
+            with set_default_dtype(torch.double):
+                actual = torch.divide(a, b, rounding_mode=mode)
             self.assertEqual(actual, torch.from_numpy(expect),
                              exact_device=False, exact_dtype=exact_dtype)
 
