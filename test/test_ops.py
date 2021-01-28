@@ -365,7 +365,7 @@ class TestCommon(JitCommonTestCase):
         self.assertEqual(expected, out, exact_device=True)
 
     @ops(op_db)
-    def test_out_different_shape(self, device, dtype, op):
+    def test_out_large_shape(self, device, dtype, op):
         # Compute expected output of op
         expected, sample = self.compute_expected_output(device, dtype, op)
         # call it with out=... and check we get the expected result
@@ -373,6 +373,24 @@ class TestCommon(JitCommonTestCase):
         # Create an empty tensor of different shape than
         # the expected tensor
         out_kwargs['out'] = out = torch.empty((expected.numel() + 1,), dtype=expected.dtype, device=expected.device)
+        # Verify that using a tensor shape of incorrrect size to out=
+        # raises userwarning.
+        self.assertWarnsRegex(UserWarning,
+                        'An output with one or more elements was resized',
+                        lambda: op(*sample.input, *sample.args, **out_kwargs))
+        # Verify if the out tensor is resized and restrided to whatever
+        # striding is natural for the op to produce
+        self.assertEqual(expected, out, exact_device=True)
+
+    @ops(op_db)
+    def test_out_small_shape(self, device, dtype, op):
+        # Compute expected output of op
+        expected, sample = self.compute_expected_output(device, dtype, op)
+        # call it with out=... and check we get the expected result
+        out_kwargs = sample.kwargs.copy()
+        # Create an empty tensor of different shape than
+        # the expected tensor
+        out_kwargs['out'] = out = torch.empty((expected.numel() - 1,), dtype=expected.dtype, device=expected.device)
         # Verify that using a tensor shape of incorrrect size to out=
         # raises userwarning.
         self.assertWarnsRegex(UserWarning,
