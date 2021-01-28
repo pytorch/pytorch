@@ -1191,7 +1191,23 @@ Arguments:
       .def_readwrite("broadcast_buffers", &c10::DDPLoggingData::broadcast_buffers)
       .def_readwrite("bucket_cap_mb", &c10::DDPLoggingData::bucket_cap_mb)
       .def_readwrite("find_unused_parameters", &c10::DDPLoggingData::find_unused_parameters)
-      .def_readwrite("gradient_as_bucket_view", &c10::DDPLoggingData::gradient_as_bucket_view);
+      .def_readwrite("gradient_as_bucket_view", &c10::DDPLoggingData::gradient_as_bucket_view)
+      .def_readwrite("iteration", &c10::DDPLoggingData::iteration)
+      .def_readwrite("dtype", &c10::DDPLoggingData::dtype)
+      .def_readwrite("parameter_size", &c10::DDPLoggingData::parameter_size)
+      .def_readwrite("num_parameters", &c10::DDPLoggingData::num_parameters)
+      .def_readwrite("bucket_sizes", &c10::DDPLoggingData::bucket_sizes)
+      .def_readwrite("nccl_version", &c10::DDPLoggingData::nccl_version)
+      .def_readwrite("master_port", &c10::DDPLoggingData::master_port)
+      .def_readwrite("master_addr", &c10::DDPLoggingData::master_addr)
+      .def_readwrite("cuda_visible_devices", &c10::DDPLoggingData::cuda_visible_devices)
+      .def_readwrite("gloo_socket_ifname", &c10::DDPLoggingData::gloo_socket_ifname)
+      .def_readwrite("gloo_device_transport", &c10::DDPLoggingData::gloo_device_transport)
+      .def_readwrite("nccl_socket_ifname", &c10::DDPLoggingData::nccl_socket_ifname)
+      .def_readwrite("nccl_blocking_wait", &c10::DDPLoggingData::nccl_blocking_wait)
+      .def_readwrite("nccl_debug", &c10::DDPLoggingData::nccl_debug)
+      .def_readwrite("nccl_nthreads", &c10::DDPLoggingData::nccl_nthreads)
+      .def_readwrite("nccl_ib_timeout", &c10::DDPLoggingData::nccl_ib_timeout);
 
   module.def(
       "_compute_bucket_assignment_by_size",

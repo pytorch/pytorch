@@ -205,6 +205,10 @@ class Reducer {
       torch::autograd::Variable& variable,
       GradCallback&& cb);
 
+  void set_env_variables();
+  void set_parameter_stats();
+  void set_bucket_stats();
+
   // A bucket replica represents [1..N] gradients to be reduced,
   // with the same dtype, on the same device.
   //
