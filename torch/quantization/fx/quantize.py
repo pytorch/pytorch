@@ -804,8 +804,7 @@ class Quantizer:
                 root_module = self.modules[""]
                 assert isinstance(node.args[0], Node)
                 quant_env[node.name] = quantize_node(
-                    root_module, self.quantized_graph,
-                    load_non_quantized(node.args[0]), observer_module)
+                    self, load_non_quantized(node.args[0]), observer_module, node, is_input=True)
 
         # additional state to override inputs to be quantized, if specified
         # by the user
