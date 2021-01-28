@@ -410,6 +410,58 @@ c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
 }
 
 
+std::vector<int64_t> ComputeShapeFromReshape(const std::vector<int64_t>& input_shape,
+  const std::vector<int64_t>& reshape) {
+  if (input_shape.size() == 0) {
+    return reshape;
+  }
+  auto reshape_has_zero = false;
+  auto reshape_size = static_cast<int>(reshape.size());
+  for (auto i = 0; i < reshape_size; i++) {
+    if (reshape[i] == 0) {
+      reshape_has_zero = true;
+      break;
+    }
+  }
+  if (!reshape_has_zero) {
+    return reshape;
+  }
+  int minus_one_pos = -1;
+  auto input_shape_size = static_cast<int>(input_shape.size());
+  for (auto i = 0; i < input_shape_size; i++) {
+    if (reshape[i] == -1) {
+      minus_one_pos = i;
+      break;
+    }
+  }
+  std::vector<int64_t> final_shape;
+  double shape_ratio = 1.0;
+  for (auto i = 0; i < input_shape_size; i++) {
+    if (i < minus_one_pos) {
+      if (reshape[i] != 0) {
+        shape_ratio *= static_cast<double>(input_shape[i]) / reshape[i];
+      }  
+    } else if (minus_one_pos > -1) {
+      if (i < input_shape_size - reshape_size + minus_one_pos + 1) {
+        shape_ratio *= static_cast<double>(input_shape[i]);
+      } else {
+        shape_ratio *= static_cast<double>(input_shape[i]) / reshape[i];
+      }
+    }
+  }
+
+  for (int i = 0; i < minus_one_pos; i++) {
+    int64_t cur_shape = reshape[i] == 0 ? input_shape[i] : reshape[i];
+    final_shape.push_back(cur_shape);
+  }
+  final_shape.push_back(static_cast<int64_t>(std::round(shape_ratio)));
+  for (int i = minus_one_pos + 1; i < reshape_size; i++) {
+    int64_t cur_shape = reshape[i] == 0 ? input_shape[i + input_shape_size - reshape_size] : reshape[i];
+    final_shape.push_back(cur_shape);
+  }
+  return final_shape;
+}
+
 void ComputeConstant(Node* n, int opset_version) {
   std::cout << "ComputeConstant start" << std::endl;
   if (n->kind() == ::c10::onnx::Constant) {
@@ -461,13 +513,21 @@ void ComputeConstant(Node* n, int opset_version) {
         auto shape_size = ConstantValueMap::GetValue(n->input(1)->debugName());
         std::cout << "reshape shape tensor = " << shape_size << std::endl;
         std::vector<int64_t> shape_temp;
-        auto shape_size_a = shape_size.accessor<int64_t, 1>();
+        auto shape_size_a = shape_size.accessor<int64_t, 1>();                
         for (auto i=0; i<shape_size.size(0); i++) {          
           shape_temp.emplace_back(static_cast<int64_t>(shape_size_a[i]));
         }
-        auto vary_shape_size = c10::VaryingShape<int64_t>(shape_temp);
+        std::vector<int64_t> shape_vector_0;        
+        if (ConstantValueMap::HasShape(n->input(0)->debugName())) {
+          auto shape_size_0 = ConstantValueMap::GetShape(n->input(0)->debugName()).concrete_sizes();
+          if (shape_size_0.has_value()) {
+            shape_vector_0 = shape_size_0.value();
+          }
+        }
+        auto final_shape = ComputeShapeFromReshape(shape_vector_0, shape_temp);
+        auto vary_shape_size = c10::VaryingShape<int64_t>(final_shape);
         ConstantValueMap::SetShape(n->output()->debugName(), vary_shape_size);
-        n->output()->setType(n->output()->type()->cast<TensorType>()->withSymbolicShapes(::c10::SymbolicShape(shape_temp)));
+        n->output()->setType(n->output()->type()->cast<TensorType>()->withSymbolicShapes(::c10::SymbolicShape(final_shape)));
       }
       break;
     }
