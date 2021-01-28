@@ -24,6 +24,7 @@ import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from torch import nn
 from torch._six import string_classes
+
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -48,6 +49,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
     slowTest,
 )
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -4626,7 +4628,7 @@ class CommTest(MultiProcessTestCase):
         with self.assertRaisesRegex(RuntimeError, "device_ids not supported"):
             c10d.barrier(device_ids=[self.rank])
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     assert (
         not torch.cuda._initialized
     ), "test_distributed must not have initialized CUDA context on main process"
