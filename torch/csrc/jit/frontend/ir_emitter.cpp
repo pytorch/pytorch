@@ -396,10 +396,11 @@ struct Environment {
       }
     }
     if (as_simple_value) {
+      // We need a TypePtr for `insertStore` later
       if (!annotated_type) {
         annotated_type = as_simple_value->type();
       }
-      if (!as_simple_value->type()->isSubtypeOf(annotated_type)) {
+      else if (!as_simple_value->type()->isSubtypeOf(annotated_type)) {
         throw ErrorReport(loc)
             << "Variable '" << name << "' is annotated with type "
             << annotated_type->repr_str()
