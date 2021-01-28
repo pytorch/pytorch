@@ -2,6 +2,22 @@
 
 set -ex
 
+install_magma() {
+    # "install" hipMAGMA into /opt/rocm/magma by copying after build
+    git clone https://bitbucket.org/icl/magma.git -b hipMAGMA
+    pushd magma
+    cp make.inc-examples/make.inc.hip-mkl-gcc make.inc
+    echo 'LIBDIR += -L$(MKLROOT)/lib' >> make.inc
+    echo 'LIB += -Wl,--enable-new-dtags -Wl,--rpath,/opt/rocm/lib -Wl,--rpath,$(MKLROOT)/lib -Wl,--rpath,/opt/rocm/magma/lib' >> make.inc
+    echo 'DEVCCFLAGS += --amdgpu-target=gfx803 --amdgpu-target=gfx900 --amdgpu-target=gfx906 --amdgpu-target=gfx908' >> make.inc
+    export PATH="${PATH}:/opt/rocm/bin"
+    make -f make.gen.hipMAGMA -j $(nproc)
+    make lib/libmagma.so -j $(nproc) MKLROOT=/opt/conda
+    make testing/testing_dgemm -j $(nproc) MKLROOT=/opt/conda
+    popd
+    mv magma /opt/rocm
+}
+
 install_ubuntu() {
     apt-get update
     if [[ $UBUNTU_VERSION == 18.04 ]]; then
@@ -37,19 +53,7 @@ install_ubuntu() {
       DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENKERNELS}
     fi
 
-    # "install" hipMAGMA into /opt/rocm/magma by copying after build
-    git clone https://bitbucket.org/icl/magma.git -b hipMAGMA
-    pushd magma
-    cp make.inc-examples/make.inc.hip-mkl-gcc make.inc
-    echo 'LIBDIR += -L$(MKLROOT)/lib' >> make.inc
-    echo 'LIB += -Wl,--enable-new-dtags -Wl,--rpath,/opt/rocm/lib -Wl,--rpath,$(MKLROOT)/lib -Wl,--rpath,/opt/rocm/magma/lib' >> make.inc
-    echo 'DEVCCFLAGS += --amdgpu-target=gfx803 --amdgpu-target=gfx900 --amdgpu-target=gfx906 --amdgpu-target=gfx908' >> make.inc
-    export PATH="${PATH}:/opt/rocm/bin"
-    make -f make.gen.hipMAGMA -j $(nproc)
-    make lib/libmagma.so -j $(nproc) MKLROOT=/opt/conda
-    make testing/testing_dgemm -j $(nproc) MKLROOT=/opt/conda
-    popd
-    mv magma /opt/rocm
+    install_magma
 
     # Cleanup
     apt-get autoclean && apt-get clean
@@ -77,16 +81,12 @@ install_centos() {
   yum install -y \
                    rocm-dev \
                    rocm-utils \
-                   rocfft \
-                   miopen-hip \
-                   rocblas \
-                   hipsparse \
-                   rocrand \
+                   rocm-libs \
                    rccl \
-                   hipcub \
-                   rocthrust \
                    rocprofiler-dev \
                    roctracer-dev
+
+  install_magma
 
   # Cleanup
   yum clean all
