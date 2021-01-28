@@ -82,6 +82,22 @@ extern "C" void ssyevd_(char *jobz, char *uplo, int *n, float *a, int *lda, floa
 // geev
 extern "C" void dgeev_(char *jobvl, char *jobvr, int *n, double *a, int *lda, double *wr, double *wi, double* vl, int *ldvl, double *vr, int *ldvr, double *work, int *lwork, int *info);
 extern "C" void sgeev_(char *jobvl, char *jobvr, int *n, float *a, int *lda, float *wr, float *wi, float* vl, int *ldvl, float *vr, int *ldvr, float *work, int *lwork, int *info);
+extern "C" void cgeev_(char *jobvl, char *jobvr, int *n,
+             std::complex<float> *a, int *lda,
+             std::complex<float> *w,
+             std::complex<float> *vl, int *ldvl,
+             std::complex<float> *vr, int *ldvr,
+             std::complex<float> *work, int *lwork,
+             float *rwork,
+             int *info);
+extern "C" void zgeev_(char *jobvl, char *jobvr, int *n,
+             std::complex<double> *a, int *lda,
+             std::complex<double> *w,
+             std::complex<double> *vl, int *ldvl,
+             std::complex<double> *vr, int *ldvr,
+             std::complex<double> *work, int *lwork,
+             double *rwork,
+             int *info);
 
 // gesdd
 extern "C" void zgesdd_(char *jobz, int *m, int *n, std::complex<double> *a, int *lda,
@@ -126,9 +142,6 @@ void lapackTriangularSolve(char uplo, char trans, char diag, int n, int nrhs, sc
 
 template<class scalar_t>
 void lapackGeqrf(int m, int n, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);
-
-template<class scalar_t>
-void lapackOrgqr(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scalar_t *work, int lwork, int *info);
 
 template<class scalar_t, class value_t=scalar_t>
 void lapackSymeig(char jobz, char uplo, int n, scalar_t *a, int lda, value_t *w, scalar_t *work, int lwork, value_t *rwork, int *info);
@@ -310,12 +323,42 @@ template<> void lapackSyevd<float>(char jobz, char uplo, int n, float *a, int ld
   ssyevd_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, iwork, &liwork, info);
 }
 
-template<> void lapackEig<double>(char jobvl, char jobvr, int n, double *a, int lda, double *wr, double *wi, double* vl, int ldvl, double *vr, int ldvr, double *work, int lwork, int *info) {
+template<> void lapackEig<double>(char jobvl, char jobvr, int n, double *a, int lda, double *w, double* vl, int ldvl, double *vr, int ldvr, double *work, int lwork, double *rwork, int *info) {
+  // lapack [sd]geev wants to separate output arrays: wr and wi for the real
+  // and imaginary parts
+  double *wr = w;
+  double *wi = w + n;
+  (void)rwork; // unused
   dgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
 
-template<> void lapackEig<float>(char jobvl, char jobvr, int n, float *a, int lda, float *wr, float *wi, float* vl, int ldvl, float *vr, int ldvr, float *work, int lwork, int *info) {
+template<> void lapackEig<float>(char jobvl, char jobvr, int n, float *a, int lda, float *w, float* vl, int ldvl, float *vr, int ldvr, float *work, int lwork, float *rwork, int *info) {
+  // lapack [sd]geev wants to separate output arrays: wr and wi for the real
+  // and imaginary parts
+  float *wr = w;
+  float *wi = w + n;
+  (void)rwork; // unused
   sgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
+}
+
+template<> void lapackEig<c10::complex<double>, double>(char jobvl, char jobvr, int n, c10::complex<double> *a, int lda, c10::complex<double> *w, c10::complex<double> *vl, int ldvl, c10::complex<double> *vr, int ldvr, c10::complex<double> *work, int lwork, double *rwork, int *info) {
+  zgeev_(&jobvl, &jobvr, &n,
+         reinterpret_cast<std::complex<double>*>(a), &lda,
+         reinterpret_cast<std::complex<double>*>(w),
+         reinterpret_cast<std::complex<double>*>(vl), &ldvl,
+         reinterpret_cast<std::complex<double>*>(vr), &ldvr,
+         reinterpret_cast<std::complex<double>*>(work), &lwork,
+         rwork, info);
+}
+
+template<> void lapackEig<c10::complex<float>, float>(char jobvl, char jobvr, int n, c10::complex<float> *a, int lda, c10::complex<float> *w, c10::complex<float> *vl, int ldvl, c10::complex<float> *vr, int ldvr, c10::complex<float> *work, int lwork, float *rwork, int *info) {
+  cgeev_(&jobvl, &jobvr, &n,
+         reinterpret_cast<std::complex<float>*>(a), &lda,
+         reinterpret_cast<std::complex<float>*>(w),
+         reinterpret_cast<std::complex<float>*>(vl), &ldvl,
+         reinterpret_cast<std::complex<float>*>(vr), &ldvr,
+         reinterpret_cast<std::complex<float>*>(work), &lwork,
+         rwork, info);
 }
 
 template<> void lapackSvd<c10::complex<double>, double>(char jobz, int m, int n, c10::complex<double> *a, int lda,
@@ -983,44 +1026,6 @@ static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
 #endif
 }
 
-template<typename scalar_t>
-static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t m, int64_t n_columns,
-                        int64_t k, std::vector<int64_t>& infos) {
-#ifndef USE_LAPACK
-  AT_ERROR("qr: LAPACK library not found in compilation");
-#else
-  using value_t = typename c10::scalar_value_type<scalar_t>::type;
-  auto self_data = self.data_ptr<scalar_t>();
-  auto tau_data = tau.data_ptr<scalar_t>();
-  auto self_matrix_stride = matrixStride(self);
-  auto tau_stride = tau.size(-1);
-  auto batch_size = batchCount(self);
-
-  int info;
-  // Run once, first to get the optimum work size.
-  // Since we deal with batches of matrices with the same dimensions, doing this outside
-  // the loop saves (batch_size - 1) workspace queries which would provide the same result
-  // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
-  int lwork = -1;
-  scalar_t wkopt;
-  lapackOrgqr<scalar_t>(m, n_columns, k, self_data, m, tau_data, &wkopt, lwork, &info);
-  lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
-  Tensor work = at::empty({lwork}, self.options());
-
-  for (int64_t i = 0; i < batch_size; i++) {
-    scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
-    scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
-
-    // now compute the actual Q
-    lapackOrgqr<scalar_t>(m, n_columns, k, self_working_ptr, m, tau_working_ptr, work.data_ptr<scalar_t>(), lwork, &info);
-    infos[i] = info;
-    if (info != 0) {
-      return;
-    }
-  }
-#endif
-}
-
 std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& self, std::string mode) {
   bool compute_q, reduced;
   std::tie(compute_q, reduced) = _parse_qr_mode(mode);
@@ -1075,13 +1080,14 @@ std::tuple<Tensor, Tensor> _linalg_qr_helper_cpu(const Tensor& self, std::string
   }
 
   // Next perform ORGQR for Q using the results (both raw R and TAU) from GEQRF
+  auto infos_orgqr = at::empty({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "qr_cpu", [&]{
-    apply_orgqr<scalar_t>(q_working_copy, tau_working_copy, m, n_columns_q, std::min(m, n), infos);
+    apply_orgqr<scalar_t>(q_working_copy, tau_working_copy, infos_orgqr, n_columns_q);
   });
   if (self.dim() > 2) {
-    batchCheckErrors(infos, "qr_cpu");
+    batchCheckErrors(infos_orgqr, "qr_cpu");
   } else {
-    singleCheckErrors(infos[0], "qr_cpu");
+    singleCheckErrors(infos_orgqr.item().toInt(), "qr_cpu");
   }
   return std::make_tuple(q_working_copy.narrow(-1, 0, n_columns_q), R);
 }
@@ -1112,6 +1118,114 @@ std::tuple<Tensor,Tensor> qr(const Tensor& self, bool some) {
 std::tuple<Tensor&,Tensor&> qr_out(Tensor& Q, Tensor& R, const Tensor& self, bool some) {
   std::string mode = some ? "reduced" : "complete";
   return at::linalg_qr_out(Q, R, self, mode);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ orgqr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+DEFINE_DISPATCH(orgqr_stub);
+
+/*
+  The orgqr function allows reconstruction of an orthogonal (or unitary) matrix Q,
+  from a sequence of elementary reflectors, such as is produced by the geqrf function.
+
+  Args:
+  * `input` - Tensor with the directions of the elementary reflectors below the diagonal.
+  * `tau` - Tensor containing the magnitudes of the elementary reflectors.
+  * `result` - result Tensor, which will contain the orthogonal (or unitary) matrix Q.
+  * `infos` - Tensor to store LAPACK/MAGMA error codes
+
+  For further details, please see the LAPACK/MAGMA documentation.
+*/
+Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, Tensor& infos) {
+  TORCH_INTERNAL_ASSERT(input.dim() >= 2);
+  TORCH_INTERNAL_ASSERT(input.size(-2) >= input.size(-1));
+  TORCH_INTERNAL_ASSERT(input.size(-1) >= tau.size(-1));
+
+  TORCH_INTERNAL_ASSERT(input.scalar_type() == tau.scalar_type());
+  TORCH_INTERNAL_ASSERT(input.device() == tau.device());
+
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == input.scalar_type());
+  TORCH_INTERNAL_ASSERT(result.device() == input.device());
+
+  TORCH_INTERNAL_ASSERT(infos.scalar_type() == at::kInt);
+  TORCH_INTERNAL_ASSERT(infos.device() == at::kCPU);
+  TORCH_INTERNAL_ASSERT(infos.numel() == std::max<int64_t>(1, batchCount(input)));
+
+  // if result has no elements we can modify it
+  if (result.numel() == 0) {
+    at::native::resize_as_(result, input.transpose(-2, -1), MemoryFormat::Contiguous);
+    result.transpose_(-2, -1);
+  }
+
+  // result tensor must be in batched column major order (Fortran contiguous)
+  TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
+  TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
+
+  // orgqr_stub (apply_orgqr) performs calculations in-place and result must be a copy of input
+  result.copy_(input);
+
+  // infos must be contiguous
+  TORCH_INTERNAL_ASSERT(infos.is_contiguous());
+  infos.fill_(0);
+
+  auto n = input.size(-1);
+  result = orgqr_stub(result.device().type(), result, tau, infos, n);
+  return result;
+}
+
+Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
+  TORCH_CHECK(input.dim() >= 2, "orgqr: input must have at least 2 dimensions.");
+  TORCH_CHECK(input.size(-2) >= input.size(-1), "orgqr: input.shape[-2] must be greater than or equal to input.shape[-1]");
+  TORCH_CHECK(input.size(-1) >= tau.size(-1), "orgqr: input.shape[-1] must be greater than or equal to tau.shape[-1]");
+
+  TORCH_CHECK(tau.scalar_type() == input.scalar_type(),
+    "orgqr: tau dtype ", tau.scalar_type(), " does not match input dtype ", input.scalar_type());
+  TORCH_CHECK(input.device() == tau.device(),
+              "orgqr: Expected input and tau to be on the same device, but found input on ",
+              input.device(), " and tau on ", tau.device(), " instead.");
+
+  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
+    "orgqr: result dtype ", result.scalar_type(), " does not match the expected dtype ", input.scalar_type());
+  TORCH_CHECK(result.device() == input.device(),
+              "orgqr: Expected result and input to be on the same device, but found result on ",
+              result.device(), " and input on ", input.device(), " instead.");
+
+  // TODO: uncomment the following when passing incorrectly sized 'result' is not allowed
+  // if (result.numel() != 0) {
+  //   // Resize messes up the strides, so let's not use at::native::resize_output
+  //   TORCH_CHECK(result.sizes().equals(input.sizes()),
+  //   "result shape ", result.sizes(), " does not match input shape ", input.sizes());
+  // }
+
+  // Single matrix MAGMA routine requires 'infos' to reside in CPU memory,
+  // therefore we create 'infos' only on CPU for now.
+  // This should be changed if cuSOLVER would be used
+  auto infos = at::empty({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt).device(kCPU));
+
+  // if result is not empty and not in batched column major format we have to allocate a temporary tensor
+  if (result.numel() != 0 && !result.transpose(-2, -1).is_contiguous()) {
+    Tensor result_tmp = at::empty({0}, input.options());
+    result_tmp = orgqr_out_info(input, tau, result_tmp, infos);
+    at::native::resize_output(result, result_tmp.sizes());
+    result.copy_(result_tmp);
+  } else {
+    // use result's storage directly
+    result = orgqr_out_info(input, tau, result, infos);
+  }
+
+  // Now check LAPACK/MAGMA error codes
+  if (result.dim() > 2) {
+    batchCheckErrors(infos, "orgqr");
+  } else {
+    singleCheckErrors(infos.item().toInt(), "orgqr");
+  }
+  return result;
+}
+
+Tensor orgqr(const Tensor& input, const Tensor& tau) {
+  Tensor result = at::empty({0}, input.options());
+  result = at::orgqr_outf(input, tau, result);
+  return result;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ syevd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1374,7 +1488,11 @@ std::tuple<Tensor&, Tensor&> eig_out(Tensor& e, Tensor& v, const Tensor& self, b
       TORCH_CHECK(v.dtype() == self.dtype(), "Expected 'v' to have dtype ", self.dtype(), " but got ", v.dtype());
   int64_t n = self.size(-1);
 
-  at::native::resize_output(e, {n, 2});
+  if (isComplexType(at::typeMetaToScalarType(self.dtype()))) {
+      at::native::resize_output(e, {n});
+  } else {
+      at::native::resize_output(e, {n, 2});
+  }
   if (eigenvectors) {
       at::native::resize_output(v, self.sizes());
   }
@@ -1499,6 +1617,8 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
     VT_working_copy.zero_();
   }
   // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
+  // Note that the 'apply_svd' routine returns VT = V^T (for real inputs) or VT = V^H (for complex inputs), not V.
+  VT_working_copy = VT_working_copy.conj();
   VT_working_copy.transpose_(-2, -1);
   return std::make_tuple(U_working_copy, S_working_copy, VT_working_copy);
 }
@@ -1529,8 +1649,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& V,
     1. the 2nd parameter is bool some=True, which if effectively the opposite
        of full_matrices=True
 
-    2. svd returns V, while linalg.svd returns VT. To accommodate the
-       difference, we transpose() V upon return
+    2. svd returns V, while linalg.svd returns VT = V^T (for real inputs) or VT = V^H (for complex inputs).
+       To accommodate the difference, we transpose() and conj() V upon return
 */
 
 std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matrices, bool compute_uv) {
@@ -1541,7 +1661,7 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matr
     Tensor U, S, V;
     std::tie(U, S, V) = at::_svd_helper(self, some, compute_uv);
     if (compute_uv) {
-        Tensor VT = V.transpose(-2, -1);
+        Tensor VT = V.conj().transpose(-2, -1);
         return std::make_tuple(U, S, VT);
     } else {
         Tensor empty_U = at::empty({0}, self.options());

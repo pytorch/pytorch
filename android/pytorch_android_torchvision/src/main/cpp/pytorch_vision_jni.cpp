@@ -4,8 +4,6 @@
 
 #include "jni.h"
 
-#define clamp0255(x) x > 255 ? 255 : x < 0 ? 0 : x
-
 namespace pytorch_vision_jni {
 
 static void imageYUV420CenterCropToFloatBuffer(
@@ -112,9 +110,12 @@ static void imageYUV420CenterCropToFloatBuffer(
       ri = (a0 + 1634 * vi) >> 10;
       gi = (a0 - 833 * vi - 400 * ui) >> 10;
       bi = (a0 + 2066 * ui) >> 10;
-      outData[wr++] = (clamp0255(ri) - normMeanRm255) / normStdRm255;
-      outData[wg++] = (clamp0255(gi) - normMeanGm255) / normStdGm255;
-      outData[wb++] = (clamp0255(bi) - normMeanBm255) / normStdBm255;
+      ri = ri > 255 ? 255 : ri < 0 ? 0 : ri;
+      gi = gi > 255 ? 255 : gi < 0 ? 0 : gi;
+      bi = bi > 255 ? 255 : bi < 0 ? 0 : bi;
+      outData[wr++] = (ri - normMeanRm255) / normStdRm255;
+      outData[wg++] = (gi - normMeanGm255) / normStdGm255;
+      outData[wb++] = (bi - normMeanBm255) / normStdBm255;
     }
   }
 }
