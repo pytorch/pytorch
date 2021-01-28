@@ -356,6 +356,8 @@ class TestTorchbind(JitTestCase):
             obj.increment(5)
             obj.decrement()
             obj.decrement(2)
+            obj.scale_add(5)
+            obj.scale_add(3, 2)
             return obj.increment()
 
         self.checkScript(fn, ())
@@ -365,6 +367,8 @@ class TestTorchbind(JitTestCase):
             obj.increment(3)
             obj.increment()
             obj.decrement(2)
+            obj.scale_add(3)
+            obj.scale_add(3, 2)
             return obj.decrement()
 
         self.checkScript(gn, ())

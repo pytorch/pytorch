@@ -22,6 +22,10 @@ struct DefaultArgs : torch::CustomClassHolder {
     x += val;
     return x;
   }
+  int64_t scale_add(int64_t add, int64_t scale = 1) {
+    x = scale * x + add;
+    return x;
+  }
 };
 
 struct Foo : torch::CustomClassHolder {
@@ -218,7 +222,12 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
   m.class_<DefaultArgs>("_DefaultArgs")
       .def(torch::init<int64_t>(), "", {torch::arg("start") = 3})
       .def("increment", &DefaultArgs::increment, "", {torch::arg("val") = 1})
-      .def("decrement", &DefaultArgs::increment, "", {torch::arg("val") = 1});
+      .def("decrement", &DefaultArgs::increment, "", {torch::arg("val") = 1})
+      .def(
+          "scale_add",
+          &DefaultArgs::scale_add,
+          "",
+          {torch::arg("add"), torch::arg("scale") = 1});
 
   m.class_<Foo>("_Foo")
       .def(torch::init<int64_t, int64_t>())

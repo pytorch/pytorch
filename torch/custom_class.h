@@ -18,14 +18,29 @@
 
 namespace torch {
 
+/// This struct is used to represent default values for arguments
+/// when registering methods for custom classes.
+///     static auto register_foo = torch::class_<Foo>("myclasses", "Foo")
+///       .def("myMethod", &Foo::myMethod, {torch::arg("name") = name});
 struct arg {
-  explicit arg(std::string name) : name_(std::move(name)) {}
+  // Explicit constructor.
+  explicit arg(std::string name) : name_(std::move(name)), value_set_(false) {}
+  // Assignment operator. This enables the pybind-like syntax of
+  // torch::arg("name") = value.
   arg& operator=(const c10::IValue& rhs) {
     value_ = rhs;
+    value_set_ = true;
     return *this;
   }
 
+  // The name of the argument. This is copied to the schema; argument
+  // names cannot be extracted from the C++ declaration.
   std::string name_;
+  // IValue's default constructor makes it None, which not distinguishable from
+  // an actual, user-provided default value that is None. This boolean
+  // helps distinguish between the two cases.
+  bool value_set_;
+  // The provided default value of the argument.
   c10::IValue value_;
 };
 
@@ -291,10 +306,17 @@ class class_ {
     auto qualMethodName = qualClassName + "." + name;
     auto schema = c10::inferFunctionSchemaSingleReturn<Func>(std::move(name), "");
 
+    // If default values are provided for function arguments, there must be none
+    // (no default values) or default values for all function arguments, except
+    // for self. This is because argument names are not extracted by
+    // inferFunctionSchemaSingleReturn, and so there must be a torch::arg instance in
+    // default_args even for arguments that do not have an actual default value provided.
     TORCH_CHECK(
         default_args.size() == 0 || default_args.size() == schema.arguments().size()-1,
         "Default values must be specified for none or all arguments");
 
+    // If there are default args, copy the argument names and default values to the
+    // function schema.
     if (default_args.size() > 0) {
       const auto& old_args = schema.arguments();
       std::vector<c10::Argument> new_args;
@@ -308,7 +330,7 @@ class class_ {
             std::move(default_args_v[i].name_),
             arg.type(),
             arg.N(),
-            std::move(default_args_v[i].value_)));
+            default_args_v[i].value_set_? std::move(default_args_v[i].value_) : c10::nullopt));
       }
 
       schema = schema.cloneWithArguments(new_args);
