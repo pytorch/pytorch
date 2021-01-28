@@ -31,7 +31,7 @@ namespace {
 // Register fallthrough for Autograd backends dispatch keys
 // NB: But not the private use ones; maybe the extension wants
 // to override it themselves!
-
+/*
 TORCH_LIBRARY_IMPL(_, AutogradOther, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
@@ -47,5 +47,6 @@ TORCH_LIBRARY_IMPL(_, AutogradCUDA, m) {
 TORCH_LIBRARY_IMPL(_, AutogradXLA, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
+*/
 
 }
