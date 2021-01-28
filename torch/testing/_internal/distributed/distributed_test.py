@@ -3208,6 +3208,7 @@ class DistributedTest:
             def parse_env(var):
                 return os.environ[var] if var in os.environ else "N/A"
 
+            group, group_id, rank = self._init_global_test()
             model_DDP = copy.deepcopy(DDP_NET)
             model_DDP = nn.parallel.DistributedDataParallel(model_DDP)
             ddp_logging_data = model_DDP.get_ddp_logging_data()
@@ -3222,6 +3223,7 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.bucket_cap_mb, 25)
             self.assertEqual(ddp_logging_data.find_unused_parameters, False)
             self.assertEqual(ddp_logging_data.gradient_as_bucket_view, False)
+            self.assertEqual(ddp_logging_data.backend_name, dist.get_backend(group_id))
             self.assertEqual(ddp_logging_data.iteration, 0)
             params = list(model_DDP.parameters())
             num_params = 0

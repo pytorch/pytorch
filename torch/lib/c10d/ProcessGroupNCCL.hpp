@@ -32,6 +32,8 @@ constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
 // Handling with NCCL.
 constexpr const char* NCCL_ASYNC_ERROR_HANDLING = "NCCL_ASYNC_ERROR_HANDLING";
 
+const std::string NCCL_BACKEND_NAME = "nccl";
+
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
 // All functions of the class are expected to be called in the same order
@@ -226,6 +228,10 @@ class ProcessGroupNCCL : public ProcessGroup {
       : ProcessGroupNCCL(store, rank, size, options) {}
 
   virtual ~ProcessGroupNCCL();
+
+  const std::string getBackendName() const {
+      return NCCL_BACKEND_NAME;
+  }
 
   c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& tensors,

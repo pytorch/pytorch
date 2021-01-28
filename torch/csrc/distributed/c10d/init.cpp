@@ -1192,6 +1192,7 @@ Arguments:
       .def_readwrite("bucket_cap_mb", &c10::DDPLoggingData::bucket_cap_mb)
       .def_readwrite("find_unused_parameters", &c10::DDPLoggingData::find_unused_parameters)
       .def_readwrite("gradient_as_bucket_view", &c10::DDPLoggingData::gradient_as_bucket_view)
+      .def_readwrite("backend_name", &c10::DDPLoggingData::backend_name)
       .def_readwrite("iteration", &c10::DDPLoggingData::iteration)
       .def_readwrite("dtype", &c10::DDPLoggingData::dtype)
       .def_readwrite("parameter_size", &c10::DDPLoggingData::parameter_size)

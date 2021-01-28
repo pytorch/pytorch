@@ -313,6 +313,7 @@ struct DDPLoggingData {
   int world_size;
   int rank;
   std::string module_name;
+  std::string backend_name;
   // The DDPLoggingData is logged in which iteration of the training loop,
   // 0 if the data is logged during DistributedDataParallel construction time.
   int iteration;
