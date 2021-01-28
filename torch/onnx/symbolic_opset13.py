@@ -116,7 +116,7 @@ def fake_quantize_per_channel_affine(g, inputs, scale, zero_point, axis, quant_m
         raise RuntimeError(
             "ONNX defines [0, 255] for quint8 and [-128, 127] for qint8, got [{}, {}]".format(quant_min, quant_max))
 
-    # ONNX defines zero_point to be int8 or uint8^M
+    # ONNX defines zero_point to be int8 or uint8
     if quant_min == 0:
         zero_point = g.op("Cast", zero_point, to_i=cast_pytorch_to_onnx['Byte'])
     else:
