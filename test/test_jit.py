@@ -40,6 +40,7 @@ from jit.test_warn import TestWarn  # noqa: F401
 from jit.test_isinstance import TestIsinstance  # noqa: F401
 from jit.test_cuda import TestCUDA  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
+from jit.test_complex import TestComplex  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -788,7 +789,7 @@ class TestJit(JitTestCase):
                 super(Mod, self).__init__()
                 self.model = nn.ModuleList([nn.Linear(10, 10) for _ in range(10)])
                 self.model += (nn.Linear(10, 20),)
-                self.model.append(nn.Linear(20, 30)) 
+                self.model.append(nn.Linear(20, 30))
                 self.model.extend([nn.Linear(30, 40), nn.Linear(40, 50)])
 
             def forward(self, v):
@@ -15792,7 +15793,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
                 #      so that we don't regress on autodiff support.
                 with disable_autodiff_subgraph_inlining():
                     script_fn = create_script_fn(self, name, 'nn_functional')
-                    check_against_reference(self, script_fn, fn, output_process_fn, 
+                    check_against_reference(self, script_fn, fn, output_process_fn,
                                             f_args_variable, kwargs_variable, no_grad=no_grad)
                     # For tests we disabled AD subgraph inlining, make sure it's not falling back to autograd
                     if (doAutodiffCheck(test_name)):
@@ -15913,7 +15914,7 @@ def add_nn_module_test(*args, **kwargs):
         f_args_variable = deepcopy(unpack_variables(args_variable))
 
         # Check against Python module as reference
-        check_against_reference(self, create_script_module, create_nn_module, 
+        check_against_reference(self, create_script_module, create_nn_module,
                                 lambda x: x, f_args_variable, no_grad=no_grad)
 
     if 'slowTest' in kwargs:
