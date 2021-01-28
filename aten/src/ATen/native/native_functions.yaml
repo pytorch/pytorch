@@ -1383,19 +1383,16 @@
     SparseCPU, SparseCUDA: div_out_sparse_zerodim
 
 - func: div.Tensor_mode(Tensor self, Tensor other, *, str rounding_mode) -> Tensor
-  use_c10_dispatcher: full
   variants: function, method
   dispatch:
     CPU, CUDA: div
 
 - func: div_.Tensor_mode(Tensor(a!) self, Tensor other, *, str rounding_mode) -> Tensor(a!)
-  use_c10_dispatcher: full
   variants: method
   dispatch:
     CPU, CUDA: div_
 
 - func: div.out_mode(Tensor self, Tensor other, *, str rounding_mode, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: full
   dispatch:
     CPU, CUDA: div_out
 
@@ -1411,13 +1408,11 @@
     DefaultBackend: div_
 
 - func: div.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor
-  use_c10_dispatcher: full
   variants: function, method
   dispatch:
     DefaultBackend: div
 
 - func: div_.Scalar_mode(Tensor(a!) self, Scalar other, *, str rounding_mode) -> Tensor(a!)
-  use_c10_dispatcher: full
   variants: method
   dispatch:
     DefaultBackend: div_
@@ -1439,22 +1434,17 @@
   variants: method
 
 - func: divide.Tensor_mode(Tensor self, Tensor other, *, str rounding_mode) -> Tensor
-  use_c10_dispatcher: full
   variants: function, method
 
 - func: divide_.Tensor_mode(Tensor(a!) self, Tensor other, *, str rounding_mode) -> Tensor(a!)
-  use_c10_dispatcher: full
   variants: method
 
 - func: divide.out_mode(Tensor self, Tensor other, *, str rounding_mode, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: full
 
 - func: divide.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor
-  use_c10_dispatcher: full
   variants: function, method
 
 - func: divide_.Scalar_mode(Tensor(a!) self, Scalar other, *, str rounding_mode) -> Tensor(a!)
-  use_c10_dispatcher: full
   variants: method
 
   # true_divide, an alias for div
