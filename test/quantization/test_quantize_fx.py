@@ -347,10 +347,11 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_dict = {'': qconfig}
         prepared = prepare_fx(m, qconfig_dict)
         quantized = convert_fx(prepared, debug=True)
-        qparams = (quantized._scale_0, quantized._zero_point_0)
+        qparams = (quantized._input_scale_0, quantized._input_zero_point_0)
         weight_obs = qconfig.weight()
         weight_obs(quantized.weight)
-        ref_qparams = weight_obs.calculate_qparams()
+        # Get the actual value to avoid tensor size mismatch error, torch.Size([]) vs torch.Size([1])
+        ref_qparams = (weight_obs.calculate_qparams()[0].item(), weight_obs.calculate_qparams()[1].item())
         self.assertEqual(qparams, ref_qparams)
 
     def test_conv_bn_relu(self):
@@ -983,6 +984,46 @@ class TestQuantizeFx(QuantizationTestCase):
             # make sure it runs
             m(torch.randn(2, 1, 3, 3))
 
+    def test_qconfig_for_call_func(self):
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    Linear(),
+                    Linear()
+                )
+                self.mods2 = Linear()
+
+            def forward(self, x):
+                x = self.mods1(x)
+                x = self.mods2(x)
+                return x
+
+        model = M().eval()
+        qconfig_dict = {"": default_qconfig, "module_name": [("mods2", None)]}
+        m = prepare_fx(model, qconfig_dict)
+        m(torch.rand(5, 5))
+
+        m = convert_fx(m)
+        node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.linear),
+            ns.call_function(torch.ops.quantized.linear),
+            ns.call_method('dequantize'),
+            ns.call_function(torch.nn.functional.linear)
+        ]
+        self.checkGraphModuleNodes(m, expected_node_list=node_list)
+        m(torch.rand(5, 5))
+
     def test_preserve_attributes(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1454,6 +1495,68 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertTrue(
             str(context.exception) ==
             'Per channel weight observer is not supported yet for ConvTranspose{n}d.')
+
+    @skipIfNoFBGEMM
+    def test_qparams_buffers(self):
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    Linear(),
+                    Linear()
+                )
+                self.mods2 = Linear()
+
+            def forward(self, x):
+                x = self.mods1(x)
+                x = self.mods2(x)
+                return x
+
+        model = M().eval()
+        qconfig_dict = {"": default_qconfig}
+        m = prepare_fx(model, qconfig_dict)
+        m(torch.rand(5, 5))
+
+        m = convert_fx(m)
+        keys = m.state_dict().keys()
+        quant_scale_count = quant_zero_point = scale_count = zero_point_count = 0
+        for k in keys:
+            if 'input_scale' in k:
+                quant_scale_count = quant_scale_count + 1
+            elif 'input_zero_point' in k:
+                quant_zero_point = quant_zero_point + 1
+            elif 'scale' in k:
+                scale_count = scale_count + 1
+            elif 'zero_point' in k:
+                zero_point_count = zero_point_count + 1
+
+        # Expect each quantized linear op to have a scale and zero point
+        self.assertTrue(scale_count == 3, "Expect each quantized linear op to have a scale in state_dict")
+        self.assertTrue(zero_point_count == 3, "Expect each quantized linear op to have a zero_point in state_dict")
+        # ensure it runs
+        m(torch.rand(5, 5))
+        # ensure it is scriptable
+        scripted = torch.jit.script(m)
+        scripted_keys = scripted.state_dict().keys()
+        self.assertTrue(scripted_keys == keys, "Expected the scripted model to preserve the state_dict")
+        assert hasattr(m, "mods1_0_input_scale_0")
+        assert hasattr(m, "mods1_0_input_zero_point_0")
+        assert hasattr(m, "mods1_0_scale_0")
+        assert hasattr(m, "mods1_0_zero_point_0")
+        assert hasattr(m, "mods1_1_scale_0")
+        assert hasattr(m, "mods1_1_zero_point_0")
+        assert hasattr(m, "mods2_scale_0")
+        assert hasattr(m, "mods2_zero_point_0")
+
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
