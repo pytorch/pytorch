@@ -6,6 +6,8 @@ class MkldnnLinear(torch.jit.ScriptModule):
         super(MkldnnLinear, self).__init__()
         self.register_buffer('weight', dense_module.weight.to_mkldnn(dtype))
         if dense_module.bias is not None:
+            # Bias can be fp32 or bf16 for OneDNN bf16 path, but for good accuracy,
+            # we use fp32 dtype.
             self.register_buffer('bias', dense_module.bias.to_mkldnn())
         else:
             # TODO: Remove this once ScriptModule supports registering None buffer
@@ -46,6 +48,8 @@ class _MkldnnConvNd(torch.jit.ScriptModule):
         if dense_module.bias is not None:
             self.register_buffer('bias', dense_module.bias.to_mkldnn())
         else:
+            # Bias can be fp32 or bf16 for OneDNN bf16 path, but for good accuracy,
+            # we use fp32 dtype.
             # TODO: Remove this once ScriptModule supports registering None buffer
             self.register_buffer(
                 'bias',
@@ -191,6 +195,8 @@ def to_mkldnn(module, dtype=torch.float):
         elif isinstance(m, torch.nn.Conv3d):
             return MkldnnConv3d(m, d)
         elif isinstance(m, torch.nn.BatchNorm2d) or isinstance(m, torch.nn.BatchNorm3d):
+            # For batchnorm bf16 path, OneDNN requires weight and bias need fp32 dtype.
+            # so it doesn't need dtype argument.
             return MkldnnBatchNorm(m)
         else:
             return m
