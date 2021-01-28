@@ -26,6 +26,63 @@ C10_ALWAYS_INLINE vfloat32 vec_float(const vint32& vec_in) {
 }
 #endif
 
+#if !defined(vec_signed)
+C10_ALWAYS_INLINE vint32 vec_signed(const vfloat32& vec_in) {
+  vint32 vec_out;
+  __asm__("xvcvspsxws %x0,%x1" : "=wa"(vec_out) : "wf"(vec_in));
+  return vec_out;
+}
+
+C10_ALWAYS_INLINE vint64 vec_signed(const vfloat64& vec_in) {
+  vint64 vec_out;
+  __asm__("xvcvdpsxds %x0,%x1" : "=wa"(vec_out) : "wd"(vec_in));
+  return vec_out;
+}
+#endif
+
+#if !defined(vec_neg)
+C10_ALWAYS_INLINE vfloat32 vec_neg(const vfloat32& vec_in) {
+  vfloat32 vec_out;
+  __asm__("xvnegsp %x0,%x1" : "=wf"(vec_out) : "wf"(vec_in));
+  return vec_out;
+}
+
+C10_ALWAYS_INLINE vfloat64 vec_neg(const vfloat64& vec_in) {
+  vfloat64 vec_out;
+  __asm__("xvnegdp %x0,%x1" : "=wd"(vec_out) : "wd"(vec_in));
+  return vec_out;
+}
+
+C10_ALWAYS_INLINE vint16 vec_neg(const vint16& vec_in) {
+  vint16 vint0 = {0, 0, 0, 0 ,0, 0, 0, 0};
+  return vec_vsubuhm(vint0, vec_in);
+}
+
+C10_ALWAYS_INLINE vint32 vec_neg(const vint32& vec_in) {
+  vint32 vint0 = {0, 0, 0, 0};
+  return vec_vsubuwm(vint0, vec_in);
+}
+
+C10_ALWAYS_INLINE vint64 vec_neg(const vint64& vec_in) {
+  vint64 vint0 = {0, 0};
+  return vec_vsubudm(vint0, vec_in);
+}
+#endif
+
+#if !defined(vec_sldw)
+template <unsigned int C>
+C10_ALWAYS_INLINE vfloat32
+vec_sldw_aux(const vfloat32& vec_in0, const vfloat32& vec_in1) {
+  vfloat32 vec_out;
+  __asm("xxsldwi %x0, %x1, %x2, %3 "
+        : "=wa"(vec_out)
+        : "wa"(vec_in0), "wa"(vec_in1), "I"(C));
+  return vec_out;
+}
+
+#define vec_sldw(a, b, c) vec_sldw_aux<c>(a, b)
+#endif
+
 #define vec_not(a) vec_nor(a, a)
 
 #define DEFINE_MEMBER_UNARY_OP(op, op_type, func)     \
@@ -222,11 +279,11 @@ namespace at {
 namespace vec256 {
 // See Note [Acceptable use of anonymous namespace in header]
 namespace {
-// 
-    constexpr int offset0 = 0;
-    constexpr int  offset16 = 16; 
+//
+constexpr int offset0 = 0;
+constexpr int offset16 = 16;
 
-//#Constants
+// #Constants
 const vuint8 mask_zero_bits = vuint8{128, 128, 128, 128, 128, 128, 128, 128,
                                 128, 128, 128, 128, 96,  64,  32,  0};
 
@@ -259,7 +316,7 @@ const vfloat32 half = vec_splats(0.5f);
 const vfloat32 one = vec_splats(1.f);
 const vfloat32 two = vec_splats(2.0f);
 const vfloat32 _4div_pi = vec_splats(1.27323954473516f);
-const vfloat32 v_inf = (vfloat32)vec_splats(0x7f800000u); 
+const vfloat32 v_inf = (vfloat32)vec_splats(0x7f800000u);
 const vfloat32 v_minus_inf = vfloat32{ 0xff800000u, 0xff800000u, 0xff800000u, 0xff800000u };
 const vfloat32 v_nan = (vfloat32)vec_splats(0x7fffffff);
 const vfloat32 log10e_inv = vec_splats(0.43429448190325176f);
@@ -326,7 +383,7 @@ const vfloat64 vd_imag_half = vfloat64{0.0, 0.5};
 const vfloat64 vd_sqrt2_2 = vfloat64{0.70710678118654757, 0.70710678118654757};
 const vfloat64 vd_pi_2 = vfloat64{M_PI / 2.0, 0.0};
 
-}  // namespace
-}  // namespace vec256
-}  // namespace at
+} // namespace
+} // namespace vec256
+} // namespace at
 
