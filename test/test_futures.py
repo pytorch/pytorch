@@ -21,16 +21,16 @@ class TestFuture(TestCase):
 
         f = Future[T]()
         # Set exception
-        f.set_exception(value_error) # type: ignore
+        f.set_exception(value_error)  # type: ignore
         # Exception should throw on wait
         with self.assertRaisesRegex(ValueError, "Intentional"):
             f.wait()
 
         # Exception should also throw on value
         f = Future()
-        f.set_exception(value_error) # type: ignore
+        f.set_exception(value_error)  # type: ignore
         with self.assertRaisesRegex(ValueError, "Intentional"):
-            f.value() # type: ignore
+            f.value()  # type: ignore
 
     def test_set_exception_multithreading(self) -> None:
         # Ensure errors can propagate when one thread waits on future result
@@ -45,7 +45,7 @@ class TestFuture(TestCase):
         f = Future[T]()
         t = threading.Thread(target=wait_future, args=(f, ))
         t.start()
-        f.set_exception(value_error) # type: ignore
+        f.set_exception(value_error)  # type: ignore
         t.join()
 
     def test_done(self) -> None:
