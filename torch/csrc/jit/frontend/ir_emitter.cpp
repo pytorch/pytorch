@@ -396,18 +396,17 @@ struct Environment {
       }
     }
     if (as_simple_value) {
-      // We need a TypePtr for `insertStore` later
-      if (!annotated_type) {
-        annotated_type = as_simple_value->type();
-      }
-      else if (!as_simple_value->type()->isSubtypeOf(annotated_type)) {
+      if (annotated_type &&
+          !as_simple_value->type()->isSubtypeOf(annotated_type)) {
         throw ErrorReport(loc)
             << "Variable '" << name << "' is annotated with type "
             << annotated_type->repr_str()
             << " but is being assigned to a value of type "
             << as_simple_value->type()->repr_str();
       }
-      insertStore(name, loc, as_simple_value, annotated_type);
+      auto value_store_type =
+          annotated_type ? annotated_type : as_simple_value->type();
+      insertStore(name, loc, as_simple_value, value_store_type);
     } else {
       value_table[name] = std::move(value);
     }
