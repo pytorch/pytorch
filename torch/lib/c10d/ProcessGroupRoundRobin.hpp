@@ -6,6 +6,8 @@
 
 namespace c10d {
 
+const std::string ROUND_ROBIN_BACKEND_NAME = "round_robin";
+
 // ProcessGroupRoundRobin implements simple load balancing.
 //
 // It is constructed with multiple processes groups. Each call is dispatched to

@@ -16,6 +16,8 @@
 
 namespace c10d {
 
+const std::string MPI_BACKEND_NAME = "mpi";
+
 // WorkEntry is the state associated with a single MPI run instance.
 // It include the source Tensor list and destination Tensor list, as well as
 // The actual run function that will operate either on src or dst or both.

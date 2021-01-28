@@ -4,6 +4,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/stack.h>
+#include <pybind11/complex.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Device.h>
@@ -292,6 +293,8 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   } else if (py::isinstance<py::float_>(input)) {
     return InferredType(FloatType::get());
+  } else if (PyComplex_CheckExact(input.ptr())) {
+    return InferredType(ComplexDoubleType::get());
   } else if (py::isinstance<py::str>(input)) {
     return InferredType(StringType::get());
   } else if (THPLayout_Check(input.ptr())) {
@@ -636,6 +639,9 @@ inline py::object toPyObject(IValue ivalue) {
     return py::cast(autograd::Variable(std::move(tensor)));
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
+  } else if (ivalue.isComplexDouble()) {
+    return py::cast(
+        static_cast<std::complex<double>>(std::move(ivalue).toComplexDouble()));
   } else if (ivalue.isInt()) {
     return py::cast(std::move(ivalue).toInt());
   } else if (ivalue.isBool()) {

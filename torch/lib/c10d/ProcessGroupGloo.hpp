@@ -27,6 +27,8 @@
 
 namespace c10d {
 
+const std::string GLOO_BACKEND_NAME = "gloo";
+
 // ProcessGroupGloo implements Gloo bindings for c10d.
 //
 // All functions on this class are expected to be called in the same
