@@ -11,9 +11,6 @@ namespace onnx {
 using namespace ::c10::onnx;
 }
 
-// A map of names and values of referenced attributes, to avoid duplicates.
-std::unordered_map<std::string, Value*> attrValues;
-
 // findSubModuleAttr function chases getAttr chains backwards to locate the
 // submodules. For example: module M {
 //   attributes {
@@ -71,7 +68,8 @@ std::vector<IValue> getParamAttributes(
     Block* block,
     std::shared_ptr<Graph>& graph,
     const Module& module_,
-    Function* function_) {
+    Function* function_,
+    std::unordered_map<std::string, Value*>& attrValues) {
   auto isEval = !module_.hasattr("training") || !module_.is_training();
 
   Node* m = *block->nodes().begin();
@@ -147,7 +145,7 @@ std::vector<IValue> getParamAttributes(
 
     for (Block* sub_block : n->blocks()) {
       auto nextParameterIValues =
-          getParamAttributes(sub_block, graph, module_, function_);
+          getParamAttributes(sub_block, graph, module_, function_, attrValues);
       parameterIValues.insert(
           std::end(parameterIValues),
           std::begin(nextParameterIValues),
@@ -157,7 +155,7 @@ std::vector<IValue> getParamAttributes(
   return parameterIValues;
 }
 
-void insertMainModuleAsConstant(const std::shared_ptr<Graph> graph) {
+void insertMainModuleAsConstant(const std::shared_ptr<Graph>& graph) {
   auto* constNode = graph->create(prim::Constant);
   constNode->output()->setType(graph->inputs().at(0)->type());
   auto it = graph->nodes().begin();
@@ -172,12 +170,12 @@ std::pair<Module, std::vector<IValue>> list_module_parameters(
   Method method = moduleClone.get_method("forward");
   auto function = &method.function();
   auto graph = function->graph();
-  std::vector<IValue> parameterIValues = {};
-  attrValues.clear();
+  // A map of names and values of referenced attributes, to avoid duplicates.
+  std::unordered_map<std::string, Value*> attrValues = {};
 
   GRAPH_DEBUG("Fetch attributes for function: " + function->name());
-  parameterIValues =
-      getParamAttributes(graph->block(), graph, moduleClone, function);
+  std::vector<IValue> parameterIValues = getParamAttributes(
+      graph->block(), graph, moduleClone, function, attrValues);
   insertMainModuleAsConstant(graph);
   GRAPH_DEBUG("Listed parameters as inputs: ", *graph);
 

@@ -16,7 +16,7 @@ from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, disableScript
                                  skipIfUnsupportedMaxOpsetVersion, skipIfONNXShapeInference)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import model_defs.word_language_model as word_language_model
 import torchvision
 from torchvision import ops

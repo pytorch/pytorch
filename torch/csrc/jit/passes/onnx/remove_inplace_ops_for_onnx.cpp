@@ -383,7 +383,7 @@ void RegisterInplaceNodeInIfBlocks(
     Value* new_inplace_node,
     Block* outer_block,
     Node* initial_node,
-    std::string output_name) {
+    const std::string& output_name) {
   if (initial_node->kind() != prim::If)
     return;
 
@@ -777,11 +777,6 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
   }
 }
 
-// A map of names and values of referenced attributes, to avoid duplicates.
-std::unordered_map<std::string, Value*> attrValues = {};
-// Replaced nodes to be delete
-std::vector<Node*> toDestory = {};
-
 // findSubModuleAttr function chases getAttr chains backwards to locate the
 // submodules. For example: module M {
 //   attributes {
@@ -836,7 +831,7 @@ Value* findArgumentAsInputParam(
 }
 
 Node* insertCloneBeforeNode(
-    std::shared_ptr<Graph> graph,
+    const std::shared_ptr<Graph>& graph,
     Value* orig_data,
     Node* node) {
   Node* newNode = nullptr;
@@ -865,7 +860,7 @@ Value* registerSetAttrInBlocks(
     Block* block,
     Value* newValue,
     Value* origValue,
-    std::string output_name) {
+    const std::string& output_name) {
   auto cloneNode = insertCloneBeforeNode(graph, newValue, block->return_node());
   auto next_node = block->owningNode();
 
@@ -879,6 +874,7 @@ void trackAndRegisterAttributesInBlocks(
     Node* n,
     const std::shared_ptr<Graph>& graph,
     const Module& module_,
+    std::unordered_map<std::string, Value*>& allAttrValues,
     std::unordered_map<std::string, Value*>& setAttrValues,
     std::unordered_map<std::string, Value*>& nextSetAttrValues) {
   if (n->kind() != prim::GetAttr && n->kind() != prim::SetAttr)
@@ -906,11 +902,9 @@ void trackAndRegisterAttributesInBlocks(
   // Add model_parameters and model_buffers as model inputs. Order is
   // preserved based on the appearance in the graph.
   if (type->is_parameter(slot) || type->is_buffer(slot)) {
-    if (attrValues.find(fullName) != attrValues.end()) {
-      paramConst = attrValues[fullName];
-    } else {
+    if (allAttrValues.find(fullName) == allAttrValues.end()) {
       paramConst = findArgumentAsInputParam(graph, fullName, attr);
-      attrValues.insert({fullName, paramConst});
+      allAttrValues.insert({fullName, paramConst});
     }
   }
 
@@ -924,7 +918,7 @@ void trackAndRegisterAttributesInBlocks(
 
         auto attrValue = (setAttrValues.find(fullName) != setAttrValues.end())
             ? setAttrValues[fullName]
-            : attrValues[fullName];
+            : allAttrValues[fullName];
 
         auto blockOutput = registerSetAttrInBlocks(
             graph, block_, n->inputs().at(1), attrValue, fullName);
@@ -933,7 +927,6 @@ void trackAndRegisterAttributesInBlocks(
       // SetAttr writes a value to an attr. Keep this
       // in the setAttrValues map.
       setAttrValues[fullName] = n->inputs().at(1);
-      toDestory.emplace_back(n);
     }
   } else if (n->kind() == prim::GetAttr) { // Handle GetAttr node
     if (setAttrValues.find(fullName) != setAttrValues.end()) {
@@ -943,13 +936,11 @@ void trackAndRegisterAttributesInBlocks(
       // Clone SetAttr input
       auto cloneNode = insertCloneBeforeNode(graph, set_attr_node_input, n);
       n->output()->replaceAllUsesAfterNodeWith(n, cloneNode->output());
-      toDestory.emplace_back(n);
-    } else if (attrValues.find(fullName) != attrValues.end()) {
+    } else if (allAttrValues.find(fullName) != allAttrValues.end()) {
       // Attr has not been set earlier in the graph. Replace it with the
       // graph parameter if exists.
-      n->output()->replaceAllUsesWith(attrValues[fullName]);
+      n->output()->replaceAllUsesWith(allAttrValues[fullName]);
       n->removeAllInputs();
-      toDestory.emplace_back(n);
     }
   }
 }
@@ -959,7 +950,8 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
     Block* block,
     const std::shared_ptr<Graph>& graph,
     Module module_,
-    std::unordered_map<std::string, Value*> setAttrValues) {
+    std::unordered_map<std::string, Value*>& allAttrValues,
+    std::unordered_map<std::string, Value*>& setAttrValues) {
   Node* m = *block->nodes().begin();
   WithInsertPoint guard(m);
 
@@ -971,7 +963,7 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
 
     if (n->kind() == prim::GetAttr || n->kind() == prim::SetAttr) {
       trackAndRegisterAttributesInBlocks(
-          n, graph, module_, setAttrValues, nextSetAttrValues);
+          n, graph, module_, allAttrValues, setAttrValues, nextSetAttrValues);
     } else if (
         mr.inplaceOpVariant(n) &&
         n->kind() != aten::copy_) { // TODO: create a list of all excluded ops
@@ -985,7 +977,7 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
       for (Block* sub_block : n->blocks()) {
         std::unordered_map<std::string, Value*> map_ =
             registerInplaceOpAsBlockOutputs(
-                mr, sub_block, graph, module_, setAttrValues);
+                mr, sub_block, graph, module_, allAttrValues, setAttrValues);
         std::unordered_map<std::string, Value*>::iterator mapIt;
         for (mapIt = map_.begin(); mapIt != map_.end(); mapIt++) {
           setAttrValues[mapIt->first] = mapIt->second;
@@ -1000,14 +992,14 @@ void RegisterInplaceOpAsBlockOutputs(
     MutationRemover& mr,
     Module* module,
     const std::shared_ptr<Graph>& graph) {
-  attrValues.clear();
-  toDestory.clear();
+  // A map of names and values of referenced attributes, to avoid duplicates.
+  std::unordered_map<std::string, Value*> allAttrValues = {};
+  // A map of names and values of set attributes, to track mutations.
+  std::unordered_map<std::string, Value*> setAttrValues = {};
 
   Module moduleClone = module->clone(true);
-  registerInplaceOpAsBlockOutputs(mr, graph->block(), graph, moduleClone, {});
-  for (Node* n : toDestory) {
-    n->destroy();
-  }
+  registerInplaceOpAsBlockOutputs(
+      mr, graph->block(), graph, moduleClone, allAttrValues, setAttrValues);
   EliminateDeadCode(graph->block());
 }
 

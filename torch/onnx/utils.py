@@ -397,7 +397,7 @@ def _create_jit_graph(model, args, _retain_param_name, use_new_jit_passes):
             else:
                 freezed_m = torch._C._freeze_module(model._c, preserveParameters=True)
                 module, params = torch._C._jit_onnx_list_model_parameters(freezed_m)
-                method_graph = freezed_m._get_method('forward').graph
+                method_graph = module._get_method('forward').graph
 
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
             graph = _propagate_and_assign_input_shapes(
