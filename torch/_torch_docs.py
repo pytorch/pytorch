@@ -8351,46 +8351,44 @@ add_docstr(torch.svd,
 svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 Computes the singular value decomposition of either a matrix or batch of
-matrices :attr:`input`." The singular value decomposition is represented as a
-namedtuple ``(U, S, V)``, such that :math:`input = U \mathbin{@} diag(S) \times
-V^T`, where :math:`V^T` is the transpose of ``V``. If :attr:`input` is a batch
-of tensors, then ``U``, ``S``, and ``V`` are also batched with the same batch
-dimensions as :attr:`input`.
+matrices :attr:`input`. The singular value decomposition is represented as a
+namedtuple (`U,S,V`), such that
+:attr:`input` = `U` diag(`S`) `Vᴴ`,
+where `Vᴴ` is the transpose of `V` for the real-valued inputs,
+or the conjugate transpose of `V` for the complex-valued inputs.
+If :attr:`input` is a batch of tensors, then `U`, `S`, and `V` are also
+batched with the same batch dimensions as :attr:`input`.
 
 If :attr:`some` is ``True`` (default), the method returns the reduced singular
 value decomposition i.e., if the last two dimensions of :attr:`input` are
-``m`` and ``n``, then the returned `U` and `V` matrices will contain only
-:math:`min(n, m)` orthonormal columns.
+`m` and `n`, then the returned `U` and `V` matrices will contain only
+min(`n, m`) orthonormal columns.
 
 If :attr:`compute_uv` is ``False``, the returned `U` and `V` will be
-zero-filled matrices of shape :math:`(m \times m)` and :math:`(n \times n)`
+zero-filled matrices of shape `(m × m)` and `(n × n)`
 respectively, and the same device as :attr:`input`. The :attr:`some`
-argument has no effect when :attr:`compute_uv` is False.
+argument has no effect when :attr:`compute_uv` is ``False``.
 
-The dtypes of ``U`` and ``V`` are the same as :attr:`input`'s. ``S`` will
+Supports input of float, double, cfloat and cdouble data types.
+The dtypes of `U` and `V` are the same as :attr:`input`'s. `S` will
 always be real-valued, even if :attr:`input` is complex.
 
-.. warning:: ``torch.svd`` is deprecated. Please use ``torch.linalg.``
-             :func:`~torch.linalg.svd` instead, which is similar to NumPy's
+.. warning:: :func:`torch.svd` is deprecated. Please use
+             :func:`torch.linalg.svd` instead, which is similar to NumPy's
              ``numpy.linalg.svd``.
 
-.. note:: **Differences with** ``torch.linalg.`` :func:`~torch.linalg.svd`:
+.. note:: Differences with :func:`torch.linalg.svd`:
 
-             * :attr:`some` is the opposite of ``torch.linalg.``
-               :func:`~torch.linalg.svd`'s :attr:`full_matricies`. Note that
+             * :attr:`some` is the opposite of
+               :func:`torch.linalg.svd`'s :attr:`full_matricies`. Note that
                default value for both is ``True``, so the default behavior is
                effectively the opposite.
 
-             * it returns ``V``, whereas ``torch.linalg.``
-               :func:`~torch.linalg.svd` returns ``Vh``. The result is that
-               when using ``svd`` you need to manually transpose
-               ``V`` in order to reconstruct the original matrix.
+             * :func:`torch.svd` returns `V`, whereas :func:`torch.linalg.svd` returns `Vᴴ`.
 
-             * If :attr:`compute_uv=False`, it returns zero-filled tensors for
-               ``U`` and ``Vh``, whereas :meth:`~torch.linalg.svd` returns
+             * If :attr:`compute_uv=False`, :func:`torch.svd` returns zero-filled tensors for
+               ``U`` and ``Vh``, whereas :func:`torch.linalg.svd` returns
                empty tensors.
-
-Supports real-valued and complex-valued input.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
           then the singular values of each matrix in the batch is returned in descending order.
@@ -8421,10 +8419,10 @@ Supports real-valued and complex-valued input.
           `U` and `V` tensors.
 
 Args:
-    input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
-                    batch dimensions consisting of :math:`m \times n` matrices.
+    input (Tensor): the input tensor of size `(*, m, n)` where `*` is zero or more
+                    batch dimensions consisting of `(m × n)` matrices.
     some (bool, optional): controls whether to compute the reduced or full decomposition, and
-                           consequently the shape of returned ``U`` and ``V``. Defaults to True.
+                           consequently the shape of returned `U` and `V`. Defaults to True.
     compute_uv (bool, optional): option whether to compute `U` and `V` or not. Defaults to True.
 
 Keyword args:
