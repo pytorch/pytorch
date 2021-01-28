@@ -435,6 +435,26 @@ class TestTEFuser(JitTestCase):
                 graph = backward_graph(s)
                 self.assertAllFused(graph, except_for={'aten::Float', 'aten::_grad_sum_to_size'})
 
+    def test_clamp_double(self):
+        for device in self.devices:
+            def clamp_double(x, eta: float):
+                return 1 - x.clamp(eta, 1 - eta)
+
+            x = torch.tensor([1.0, 1.0], dtype=torch.double, device=device)
+            eta = 1e-9
+            s = self.checkScript(clamp_double, (x, eta), profiling=ProfilingMode.PROFILING, atol=1e-10, rtol=1e-5)
+            self.assertAllFused(s.graph_for(x, eta))
+
+    def test_clamp_int(self):
+        for device in self.devices:
+            def clamp_int(x, eta: int):
+                return x.clamp(0, eta)
+
+            x = torch.tensor([1, 1], device=device)
+            eta = 1 << 32
+            s = self.checkScript(clamp_int, (x, eta), profiling=ProfilingMode.PROFILING)
+            self.assertAllFused(s.graph_for(x, eta))
+
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "no half support with profiling on")
     def test_dropout(self):
