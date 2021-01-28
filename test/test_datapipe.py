@@ -48,6 +48,7 @@ class TestIterableDataPipeBasic(TestCase):
 
     def tearDown(self):
         try:
+            self.temp_sub_dir.cleanup()
             self.temp_dir.cleanup()
         except Exception as e:
             warnings.warn("TestIterableDatasetBasic was not able to cleanup temp dir due to {}".format(str(e)))
