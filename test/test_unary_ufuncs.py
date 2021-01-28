@@ -343,9 +343,7 @@ class TestUnaryUfuncs(TestCase):
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
-    @ops(unary_ufuncs, allowed_dtypes=floating_and_complex_types_and(
-        torch.bfloat16, torch.half, torch.int8, torch.int16, torch.int32, torch.int64
-    ))
+    @ops(unary_ufuncs, allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half))
     def test_reference_numerics_extremal(self, device, dtype, op):
         handles_extremals = (op.handles_complex_extremals if
                              dtype in (torch.cfloat, torch.cdouble) else op.handles_extremals)
