@@ -380,8 +380,8 @@ class TestCommon(JitCommonTestCase):
         # Verify that using a tensor shape of incorrrect size to out=
         # raises userwarning.
         self.assertWarnsRegex(UserWarning,
-                                'An output with one or more elements was resized',
-                                lambda: op(*sample.input, *sample.args, **out_kwargs))
+                              'An output with one or more elements was resized',
+                              lambda: op(*sample.input, *sample.args, **out_kwargs))
         # Verify if the out tensor is resized and restrided to whatever
         # striding is natural for the op to produce
         self.assertEqual(expected, out, exact_device=True)
@@ -398,8 +398,8 @@ class TestCommon(JitCommonTestCase):
         # Verify that using a tensor shape of incorrrect size to out=
         # raises userwarning.
         self.assertWarnsRegex(UserWarning,
-                                'An output with one or more elements was resized',
-                                lambda: op(*sample.input, *sample.args, **out_kwargs))
+                              'An output with one or more elements was resized',
+                              lambda: op(*sample.input, *sample.args, **out_kwargs))
         # Verify if the out tensor is resized and restrided to whatever
         # striding is natural for the op to produce
         self.assertEqual(expected, out, exact_device=True)
