@@ -417,6 +417,25 @@ Collective functions
 
     :class:`~torch.distributed.ReduceOp` is recommended to use instead.
 
+Autograd-enabled communication primitives
+-----------------------------------------
+
+If you want to use collective communication functions supporting autograd
+you can find an implementation of those in the `torch.distributed.nn.*` module.
+
+Functions here are synchronous and will be inserted in the autograd graph, so
+you need to ensure that all the processes that participated in the collective operation
+will do the backward pass for the backward communication to effectively happen and
+don't cause a deadlock. 
+
+Please notice that currently the only backend where all the functions are guaranteed to work is ``gloo``.
+.. autofunction:: torch.distributed.nn.broadcast
+.. autofunction:: torch.distributed.nn.gather
+.. autofunction:: torch.distributed.nn.scatter
+.. autofunction:: torch.distributed.nn.reduce
+.. autofunction:: torch.distributed.nn.all_gather
+.. autofunction:: torch.distributed.nn.all_to_all
+.. autofunction:: torch.distributed.nn.all_reduce
 
 Multi-GPU collective functions
 ------------------------------

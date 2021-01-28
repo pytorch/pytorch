@@ -367,13 +367,23 @@ struct SourceImporterImpl : public Resolver,
         c10::QualifiedName(qualified_classname), cu_, is_module);
 
     std::vector<Def> methods;
-    std::vector<ResolverPtr> resolvers;
+    std::vector<ResolverPtr> method_resolvers;
+    std::map<std::string, Def> pre_hook_def_map;
+    std::map<std::string, Def> hook_def_map;
+    std::map<std::string, ResolverPtr> pre_hook_resolver_map;
+    std::map<std::string, ResolverPtr> hook_resolver_map;
     std::vector<Assign> attributes;
     std::vector<Assign> constants;
 
     // Module-specific: which attrs are parameters?
     std::unordered_set<std::string> parameter_names;
     std::unordered_set<std::string> buffer_names;
+    std::unordered_set<std::string> pre_hook_names;
+    std::unordered_set<std::string> hook_names;
+    // used to keep track of original ordering of hooks and prehooks
+    // in case any are called more than once
+    std::vector<std::string> pre_hooks_order;
+    std::vector<std::string> hooks_order;
     // Process statements, splitting things into attribute and method
     // definitions.
     for (const auto& statement : class_def.body()) {
@@ -407,6 +417,27 @@ struct SourceImporterImpl : public Resolver,
                     ListLiteral(assign.rhs().get()).inputs();
                 for (const auto& buffer : buffer_list) {
                   buffer_names.insert(StringLiteral(buffer).text());
+                }
+              } else if (name == "__forward_pre_hooks__") {
+                TORCH_INTERNAL_ASSERT(
+                    is_module,
+                    "Forward pre hooks only exist on modules at the moment");
+                const auto pre_hook_list =
+                    ListLiteral(assign.rhs().get()).inputs();
+                for (const auto& pre_hook : pre_hook_list) {
+                  std::string pre_hook_name = StringLiteral(pre_hook).text();
+                  pre_hook_names.insert(pre_hook_name);
+                  pre_hooks_order.emplace_back(pre_hook_name);
+                }
+              } else if (name == "__forward_hooks__") {
+                TORCH_INTERNAL_ASSERT(
+                    is_module,
+                    "Forward hooks only exist on modules at the moment");
+                const auto hook_list = ListLiteral(assign.rhs().get()).inputs();
+                for (const auto& hook : hook_list) {
+                  std::string hook_name = StringLiteral(hook).text();
+                  hook_names.insert(hook_name);
+                  hooks_order.emplace_back(hook_name);
                 }
               } else {
                 if (auto fixed_up = attributeAssignmentSpecialHandlingHack(
@@ -442,8 +473,18 @@ struct SourceImporterImpl : public Resolver,
           }
         } break;
         case TK_DEF: {
-          methods.emplace_back(Def(statement));
-          resolvers.push_back(shared_from_this());
+          Def def = Def(statement);
+          if (pre_hook_names.find(def.name().name()) != pre_hook_names.end()) {
+            pre_hook_def_map.emplace(def.name().name(), def);
+            pre_hook_resolver_map.emplace(
+                def.name().name(), shared_from_this());
+          } else if (hook_names.find(def.name().name()) != hook_names.end()) {
+            hook_def_map.emplace(def.name().name(), def);
+            hook_resolver_map.emplace(def.name().name(), shared_from_this());
+          } else {
+            methods.emplace_back(def);
+            method_resolvers.push_back(shared_from_this());
+          }
         } break;
         default: {
           TORCH_INTERNAL_ASSERT(
@@ -485,6 +526,23 @@ struct SourceImporterImpl : public Resolver,
       class_type->addConstant(name, const_val);
     }
 
+    // build pre hook and hook def/resolver pairs
+    // pairs are dedupped in ir_emitter.cpp's CompilationUnit::define_hooks()
+    // ordering here is call order for hooks
+    std::vector<Def> hooks;
+    std::vector<ResolverPtr> hook_resolvers;
+    for (const std::string& hook_name : hooks_order) {
+      hooks.emplace_back(hook_def_map.find(hook_name)->second);
+      hook_resolvers.push_back(hook_resolver_map.find(hook_name)->second);
+    }
+    std::vector<Def> pre_hooks;
+    std::vector<ResolverPtr> pre_hook_resolvers;
+    for (const std::string& pre_hook_name : pre_hooks_order) {
+      pre_hooks.emplace_back(pre_hook_def_map.find(pre_hook_name)->second);
+      pre_hook_resolvers.push_back(
+          pre_hook_resolver_map.find(pre_hook_name)->second);
+    }
+
     cu_->register_type(class_type);
     const auto self = SimpleSelf(class_type);
     cu_->define(
@@ -492,7 +550,14 @@ struct SourceImporterImpl : public Resolver,
         /*properties=*/{},
         /*propResolvers=*/{},
         methods,
-        resolvers,
+        method_resolvers,
+        &self);
+    cu_->define_hooks(
+        qualified_classname,
+        hooks,
+        hook_resolvers,
+        pre_hooks,
+        pre_hook_resolvers,
         &self);
   }
 

@@ -21,6 +21,10 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     }
     case TypeKind::FloatType:
       return py::cast<double>(obj);
+    case TypeKind::ComplexDoubleType: {
+      auto c_obj = py::cast<std::complex<double>>(obj.ptr());
+      return static_cast<c10::complex<double>>(c_obj);
+    }
     case TypeKind::IntType:
     // TODO(xintchen): Handling LayoutType and ScalarTypeType correctly.
     case TypeKind::LayoutType:
@@ -78,7 +82,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       return static_cast<int64_t>(stream->cdata);
     }
     case TypeKind::ListType: {
-      const auto& elem_type = type->expect<ListType>()->getElementType();
+      const auto& elem_type = type->expectRef<ListType>().getElementType();
       switch (elem_type->kind()) {
         // allows single int/float to be broadcasted to a fixed size list
         case TypeKind::IntType:
@@ -127,7 +131,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         // return an IValue() to denote a NoneType
         return {};
       }
-      return toIValue(obj, type->expect<OptionalType>()->getElementType());
+      return toIValue(obj, type->expectRef<OptionalType>().getElementType());
     }
     case TypeKind::ClassType: {
       auto classType = type->expect<ClassType>();
@@ -229,6 +233,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         return py::cast<int64_t>(obj);
       } else if (py::isinstance<py::float_>(obj)) {
         return py::cast<double>(obj);
+      } else if (PyComplex_CheckExact(obj.ptr())) {
+        auto c_obj = py::cast<std::complex<double>>(obj.ptr());
+        return static_cast<c10::complex<double>>(c_obj);
       } else {
         throw py::cast_error(
             c10::str("Cannot cast ", py::str(obj), " to ", type->repr_str()));
