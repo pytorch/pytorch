@@ -1,6 +1,7 @@
 name: Build Linux Wheels
 
 on:
+  pull_request:
   # TODO: These are only runnable from workflow_dispatch, we need to eventually add
   #       a cron
   # TODO: Add an on_release trigger to build on tags

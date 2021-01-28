@@ -58,7 +58,8 @@ FULL_PYTHON_VERSIONS = [
 
 
 def is_pull_request():
-    return os.environ.get("GITHUB_HEAD_REF")
+    return False
+    # return os.environ.get("GITHUB_HEAD_REF")
 
 def generate_matrix(include_cuda=True, include_rocm=False):
     python_versions = FULL_PYTHON_VERSIONS
