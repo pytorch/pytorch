@@ -10,7 +10,154 @@ Overview
 Writing Transformations
 -----------------------
 
-TODO
+What is a FX transform? Well, in the abstract, it’s something that takes
+your ``nn.Module``, does something with it, and then returns a new
+``nn.Module``. Specifically, as FX converts your input ``nn.Module``
+into a graph form, your FX transform will use your input graph to build
+a new graph (which may simply be a copy of the input), and then return
+an ``nn.Module``. You should think of the ``nn.Module`` that your FX
+transform returns as identical to a regular ``nn.Module``- you can pass
+it to another FX transform, you can pass it to Torchscript, or you can
+run it. Ensuring that the inputs and outputs of your FX transform are a
+``nn.Module`` will ensure composability.
+
+Given that you’ve passed in a ``nn.Module`` that has been traced into a
+graph, there are now 2 primary approaches you can take to building a new
+graph.
+
+Graph Manipulation
+------------------
+
+One approach to building this new graph is to simply transform your old
+one. To aid in this, we can simply take the graph we obtain from
+symbolic tracing and modify it. For example, let’s say we desired to
+replace ``torch.add`` with ``torch.mul``.
+
+::
+
+    # Sample module
+    class M(torch.nn.Module):
+        def forward(self, x, y):
+            return torch.add(x, y)
+
+    # Symbolically trace an instance of the module
+    traced = symbolic_trace(original_module)
+
+    for node in traced.graph.nodes:
+        if n.target == torch.add:
+            n.target = torch.mul
+
+    traced.recompile()
+
+We can also do more involved graph rewrites, such as appending a ReLU
+after a node. To aid in these transformations, FX also has utility
+functions for transforming the graph. You can find more .
+
+::
+
+    with traced.graph.inserting_after(node):
+        new_node = traced.graph.call_function(torch.relu, args=(node,))
+        node.replace_all_uses_with(new_node)
+
+This approach is also a good fit for graph optimizations - such as
+`conv/batch norm
+fusion! <https://github.com/pytorch/pytorch/blob/ec86cec20a8a2312a2295d7bc8be6e88256a2de4/torch/fx/experimental/fuser.py>`__
+
+For simple transformations that are simply substitutions, you can also
+make use of the `subgraph rewriter. <https://github.com/pytorch/pytorch/blob/master/torch/fx/subgraph_rewriter.py>`__
+
+In general, writing your transformation through graph manipulation is a
+good fit if you need to make a few small changes or if you need a global
+view of your graph. However, if you need to entirely rewrite your graph, you may want to look at
+constructing your graph with Proxies (i.e: retracing).
+
+Examples
+~~~~~~~~
+
+-  `Replace one
+   op <https://github.com/pytorch/pytorch/blob/master/torch/fx/examples/replace_op.py>`__
+-  `Conv/Batch Norm
+   fusion <https://github.com/pytorch/pytorch/blob/master/torch/fx/experimental/fuser.py>`__
+-  `Quantization <https://github.com/pytorch/pytorch/tree/master/torch/quantization/fx>`__
+
+Proxy/Retracing
+---------------
+
+Although most transformations can be implemented as graph
+transformations, transformations that involve large amounts of rewriting
+are often easier represented through retracing. For example, let’s
+imagine that we wanted to write a decomposition pass that decomposed
+PyTorch functions. For example, it would transform every ``F.relu(x)``
+into ``(x > 0)*x``. One possibility would be to perform the requisite
+graph rewriting to insert the comparison and multiplication after the
+``F.relu``, and then clean up the original ``F.relu``. However, graph
+manipulation can be awkward, and it’s often easier to implicitly
+generate the graph by retracing.
+
+To use this method, we write the graph that we want inserted as regular
+PyTorch code, and pass in implicit proxy objects. These proxy objects
+will capture the operations that are performed on it and append them to
+the graph.
+
+::
+
+    def relu_decomposition(x):
+        return (x > 0)*x
+
+    decomposition_rules = {}
+    decomposition_rules[F.relu] = relu_decomposition
+
+    new_graph = fx.Graph()
+    for node in traced.graph.nodes:
+        if node.op == 'call_function':
+            tracer = GraphAppendingTracer(new_graph)
+            proxy_args = [Proxy(i, tracer=tracer) if isinstance(x, fx.Node)
+                          for x in node.args]
+            new_node = decomposition_rules[node.target](proxy_args)
+            new_node.name = node.name
+        else: # Otherwise, just append the original graph.
+            new_graph.node_copy(node)
+
+In addition to being more natural to write, this also allows you to
+specify your rewrite rules as native Python code. For transformations
+that require a large amount of rewrite rules (such as vmap or grad),
+this can often improve readability and maintainability of the rules.
+
+Example transformations that use this technique include (vmap), (grad),
+and the (decomposition) pass.
+
+FX transforms that don’t return a module
+----------------------------------------
+
+In addition to FX passes (that take in a module and return a module),
+there may be other things you wish to do with the FX graph that don’t
+fit into this paradigm. For example, let’s say that you’d like to obtain
+the shape information of tensors in your graph. In this case, instead of
+looping over the FX graph and modifying it, we can write an interpreter
+on top of the FX graph! As the FX IR is quite simple, it’s easy to
+reimplement an interpreter that also captures your desired attributes.
+
+This example `Shape Propagation
+pass <https://github.com/pytorch/pytorch/blob/master/torch/fx/experimental/shape_prop.py#L7>`__
+reinterprets the FX symbolic graph with example inputs while annotating
+the graph with the shapes.
+
+Reinterpreting the FX graph is generally most useful when you want
+runtime information that FX typically doesn’t capture (due to being a
+symbolic trace). This can be used for capturing shape information for
+downstream passes, but it can also be used to capture other information
+about execution. For example, this (roofline analysis pass in FX)
+reinterprets the FX graph while capturing information about the runtime
+of each operation in order to identify bottlenecks.
+
+Examples
+~~~~~~~~
+
+-  `Shape
+   Propagation <https://github.com/pytorch/pytorch/blob/master/torch/fx/experimental/shape_prop.py>`__
+-  `Roofline
+   Analyzer <https://github.com/pytorch/pytorch/blob/a9f88511b8155ba9620730fb175dee8c54e346d5/torch/fx/experimental/cost_model.py>`__
+
 
 Debugging Transformations
 -------------------------
