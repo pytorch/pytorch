@@ -35,6 +35,16 @@ if TYPE_CHECKING:
     from torch.utils.benchmark.utils.common import Measurement
     from torch.utils.benchmark.utils.timer import Language, Timer
     from torch.utils.benchmark.utils.valgrind_wrapper.timer_interface import CallgrindStats
+
+elif __name__ != '__main__':
+    # This is a suspect line, if there ever was one. In effect, `worker.py`
+    # plays double duty as API definition and execution script. For the latter,
+    # the `utils_backport` import attempt is appropriate; however, for defining
+    # the dataclasses which the rest of the microbenchmarks will use we need to
+    # always use the "true" symbols. Hence the unusual `__name__ != '__main__'`
+    # condition.
+    from torch.utils.benchmark import CallgrindStats, Language, Measurement, Timer
+
 else:
     try:
         # Give backport utils first dibs in case there is an old version of Timer.
