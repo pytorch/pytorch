@@ -4,6 +4,9 @@ import torch
 import unittest
 from torch.futures import Future
 from torch.testing._internal.common_utils import IS_WINDOWS, TestCase, TemporaryFileName, run_tests
+from typing import TypeVar
+
+T = TypeVar("T")
 
 
 def add_one(fut):
@@ -16,18 +19,18 @@ class TestFuture(TestCase):
         error_msg = "Intentional Value Error"
         value_error = ValueError(error_msg)
 
-        f = Future[int]()
+        f = Future[T]()
         # Set exception
-        f.set_exception(value_error)
+        f.set_exception(value_error) # type: ignore
         # Exception should throw on wait
         with self.assertRaisesRegex(ValueError, "Intentional"):
             f.wait()
 
         # Exception should also throw on value
         f = Future()
-        f.set_exception(value_error)
+        f.set_exception(value_error) # type: ignore
         with self.assertRaisesRegex(ValueError, "Intentional"):
-            f.value()
+            f.value() # type: ignore
 
     def test_set_exception_multithreading(self) -> None:
         # Ensure errors can propagate when one thread waits on future result
@@ -39,10 +42,10 @@ class TestFuture(TestCase):
             with self.assertRaisesRegex(ValueError, "Intentional"):
                 f.wait()
 
-        f = Future[int]()
+        f = Future[T]()
         t = threading.Thread(target=wait_future, args=(f, ))
         t.start()
-        f.set_exception(value_error)
+        f.set_exception(value_error) # type: ignore
         t.join()
 
     def test_done(self) -> None:
