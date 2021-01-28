@@ -136,7 +136,7 @@ class class_ {
       object->setSlot(0, c10::IValue::make_capsule(std::move(classObj)));
     };
 
-    defineMethod("__init__", std::move(func), std::move(doc_string), std::move(default_args));
+    defineMethod("__init__", std::move(func), std::move(doc_string), default_args);
     return *this;
   }
 
@@ -154,7 +154,7 @@ class class_ {
       auto object = self.ivalue.toObject();
       object->setSlot(0, c10::IValue::make_capsule(classObj));
     };
-    defineMethod("__init__", std::move(init_lambda_wrapper), std::move(doc_string), std::move(default_args));
+    defineMethod("__init__", std::move(init_lambda_wrapper), std::move(doc_string), default_args);
 
     return *this;
   }
@@ -184,7 +184,7 @@ class class_ {
       std::string doc_string = "",
       std::initializer_list<arg> default_args = {}) {
     auto wrapped_f = detail::wrap_func<CurClass, Func>(std::move(f));
-    defineMethod(std::move(name), std::move(wrapped_f), std::move(doc_string), std::move(default_args));
+    defineMethod(std::move(name), std::move(wrapped_f), std::move(doc_string), default_args);
     return *this;
   }
 

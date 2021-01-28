@@ -222,7 +222,7 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
   m.class_<DefaultArgs>("_DefaultArgs")
       .def(torch::init<int64_t>(), "", {torch::arg("start") = 3})
       .def("increment", &DefaultArgs::increment, "", {torch::arg("val") = 1})
-      .def("decrement", &DefaultArgs::increment, "", {torch::arg("val") = 1})
+      .def("decrement", &DefaultArgs::decrement, "", {torch::arg("val") = 1})
       .def(
           "scale_add",
           &DefaultArgs::scale_add,
