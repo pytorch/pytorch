@@ -4,13 +4,19 @@
 #include <ATen/core/Vitals.h>
 #include <cstdlib>
 
+using namespace at::vitals;
+
 TEST(Vitals, Basic) {
   std::stringstream buffer;
 
   std::streambuf* sbuf = std::cout.rdbuf();
   std::cout.rdbuf(buffer.rdbuf());
   {
+#ifdef _WIN32
+    _putenv("TORCH_VITAL=1");
+#else
     setenv("TORCH_VITAL", "1", 1);
+#endif
     TORCH_VITAL_DEFINE(Testing);
     TORCH_VITAL(Testing, Attribute0) << 1;
     TORCH_VITAL(Testing, Attribute1) << "1";
@@ -35,7 +41,11 @@ TEST(Vitals, MultiString) {
   std::streambuf* sbuf = std::cout.rdbuf();
   std::cout.rdbuf(buffer.rdbuf());
   {
+#ifdef _WIN32
+    _putenv("TORCH_VITAL=1");
+#else
     setenv("TORCH_VITAL", "1", 1);
+#endif
     TORCH_VITAL_DEFINE(Testing);
     TORCH_VITAL(Testing, Attribute0) << 1 << " of " << 2;
     TORCH_VITAL(Testing, Attribute1) << 1;
@@ -56,7 +66,15 @@ TEST(Vitals, OnAndOff) {
     std::streambuf* sbuf = std::cout.rdbuf();
     std::cout.rdbuf(buffer.rdbuf());
     {
+#ifdef _WIN32
+      if (i) {
+        _putenv("TORCH_VITAL=1");
+      } else {
+        _putenv("TORCH_VITAL=0");
+      }
+#else
       setenv("TORCH_VITAL", i ? "1" : "", 1);
+#endif
       TORCH_VITAL_DEFINE(Testing);
       TORCH_VITAL(Testing, Attribute0) << 1;
     }
