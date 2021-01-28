@@ -129,6 +129,8 @@ std::vector<IValue> getParamAttributes(
           try {
             parameterIValues.emplace_back(
                 script::Object(attr.toObject()).run_method("__getstate__"));
+            paramConst = addParamAsArgument(function_, fullName, attr);
+            attrValues.insert({fullName, paramConst});
           } catch (const std::exception&) {
             throw ErrorReport(n->sourceRange())
                 << "Unknown type " << attr.type()->repr_str()

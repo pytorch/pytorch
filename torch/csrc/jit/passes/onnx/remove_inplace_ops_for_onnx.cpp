@@ -511,9 +511,10 @@ void RegisterInplaceNodeInBlocks(
   }
 
   for (auto block_input : outer_block->inputs()) {
-    if (block_input->debugName() == orig_data->debugName()) {
+    if (block_input->debugName() ==
+        orig_data->debugName()) { // TODO: enable more than one mutation.
       AT_ERROR(
-          "More than one inplace mutation in a subblock are not supported.");
+          "More than one inplace mutation per object in a subblock are not supported.");
     }
   }
 
@@ -949,7 +950,7 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
     MutationRemover& mr,
     Block* block,
     const std::shared_ptr<Graph>& graph,
-    Module module_,
+    const Module& module_,
     std::unordered_map<std::string, Value*>& allAttrValues,
     std::unordered_map<std::string, Value*>& setAttrValues) {
   Node* m = *block->nodes().begin();

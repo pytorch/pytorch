@@ -3485,6 +3485,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(6, 4)
         self.run_test(ViewModel(), (x, y))
 
+    @disableScriptTest()
     def test_weight_norm(self):
         # addmm for 3-d inputs converts to onnx::MatMul
         model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=1)
@@ -3508,6 +3509,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 3, 5, requires_grad=True)
         self.run_test(model, x)
 
+    @disableScriptTest()
     def test_weight_norm_nodim(self):
         # addmm for 3-d inputs converts to onnx::MatMul
         model = torch.nn.utils.weight_norm(torch.nn.Linear(5, 10), dim=None)
@@ -5929,7 +5931,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_script_custom_class_error(self):
         class BoxCoder(object):
-            def __init__(self, bbox_xform_clip):
+            def __init__(self, bbox_xform_clip: float):
                 # type: (float) -> None
                 self.bbox_xform_clip = bbox_xform_clip
 
@@ -6597,11 +6599,11 @@ TestONNXRuntime_opset13 = type(str("TestONNXRuntime_opset13"),
 
 # opset 9 tests, with use_new_jit_passes=True for using new jit API,
 # and with keep_initializers_as_inputs=False for IR version 4 style export.
-TestONNXRuntime_opset9_IRv4_old_jit_API = type(str("TestONNXRuntime_opset9_IRv4_old_jit_API"),
-                                               (unittest.TestCase,),
-                                               dict(TestONNXRuntime.__dict__,
-                                                    keep_initializers_as_inputs=False,
-                                                    use_new_jit_passes=False))
+TestONNXRuntime_IRv4_old_jit_API = type(str("TestONNXRuntime_IRv4_old_jit_API"),
+                                        (unittest.TestCase,),
+                                        dict(TestONNXRuntime.__dict__,
+                                             keep_initializers_as_inputs=False,
+                                             use_new_jit_passes=False))
 
 
 # opset 12 tests, with use_new_jit_passes=True for using new jit API,
