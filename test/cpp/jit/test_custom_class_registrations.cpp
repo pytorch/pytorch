@@ -11,6 +11,20 @@ using namespace torch::jit;
 
 namespace {
 
+
+struct DefaultArgs : torch::CustomClassHolder {
+  int x;
+  DefaultArgs(int64_t start = 3) : x(start) {}
+  int64_t increment(int64_t val = 1) {
+    x += val;
+    return x;
+  }
+  int64_t decrement(int64_t val = 1) {
+    x += val;
+    return x;
+  }
+};
+
 struct Foo : torch::CustomClassHolder {
   int x, y;
   Foo() : x(0), y(0) {}
@@ -202,6 +216,11 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
 };
 
 TORCH_LIBRARY(_TorchScriptTesting, m) {
+  m.class_<DefaultArgs>("_DefaultArgs")
+      .def(torch::init<int64_t>(), "", {torch::arg("start") = 3})
+      .def("increment", &DefaultArgs::increment, "", {torch::arg("val") = 1})
+      .def("decrement", &DefaultArgs::increment, "", {torch::arg("val") = 1});
+
   m.class_<Foo>("_Foo")
       .def(torch::init<int64_t, int64_t>())
       // .def(torch::init<>())

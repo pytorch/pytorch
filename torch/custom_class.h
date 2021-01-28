@@ -18,6 +18,17 @@
 
 namespace torch {
 
+struct arg {
+  explicit arg(std::string name) : name_(std::move(name)) {}
+  arg& operator=(const c10::IValue& rhs) {
+    value_ = rhs;
+    return *this;
+  }
+
+  std::string name_;
+  c10::IValue value_;
+};
+
 /// This function is used in conjunction with `class_::def()` to register
 /// a constructor for a given C++ class type. For example,
 /// `torch::init<int, std::string>()` would register a two-argument constructor
@@ -98,15 +109,19 @@ class class_ {
   /// `torch::init<int, std::string>()` would register a two-argument constructor
   /// taking an `int` and a `std::string` as argument.
   template <typename... Types>
-  class_& def(detail::types<void, Types...>, std::string doc_string = "") { // Used in combination with
-                                               // torch::init<...>()
+  class_& def(
+      detail::types<void, Types...>,
+      std::string doc_string = "",
+      std::initializer_list<arg> default_args =
+          {}) { // Used in combination with
+    // torch::init<...>()
     auto func = [](c10::tagged_capsule<CurClass> self, Types... args) {
       auto classObj = c10::make_intrusive<CurClass>(args...);
       auto object = self.ivalue.toObject();
       object->setSlot(0, c10::IValue::make_capsule(std::move(classObj)));
     };
 
-    defineMethod("__init__", std::move(func), std::move(doc_string));
+    defineMethod("__init__", std::move(func), std::move(doc_string), std::move(default_args));
     return *this;
   }
 
@@ -114,7 +129,8 @@ class class_ {
   template <typename Func, typename... ParameterTypes>
   class_& def(
       InitLambda<Func, c10::guts::typelist::typelist<ParameterTypes...>> init,
-      std::string doc_string = "") {
+      std::string doc_string = "",
+      std::initializer_list<arg> default_args = {}) {
     auto init_lambda_wrapper = [func = std::move(init.f)](
                                    c10::tagged_capsule<CurClass> self,
                                    ParameterTypes... arg) {
@@ -123,7 +139,7 @@ class class_ {
       auto object = self.ivalue.toObject();
       object->setSlot(0, c10::IValue::make_capsule(classObj));
     };
-    defineMethod("__init__", std::move(init_lambda_wrapper), std::move(doc_string));
+    defineMethod("__init__", std::move(init_lambda_wrapper), std::move(doc_string), std::move(default_args));
 
     return *this;
   }
@@ -147,9 +163,13 @@ class class_ {
   ///       // do something
   ///     })
   template <typename Func>
-  class_& def(std::string name, Func f, std::string doc_string = "") {
+  class_& def(
+      std::string name,
+      Func f,
+      std::string doc_string = "",
+      std::initializer_list<arg> default_args = {}) {
     auto wrapped_f = detail::wrap_func<CurClass, Func>(std::move(f));
-    defineMethod(std::move(name), std::move(wrapped_f), std::move(doc_string));
+    defineMethod(std::move(name), std::move(wrapped_f), std::move(doc_string), std::move(default_args));
     return *this;
   }
 
@@ -263,11 +283,39 @@ class class_ {
 
  private:
   template <typename Func>
-  void defineMethod(std::string name, Func func, std::string doc_string = "") {
+  void defineMethod(
+      std::string name,
+      Func func,
+      std::string doc_string = "",
+      std::initializer_list<arg> default_args = {}) {
     auto qualMethodName = qualClassName + "." + name;
     auto schema = c10::inferFunctionSchemaSingleReturn<Func>(std::move(name), "");
 
-    auto wrapped_func = [func = std::move(func)](jit::Stack& stack) mutable -> void {
+    TORCH_CHECK(
+        default_args.size() == 0 || default_args.size() == schema.arguments().size()-1,
+        "Default values must be specified for none or all arguments");
+
+    if (default_args.size() > 0) {
+      const auto& old_args = schema.arguments();
+      std::vector<c10::Argument> new_args;
+      new_args.reserve(old_args.size());
+      std::vector<arg> default_args_v(default_args);
+
+      new_args.emplace_back(old_args[0]);
+      for (size_t i = 0; i < default_args_v.size(); ++i) {
+        auto& arg = old_args[i+1];
+        new_args.emplace_back(c10::Argument(
+            std::move(default_args_v[i].name_),
+            arg.type(),
+            arg.N(),
+            std::move(default_args_v[i].value_)));
+      }
+
+      schema = schema.cloneWithArguments(new_args);
+    }
+
+    auto wrapped_func =
+        [func = std::move(func)](jit::Stack& stack) mutable -> void {
       // TODO: we need to figure out how to profile calls to custom functions
       // like this! Currently can't do it because the profiler stuff is in
       // libtorch and not ATen

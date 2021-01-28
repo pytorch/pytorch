@@ -349,3 +349,22 @@ class TestTorchbind(JitTestCase):
 
         obj_swap = torch.classes._TorchScriptTesting._LambdaInit(4, 3, True)
         self.assertEqual(obj_swap.diff(), -1)
+
+    def test_default_args(self):
+        def fn() -> int:
+            obj = torch.classes._TorchScriptTesting._DefaultArgs()
+            obj.increment(5)
+            obj.decrement()
+            obj.decrement(2)
+            return obj.increment()
+
+        self.checkScript(fn, ())
+
+        def gn() -> int:
+            obj = torch.classes._TorchScriptTesting._DefaultArgs(5)
+            obj.increment(3)
+            obj.increment()
+            obj.decrement(2)
+            return obj.decrement()
+
+        self.checkScript(gn, ())
