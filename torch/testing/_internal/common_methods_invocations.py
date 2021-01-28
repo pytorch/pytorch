@@ -993,19 +993,20 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad):
     )
     return [SampleInput(tensor) for tensor in tensors]
 
+
 def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad):
     samples = (
         SampleInput(make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        args=(torch.randn(M, M, device=device) > 0, make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+                    args=(torch.randn(M, M, device=device) > 0,
+                          make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad))),
 
         SampleInput(make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        args=(torch.randn((M,), device=device) > 0, make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+                    args=(torch.randn((M,), device=device) > 0,
+                          make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad))),
 
         SampleInput(make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        args=(bernoulli_scalar().to(device), make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad))),
-        # Inplace variants fail
-        # SampleInput(make_tensor((M,), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        # args=(torch.randn(M, M, device=device) > 0, make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad))),
+                    args=(bernoulli_scalar().to(device),
+                          make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad))),
     )
 
     return samples
@@ -1013,25 +1014,25 @@ def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad):
 def sample_inputs_masked_select(op_info, device, dtype, requires_grad):
     samples = (
         SampleInput(make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        args=(torch.randn(M, M, device=device) > 0,)),
+                    args=(torch.randn(M, M, device=device) > 0,)),
 
         SampleInput(make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        args=(torch.randn((M,), device=device) > 0,)),
+                    args=(torch.randn((M,), device=device) > 0,)),
 
         SampleInput(make_tensor((M,), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        args=(torch.randn((M, M), device=device) > 0,)),
+                    args=(torch.randn((M, M), device=device) > 0,)),
 
         SampleInput(make_tensor((M, 1, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        args=(torch.randn((M, M), device=device) > 0,)),
+                    args=(torch.randn((M, M), device=device) > 0,)),
 
         SampleInput(make_tensor((), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        args=(torch.tensor(1, device=device, dtype=torch.bool),)),
+                    args=(torch.tensor(1, device=device, dtype=torch.bool),)),
 
         SampleInput(make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        args=(torch.tensor(1, device=device, dtype=torch.bool),)),
+                    args=(torch.tensor(1, device=device, dtype=torch.bool),)),
 
         SampleInput(make_tensor((), device, dtype, low=None, high=None, requires_grad=requires_grad),
-        args=(torch.randn((M, M), device=device) > 0,)),
+                    args=(torch.randn((M, M), device=device) > 0,)),
     )
 
     return samples
