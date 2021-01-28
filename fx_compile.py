@@ -1,11 +1,8 @@
 import time
-import math
 import torch
 import torch.nn as nn
 import torch._C.te as te
 import torch.fx as fx
-from torch.fx.node import map_aggregate
-import time
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -383,7 +380,7 @@ class DeepAndWide(torch.nn.Module):
         super(DeepAndWide, self).__init__()
         self.mu = torch.nn.Parameter(torch.randn(1, num_features))
         self.sigma = torch.nn.Parameter(torch.randn(1, num_features))
-        self.fc_w = nn.Parameter(torch.randn(1, num_features + 1))
+        self.fc_w = torch.nn.Parameter(torch.randn(1, num_features + 1))
         self.fc_b = torch.nn.Parameter(torch.randn(1))
 
     def forward(self, ad_emb_packed, user_emb, wide):
@@ -398,35 +395,77 @@ class DeepAndWide(torch.nn.Module):
         fc1 = torch.addmm(self.fc_b, inp, t1)
         return fc1
 
+from jax import jit
+import jax.numpy as jnp
+import jax.lax as lax
+def jax_fn(mu, sigma, fc_w, fc_b, ad_emb_packed, user_emb, wide):
+    wide_offset = wide + mu
+    wide_normalized = wide_offset + sigma
+    wide_preproc = jnp.clip(wide_normalized, 0., 10.)
+    user_emb_t = jnp.transpose(user_emb, (0, 2, 1))
+    dp_unflatten = lax.batch_matmul(ad_emb_packed, user_emb_t)
+    dp = dp_unflatten.reshape(dp_unflatten.shape[0], -1)
+    inp = jnp.concatenate([dp, wide_preproc], 1)
+    t1 = jnp.transpose(fc_w, (1,0))
+    fc1 = fc_b + inp @ t1
+    return fc1
+
+
 
 with kernel_arena_scope():
     with torch.no_grad():
-        num_features = 1000
+        num_features = 100000
         mod = DeepAndWide(num_features)
 
         # Phabricate sample inputs
-        batch_size = 5
-        embedding_size = 1000
+        batch_size = 1
+        embedding_size = 100000
         ad_emb_packed = torch.randn(batch_size, 1, embedding_size)
         user_emb = torch.randn(batch_size, 1, embedding_size)
         wide = torch.randn(batch_size, num_features)
         inps = (ad_emb_packed, user_emb, wide)
-        out = torch.empty(5, 1)
+        out = torch.empty(batch_size, 1)
 
         shape_env = ShapeProp(fx.symbolic_trace(mod)).propagate(*inps)
         mod = decompose(mod, shape_env)
         shape_env = ShapeProp(fx.symbolic_trace(mod)).propagate(*inps)
+        print(shape_env)
         cg = nnc_compile(mod, True, shape_env)
 
-        iters = 100
+        iters = 1000
 
+        for _ in range(10):
+            cg([ad_emb_packed, user_emb,wide, out])
         begin = time.time()
         for _ in range(iters):
             cg([ad_emb_packed, user_emb,wide, out])
-        print("NNC time: ", time.time()-begin); begin = time.time()
+        print("NNC time: ", time.time()-begin)
 
-        mod = mod
+        mod_jit = torch.jit.script(DeepAndWide(num_features))
+        for _ in range(10):
+            mod_jit(ad_emb_packed, user_emb,wide)
+        begin = time.time()
         for _ in range(iters):
-            mod(*inps)
-        print("PyTorch time: ", time.time()-begin); begin = time.time()
+            mod_jit(ad_emb_packed, user_emb,wide)
+        print("PyTorch time", time.time()-begin)
+
+        static_runtime = torch._C._jit_to_static_runtime(mod_jit._c)
+        for _ in range(10):
+            static_runtime.run([ad_emb_packed, user_emb,wide])
+        begin = time.time()
+        for _ in range(iters):
+            static_runtime.run([ad_emb_packed, user_emb,wide])
+        print("Static Runtime time", time.time()-begin)
+
+        m = mod
+        jax_inps = [m.mu, m.sigma, m.fc_w, m.fc_b, ad_emb_packed, user_emb, wide]
+        jax_inps = [jnp.array(i.numpy()) for i in jax_inps]
+        jax_fn = jit(jax_fn)
+        # mod = mod
+        for _ in range(10):
+            jax_fn(*jax_inps)
+        begin = time.time()
+        for _ in range(iters):
+            jax_fn(*jax_inps)
+        print("Jax Time: ", time.time()-begin)
         print("Sums:", out.sum(), mod(*inps).sum())

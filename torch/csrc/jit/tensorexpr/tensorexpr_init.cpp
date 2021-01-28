@@ -197,6 +197,16 @@ void initTensorExprBindings(PyObject* module) {
         return tensorexpr::ifThenElse(c, t, f);
       });
   te.def(
+      "max",
+      [](const tensorexpr::ExprHandle& v1, const tensorexpr::ExprHandle& v2) {
+        return tensorexpr::Max::make(v1, v2, false);
+      });
+  te.def(
+      "min",
+      [](const tensorexpr::ExprHandle& v1, const tensorexpr::ExprHandle& v2) {
+        return tensorexpr::Min::make(v1, v2, false);
+      });
+  te.def(
       "atan2",
       [](const tensorexpr::ExprHandle& v1, const tensorexpr::ExprHandle& v2) {
         return tensorexpr::atan2(v1, v2);
@@ -224,6 +234,7 @@ void initTensorExprBindings(PyObject* module) {
 #undef EXPRHANDLE_CTOR
 
   py::class_<tensorexpr::VarHandle, tensorexpr::ExprHandle>(te, "VarHandle");
+
   py::class_<tensorexpr::BufHandle, tensorexpr::ExprHandle>(te, "BufHandle");
 
   py::class_<tensorexpr::Placeholder>(te, "Placeholder")
