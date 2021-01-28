@@ -331,8 +331,10 @@ class ConvRelu(QuantizeHandler):
                     scale_node, zero_point_node = create_qparam_nodes(quantizer, self.conv_node.name, scale, zero_point)
                     qconv_args = (conv_input, packed_weight, scale_node, zero_point_node)
                     kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
-                    return quantizer.quantized_graph.create_node(
+                    op = quantizer.quantized_graph.create_node(
                         'call_function', qconv_op, qconv_args, kwargs)
+                    quantizer.node_name_to_scope[op.name] = quantizer.node_name_to_scope[self.conv_node.name]
+                    return op
                 else:
                     # conv2d_dyanmic branch
                     raise Exception("Only static quant is supported for conv")
@@ -488,13 +490,16 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     scale_node, zero_point_node = create_qparam_nodes(quantizer, self.linear_node.name, scale, zero_point)
 
                     qlinear_args = (linear_input, packed_weight, scale_node, zero_point_node)
-                    return quantizer.quantized_graph.create_node(
+                    op = quantizer.quantized_graph.create_node(
                         "call_function", qlinear_op, qlinear_args, kwargs)
+                    quantizer.node_name_to_scope[op.name] = quantizer.node_name_to_scope[self.linear_node.name]
+                    return op
                 else:
                     linear_input = load_arg(quantized=False)(self.linear_node.args[0])
                     qlinear_args = (linear_input, packed_weight)  # type: ignore
                     op_out = quantizer.quantized_graph.create_node(
                         "call_function", torch.ops.quantized.linear_dynamic, qlinear_args, kwargs)
+                    quantizer.node_name_to_scope[op_out.name] = quantizer.node_name_to_scope[self.linear_node.name]
                     if self.relu_node:
                         op_out = quantizer.quantized_graph.create_node("call_function", torch.nn.functional.relu, (op_out,), {})
                     return op_out

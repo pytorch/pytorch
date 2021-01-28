@@ -1525,7 +1525,6 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_dict = {"": default_qconfig}
         m = prepare_fx(model, qconfig_dict)
         m(torch.rand(5, 5))
-
         m = convert_fx(m)
         keys = m.state_dict().keys()
         quant_scale_count = quant_zero_point = scale_count = zero_point_count = 0
@@ -1557,6 +1556,41 @@ class TestQuantizeFx(QuantizationTestCase):
         assert hasattr(m, "mods2_scale_0")
         assert hasattr(m, "mods2_zero_point_0")
 
+    @skipIfNoFBGEMM
+    def test_packed_weight_fused_op(self):
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return F.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    Linear(),
+                    Linear()
+                )
+                self.mods2 = Linear()
+                self.relu = F.relu
+
+            def forward(self, x):
+                x = self.mods1(x)
+                x = self.mods2(x)
+                x = self.relu(x)
+                return x
+
+        model = M().eval()
+        qconfig_dict = {"": default_qconfig}
+        m = prepare_fx(model, qconfig_dict)
+        m(torch.rand(5, 5))
+        m = convert_fx(m)
+        assert hasattr(m, "mods1_0_packed_weight_0")
+        assert hasattr(m, "mods1_1_packed_weight_0")
+        assert hasattr(m, "mods2_packed_weight_0")
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
