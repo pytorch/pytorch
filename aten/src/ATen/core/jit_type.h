@@ -2171,14 +2171,14 @@ struct TORCH_API ClassType : public NamedType {
   torch::jit::Function* findStaticMethod(const std::string& name) const;
   void addStaticMethod(torch::jit::Function* method);
 
-      // [Internal Only] Remove method from the ClassType
-      // caller is responsible to make sure the modification is safe:
-      // it is unsafe to having existing allocations
-      // of this object around anymore, and any code that works on
-      // the attribute is now invalid. Only newly created code is
-      // valid again.
-      // Note this method is intended for freezing only.
-      void unsafeRemoveMethod(const std::string& name);
+  // [Internal Only] Remove method from the ClassType
+  // caller is responsible to make sure the modification is safe:
+  // it is unsafe to having existing allocations
+  // of this object around anymore, and any code that works on
+  // the attribute is now invalid. Only newly created code is
+  // valid again.
+  // Note this method is intended for freezing only.
+  void unsafeRemoveMethod(const std::string& name);
 
   std::shared_ptr<CompilationUnit> compilation_unit();
 

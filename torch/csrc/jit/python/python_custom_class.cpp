@@ -1,6 +1,6 @@
-#include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/jit/python/python_custom_class.h>
+
+#include <torch/csrc/jit/frontend/sugared_value.h>
 
 #include <fmt/format.h>
 
@@ -25,11 +25,15 @@ py::object ScriptClass::__call__(py::args args, py::kwargs kwargs) {
   return py::cast(instance);
 }
 
+/// Variant of StrongFunctionPtr, but for static methods of custom classes.
+/// They do not belong to compilation units (the custom class method registry
+/// serves that purpose in this case), so StrongFunctionPtr cannot be used here.
+/// While it is usually unsafe to carry a raw pointer like this, the custom
+/// class method registry that owns the pointer is never destroyed.
 struct ScriptClassFunctionPtr {
   ScriptClassFunctionPtr(Function* function) : function_(function) {
     TORCH_INTERNAL_ASSERT(function_);
   }
-  std::shared_ptr<CompilationUnit> cu_;
   Function* function_;
 };
 
@@ -39,7 +43,6 @@ void initPythonCustomClassBindings(PyObject* module) {
   py::class_<ScriptClassFunctionPtr>(
       m, "ScriptClassFunction", py::dynamic_attr())
       .def("__call__", [](py::args args, py::kwargs kwargs) {
-        // see: [pybind11 varargs]
         auto strongPtr = py::cast<ScriptClassFunctionPtr>(args[0]);
         Function& callee = *strongPtr.function_;
         py::object result = invokeScriptFunctionFromPython(
@@ -52,8 +55,10 @@ void initPythonCustomClassBindings(PyObject* module) {
       .def(
           "__getattr__",
           [](ScriptClass& self, const std::string& name) {
+            // Define __getattr__ so that static functions of custom classes can
+            // be used in regular Python.
             auto type = self.class_type_.type_->castRaw<ClassType>();
-            AT_ASSERT(type);
+            TORCH_INTERNAL_ASSERT(type);
             auto* fn = type->findStaticMethod(name);
             if (fn) {
               return ScriptClassFunctionPtr(fn);
