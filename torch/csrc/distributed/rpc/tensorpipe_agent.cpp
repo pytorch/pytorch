@@ -116,7 +116,8 @@ namespace {
 // during handshake. Higher priorities will take precedence over lower ones.
 // The transport with lowest priority will be the one used to bootstrap pipes.
 
-constexpr int64_t kShmTransportPriority = 100;
+constexpr int64_t kShmTransportPriority = 200;
+constexpr int64_t kIbvTransportPriority = 100;
 // The UV transport just uses TCP and should work everywhere, thus keep it last.
 constexpr int64_t kUvTransportPriority = 0;
 
@@ -173,7 +174,49 @@ std::unique_ptr<TransportRegistration> makeShmTransport() {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeTransportRegistry, shm, makeShmTransport);
 
-#endif
+#endif // TENSORPIPE_HAS_SHM_TRANSPORT
+
+#if TENSORPIPE_HAS_IBV_TRANSPORT
+
+std::string guessIbvAddress(tensorpipe::transport::ibv::Context& ibvContext) {
+  tensorpipe::Error error;
+  std::string ibvAddress;
+  char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
+  if (ifnameEnv != nullptr) {
+    std::tie(error, ibvAddress) = ibvContext.lookupAddrForIface(ifnameEnv);
+    if (error) {
+      LOG(WARNING) << "Failed to look up the IP address for interface "
+                   << ifnameEnv << " (" << error.what() << "), defaulting to "
+                   << kDefaultUvAddress;
+      ibvAddress = kDefaultUvAddress;
+    }
+  } else {
+    std::tie(error, ibvAddress) = ibvContext.lookupAddrForHostname();
+    if (error) {
+      LOG(WARNING) << "Failed to look up the IP address for the hostname ("
+                   << error.what() << "), defaulting to " << kDefaultUvAddress;
+      ibvAddress = kDefaultUvAddress;
+    }
+  }
+  return ibvAddress;
+}
+
+std::unique_ptr<TransportRegistration> makeIbvTransport() {
+  auto context = std::make_shared<tensorpipe::transport::ibv::Context>();
+  std::string address = guessIbvAddress(*context);
+  return std::make_unique<TransportRegistration>(TransportRegistration{
+      std::move(context), kIbvTransportPriority, std::move(address)});
+}
+
+// The IBV transport sends data across using an InfiniBand queue pair, locally
+// copying data to and from a staging buffer (registered with libibverbs) and
+// issuing a RDMA write for transferring data across machines (plus a send for
+// acknowledging it). It bootstraps using a standard TCP connection to exchange
+// setup information. It is Linux-only.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_REGISTER_CREATOR(TensorPipeTransportRegistry, ibv, makeIbvTransport);
+
+#endif // TENSORPIPE_HAS_IBV_TRANSPORT
 
 std::unique_ptr<CpuChannelRegistration> makeBasicChannel() {
   auto context = std::make_shared<tensorpipe::channel::basic::Context>();
@@ -202,7 +245,7 @@ std::unique_ptr<CpuChannelRegistration> makeCmaChannel() {
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_REGISTER_CREATOR(TensorPipeCpuChannelRegistry, cma, makeCmaChannel);
 
-#endif
+#endif // TENSORPIPE_HAS_CMA_CHANNEL
 
 constexpr static int kNumUvThreads = 16;
 
@@ -432,6 +475,9 @@ void TensorPipeAgent::startImpl() {
     }
     std::unique_ptr<TransportRegistration> reg =
         TensorPipeTransportRegistry()->Create(key);
+    if (!reg->transport->isViable()) {
+      continue;
+    }
     if (priority == -1) {
       priority = reg->priority;
     }
@@ -465,6 +511,9 @@ void TensorPipeAgent::startImpl() {
       // std::unique_ptr<CudaChannelRegistration>, depending on the type of the
       // registry.
       auto reg = registry->Create(key);
+      if (!reg->channel->isViable()) {
+        continue;
+      }
       if (priority == -1) {
         priority = reg->priority;
       }
