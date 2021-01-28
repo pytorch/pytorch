@@ -51,6 +51,13 @@ def _load_for_lite_interpreter(f, map_location=None):
 
     return LiteScriptModule(cpp_module)
 
+def _export_operator_list(m):
+    r"""
+        return a set of root operator names (with overload name) that are used by any method
+        in this mobile module.
+    """
+    return torch._C._export_operator_list(m._c)
+
 
 class LiteScriptModule(object):
     def __init__(self, cpp_module):
