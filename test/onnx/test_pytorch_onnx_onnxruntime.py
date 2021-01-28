@@ -2762,7 +2762,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 5, dtype=torch.float)
         self.run_test(ReducedOpModule(), x)
 
-    @skipIfUnsupportedOpsetVersion([13])
     def test_reduced_sum(self):
         return self._test_reduced_ops(op=torch.sum)
 
@@ -4319,7 +4318,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     @disableScriptTest()  # error in propagate as assign input shape
     @skipIfUnsupportedMinOpsetVersion(10)
-    @skipIfUnsupportedOpsetVersion([12, 13])  # Due to ONNX Loop shape inference issue
     def test_embedding_bag(self):
         model = torch.nn.EmbeddingBag(10, 5, mode='sum', scale_grad_by_freq=True)
         input = torch.randint(10, (7,))
@@ -4336,7 +4334,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (input))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfUnsupportedOpsetVersion([12, 13])  # Due to ONNX Loop shape inference issue
     def test_embedding_bag_1d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
             def forward(self, embedding_matrix, input, offset, weights):
@@ -4351,7 +4348,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (embedding_matrix, x, offset, w))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfUnsupportedOpsetVersion([12, 13])  # Due to ONNX Loop shape inference issue
     def test_embedding_bag_2d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
             def forward(self, embedding_matrix, input, weights):
