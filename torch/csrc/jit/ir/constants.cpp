@@ -88,8 +88,8 @@ c10::optional<Value*> tryInsertConstant(
     n->i_(attr::value, val.toBool());
     n->output()->setType(BoolType::get());
   } else if (val.isList()) {
-    bool fast_path_list =
-        val.isBoolList() || val.isIntList() || val.isDoubleList() || val.isComplexDoubleList();
+    bool fast_path_list = val.isBoolList() || val.isIntList() ||
+        val.isDoubleList() || val.isComplexDoubleList();
     if (fast_path_list || insertableIValue(val)) {
       n->ival_(attr::value, val);
       n->output()->setType(val.type());
