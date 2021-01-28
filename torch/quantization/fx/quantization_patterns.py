@@ -2,6 +2,7 @@ import torch
 from torch.fx.graph import (
     Node,
 )
+from torch.fx.node import Argument
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.quantization import (
@@ -113,14 +114,15 @@ class Add(QuantizeHandler):
             scale, zero_point = activation_post_process.calculate_qparams()
             scale = float(scale)
             zero_point = int(zero_point)
-
-            scale_node, zero_point_node = create_qparam_nodes(quantizer, node.name, scale, zero_point)
+            scale_arg: Argument = None
+            zero_point_arg: Argument = None
+            scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
 
             if self.relu_node is not None:
                 op = torch.ops.quantized.add_relu
             else:
                 op = torch.ops.quantized.add
-            kwargs = {**self.add_node.kwargs, 'scale': scale_node, 'zero_point': zero_point_node}
+            kwargs = {**self.add_node.kwargs, 'scale': scale_arg, 'zero_point': zero_point_arg}
             return quantizer.quantized_graph.create_node(
                 'call_function', op, load_arg(quantized=True)(self.add_node.args), kwargs)
 
@@ -165,14 +167,16 @@ class Mul(QuantizeHandler):
             scale, zero_point = activation_post_process.calculate_qparams()
             scale = float(scale)
             zero_point = int(zero_point)
+            scale_arg: Argument = None
+            zero_point_arg: Argument = None
 
-            scale_node, zero_point_node = create_qparam_nodes(quantizer, node.name, scale, zero_point)
+            scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
 
             if self.relu_node is not None:
                 op = torch.ops.quantized.mul_relu
             else:
                 op = torch.ops.quantized.mul
-            kwargs = {**self.mul_node.kwargs, 'scale': scale_node, 'zero_point': zero_point_node}
+            kwargs = {**self.mul_node.kwargs, 'scale': scale_arg, 'zero_point': zero_point_arg}
             return quantizer.quantized_graph.create_node('call_function', op, load_arg(quantized=True)(self.mul_node.args), kwargs)
 
 @register_quant_pattern(torch.cat)
@@ -186,10 +190,12 @@ class Cat(QuantizeHandler):
         scale, zero_point = activation_post_process.calculate_qparams()
         scale = float(scale)
         zero_point = int(zero_point)
+        scale_arg: Argument = None
+        zero_point_arg: Argument = None
 
-        scale_node, zero_point_node = create_qparam_nodes(quantizer, node.name, scale, zero_point)
+        scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
 
-        kwargs = {**load_arg(quantized=False)(node.kwargs), 'scale': scale_node, 'zero_point': zero_point_node}
+        kwargs = {**load_arg(quantized=False)(node.kwargs), 'scale': scale_arg, 'zero_point': zero_point_arg}
         return quantizer.quantized_graph.create_node(
             'call_function', torch.ops.quantized.cat, load_arg(quantized=[0])(node.args), kwargs)
 
@@ -656,14 +662,16 @@ class DefaultNode(QuantizeHandler):
             scale, zero_point = activation_post_process.calculate_qparams()
             scale = float(scale)
             zero_point = int(zero_point)
+            scale_arg: Argument = None
+            zero_point_arg: Argument = None
 
-            scale_node, zero_point_node = create_qparam_nodes(quantizer, node.name, scale, zero_point)
+            scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
 
             assert not isinstance(node.target, str), "Expecting node.target for "
             "call_function to be a function instead of a string"
             quantized_op = get_quantized_operator(node.target)
             args = load_arg(quantized=[0])(node.args)
-            kwargs = {**load_arg(quantized=False)(node.kwargs), "output_scale": scale_node, "output_zero_point": zero_point_node}
+            kwargs = {**load_arg(quantized=False)(node.kwargs), "output_scale": scale_arg, "output_zero_point": zero_point_arg}
             if quantized_op in ARGS_TO_SKIP:
                 args_to_skip = ARGS_TO_SKIP[quantized_op]
                 for arg in args_to_skip:
@@ -682,12 +690,14 @@ class ELU(QuantizeHandler):
         scale, zero_point = activation_post_process.calculate_qparams()
         scale = float(scale)
         zero_point = int(zero_point)
+        scale_arg: Argument = None
+        zero_point_arg: Argument = None
 
-        scale_node, zero_point_node = create_qparam_nodes(quantizer, node.name, scale, zero_point)
+        scale_arg, zero_point_arg = create_qparam_nodes(quantizer, node.name, scale, zero_point)
 
         quantized_op = get_quantized_operator(node.target)
         args = load_arg(quantized=[0])(node.args)
-        kwargs = {**load_arg(quantized=False)(node.kwargs), 'output_scale': scale_node, 'output_zero_point': zero_point_node}
+        kwargs = {**load_arg(quantized=False)(node.kwargs), 'output_scale': scale_arg, 'output_zero_point': zero_point_arg}
         kwargs.pop('inplace')
         return quantizer.quantized_graph.create_node(
             'call_function', quantized_op, args, kwargs)
