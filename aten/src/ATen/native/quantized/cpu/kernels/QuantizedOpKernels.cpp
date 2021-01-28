@@ -2054,43 +2054,6 @@ void q_batch_norm_kernel(
 
 }
 
-void fake_quantize_tensor_kernel(
-    Tensor& output,
-    const Tensor& input,
-    float sc,
-    int64_t z_point,
-    int64_t quant_min,
-    int64_t quant_max) {
-  float inv_scale = 1.0f / sc;
-  auto iter = TensorIterator::unary_op(output, input);
-  cpu_kernel(iter, [&](float self) -> float {
-    return (std::fmin(
-                std::fmax(
-                    static_cast<int64_t>(
-                        z_point + std::nearbyint(self * inv_scale)),
-                    quant_min),
-                quant_max) -
-            z_point) *
-        sc;
-  });
-}
-
-void fake_quantize_grad_tensor_kernel(
-    Tensor& input_grad,
-    const Tensor& input,
-    const Tensor& output_grad,
-    float sc,
-    int64_t z_point,
-    int64_t quant_min,
-    int64_t quant_max) {
-  float inv_scale = 1.0f / sc;
-  auto iter = TensorIterator::binary_op(input_grad, input, output_grad);
-  cpu_kernel(iter, [&](float x, float dy) -> float {
-    int64_t xq = static_cast<int64_t>(z_point + std::nearbyint(x * inv_scale));
-    return dy * (xq >= quant_min && xq <= quant_max);
-  });
-}
-
 void fake_quantize_tensor_cachemask_kernel(
     Tensor& output,
     Tensor& mask,
@@ -3082,10 +3045,7 @@ REGISTER_DISPATCH(fake_quant_grad_learnable_tensor_stub,
                   &fake_quantize_learnable_tensor_grad_kernel_cpu);
 REGISTER_DISPATCH(fake_quant_grad_per_channel_stub,
                   &fake_quant_grad_per_channel_cpu);
-REGISTER_DISPATCH(fake_quant_grad_tensor_stub,
-                  &fake_quantize_grad_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
-REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel);
 REGISTER_DISPATCH(fake_quant_tensor_cachemask_stub,
                   &fake_quantize_tensor_cachemask_kernel);
 REGISTER_DISPATCH(qadaptive_avg_pool2d_nhwc_stub,
