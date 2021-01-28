@@ -147,6 +147,10 @@ class TORCH_API Tensor {
     return impl_;
   }
 
+  c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> unsafeReleaseIntrusivePtr()  {
+    return std::move(impl_);
+  }
+
   bool defined() const {
     return impl_;
   }
