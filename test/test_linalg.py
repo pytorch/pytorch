@@ -39,6 +39,7 @@ class TestLinalg(TestCase):
 
     @dtypes(torch.float, torch.cfloat)
     @precisionOverride({torch.float: 1e-06, torch.cfloat: 1e-06})
+    @tf32_on_and_off(5e-3)
     def test_inner(self, device, dtype):
         def check(a_sizes_, b_sizes_):
             for a_sizes, b_sizes in ((a_sizes_, b_sizes_), (b_sizes_, a_sizes_)):
@@ -822,6 +823,18 @@ class TestLinalg(TestCase):
             # run_test_transposed(a_shape, b_shape)
             run_test_skipped_elements(a_shape, b_shape)
 
+        # Test that kron perserve memory format
+        a = torch.randn(1, 2, 3, 4, dtype=dtype, device=device).contiguous(memory_format=torch.channels_last)
+        b = torch.randn(1, 2, 3, 4, dtype=dtype, device=device).contiguous(memory_format=torch.channels_last)
+        c = torch.kron(a, b)
+        self.assertTrue(c.is_contiguous(memory_format=torch.channels_last))
+        torch.kron(a, b, out=c)
+        self.assertTrue(c.is_contiguous(memory_format=torch.channels_last))
+        c = c.contiguous(memory_format=torch.contiguous_format)
+        torch.kron(a, b, out=c)
+        self.assertTrue(c.is_contiguous(memory_format=torch.contiguous_format))
+
+
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_kron_empty(self, device, dtype):
 
@@ -1419,7 +1432,7 @@ class TestLinalg(TestCase):
         e = torch.zeros(4, 2, dtype=dtype, device=device)
         v = torch.zeros(4, 4, dtype=dtype, device=device)
         torch.eig(X, True, out=(e, v))
-        Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
+        Xhat = np.matmul(np.matmul(v.cpu(), torch.diag(e.select(1, 0)).cpu()), v.t().cpu())
         if dtype is torch.float:
             atol = 1e-7
             rtol = 1e-5
@@ -1430,7 +1443,7 @@ class TestLinalg(TestCase):
         self.assertTrue(v.is_contiguous(), 'V is not contiguous')
 
         torch.eig(X, True, out=(e, v))
-        Xhat = torch.mm(v, torch.mm(e.select(1, 0).diag(), v.t()))
+        Xhat = np.matmul(v.cpu(), np.matmul(e.select(1, 0).diag().cpu(), v.t().cpu()))
         self.assertEqual(X, Xhat, atol=atol, rtol=rtol, msg='VeV\' wrong')
         self.assertTrue(v.is_contiguous(), 'V is not contiguous')
 
@@ -1445,7 +1458,7 @@ class TestLinalg(TestCase):
         self.assertFalse(v.is_contiguous(), 'V is contiguous')
         self.assertFalse(e.is_contiguous(), 'E is contiguous')
         torch.eig(X, True, out=(e, v))
-        Xhat = torch.mm(torch.mm(v, torch.diag(e.select(1, 0))), v.t())
+        Xhat = np.matmul(np.matmul(v.cpu(), torch.diag(e.cpu().select(1, 0))), v.t().cpu())
         if dtype is torch.float:
             atol = 1e-7
             rtol = 1e-5
@@ -2031,7 +2044,7 @@ class TestLinalg(TestCase):
         for (k, n), upper in itertools.product(zip([2, 3, 5], [3, 5, 7]), [True, False]):
             b, A, L = self.cholesky_solve_test_helper((n,), (n, k), upper, device, dtype)
             x = torch.cholesky_solve(b, L, upper=upper)
-            self.assertEqual(b, A.mm(x))
+            self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -2047,7 +2060,7 @@ class TestLinalg(TestCase):
             x_exp = torch.stack(x_exp_list)  # Stacked output
             x_act = torch.cholesky_solve(b, L, upper=upper)  # Actual output
             self.assertEqual(x_act, x_exp)  # Equality check
-            Ax = torch.matmul(A, x_act)
+            Ax = np.matmul(A.cpu(), x_act.cpu())
             self.assertEqual(b, Ax)  # Correctness check
 
         for upper, batchsize in itertools.product([True, False], [1, 3, 4]):
@@ -2159,8 +2172,8 @@ class TestLinalg(TestCase):
 
             # Additional correctness tests, check matrix*matrix_inverse == identity
             identity = torch.eye(n, dtype=dtype, device=device)
-            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix, matrix_inverse))
-            self.assertEqual(identity.expand_as(matrix), torch.matmul(matrix_inverse, matrix))
+            self.assertEqual(identity.expand_as(matrix), np.matmul(matrix.cpu(), matrix_inverse.cpu()))
+            self.assertEqual(identity.expand_as(matrix), np.matmul(matrix_inverse.cpu(), matrix.cpu()))
 
             # check the out= variant
             # prepare the expected out tensor
@@ -2255,11 +2268,13 @@ class TestLinalg(TestCase):
         def run_test_main(A, hermitian):
             # Testing against definition for pseudo-inverses
             A_pinv = torch.linalg.pinv(A, hermitian=hermitian)
+            np_A = A.cpu().numpy()
+            np_A_pinv = A_pinv.cpu().numpy()
             if A.numel() > 0:
-                self.assertEqual(A, A @ A_pinv @ A, atol=self.precision, rtol=self.precision)
-                self.assertEqual(A_pinv, A_pinv @ A @ A_pinv, atol=self.precision, rtol=self.precision)
-                self.assertEqual(A @ A_pinv, (A @ A_pinv).conj().transpose(-2, -1))
-                self.assertEqual(A_pinv @ A, (A_pinv @ A).conj().transpose(-2, -1))
+                self.assertEqual(A, np_A @ np_A_pinv @ np_A, atol=self.precision, rtol=self.precision)
+                self.assertEqual(A_pinv, np_A_pinv @ np_A @ np_A_pinv, atol=self.precision, rtol=self.precision)
+                self.assertEqual(np_A @ np_A_pinv, (np_A @ np_A_pinv).conj().swapaxes(-2, -1))
+                self.assertEqual(np_A_pinv @ np_A, (np_A_pinv @ np_A).conj().swapaxes(-2, -1))
             else:
                 self.assertEqual(A.shape, A_pinv.shape[:-2] + (A_pinv.shape[-1], A_pinv.shape[-2]))
 
@@ -2406,10 +2421,10 @@ class TestLinalg(TestCase):
             # Correctness test
             x = torch.linalg.solve(A, b)
             if rhs == ():
-                Ax = torch.matmul(A, x.unsqueeze(-1))
+                Ax = np.matmul(A.cpu(), x.unsqueeze(-1).cpu())
                 Ax.squeeze_(-1)
             else:
-                Ax = torch.matmul(A, x)
+                Ax = np.matmul(A.cpu(), x.cpu())
             self.assertEqual(b.expand_as(Ax), Ax)
 
             # Check against NumPy
@@ -2500,7 +2515,7 @@ class TestLinalg(TestCase):
         for (k, n) in zip([2, 3, 5], [3, 5, 7]):
             b, A = self.solve_test_helper((n,), (n, k), device, dtype)
             x = torch.solve(b, A)[0]
-            self.assertEqual(b, A.mm(x))
+            self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -2514,7 +2529,7 @@ class TestLinalg(TestCase):
             x_exp = torch.stack(x_exp_list)  # Stacked output
             x_act = torch.solve(b, A)[0]  # Actual output
             self.assertEqual(x_exp, x_act)  # Equality check
-            Ax = torch.matmul(A, x_act)
+            Ax = np.matmul(A.cpu(), x_act.cpu())
             self.assertEqual(b, Ax)
 
         for batchsize in [1, 3, 4]:
@@ -3409,9 +3424,9 @@ class TestLinalg(TestCase):
                                                      unitriangular, device, dtype)
             x = torch.triangular_solve(b, A, upper=upper, unitriangular=unitriangular, transpose=transpose)[0]
             if transpose:
-                self.assertEqual(b, A.t().mm(x))
+                self.assertEqual(b, np.matmul(A.t().cpu(), x.cpu()))
             else:
-                self.assertEqual(b, A.mm(x))
+                self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
 
     @skipCPUIfNoLapack
     @skipCUDAIfNoMagma
@@ -3435,7 +3450,7 @@ class TestLinalg(TestCase):
             if transpose:
                 A = A.transpose(-2, -1)
 
-            Ax = torch.matmul(A, x_act)
+            Ax = np.matmul(A.cpu(), x_act.cpu())
             self.assertEqual(b, Ax)
 
         for (upper, unitriangular, transpose), batchsize in itertools.product(itertools.product(
@@ -4707,7 +4722,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # undefined bahavior
             return
 
-        num_batches = 10
+        batch_sizes = [1, 10]
         M, N, O = 23, 8, 12
         numpy_dtype = dtype if dtype != torch.bfloat16 else torch.float32
 
@@ -4716,17 +4731,18 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             is_supported = TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater)
 
         if not is_supported:
-            b1 = torch.randn(num_batches, M, N, device=device).to(dtype)
-            b2 = torch.randn(num_batches, N, O, device=device).to(dtype)
-            self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
-                                   lambda: torch.bmm(b1, b2))
+            for num_batches in batch_sizes:
+                b1 = torch.randn(num_batches, M, N, device=device).to(dtype)
+                b2 = torch.randn(num_batches, N, O, device=device).to(dtype)
+                self.assertRaisesRegex(RuntimeError, "type|Type|not implemented|CUBLAS_STATUS_NOT_SUPPORTED",
+                                       lambda: torch.bmm(b1, b2))
             return
 
         def invert_perm(p):
             d = {x: i for i, x in enumerate(p)}
             return (d[0], d[1], d[2])
 
-        def generate_inputs():
+        def generate_inputs(num_batches):
             # transposed tensors
             for perm1, perm2 in itertools.product(itertools.permutations((0, 1, 2)), repeat=2):
                 b1 = make_tensor((num_batches, M, N), device, dtype, low=-1, high=1)
@@ -4749,21 +4765,22 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 b2 = torch.randn(shape2, dtype=dtype, device=device)
                 yield b1, b2
 
-        for (b1, b2), perm3 in itertools.product(generate_inputs(), itertools.permutations((0, 1, 2))):
-            res1 = torch.bmm(b1, b2)
-            res2 = torch.full((num_batches, M, O), math.nan, dtype=dtype, device=device) \
-                .permute(perm3).contiguous().permute(invert_perm(perm3))
-            torch.bmm(b1, b2, out=res2)
-            expect = torch.from_numpy(
-                b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
-            self.assertEqual(expect, res1)
-            self.assertEqual(expect, res2)
+        for num_batches in batch_sizes:
+            for (b1, b2), perm3 in itertools.product(generate_inputs(num_batches), itertools.permutations((0, 1, 2))):
+                res1 = torch.bmm(b1, b2)
+                res2 = torch.full((num_batches, M, O), math.nan, dtype=dtype, device=device) \
+                    .permute(perm3).contiguous().permute(invert_perm(perm3))
+                torch.bmm(b1, b2, out=res2)
+                expect = torch.from_numpy(
+                    b1.to(numpy_dtype).cpu().numpy() @ b2.to(numpy_dtype).cpu().numpy()).to(device=device, dtype=dtype)
+                self.assertEqual(expect, res1)
+                self.assertEqual(expect, res2)
 
-            if self.device_type == 'cuda':
-                # check that mixed arguments are rejected
-                self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2.cpu()))
-                self.assertRaises(RuntimeError, lambda: torch.bmm(b1.cpu(), b2))
-                self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2, out=res2.cpu()))
+                if self.device_type == 'cuda':
+                    # check that mixed arguments are rejected
+                    self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2.cpu()))
+                    self.assertRaises(RuntimeError, lambda: torch.bmm(b1.cpu(), b2))
+                    self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2, out=res2.cpu()))
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
@@ -5966,7 +5983,7 @@ else:
             for k, n in zip([2, 3, 5], [3, 5, 7]):
                 b, A, LU_data, LU_pivots = self.lu_solve_test_helper((n,), (n, k), pivot, device, dtype)
                 x = torch.lu_solve(b, LU_data, LU_pivots)
-                self.assertEqual(b, A.mm(x))
+                self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
 
         sub_test(True)
         if self.device_type == 'cuda':
@@ -5987,7 +6004,7 @@ else:
                 x_exp = torch.stack(x_exp_list)  # Stacked output
                 x_act = torch.lu_solve(b, LU_data, LU_pivots)  # Actual output
                 self.assertEqual(x_exp, x_act)  # Equality check
-                Ax = torch.matmul(A, x_act)
+                Ax = np.matmul(A.cpu(), x_act.cpu())
                 self.assertEqual(b, Ax)
 
             for batchsize in [1, 3, 4]:

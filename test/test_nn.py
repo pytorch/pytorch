@@ -9928,6 +9928,27 @@ class TestFusionEval(TestCase):
         self.assertEqual(Y_ref, Y_hat, msg="Conv+BN(non-affine) fusion results are off")
 
 
+class TestConstantPadNd(TestCase):
+    def test_constant_pad_nd(self):
+        a = torch.tensor([[1, 2], [3, 4]])
+        res = torch.constant_pad_nd(a, [1, 2, 1, 0], 9)
+        expected = torch.tensor([
+            [9, 9, 9, 9, 9],
+            [9, 1, 2, 9, 9],
+            [9, 3, 4, 9, 9]
+        ])
+        self.assertEqual(res, expected)
+
+    def test_preserves_memory_format(self):
+        nchw_tensor = torch.rand((1, 2, 5, 3))
+        nchw_padded = torch.constant_pad_nd(nchw_tensor, [1, 2], 0.5)
+        self.assertTrue(nchw_padded.is_contiguous(memory_format=torch.contiguous_format))
+
+        nhwc_tensor = nchw_tensor.contiguous(memory_format=torch.channels_last)
+        nhwc_padded = torch.constant_pad_nd(nhwc_tensor, [1, 2], 0.5)
+        self.assertTrue(nhwc_padded.is_contiguous(memory_format=torch.channels_last))
+
+
 class TestAddRelu(TestCase):
     def test_add_relu(self):
         a = torch.rand((7, 11))

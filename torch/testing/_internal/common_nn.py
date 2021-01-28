@@ -5191,6 +5191,9 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
             if input.grad is not None:
                 with torch.no_grad():
                     input.grad.zero_()
+            if input_ip.grad is not None:
+                with torch.no_grad():
+                    input_ip.grad.zero_()
             output.backward(grad)
             output_ip.backward(grad)
             test_case.assertEqual(input.grad, input_ip.grad)

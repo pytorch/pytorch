@@ -119,7 +119,7 @@ size_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
 }
 
 static at::ScalarType tensorType(Tensor* t) {
-  return static_cast<at::ScalarType>(t->body()->dtype().scalar_type());
+  return static_cast<at::ScalarType>(t->buf()->dtype().scalar_type());
 }
 
 static std::vector<ExprHandle> computeIndicesToBroadcast(
@@ -608,7 +608,7 @@ std::vector<ExprHandle> TensorExprKernel::valueShape(
   if (it == tensors_.end()) {
     return {};
   }
-  return ExprVectorToExprHandleVector(it->second->dims());
+  return ExprVectorToExprHandleVector(it->second->buf()->dims());
 }
 
 Tensor* TensorExprKernel::computeOneOperand(
@@ -1125,7 +1125,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::type_as: {
       auto const& n = v->node();
       Tensor* rhs = tensors_.at(n->inputs()[1]->unique());
-      auto dtype = rhs->body()->dtype();
+      auto dtype = rhs->buf()->dtype();
       return computeOneOperand(
           "aten_type_as", v, [dtype](const ExprHandle& lhs) {
             return Cast::make(dtype, lhs);
@@ -1350,8 +1350,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::lgamma: {
-      return computeOneOperand(
-          "aten_lgamma", v, [](const ExprHandle& a) { return lgamma(a); });
+      return computeOneOperand("aten_lgamma", v, [](const ExprHandle& a) {
+        return lgamma(promoteIntegerToDefaultType(a));
+      });
     } break;
 
     case prim::ConstantChunk: {
