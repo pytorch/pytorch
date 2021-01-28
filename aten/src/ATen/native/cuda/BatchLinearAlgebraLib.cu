@@ -10,7 +10,6 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
 
-#include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/cuda/BatchLinearAlgebraLib.h>
@@ -319,8 +318,8 @@ inline void apply_orgqr_cusolver(Tensor& self, const Tensor& tau, Tensor& infos,
   auto batchsize = cuda_int_cast(batchCount(self), "batch size");
   auto m = cuda_int_cast(self.size(-2), "m");
   auto n = cuda_int_cast(n_columns, "n");
-  auto k = cuda_int_cast(tau.size(-1), "m");
-  auto tau_stride = std::max<int>(1, n);
+  auto k = cuda_int_cast(tau.size(-1), "k");
+  auto tau_stride = std::max<int>(1, k);
   auto lda = std::max<int>(1, m);
 
   // LAPACK's requirement
@@ -352,26 +351,14 @@ inline void apply_orgqr_cusolver(Tensor& self, const Tensor& tau, Tensor& infos,
   }
 }
 
-}} // namespace at::native
-
-#endif  // USE_CUSOLVER
-
-namespace at {
-namespace native {
-
-// This is a type dispatching helper function for 'apply_orgqr'
-Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns) {
-#ifdef USE_CUSOLVER
+// This is a type dispatching helper function for 'apply_orgqr_cusolver'
+Tensor& orgqr_helper_cuda_lib(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "orgqr_cuda", [&]{
     apply_orgqr_cusolver<scalar_t>(result, tau, infos, n_columns);
   });
   return result;
-#else
-  TORCH_CHECK(false, "Calling torch.orgqr on a CUDA tensor requires compiling ",
-    "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER support.");
-#endif
 }
 
-REGISTER_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
-
 }} // namespace at::native
+
+#endif  // USE_CUSOLVER

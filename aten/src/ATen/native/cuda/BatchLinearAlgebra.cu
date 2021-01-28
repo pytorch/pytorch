@@ -41,6 +41,14 @@ void magmaSolveBatched(
     magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue);
 
 template<class scalar_t>
+void magmaLarftBatched(
+    magma_int_t n, magma_int_t k, magma_int_t stair_T,
+    scalar_t** v_array, magma_int_t ldv,
+    scalar_t** tau_array, scalar_t** T_array, magma_int_t ldt,
+    scalar_t** work_array, magma_int_t lwork,
+    magma_int_t batch_count, const MAGMAQueue& magma_queue);
+
+template<class scalar_t>
 void magmaLu(
     magma_int_t m, magma_int_t n, scalar_t* dA, magma_int_t ldda,
     magma_int_t* ipiv, magma_int_t* info);
@@ -237,6 +245,56 @@ void magmaSolveBatched<c10::complex<float>>(
   magma_cgesv_batched(n, nrhs,
     reinterpret_cast<magmaFloatComplex**>(dA_array), ldda, dipiv_array,
     reinterpret_cast<magmaFloatComplex**>(dB_array), lddb, dinfo_array, batch_count, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template <>
+void magmaLarftBatched<double>(magma_int_t n, magma_int_t k, magma_int_t stair_T,
+    double** v_array, magma_int_t ldv,
+    double** tau_array, double** T_array, magma_int_t ldt,
+    double** work_array, magma_int_t lwork,
+    magma_int_t batch_count, const MAGMAQueue& magma_queue) {
+  magma_dlarft_batched(n, k, stair_T, v_array, ldv, tau_array, T_array, ldt, work_array, lwork, batch_count, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template <>
+void magmaLarftBatched<float>(magma_int_t n, magma_int_t k, magma_int_t stair_T,
+    float** v_array, magma_int_t ldv,
+    float** tau_array, float** T_array, magma_int_t ldt,
+    float** work_array, magma_int_t lwork,
+    magma_int_t batch_count, const MAGMAQueue& magma_queue) {
+  magma_slarft_batched(n, k, stair_T, v_array, ldv, tau_array, T_array, ldt, work_array, lwork, batch_count, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template <>
+void magmaLarftBatched<c10::complex<double>>(magma_int_t n, magma_int_t k, magma_int_t stair_T,
+    c10::complex<double>** v_array, magma_int_t ldv,
+    c10::complex<double>** tau_array, c10::complex<double>** T_array, magma_int_t ldt,
+    c10::complex<double>** work_array, magma_int_t lwork,
+    magma_int_t batch_count, const MAGMAQueue& magma_queue) {
+  magma_zlarft_batched(n, k, stair_T,
+    reinterpret_cast<magmaDoubleComplex**>(v_array), ldv,
+    reinterpret_cast<magmaDoubleComplex**>(tau_array),
+    reinterpret_cast<magmaDoubleComplex**>(T_array), ldt,
+    reinterpret_cast<magmaDoubleComplex**>(work_array), lwork,
+    batch_count, magma_queue.get_queue());
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template <>
+void magmaLarftBatched<c10::complex<float>>(magma_int_t n, magma_int_t k, magma_int_t stair_T,
+    c10::complex<float>** v_array, magma_int_t ldv,
+    c10::complex<float>** tau_array, c10::complex<float>** T_array, magma_int_t ldt,
+    c10::complex<float>** work_array, magma_int_t lwork,
+    magma_int_t batch_count, const MAGMAQueue& magma_queue) {
+  magma_clarft_batched(n, k, stair_T,
+    reinterpret_cast<magmaFloatComplex**>(v_array), ldv,
+    reinterpret_cast<magmaFloatComplex**>(tau_array),
+    reinterpret_cast<magmaFloatComplex**>(T_array), ldt,
+    reinterpret_cast<magmaFloatComplex**>(work_array), lwork,
+    batch_count, magma_queue.get_queue());
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -1892,6 +1950,141 @@ std::tuple<Tensor, Tensor> _triangular_solve_helper_cuda(const Tensor& self, con
   });
   return std::tuple<Tensor, Tensor>(self_working_copy, A_working_copy);
 }
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ orgqr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/*
+  The orgqr function allows reconstruction of an orthogonal (or unitary) matrix Q,
+  from a sequence of elementary reflectors, such as produced by the geqrf function.
+
+  Args:
+  * `self` - Tensor with the directions of the elementary reflectors below the diagonal,
+              it will be overwritten with the result
+  * `tau` - Tensor containing the magnitudes of the elementary reflectors
+  * `infos` - Tensor to store MAGMA's error codes (not used here)
+  * `n_columns` - The number of columns of Q to be computed
+
+  For further details, please see the LAPACK documentation for ORGQR/UNGQR, LARFT, LARFB.
+
+  MAGMA doesn't have native GPU UNGQR function implemented, but it has LARFT, which is used here.
+  The restriction is that it applies only to inputs with tau.shape[-1] <= 32, for other inputs cuSOLVER should be used.
+*/
+template <typename scalar_t>
+inline void apply_orgqr_batched_magma(Tensor& self, const Tensor& tau, Tensor& infos, int64_t n_columns) {
+#ifndef USE_MAGMA
+  TORCH_CHECK(false, "Calling torch.orgqr on a CUDA tensor requires compiling ",
+    "PyTorch with MAGMA. Please use PyTorch built with MAGMA support.");
+#else
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+  auto self_data = self.data_ptr<scalar_t>();
+  auto tau_data = tau.data_ptr<scalar_t>();
+  auto infos_data = infos.data_ptr<int>();
+  auto self_matrix_stride = matrixStride(self);
+  auto batchsize = magma_int_cast(batchCount(self), "batch size");
+  auto m = magma_int_cast(self.size(-2), "m");
+  auto n = magma_int_cast(n_columns, "n");
+  auto k = magma_int_cast(tau.size(-1), "k");
+  auto tau_stride = std::max<int>(1, k);
+  auto lda = std::max<int>(1, n);
+
+  // LAPACK's requirement
+  TORCH_INTERNAL_ASSERT(m >= n);
+  TORCH_INTERNAL_ASSERT(n >= k);
+
+  // magmaLarftBatched doesn't work for k > 32
+  TORCH_INTERNAL_ASSERT(k <= 32);
+
+  int lwork = k*lda;
+  Tensor work = at::empty({lwork}, self.options());
+  auto work_data = work.data_ptr<scalar_t>();
+
+  auto T_sizes = tau.sizes().vec();
+  T_sizes.push_back(k);
+  Tensor T = at::zeros(T_sizes, self.options());
+  auto ldt = std::max<int>(1, k);
+  auto T_matrix_stride = matrixStride(T);
+  T.transpose_(-2, -1);
+  auto T_data = T.data_ptr<scalar_t>();
+
+  scalar_t** self_array;
+  scalar_t** T_array;
+  scalar_t** tau_array;
+
+  ALLOCATE_ARRAY(self_array, scalar_t*, batchsize);
+  ALLOCATE_ARRAY(T_array, scalar_t*, batchsize);
+  ALLOCATE_ARRAY(tau_array, scalar_t*, batchsize);
+
+  // Set up the created arrays
+  for (int64_t i = 0; i < batchsize; i++) {
+    self_array[i] = &self_data[i * self_matrix_stride];
+    T_array[i] = &T_data[i * T_matrix_stride];
+    tau_array[i] = &tau_data[i * tau_stride];
+  }
+
+  // make sure that all elements of elementary reflectors including 0's and 1's are stored, unlike LAPACK
+  self.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
+  self.tril_();
+
+  // Now compute T matrix using magmaLarftBatched
+  if (batchsize > 0) {
+    MAGMAQueue magma_queue(self.get_device());
+
+    constexpr int64_t batch_limit = 65535;
+    // Compute as many batches of 65535 possible
+    // The number of "mini"-batches are floor(batchsize / batch_limit)
+    // and these cover floor(batchsize / batch_limit) * batch_limit
+    int64_t mini_batches = batchsize / batch_limit, mini_idx;
+    for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
+      scalar_t** self_array_cur = &self_array[mini_idx];
+      scalar_t** tau_array_cur = &tau_array[mini_idx];
+      scalar_t** T_array_cur = &T_array[mini_idx];
+      magmaLarftBatched<scalar_t>(n, k, 0, self_array_cur, lda, tau_array_cur, T_array_cur, ldt, &work_data, lwork, batch_limit, magma_queue);
+    }
+
+    // Compute whatever is left = batchsize - floor(batchsize / batch_limit) * batch_limit
+    // which concisely is equal to batchsize % batch_limit
+    if (batchsize % batch_limit != 0) {
+      magmaLarftBatched<scalar_t>(n, k, 0, &self_array[mini_idx], lda, &tau_array[mini_idx], &T_array[mini_idx], ldt, &work_data, lwork, batchsize % batch_limit, magma_queue);
+    }
+  }
+
+  auto V = at::narrow(self, /*dim=*/-1, /*start=*/0, /*length=*/k);
+
+  // Compute result = I - V T V^H
+  // In LAPACK same result could be obtained using LARFB
+  auto W = at::matmul(T, V.conj().transpose(-2, -1));
+  at::matmul_out(self, V, W);
+  self.mul_(-1);
+  self.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).add_(1);
+
+  infos.fill_(0);
+#endif
+}
+
+// This is a type dispatching helper function for 'apply_orgqr'
+Tensor& orgqr_helper_batched_magma(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "orgqr_cuda", [&]{
+    apply_orgqr_batched_magma<scalar_t>(result, tau, infos, n_columns);
+  });
+  return result;
+}
+
+Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, Tensor& infos, int64_t n_columns) {
+#if defined(USE_CUSOLVER) && defined(USE_MAGMA)
+  if (batchCount(result) > 1 && tau.size(-1) <= 32) {
+    return orgqr_helper_batched_magma(result, tau, infos, n_columns); // magma-cuda
+  } else {
+    return orgqr_helper_cuda_lib(result, tau, infos, n_columns); // cusolver
+  }
+#elif defined(USE_CUSOLVER) && !defined(USE_MAGMA)
+  return orgqr_helper_cuda_lib(result, tau, infos, n_columns); // cusolver
+#else
+  TORCH_CHECK(tau.size(-1) <= 32, "orgqr: tau.shape[-1] larger than 32 is not supported with MAGMA backend. Please use PyTorch built with cuSOLVER support.")
+  return orgqr_helper_batched_magma(result, tau, infos, n_columns); // magma-cuda
+#endif
+}
+
+REGISTER_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
