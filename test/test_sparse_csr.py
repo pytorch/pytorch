@@ -76,6 +76,12 @@ class TestSparseCSR(TestCase):
             ((1000, 10), 10)
         ]
 
+        printed = []
+        for shape, nnz in shape_nnz:
+            values_shape = torch.Size((nnz,))
+            col_indices_shape = torch.Size((nnz,))
+            crow_indices_shape = torch.Size((shape[0]+1,))
+            
 
     def test_sparse_csr_from_dense(self):
         sp = torch.tensor([[1, 2], [3, 4]]).to_sparse_csr()
