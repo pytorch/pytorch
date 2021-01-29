@@ -219,7 +219,13 @@ option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 cmake_dependent_option(
     USE_VALGRIND "Use Valgrind. Only available on Linux." ON
     "LINUX" OFF)
-option(USE_VULKAN "Use Vulkan GPU backend" OFF)
+
+if(NOT DEFINED USE_VULKAN)
+  cmake_dependent_option(
+      USE_VULKAN "Use Vulkan GPU backend" ON
+      "ANDROID" OFF)
+endif()
+
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference even on fp32 tensors" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation (needs libshaderc)" OFF)
