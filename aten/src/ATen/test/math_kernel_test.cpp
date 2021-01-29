@@ -112,3 +112,14 @@ TEST(MathKernelTest, NarrowCopy)  {
     ASSERT_ALLCLOSE_TOLERANCES(y_ref, y_test, 0, 0);
   }
 }
+
+TEST(MathKernelTest, Bmm)  {
+  auto test_bmm = [](int64_t last_dim) {
+    auto x = rand({1, 4, 4}, at::kFloat);
+    auto y = rand({1, 4, last_dim}, at::kDouble);
+    EXPECT_THROW(auto z = at::bmm(x, y), std::exception);
+  };
+
+  test_bmm(5);
+  test_bmm(1000);
+}

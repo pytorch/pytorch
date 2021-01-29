@@ -35,6 +35,7 @@ from torch.testing._internal.common_quantization import (
     QuantStubModel,
     ModelForFusion,
     ModelWithSequentialFusion,
+    ModelForLinearBNFusion,
     ManualLinearQATModel,
     ManualConvLinearQATModel,
     ModelWithFunctionals,
@@ -89,6 +90,7 @@ import unittest
 import numpy as np
 
 class TestPostTrainingStatic(QuantizationTestCase):
+
     def test_single_layer(self):
         r"""Quantize SingleLayerLinearModel which has one Linear module, make sure it is swapped
         to nnq.Linear which is the quantized version of the module
@@ -538,6 +540,29 @@ class TestPostTrainingStatic(QuantizationTestCase):
         self.checkQuantizedLinear(model.fc)
 
     @skipIfNoFBGEMM
+    def test_embedding_linear_dynamic(self):
+        class EmbeddingWithLinearDynamic(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12)
+                self.fc = torch.nn.Linear(5, 5)
+
+            def forward(self, indices, linear_in):
+                return self.emb(indices), self.fc(linear_in)
+
+        model = EmbeddingWithLinearDynamic()
+        qconfig_dict = {'fc' : default_dynamic_qconfig}
+        model = EmbeddingWithLinear()
+        quantize_dynamic(model, qconfig_dict, inplace=True)
+
+        model.emb.qconfig = float_qparams_weight_only_qconfig
+        prepare(model, inplace=True)
+        convert(model, inplace=True)
+        self.assertTrue('QuantizedEmbedding' in str(model))
+        self.assertTrue('DynamicQuantizedLinear' in str(model))
+
+
+    @skipIfNoFBGEMM
     def test_dequant_stub(self):
         m = QuantStubModel().eval()
         prepare(m, inplace=True)
@@ -558,7 +583,6 @@ class TestPostTrainingStatic(QuantizationTestCase):
         self.assertEqual(type(m2.dequant), DeQuantStub)
 
 
-    @skipIfNoFBGEMM
     def test_quantized_embedding_bag(self):
         r""" Test the post-training quantization flow, serialization and scripting
         of embedding_bag modules
@@ -1741,6 +1765,21 @@ class TestFusion(QuantizationTestCase):
                     self.assertEqual(type(model.bn2), nn.Identity)
 
                 checkQAT(model)
+
+
+    def test_fusion_linear_bn_eval(self):
+        model = ModelForLinearBNFusion().train()
+        inp1 = torch.randn(8, 20)
+        inp2 = torch.randn(8, 20)
+
+        # Get some interesting values into the running mean and variance.
+        model(inp1)
+        model.eval()
+        golden = model(inp2)
+
+        model = fuse_modules(model, [["fc", "bn"]])
+        self.assertEqual(type(model.bn), nn.Identity)
+        self.assertEqual(golden, model(inp2))
 
     def test_forward_hooks_preserved(self):
         r"""Test case that checks whether forward pre hooks of the first module and

@@ -58,6 +58,13 @@ def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
     ort_sess = onnxruntime.InferenceSession(f.getvalue())
     return ort_sess
 
+
+def inline_flatten_list(inputs, res_list):
+    for i in inputs:
+        res_list.append(i) if not isinstance(i, (list, tuple)) else inline_flatten_list(i, res_list)
+    return res_list
+
+
 def run_ort(ort_sess, input):
     input_copy = copy.deepcopy(input)
     input, _ = torch.jit._flatten(input_copy)
@@ -66,7 +73,8 @@ def run_ort(ort_sess, input):
     ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
     ort_outs = ort_sess.run(None, ort_inputs)
 
-    return ort_outs
+    return inline_flatten_list(ort_outs, [])
+
 
 def ort_compare_with_pytorch(ort_outs, output, rtol, atol):
     output, _ = torch.jit._flatten(output)
@@ -115,7 +123,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                                    output_names=output_names, fixed_batch_size=fixed_batch_size, training=None,
                                    onnx_shape_inference=self.onnx_shape_inference,
                                    use_new_jit_passes=self.use_new_jit_passes)
-
+        # compute onnxruntime output prediction
         ort_outs = run_ort(ort_sess, input)
         ort_compare_with_pytorch(ort_outs, output, rtol, atol)
 
@@ -2726,6 +2734,38 @@ class TestONNXRuntime(unittest.TestCase):
         indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
         self.run_test(GatherModel(), input=(input, indices))
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_gather_constant_fold(self):
+        class GatherModule(torch.nn.Module):
+            def __init__(self):
+                super(GatherModule, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                # shape is of rank 0
+                shape = self.weight.shape[0]
+                m = 5 - shape
+                return x.clamp(min=m)
+
+        x = torch.randn(1)
+        self.run_test(GatherModule(), (x,))
+
+        class GatherModule(torch.nn.Module):
+            def __init__(self):
+                super(GatherModule, self).__init__()
+                self.register_buffer("weight", torch.ones(2))
+
+            def forward(self, x):
+                # shape is of rank 0
+                shape = self.weight.shape[0]
+                pad = [1, shape, shape, shape]
+                zero_pad = torch.nn.ZeroPad2d(pad)
+                return zero_pad(x)
+
+        x = torch.randn(1, 3, 2)
+        self.run_test(GatherModule(), (x,))
+
+    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_expand(self):
         class ExpandModel(torch.nn.Module):
@@ -3640,27 +3680,24 @@ class TestONNXRuntime(unittest.TestCase):
     def test_split(self):
         class SplitModel(torch.nn.Module):
             def forward(self, input):
-                out1, out2, out3 = input.split([2, 1, 2])
-                return out1, out2, out3
+                return input.split([2, 1, 2]), input.split([3, 2])[0]
 
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel(), x)
 
         class SplitModel2(torch.nn.Module):
             def forward(self, input):
-                out1, out2, out3 = input.split([2, 1, 1], -2)
-                return out1, out2, out3
+                return input.split([2, 1, 1], -2), input.split([2, 2], -2)[-1]
 
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel2(), x)
 
         class SplitModel3(torch.nn.Module):
             def forward(self, input):
-                out1, out2, out3 = input.split([2, 1, 2])
-                return out3, out1
+                return input.split([2, 1, 2])
 
         x = torch.randn(5, 4, 3)
-        self.run_test(torch.jit.script(SplitModel3()), x)
+        self.run_test(SplitModel3(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
@@ -3815,7 +3852,7 @@ class TestONNXRuntime(unittest.TestCase):
                     res2 += 1
                     res3 = res3 + [arr[i].sum(0, False)]
                     res4 += [arr[-1 - i].sum(0, False)]
-                return torch.stack(res), torch.stack(res1), res2, torch.stack(res3), torch.stack(res4)
+                return res, res1, res2, torch.stack(res3), torch.stack(res4)
 
         model = ListLoopModel()
         inputs = torch.randn(16)
@@ -4283,6 +4320,13 @@ class TestONNXRuntime(unittest.TestCase):
         class UnfoldModel(torch.nn.Module):
             def forward(self, x):
                 return x.unfold(dimension=2, size=x.shape[1], step=x.shape[1] - 1)
+
+        x = torch.randn(4, 2, 4, requires_grad=True)
+        self.run_test(UnfoldModel(), x)
+
+        class UnfoldModel(torch.nn.Module):
+            def forward(self, x):
+                return x.unfold(dimension=2, size=x.shape[1], step=1)
 
         x = torch.randn(4, 2, 4, requires_grad=True)
         self.run_test(UnfoldModel(), x)
@@ -5563,7 +5607,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.assertRaises(RuntimeError, check_proto)
 
-    @disableScriptTest()  # dtype mismatch
     def test_split_tensor_scalar(self):
         class SplitModel(torch.nn.Module):
             def forward(self, x):
@@ -5914,6 +5957,38 @@ class TestONNXRuntime(unittest.TestCase):
         [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in
          zip(ort_outs1, ort_outs2)]
 
+    def test_script_custom_class_error(self):
+        class BoxCoder(object):
+            def __init__(self, bbox_xform_clip):
+                # type: (float) -> None
+                self.bbox_xform_clip = bbox_xform_clip
+
+            def decode(self, rel_codes, boxes):
+                # type: (Tensor, List[Tensor]) -> Tensor
+                boxes = torch.cat(boxes, dim=0)
+                pred_ctr_x = torch.clamp(rel_codes[:, 0::4], max=self.bbox_xform_clip) * boxes[:, 2]
+                return pred_ctr_x
+
+        class MyModule(torch.nn.Module):
+            __annotations__ = {
+                'box_coder': BoxCoder,
+            }
+
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.box_coder = BoxCoder(1.4)
+
+            def forward(self, box_regression: torch.Tensor, proposals: List[torch.Tensor]):
+                return self.box_coder.decode(box_regression, proposals)
+
+        model = torch.jit.script(MyModule())
+        box_regression = torch.randn([4, 4])
+        proposal = [torch.randn(2, 4), torch.randn(2, 4)]
+
+        with self.assertRaises(RuntimeError) as cm:
+            self.run_test(model, (box_regression, proposal))
+
+    @skipIfUnsupportedOpsetVersion([13])
     def test_initializer_sequence(self):
         class MyModule(torch.nn.Module):
             def __init__(self, input_size, hidden_size, num_classes):

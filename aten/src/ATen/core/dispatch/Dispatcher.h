@@ -78,8 +78,17 @@ public:
   // Implementation note: this class abstracts over the fact that we have per-operator
   // dispatch tables.  This could be easily adjusted to have a single global hash
   // table.
+  static Dispatcher& realSingleton();
 
-  static Dispatcher& singleton();
+  static Dispatcher& singleton() {
+    // Implemented inline so that steady-state code needn't incur
+    // function-call overhead. We can't just inline `realSingleton`
+    // because the function-local static would get duplicated across
+    // all DSOs that include & use this header, leading to multiple
+    // singleton instances.
+    static Dispatcher& s = realSingleton();
+    return s;
+  }
 
   // ------------------------------------------------------------------------
   //

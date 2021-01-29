@@ -2,7 +2,7 @@ from collections import namedtuple
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.testing import FileCheck
 from torch import jit
 from textwrap import dedent
@@ -673,7 +673,7 @@ class TestScriptPy3(JitTestCase):
         mod = ModuleWithProperties(3)
         scripted_mod = torch.jit.script(mod)
 
-        with self.assertRaisesRegex(torch.nn.modules.module.ModuleAttributeError, "has no attribute"):
+        with self.assertRaisesRegex(AttributeError, "has no attribute"):
             scripted_mod.ignored_attr
 
     def test_ignoring_module_attributes(self):
@@ -727,7 +727,6 @@ class TestScriptPy3(JitTestCase):
 
 
     def test_export_opnames_interface(self):
-        global OneTwoModule
 
         @torch.jit.interface
         class OneTwoModule(nn.Module):
@@ -759,6 +758,8 @@ class TestScriptPy3(JitTestCase):
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 return self.two(self.one(x, x))
+
+        make_global(OneTwoModule)
 
         class M(nn.Module):
             sub : OneTwoModule
