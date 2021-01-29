@@ -861,6 +861,65 @@ class TestFakeQuantize(TestCase):
         Y_prime.backward(dout)
         np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
+    def _test_forward_per_tensor_cachemask_impl(self, device):
+        for torch_type in (torch.qint8, torch.quint8):
+            X = torch.randn(4, 8).to(device)
+            # pick the scale + zp so that some values get clipped
+            obs = torch.quantization.MinMaxObserver(torch_type)
+            obs(X * 0.75)
+            scale, zero_point = obs.calculate_qparams()
+            scale, zero_point = float(scale), int(zero_point)
+            quant_min, quant_max = obs._calculate_qmin_qmax()
+
+            Y_test, _mask = torch.fake_quantize_per_tensor_affine_cachemask(
+                X, scale, zero_point, quant_min, quant_max)
+            Y_ref = _fake_quantize_per_tensor_affine_reference(
+                X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
+            self.assertTrue(torch.allclose(Y_test, Y_ref, rtol=tolerance, atol=tolerance))
+
+    def test_forward_per_tensor_cachemask_cpu(self):
+        device = torch.device('cpu')
+        self._test_forward_per_tensor_cachemask_impl(device)
+
+    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    def test_forward_per_tensor_cachemask_cuda(self):
+        device = torch.device('cuda')
+        self._test_forward_per_tensor_cachemask_impl(device)
+
+    def _test_backward_per_tensor_cachemask_impl(self, device):
+        for torch_type in (torch.qint8, torch.quint8):
+            X = torch.randn(4, 8).to(device)
+            X.requires_grad_()
+            # pick the scale + zp so that some values get clipped
+            obs = torch.quantization.MinMaxObserver(torch_type)
+            obs(X * 0.75)
+            scale, zero_point = obs.calculate_qparams()
+            scale, zero_point = float(scale), int(zero_point)
+            quant_min, quant_max = obs._calculate_qmin_qmax()
+
+            # forward pass
+            Y_test, mask = torch.fake_quantize_per_tensor_affine_cachemask(
+                X, scale, zero_point, quant_min, quant_max)
+            Y_ref = _fake_quantize_per_tensor_affine_reference(
+                X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
+            self.assertTrue(torch.allclose(Y_test, Y_ref, rtol=tolerance, atol=tolerance))
+
+            # backward pass
+            dout = torch.rand(X.shape, dtype=torch.float).to(device)
+            dX = _fake_quantize_per_tensor_affine_grad_reference(
+                dout, X, scale, zero_point, quant_min, quant_max)
+            Y_test.backward(dout)
+            self.assertTrue(torch.allclose(dX, X.grad))
+
+    def test_backward_per_tensor_cachemask_cpu(self):
+        device = torch.device('cpu')
+        self._test_backward_per_tensor_cachemask_impl(device)
+
+    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    def test_backward_per_tensor_cachemask_cuda(self):
+        device = torch.device('cuda')
+        self._test_backward_per_tensor_cachemask_impl(device)
+
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
                        elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
