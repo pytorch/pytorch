@@ -148,14 +148,14 @@ def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
         if len(starts) == 1 and starts[0] is None and ends[0] is None\
            and (steps is None or (len(steps) == 1 and steps[0] == 1)):
             return input
+        # onnx slice expects integer so we need to manually convert here
+        if starts[0] is None:
+            starts[0] = 9223372036854775807
+        if ends[0] is None:
+            ends[0] = 9223372036854775807
         axes = g.op("Constant", value_t=torch.tensor(axes))
         starts = g.op("Constant", value_t=torch.tensor(starts))
         ends = g.op("Constant", value_t=torch.tensor(ends))
-    # onnx slice expects integer so we need to manually convert here
-    if starts[0] is None:
-        starts[0] = 9223372036854775807
-    if ends[0] is None:
-        ends[0] = 9223372036854775807
     if steps is None:
         return g.op("Slice", input, starts, ends, axes)
     steps = g.op("Constant", value_t=torch.tensor(steps))
