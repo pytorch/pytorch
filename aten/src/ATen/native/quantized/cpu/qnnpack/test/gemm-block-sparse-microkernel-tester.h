@@ -24,6 +24,8 @@
 #include <qnnpack/params.h>
 #include <qnnpack/requantization.h>
 
+#define MAYBE_UNUSED __attribute__((unused))
+
 namespace {
   void fillBlockSparseWeights(
       uint8_t* b,
@@ -50,7 +52,7 @@ namespace {
   }
 
   // Temp Debug utils that will be removed later
-  void printMatrix(const char* name, const uint8_t* a, const size_t M, const size_t N) {
+  MAYBE_UNUSED void printMatrix(const char* name, const uint8_t* a, const size_t M, const size_t N) {
     std::cout << "Matrix START:" << name << "...\n";
     for (uint32_t m = 0; m < M ; ++m) {
       for (uint32_t n = 0; n < N; n++) {
@@ -61,7 +63,7 @@ namespace {
     std::cout << "Matrix END...\n\n";
   }
 
-  void printMatrix(const char* name, const float* a, const size_t M, const size_t N) {
+  MAYBE_UNUSED void printMatrix(const char* name, const float* a, const size_t M, const size_t N) {
     std::cout << "Matrix START:" << name << "...\n";
     for (uint32_t m = 0; m < M ; ++m) {
       for (uint32_t n = 0; n < N; n++) {
@@ -258,11 +260,10 @@ class GemmBlockSparseMicrokernelTester {
       size_t num_zero_points_padded = n() + 8;
       std::vector<uint8_t> kernel_zero_points
         (num_zero_points_padded, bZeroPoint());
-      //std::generate(kernel_zero_points.begin(), kernel_zero_points.end(), std::ref(u8rng));
+      std::generate(kernel_zero_points.begin(), kernel_zero_points.end(), std::ref(u8rng));
 
-      std::unique_ptr<BCSRMatrix> bcsr_matrix;
-      uint8_t max_elem, min_elem;
       // This loop to ensure the assert_ne on b mat does not fire.
+      uint8_t max_elem, min_elem;
       do {
         std::generate(b.begin(), b.end(), std::ref(u8rng));
         fillBlockSparseWeights(
@@ -273,7 +274,11 @@ class GemmBlockSparseMicrokernelTester {
             colBlockSize(),
             sparsity(),
             kernel_zero_points.data());
-        bcsr_matrix =
+        max_elem = *std::max_element(b.cbegin(), b.cend());
+        min_elem = *std::min_element(b.cbegin(), b.cend());
+      } while (max_elem == min_elem);
+
+      std::unique_ptr<BCSRMatrix> bcsr_matrix =
           generateBlockCSRMatrix(
               b.data(),
               n(),
@@ -281,9 +286,6 @@ class GemmBlockSparseMicrokernelTester {
               rowBlockSize(),
               colBlockSize(),
               kernel_zero_points.data());
-        max_elem = *std::max_element(b.cbegin(), b.cend());
-        min_elem = *std::min_element(b.cbegin(), b.cend());
-      } while (max_elem == min_elem);
 
       ASSERT_NE(
           *std::max_element(a.cbegin(), a.cend()),
@@ -487,7 +489,6 @@ class GemmBlockSparseMicrokernelTester {
  private:
   size_t mr_{1};
   size_t nr_{1};
-  size_t np_{1};
   size_t kr_{1};
   size_t m_{1};
   size_t n_{1};
