@@ -83,22 +83,6 @@ REGISTER_DISPATCH(fake_quant_grad_learnable_tensor_stub, &_fake_quantize_grad_le
 
 // Fake quantize per channel
 
-void fake_quant_per_channel_cuda(TensorIterator &iter, int64_t quant_min, int64_t quant_max) {
-  gpu_kernel(iter,
-    [=] GPU_LAMBDA (float input_val, float scale, int64_t zero_point) -> float {
-      float inv_scale = 1.0f / scale;
-      return (fminf(
-                  quant_max,
-                  fmaxf(
-                      quant_min,
-                      static_cast<int64_t>(
-                          std::nearbyint(input_val * inv_scale) +
-                          zero_point))) -
-              zero_point) *
-          scale;
-    });
-}
-
 void fake_quant_per_channel_cachemask_cuda(
     TensorIterator &iter, TensorIterator &iter_mask, int64_t quant_min, int64_t quant_max) {
   // TODO(future, optional): read once, write twice.  Not done at the moment
@@ -128,15 +112,6 @@ void fake_quant_per_channel_cachemask_cuda(
     });
 }
 
-void fake_quant_grad_per_channel_cuda(TensorIterator &iter, int64_t quant_min, int64_t quant_max) {
-  gpu_kernel(iter,
-    [=] GPU_LAMBDA (float x, float dy, float scale, int64_t zero_point) -> float {
-      float inv_scale = 1.0f / scale;
-      int64_t Xq = std::nearbyint(x * inv_scale) + zero_point;
-      return (Xq >= quant_min && Xq <= quant_max) * dy;
-    });
-}
-
 void _fake_quantize_grad_learnable_channel_kernel_cuda(TensorIterator &iter, int64_t quant_min, int64_t quant_max) {
   gpu_kernel_multiple_outputs(iter,
     [=] GPU_LAMBDA (float x_input, float dy_input, float scale_input, float zero_point_input) -> thrust::tuple<float, float, float> {
@@ -161,8 +136,6 @@ void _fake_quantize_grad_learnable_channel_kernel_cuda(TensorIterator &iter, int
     });
 }
 
-REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cuda);
-REGISTER_DISPATCH(fake_quant_grad_per_channel_stub, &fake_quant_grad_per_channel_cuda);
 REGISTER_DISPATCH(fake_quant_per_channel_cachemask_stub, &fake_quant_per_channel_cachemask_cuda);
 REGISTER_DISPATCH(fake_quant_grad_learnable_channel_stub, &_fake_quantize_grad_learnable_channel_kernel_cuda);
 
