@@ -156,11 +156,10 @@ The determinant can be computed with ``sign * exp(logabsdet)``.
 
 Supports input of float, double, cfloat and cdouble datatypes.
 
-.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU
-          while checking if the call to MAGMA was successful using the info argument.
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
 
-.. note:: The determinant is computed via LU factorization. On CPU, this is done using the LAPACK
-          routine `getrf`. On CUDA, this is done using the MAGMA routine `getrf`.
+.. note:: The determinant is computed using LU factorization. LAPACK's `getrf` is used for CPU inputs,
+          and MAGMA's `getrf` is used for CUDA inputs.
 
 .. note:: For matrices that have zero determinant, this returns ``(0, -inf)``.
           If :attr:`input` is batched then the entries in the result tensors corresponding to matrices with
