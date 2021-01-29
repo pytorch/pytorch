@@ -2,7 +2,6 @@ from functools import partial, wraps
 
 import torch
 
-from torch.testing import floating_and_complex_types_and
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, IS_SANDCASTLE, clone_input_helper)
 from torch.testing._internal.common_methods_invocations import \
@@ -191,7 +190,8 @@ class TestCommon(JitCommonTestCase):
     #   against eager's gold standard op function variant
     @ops(op_db)
     def test_variant_consistency_eager(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        test_backward = op.test_complex_grad or not dtype.is_complex
+        samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
 
@@ -237,7 +237,7 @@ class TestCommon(JitCommonTestCase):
                 self.assertEqual(variant_forward, expected_forward)
 
                 # Compares variant's backward
-                if variant is not inplace or op.test_inplace_grad:
+                if test_backward and (variant is not inplace or op.test_inplace_grad):
                     self.check_variant_backward(sample.input, variant_forward,
                                                 expected_grad, exception_during_backwards)
 
@@ -247,7 +247,10 @@ class TestCommon(JitCommonTestCase):
     # TODO WARNING: inplace x {traced, scripted} not currently tested
     @ops(op_db)
     def test_variant_consistency_jit(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        test_backward = (
+            (dtype.is_complex and op.test_complex_grad) or
+            (dtype.is_floating_point and (not op.skip_bfloat16_grad or dtype != torch.bfloat16)))
+        samples = op.sample_inputs(device, dtype, requires_grad=test_backward)
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
 
@@ -275,32 +278,28 @@ class TestCommon(JitCommonTestCase):
                 #   autodiff support. Context manager forces the graph to contain
                 #   DifferentiableGraph nodes if they are present
                 with disable_autodiff_subgraph_inlining():
-                    def fn(*inputs, **kwargs):
-                        output = func(*inputs, **kwargs)
-                        return op.output_func(output)
 
-                    # bfloat16 grad doesn't work for some operators
-                    dtypes_to_grad_check = floating_and_complex_types_and(torch.half) \
-                        if op.skip_bfloat16_grad else floating_and_complex_types_and(torch.half, torch.bfloat16)
 
                     # Check scripted forward, grad, and grad grad
-                    script_fn = create_script_fn(self, name, func_type, op.output_func)
+                    script_fn = create_script_fn(self, name, func_type)
 
                     check_against_reference(self,
                                             script_fn,
-                                            fn,
+                                            func,
+                                            op.output_func,
                                             (*sample.input,) + sample.args,
                                             sample.kwargs,
-                                            no_grad=(dtype not in dtypes_to_grad_check))
+                                            no_grad=not test_backward)
 
                     # Check traced forward, grad, and grad grad
                     traced_fn = create_traced_fn(self, variant)
                     check_against_reference(self,
                                             traced_fn,
-                                            fn,
+                                            func,
+                                            op.output_func,
                                             (*sample.input,) + sample.args,
                                             sample.kwargs,
-                                            no_grad=(dtype not in dtypes_to_grad_check))
+                                            no_grad=not test_backward)
 
                     # Check alias annotation schema for correctness (make
                     #   sure inputs that aren't supposed to be modified aren't)
