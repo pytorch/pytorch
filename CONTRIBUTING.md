@@ -150,7 +150,19 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
   ```bash
   ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
   ```
+* If you run into issue running `git submodule update --init --recursive`. Please try the following:
+  - If you encountered error such as 
+  ```
+  fatal: unable to access 'https://github.com/pybind11/pybind11.git': could not load PEM client certificate ...
+  ```
+  check whether your `git config --global --list` contains valid SSL certificates. If you are using http proxy, checkout for keyword `http.proxysslcert` as well.
 
+  - If you encountered error such as
+  ```
+  error: Submodule 'third_party/pybind11' could not be updated
+  ```
+  check whether your `git config --global --list` contains any `submodule.*` configs. Remove them in your `~/.gitconfig` and try again.
+  - 
 ## Nightly Checkout & Pull
 
 The `tools/nightly.py` script is provided to ease pure Python development of
