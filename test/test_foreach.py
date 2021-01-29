@@ -583,14 +583,6 @@ class TestForeach(TestCase):
                     continue
 
                 expected = [torch_bin_op(t, s) for t, s in zip(tensors, scalars)]
-                #if dtype in [torch.complex64, torch.complex128] and self.device_type == "cuda":
-                #    with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                #        res = foreach_bin_op(tensors, scalars)
-#
-                #    with self.assertRaisesRegex(RuntimeError, "not implemented for"):
-                #        foreach_bin_op_(tensors, scalars)
-                #    continue
-                #else:
                 res = foreach_bin_op(tensors, scalars)
                 self.assertEqual(res, expected)
 
