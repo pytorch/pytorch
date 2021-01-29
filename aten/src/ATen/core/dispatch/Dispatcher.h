@@ -372,10 +372,6 @@ public:
     return c10::Dispatcher::singleton().redispatch<Return, Args...>(*this, currentDispatchKeySet, std::forward<Args>(args)...);
   }
 
-  Return redispatch(DispatchKey currentDispatchKey, Args... args) const {
-    return c10::Dispatcher::singleton().redispatch<Return, Args...>(*this, currentDispatchKey, std::forward<Args>(args)...);
-  }
-
 private:
   explicit TypedOperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
   : OperatorHandle(std::move(operatorIterator)) {}
