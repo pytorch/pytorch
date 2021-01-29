@@ -528,8 +528,9 @@ always be real-valued, even if :attr:`input` is complex.
           then the singular values of each matrix in the batch is returned in descending order.
 
 .. note:: The implementation of SVD on CPU uses the LAPACK routine `?gesdd` (a divide-and-conquer
-          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the MAGMA routine
-          `gesdd` as well.
+          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the cuSOLVER routines
+          `gesvdj` and `gesvdjBatched` on CUDA 10.1.243 and later, and uses the MAGMA routine `gesdd`
+          on earlier versions of CUDA.
 
 .. note:: The returned matrix `U` will be transposed, i.e. with strides
           :code:`U.contiguous().transpose(-2, -1).stride()`.
@@ -543,6 +544,10 @@ always be real-valued, even if :attr:`input` is complex.
 
 .. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is True.
 
+.. note:: Since `U` and `V` of an SVD is not unique, each vector can be multiplied by
+          an arbitrary phase factor :math:`e^{i \phi}` while the SVD result is still correct.
+          Different platforms, like Numpy, or inputs on different device types, may produce different
+          `U` and `V` tensors.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
