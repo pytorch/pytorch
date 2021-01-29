@@ -137,8 +137,14 @@ class FakeQuantize(FakeQuantizeBase):
 
         if self.fake_quant_enabled[0] == 1:
             if self.is_per_channel:
-                X = torch.fake_quantize_per_channel_affine(X, self.scale, self.zero_point,
-                                                           self.ch_axis, self.quant_min, self.quant_max)
+                if self.training:
+                    X, _mask = torch.fake_quantize_per_channel_affine_cachemask(
+                        X, self.scale, self.zero_point,
+                        self.ch_axis, self.quant_min, self.quant_max)
+                else:
+                    X = torch.fake_quantize_per_channel_affine(
+                        X, self.scale, self.zero_point,
+                        self.ch_axis, self.quant_min, self.quant_max)
             else:
                 X = torch.fake_quantize_per_tensor_affine(
                     X, float(self.scale), int(self.zero_point),
