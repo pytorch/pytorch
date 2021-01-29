@@ -1,24 +1,24 @@
-#include <algorithm>
-#include <vector>
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/InferSize.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/WrapDimUtils.h>
-#include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
-#include <c10/util/SmallVector.h>
-#include <ATen/native/Resize.h>
-#include <ATen/native/TypeProperties.h>
-#include <ATen/SparseTensorUtils.h>
-#include <ATen/quantized/QTensorImpl.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/SparseTensorUtils.h>
+#include <ATen/WrapDimUtils.h>
+#include <ATen/native/Copy.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/cpu/CatKernel.h>
-#include <ATen/native/Copy.h>
-#include <ATen/MemoryOverlap.h>
+#include <ATen/quantized/QTensorImpl.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
+#include <c10/util/SmallVector.h>
+#include <algorithm>
+#include <cstdint>
+#include <vector>
 
 namespace at {
 namespace native {
@@ -1190,7 +1190,12 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
   }
 }
 
-Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_t step) {
+Tensor slice(
+    const Tensor& self,
+    int64_t dim,
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
+    int64_t step) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
     TORCH_CHECK_INDEX(false, "slice() cannot be applied to a 0-dim tensor.");
@@ -1198,27 +1203,37 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   dim = maybe_wrap_dim(dim, ndim);
   auto sizes = self.sizes().vec();
   auto strides = self.strides().vec();
+
+  // handle optional parameters
+  int64_t start_val = start.has_value() ? start.value() : 0;
+  int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
+
   // TODO: support negative strides
   TORCH_CHECK(step > 0, "slice step must be positive");
-  if (start < 0) {
-    start += sizes[dim];
+
+  // INT64_MAX stands for default value.
+  if (start_val == INT64_MAX) {
+    start_val = 0;
   }
-  if (end < 0) {
-    end += sizes[dim];
+  if (start_val < 0) {
+    start_val += sizes[dim];
   }
-  if (start < 0) {
-    start = 0;
-  } else if (start >= sizes[dim]) {
-    start = sizes[dim];
+  if (end_val < 0) {
+    end_val += sizes[dim];
   }
-  if (end < start) {
-    end = start;
-  } else if (end >= sizes[dim]) {
-    end = sizes[dim];
+  if (start_val < 0) {
+    start_val = 0;
+  } else if (start_val >= sizes[dim]) {
+    start_val = sizes[dim];
   }
-  auto storage_offset = self.storage_offset() + start * strides[dim];
-  auto len = end - start;
-  sizes[dim] = (len + step - 1) / step;  // round-up
+  if (end_val < start_val) {
+    end_val = start_val;
+  } else if (end_val >= sizes[dim]) {
+    end_val = sizes[dim];
+  }
+  auto storage_offset = self.storage_offset() + start_val * strides[dim];
+  auto len = end_val - start_val;
+  sizes[dim] = (len + step - 1) / step; // round-up
   strides[dim] *= step;
   auto result = self.as_strided(sizes, strides, storage_offset);
   namedinference::propagate_names(result, self);
@@ -1755,12 +1770,10 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
   start_dim = maybe_wrap_dim(start_dim, self.dim());
   end_dim = maybe_wrap_dim(end_dim, self.dim());
   TORCH_CHECK(start_dim <= end_dim, "flatten() has invalid args: start_dim cannot come after end_dim");
-  std::vector<int64_t> shape;
 
   if (self.dim() == 0) {
     return self.reshape({1});
   }
-
   if (start_dim == end_dim) {
     return self;
   }
@@ -1770,16 +1783,17 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
   // It's clear we want result shape [0, 3, 0] but passing [0, -1, 0] to infer_size means the -1
   // can take on any value and satisfy the constraints.
   auto slice_numel = prod_intlist(self.sizes().slice(start_dim, end_dim - start_dim + 1));
+  std::vector<int64_t> shape;
   shape.reserve(self.dim() - end_dim + start_dim);
   for (int64_t i = 0; i < start_dim; i++) {
-    shape.push_back(self.size(i));
+    shape.push_back(self.sizes()[i]);
   }
   shape.push_back(slice_numel);
   for (int64_t i = end_dim + 1; i < self.dim(); i++) {
-    shape.push_back(self.size(i));
+    shape.push_back(self.sizes()[i]);
   }
 
-  return self.reshape(shape);
+  return native::reshape(self, shape);
 }
 
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim, Dimname out_dim) {
