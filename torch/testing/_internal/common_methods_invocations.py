@@ -351,7 +351,7 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
         (0, 0, 0),
     ]
 
-    vector_ords = (None, 0, 0.5, 1, 2, 3.5, inf, -0.5, -1, -2, -3.5)
+    vector_ords = (None, 0, 0.5, 1, 2, 3.5, inf, -0.5, -1, -2, -3.5, -inf)
     matrix_ords = (None, 'fro', 'nuc', 1, 2, inf, -1, -2, -inf)
 
     inputs = []
@@ -379,7 +379,7 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
                 # TODO: remove this check when `max` is implemented for
                 #       float16 and bfloat16. Issue:
                 #       https://github.com/pytorch/pytorch/issues/50790
-                if is_vector_norm and is_dtype_half and ord == inf:
+                if is_vector_norm and is_dtype_half and ord in [inf, -inf]:
                     continue
 
                 inputs.append(SampleInput(
@@ -783,6 +783,63 @@ class HermitianOpInfo(OpInfo):
         return hermitian_func
 
 
+class TriangularOpInfo(OpInfo):
+    """Operator information for function that take lower or upper triangular matrices as input.
+    They require a modified function to be tested for gradcheck, because the finite-difference algorithm
+    for calculating derivatives does not preserve the triangular property of the input and returning incorrect results.
+    """
+
+    def get_op(self):
+        """
+        Returns the function variant of the operator, torch.<op_name>,
+        compatible with gradcheck for triangular input functions.
+        It works only for single input argument and upper kwarg
+        """
+        def triangular_func(non_triangular_input, upper=False):
+            if upper:
+                triangular_input = non_triangular_input.triu()
+            else:
+                triangular_input = non_triangular_input.tril()
+            return self.op(triangular_input, upper=upper)
+
+        return triangular_func
+
+    def get_method(self):
+        """
+        Returns the method variant of the operator
+        compatible with gradcheck for triangular input functions.
+        It works only for single input argument and upper kwarg
+        """
+        def triangular_func(non_triangular_input, upper=False):
+            if upper:
+                triangular_input = non_triangular_input.triu()
+            else:
+                triangular_input = non_triangular_input.tril()
+            return self.method_variant(triangular_input, upper=upper)
+
+        return triangular_func
+
+    def sample_inputs(self, device, dtype, requires_grad=False):
+        """
+        This function generates Cholesky factors of positive-definite (non-singular) Hermitian (symmetric) matrices
+        for cholesky_inverse.
+        """
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+        inputs = (
+            torch.zeros(0, 0, dtype=dtype, device=device),  # 0x0 matrix
+            torch.zeros(0, 2, 2, dtype=dtype, device=device),  # zero batch of matrices
+            random_hermitian_pd_matrix(S, dtype=dtype, device=device),  # single matrix
+            random_hermitian_pd_matrix(S, 2, dtype=dtype, device=device),  # batch of matrices
+        )
+        test_cases = (torch.linalg.cholesky(a) for a in inputs)
+        out = []
+        for a in test_cases:
+            a.requires_grad = requires_grad
+            out.append(SampleInput(a))
+            out.append(SampleInput(a, kwargs=dict(upper=True)))
+        return out
+
+
 def sample_inputs_linalg_pinv(op_info, device, dtype, requires_grad=False):
     """
     This function generates input for torch.linalg.pinv with distinct singular values so that autograd is always stable
@@ -812,7 +869,7 @@ def sample_inputs_linalg_pinv_hermitian(op_info, device, dtype, requires_grad=Fa
         o.kwargs = {"hermitian": True}
     return out
 
-def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False):
+def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False, vector_rhs_allowed=True):
     """
     This function generates always solvable input for torch.linalg.solve
     Using random_fullrank_matrix_distinct_singular_value gives a non-singular (=invertible, =solvable) matrices 'a'.
@@ -829,12 +886,20 @@ def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False):
         (1,) - same as () but explicit
         (3,) - solve for 3 vectors.
     Zeros in dimensions are edge cases in the implementation and important to test for in order to avoid unexpected crashes.
+    'vector_rhs_allowed' controls whether to include nrhs = () to the list of SampleInputs.
+    torch.solve / triangular_solve / cholesky_solve (opposed to torch.linalg.solve) do not allow
+    1D tensors (vectors) as the right-hand-side.
+    Once torch.solve / triangular_solve / cholesky_solve and its testing are removed,
+    'vector_rhs_allowed' may be removed here as well.
     """
     from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
     batches = [(), (0, ), (2, )]
     ns = [0, 5]
-    nrhs = [(), (1, ), (3, )]
+    if vector_rhs_allowed:
+        nrhs = [(), (1,), (3,)]
+    else:
+        nrhs = [(1,), (3,)]
     out = []
     for n, batch, rhs in product(ns, batches, nrhs):
         a = random_fullrank_matrix_distinct_singular_value(n, *batch, dtype=dtype).to(device)
@@ -842,6 +907,22 @@ def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False):
         b = torch.randn(*batch, n, *rhs, dtype=dtype, device=device)
         b.requires_grad = requires_grad
         out.append(SampleInput((a, b)))
+    return out
+
+
+def sample_inputs_legacy_solve(op_info, device, dtype, requires_grad=False):
+    """
+    This function generates always solvable input for legacy solve functions
+    (the ones that are not in torch.linalg module).
+    The difference from sample_inputs_linalg_solve is that here the right-hand-side of A x = b equation
+    should have b.ndim >= 2, vectors are not allowed.
+    Also the arguments order is swapped.
+    """
+    out = sample_inputs_linalg_solve(
+        op_info, device, dtype, requires_grad=requires_grad, vector_rhs_allowed=False
+    )
+    for sample in out:
+        sample.input = tuple(reversed(sample.input))
     return out
 
 
@@ -1146,6 +1227,23 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_broadcast_to),
+    TriangularOpInfo('cholesky_inverse',
+                     op=torch.cholesky_inverse,
+                     dtypes=floating_and_complex_types(),
+                     # TODO: RuntimeError: cholesky_inverse does not support automatic differentiation for outputs
+                     # with complex dtype.
+                     test_complex_grad=False,
+                     test_inplace_grad=False,
+                     check_batched_gradgrad=False,
+                     supports_tensor_out=True,
+                     decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+                     skips=(
+                         # These tests do not take into account custom op.get_op()
+                         # TODO: implement op.input_func instead of modifying op.get_op()
+                         # See https://github.com/pytorch/pytorch/issues/50837
+                         SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+                         SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                                  dtypes=[torch.complex64, torch.complex128]),)),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -1503,6 +1601,17 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_tensor_split,),
+    OpInfo('triangular_solve',
+           op=torch.triangular_solve,
+           dtypes=floating_and_complex_types(),
+           test_inplace_grad=False,
+           supports_tensor_out=False,
+           sample_inputs_func=sample_inputs_legacy_solve,
+           check_batched_gradgrad=False,
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           # CUDA gradchecks are slow and triangular solve backward is a composite operation
+           # see discussion https://github.com/pytorch/pytorch/pull/47761#issuecomment-747316775
+           skips=(SkipInfo('TestGradients', 'test_fn_gradgrad', device_type='cuda'),)),
     UnaryUfuncInfo('exp2',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp2),
                    dtypes=all_types_and(torch.bool, torch.half),
@@ -2867,7 +2976,6 @@ def method_tests():
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
                                                              torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
         ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
-        ('triangular_solve', (S, M), ((S, S), ), '', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('kron', (S, S), ((M, L),))
     ]
 
