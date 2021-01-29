@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/lower_compute_at_map.h>
+#include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 #include <memory>
 #include <ostream>
@@ -36,6 +38,18 @@ class TORCH_CUDA_CU_API GpuLower {
   //! (or nullptr if no lowering is in progress)
   static GpuLower* current();
 
+  const ComputeAtMap& caLoopMap() const {
+    return ca_loop_map_;
+  }
+
+  const ComputeAtMap& caIndexMap() const {
+    return ca_index_map_;
+  }
+
+  const ComputeAtMap& caParallelMap() const {
+    return ca_parallel_map_;
+  }
+
  private:
   void lower();
 
@@ -54,6 +68,11 @@ class TORCH_CUDA_CU_API GpuLower {
   // Fusion IR node to Kernel IR node mapping
   std::unordered_map<const Val*, kir::Val*> kir_val_map_;
   std::unordered_map<const Expr*, kir::Expr*> kir_expr_map_;
+
+  // Some stateful information during lowering
+  ComputeAtMap ca_loop_map_;
+  ComputeAtMap ca_index_map_;
+  ComputeAtMap ca_parallel_map_;
 
   Fusion* fusion_ = nullptr;
 };

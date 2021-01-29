@@ -69,7 +69,7 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
         continue;
       if (dom[i]->isBroadcast())
         continue;
-      out_domain[i] = new IterDomain(dom[i]->start(), dom[i]->extent());
+      out_domain[i] = dom[i]->clone();
     }
   }
   for (size_t dim_i = 0; dim_i < out_domain.size(); dim_i++) {
@@ -689,6 +689,7 @@ TensorView* broadcast(
   }
 
   std::vector<IterDomain*> out_domain;
+  // Don't propagate reduction IDs through arith ops.
   auto inp_domain = TensorDomain::noReductions(inp->getRootDomain());
   size_t iinp = 0, ibdim = 0;
   while (ibdim < is_broadcast_dim.size()) {
@@ -699,8 +700,7 @@ TensorView* broadcast(
           ParallelType::Serial,
           IterType::BroadcastWithoutStride));
     } else {
-      // Don't propagate reduction IDs through arith ops.
-      out_domain.push_back(inp_domain[iinp]);
+      out_domain.push_back(inp_domain[iinp]->clone());
       iinp++;
     }
     ibdim++;
@@ -723,7 +723,7 @@ TensorView* transpose(
 
   for (size_t i = 0; i < out_domain.size(); ++i) {
     auto in_id = inp_domain[new2old[i]];
-    out_domain[i] = new IterDomain(in_id->start(), in_id->extent());
+    out_domain[i] = in_id->clone();
   }
 
   TensorView* out_tensor = new TensorView(

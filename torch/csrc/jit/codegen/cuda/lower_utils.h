@@ -104,6 +104,12 @@ namespace loop_utils {
 // or refactor and use in lower_allocation
 std::pair<kir::ForLoop*, int64_t> getAllocPoint(
     const TensorView* tv,
+    const std::vector<kir::ForLoop*>& loops,
+    const std::unordered_map<IterDomain*, IterDomain*>& id_map,
+    bool use_id_map);
+
+std::pair<kir::ForLoop*, int64_t> getAllocPoint(
+    const TensorView* tv,
     const std::vector<kir::ForLoop*>& loops);
 
 // Go through exprs mapping root domains from producer to consumer. Provides a

@@ -7,9 +7,9 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-std::vector<Expr*> reorderExprsForComputeAt(const std::vector<Expr*>& exprs);
+std::vector<Expr*> reorderExprsForComputeAt();
 
-}
+} // namespace cuda
 } // namespace fuser
 } // namespace jit
 } // namespace torch

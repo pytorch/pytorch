@@ -69,11 +69,10 @@ class AllocationInserter : public kir::MutableIrVisitor {
         break;
       }
 
-      auto ca_id =
-          gpu_lower->lowerValue(fuser_tv->getComputeAtAxis(alloc_pos).first)
-              ->as<kir::IterDomain>();
+      auto local_id = gpu_lower->lowerValue(fuser_tv->axis(alloc_pos))
+                          ->as<kir::IterDomain>();
 
-      if (ca_id == fl_id) {
+      if (gpu_lower->caLoopMap().areMapped(local_id, fl_id)) {
         alloc_pos++;
       }
 
@@ -114,10 +113,12 @@ class AllocationInserter : public kir::MutableIrVisitor {
           info.buffer->fuserTv()->axis(axis_i)->isBroadcast()) {
         continue;
       }
-      auto ca_id =
-          gpu_lower->lowerValue(fuser_tv->getComputeAtAxis(axis_i).first)
+      auto concrete_id =
+          gpu_lower
+              ->lowerValue(gpu_lower->caParallelMap().getConcreteMappedID(
+                  fuser_tv->axis(axis_i)))
               ->as<kir::IterDomain>();
-      init_dims.push_back(ca_id);
+      init_dims.push_back(concrete_id);
     }
     kir::Expr* init_expr = ir_builder.create<kir::UnaryOp>(
         UnaryOpType::Set, info.buffer, init_val);
@@ -168,12 +169,16 @@ class AllocationInserter : public kir::MutableIrVisitor {
         continue;
       }
 
-      const auto ca_id =
-          gpu_lower->lowerValue(fuser_tv->getComputeAtAxis(axis_i).first)
+      auto concrete_id =
+          gpu_lower
+              ->lowerValue(gpu_lower->caParallelMap().getConcreteMappedID(
+                  fuser_tv->axis(axis_i)))
               ->as<kir::IterDomain>();
-      const bool is_block_dim = isParallelTypeBlockDim(ca_id->parallelType());
-      const bool is_thread_dim = isParallelTypeThreadDim(ca_id->parallelType());
-      const bool is_thread = isParallelTypeThread(ca_id->parallelType());
+      const bool is_block_dim =
+          isParallelTypeBlockDim(concrete_id->parallelType());
+      const bool is_thread_dim =
+          isParallelTypeThreadDim(concrete_id->parallelType());
+      const bool is_thread = isParallelTypeThread(concrete_id->parallelType());
 
       if (axis_i < info.alloc_pos) {
         // Even when the axis is outside the allocation position, if the
@@ -196,7 +201,7 @@ class AllocationInserter : public kir::MutableIrVisitor {
           continue;
         }
       }
-      alloc_dims.push_back(ca_id->rawExtent());
+      alloc_dims.push_back(concrete_id->rawExtent());
     }
 
     // Multiply all the dimensions we're going to use for the allocation

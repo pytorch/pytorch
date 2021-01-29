@@ -308,7 +308,8 @@ void BackwardVisitor::traverseFrom(
     for (auto out : traversal_pair.first->outputs()) {
       TORCH_INTERNAL_ASSERT(
           vals.find(out) != vals.end(),
-          "Invalid backward traversal found. Some output paths were not provided.");
+          "Invalid backward traversal found. Some output paths were not provided:",
+          out);
     }
   }
 
@@ -577,8 +578,14 @@ void InputsOf::handle(Val* v) {
 }
 
 std::unordered_set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
+  return outputs(fusion, {output_});
+}
+
+std::unordered_set<Val*> InputsOf::outputs(
+    Fusion* fusion,
+    const std::vector<Val*>& outputs_) {
   InputsOf io;
-  io.traverseFrom(FusionGuard::getCurFusion(), {output_}, false);
+  io.traverseFrom(fusion, outputs_, false);
   return io.inputs;
 }
 

@@ -57,15 +57,11 @@ class TORCH_CUDA_CU_API UnrollPass {
   static std::vector<kir::Expr*> runPass(
       Fusion* fusion,
       const std::vector<kir::Expr*>& exprs,
-      const ThreadPredicateMap& thread_predicates,
-      const ComputeAtRootDomainMap& ca_root_map);
+      const ThreadPredicateMap& thread_predicates);
 
  private:
-  UnrollPass(
-      Fusion* fusion,
-      const ThreadPredicateMap& thread_predicates,
-      const ComputeAtRootDomainMap& ca_root_map)
-      : thread_predicates_(thread_predicates), ca_root_map_(ca_root_map) {
+  UnrollPass(Fusion* fusion, const ThreadPredicateMap& thread_predicates)
+      : thread_predicates_(thread_predicates) {
     p2c_root_map_ = loop_utils::p2cRootMap(fusion->exprs());
   }
 
@@ -90,8 +86,6 @@ class TORCH_CUDA_CU_API UnrollPass {
 
   // Map from TensorView
   const ThreadPredicateMap& thread_predicates_;
-
-  const ComputeAtRootDomainMap& ca_root_map_;
 
   IterDomainMap p2c_root_map_;
 

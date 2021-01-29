@@ -98,6 +98,10 @@ class IndexCompute : public BackwardVisitor {
   // IDs that are a result of contiguous merges
   std::unordered_set<kir::IterDomain*> contig_ids;
 
+  // Mentions if we should propagate an index down a particular IterDomain path
+  // if there's an option
+  std::unordered_set<kir::IterDomain*> preferred_paths_;
+
  public:
   const std::unordered_map<kir::IterDomain*, kir::Val*>& indexMap() const {
     return index_map_;
@@ -117,15 +121,14 @@ class IndexCompute : public BackwardVisitor {
       std::unordered_map<kir::IterDomain*, kir::Val*> initial_index_map,
       std::unordered_map<kir::IterDomain*, kir::Val*> _extent_map,
       std::unordered_set<kir::IterDomain*> _zero_merged_in,
-      const std::vector<bool>& _root_contiguity);
+      const std::vector<bool>& _root_contiguity,
+      std::unordered_set<kir::IterDomain*> preferred_paths = {});
 
   // Updates index_map, extent_map, and zero_merged_in based on id_map and
-  // returns a new IndexCompute ready to be used. new_index_entries are not
-  // mapped, but are added to index_map.
+  // returns a new IndexCompute ready to be used.
   IndexCompute updateIndexCompute(
       const TensorDomain* new_td,
       const std::unordered_map<IterDomain*, IterDomain*>& id_map,
-      std::unordered_map<kir::IterDomain*, kir::Val*> new_index_entries,
       const std::vector<bool>& _root_contiguity);
 
   virtual void run();
@@ -133,8 +136,8 @@ class IndexCompute : public BackwardVisitor {
   // Map producer contiguity information to consumer, if entries don't match
   // mark as false
   static std::vector<bool> contiguityPasC(
-      kir::TensorDomain* producer,
-      kir::TensorDomain* consumer);
+      kir::TensorView* producer,
+      kir::TensorView* consumer);
 
   static std::vector<bool> contiguityAnd(
       const std::vector<bool>& contig1,
@@ -173,27 +176,23 @@ class Index {
   static kir::TensorIndex* getProducerIndex_impl(
       TensorView* producer,
       const TensorView* consumer,
-      const std::vector<kir::ForLoop*>& loops,
-      const ComputeAtRootDomainMap& ca_root_map);
+      const std::vector<kir::ForLoop*>& loops);
 
   // Consumer indexing if it's in shared or local memory
   static kir::TensorIndex* getConsumerIndex_impl(
       const TensorView* consumer,
-      const std::vector<kir::ForLoop*>& loops,
-      const ComputeAtRootDomainMap& ca_root_map);
+      const std::vector<kir::ForLoop*>& loops);
 
   // Producer if it's in global memory
   static kir::TensorIndex* getGlobalProducerIndex(
       TensorView* producer,
       const TensorView* consumer,
-      const std::vector<kir::ForLoop*>& loops,
-      const ComputeAtRootDomainMap& ca_root_map);
+      const std::vector<kir::ForLoop*>& loops);
 
   // Consumer indexing if it's in global memory
   static kir::TensorIndex* getGlobalConsumerIndex(
       const TensorView* consumer,
-      const std::vector<kir::ForLoop*>& loops,
-      const ComputeAtRootDomainMap& ca_root_map);
+      const std::vector<kir::ForLoop*>& loops);
 
  public:
   // Indexing functions
@@ -203,14 +202,12 @@ class Index {
   static kir::TensorIndex* getProducerIndex(
       TensorView* producer,
       const TensorView* consumer,
-      const std::vector<kir::ForLoop*>& loops,
-      const ComputeAtRootDomainMap& ca_root_map);
+      const std::vector<kir::ForLoop*>& loops);
 
   // Consumer index dispatch
   static kir::TensorIndex* getConsumerIndex(
       const TensorView* consumer,
-      const std::vector<kir::ForLoop*>& loops,
-      const ComputeAtRootDomainMap& ca_root_map);
+      const std::vector<kir::ForLoop*>& loops);
 
   // Consumer indices for predicates, keep all indices matching in root domain.
   // Even those not used for physical addressing. Returns pair <root indices, if
@@ -219,7 +216,6 @@ class Index {
       const kir::TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops,
       const std::vector<bool>& root_contiguity,
-      const ComputeAtRootDomainMap& ca_root_map,
       bool unswitch = false);
 };
 

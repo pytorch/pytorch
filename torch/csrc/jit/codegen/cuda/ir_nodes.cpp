@@ -584,10 +584,10 @@ void IterDomain::parallelize(ParallelType t) {
 }
 
 TensorDomain::TensorDomain(
-    std::vector<IterDomain*> domain,
+    std::vector<IterDomain*> root_domain,
     std::vector<bool> contiguity)
     : Val(ValType::TensorDomain),
-      root_domain_(std::move(domain)),
+      root_domain_(std::move(root_domain)),
       contiguity_(
           contiguity.empty() ? std::vector<bool>(root_domain_.size(), false)
                              : std::move(contiguity)) {

@@ -262,10 +262,10 @@ TEST(NVFuserTest, FusionExprEvalBasic_CUDA) {
   //  (ex. `tv0->getRootDomain()[0]->extent()`
   //   instead of `tv0->axis(0)->extent()`)
   //
-  evaluator.bind(tv0->getRootDomain()[0]->extent(), 6);
-  evaluator.bind(tv0->getRootDomain()[1]->extent(), 128);
-  evaluator.bind(tv1->getRootDomain()[0]->extent(), 6);
-  evaluator.bind(tv1->getRootDomain()[1]->extent(), 128);
+  evaluator.bind(tv0->getRootDomain()[0]->rawExtent(), 6);
+  evaluator.bind(tv0->getRootDomain()[1]->rawExtent(), 128);
+  evaluator.bind(tv1->getRootDomain()[0]->rawExtent(), 6);
+  evaluator.bind(tv1->getRootDomain()[1]->rawExtent(), 128);
 
   // 3. Evaluate and check result values
   TORCH_CHECK(tv2->domain()->nDims() == 3);
@@ -306,8 +306,8 @@ TEST(NVFuserTest, FusionExprEvalComplex_CUDA) {
   ExpressionEvaluator evaluator(&fusion);
 
   // 2. Bind values
-  evaluator.bind(tv0->getRootDomain()[0]->extent(), 129);
-  evaluator.bind(tv0->getRootDomain()[1]->extent(), 127);
+  evaluator.bind(tv0->getRootDomain()[0]->rawExtent(), 129);
+  evaluator.bind(tv0->getRootDomain()[1]->rawExtent(), 127);
 
   // Evaluate and check extent values
   TORCH_CHECK(tv0->domain()->nDims() == 2);
@@ -369,10 +369,10 @@ TEST(NVFuserTest, FusionExprEvalPostLower_CUDA) {
   ExpressionEvaluator evaluator(&fusion);
 
   // 2. Bind values
-  evaluator.bind(tv0->getRootDomain()[0]->extent(), 6);
-  evaluator.bind(tv0->getRootDomain()[1]->extent(), 128);
-  evaluator.bind(tv1->getRootDomain()[0]->extent(), 6);
-  evaluator.bind(tv1->getRootDomain()[1]->extent(), 128);
+  evaluator.bind(tv0->getRootDomain()[0]->rawExtent(), 6);
+  evaluator.bind(tv0->getRootDomain()[1]->rawExtent(), 128);
+  evaluator.bind(tv1->getRootDomain()[0]->rawExtent(), 6);
+  evaluator.bind(tv1->getRootDomain()[1]->rawExtent(), 128);
 
   // 3. Evaluate and check result values
   TORCH_CHECK(tv2->domain()->nDims() == 3);
@@ -1148,25 +1148,25 @@ TEST(NVFuserTest, FusionParser_CUDA) {
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3) {
   float T2[1];
   if ((((((blockIdx.x * 1) + (1 - 1)) * 128) + threadIdx.x) < T0.size[0])) {
-    for(size_t ki25 = 0; ki25 < 1; ++ki25) {
-      T2[ki25]
-        = T0[((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x)]
-        * T1[((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x)];
-      T3[((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x)]
-        = T2[ki25]
-        * T0[((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x)];
+    for(size_t ki38 = 0; ki38 < 1; ++ki38) {
+      T2[ki38]
+        = T0[((((blockIdx.x * 1) + ki38) * 128) + threadIdx.x)]
+        * T1[((((blockIdx.x * 1) + ki38) * 128) + threadIdx.x)];
+      T3[((((blockIdx.x * 1) + ki38) * 128) + threadIdx.x)]
+        = T2[ki38]
+        * T0[((((blockIdx.x * 1) + ki38) * 128) + threadIdx.x)];
     }
   } else {
-    for(size_t ki25 = 0; ki25 < 1; ++ki25) {
-      if ((((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x) < T0.size[0])) {
-        T2[ki25]
-          = T0[((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x)]
-          * T1[((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x)];
+    for(size_t ki38 = 0; ki38 < 1; ++ki38) {
+      if ((((((blockIdx.x * 1) + ki38) * 128) + threadIdx.x) < T0.size[0])) {
+        T2[ki38]
+          = T0[((((blockIdx.x * 1) + ki38) * 128) + threadIdx.x)]
+          * T1[((((blockIdx.x * 1) + ki38) * 128) + threadIdx.x)];
       }
-      if ((((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x) < T0.size[0])) {
-        T3[((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x)]
-          = T2[ki25]
-          * T0[((((blockIdx.x * 1) + ki25) * 128) + threadIdx.x)];
+      if ((((((blockIdx.x * 1) + ki38) * 128) + threadIdx.x) < T0.size[0])) {
+        T3[((((blockIdx.x * 1) + ki38) * 128) + threadIdx.x)]
+          = T2[ki38]
+          * T0[((((blockIdx.x * 1) + ki38) * 128) + threadIdx.x)];
       }
     }
   }
@@ -4668,6 +4668,171 @@ TEST(NVFuserTest, FusionAdvancedIndexing8_CUDA) {
       &fusion, cg_outputs, {at_t0, at_t1}, {aten_output}, __LINE__, __FILE__);
 }
 
+// Intended to stress the lowering of our code generator
+TEST(NVFuserTest, FusionAdvancedLowering1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeConcreteTensor({9, 5});
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = add(tv0, new Double(1));
+  TensorView* tv2 = add(tv1, new Double(2));
+  TensorView* tv3 = add(tv1, new Double(3));
+  TensorView* tv4 = sum(tv3, {1});
+
+  fusion.addOutput(tv2);
+  fusion.addOutput(tv4);
+
+  tv4->split(1, 4);
+  auto tv5 = tv4->rFactor({2});
+
+  tv1->computeAt(tv5, -1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor aten_input = at::randn({9, 5}, options);
+
+  auto t1 = aten_input.add(1.0);
+  auto t2 = t1.add(2.0);
+  auto t3 = t1.add(3.0);
+  auto t4 = t3.sum(1);
+
+  std::vector<at::Tensor> aten_outputs = {t2, t4};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto cg_outputs = fe.runFusion({aten_input});
+
+  testValidate(
+      &fusion, cg_outputs, {aten_input}, aten_outputs, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionAdvancedLowering2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Progressively broadcast tensors
+  TensorView* tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  TensorView* tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv1);
+  TensorView* tv2 = makeSymbolicTensor(3);
+  fusion.addInput(tv2);
+
+  TensorView* tv3 = add(tv0, new Double(1));
+  TensorView* tv4 = broadcast(tv3, {false, true});
+  TensorView* tv5 = add(tv4, tv1);
+  TensorView* tv6 = add(tv5, tv2);
+
+  fusion.addOutput(tv6);
+
+  // Split inner dimension
+  tv6->split(1, 4);
+  // Merge middle dims with outer dimensions
+  tv6->merge(2);
+  tv6->merge(0);
+
+  // tv6[I0*I1o, I1i*I2]
+
+  // Compute everything inline
+  tv0->computeAt(tv6, -1);
+
+  tv6->axis(0)->parallelize(ParallelType::BIDx);
+  tv6->axis(1)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  int x = 13, y = 9, z = 5;
+  at::Tensor t0 = at::randn({y}, options);
+  at::Tensor t1 = at::randn({y, z}, options);
+  at::Tensor t2 = at::randn({x, y, z}, options);
+
+  auto t3 = t0.add(1.0);
+  auto t4 = t3.unsqueeze(-1);
+  auto t5 = t4.add(t1);
+  auto t6 = t5.add(t2);
+
+  std::vector<IValue> aten_inputs = {t0, t1, t2};
+  std::vector<at::Tensor> aten_outputs = {t6};
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
+}
+
+// TODO: Enable test
+TEST(NVFuserTest, FusionAdvancedLowering3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeConcreteTensor({1, -1});
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  // [b0, i1]
+  auto tv2 = add(tv0, new Double(2.0));
+
+  // [i0, i1]
+  auto tv3 = add(tv1, new Double(3.0));
+
+  // [b0, i1]
+  auto tv4 = add(tv2, new Double(4.0));
+
+  // [io, i1]
+  auto tv5 = add(tv2, tv3);
+
+  fusion.addOutput(tv4);
+  fusion.addOutput(tv5);
+
+  // TODO: Enable this computeAt, enable test.
+  // tv0->computeAt(tv4, -1);
+}
+
+// This excercises indexing with broadcast root axes. Non-broadcast
+// axes need to be preferred when propagating index exprs to root
+// axes. See, e.g., Index::getConsumerIndex_impl.
+TEST(NVFuserTest, FusionAdvancedLowering4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = broadcast(tv0, {false, true});
+  auto tv2 = broadcast(tv1, {false, false, true});
+  auto tv3 = makeSymbolicTensor(3);
+  fusion.addInput(tv3);
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  tv4->merge(1)->merge(0);
+  tv4->split(0, 8);
+  tv0->computeAt(tv4, 1);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  const int bx = 10;
+  const int by = 20;
+  const int bz = 30;
+  at::Tensor t0 = at::randn({bx}, options);
+  at::Tensor t3 = at::randn({bx, by, bz}, options);
+  std::vector<IValue> aten_inputs = {t0, t3};
+
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto aten_output =
+      t0.unsqueeze(-1).expand({bx, by}).unsqueeze(-1).expand({bx, by, bz}) + t3;
+
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+}
+
 // Test a simple Gemm but also play around with fusion executor features
 TEST(NVFuserTest, FusionSimpleGemm_CUDA) {
   Fusion fusion;
@@ -5079,8 +5244,6 @@ TEST(NVFuserTest, FusionGridReduction1_CUDA) {
 
   int numel_x = 10000;
   int numel_y = 65000;
-
-  // fusion.printKernel();
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor input = at::randn({numel_x, numel_y}, options);

@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/lower_compute_at_map.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 
 namespace torch {
@@ -27,19 +28,12 @@ namespace cuda {
 //!
 //! It does not generate predicates, but it will generate allocations, and loop
 //! nests to initialize reduction buffers.
-//!
 class TORCH_CUDA_CU_API LoopNestGenerator {
  public:
-  static std::vector<kir::Expr*> loweredExprs(
-      Fusion* fusion,
-      const std::vector<Expr*>& exprs) {
-    FUSER_PERF_SCOPE("LoopNestGenerator::loweredExprs");
-    LoopNestGenerator generator(fusion, exprs);
-    return generator.lowered_exprs_;
-  }
+  static std::vector<kir::Expr*> loweredExprs(const std::vector<Expr*>& exprs);
 
  private:
-  LoopNestGenerator(Fusion* fusion, const std::vector<Expr*>& exprs);
+  LoopNestGenerator(const std::vector<Expr*>& exprs);
 
   // Open a new inner most for loop, track which TV it was constructed from
   // according to the computeAt chain.
@@ -49,7 +43,7 @@ class TORCH_CUDA_CU_API LoopNestGenerator {
   void closeFor();
 
   // Appends an expression to the current scope
-  void pushBack(kir::Expr* expr);
+  void pushFront(kir::Expr* expr);
 
   void handle(const Expr*);
 
@@ -60,15 +54,9 @@ class TORCH_CUDA_CU_API LoopNestGenerator {
   // Lowered exprs to return
   std::vector<kir::Expr*> lowered_exprs_;
 
-  // Fusion pointer for convenience
-  Fusion* fusion_ = nullptr;
-
   // Keep all for loops conveniently to make unrolling easier, basically just a
   // stack of the active for_loops
   std::vector<kir::ForLoop*> for_loops_;
-
-  // Kernel IR builder
-  kir::IrBuilder ir_builder_;
 };
 
 } // namespace cuda

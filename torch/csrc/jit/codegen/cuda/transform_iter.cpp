@@ -214,6 +214,12 @@ void ReplayTransformations::runReplay() {
       [](std::pair<IterDomain*, size_t> entry) { return entry.first; });
 }
 
+// TODO: Make sure the replay and target domains have a
+// producer-consumer relationship when forward_bcast_mismatch is
+// true. When it's true, a merge expr with amissing axis may
+// erroneously be forwarded even if the axis of the replayed tensor is
+// not broadcast. It should not occur when the replay and target
+// domains have a producer-consumer relationship.
 BestEffortReplay::BestEffortReplay(
     const std::vector<IterDomain*>& replay_domain,
     const std::vector<IterDomain*>& target_domain,
@@ -303,10 +309,9 @@ BestEffortReplay::BestEffortReplay(
       IterDomain* r_inner = id_map_.find(t_inner) != id_map_.end()
           ? id_map_.at(t_inner)
           : nullptr;
-      if (r_outer != nullptr && r_inner == nullptr && t_inner->isBroadcast()) {
+      if (r_outer != nullptr && r_inner == nullptr) {
         id_map_[t_merge->out()] = r_outer;
-      } else if (
-          r_inner != nullptr && r_outer == nullptr && t_outer->isBroadcast()) {
+      } else if (r_inner != nullptr && r_outer == nullptr) {
         id_map_[t_merge->out()] = r_inner;
       }
     }

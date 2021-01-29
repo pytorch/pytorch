@@ -280,7 +280,6 @@ class ReadAfterWriteSyncs : public kir::MutableIrVisitor {
 
       kir::IrBuilder ir_builder(GpuLower::current()->kernel());
       auto sync_expr = ir_builder.create<kir::Sync>();
-
       if (out_tv->fuserTv()->getThisComputeAtAxis() == 0) {
         // Sync should be placed at global scope, after its outer most loop if
         // it has one.
@@ -299,23 +298,21 @@ class ReadAfterWriteSyncs : public kir::MutableIrVisitor {
         // Find the last loop in computeAt of out_tv, this is the loop where we
         // would place an allocation for out_tv
         auto fuser_tv = out_tv->fuserTv();
-        auto ca_id =
-            fuser_tv
-                ->getComputeAtAxis(int(fuser_tv->getThisComputeAtAxis()) - 1)
-                .first;
-        auto lowered_ca_id =
-            GpuLower::current()->lowerValue(ca_id)->as<kir::IterDomain>();
+        auto lowered_local_id =
+            GpuLower::current()
+                ->lowerValue(fuser_tv->axis(
+                    (int)out_tv->fuserTv()->getThisComputeAtAxis() - 1))
+                ->as<kir::IterDomain>();
 
-        // Note that tensors are allocated outside a reduction axis if
-        // exists. However, that only happens with output tensors,
-        // which by definition does not need syncthreads.
         auto loops_it = std::find_if(
             for_loops_.begin(),
             for_loops_.end(),
-            [&lowered_ca_id](const auto& loop) {
-              return lowered_ca_id == loop->iter_domain() ||
+            [&lowered_local_id](const auto& loop) {
+              return GpuLower::current()->caLoopMap().areMapped(
+                         loop->iter_domain(), lowered_local_id) ||
                   loop->iter_domain()->parallelType() == ParallelType::Unroll;
             });
+
         TORCH_INTERNAL_ASSERT(loops_it != for_loops_.end());
 
         auto place_in = *loops_it;
