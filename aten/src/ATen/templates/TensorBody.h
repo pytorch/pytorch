@@ -335,7 +335,9 @@ class TORCH_API Tensor {
   caffe2::TypeMeta dtype() const noexcept;
 
   /// Returns a `Tensor`'s device.
-  Device device() const;
+  inline Device device() const {
+    return impl_->device();
+  }
 
   /// Returns a `Tensor`'s device index.
   int64_t get_device() const;

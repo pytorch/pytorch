@@ -72,6 +72,13 @@ private:
   friend class OperatorHandle;
   template<class> friend class TypedOperatorHandle;
 
+  // Helper utility function for internal use only.
+  template<class Return, class... Args>
+  Return _callWithDispatchKeySet(const TypedOperatorHandle<Return(Args...)>& op, const KernelFunction& kernel, DispatchKeySet dispatchKeySet, Args... args) const;
+
+  // Helper utility function for internal use only.
+  void _callBoxed(const OperatorHandle& op, const impl::OperatorEntry& entry, const KernelFunction& kernel, DispatchKeySet dispatchKeySet, Stack* stack) const;
+
 public:
   ~Dispatcher();
 
@@ -130,11 +137,6 @@ public:
   template<class Return, class... Args>
   Return call(const TypedOperatorHandle<Return (Args...)>& op, Args... args) const;
 
-  // Like call, but override the default DispatchKey calculation code,
-  // instead dispatching straight to the provided DispatchKey
-  template<class Return, class... Args>
-  Return callWithDispatchKey(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey dispatchKey, Args... args) const;
-
   // Like call, but intended for use in a redispatch: you are currently
   // in some currentDispatchKey, you have finished processing the key and
   // you now want to redispatch to the next dispatch key in the chain.
@@ -143,8 +145,21 @@ public:
   template<class Return, class... Args>
   Return redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey currentDispatchKey, Args... args) const;
 
+
+  // Like call, but intended for use in a redispatch in kernels that have explicitly performed the DispatchKey update calculatulation.
+  // This will take the DispatchKeySet completely as is and dispatch to the kernel of the corresponding highest priority key in the set.
+  // Note that this version of redispatch treats the inputted DispatchKeySet *as is*, and does NOT mask out the highest priority key.
+  // See Note [Plumbing Keys Through The Dispatcher]
+  template<class Return, class... Args>
+  Return redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const;
+
   // Invoke an operator via the boxed calling convention using an IValue stack
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
+
+  // TODO: This will only be useful if we write a backend fallback that plumbs dispatch keys (currently there are none)
+  // See Note [Plumbing Keys Through The Dispatcher]
+  void redispatchBoxed(const OperatorHandle& op, DispatchKeySet dispatchKeySet, Stack* stack) const;
+
 
   // ------------------------------------------------------------------------
   //
@@ -206,13 +221,6 @@ public:
   RegistrationHandleRAII addRegistrationListener(std::unique_ptr<OpRegistrationListener> listener);
 
   void checkInvariants() const;
-
-  /* Check if operator calls with a given dispatch key
-   * need to be observed with RecordFunction.
-   */
-  inline bool shouldRecord(DispatchKey dispatch_key) const {
-    return dispatch_key != DispatchKey::BackendSelect;
-  }
 
   //
   // ------------------------------------------------------------------------
@@ -323,7 +331,11 @@ public:
     c10::Dispatcher::singleton().callBoxed(*this, stack);
   }
 
-private:
+  void redispatchBoxed(DispatchKeySet ks, Stack* stack) const {
+    c10::Dispatcher::singleton().redispatchBoxed(*this, ks, stack);
+  }
+
+//private:
   explicit OperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
   : operatorIterator_(std::move(operatorIterator)) {}
   friend class Dispatcher;
@@ -350,12 +362,18 @@ public:
   TypedOperatorHandle(const TypedOperatorHandle&) = default;
   TypedOperatorHandle& operator=(const TypedOperatorHandle&) = default;
 
-  Return call(Args... args) const {
+  // Note: benchmarks showed that this function wasn't getting inlined during calls to at::empty
+  C10_ALWAYS_INLINE Return call(Args... args) const {
     return c10::Dispatcher::singleton().call<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 
-  Return callWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
-    return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
+  // Note: benchmarks showed that this function wasn't getting inlined during calls to at::empty
+  C10_ALWAYS_INLINE Return redispatch(DispatchKeySet currentDispatchKeySet, Args... args) const {
+    return c10::Dispatcher::singleton().redispatch<Return, Args...>(*this, currentDispatchKeySet, std::forward<Args>(args)...);
+  }
+
+  Return redispatch(DispatchKey currentDispatchKey, Args... args) const {
+    return c10::Dispatcher::singleton().redispatch<Return, Args...>(*this, currentDispatchKey, std::forward<Args>(args)...);
   }
 
 private:
@@ -368,13 +386,9 @@ namespace detail {
 template<class... Args> inline void unused_arg_(const Args&...) {}
 }
 
+// Note: benchmarks showed that this function wasn't getting inlined during calls to at::empty
 template<class Return, class... Args>
-inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(Args...)>& op, DispatchKey dispatchKey, Args... args) const {
-  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  // No alias dispatch key is allowed at runtime.
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKey));
-  const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
-
+C10_ALWAYS_INLINE Return Dispatcher::_callWithDispatchKeySet(const TypedOperatorHandle<Return(Args...)>& op, const KernelFunction& kernel, DispatchKeySet dispatchKeySet, Args... args) const {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   // By default, when there're no high-frequency or non-sampled callbacks,
   // RecordFunction is pre-sampled as a perf optimization;
@@ -392,7 +406,8 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
     // the function call or prematurely box them
     at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
     if (C10_UNLIKELY(guard.isActive())) {
-      if (shouldRecord(dispatchKey) && op.operatorIterator_->op.isObserved()) {
+      auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
+      if (op.operatorIterator_->op.isObserved()) {
         int64_t seq_num = -1;
         // Setting sequence number in the Autograd case to associate
         // the forward range with the coresponding Autograd's node
@@ -408,49 +423,72 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
       }
     }
     // keeping the guard alive while executing the kernel
-    return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
+    return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
-  return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
+  return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
 }
 
 template<class Return, class... Args>
-inline Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
+// Note: benchmarks showed that this function wasn't getting inlined during calls to at::empty
+C10_ALWAYS_INLINE Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  auto dispatchKey = op.operatorIterator_->op.dispatchKeyExtractor()
-    .template getDispatchKeyUnboxed<Args...>(
+  auto dispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
+    .template getDispatchKeySetUnboxed<Args...>(
       DispatchKeySet::FULL,
       args...
     );
-  return callWithDispatchKey<Return, Args...>(op, dispatchKey, args...);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKeySet.highestPriorityTypeId()));
+  const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKeySet.highestPriorityTypeId());
+  return _callWithDispatchKeySet<Return, Args...>(op, kernel, dispatchKeySet, args...);
 }
 
 template<class Return, class... Args>
 inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey currentDispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  auto dispatchKey = op.operatorIterator_->op.dispatchKeyExtractor()
-    .template getDispatchKeyUnboxed<Args...>(
+  auto currentDispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
+    .template getDispatchKeySetUnboxed<Args...>(
       DispatchKeySet(DispatchKeySet::FULL_AFTER, currentDispatchKey),
       args...
     );
   // do not use RecordFunction on redispatch
-  const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
-  return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
+  const KernelFunction& kernel = op.operatorIterator_->op.lookup(currentDispatchKeySet.highestPriorityTypeId());
+  return kernel.template call<Return, Args...>(op, currentDispatchKeySet, std::forward<Args>(args)...);
+}
+
+template<class Return, class... Args>
+inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const {
+  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+  // do not use RecordFunction on redispatch
+  const KernelFunction& kernel = op.operatorIterator_->op.lookup(currentDispatchKeySet.highestPriorityTypeId());
+  return kernel.template call<Return, Args...>(op, currentDispatchKeySet, std::forward<Args>(args)...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorIterator_->op;
-  auto dispatchKey = entry.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
-  const auto& kernel = entry.lookup(dispatchKey);
+  auto dispatchKeySet = entry.dispatchKeyExtractor().getDispatchKeySetBoxed(stack);
+  const auto& kernel = entry.lookup(dispatchKeySet.highestPriorityTypeId());
+  return _callBoxed(op, entry, kernel, dispatchKeySet, stack);
+}
 
+inline void Dispatcher::redispatchBoxed(const OperatorHandle& op, DispatchKeySet dispatchKeySet, Stack* stack) const {
+  // note: this doesn't need the mutex because write operations on the list keep iterators intact.
+  const auto& entry = op.operatorIterator_->op;
+  const auto& kernel = entry.lookup(dispatchKeySet.highestPriorityTypeId());
+  return _callBoxed(op, entry, kernel, dispatchKeySet, stack);
+}
+
+// Note: benchmarks showed that this function wasn't getting inlined during calls to at::empty
+C10_ALWAYS_INLINE void Dispatcher::_callBoxed(const OperatorHandle& op, const impl::OperatorEntry& entry, const KernelFunction& kernel, DispatchKeySet dispatchKeySet, Stack* stack) const {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   bool pre_sampled = false;
   if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
     // using already existing stack to record function execution in observers
     at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
     if (C10_UNLIKELY(guard.isActive())) {
-      if (shouldRecord(dispatchKey) && entry.isObserved()) {
+      auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
+      if (entry.isObserved()) {
         int64_t seq_num = -1;
         if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
           seq_num = at::sequence_number::peek();
@@ -463,11 +501,11 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
       }
     }
     // keeping the guard alive while executing the kernel
-    kernel.callBoxed(op, stack);
+    kernel.callBoxed(op, dispatchKeySet, stack);
     return;
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
-  kernel.callBoxed(op, stack);
+  kernel.callBoxed(op, dispatchKeySet, stack);
 }
 
 } // namespace c10
