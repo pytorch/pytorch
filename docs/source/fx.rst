@@ -404,12 +404,15 @@ After running the above example, we can then look at the code within
 ``foo/module.py`` and modify it as desired (e.g. adding ``print``
 statements or using ``pdb``) to debug the generated code.
 
-Debugging Symbolic Tracing
+Debugging the Transformation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Now that we've identified that a transformation is creating incorrect
-code, it's time to debug the transformation itself. Our goal is to
-figure out what went wrong during symbolic tracing. First, we need to
+code, it's time to debug the transformation itself. We’ve
+checked the :ref:`Limitations of Symbolic Tracing` section in the
+documentation, and we know that ``symbolic_trace`` is working as
+expected. Our goal is to figure out what went wrong during our
+transformation of the generated FX ``GraphModule``. First, we need to
 read the FX documentation. Once we understand the most important classes
 (:class:`Node`, :class:`Graph`, :class:`Proxy`, and :class:`Tracer`), we
 can determine which class attributes might give us the best
@@ -457,14 +460,44 @@ There are several ways to examine what ``symbolic_tracing`` produces:
     """
     traced.graph.print_tabular()
 
+Using the utility functions above, we can compare our traced Module
+before and after we've apply our transformations. Sometimes, a
+simple visual comparison is enough to trace down a bug. If it's still
+not clear what's going wrong, a debugger like ``pdb`` can be a good
+next step.
+
+Going off of the example above, consider the following code:
+
+::
+
+    # Sample user-defined function
+    def transform_graph(gm: GraphModule) -> None:
+
+        # Get the Graph from our traced Module
+        g = gm.graph
+
+        """
+        Transformations on `g` go here
+        """
+
+        # Recompile the GraphModule. This must be called after editing
+        # the Graph `g`, otherwise the generated code will still reflect
+        # the old Graph before any transforms
+        gm.recompile()
+
+    # Transform the Graph
+    transform_graph(traced)
+
+    # Print the new code after our transforms. Check to see if it was
+    # what we expected
+    print(traced)
+
 Using the above example, let’s say that the call to ``print(traced)``
-showed us that symbolic tracing had not captured the right code. We’ve
-checked the :ref:`Limitations of Symbolic Tracing`
-section in the documentation, but we still can’t diagnose our
-particular issue. We want to find what goes wrong using a debugger. We
-start a ``pdb`` session. We can see what’s happening during the
-symbolic tracing by breaking on ``traced = symbolic_trace(m)``, then
-pressing ``s`` to “step into” the call to ``symbolic_trace(m)``.
+showed us that there was an error in our transforms. We want to find
+what goes wrong using a debugger. We start a ``pdb`` session. We can see
+what’s happening during the transform by breaking on
+``transform_graph(traced)``, then pressing ``s`` to “step into” the call
+to ``transform_graph(traced)``.
 
 We may also have good luck by editing the ``print_tabular`` method to print
 different attributes of the Nodes in the Graph. (For example, we might
