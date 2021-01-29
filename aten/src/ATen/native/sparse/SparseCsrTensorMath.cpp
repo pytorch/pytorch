@@ -47,7 +47,7 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
   TORCH_CHECK(op2.size(0) == dim_k,
               "addmm: Expected dense matrix (op2) size(0)=", dim_k, ", got ", op2.size(0));
   TORCH_CHECK(op1.size(1) == dim_k,
-              "addmm: Expected result dense matrix (self) size(1)=", dim_k, ", got ", op1.size(1));
+              "addmm: Expected sparse matrix (op1) size(1)=", dim_k, ", got ", op1.size(1));
   out.resize_({dim_i, dim_j});
 
   // TODO: why does that nnz == 0 condition exist in the COO code?
