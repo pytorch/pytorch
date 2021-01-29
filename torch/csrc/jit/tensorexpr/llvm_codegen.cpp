@@ -1330,14 +1330,14 @@ LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(
 
   llvm::Type* type;
   bool use_simd;
-#if defined(__AVX__) && !defined(_MSC_VER)
-  type = llvm::VectorType::get(basetype, ElementCount(lanes));
-  use_simd = true;
-#else
-  name = basename;
-  type = basetype;
-  use_simd = false;
-#endif
+  if (jit_->hasSymbol(name)) {
+    type = llvm::VectorType::get(basetype, ElementCount(lanes));
+    use_simd = true;
+  } else {
+    name = basename;
+    type = basetype;
+    use_simd = false;
+  }
   llvm::FunctionType* fntype;
   switch (arity) {
     case Unary:
