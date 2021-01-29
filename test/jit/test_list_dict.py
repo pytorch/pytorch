@@ -143,15 +143,9 @@ class TestList(JitTestCase):
         self.checkScript(foo3, ())
         FileCheck().check_count("aten::list", 2, exactly=True).run(torch.jit.script(foo3).graph)
 
-    def test_dict_keyword_with_kwargs_using_numerical_values(self):
+    def test_dict_keyword_with_kwargs(self):
         def fn():
             return dict(foo=1, bar=2, baz=3)
-
-        self.checkScript(fn, ())
-
-    def test_dict_keyword_with_kwargs_using_str_values(self):
-        def fn():
-            return dict(foo="one", bar="two", baz="three")
 
         self.checkScript(fn, ())
 
@@ -167,17 +161,63 @@ class TestList(JitTestCase):
 
         self.checkScript(fn, ())
 
+    def test_dict_keyword_with_empty_iterable(self):
+        def fn():
+            return dict([])
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_internal_aggregate_function(self):
+        def fn():
+            return dict(zip(["foo", "baz", "bar"], [1, 2, 3]))
+
+        self.checkScript(fn, ())
+
     def test_dict_keyword_with_mapping(self):
         def fn():
             return dict({"foo" : 1, "bar" : 2, "baz" : 3})
 
         self.checkScript(fn, ())
 
-    def test_dict_keyword_with_mixed_mapping_and_kwargs(self):
+    def test_dict_keyword_with_mapping_and_kwargs(self):
         def fn():
-            return dict({"foo" : 1, "baz" : 3}, bar=2)
+            return dict({"foo" : 1, "bar" : 2}, baz=3)
 
         self.checkScript(fn, ())
+
+    def test_dict_keyword_with_dict_comprehension(self):
+        def fn():
+            return dict({i: chr(i + 65) for i in range(4)})
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_dict_comprehension_and_kwargs(self):
+        def fn():
+            return dict({chr(65+i) : i for i in range(4)}, foo=2)
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_empty_dict_comprehension(self):
+        def fn():
+            return dict({})
+
+        self.checkScript(fn, ())
+
+    def test_dict_keyword_with_statically_unrolled_iterable(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.choices = torch.nn.ModuleDict({
+                        'conv': torch.nn.Conv2d(10, 10, 3),
+                        'pool': torch.nn.MaxPool2d(3)
+                })
+
+            def forward(self, x):
+                return dict(self.choices.items())
+
+        m = torch.jit.script(M())
+        print(m.forward.graph)
+        self.checkScript(m.forward, ())
 
     def test_dict_keyword_is_correctly_typed(self):
         def fn():
@@ -188,15 +228,21 @@ class TestList(JitTestCase):
         self.checkScript(fn, ())
 
     def test_dict_keyword_with_mismatched_annotations(self):
-        with self.assertRaisesRegex(RuntimeError, "Variable 'x' is "
-                                    "annotated with type "
-                                    r"Dict\[int, str\] but is being "
-                                    "assigned to a value of type "
-                                    r"Dict\[str, int\]"):
+        # TODO: This fails during function schema matching, so the error
+        # message is not very informative to the user. Change logic so
+        # that the error is thrown at a different time?
+        with self.assertRaisesRegex(RuntimeError, "Arguments for call "
+                                                  "are not valid"):
             @torch.jit.script
             def fn():
                 x: Dict[int, str] = dict([("foo", 1), ("bar", 2), ("baz", 3)])    # noqa: C406
                 return x
+
+    def test_dict_keyword_with_nested_call(self):
+        def fn():
+            return dict(dict(foo=1, bar=2, baz=3))
+
+        self.checkScript(fn, ())
 
     def test_min_bool_list(self):
         def jit_min_list(a: List[bool], b: List[bool]) -> List[bool]:

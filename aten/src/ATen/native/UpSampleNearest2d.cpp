@@ -107,7 +107,7 @@ TORCH_IMPL_FUNC(upsample_nearest2d_backward_out_cpu) (
 using at::native::upsample::compute_output_size;
 using at::native::upsample::get_scale_value;
 
-Tensor upsample_nearest2d_cpu(
+Tensor upsample_nearest2d(
     const Tensor& input,
     c10::optional<IntArrayRef> output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
@@ -117,7 +117,7 @@ Tensor upsample_nearest2d_cpu(
   return at::upsample_nearest2d(input, osize, scale_h, scale_w);
 }
 
-Tensor upsample_nearest2d_backward_cpu(
+Tensor upsample_nearest2d_backward(
     const Tensor& grad_output,
     c10::optional<IntArrayRef> output_size,
     IntArrayRef input_size,

@@ -30,8 +30,16 @@ endif()
 
 set(CMAKE_INSTALL_MESSAGE NEVER)
 
+# check and set CMAKE_CXX_STANDARD
+string(FIND "${CMAKE_CXX_FLAGS}" "-std=c++" env_cxx_standard)
+if(env_cxx_standard GREATER -1)
+  message(
+      WARNING "C++ standard version definition detected in environment variable."
+      "PyTorch requires -std=c++14. Please remove -std=c++ settings in your environment.")
+endif()
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_C_STANDARD 11)
+
 if(DEFINED GLIBCXX_USE_CXX11_ABI)
   if(${GLIBCXX_USE_CXX11_ABI} EQUAL 1)
     set(CXX_STANDARD_REQUIRED ON)
@@ -153,6 +161,7 @@ option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
+option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
 option(USE_ROCM "Use ROCm" ON)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
@@ -162,7 +171,8 @@ cmake_dependent_option(
     USE_STATIC_CUDNN "Use cuDNN static libraries" OFF
     "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
-option(USE_KINETO "Use Kineto profiling library" OFF)
+option(USE_KINETO "Use Kineto profiling library" ON)
+option(USE_CUPTI_SO "Use CUPTI as a shared library" OFF)
 option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
@@ -220,8 +230,8 @@ option(USE_ZSTD "Use ZSTD" OFF)
 # Ensure that an MKLDNN build is the default for x86 CPUs
 # but optional for AArch64 (dependent on -DUSE_MKLDNN).
 cmake_dependent_option(
-  USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, and AArch64." ON
-  "CPU_INTEL OR CPU_AARCH64 AND USE_MKLDNN" OFF)
+  USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, and AArch64." "${CPU_INTEL}"
+  "CPU_INTEL OR CPU_AARCH64" OFF)
 set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 cmake_dependent_option(
     USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF
@@ -239,7 +249,9 @@ cmake_dependent_option(
 option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
-
+cmake_dependent_option(
+    USE_DEPLOY "Build embedded torch::deploy interpreter" OFF
+    "BUILD_PYTHON" OFF)
 # Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
 # On Windows platform, if user does not install libuv in build conda env and
 # does not set libuv_ROOT environment variable. Set USE_DISTRIBUTED to OFF.
@@ -536,29 +548,10 @@ if(USE_FBGEMM AND ((CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SIZEOF_VO
   set(USE_FBGEMM OFF)
 endif()
 
-if(USE_KINETO AND INTERN_BUILD_MOBILE)
-  message(STATUS "Not using libkineto in a mobile build.")
-  set(USE_KINETO OFF)
-endif()
-
-if(USE_KINETO AND (NOT USE_CUDA))
-  message(STATUS "Not using libkineto in a non-CUDA build.")
-  set(USE_KINETO OFF)
-endif()
-
-if(USE_KINETO AND MSVC)
-  message(STATUS "Not using libkineto in a Windows build.")
-  set(USE_KINETO OFF)
-endif()
-
 include(cmake/Dependencies.cmake)
 
 if(USE_FBGEMM)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_FBGEMM")
-endif()
-
-if(USE_KINETO)
-  string(APPEND CMAKE_CXX_FLAGS " -DUSE_KINETO")
 endif()
 
 if(USE_QNNPACK)
@@ -927,3 +920,8 @@ endif()
 
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
+
+# ---[ Torch Deploy
+if(USE_DEPLOY)
+  add_subdirectory(torch/csrc/deploy)
+endif()

@@ -1253,15 +1253,6 @@
   - name: aten::eq
   - name: aten::is_nonzero
   - name: aten::set_
-- name: aten::_multinomial_alias_draw
-  depends:
-  - name: aten::eq
-  - name: aten::is_nonzero
-- name: aten::_multinomial_alias_setup
-  depends:
-  - name: aten::eq
-  - name: aten::is_nonzero
-  - name: aten::set_
 - name: aten::_nnpack_available
   depends:
   - name: aten::eq

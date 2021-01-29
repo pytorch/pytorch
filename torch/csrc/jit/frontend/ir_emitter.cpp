@@ -1268,7 +1268,6 @@ struct to_ir {
     const auto loc = lc.range();
     const auto targets_list = List<Expr>::create(lc.range(), {lc.target()});
     const auto itrs = List<Expr>::create(lc.range(), {lc.iter()});
-
     // If there is no type hint, and this is emitted over an iterable that is
     // unrolled and of length 0, then we emit a List of tensors
     Value* list_value = graph->insertNode(graph->create(prim::ListConstruct, 1))
@@ -3010,23 +3009,36 @@ struct to_ir {
             emitListComprehension(lc, type_hint));
       }
       case prim::dict: {
-        // Set the type
-        TypePtr type = type_hint;
-        if (type_hint) {
-          if (!type_hint->cast<DictType>()) {
-            throw ErrorReport(apply.range())
-                << "Expected dict type annotation for dict(), found "
-                << type_hint->repr_str();
+
+        auto treat_as_empty_container = [&]{
+          if (apply.inputs().empty() && !apply.attributes().empty()) {
+            return true;
           }
-        } else {
-          // Otherwise, use the default of Dict[str, Tensor]. If we have an
-          // iterable in apply.inputs(), then this default type will be
-          // overridden when the iterable is emitted
-          type = DictType::create(StringType::get(), TensorType::get());
+          if (!apply.inputs().empty() && apply.inputs()[0].kind() == TK_DICT_LITERAL) {
+            auto dict_lit = DictLiteral(apply.inputs()[0]);
+            return dict_lit.key_inputs().empty() && dict_lit.value_inputs().empty();
+          }
+          if (!apply.inputs().empty() && apply.inputs()[0].kind() == TK_LIST_LITERAL) {
+            auto list_lit = ListLiteral(apply.inputs()[0]);
+            return list_lit.inputs().empty();
+          }
+          return false;
+        };
+
+        // If we have a call with an empty container, or if we have a
+        // call with kwargs only
+        if (treat_as_empty_container()) {
+          auto expr_list = List<Expr>::create(apply.range(), {});
+          apply = Apply::create(
+              apply.range(), apply.callee(), expr_list, apply.attributes());
         }
 
-        // If we have an empty call to dict()
+        // If we have a completely empty call to dict()
         if (apply.inputs().empty() && apply.attributes().empty()) {
+          TypePtr type = type_hint;
+          if (!type_hint) {
+            type = DictType::create(StringType::get(), TensorType::get());
+          }
           return std::make_shared<SimpleValue>(
               graph
                   ->insertNode(graph->createDict(
@@ -3035,6 +3047,23 @@ struct to_ir {
                       {},
                       {}))
                   ->output());
+        }
+
+        // Special case logic for if we have a dict comprehension
+        if (!apply.inputs().empty() && apply.inputs()[0].kind() == TK_DICT_COMP) {
+          auto dc = DictComp(apply.inputs()[0]);
+          auto dc_node = emitDictComprehension(dc, type_hint);
+          NamedValue self = NamedValue(dc.range(), "self", dc_node);
+          for (auto kwarg : apply.attributes()) {
+            auto name = StringLiteral::create(kwarg.range(), kwarg.name().name());
+            auto k = emitExpr(name);
+            auto v = emitExpr(kwarg.value());
+            NamedValue input_k = NamedValue(kwarg.range(), "", k);
+            NamedValue input_v = NamedValue(kwarg.range(), "", v);
+          emitBuiltinCall(
+            kwarg.range(), *graph, aten::_set_item, {self, input_k, input_v}, {});
+          }
+          return std::make_shared<SimpleValue>(dc_node);
         }
 
         // We can't feasibly register all possible key x value
@@ -3097,12 +3126,42 @@ struct to_ir {
         checkApplyNumInputs(apply, 1);
 
         auto iter_input = emitSugaredExpr(apply.inputs()[0], 1);
+        const std::string& iter_name = createTempName("$_iter");
+        const std::string& key_name = createTempName("$_key");
+        const std::string& value_name = createTempName("$_value");
 
-        auto simple = asSimple(iter_input);
+        auto key = Var::create(
+            apply.range(), Ident::create(apply.range(), key_name));
+        auto value = Var::create(
+            apply.range(), Ident::create(apply.range(), value_name));
+        auto target = TupleLiteral::create(apply.range(), List<Expr>::create(apply.range(), {key, value}));
+        auto iter = Var::create(
+            apply.range(), Ident::create(apply.range(), iter_name));
 
-        return std::make_shared<SimpleValue>(emitBuiltinCall(
-            apply.range(), *method.graph(), aten::dict, {simple}, {}));
+        environment_stack->setSugaredVar(
+            apply.range(),
+            iter_name,
+            iter_input,
+            /*annotated_type=*/nullptr);
+
+        auto dc = DictComp::create(apply.range(), key, value, target, iter);
+        auto dc_node = emitDictComprehension(dc, type_hint);
+        NamedValue self = NamedValue(dc.range(), "self", dc_node);
+
+        for (auto kwarg : apply.attributes()) {
+          auto name = StringLiteral::create(kwarg.range(), kwarg.name().name());
+          auto k = emitExpr(name);
+          auto v = emitExpr(kwarg.value());
+          NamedValue input_k = NamedValue(kwarg.range(), "", k);
+          NamedValue input_v = NamedValue(kwarg.range(), "", v);
+        emitBuiltinCall(
+          kwarg.range(), *graph, aten::_set_item, {self, input_k, input_v}, {});
+        }
+
+        return std::make_shared<SimpleValue>(dc_node);
+
       }
+
       default:
         TORCH_INTERNAL_ASSERT(false, "unknown special form: ", form);
     }
@@ -4216,7 +4275,8 @@ std::unique_ptr<Function> CompilationUnit::define(
     const ResolverPtr& resolver,
     const Self* self,
     const std::unordered_map<std::string, Function*>& function_table,
-    bool shouldMangle) const {
+    bool shouldMangle,
+    CompilationUnit::FunctionType type) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -4252,7 +4312,13 @@ std::unique_ptr<Function> CompilationUnit::define(
       std::move(name), std::make_shared<Graph>(), creator);
   if (self) {
     // Register this as a method on `self`'s type
-    self->getClassType()->addMethod(fn.get());
+    if (type == CompilationUnit::FunctionType::Hook) {
+      self->getClassType()->addForwardHook(fn.get());
+    } else if (type == CompilationUnit::FunctionType::PreHook) {
+      self->getClassType()->addForwardPreHook(fn.get());
+    } else {
+      self->getClassType()->addMethod(fn.get());
+    }
   }
   return fn;
 }
@@ -4305,7 +4371,8 @@ std::vector<Function*> CompilationUnit::define(
         defResolvers[i],
         self,
         function_table,
-        shouldMangle);
+        shouldMangle,
+        CompilationUnit::FunctionType::Method);
 
     record_function(std::move(fn));
   }
@@ -4323,6 +4390,111 @@ std::vector<Function*> CompilationUnit::define(
   }
 
   return functions;
+}
+
+void CompilationUnit::define_hooks(
+    const c10::optional<c10::QualifiedName>& prefix,
+    const std::vector<Def>& hookDefs,
+    const std::vector<ResolverPtr>& hookResolvers,
+    const std::vector<Def>& preHookDefs,
+    const std::vector<ResolverPtr>& preHookResolvers,
+    const Self* self,
+    bool shouldMangle) {
+  TORCH_INTERNAL_ASSERT(hookDefs.size() == hookResolvers.size());
+  TORCH_INTERNAL_ASSERT(preHookDefs.size() == preHookResolvers.size());
+  std::vector<Function*> functions;
+  std::unordered_map<std::string, Function*> function_table;
+
+  // check hook for name collisions and redefinition
+  auto check_collisions = [&](const Def& hook) -> Function* {
+    auto name = prefix ? QualifiedName(*prefix, hook.name().name()).name()
+                       : QualifiedName(hook.name().name()).name();
+    // check if hook is already defined for this module
+    auto found_hook = function_table.find(name);
+    auto existing_hook =
+        found_hook != function_table.end() ? found_hook->second : nullptr;
+    // check if hook name is already defined on module as method
+    if (existing_hook == nullptr) {
+      TORCH_CHECK(
+          self->getClassType()->findMethod(name) == nullptr &&
+              self->getClassType()->findHook(name) == nullptr,
+          "Can't define hook: ",
+          name,
+          " on class: ",
+          self->getClassType()->repr_str(),
+          " because a method or hook with that name already exists.");
+    }
+    return existing_hook;
+  };
+
+  // build_schema for checking
+  auto build_schema = [&](const Def& hook_def,
+                          const ResolverPtr& hook_res) -> FunctionSchema {
+    ScriptTypeParser typeParser(hook_res);
+    FunctionSchema schema =
+        typeParser.parseSchemaFromDef(hook_def, true /* skip_self*/);
+    // need to add self as the first because we skipped it
+    std::vector<Argument> arguments;
+    arguments.emplace_back(Argument(
+        hook_def.decl().params()[0].ident().name(), self->getClassType()));
+    arguments.insert(
+        arguments.end(), schema.arguments().begin(), schema.arguments().end());
+    return schema.cloneWithArguments(arguments);
+  };
+
+  // define hooks
+  for (size_t i = 0; i < hookDefs.size(); i++) {
+    // check to see if already defined this hook
+    auto existing_fn = check_collisions(hookDefs[i]);
+    if (existing_fn != nullptr) {
+      // add it to class type again so it's called
+      self->getClassType()->addForwardHook(existing_fn);
+      continue;
+    }
+    // define hook
+    auto fn = define(
+        prefix,
+        hookDefs[i],
+        hookResolvers[i],
+        self,
+        function_table,
+        shouldMangle,
+        CompilationUnit::FunctionType::Hook);
+
+    function_table[fn->name()] = fn.get();
+    functions.emplace_back(fn.get());
+    this->register_function(std::move(fn));
+    self->getClassType()->checkForwardHookSchema(
+        i, build_schema(hookDefs[i], hookResolvers[i]));
+    functions.back()->ensure_defined();
+  }
+
+  // define pre_hooks
+  for (size_t i = 0; i < preHookDefs.size(); i++) {
+    // check to see if already defined this hook
+    auto existing_fn = check_collisions(preHookDefs[i]);
+    if (existing_fn != nullptr) {
+      // add it to class type again so it's called
+      self->getClassType()->addForwardPreHook(existing_fn);
+      continue;
+    }
+    // define pre_hook
+    auto fn = define(
+        prefix,
+        preHookDefs[i],
+        preHookResolvers[i],
+        self,
+        function_table,
+        shouldMangle,
+        CompilationUnit::FunctionType::PreHook);
+
+    function_table[fn->name()] = fn.get();
+    functions.emplace_back(fn.get());
+    this->register_function(std::move(fn));
+    self->getClassType()->checkForwardPreHookSchema(
+        i, build_schema(preHookDefs[i], preHookResolvers[i]));
+    functions.back()->ensure_defined();
+  }
 }
 
 std::vector<Function*> CompilationUnit::define(

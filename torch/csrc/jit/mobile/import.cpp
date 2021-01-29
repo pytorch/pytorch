@@ -3,7 +3,6 @@
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
-#include <torch/csrc/jit/mobile/common_const.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
@@ -78,7 +77,6 @@ std::string operator_str(
 }
 
 namespace {
-
 void print_unsupported_ops_and_throw(
     const std::unordered_set<std::string>& unsupported_ops) {
   std::string error_message("{");
@@ -95,7 +93,6 @@ void print_unsupported_ops_and_throw(
 
 void parseMethods(
     const std::vector<IValue>& vals,
-    const std::vector<IValue>& constant_vals_from_jit,
     const c10::optional<std::vector<IValue>>& debug_info_vals,
     mobile::CompilationUnit& mcu) {
   TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
@@ -153,29 +150,6 @@ void parseMethods(
     const auto& register_size =
         expect_field(table, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
             .toInt();
-
-    // If there exist a tuple in consts_list with this format
-    // ('tensor_jit_index', 4) fetch the tensor at index 4 from tensor table
-    // generated in jit, and push it to the new constant list
-    // *updated_constant_vals*.
-    std::vector<IValue> updated_constant_vals;
-    for (const auto& const_item : consts_list) {
-      if (const_item.isTuple()) {
-        const auto& tensor_jit = const_item.toTuple()->elements();
-        if (tensor_jit.size() > 1) {
-          const auto& tensor_jit_index_key = tensor_jit[0];
-          const auto& tensor_jit_index = tensor_jit[1];
-          if (tensor_jit_index_key.isString() &&
-              tensor_jit_index_key.toString().get()->string() ==
-                  mobile::kTensorJitIndex) {
-            updated_constant_vals.push_back(
-                constant_vals_from_jit[tensor_jit_index.toInt()]);
-          }
-        }
-      } else {
-        updated_constant_vals.push_back(const_item);
-      }
-    }
 
     std::vector<IValue> module_debug_info_list;
     if (has_debug_info) {
@@ -238,7 +212,7 @@ void parseMethods(
       print_unsupported_ops_and_throw(unsupported_op_names);
     };
 
-    for (const auto& constant : updated_constant_vals) {
+    for (const auto& constant : consts_list) {
       function->append_constant(constant);
     }
 
@@ -252,122 +226,19 @@ void parseMethods(
   }
 }
 
-// Find if any of the methods in the bytecode model bytecode_values include
-// a tuple with this format ('tensor_jit_index', 4) in "constants" field.
-bool has_tensor_jit_index(const std::vector<IValue>& bytecode_values) {
-  // The following variables are used to locate the "constants"
-  // fields in elements
-  c10::ivalue::ConstantString constants_str("constants");
-  auto constants_ir = IValue(constants_str);
-  c10::ivalue::ConstantString tensor_jit_index_str(mobile::kTensorJitIndex);
-  auto tensor_jit_index_ir = IValue(tensor_jit_index_str);
-  //  *bytecode_values* is bytcode model. The first element of the top tuple is
-  //  the bytecode version number. The following elements are methods. In each
-  //  method, it has all the necessary parts for the lite interpreter to
-  //  interpret, including the instructions, operators, constants, types and
-  //  register size.
-  //  *bvals* example:
-  //   (3,
-  //       ('__torch__.m.forward',
-  //           (('instructions',
-  //               (('STOREN', 1, 2),
-  //                    ('DROPR', 1, 0),
-  //                    ('MOVE', 2, 0),
-  //                    ('OP', 0, 0),
-  //                    ('RET', 0, 0))),
-  //                ('operators', (('aten::Int', 'Tensor'),)),
-  //                ('constants', ()),
-  //                ('types', ()),
-  //                ('register_size', 2)
-  //            )
-  //        )
-  //    )
-  for (const auto& element : bytecode_values) {
-    if (element.isTuple()) {
-      //  The second item of elements is a list of methods, like forward
-      //  method, example:
-      //  ('__torch__.m.forward',
-      //      (('instructions',
-      //          (('STOREN', 1, 2),
-      //              ('DROPR', 1, 0),
-      //              ('MOVE', 2, 0),
-      //              ('OP', 0, 0),
-      //              ('RET', 0, 0))),
-      //          ('operators', (('aten::Int', 'Tensor'),)),
-      //          ('constants', ()),
-      //          ('types', ()),
-      //          ('register_size', 2)
-      //      )
-      //  )
-      const auto& methods = element.toTuple()->elements();
-      for (const auto& method : methods) {
-        if (method.isTuple()) {
-          //  method example:
-          //  (('instructions',
-          //      (('STOREN', 1, 2),
-          //          ('DROPR', 1, 0),
-          //          ('MOVE', 2, 0),
-          //          ('OP', 0, 0),
-          //          ('RET', 0, 0))),
-          //      ('operators', (('aten::Int', 'Tensor'),)),
-          //      ('constants', ()),
-          //      ('types', ()),
-          //      ('register_size', 2)
-          //  )
-          const auto& method_elements = method.toTuple()->elements();
-          for (const auto& method_element : method_elements) {
-            //  method_element example:
-            //  ('instructions',
-            //      (('STOREN', 1, 2),
-            //          ('DROPR', 1, 0),
-            //          ('MOVE', 2, 0),
-            //          ('OP', 0, 0),
-            //          ('RET', 0, 0)),
-            //  )
-            // A list of if condition statement, trying to locate the
-            // 'constants' field.
-            if (method_element.isTuple()) {
-              const auto& key_values_vector =
-                  method_element.toTuple()->elements();
-              if (key_values_vector.size() == 2) {
-                const auto& key = key_values_vector[0];
-                const auto& values = key_values_vector[1];
-                // Find constant fields
-                if (key.isString() && key == constants_ir) {
-                  if (values.isTuple()) {
-                    const auto& constant_values = values.toTuple()->elements();
-                    for (const auto& constant_value : constant_values) {
-                      if (constant_value.isTuple()) {
-                        const auto& constant_value_tuple =
-                            constant_value.toTuple()->elements();
-                        if (constant_value_tuple.size() == 2 &&
-                            constant_value_tuple[0] == tensor_jit_index_ir &&
-                            constant_value_tuple[1].isInt()) {
-                          return true;
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-  return false;
-}
-
 // The deserializer class which loads the bytecode package from bc files.
 class BytecodeDeserializer final {
  public:
   explicit BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader);
+  mobile::Module deserialize(c10::optional<at::Device> device);
   mobile::Module deserialize(
       c10::optional<at::Device> device,
       ExtraFilesMap& extra_files);
   std::unordered_map<std::string, std::string> deserializeMetadata(
       c10::optional<at::Device> device);
+  void deserialize_only_extra(
+      c10::optional<at::Device> device,
+      ExtraFilesMap& extra_files);
 
  private:
   c10::IValue readArchive(
@@ -393,7 +264,7 @@ std::unordered_map<std::string, std::string> BytecodeDeserializer::
   return readMobileMetadata(mcu);
 }
 
-mobile::Module BytecodeDeserializer::deserialize(
+void BytecodeDeserializer::deserialize_only_extra(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
   device_ = device;
@@ -407,6 +278,18 @@ mobile::Module BytecodeDeserializer::deserialize(
           std::string(static_cast<char*>(meta_ptr.get()), meta_size);
     }
   }
+}
+
+mobile::Module BytecodeDeserializer::deserialize(
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files) {
+  deserialize_only_extra(device, extra_files);
+  return deserialize(device);
+}
+
+mobile::Module BytecodeDeserializer::deserialize(
+    c10::optional<at::Device> device) {
+  device_ = device;
   auto mcu = std::make_shared<mobile::CompilationUnit>();
 
   // bvals can have 2 possible formats:
@@ -424,17 +307,7 @@ mobile::Module BytecodeDeserializer::deserialize(
   if (reader_->hasRecord("mobile_debug.pkl")) {
     debug_info_bvals = readArchive("mobile_debug", mcu).toTuple()->elements();
   }
-
-  std::vector<IValue> constant_values_from_jit;
-  bool need_tensor_jit = has_tensor_jit_index(bvals);
-
-  // Read from constants.pkl only if there exists tensor jit index in
-  // bytecode.pkl
-  if (need_tensor_jit && reader_->hasRecord("constants.pkl")) {
-    constant_values_from_jit =
-        readArchive("constants", mcu).toTuple()->elements();
-  }
-  parseMethods(bvals, constant_values_from_jit, debug_info_bvals, *mcu);
+  parseMethods(bvals, debug_info_bvals, *mcu);
   auto meta_dict = readMobileMetadata(mcu);
   return mobile::Module(readArchive("data", mcu).toObject(), meta_dict, mcu);
 }
@@ -554,6 +427,27 @@ c10::IValue BytecodeDeserializer::readArchive(
 
 mobile::Module _load_for_mobile(
     std::istream& in,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return _load_for_mobile(in, device, extra_files);
+}
+
+mobile::Module _load_for_mobile(
+    const std::string& filename,
+    c10::optional<at::Device> device) {
+  ExtraFilesMap extra_files;
+  return _load_for_mobile(filename, device, extra_files);
+}
+
+mobile::Module _load_for_mobile(
+    std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device) {
+  ExtraFilesMap extra_files;
+  return _load_for_mobile(std::move(rai), device, extra_files);
+}
+
+mobile::Module _load_for_mobile(
+    std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
   std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
@@ -622,6 +516,21 @@ mobile::Module _load_for_mobile(
       TORCH_RETHROW(error);
     }
   }
+}
+
+void _load_extra_only_for_mobile(
+    const std::string& filename,
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files) {
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  auto observer = torch::observerConfig().getModuleObserver();
+  auto instance_key = std::rand();
+  if (observer) {
+    observer->onEnterLoadModel(instance_key);
+  }
+  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+  BytecodeDeserializer deserializer(std::move(reader));
+  deserializer.deserialize_only_extra(device, extra_files);
 }
 
 } // namespace jit
