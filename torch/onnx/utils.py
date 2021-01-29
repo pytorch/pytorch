@@ -131,7 +131,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
     # Remove fork/wait nodes
     torch._C._jit_pass_inline_fork_wait(graph)
     torch._C._jit_pass_lint(graph)
-
+    # print(graph)
     if use_new_jit_passes:
         torch._C._jit_pass_lower_all_tuples(graph)
         torch._C._jit_pass_onnx_remove_inplace_ops_for_onnx(graph, module)
@@ -168,6 +168,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         # by the symbolic function.
         torch._C._jit_pass_onnx_preprocess(graph)
         # _prepare_inplace_ops makes the IR invalid for JIT passes / alias db
+        # print('prior to prepare inplace ops:', graph)
         torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
 
         # onnx does not support tuples, so try to remove them
@@ -203,6 +204,7 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
             input_names = [] if input_names is None else input_names
             dynamic_axes = {} if dynamic_axes is None else dynamic_axes
             torch._C._jit_pass_onnx_set_dynamic_input_shape(graph, dynamic_axes, input_names)
+        # print(graph)
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)
         torch._C._jit_pass_lint(graph)
 

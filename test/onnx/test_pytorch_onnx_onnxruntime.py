@@ -3950,6 +3950,66 @@ class TestONNXRuntime(unittest.TestCase):
         inputs = torch.randn(16, 1)
         self.run_test(model, inputs)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_list_append(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                for i in range(x.size(0)):
+                    res += [torch.matmul(x[i], y)]
+                return res
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(16, 3, 4)
+        y = torch.randn(4, 5)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_list_pop(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                for i in range(x.size(0)):
+                    res += [torch.matmul(x[i], y)]
+                res.pop()
+                return res
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(16, 3, 4)
+        y = torch.randn(4, 5)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_list_del(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                for i in range(x.size(0)):
+                    res += [torch.matmul(x[i], y)]
+                # res.remove(res[2])  # this fails with
+                del res[2]
+                return res
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(16, 3, 4)
+        y = torch.randn(4, 5)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_list_remove(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                for i in range(x.size(0)):
+                    res += [torch.matmul(x[i], y)]
+                res.remove(res[2])  # this fails with
+                return res
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(16, 3, 4)
+        y = torch.randn(4, 5)
+        self.run_test(model, (x, y))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tensor_factories(self):
         class TensorFactory(torch.nn.Module):
