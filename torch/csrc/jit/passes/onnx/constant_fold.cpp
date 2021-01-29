@@ -276,6 +276,51 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
                 << "Constant folding not applied." << std::endl;
       return c10::nullopt;
     }
+  } else if (node->kind() == onnx::Squeeze) {
+    assert(inputTensorValues.size() != 2 or inputTensorValues.size() != 1);
+    if (opset_version == ONNX_OPSET_13) {
+      // Squeeze version 13 input axes is optional, inputTensorValues.size() == 1 means axes equal to None
+      updated_val = inputTensorValues[0];
+      if (inputTensorValues.size() == 2)
+      {
+        // Checking validity of 'axes' input
+        if (inputTensorValues[1].sizes().size() != 1) {
+          std::cerr
+              << "Warning: Constant folding - Invalid 'axes' inputs found for opset 13 onnx::Squeeze op. "
+              << "Constant folding not applied." << std::endl;
+          return c10::nullopt;
+        }
+        auto axes_a = inputTensorValues[1].accessor<int64_t, 1>();
+        std::vector<int64_t> axes;
+        for (int64_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
+          // ONNX Squeeze accepts negative axes
+          axes_a[i] += axes_a[i] < 0 ? inputTensorValues[0].sizes().size() : 0;
+          axes.push_back(axes_a[i]);
+        }
+        std::sort(axes.begin(), axes.end());
+        for (int64_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
+          updated_val = at::squeeze(updated_val, axes[i]);
+        }
+      }
+      return c10::optional<at::Tensor>(updated_val);
+    } else if (
+        opset_version == ONNX_OPSET_9 || opset_version == ONNX_OPSET_10 ||
+        opset_version == ONNX_OPSET_11 || opset_version == ONNX_OPSET_12) {
+      assert(inputTensorValues.size() == 1);
+      updated_val = inputTensorValues[0];
+      if (node->hasAttributeS("axes")) {
+        std::vector<int64_t> axesAttr = node->is(attr::axes);
+        std::sort(axesAttr.begin(), axesAttr.end());
+        for (auto axis : axesAttr) {
+          updated_val = at::squeeze(updated_val, axis);
+        }
+      }
+      return c10::optional<at::Tensor>(updated_val);
+    } else {
+      std::cerr << "Warning: Constant folding - unsupported opset version. "
+                << "Constant folding not applied." << std::endl;
+      return c10::nullopt;
+    }
   } else if (node->kind() == onnx::Transpose) {
     assert(inputTensorValues.size() == 1);
     if (!node->hasAttributeS("perm")) {
@@ -296,7 +341,8 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     updated_val = inputTensorValues[0];
     std::vector<int64_t> shape(inputTensorValues[1].sizes()[0], 0);
     auto shape_a = inputTensorValues[1].accessor<int64_t, 1>();
-    for (int64_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
+    assert(inputTensorValues[1].sizes()[0] > 0);
+    for (size_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
       // All shape dim values should be >= -1
       // onnx::Reshape supports a shape dim value to be zero, in
       // which case the actual dim value remains unchanged. However,

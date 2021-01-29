@@ -249,6 +249,41 @@ class TestUtilityFuns(TestCase):
             assert node.kind() != "onnx::Unsqueeze"
             assert node.kind() != "onnx::Cast"
             assert node.kind() != "onnx::Constant"
+        assert len(list(graph.nodes())) == 4
+
+    def test_constant_fold_squeeze_without_axes(self):
+        class SqueezeModule(torch.nn.Module):
+            def forward(self, x):
+                a = torch.tensor([[[1., 2., 3.], [4., 5., 6.]]])
+                return torch.squeeze(a) + x + torch.squeeze(a)
+
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        x = torch.ones(2, 3)
+        graph, _, __ = self._model_to_graph(SqueezeModule(), (x, ))
+        print(graph)
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Squeeze"
+            assert node.kind() != "onnx::Cast"
+            assert node.kind() != "onnx::Constant"
+        assert len(list(graph.nodes())) == 2
+
+    def test_constant_fold_squeeze_with_axes(self):
+        class SqueezeAxesModule(torch.nn.Module):
+            def forward(self, x):
+                a = torch.tensor([[[1., 2., 3.], [4., 5., 6.]]])
+                return torch.squeeze(a, dim=-3) + x
+
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        x = torch.ones(2, 3)
+        graph, _, __ = self._model_to_graph(SqueezeAxesModule(), (x, ))
+
+        for node in graph.nodes():
+            assert node.kind() != "onnx::Squeeze"
+            assert node.kind() != "onnx::Cast"
+            assert node.kind() != "onnx::Constant"
+        assert len(list(graph.nodes())) == 1
 
     def test_constant_fold_concat(self):
         class ConcatModule(torch.nn.Module):
