@@ -21,6 +21,8 @@ enum class DebugDumpOption {
 
 bool isDebugDumpEnabled(DebugDumpOption option);
 
+bool useFallback();
+
 //! Ceil integer division
 constexpr int64_t ceilDiv(int64_t a, int64_t b) {
   return (a + b - 1) / b;

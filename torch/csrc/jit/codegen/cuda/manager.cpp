@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler.h>
 #include <torch/csrc/jit/codegen/cuda/shape_inference.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -211,11 +212,6 @@ class CudaFusionManager {
 
   int32_t next_unique_id_ = 0;
 };
-
-bool useFallback() {
-  const char* disable_fb_env = getenv("PYTORCH_NVFUSER_DISABLE_FALLBACK");
-  return !(disable_fb_env ? atoi(disable_fb_env) : 0);
-}
 
 } // namespace
 

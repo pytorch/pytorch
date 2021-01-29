@@ -61,6 +61,11 @@ bool isDebugDumpEnabled(DebugDumpOption option) {
   return dump_options.at(option);
 }
 
+bool useFallback() {
+  const char* disable_fb_env = getenv("PYTORCH_NVFUSER_DISABLE_FALLBACK");
+  return !(disable_fb_env ? atoi(disable_fb_env) : 0);
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit
