@@ -157,23 +157,16 @@ class CppSignature:
         return n
 
     # Render the C++ declaration for this signature
-    def decl(self, *, prefix: str = "", is_redispatching_function: bool = False) -> str:
+    def decl(self) -> str:
         returns_type = cpp.returns_type(self.func.returns)
-        cpp_args = [a.decl() for a in self.arguments()]
-        if is_redispatching_function:
-            cpp_args = ['c10::DispatchKey dispatchKey'] + cpp_args
-        cpp_args_str = ', '.join(cpp_args)
-        name = prefix + self.name()
-        return f"{returns_type} {name}({cpp_args_str})"
+        cpp_args_str = ', '.join(a.decl() for a in self.arguments())
+        return f"{returns_type} {self.name()}({cpp_args_str})"
 
     # Render the C++ definition for this signature, not including
     # the body (with curly braces)
-    def defn(self, *, prefix: str = "", is_redispatching_function: bool = False) -> str:
+    def defn(self, *, prefix: str = "") -> str:
         returns_type = cpp.returns_type(self.func.returns)
-        cpp_args = [a.defn() for a in self.arguments()]
-        if is_redispatching_function:
-            cpp_args = ['c10::DispatchKey dispatchKey'] + cpp_args
-        cpp_args_str = ', '.join(cpp_args)
+        cpp_args_str = ', '.join(a.defn() for a in self.arguments())
         name = prefix + self.name()
         return f"{returns_type} {name}({cpp_args_str})"
 
