@@ -89,6 +89,33 @@ if(APPLE)
 
   # RPATH stuff
   set(CMAKE_MACOSX_RPATH ON)
+  if(NOT IOS)
+    # Determine if we can link against ML Compute
+    set(MLCOMPUTE_FOUND OFF)
+    execute_process(
+      COMMAND bash -c "xcrun --sdk macosx --show-sdk-path"
+      OUTPUT_VARIABLE _macosx_sdk_path
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+    set(_SDK_SEARCH_PATH "${_macosx_sdk_path}/System/Library/Frameworks/")
+    set(_FRAMEWORK_SEARCH_PATH "/System/Library/Frameworks/")
+
+    find_library(_MLCompute_fwrk_path_ NAMES MLCompute PATHS ${_FRAMEWORK_SEARCH_PATH} NO_DEFAULT_PATH)
+    find_library(_MLCompute_sdk_path_ NAMES MLCompute PATHS ${_SDK_SEARCH_PATH} NO_DEFAULT_PATH)
+
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/mlc)
+      set(_MLC_FOLDER_EXISTS YES)
+    else()
+      set(_MLC_FOLDER_EXISTS NO)
+    endif()
+
+    if(_MLCompute_fwrk_path_ AND _MLCompute_sdk_path_ AND _MLC_FOLDER_EXISTS)
+      set(MLCOMPUTE_FOUND ON)
+      message(STATUS "ML Compute framework found")
+    else()
+      message(STATUS "ML Compute framework not found")
+    endif()
+  endif()
 endif()
 
 set(CPU_AARCH64 OFF)
@@ -190,6 +217,9 @@ option(USE_LMDB "Use LMDB" OFF)
 option(USE_METAL "Use Metal for Caffe2 iOS build" ON)
 option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
+cmake_dependent_option(
+    USE_MLCOMPUTE "Use ML Compute for macOS build" ON
+    "MLCOMPUTE_FOUND" OFF)
 cmake_dependent_option(
     USE_NCCL "Use NCCL" ON
     "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
@@ -756,6 +786,9 @@ if(USE_CPP_CODE_COVERAGE)
 endif()
 
 if(APPLE)
+    if(USE_MLCOMPUTE)
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_MLCOMPUTE -fobjc-arc -framework MLCompute -framework Metal")
+    endif()
     string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-private-field")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-braces")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-c++14-extensions")
