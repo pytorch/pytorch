@@ -8767,7 +8767,7 @@ class TestNN(NNTestCase):
         input = torch.ones((1, 1, in_s), device='cuda', requires_grad=True)
         # note we allocated grad_output to be larger so out of bound access
         # woudl be visible in grad_input
-        grad = torch.ones((1, 1, out_s*2), device='cuda', requires_grad=True)
+        grad = torch.ones((1, 1, out_s * 2), device='cuda', requires_grad=True)
         grad = grad[:, :, :out_s]
 
         input_ref = input.detach().cpu().requires_grad_()
