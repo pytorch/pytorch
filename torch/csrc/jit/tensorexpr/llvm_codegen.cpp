@@ -1321,6 +1321,23 @@ void LLVMCodeGenImpl::emitIsNan(const Intrinsics* v) {
   }
 }
 
+static bool wantSleef(const std::string& name) {
+  // Using sleef on these ops is slower than libm.
+  static std::unordered_set<std::string> noSleef = {
+      "sqrt",
+      "ceil",
+      "trunc",
+      "fabs",
+      "floor",
+      "sqrtf",
+      "ceilf",
+      "truncf",
+      "fabsf",
+      "floorf",
+  };
+  return noSleef.find(name) == noSleef.end();
+}
+
 LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(
     const std::string& basename,
     llvm::Type* basetype,
@@ -1336,7 +1353,7 @@ LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(
   std::string typeSuffix = basetype == DoubleTy_ ? "d" : "";
   std::string sleefName =
       "Sleef_" + basename + typeSuffix + std::to_string(lanes);
-  if (hasAVX && jit_->hasSymbol(sleefName)) {
+  if (wantSleef(basename) && hasAVX && jit_->hasSymbol(sleefName)) {
     name = std::move(sleefName);
     type = llvm::VectorType::get(basetype, ElementCount(lanes));
     useSimd = true;
