@@ -249,11 +249,44 @@ namespace impl {
 
   // ivalue_to_arg
 
+  template<class T>
+  struct decay_if_not_tensor final {
+    using type = std::decay_t<T>;
+  };
+
+  template<>
+  struct decay_if_not_tensor<at::Tensor&> final {
+    using type = at::Tensor&;
+  };
+
+  template<>
+  struct decay_if_not_tensor<const at::Tensor&> final {
+    using type = const at::Tensor&;
+  };
+
   template<class T, bool AllowDeprecatedTypes>
   struct ivalue_to_arg final {
-    static T call(IValue&& v) {
+    static T call(IValue& v) {
       assert_is_valid_input_type<T, AllowDeprecatedTypes>();
       return std::move(v).to<T>();
+    }
+  };
+
+  // The following two specializations take advantage of specialized
+  // `toTensor()` overloads on IValue to avoid copying.
+  template<bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<at::Tensor&, AllowDeprecatedTypes> final {
+    static at::Tensor& call(IValue& v) {
+      // Tensor& is valid, don't bother asserting
+      return v.toTensor();
+    }
+  };
+
+  template<bool AllowDeprecatedTypes>
+  struct ivalue_to_arg<const at::Tensor&, AllowDeprecatedTypes> final {
+    static const at::Tensor& call(IValue& v) {
+      // const Tensor& is valid, don't bother asserting
+      return v.toTensor();
     }
   };
 
@@ -261,8 +294,8 @@ namespace impl {
   struct ivalue_to_arg<ArrayRef<T>, AllowDeprecatedTypes> final {
     // If an argument is ArrayRef<T>, convert the IValue to a std::vector<T> and pass that
     // to the operator. std::vector<T> is implicitly convertible to ArrayRef<T>.
-    static std::vector<T> call(IValue&& v) {
-      return ivalue_to_arg<std::vector<T>, AllowDeprecatedTypes>::call(std::move(v));
+    static std::vector<T> call(IValue& v) {
+      return ivalue_to_arg<std::vector<T>, AllowDeprecatedTypes>::call(v);
     }
   };
   template<class T, bool AllowDeprecatedTypes>
@@ -270,8 +303,8 @@ namespace impl {
     // If an argument is optional<ArrayRef<T>>, convert the IValue to an optional<std::vector<T>> and pass that
     // to the operator. OptionalArray<T> is basically a optional<std::vector<T>> but impliticly convertible
     // to optional<ArrayRef<T>>.
-    static OptionalArray<T> call(IValue&& v) {
-      return ivalue_to_arg<OptionalArray<T>, AllowDeprecatedTypes>::call(std::move(v));
+    static OptionalArray<T> call(IValue& v) {
+      return ivalue_to_arg<OptionalArray<T>, AllowDeprecatedTypes>::call(v);
     }
   };
 
@@ -296,35 +329,15 @@ namespace impl {
     }
   };
 
-  // reference_cast allows casting references, e.g. T&& to T&:
-  //    T make_t() {}
-  //    T& v = reference_cast<T&>(make_t()); // make_t() returns a T&& which is cast to T&.
-  // If the target is a non-reference value, then it gets moved:
-  //    T make_t() {}
-  //    T v = reference_cast<T>(make_t()); // no copies involved
-  // The first example actually also shows why reference_cast is usually a very bad idea. v now is a lvalue
-  // reference to a dead temporary. Use with caution!
-  template<class T, class U>
-  T reference_cast(U&& t) {
-      return std::forward<T>(t);
-  }
-
   template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices,  typename... ArgTypes>
   std::decay_t<typename guts::infer_function_traits_t<Functor>::return_type>
   call_functor_with_args_from_stack_(Functor* functor, Stack* stack, std::index_sequence<ivalue_arg_indices...>, guts::typelist::typelist<ArgTypes...>*) {
     (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
 
-    /*
-     * For ops that take "Tensor&" as an argument, ivalue_to_arg would still return a "Tensor" by value
-     * and C++ doesn't allow us to call (*functor) with a temporary "Tensor" when it expects "Tensor&".
-     * We use reference_cast to explicitly cast our temporary to a "Tensor&" and make it pass the compiler.
-     * Even though usually dangerous, this is ok here because temporaries live until the end of the statement.
-     * TODO We should remove reference_cast once kernels don't take "Tensor&" arguments anymore
-     */
-    return (*functor)(reference_cast<ArgTypes>(
-      ivalue_to_arg<std::decay_t<ArgTypes>, AllowDeprecatedTypes>::call(
-        std::move(torch::jit::peek(*stack, ivalue_arg_indices, sizeof...(ArgTypes)))
-    ))...);
+    return (*functor)(
+        ivalue_to_arg<typename decay_if_not_tensor<ArgTypes>::type, AllowDeprecatedTypes>::call(
+            torch::jit::peek(*stack, ivalue_arg_indices, sizeof...(ArgTypes))
+        )...);
   }
 
   template<class Functor, bool AllowDeprecatedTypes>
