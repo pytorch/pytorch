@@ -13,7 +13,7 @@ namespace onnx {
 using namespace ::c10::onnx;
 }
 
-namespace {
+namespace onnx_constant_fold {
 
 enum OnnxType : int {
   ONNX_FLOAT = 1,
@@ -387,7 +387,7 @@ std::vector<Node*> getOnnxConstParentsToRemove(Node* node) {
   return parentNodes;
 }
 
-} // Anonymous namespace
+} // namespace onnx_constant_fold
 
 // This method updates the block in-place to fold all the one-time
 // constant-based computations/ops into an initializer node.
@@ -417,20 +417,21 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
       // Constant folding for multiple-output nodes not supported. Skip it.
       continue;
     }
-    if (!areNodeInputsConstant(node, valsToParamsMap)) {
+    if (!onnx_constant_fold::areNodeInputsConstant(node, valsToParamsMap)) {
       // If all the inputs to this node are not either parameter or
       // onnx::Constant, then skip this node.
       continue;
     }
 
-    auto inputTensorValues = getValues(node, valsToParamsMap);
+    auto inputTensorValues =
+        onnx_constant_fold::getValues(node, valsToParamsMap);
     if (inputTensorValues.empty()) {
       // This is a terminal node with no inputs, such as onnx::Constant. Skip
       // it.
       continue;
     }
-    auto updatedValWrapped =
-        runTorchBackendForOnnx(node, inputTensorValues, opset_version);
+    auto updatedValWrapped = onnx_constant_fold::runTorchBackendForOnnx(
+        node, inputTensorValues, opset_version);
     if (updatedValWrapped == c10::nullopt) {
       // Constant folding is not supported for this op. Skip it.
       continue;
@@ -453,7 +454,8 @@ void ConstantFoldONNX(Block* b, ParamMap& paramsDict, int opset_version) {
     // below), and then remove the current node. If the parent was
     // an initializer (not onnx::Constant) then they are all removed
     // by eraseUnusedBlockInputs() call (below) outside the loop.
-    auto onnxConstParents = getOnnxConstParentsToRemove(node);
+    auto onnxConstParents =
+        onnx_constant_fold::getOnnxConstParentsToRemove(node);
     node->removeAllInputs();
     for (auto* n : onnxConstParents) {
       n->destroy();

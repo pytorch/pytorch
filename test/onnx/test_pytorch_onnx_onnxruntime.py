@@ -7,6 +7,7 @@ import io
 import itertools
 import copy
 import os
+import random
 
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
@@ -162,12 +163,14 @@ def _init_test_rpn():
     rpn_pre_nms_top_n = dict(training=2000, testing=1000)
     rpn_post_nms_top_n = dict(training=2000, testing=1000)
     rpn_nms_thresh = 0.7
+    rpn_score_thresh = 0.0
 
     rpn = RegionProposalNetwork(
         rpn_anchor_generator, rpn_head,
         rpn_fg_iou_thresh, rpn_bg_iou_thresh,
         rpn_batch_size_per_image, rpn_positive_fraction,
-        rpn_pre_nms_top_n, rpn_post_nms_top_n, rpn_nms_thresh)
+        rpn_pre_nms_top_n, rpn_post_nms_top_n, rpn_nms_thresh,
+        score_thresh=rpn_score_thresh)
     return rpn
 
 def _init_test_roi_heads_faster_rcnn():
@@ -206,6 +209,11 @@ def _init_test_roi_heads_faster_rcnn():
         bbox_reg_weights,
         box_score_thresh, box_nms_thresh, box_detections_per_img)
     return roi_heads
+
+def set_rng_seed(seed):
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
 
 class TestONNXRuntime(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
@@ -5989,7 +5997,7 @@ class TestONNXRuntime(unittest.TestCase):
             self.run_test(model, (box_regression, proposal))
 
     @skipIfUnsupportedOpsetVersion([13])
-    def test_initializer_sequence(self):
+        def test_initializer_sequence(self):
         class MyModule(torch.nn.Module):
             def __init__(self, input_size, hidden_size, num_classes):
                 super(MyModule, self).__init__()
@@ -6186,6 +6194,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_rpn(self):
+        set_rng_seed(0)
 
         class RPNModule(torch.nn.Module):
             def __init__(self):

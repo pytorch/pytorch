@@ -203,14 +203,15 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
             input_names = [] if input_names is None else input_names
             dynamic_axes = {} if dynamic_axes is None else dynamic_axes
             torch._C._jit_pass_onnx_set_dynamic_input_shape(graph, dynamic_axes, input_names)
+        print("start jit pass onnx")
         graph = torch._C._jit_pass_onnx(graph, operator_export_type)
+        print("finish jit pass onnx")
         torch._C._jit_pass_lint(graph)
 
         torch._C._jit_pass_onnx_scalar_type_analysis(graph)
         torch._C._jit_pass_lint(graph)
 
-        if dynamic_axes is None or not bool(dynamic_axes):
-            torch._C._jit_pass_onnx_fold_if(graph)
+        torch._C._jit_pass_onnx_fold_if(graph)
 
         from torch.onnx.symbolic_helper import _export_onnx_opset_version
         torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version, fixed_batch_size)
@@ -351,6 +352,9 @@ def _decide_input_format(model, args):
     except IndexError:
         warnings.warn("No input args")
         return args
+    except ValueError:
+        warnings.warn("No input args")
+        return args 
 
 def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
