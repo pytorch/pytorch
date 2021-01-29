@@ -975,7 +975,6 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
     case pytorch_qnnp_ukernel_type_gemm_sparse_dq: {
       const size_t batch_size = op->batch_size;
       const size_t groups = op->groups;
-      const size_t group_input_channels = op->group_input_channels;
       const size_t group_output_channels = op->group_output_channels;
       const uint32_t mr = pytorch_qnnp_params.q8gemm_sparse_c1x4.mr;
       const uint32_t nr = pytorch_qnnp_params.q8gemm_sparse_c1x4.nr;
