@@ -12,12 +12,14 @@ if [ -z "${IN_CI}" ]; then
   export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
 fi
 
-if which sccache > /dev/null; then
-  printf "#!/bin/sh\nexec sccache %s \$*" "$(which clang++)" > "${WORKSPACE_DIR}/clang++"
-  chmod a+x "${WORKSPACE_DIR}/clang++"
+function write_sccache_stub() {
+  printf "#!/bin/sh\nif [ \$(ps auxc \$(ps auxc -o ppid \$\$ | grep \$\$ | rev | cut -d' ' -f1 | rev) | tr '\\\\n' ' ' | rev | cut -d' ' -f2 | rev) != sccache ]; then\n  exec sccache $(which $1) \"\$@\"\nelse\n  exec $(which $1) \"\$@\"\nfi" > "${WORKSPACE_DIR}/$1"
+  chmod a+x "${WORKSPACE_DIR}/$1"
+}
 
-  printf "#!/bin/sh\nexec sccache %s \$*" "$(which clang)" > "${WORKSPACE_DIR}/clang"
-  chmod a+x "${WORKSPACE_DIR}/clang"
+if which sccache > /dev/null; then
+  write_sccache_stub clang++
+  write_sccache_stub clang
 
   export PATH="${WORKSPACE_DIR}:$PATH"
 fi
