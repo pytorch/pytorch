@@ -283,7 +283,7 @@ class _ObserverBase(ObserverBase):
         else:
             scale = (max_val_pos - min_val_neg) / float(quant_max - quant_min)
             scale = torch.max(scale, self.eps)
-            zero_point = quant_min - torch.round(min_val_neg / scale)
+            zero_point = quant_min - torch.round(min_val_neg / scale).to(torch.int64)
             zero_point = torch.clamp(zero_point, quant_min, quant_max)
 
         # For scalar values, cast them to Tensors of size 1 to keep the shape

@@ -1287,8 +1287,6 @@ class TestFakeQuantize(TestCase):
             obs = torch.quantization.PerChannelMinMaxObserver(axis, torch_type).to(device)
             obs(X * 0.75)
             scale, zero_point = obs.calculate_qparams()
-            # TODO(future PR): fix the wrong dtype in obs.calculate_qparams and remove the cast
-            zero_point = zero_point.to(torch.int64)
             quant_min, quant_max = obs._calculate_qmin_qmax()
 
             Y = _fake_quantize_per_channel_affine_reference(
@@ -1381,8 +1379,6 @@ class TestFakeQuantize(TestCase):
             obs = torch.quantization.PerChannelMinMaxObserver(axis, torch_type).to(device)
             obs(X * 0.75)
             scale, zero_point = obs.calculate_qparams()
-            # TODO(future PR): fix the wrong dtype in obs.calculate_qparams and remove the cast
-            zero_point = zero_point.to(torch.int64)
             quant_min, quant_max = obs._calculate_qmin_qmax()
             X.requires_grad_()
             Y_prime, _mask = torch.fake_quantize_per_channel_affine_cachemask(
