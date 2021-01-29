@@ -540,8 +540,6 @@ Tensor sparse_mask_helper_cpu(
     Inputs:
       `t`             - coalesced sparse tensor input
       `mask_indices`  - mask indices tensor
-
-    Note: every index exists in the sparse tensor `t`
   */
   TORCH_CHECK(t.is_sparse(), "t: input is not a sparse tensor");
   TORCH_CHECK(t.is_coalesced(), "t:  input is uncoalesced");
@@ -578,8 +576,6 @@ Tensor sparse_mask_helper_cpu(
       int64_t index = flattened_mask_indices.data_ptr<int64_t>()[i];
       auto iter = t_flatten_indices.find(index);
       if (iter != t_flatten_indices.end()) {
-        assert(iter->second < t_nnz);
-        assert(i < r_nnz);
         r_values[i] = t_v[ iter->second ];
       }
     }

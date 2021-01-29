@@ -221,7 +221,7 @@ Tensor sparse_mask_helper_cuda(
  
   if (t.sparse_dim() == 0) {
     Tensor t_values_expand = t_values;
-    t_values_expand = t_values_expand.expand(vsize).clone(at::MemoryFormat::Contiguous);
+    t_values_expand = t_values_expand.expand(vsize).contiguous();
     return t_values_expand;
   } 
   Tensor r_values = at::zeros({vsize}, t_values.options());
@@ -256,14 +256,8 @@ Tensor sparse_mask_helper_cuda(
 
   // Step 4: Copy the Filtered `t._values()` using the matches at `t_indices_pos`
   if (r_nnz > 0 && t_values.numel() > 0) {
-    const dim3 block = dim3(
-        std::min(static_cast<int64_t>(cuda::getApplyBlock().x), r_nnz));
-    dim3 grid;
-    int curDevice = -1;
-    cudaGetDevice(&curDevice);
-    TORCH_CHECK(
-        cuda::getApplyGrid(r_nnz, grid, curDevice),
-        "sparse_mask_helper_cuda: input too large or too many dimensions");
+    int64_t block_size = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, 1024);
+    auto grid_size = cuda::ATenCeilDiv(r_nnz, block_size);
 
     auto t_indices_ti = getTensorInfo<int64_t, int64_t>(t_flatten_indices);
     auto mask_indices_ti =
@@ -277,7 +271,7 @@ Tensor sparse_mask_helper_cuda(
           auto r_values_ti =
               getTensorInfo<scalar_t, int64_t>(r_values);
 
-          _sparse_mask_copy_kernel<scalar_t><<<grid, block, 0, stream>>>(
+          _sparse_mask_copy_kernel<scalar_t><<<grid_size, block_size, 0, stream>>>(
               r_nnz,
               t_nnz,
               t_indices_ti,
