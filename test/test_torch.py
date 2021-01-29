@@ -1191,49 +1191,6 @@ class AbstractTestCases:
             for method in ["add", "multiply"]:
                 self._test_scatter_base(self, lambda t: t, 'scatter_', reduction=method)
 
-        def test_masked_scatter(self):
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
-                for maskType in [torch.uint8, torch.bool]:
-                    for dt in torch.testing.get_all_dtypes():
-                        num_copy, num_dest = 3, 10
-                        dest = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dtype=dt)
-                        dest2 = dest.clone()
-                        src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt)
-                        mask = torch.tensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0), dtype=maskType)
-
-                        if dt == torch.bool:
-                            # torch.bool is a special case and is being tested
-                            # in a separate test
-                            continue
-
-                        # TODO: update test when masked scatter is supported for complex
-                        if dt == torch.half or dt.is_complex:
-                            self.assertRaises(RuntimeError, lambda: dest.masked_scatter_(mask, src))
-                            continue
-
-                        dest.masked_scatter_(mask, src)
-                        j = 0
-                        for i in range(num_dest):
-                            if mask[i]:
-                                dest2[i] = src[j]
-                                j += 1
-                        self.assertEqual(dest, dest2, atol=0, rtol=0)
-
-                        # make source bigger than number of 1s in mask
-                        src = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1], dtype=dt)
-                        dest.masked_scatter_(mask, src)
-
-                        # make src smaller. this should fail
-                        src = torch.zeros(num_copy - 1, dtype=dt)
-                        with self.assertRaises(RuntimeError):
-                            dest.masked_scatter_(mask, src)
-            self.assertEqual(len(w), 27)
-
-            warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
-            for wi in w:
-                self.assertEqual(str(wi.message)[0:55], str(warn))
-
         def test_masked_fill(self):
             with warnings.catch_warnings(record=True) as w:
                 warnings.simplefilter("always")
@@ -4521,6 +4478,56 @@ class TestTorchDeviceType(TestCase):
                                             [False, True, False, True, False],
                                             [True, False, True, False, True]], device=device))
 
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_masked_scatter(self, device, dtype):
+        dt = dtype
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            for maskType in [torch.uint8, torch.bool]:
+                num_copy, num_dest = 3, 10
+                dest = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dtype=dt, device=device)
+                dest2 = dest.clone()
+                dest_ones = dest.clone()
+                dest_ones_expected = dest.clone()
+                src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dt, device=device)
+                src_ones = torch.tensor([1, 1, 1, 1, 1, 1, 1, 1, 1, 1], dtype=dt, device=device)
+                mask = torch.tensor((0, 0, 0, 0, 1, 0, 1, 0, 1, 0), dtype=maskType, device=device)
+
+                if dt == torch.bool:
+                    # torch.bool is a special case and is being tested
+                    # in a separate test
+                    return
+
+                # TODO: update test when masked scatter is supported for complex
+                # and cpu supports half
+                if (dt == torch.half and self.device_type == 'cpu') or dt.is_complex:
+                    self.assertRaises(RuntimeError, lambda: dest.masked_scatter_(mask, src))
+                    return
+
+                dest.masked_scatter_(mask, src)
+                j = 0
+                for i in range(num_dest):
+                    if mask[i]:
+                        dest2[i] = src[j]
+                        dest_ones_expected[i] = src_ones[j]
+                        j += 1
+                self.assertEqual(dest, dest2, atol=0, rtol=0)
+
+                dest_ones.masked_scatter_(mask, src_ones)
+                self.assertEqual(dest_ones, dest_ones_expected, atol=0, rtol=0)
+
+                # make src smaller. this should fail
+                src = torch.zeros(num_copy - 1, dtype=dt, device=device)
+                with self.assertRaises(RuntimeError):
+                    dest.masked_scatter_(mask, src)
+
+        self.assertEqual(len(w), 3)
+
+        warn = 'masked_scatter_ received a mask with dtype torch.uint8,'
+        for wi in w:
+            self.assertEqual(str(wi.message)[0:55], str(warn))
+
     def test_masked_scatter_bool_tensor(self, device):
         src = torch.tensor([True, True, True], device=device)
         dst = torch.tensor([False, False, False], device=device)
@@ -6723,12 +6730,6 @@ tensor_op_tests = [
     ('remainder', 'negative_tensor', _small_3d,
         lambda t, d: [0 - _small_3d(t, d, has_zeros=False)],
         1e-1, 1e-2, 1e-5, _signed_types),
-    ('std', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
-    ('std', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
-    ('std', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
-    ('var', '', _small_3d, lambda t, d: [], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
-    ('var', 'dim', _small_3d, lambda t, d: [1], 1e-3, 1e-5, 1e-5, _float_types, _cpu_types, False),
-    ('var', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes(), _cpu_types, False),
     ('ndimension', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('nelement', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('numel', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
@@ -6854,7 +6855,6 @@ tensor_op_tests = [
     ('round', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('trunc', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('ceil', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('lgamma', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, _float_types_no_half, [torch.bfloat16]),
 ]
 
 # Creates and decorates a generic test and adds it to the class.
