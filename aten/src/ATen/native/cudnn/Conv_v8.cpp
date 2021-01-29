@@ -134,18 +134,12 @@ struct ConvolutionCalculator final {
       return output;
     }
 
-    auto op_builder = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR);
-    op_builder
+    auto op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
         .setxDesc(getTensorDescriptor(input, 'x', key.input_alignment))
         .setyDesc(getTensorDescriptor(output, 'y', key.output_alignment))
         .setwDesc(getTensorDescriptor(weight, 'w', key.weight_alignment))
-        .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation));
-    if (input.scalar_type() == kDouble) {
-      op_builder.setAlpha(1.0).setBeta(0.0);
-    } else {
-      op_builder.setAlpha(1.0f).setBeta(0.0f);
-    }
-    auto op = op_builder.build();
+        .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation))
+        .build();
     // std::cout << op.describe() << std::endl;
 
     std::array<cudnn_frontend::Operation const *, 1> ops = {&op};
