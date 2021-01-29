@@ -1358,7 +1358,7 @@ std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& 
 // This is a type dispatching helper function for 'apply_solve'
 Tensor& _linalg_solve_out_helper_cuda(Tensor& result, Tensor& input, Tensor& infos) {
   // 'result' and 'input' should be in column major order (it should be checked before calling this function)
-  // the content of 'result', 'input' and 'infos' is overriden by 'apply_solve'
+  // the content of 'result', 'input' and 'infos' is overwritten by 'apply_solve'
   // 'result' should contain data of 'other' tensor (right-hand-side of the linear system of equations)
   // 'input' should contain data of origianl 'input' tensor (left-hand-side of the linear system)
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "linalg_solve_out_cpu", [&]{
@@ -1552,12 +1552,13 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
   auto A_data = A.data_ptr<scalar_t>();
   auto b_data = b.data_ptr<scalar_t>();
   magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
+  magma_int_t lda = std::max<magma_int_t>(1, n);
   magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
 
   int info_tmp = 0;
   if (b.dim() == 2) {
-    magmaCholeskySolve<scalar_t>(uplo, n, nrhs, A_data, n,
-                                 b_data, n, &info_tmp);
+    magmaCholeskySolve<scalar_t>(uplo, n, nrhs, A_data, lda,
+                                 b_data, lda, &info_tmp);
     info = info_tmp;
   } else {
     auto A_mat_stride = matrixStride(A);
@@ -1588,7 +1589,7 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
       scalar_t** b_array_cur = &b_array[mini_idx];
 
       magmaCholeskySolveBatched<scalar_t>(
-          uplo, n, nrhs, A_array_cur, n, b_array_cur, n,
+          uplo, n, nrhs, A_array_cur, lda, b_array_cur, lda,
           info_tmp, batch_limit, magma_queue);
 
       if (info_tmp != 0) {
@@ -1600,7 +1601,7 @@ AT_ERROR("cholesky_solve: MAGMA library not found in "
     // which concisely is equal to batch_size % batch_limit
     if (batch_size % batch_limit != 0 && info_tmp == 0) {
       magmaCholeskySolveBatched<scalar_t>(
-          uplo, n, nrhs, &A_array[mini_idx], n, &b_array[mini_idx], n,
+          uplo, n, nrhs, &A_array[mini_idx], lda, &b_array[mini_idx], lda,
           info_tmp, batch_size % batch_limit, magma_queue);
     }
 
@@ -1716,6 +1717,65 @@ Tensor _cholesky_helper_cuda(const Tensor& self, bool upper) {
 
   return upper ? result.transpose_(-1, -2) : result;
 }
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/*
+Computes the inverse of a symmetric (Hermitian) positive-definite matrix n-by-n matrix 'input' using the Cholesky solver
+This is an in-place routine, content of 'input' is overwritten.
+'infos' is an int Tensor containing error codes for each matrix in the batched input.
+MAGMA requires 'infos' to reside in CPU memory.
+For more information see MAGMA's documentation for POTRS routine.
+*/
+template <typename scalar_t>
+static void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
+#ifndef USE_MAGMA
+  TORCH_CHECK(false, "cholesky_inverse: MAGMA library not found in compilation. Please rebuild with MAGMA.");
+#else
+  // magmaCholeskyInverse (magma_dpotri_gpu) is slow because internally
+  // it transfers data several times between GPU and CPU and calls lapack routine on CPU
+  // using magmaCholeskySolveBatched is a lot faster
+  // note that magmaCholeskySolve is also slow
+
+  // 'input' is modified in-place we need to clone it and replace with a diagonal matrix
+  // for apply_cholesky_solve
+  auto input_working_copy = cloneBatchedColumnMajor(input);
+
+  // 'input' tensor has to be a batch of diagonal matrix
+  input.fill_(0);
+  input.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).fill_(1);
+
+  Tensor result_u, input_u;
+  if (input.dim() == 2) {
+    // unsqueezing here so that the batched version is used
+    result_u = input.unsqueeze(0);
+    input_u = input_working_copy.unsqueeze(0);
+  } else {
+    result_u = input;
+    input_u = input_working_copy;
+  }
+
+  // magma's potrs_batched doesn't take matrix-wise array of ints as an 'info' argument
+  // it returns a single 'magma_int_t'
+  // if info = 0 the operation is successful, if info = -i, the i-th parameter had an illegal value.
+  int64_t info_tmp = 0;
+  apply_cholesky_solve<scalar_t>(result_u, input_u, upper, info_tmp);
+  infos.fill_(info_tmp);
+#endif
+}
+
+// This is a type dispatching helper function for 'apply_cholesky_inverse'
+Tensor& cholesky_inverse_kernel_impl(Tensor &result, Tensor& infos, bool upper) {
+  // This function calculates the inverse matrix in-place
+  // result should be in column major order and contain matrices to invert
+  // the content of result is overwritten by 'apply_cholesky_inverse'
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "cholesky_inverse_out_cuda", [&]{
+    apply_cholesky_inverse<scalar_t>(result, infos, upper);
+  });
+  return result;
+}
+
+REGISTER_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
