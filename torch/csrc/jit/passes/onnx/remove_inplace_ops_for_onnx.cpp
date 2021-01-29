@@ -616,6 +616,12 @@ void SquashSliceAndSelect(Node* index_put_node) {
       orig_data, new_index_put, block_node, outer_block, next_node);
 }
 
+void PrepareIndexPutForONNX(Node* node) {
+  if (node->kind() == aten::index_put || node->kind() == aten::index_put_) {
+    SquashSliceAndSelect(node);
+  }
+}
+
 void PrepareCopyForONNX(Node* node) {
   if (node->kind() == aten::copy_) {
     // aten::copy_ can be viewed as a special case of index_put, where the
@@ -643,12 +649,8 @@ void PrepareCopyForONNX(Node* node) {
     index_put->node()->setSourceRange(node->sourceRange());
     index_put->copyMetadata(node->output());
     node->output()->replaceAllUsesWith(index_put);
-  }
-}
 
-void PrepareIndexPutForONNX(Node* node) {
-  if (node->kind() == aten::index_put || node->kind() == aten::index_put_) {
-    SquashSliceAndSelect(node);
+    PrepareIndexPutForONNX(index_put->node());
   }
 }
 
@@ -675,6 +677,14 @@ static void PrepareListPopForONNX(Node* n) {
   }
 }
 
+static void PrepareListDeleteForONNX(Node *n) {
+  if (n->kind() == aten::Delete) {
+    n->addOutput();
+    n->output()->setType(n->input(0)->type());
+    n->input(0)->replaceAllUsesAfterNodeWith(n, n->output());
+  }
+}
+
 static void PrepareListAppendAndInsertForONNX(Node* n) {
   if (n->kind() == aten::insert || n->kind() == aten::append) {
     if (n->outputs().size() == 0) {
@@ -693,10 +703,12 @@ static void PrepareInplaceOpsForONNX(Block* b) {
 
     switch (it->kind()) {
       case aten::copy_: {
+        PrepareCopyForONNX(*it);
         break;
       }
       case aten::index_put:
       case aten::index_put_: {
+        PrepareIndexPutForONNX(*it);
         break;
       }
       case aten::pop: {
@@ -706,6 +718,10 @@ static void PrepareInplaceOpsForONNX(Block* b) {
       case aten::insert:
       case aten::append: {
         PrepareListAppendAndInsertForONNX(*it);
+        break;
+      }
+      case aten::Delete: {
+        PrepareListDeleteForONNX(*it);
         break;
       }
     }

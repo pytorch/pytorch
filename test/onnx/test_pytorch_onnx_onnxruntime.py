@@ -3986,7 +3986,6 @@ class TestONNXRuntime(unittest.TestCase):
                 res = []
                 for i in range(x.size(0)):
                     res += [torch.matmul(x[i], y)]
-                # res.remove(res[2])  # this fails with
                 del res[2]
                 return res
 
@@ -3995,6 +3994,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
+    @unittest.skip("Enable this once remove is suported by torchscript")
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_list_remove(self):
         class ListModel(torch.nn.Module):
@@ -4002,7 +4002,7 @@ class TestONNXRuntime(unittest.TestCase):
                 res = []
                 for i in range(x.size(0)):
                     res += [torch.matmul(x[i], y)]
-                res.remove(res[2])  # this fails with
+                res.remove(res[2])  # this fails with torchscript
                 return res
 
         model = torch.jit.script(ListModel())
