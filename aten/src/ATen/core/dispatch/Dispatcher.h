@@ -141,13 +141,6 @@ public:
   // instead dispatching straight to the provided DispatchKey
   template<class Return, class... Args>
   Return callWithDispatchKey(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey dispatchKey, Args... args) const;
-  // TEMPORARY for testing
-  template<class Return, class... Args>
-  Return call1(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet ks, Args... args) const;
-  template<class Return, class... Args>
-  Return call2(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const;
-  template<class Return, class... Args>
-  Return call3(const TypedOperatorHandle<Return (Args...)>& op, DispatchKeySet currentDispatchKeySet, Args... args) const;
 
   // Like call, but intended for use in a redispatch: you are currently
   // in some currentDispatchKey, you have finished processing the key and
@@ -474,57 +467,6 @@ C10_ALWAYS_INLINE Return Dispatcher::call(const TypedOperatorHandle<Return(Args.
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKeySet.highestPriorityTypeId()));
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKeySet.highestPriorityTypeId());
   return _callWithDispatchKeySet<Return, Args...>(op, kernel, dispatchKeySet, args...);
-}
-
-template<class Return, class... Args>
-// Note: benchmarks showed that this function wasn't getting inlined during calls to at::empty
-C10_ALWAYS_INLINE Return Dispatcher::call1(const TypedOperatorHandle<Return(Args...)>& op, DispatchKeySet ks, Args... args) const {
-  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  auto dispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
-    .template getDispatchKeySetUnboxed<Args...>(
-      DispatchKeySet::FULL,
-      args...
-    );
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKeySet.highestPriorityTypeId()));
-  const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKeySet.highestPriorityTypeId());
-  return _callWithDispatchKeySet<Return, Args...>(op, kernel, dispatchKeySet, args...);
-}
-
-template<class Return, class... Args>
-C10_ALWAYS_INLINE Return Dispatcher::call2(const TypedOperatorHandle<Return(Args...)>& op, DispatchKeySet dispatchKeySet, Args... args) const {
-  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKeySet.highestPriorityTypeId()));
-  const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKeySet.highestPriorityTypeId());
-  bool pre_sampled = false;
-  if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
-    at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
-    if (C10_UNLIKELY(guard.isActive())) {
-      auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
-      if (op.operatorIterator_->op.isObserved()) {
-        int64_t seq_num = -1;
-        if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
-          seq_num = at::sequence_number::peek();
-        }
-        if (guard.needsInputs()) {
-          torch::jit::Stack stack = impl::boxArgs(args...);
-          guard.before(op, stack, seq_num);
-        } else {
-          guard.before(op, seq_num);
-        }
-      }
-    }
-    // keeping the guard alive while executing the kernel
-    return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
-  }
-  return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
-}
-
-template<class Return, class... Args>
-C10_ALWAYS_INLINE Return Dispatcher::call3(const TypedOperatorHandle<Return(Args...)>& op, DispatchKeySet dispatchKeySet, Args... args) const {
-  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKeySet.highestPriorityTypeId()));
-  const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKeySet.highestPriorityTypeId());
-  return kernel.template call<Return, Args...>(op, dispatchKeySet, std::forward<Args>(args)...);
 }
 
 template<class Return, class... Args>
