@@ -9640,11 +9640,12 @@ Example::
     tensor([ 0.1815, -0.8917, -0.3031])
 """)
 
-add_docstr(torch.slogdet,
-           r"""
+add_docstr(torch.slogdet, r"""
 slogdet(input) -> (Tensor, Tensor)
 
 Calculates the sign and log absolute value of the determinant(s) of a square matrix or batches of square matrices.
+
+.. note:: :func:`torch.slogdet` is deprecated. Please use :func:`torch.linalg.slogdet` instead.
 
 .. note::
     If ``input`` has zero determinant, this returns ``(0, -inf)``.
