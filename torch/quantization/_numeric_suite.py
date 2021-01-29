@@ -225,16 +225,16 @@ class Shadow(nn.Module):
     Args:
         q_module: module quantized from float_module that we want to shadow
         float_module: float module used to shadow q_module
-        Logger: type of logger used to process the outputs of q_module and
+        logger_cls: type of logger used to process the outputs of q_module and
             float_module. ShadowLogger or custom loggers can be used.
     """
 
-    def __init__(self, q_module, float_module, Logger):
+    def __init__(self, q_module, float_module, logger_cls):
         super(Shadow, self).__init__()
         self.orig_module = q_module
         self.shadow_module = float_module
         self.dequant = nnq.DeQuantize()
-        self.logger = Logger()
+        self.logger = logger_cls()
 
     def forward(self, *x) -> torch.Tensor:
         xl = _convert_tuple_to_list(x)
@@ -292,7 +292,7 @@ class Shadow(nn.Module):
 
 def prepare_model_with_stubs(
     float_module: nn.Module, q_module: nn.Module,
-    module_swap_list: Set[type], Logger: Callable,
+    module_swap_list: Set[type], logger_cls: Callable,
 ) -> None:
     r"""Prepare the model by attaching the float module to its matching quantized
     module as the shadow if the float module type is in module_swap_list.
@@ -306,7 +306,7 @@ def prepare_model_with_stubs(
         float_module: float module used to generate the q_module
         q_module: module quantized from float_module
         module_swap_list: list of float module types to attach the shadow
-        Logger: type of logger to be used in shadow module to process the outputs of
+        logger_cls: type of logger to be used in shadow module to process the outputs of
             quantized module and its float shadow module
     """
     torch._C._log_api_usage_once("quantization_api._numeric_suite.prepare_model_with_stubs")
@@ -323,10 +323,10 @@ def prepare_model_with_stubs(
         float_mod = float_module_children[name]
 
         if type(float_mod) not in module_swap_list:
-            prepare_model_with_stubs(float_mod, mod, module_swap_list, Logger)
+            prepare_model_with_stubs(float_mod, mod, module_swap_list, logger_cls)
 
         if type(float_mod) in module_swap_list:
-            reassign[name] = Shadow(mod, float_mod, Logger)
+            reassign[name] = Shadow(mod, float_mod, logger_cls)
 
     for key, value in reassign.items():
         q_module._modules[key] = value
@@ -334,7 +334,7 @@ def prepare_model_with_stubs(
 
 def compare_model_stub(
     float_model: nn.Module, q_model: nn.Module, module_swap_list: Set[type],
-    *data, Logger=ShadowLogger
+    *data, logger_cls=ShadowLogger
 ) -> Dict[str, Dict]:
     r"""Compare quantized module in a model with its floating point counterpart,
     feeding both of them the same input. Return a dict with key corresponding to
@@ -363,11 +363,11 @@ def compare_model_stub(
         module_swap_list: list of float module types at which shadow modules will
             be attached.
         data: input data used to run the prepared q_model
-        Logger: type of logger to be used in shadow module to process the outputs of
+        logger_cls: type of logger to be used in shadow module to process the outputs of
             quantized module and its float shadow module
     """
     torch._C._log_api_usage_once("quantization_api._numeric_suite.compare_model_stub")
-    prepare_model_with_stubs(float_model, q_model, module_swap_list, Logger)
+    prepare_model_with_stubs(float_model, q_model, module_swap_list, logger_cls)
     q_model(*data)
     ob_dict = get_logger_dict(q_model)
     return ob_dict
@@ -403,7 +403,7 @@ def get_matching_activations(
 def prepare_model_outputs(
     float_module: nn.Module,
     q_module: nn.Module,
-    Logger=OutputLogger,
+    logger_cls=OutputLogger,
     allow_list=None
 ) -> None:
     r"""Prepare the model by attaching the logger to both float module
@@ -412,14 +412,14 @@ def prepare_model_outputs(
     Args:
         float_module: float module used to generate the q_module
         q_module: module quantized from float_module
-        Logger: type of logger to be attached to float_module and q_module
+        logger_cls: type of logger to be attached to float_module and q_module
         allow_list: list of module types to attach logger
     """
     torch._C._log_api_usage_once("quantization_api._numeric_suite.prepare_model_outputs")
     if allow_list is None:
         allow_list = get_default_compare_output_module_list()
 
-    qconfig_debug = torch.quantization.QConfig(activation=Logger, weight=None)
+    qconfig_debug = torch.quantization.QConfig(activation=logger_cls, weight=None)
     float_module.qconfig = qconfig_debug  # type: ignore
     prepare(float_module, inplace=True, allow_list=allow_list)
     q_module.qconfig = qconfig_debug  # type: ignore
@@ -435,7 +435,7 @@ def compare_model_outputs(
     float_model: nn.Module,
     q_model: nn.Module,
     *data,
-    Logger=OutputLogger,
+    logger_cls=OutputLogger,
     allow_list=None
 ) -> Dict[str, Dict[str, torch.Tensor]]:
     r"""Compare output activations between float and quantized models at
@@ -454,7 +454,7 @@ def compare_model_outputs(
         float_model: float model used to generate the q_model
         q_model: model quantized from float_model
         data: input data used to run the prepared float_model and q_model
-        Logger: type of logger to be attached to float_module and q_module
+        logger_cls: type of logger to be attached to float_module and q_module
         allow_list: list of module types to attach logger
 
     Return:
@@ -465,7 +465,7 @@ def compare_model_outputs(
     torch._C._log_api_usage_once("quantization_api._numeric_suite.compare_model_outputs")
     if allow_list is None:
         allow_list = get_default_compare_output_module_list()
-    prepare_model_outputs(float_model, q_model, Logger, allow_list)
+    prepare_model_outputs(float_model, q_model, logger_cls, allow_list)
     float_model(*data)
     q_model(*data)
     act_compare_dict = get_matching_activations(float_model, q_model)
