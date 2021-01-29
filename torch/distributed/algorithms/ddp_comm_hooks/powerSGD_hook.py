@@ -153,6 +153,10 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         3.6) Allreduces Qs as a batch;
         3.7) Computes each M among all the high-rank tensors, which is approximately equal to PQ^T.
 
+    Note that this communication hook enforces vanilla allreduce for the first `state.start_powerSGD_iter` iterations.
+    This can not only allow the user to have a finer tuning over the tradeoff between speedup and accuracy,
+    but also help abstract away some complexity of the internal optimization of DDP for future communication hook developers.
+
     TODO(wayi@): The above procedure does two matmul+allreduce steps per iteration --
     one left multiplication and one right multiplication.
     For warm-start, can take one such step at a time, and alternate between them.
