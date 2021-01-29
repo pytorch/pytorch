@@ -351,7 +351,7 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
         (0, 0, 0),
     ]
 
-    vector_ords = (None, 0, 0.5, 1, 2, 3.5, inf, -0.5, -1, -2, -3.5)
+    vector_ords = (None, 0, 0.5, 1, 2, 3.5, inf, -0.5, -1, -2, -3.5, -inf)
     matrix_ords = (None, 'fro', 'nuc', 1, 2, inf, -1, -2, -inf)
 
     inputs = []
@@ -379,7 +379,7 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
                 # TODO: remove this check when `max` is implemented for
                 #       float16 and bfloat16. Issue:
                 #       https://github.com/pytorch/pytorch/issues/50790
-                if is_vector_norm and is_dtype_half and ord == inf:
+                if is_vector_norm and is_dtype_half and ord in [inf, -inf]:
                     continue
 
                 inputs.append(SampleInput(
@@ -783,6 +783,63 @@ class HermitianOpInfo(OpInfo):
         return hermitian_func
 
 
+class TriangularOpInfo(OpInfo):
+    """Operator information for function that take lower or upper triangular matrices as input.
+    They require a modified function to be tested for gradcheck, because the finite-difference algorithm
+    for calculating derivatives does not preserve the triangular property of the input and returning incorrect results.
+    """
+
+    def get_op(self):
+        """
+        Returns the function variant of the operator, torch.<op_name>,
+        compatible with gradcheck for triangular input functions.
+        It works only for single input argument and upper kwarg
+        """
+        def triangular_func(non_triangular_input, upper=False):
+            if upper:
+                triangular_input = non_triangular_input.triu()
+            else:
+                triangular_input = non_triangular_input.tril()
+            return self.op(triangular_input, upper=upper)
+
+        return triangular_func
+
+    def get_method(self):
+        """
+        Returns the method variant of the operator
+        compatible with gradcheck for triangular input functions.
+        It works only for single input argument and upper kwarg
+        """
+        def triangular_func(non_triangular_input, upper=False):
+            if upper:
+                triangular_input = non_triangular_input.triu()
+            else:
+                triangular_input = non_triangular_input.tril()
+            return self.method_variant(triangular_input, upper=upper)
+
+        return triangular_func
+
+    def sample_inputs(self, device, dtype, requires_grad=False):
+        """
+        This function generates Cholesky factors of positive-definite (non-singular) Hermitian (symmetric) matrices
+        for cholesky_inverse.
+        """
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+        inputs = (
+            torch.zeros(0, 0, dtype=dtype, device=device),  # 0x0 matrix
+            torch.zeros(0, 2, 2, dtype=dtype, device=device),  # zero batch of matrices
+            random_hermitian_pd_matrix(S, dtype=dtype, device=device),  # single matrix
+            random_hermitian_pd_matrix(S, 2, dtype=dtype, device=device),  # batch of matrices
+        )
+        test_cases = (torch.linalg.cholesky(a) for a in inputs)
+        out = []
+        for a in test_cases:
+            a.requires_grad = requires_grad
+            out.append(SampleInput(a))
+            out.append(SampleInput(a, kwargs=dict(upper=True)))
+        return out
+
+
 def sample_inputs_linalg_pinv(op_info, device, dtype, requires_grad=False):
     """
     This function generates input for torch.linalg.pinv with distinct singular values so that autograd is always stable
@@ -1146,6 +1203,23 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_broadcast_to),
+    TriangularOpInfo('cholesky_inverse',
+                     op=torch.cholesky_inverse,
+                     dtypes=floating_and_complex_types(),
+                     # TODO: RuntimeError: cholesky_inverse does not support automatic differentiation for outputs
+                     # with complex dtype.
+                     test_complex_grad=False,
+                     test_inplace_grad=False,
+                     check_batched_gradgrad=False,
+                     supports_tensor_out=True,
+                     decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+                     skips=(
+                         # These tests do not take into account custom op.get_op()
+                         # TODO: implement op.input_func instead of modifying op.get_op()
+                         # See https://github.com/pytorch/pytorch/issues/50837
+                         SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+                         SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                                  dtypes=[torch.complex64, torch.complex128]),)),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
