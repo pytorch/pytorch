@@ -279,10 +279,10 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
   } else if (node->kind() == onnx::Squeeze) {
     assert(inputTensorValues.size() == 2 or inputTensorValues.size() == 1);
     if (opset_version == ONNX_OPSET_13) {
-      // Squeeze version 13 input axes is optional, inputTensorValues.size() == 1 means axes equal to None
+      // Squeeze version 13 input axes is optional, inputTensorValues.size() ==
+      // 1 means axes equal to None
       updated_val = inputTensorValues[0];
-      if (inputTensorValues.size() == 2)
-      {
+      if (inputTensorValues.size() == 2) {
         // Checking validity of 'axes' input
         if (inputTensorValues[1].sizes().size() != 1) {
           std::cerr
