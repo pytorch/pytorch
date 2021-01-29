@@ -4,7 +4,6 @@ import math
 import numpy as np
 import torch
 import torch.distributed as dist
-import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
 
 
 def _orthogonalize(matrix, epsilon=1e-8):
@@ -128,7 +127,7 @@ class PowerSGDState(object):
 
         if self.iter == self.start_powerSGD_iter:
             logging.info(
-                "Start to apply PowerSGD after {} iterations.".format(self.iter)
+                "Starting to apply PowerSGD after {} iterations.".format(self.iter)
             )
 
 
@@ -184,8 +183,15 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
 
     # Run vanilla allreduce in the first `start_powerSGD_iter` iterations.
     if state.iter < state.start_powerSGD_iter:
+        fut = dist.all_reduce(
+            input_tensor, group=group_to_use, async_op=True
+        ).get_future()
+
+        def div_callback(fut):
+            return [fut.value()[0].div_(world_size)]
+
         state.maybe_increase_iter(bucket)
-        return default.allreduce_fut(group_to_use, input_tensor)
+        return fut.then(div_callback)
 
     # Apply PowerSGD after `start_powerSGD_iter` iterations.
     device = input_tensor.device
