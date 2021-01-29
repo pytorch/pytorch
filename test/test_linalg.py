@@ -3971,17 +3971,16 @@ class TestLinalg(TestCase):
         def run_test(shape):
             A = torch.randn(*shape, dtype=dtype, device=device)
             reflectors, tau = generate_reflectors_and_tau(A)
-            expected, _ = torch.linalg.qr(A, mode='complete')
+            expected, _ = torch.linalg.qr(A)
             actual = torch.orgqr(reflectors, tau)
             # torch.linalg.qr does not work correctly for zero batch dimension tensors
             # see https://github.com/pytorch/pytorch/issues/50576
             if (A.numel() > 0):
                 self.assertEqual(expected, actual)
             else:
-                result_shape = (*shape[:-2], shape[-2], shape[-2])
-                self.assertTrue(actual.shape == result_shape)
+                self.assertTrue(actual.shape == shape)
 
-            out = torch.empty_like(actual)
+            out = torch.empty_like(A)
             ans = torch.orgqr(reflectors, tau, out=out)
             self.assertEqual(ans, out)
             if (A.numel() > 0):

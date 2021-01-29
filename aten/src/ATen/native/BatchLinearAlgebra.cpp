@@ -1150,29 +1150,25 @@ Tensor& orgqr_out_info(const Tensor& input, const Tensor& tau, Tensor& result, T
   TORCH_INTERNAL_ASSERT(infos.device() == input.device());
   TORCH_INTERNAL_ASSERT(infos.numel() == std::max<int64_t>(1, batchCount(input)));
 
-  auto result_sizes = input.sizes().vec();
-  result_sizes.back() = input.size(-2);
-
   // if result has no elements we can modify it
   if (result.numel() == 0) {
-    at::native::resize_output(result, result_sizes);
+    at::native::resize_as_(result, input.transpose(-2, -1), MemoryFormat::Contiguous);
     result.transpose_(-2, -1);
   }
 
   // result tensor must be in batched column major order (Fortran contiguous)
   TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
-  TORCH_INTERNAL_ASSERT(result.sizes().equals(result_sizes));
+  TORCH_INTERNAL_ASSERT(result.sizes().equals(input.sizes()));
 
   // orgqr_stub (apply_orgqr) performs calculations in-place and result must be a copy of input
-  auto narrow_result = at::narrow(result, /*dim=*/-1, /*start=*/0, /*length=*/input.size(-1));
-  narrow_result.copy_(input);
+  result.copy_(input);
 
   // infos must be contiguous
   TORCH_INTERNAL_ASSERT(infos.is_contiguous());
   infos.fill_(0);
 
-  auto m = input.size(-2);
-  result = orgqr_stub(result.device().type(), result, tau, infos, m);
+  auto n = input.size(-1);
+  result = orgqr_stub(result.device().type(), result, tau, infos, n);
   return result;
 }
 
