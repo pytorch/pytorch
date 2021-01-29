@@ -677,7 +677,7 @@ static void PrepareListPopForONNX(Node* n) {
   }
 }
 
-static void PrepareListDeleteForONNX(Node *n) {
+static void PrepareListDeleteForONNX(Node* n) {
   if (n->kind() == aten::Delete) {
     n->addOutput();
     n->output()->setType(n->input(0)->type());
