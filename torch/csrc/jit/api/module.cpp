@@ -130,6 +130,37 @@ c10::intrusive_ptr<c10::ivalue::Future> Method::run_async(
   return function_->runAsync(stack, std::move(taskLauncher));
 }
 
+IValue Module::operator()(std::vector<IValue> inputs) {
+  const auto& pre_forward_hooks = type()->getForwardPreHooks();
+  const auto& forward_hooks = type()->getForwardHooks();
+
+  // call forward pre_hooks
+  for (const auto& pre_hook : pre_forward_hooks) {
+    auto tuple_input = c10::ivalue::Tuple::create(inputs);
+    IValue result = Method(_ivalue(), pre_hook)({tuple_input});
+    if (!result.isNone()) {
+      if (result.isTuple()) {
+        inputs = result.toTuple()->elements();
+      } else {
+        inputs = {result};
+      }
+    }
+  }
+
+  // call forward
+  auto outputs = forward(inputs);
+
+  // call forward hooks
+  for (const auto& hook : forward_hooks) {
+    auto tuple_input = c10::ivalue::Tuple::create(inputs);
+    auto hook_result = Method(_ivalue(), hook)({tuple_input, outputs});
+    if (!hook_result.isNone()) {
+      outputs = hook_result;
+    }
+  }
+  return outputs;
+}
+
 void Module::clone_method(
     const Module& orig,
     const Function& method,

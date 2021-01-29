@@ -51,6 +51,8 @@ DEFINE_DISPATCH(logit_backward_stub);
 DEFINE_DISPATCH(tanh_backward_stub);
 DEFINE_DISPATCH(maximum_stub);
 DEFINE_DISPATCH(minimum_stub);
+DEFINE_DISPATCH(fmax_stub);
+DEFINE_DISPATCH(fmin_stub);
 DEFINE_DISPATCH(fmod_stub);
 DEFINE_DISPATCH(logaddexp_stub);
 DEFINE_DISPATCH(logaddexp2_stub);
@@ -826,16 +828,12 @@ Tensor logical_xor(const Tensor& self, Scalar other) { return comparison_op(self
 Tensor& logical_xor_(Tensor& self, Scalar other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 
 Tensor& maximum_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum does not support complex inputs.");
-
   auto iter = TensorIterator::binary_op(result, self, other);
   maximum_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor maximum(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum does not support complex inputs.");
-
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
   maximum_stub(iter.device_type(), iter);
@@ -851,17 +849,30 @@ Tensor max(const Tensor& self, const Tensor& other) {
   return at::maximum(self, other);
 }
 
-Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum does not support complex inputs.");
+Tensor& fmax_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
 
+  auto iter = TensorIterator::binary_op(result, self, other);
+  fmax_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor fmax(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmax not implemented for complex tensors.");
+
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  fmax_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
   auto iter = TensorIterator::binary_op(result, self, other);
   minimum_stub(iter.device_type(), iter);
   return result;
 }
 
 Tensor minimum(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum does not support complex inputs.");
-
   Tensor result;
   auto iter = TensorIterator::binary_op(result, self, other);
   minimum_stub(iter.device_type(), iter);
@@ -875,6 +886,23 @@ Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
 
 Tensor min(const Tensor& self, const Tensor& other) {
   return at::minimum(self, other);
+}
+
+Tensor& fmin_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
+
+  auto iter = TensorIterator::binary_op(result, self, other);
+  fmin_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor fmin(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "fmin not implemented for complex tensors.");
+
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  fmin_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor floor_divide(const Tensor& self, Scalar other) {

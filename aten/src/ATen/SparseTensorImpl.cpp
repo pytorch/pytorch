@@ -9,6 +9,8 @@ namespace {
   DeviceType sparseTensorSetToDeviceType(DispatchKeySet key_set) {
     if (key_set.has(DispatchKey::SparseCPU)) {
       return kCPU;
+    } else if (key_set.has(DispatchKey::SparseXPU)) {
+      return kXPU;
     } else if (key_set.has(DispatchKey::SparseCUDA)) {
       return kCUDA;
     } else {
