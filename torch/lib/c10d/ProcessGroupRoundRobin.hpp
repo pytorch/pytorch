@@ -6,7 +6,7 @@
 
 namespace c10d {
 
-const std::string ROUND_ROBIN_BACKEND_NAME = "round_robin";
+constexpr const char* ROUND_ROBIN_BACKEND_NAME = "round_robin";
 
 // ProcessGroupRoundRobin implements simple load balancing.
 //
@@ -27,8 +27,8 @@ class ProcessGroupRoundRobin final : public ProcessGroup {
 
   ~ProcessGroupRoundRobin() override;
 
-  const std::string getBackendName() const {
-      return ROUND_ROBIN_BACKEND_NAME;
+  const std::string getBackendName() const override {
+      return std::string(ROUND_ROBIN_BACKEND_NAME);
   }
 
   c10::intrusive_ptr<ProcessGroup::Work> broadcast(

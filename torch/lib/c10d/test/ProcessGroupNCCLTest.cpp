@@ -480,6 +480,6 @@ TEST_F(ProcessGroupNCCLTest, testBackendName) {
     auto test = NCCLTestBase(file.path);
     test.initialize(rank_, size_);
     EXPECT_EQ(
-      test.getProcessGroup().getBackendName(), c10d::NCCL_BACKEND_NAME);
+      test.getProcessGroup().getBackendName(), std::string(c10d::NCCL_BACKEND_NAME));
   }
 }

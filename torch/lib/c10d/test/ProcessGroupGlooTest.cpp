@@ -585,7 +585,7 @@ TEST(ProcessGroupGlooTest, testBackendName) {
 
     for (auto i = 0; i < size; i++) {
       EXPECT_EQ(
-        tests[i].getProcessGroup().getBackendName(), c10d::GLOO_BACKEND_NAME);
+        tests[i].getProcessGroup().getBackendName(), std::string(c10d::GLOO_BACKEND_NAME));
     }
   }
 }

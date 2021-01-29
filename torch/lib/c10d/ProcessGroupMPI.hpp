@@ -16,7 +16,7 @@
 
 namespace c10d {
 
-const std::string MPI_BACKEND_NAME = "mpi";
+constexpr const char* MPI_BACKEND_NAME = "mpi";
 
 // WorkEntry is the state associated with a single MPI run instance.
 // It include the source Tensor list and destination Tensor list, as well as
@@ -110,8 +110,8 @@ class ProcessGroupMPI : public ProcessGroup {
   // Abort the MPI program, needs to be called when exception is detected
   void abort();
 
-  const std::string getBackendName() const {
-      return MPI_BACKEND_NAME;
+  const std::string getBackendName() const override {
+      return std::string(MPI_BACKEND_NAME);
   }
 
   c10::intrusive_ptr<ProcessGroup::Work> broadcast(
