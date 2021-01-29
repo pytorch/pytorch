@@ -1483,7 +1483,7 @@
     CPU: _embedding_bag_forward_only_cpu
     CUDA: _embedding_bag_forward_only_cuda
 
-- func: rowwise_prune(Tensor weight, Tensor mask, ScalarType compressed_indices_dtype) -> (Tensor, Tensor)
+- func: _rowwise_prune(Tensor weight, Tensor mask, ScalarType compressed_indices_dtype) -> (Tensor, Tensor)
 
 # row_stack is the alias of vstack
 - func: row_stack(Tensor[] tensors) -> Tensor
@@ -5894,17 +5894,14 @@
     CPU: _solve_helper_cpu
     CUDA: _solve_helper_cuda
 
-- func: cholesky_inverse.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
-  use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
-  dispatch:
-    CPU: legacy::cpu::_th_potri_out
-    CUDA: legacy::cuda::_th_potri_out
-
 - func: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
   variants: method, function
   dispatch:
-    CPU: legacy::cpu::_th_potri
-    CUDA: legacy::cuda::_th_potri
+    CPU, CUDA: cholesky_inverse
+
+- func: cholesky_inverse.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: cholesky_inverse_out
 
 - func: qr.Q(Tensor self, bool some=True, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures

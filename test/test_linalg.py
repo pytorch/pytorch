@@ -5793,28 +5793,99 @@ else:
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_cholesky_inverse(self, device, dtype):
-        from torch.testing._internal.common_utils import random_symmetric_pd_matrix
-        a = random_symmetric_pd_matrix(5, dtype=dtype, device=device)
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
-        # compute inverse directly
-        inv0 = torch.inverse(a)
+        def run_test(shape, batch, upper, contiguous):
+            A = random_hermitian_pd_matrix(shape, *batch, dtype=dtype, device=device)
+            if A.numel() > 0 and not contiguous:
+                A = A.transpose(-2, -1)
+                self.assertFalse(A.is_contiguous())
+            L = torch.linalg.cholesky(A)
+            expected_inverse = torch.inverse(A)
+            L = L.conj().transpose(-2, -1) if upper else L
+            actual_inverse = torch.cholesky_inverse(L, upper)
+            self.assertEqual(actual_inverse, expected_inverse)
 
-        # default case
-        chol = torch.cholesky(a)
-        inv1 = torch.cholesky_inverse(chol, False)
-        self.assertLessEqual(inv0.dist(inv1), 1e-12)
+        shapes = (0, 3, 5)
+        batches = ((), (0,), (3, ), (2, 2))
+        for shape, batch, upper, contiguous in list(itertools.product(shapes, batches, (True, False), (True, False))):
+            run_test(shape, batch, upper, contiguous)
 
-        # upper Triangular Test
-        chol = torch.cholesky(a, True)
-        inv1 = torch.cholesky_inverse(chol, True)
-        self.assertLessEqual(inv0.dist(inv1), 1e-12)
+        # check the out= variant
+        A = random_hermitian_pd_matrix(3, 2, dtype=dtype, device=device)
+        L = torch.linalg.cholesky(A)
 
-        # lower Triangular Test
-        chol = torch.cholesky(a, False)
-        inv1 = torch.cholesky_inverse(chol, False)
-        self.assertLessEqual(inv0.dist(inv1), 1e-12)
+        # There are two code paths currently for the out= variant
+        # 1. When 'out' tensor is in Fortran (column-major) memory format
+        # then the fast route is taken and the storage is reused directly in the computations
+        # 2. When 'out' tensor is not in Fortran format then a temporary tensor is allocated internally
+        # and the result is copied from the temporary tensor to 'out' tensor
+
+        # This test checks the first code path
+        out = torch.empty_like(A)
+        out_t = out.transpose(-2, -1).clone(memory_format=torch.contiguous_format)
+        out = out_t.transpose(-2, -1)
+        ans = torch.cholesky_inverse(L, out=out)
+        self.assertEqual(ans, out)
+        expected = torch.inverse(A)
+        self.assertEqual(expected, out)
+
+        # This test checks the second code path
+        out = torch.empty_like(A)
+        ans = torch.cholesky_inverse(L, out=out)
+        self.assertEqual(ans, out)
+        expected = torch.inverse(A)
+        self.assertEqual(expected, out)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_cholesky_inverse_errors_and_warnings(self, device, dtype):
+        # cholesky_inverse requires the input to be at least 2 dimensional tensor
+        a = torch.randn(2, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "must have at least 2 dimensions"):
+            torch.cholesky_inverse(a)
+
+        # cholesky_inverse requires a square matrix
+        a = torch.randn(2, 3, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
+            torch.cholesky_inverse(a)
+
+        # if non-empty out tensor with wrong shape is passed a warning is given
+        a = torch.randn(3, 3, device=device, dtype=dtype)
+        out = torch.empty(2, 3, device=device, dtype=dtype)
+        with warnings.catch_warnings(record=True) as w:
+            # Trigger warning
+            torch.cholesky_inverse(a, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+
+        # dtypes should match
+        out = torch.empty_like(a).to(torch.int)
+        with self.assertRaisesRegex(RuntimeError, "dtype Int does not match input dtype"):
+            torch.cholesky_inverse(a, out=out)
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, device=wrong_device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "does not match input device"):
+                torch.cholesky_inverse(a, out=out)
+
+        # cholesky_inverse raises an error for invalid inputs on CPU
+        # for example if at least one diagonal element is zero
+        a = torch.randn(3, 3, device=device, dtype=dtype)
+        a[1, 1] = 0
+        if self.device_type == 'cpu':
+            with self.assertRaisesRegex(RuntimeError, r"cholesky_inverse: U\(2,2\) is zero, singular U\."):
+                torch.cholesky_inverse(a)
+        # cholesky_inverse on GPU does not raise an error for this case
+        elif self.device_type == 'cuda':
+            out = torch.cholesky_inverse(a)
+            self.assertTrue(out.isinf().any() or out.isnan().any())
 
     def _select_broadcastable_dims(self, dims_full=None):
         # select full dimensionality

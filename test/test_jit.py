@@ -40,6 +40,7 @@ from jit.test_warn import TestWarn  # noqa: F401
 from jit.test_isinstance import TestIsinstance  # noqa: F401
 from jit.test_cuda import TestCUDA  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
+from jit.test_complex import TestComplex  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -15262,6 +15263,17 @@ dedent """
 
         self.checkScript(fn, ({'hi': 2, 'bye': 3},))
         self.checkScript(fn, ({'bye': 3},))
+
+    def test_for_else(self):
+        def fn():
+            c = 0
+            for i in range(4):
+                c += 10
+            else:
+                print("In else block of for...else")
+
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "else branches of for loops aren't supported"):
+            torch.jit.script(fn)
 
     def test_split(self):
         def split_two(tensor):
