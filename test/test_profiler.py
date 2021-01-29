@@ -267,7 +267,7 @@ class TestProfiler(TestCase):
         ) as p:
             for idx in range(8):
                 self.payload()
-                p.next_step()
+                p.step()
 
         self.assertEqual(called_num[0], 2)
 

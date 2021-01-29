@@ -86,7 +86,7 @@ class profile(object):
         print(p.key_averages().table(
             sort_by="self_cuda_time_total", row_limit=-1))
 
-    Usimg the profiler's ``schedule``, ``on_trace_ready`` and ``next_step`` functions:
+    Usimg the profiler's ``schedule``, ``on_trace_ready`` and ``step`` functions:
 
     .. code-block:: python
 
@@ -96,7 +96,7 @@ class profile(object):
         def trace_handler(prof):
             print(prof.key_averages().table(
                 sort_by="self_cuda_time_total", row_limit=-1))
-            # prof.export_chrome_trace("/tmp/test_trace_" + str(prof.step()) + ".json")
+            # prof.export_chrome_trace("/tmp/test_trace_" + str(prof.step_num) + ".json")
 
         with torch.profiler.profile(
             activities=[
@@ -120,7 +120,7 @@ class profile(object):
                 for iter in range(N):
                     code_iteration_to_profile(iter)
                     # send a signal to the profiler that the next iteration has started
-                    p.next_step()
+                    p.step()
     """
     def __init__(
             self,
@@ -172,7 +172,7 @@ class profile(object):
             self.step_rec_fn.__exit__(None, None, None)
         self._exit_actions()
 
-    def next_step(self):
+    def step(self):
         """
         Signals the profiler that the next profiling step has started.
         """
@@ -231,12 +231,6 @@ class profile(object):
         if self.record_steps:
             self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
             self.step_rec_fn.__enter__()
-
-    def step(self):
-        """
-        Returns the current profiling step.
-        """
-        return self.step_num
 
     def export_chrome_trace(self, path: str):
         """
