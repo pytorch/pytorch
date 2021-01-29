@@ -13,6 +13,7 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Verifier.h>
+#include <llvm/MC/MCSubtargetInfo.h>
 #include <llvm/Support/Host.h>
 #include <llvm/Support/TargetSelect.h>
 
@@ -1325,19 +1326,27 @@ LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(
     llvm::Type* basetype,
     Arity arity,
     int lanes) {
-  std::string typeSuffix = basetype == DoubleTy_ ? "d" : "";
-  std::string name = "Sleef_" + basename + typeSuffix + std::to_string(lanes);
-
+  std::string name;
   llvm::Type* type;
-  bool use_simd;
-  if (jit_->hasSymbol(name)) {
+  bool useSimd;
+
+  // Determine whether to use vectorized intrinsic.
+  auto const& featureString = jit_->getTargetMachine().getTargetFeatureString();
+  bool hasAVX = featureString.find("+avx") != llvm::StringRef::npos;
+  std::string typeSuffix = basetype == DoubleTy_ ? "d" : "";
+  std::string sleefName =
+      "Sleef_" + basename + typeSuffix + std::to_string(lanes);
+  if (hasAVX && jit_->hasSymbol(sleefName)) {
+    name = std::move(sleefName);
     type = llvm::VectorType::get(basetype, ElementCount(lanes));
-    use_simd = true;
+    useSimd = true;
   } else {
     name = basename;
     type = basetype;
-    use_simd = false;
+    useSimd = false;
   }
+
+  // Get function to call from name and type.
   llvm::FunctionType* fntype;
   switch (arity) {
     case Unary:
@@ -1349,7 +1358,7 @@ LLVMCodeGenImpl::SimdCallee LLVMCodeGenImpl::getSimdFunction(
   }
   FunctionCallee callee = module_->getOrInsertFunction(name, fntype, {});
   applyMathFunctionAttributes(llvm::cast<llvm::Function>(callee.getCallee()));
-  return SimdCallee{callee.getFunctionType(), callee.getCallee(), use_simd};
+  return SimdCallee{callee.getFunctionType(), callee.getCallee(), useSimd};
 }
 
 void LLVMCodeGenImpl::visit(const Intrinsics* v) {
