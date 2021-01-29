@@ -577,6 +577,207 @@ def makereport(tests):
 class TestStatsUtils(TestCase):
     maxDiff = None
 
+    def test_anomalies(self):
+        self.assertEqual(
+            '''\
+
+- class Baz:
+-     # was   15.23s ±   2.30s
+-
+-     def test_baz1: ...
+-         # was   0.004s           (skipped)
+-
+-     def test_baz2: ...
+-         # was  15.231s ±  2.300s
+
+
+  class Grault:
+      # was   48.86s ±   1.19s
+      # now    6.25s
+
+    - def test_grault1: ...
+    -     # was  13.146s ±  1.179s (failed)
+
+    - def test_grault3: ...
+    -     # was  30.460s
+
+    ! def test_grault2: ...
+    !     # was   0.395s ±  0.085s (errored)
+    !     # now   1.473s           (errored)
+
+
+  class Qux:
+      # was   41.66s ±   1.06s
+      # now   42.63s
+
+    - def test_qux2: ...
+    -     # was   6.020s ±  0.402s
+
+    ! def test_qux3: ...
+    !     # was   4.978s           (errored)
+    !     # now  23.496s
+
+    ! def test_qux4: ...
+    !     # was   7.074s ±  0.979s (errored)
+    !     # now   7.158s           (failed)
+
+    ! def test_qux6: ...
+    !     # was  23.589s           (failed)
+    !     # now   0.002s           (skipped)
+
+    + def test_qux1: ...
+    +     # now   0.001s           (skipped)
+
+    + def test_qux5: ...
+    +     # now  11.968s
+
+
++ class Bar:
++     # now   54.19s
++
++     def test_bar1: ...
++         # now  50.447s
++
++     def test_bar2: ...
++         # now   3.742s           (failed)
+
+''',
+            stats_utils.anomalies(
+                stdev_threshold=1,
+                head_report=makereport({
+                    # input ordering of the suites is ignored
+                    'Grault': [
+                        # not printed: status same and time similar
+                        makecase('test_grault0', 4.78, failed=True),
+                        # status same, but time increased too much
+                        makecase('test_grault2', 1.473, errored=True),
+                    ],
+                    # individual tests times changed, not overall suite
+                    'Qux': [
+                        # input ordering of the test cases is ignored
+                        makecase('test_qux1', 0.001, skipped=True),
+                        makecase('test_qux6', 0.002, skipped=True),
+                        # time in bounds, but status changed
+                        makecase('test_qux4', 7.158, failed=True),
+                        # not printed because it's the same as before
+                        makecase('test_qux7', 0.003, skipped=True),
+                        makecase('test_qux5', 11.968),
+                        makecase('test_qux3', 23.496),
+                    ],
+                    # new test suite
+                    'Bar': [
+                        makecase('test_bar2', 3.742, failed=True),
+                        makecase('test_bar1', 50.447),
+                    ],
+                    # overall suite time changed but no individual tests
+                    'Norf': [
+                        makecase('test_norf1', 3),
+                        makecase('test_norf2', 3),
+                        makecase('test_norf3', 3),
+                        makecase('test_norf4', 3),
+                    ],
+                    # suite doesn't show up if it doesn't change enough
+                    'Foo': [
+                        makecase('test_foo1', 42),
+                        makecase('test_foo2', 56),
+                    ],
+                }),
+                base_reports={
+                    # bbbb has no reports, so base is cccc instead
+                    fakehash('b'): [],
+                    fakehash('c'): [
+                        makereport({
+                            'Baz': [
+                                makecase('test_baz2', 13.605),
+                                # no recent suites have & skip this test
+                                makecase('test_baz1', 0.004, skipped=True),
+                            ],
+                            'Foo': [
+                                makecase('test_foo1', 43),
+                                # test added since dddd
+                                makecase('test_foo2', 57),
+                            ],
+                            'Grault': [
+                                makecase('test_grault0', 4.88, failed=True),
+                                makecase('test_grault1', 11.967, failed=True),
+                                makecase('test_grault2', 0.395, errored=True),
+                                makecase('test_grault3', 30.460),
+                            ],
+                            'Norf': [
+                                makecase('test_norf1', 2),
+                                makecase('test_norf2', 2),
+                                makecase('test_norf3', 2),
+                                makecase('test_norf4', 2),
+                            ],
+                            'Qux': [
+                                makecase('test_qux3', 4.978, errored=True),
+                                makecase('test_qux7', 0.002, skipped=True),
+                                makecase('test_qux2', 5.618),
+                                makecase('test_qux4', 7.766, errored=True),
+                                makecase('test_qux6', 23.589, failed=True),
+                            ],
+                        }),
+                    ],
+                    fakehash('d'): [
+                        makereport({
+                            'Foo': [
+                                makecase('test_foo1', 40),
+                                # removed in cccc
+                                makecase('test_foo3', 17),
+                            ],
+                            'Baz': [
+                                # not skipped, so not included in stdev
+                                makecase('test_baz1', 3.14),
+                            ],
+                            'Qux': [
+                                makecase('test_qux7', 0.004, skipped=True),
+                                makecase('test_qux2', 6.02),
+                                makecase('test_qux4', 20.932),
+                            ],
+                            'Norf': [
+                                makecase('test_norf1', 3),
+                                makecase('test_norf2', 3),
+                                makecase('test_norf3', 3),
+                                makecase('test_norf4', 3),
+                            ],
+                            'Grault': [
+                                makecase('test_grault0', 5, failed=True),
+                                makecase('test_grault1', 14.325, failed=True),
+                                makecase('test_grault2', 0.31, errored=True),
+                            ],
+                        }),
+                    ],
+                    fakehash('e'): [],
+                    fakehash('f'): [
+                        makereport({
+                            'Foo': [
+                                makecase('test_foo3', 24),
+                                makecase('test_foo1', 43),
+                            ],
+                            'Baz': [
+                                makecase('test_baz2', 16.857),
+                            ],
+                            'Qux': [
+                                makecase('test_qux2', 6.422),
+                                makecase('test_qux4', 6.382, errored=True),
+                            ],
+                            'Norf': [
+                                makecase('test_norf1', 0.9),
+                                makecase('test_norf3', 0.9),
+                                makecase('test_norf2', 0.9),
+                                makecase('test_norf4', 0.9),
+                            ],
+                            'Grault': [
+                                makecase('test_grault0', 4.7, failed=True),
+                                makecase('test_grault1', 13.146, failed=True),
+                                makecase('test_grault2', 0.48, errored=True),
+                            ],
+                        }),
+                    ],
+                },
+            ),
+        )
+
     def test_graph(self):
         # HEAD is on master
         self.assertEqual(
@@ -720,11 +921,34 @@ Commit graph (base is most recent master ancestor with at least one S3 report):
             )
         )
 
+    def test_summary(self):
+        self.assertEqual(
+            '''\
+Prior average total time:    41.50s ± 2.12s
+Current       total time:    42.00s
+🟢 this commit maintains total test job time within 1 standard deviation
+''',
+            stats_utils.summary(
+                head_report=makereport({'Foo': [makecase('test_foo', 42)]}),
+                base_reports={
+                    fakehash('b'): [
+                        makereport({'Foo': [makecase('test_foo', 40)]}),
+                    ],
+                    fakehash('c'): [
+                        makereport({'Foo': [makecase('test_foo', 43)]}),
+                    ],
+                },
+                stdev_threshold=2,
+            )
+        )
+
     def test_regression_info(self):
         self.assertEqual(
             '''\
-Following output is to check this commit for test time regressions:
-    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+Following output is to check for test time regressions:
+    job: foo_job
+    commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
 
 Commit graph (base is most recent master ancestor with at least one S3 report):
 
@@ -740,10 +964,6 @@ Commit graph (base is most recent master ancestor with at least one S3 report):
 Prior average total time:    41.50s ± 2.12s
 Current       total time:    42.00s
 🟢 this commit maintains total test job time within 1 standard deviation
-
------- tests added/removed ------
-
---- tests whose times changed ---
 ''',
             stats_utils.regression_info(
                 head_sha=fakehash('a'),
