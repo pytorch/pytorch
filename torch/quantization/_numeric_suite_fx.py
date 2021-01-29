@@ -52,19 +52,21 @@ def remove_qconfig_observer_fx(model):
 
 
 def compare_weights_fx(float_dict, quantized_dict):
-    r"""Compare the weights of the float module with its corresponding quantized
+    r"""Compare the weights of the float module (after prepare) with its corresponding quantized
     module. Return a dict with key corresponding to module names and each entry being
     a dictionary with two keys 'float' and 'quantized', containing the float and
     quantized weights. This dict can be used to compare and compute the quantization
     error of the weights of float and quantized models.
 
+    Note the float module is the float module which has been prepared by calling prepare_fx
+
     Example usage:
         prepared_model = prepare_fx(float_model, qconfig_dict)
-        backup_prepared_model = copy.deepcopy(prepared_model)
-        quantized_model = convert_fx(prepared_model)
+        prepared_float_model = copy.deepcopy(prepared_model)
+        quantized_model = convert_fx(prepared_float_model)
 
         qmodel = quantized_model
-        wt_compare_dict = compare_weights_fx(backup_prepared_model.state_dict(), qmodel.state_dict())
+        wt_compare_dict = compare_weights_fx(prepared_float_model.state_dict(), qmodel.state_dict())
         for key in wt_compare_dict:
             print(key, compute_error(wt_compare_dict[key]['float'], wt_compare_dict[key]['quantized'].dequantize()))
 
@@ -83,12 +85,12 @@ def compare_weights_fx(float_dict, quantized_dict):
     return compare_weights(float_dict, quantized_dict)
 
 
-def prepare_model_with_stubs_fx(float_module, q_module, module_swap_list, Logger):
-    r"""Prepare the model by attaching the float module to its matching quantized
+def prepare_model_with_stubs_fx(prepared_float_module, q_module, module_swap_list, Logger):
+    r"""Prepare the model by attaching the float module (after prepare) to its matching quantized
     module as the shadow if the float module type is in module_swap_list.
 
     Example usage:
-        prepare_model_with_stubs_fx(float_model, q_model, module_swap_list, Logger)
+        prepare_model_with_stubs_fx(prepared_float_model, q_model, module_swap_list, Logger)
         q_model(data)
         ob_dict = get_logger_dict(q_model)
 
@@ -102,11 +104,12 @@ def prepare_model_with_stubs_fx(float_module, q_module, module_swap_list, Logger
     torch._C._log_api_usage_once(
         "quantization_api._numeric_suite.prepare_model_with_stubs_fx"
     )
-    return prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger)
+    return prepare_model_with_stubs(prepared_float_module, q_module, module_swap_list, Logger)
 
 
+# TODO: Add submodule and functional support for compare_model_stub_fx
 def compare_model_stub_fx(
-    float_model, q_model, module_swap_list, *data, Logger=ShadowLogger
+    prepared_float_model, q_model, module_swap_list, *data, Logger=ShadowLogger
 ):
     r"""Compare quantized module in a model with its floating point counterpart,
     feeding both of them the same input. Return a dict with key corresponding to
@@ -114,6 +117,8 @@ def compare_model_stub_fx(
     'quantized', containing the output tensors of quantized and its matching
     float shadow module. This dict can be used to compare and compute the module
     level quantization error.
+
+    Note the float module is a float module which has been prepared by calling prepare_fx.
 
     This function first call prepare_model_with_stubs_fx() to swap the quantized
     module that we want to compare with the Shadow module, which takes quantized
@@ -125,12 +130,12 @@ def compare_model_stub_fx(
 
     Example usage:
         module_swap_list = [nn.Linear]
-        ob_dict = compare_model_stub_fx(float_model,qmodel,module_swap_list, data)
+        ob_dict = compare_model_stub_fx(prepared_float_model,qmodel,module_swap_list, data)
         for key in ob_dict:
             print(key, compute_error(ob_dict[key]['float'], ob_dict[key]['quantized'].dequantize()))
 
     Args:
-        float_model: float model used to generate the q_model
+        prepared_float_model: float model which has been prepared
         q_model: model quantized from float_model
         module_swap_list: list of float module types at which shadow modules will
             be attached.
@@ -141,8 +146,8 @@ def compare_model_stub_fx(
     torch._C._log_api_usage_once(
         "quantization_api._numeric_suite.compare_model_stub_fx"
     )
-    float_model = remove_qconfig_observer_fx(float_model)
-    prepare_model_with_stubs_fx(float_model, q_model, module_swap_list, Logger)
+    prepared_float_model = remove_qconfig_observer_fx(prepared_float_model)
+    prepare_model_with_stubs_fx(prepared_float_model, q_model, module_swap_list, Logger)
     q_model(*data)
     ob_dict = get_logger_dict(q_model)
     return ob_dict
