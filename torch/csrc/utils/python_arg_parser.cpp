@@ -476,12 +476,11 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
     }
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
-        auto seq = py::reinterpret_borrow<py::object>(obj);
-        if (PySequence_Size(seq.ptr()) == 0) {
+        if (PySequence_Size(obj) == 0) {
           return true;
         }
-        py::object item = py::reinterpret_steal<py::object>(
-          PySequence_GetItem(seq.ptr(), 0));
+        auto item = py::reinterpret_steal<py::object>(
+            PySequence_GetItem(obj, 0));
         return is_int(item.ptr());
       }
       // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
