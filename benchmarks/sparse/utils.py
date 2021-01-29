@@ -20,16 +20,17 @@ class Event(object):
         assert isinstance(end_event, Event)
         return end_event.time - self.time
 
-def gen_sparse_csr(shape, nnz, fill_value=float('NaN')):
+def gen_sparse_csr(shape, nnz):
+    fill_value = 0
     total_values = functools.reduce(operator.mul, shape, 1)
     dense = np.random.randn(total_values)
     fills = random.sample(list(range(total_values)), total_values-nnz)
 
     for f in fills:
         dense[f] = fill_value
-    dense = dense.reshape(shape)
+    dense = torch.from_numpy(dense.reshape(shape))
 
-    return dense.to_sparse_csr(None, fill_value)
+    return dense.to_sparse_csr()
 
 def gen_sparse_coo(shape, nnz):
     dense = np.random.randn(*shape)
@@ -53,4 +54,4 @@ def gen_sparse_coo_and_csr(shape, nnz):
         dense[f] = 0
 
     dense = torch.from_numpy(dense.reshape(shape))
-    return dense.to_sparse(), dense.to_sparse_csr(None, 0)
+    return dense.to_sparse(), dense.to_sparse_csr()

@@ -40,7 +40,7 @@ def test_sparse_coo_and_csr(m, n, k, nnz, test_count):
     stop = Event(enable_timing=True)
 
     coo, csr = gen_sparse_coo_and_csr((m, k), nnz)
-    mat = torch.randn((k, n) dtype=torch.double)
+    mat = torch.randn((k, n), dtype=torch.double)
 
     times = []
     for _ in range(test_count):

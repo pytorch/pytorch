@@ -78,7 +78,7 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
     int64_t out_stride0 = out.stride(0);
     int64_t out_stride1 = out.stride(1);   
 
-    AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "sparse_csr_mm_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES(values.scalar_type(), "sparse_csr_mm_cpu", [&] () {
       scalar_t cast_alpha = alpha.to<scalar_t>();
       scalar_t cast_beta = beta.to<scalar_t>();
       scalar_t* dense_ptr = op1.data_ptr<scalar_t>();
