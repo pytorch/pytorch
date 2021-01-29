@@ -10,19 +10,19 @@ Overview
 Writing Transformations
 -----------------------
 
-What is a FX transform? Well, in the abstract, it’s something that takes
+What is a FX transform? In the abstract, it’s something that takes
 your ``nn.Module``, does something with it, and then returns a new
-``nn.Module``. Specifically, as FX converts your input ``nn.Module``
-into a graph form, your FX transform will use your input graph to build
-a new graph (which may simply be a copy of the input), and then return
-an ``nn.Module``. You should think of the ``nn.Module`` that your FX
-transform returns as identical to a regular ``nn.Module``- you can pass
-it to another FX transform, you can pass it to Torchscript, or you can
+``nn.Module``. Specifically, FX converts your input ``nn.Module``
+into a graph form. Then, your FX transform will use this graph to build
+a new graph (which may simply be a copy), and then returns
+a ``nn.Module``. You should think of the ``nn.Module`` that your FX
+transform returns as identical to a regular ``nn.Module``-- you can pass
+it to another FX transform, you can pass it to TorchScript, or you can
 run it. Ensuring that the inputs and outputs of your FX transform are a
 ``nn.Module`` will ensure composability.
 
 Given that you’ve passed in a ``nn.Module`` that has been traced into a
-graph, there are now 2 primary approaches you can take to building a new
+graph, there are now two primary approaches you can take to building a new
 graph.
 
 Graph Manipulation
@@ -30,7 +30,7 @@ Graph Manipulation
 
 One approach to building this new graph is to simply transform your old
 one. To aid in this, we can simply take the graph we obtain from
-symbolic tracing and modify it. For example, let’s say we desired to
+symbolic tracing and modify it. For example, let’s say we desire to
 replace ``torch.add`` with ``torch.mul``.
 
 ::
@@ -51,19 +51,19 @@ replace ``torch.add`` with ``torch.mul``.
 
 We can also do more involved graph rewrites, such as appending a ReLU
 after a node. To aid in these transformations, FX also has utility
-functions for transforming the graph. You can find more .
+functions for transforming the graph. You can find more   .
 
 ::
 
-    with traced.graph.inserting_after(node):
-        new_node = traced.graph.call_function(torch.relu, args=(node,))
+    with traced.graph.inserting_after(node): # Specifies the insertion point
+        new_node = traced.graph.call_function(torch.relu, args=(node,)) # builds a new relu node
         node.replace_all_uses_with(new_node)
 
-This approach is also a good fit for graph optimizations - such as
+This approach is also a good fit for graph optimizations such as
 `conv/batch norm
 fusion! <https://github.com/pytorch/pytorch/blob/ec86cec20a8a2312a2295d7bc8be6e88256a2de4/torch/fx/experimental/fuser.py>`__
 
-For simple transformations that are simply substitutions, you can also
+For simple transformations that only consist of substitutions, you can also
 make use of the `subgraph rewriter. <https://github.com/pytorch/pytorch/blob/master/torch/fx/subgraph_rewriter.py>`__
 
 In general, writing your transformation through graph manipulation is a
@@ -84,9 +84,9 @@ Proxy/Retracing
 ---------------
 
 Although most transformations can be implemented as graph
-transformations, transformations that involve large amounts of rewriting
-are often easier represented through retracing. For example, let’s
-imagine that we wanted to write a decomposition pass that decomposed
+transformations, transformations that involve large numbers of rewriting
+are often more easily represented through retracing. For example, let’s
+imagine that we wanted to write a pass that decomposed
 PyTorch functions. For example, it would transform every ``F.relu(x)``
 into ``(x > 0)*x``. One possibility would be to perform the requisite
 graph rewriting to insert the comparison and multiplication after the
@@ -95,8 +95,8 @@ manipulation can be awkward, and it’s often easier to implicitly
 generate the graph by retracing.
 
 To use this method, we write the graph that we want inserted as regular
-PyTorch code, and pass in implicit proxy objects. These proxy objects
-will capture the operations that are performed on it and append them to
+PyTorch code and pass in implicit proxy objects. These proxy objects
+will capture the operations that are performed on them and append them to
 the graph.
 
 ::
@@ -118,7 +118,7 @@ the graph.
         else: # Otherwise, just append the original graph.
             new_graph.node_copy(node)
 
-In addition to being more natural to write, this also allows you to
+In addition to avoiding explicit graph manipulation, using Proxies also allows you to
 specify your rewrite rules as native Python code. For transformations
 that require a large amount of rewrite rules (such as vmap or grad),
 this can often improve readability and maintainability of the rules.
@@ -126,14 +126,14 @@ this can often improve readability and maintainability of the rules.
 Example transformations that use this technique include (vmap), (grad),
 and the (decomposition) pass.
 
-FX transforms that don’t return a module
+FX Transforms That Don’t Return A Module
 ----------------------------------------
 
-In addition to FX passes (that take in a module and return a module),
-there may be other things you wish to do with the FX graph that don’t
-fit into this paradigm. For example, let’s say that you’d like to obtain
+In addition to FX passes that take in a module and return a module,
+there may be other things you wish to do with the FX graph. For example,
+let’s say that you’d like to obtain
 the shape information of tensors in your graph. In this case, instead of
-looping over the FX graph and modifying it, we can write an interpreter
+looping over the FX graph and modifying it, you can write an interpreter
 on top of the FX graph! As the FX IR is quite simple, it’s easy to
 reimplement an interpreter that also captures your desired attributes.
 
