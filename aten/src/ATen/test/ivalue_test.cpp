@@ -65,10 +65,10 @@ TEST(IValueTest, Basic) {
   ASSERT_EQ(foo12.toComplexDouble(), c10::complex<double>(3,4));
   ASSERT_EQ(foo1.use_count(), 2);
   ASSERT_TRUE(baz1.toComplexDoubleVector() == std::vector<c10::complex<double>>({(3, 4), (3, -4), (5, 0)}));
-  IValue the_complex_list(
+  IValue complex_tuple(
       at::ivalue::Tuple::create({IValue(c10::complex<double>(3.4, 4.7)), IValue(c10::complex<double>(0, 2.3)), bar1}));
   ASSERT_EQ(foo.use_count(), 3);
-  ASSERT_TRUE(the_complex_list.isTuple());
+  ASSERT_TRUE(complex_tuple.isTuple());
 }
 
 static std::array<IValue, 5> makeSampleIValues() {
