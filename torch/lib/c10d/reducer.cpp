@@ -1512,8 +1512,8 @@ void Reducer::set_bucket_stats() {
 
 void Reducer::set_construction_logging_data(
   const std::string& module_name,
-  const std::vector<int>& device_ids,
-  int output_device,
+  const std::string& device_ids,
+  const std::string& output_device,
   bool broadcast_buffers
 ) {
 // Data that can be got during DistributedDataParallel construction time
@@ -1535,6 +1535,8 @@ void Reducer::set_construction_logging_data(
   ddp_logging_data_->find_unused_parameters = find_unused_parameters_;
   ddp_logging_data_->gradient_as_bucket_view = gradient_as_bucket_view_;
   ddp_logging_data_->backend_name = process_group_->getBackendName();
+
+  LogPyTorchDDPUsage(*ddp_logging_data_);
 }
 
 c10::DDPLoggingData Reducer::get_ddp_logging_data() {

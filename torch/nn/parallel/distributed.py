@@ -610,8 +610,8 @@ class DistributedDataParallel(Module):
         dist._set_construction_logging_data(
             self.reducer,
             self.module.__class__.__name__,
-            [] if self.device_ids is None else self.device_ids,
-            -1 if self.output_device is None else self.output_device,
+            "" if self.device_ids is None else ",".join(map(str, self.device_ids)),
+            "" if self.output_device is None else str(self.output_device),
             self.broadcast_buffers)
 
         # passing a handle to torch.nn.SyncBatchNorm layer

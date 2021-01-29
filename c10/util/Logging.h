@@ -340,8 +340,8 @@ struct DDPLoggingData {
   std::string nccl_ib_timeout;
 
   // DistributedDataParallel constructor input parameters
-  std::vector<int> device_ids;
-  int output_device;
+  std::string device_ids;
+  std::string output_device;
   bool broadcast_buffers;
   int bucket_cap_mb;
   bool find_unused_parameters;
@@ -349,6 +349,9 @@ struct DDPLoggingData {
 
   // Runtime states
 };
+
+C10_API void SetPyTorchDDPUsageLogger(std::function<void(const c10::DDPLoggingData&)> logger);
+C10_API void LogPyTorchDDPUsage(const c10::DDPLoggingData& ddpData);
 
 namespace detail {
 // Return value is needed to do the static variable initialization trick

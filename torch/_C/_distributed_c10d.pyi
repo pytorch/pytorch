@@ -19,8 +19,8 @@ def _get_ddp_logging_data(reducer: Reducer): ...
 def _set_construction_logging_data(
     reducer: Reducer,
     module_name: str,
-    device_ids: List[int],
-    output_device: int,
+    device_ids: str,
+    output_device: str,
     broadcast_buffers: bool): ...
 
 class _GradBucket:

@@ -186,8 +186,8 @@ PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
           [](
               ::c10d::Reducer& reducer,
               const std::string& module_name,
-              const std::vector<int>& device_ids,
-              int output_device,
+              const std::string& device_ids,
+              const std::string& output_device,
               bool broadcast_buffers) -> void {
             reducer.set_construction_logging_data(
                 module_name, device_ids, output_device, broadcast_buffers);

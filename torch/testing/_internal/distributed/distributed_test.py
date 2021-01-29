@@ -3204,7 +3204,7 @@ class DistributedTest:
         @unittest.skipIf(
             BACKEND == "nccl", "nccl does not support DDP on CPU models"
         )
-        def test_ddp_logging_data(self):
+        def test_ddp_logging_data_cpu(self):
             def parse_env(var):
                 return os.environ[var] if var in os.environ else "N/A"
 
@@ -3215,10 +3215,8 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.world_size, dist.get_world_size())
             self.assertEqual(ddp_logging_data.rank, dist.get_rank())
             self.assertEqual(ddp_logging_data.module_name, 'Net')
-            self.assertEqual(ddp_logging_data.device_ids, [])
-            # output_device is -1 in default if it is not set, e.g.
-            # output_device of CPU training is -1.
-            self.assertEqual(ddp_logging_data.output_device, -1)
+            self.assertEqual(ddp_logging_data.device_ids, "")
+            self.assertEqual(ddp_logging_data.output_device, "")
             self.assertEqual(ddp_logging_data.broadcast_buffers, True)
             self.assertEqual(ddp_logging_data.bucket_cap_mb, 25)
             self.assertEqual(ddp_logging_data.find_unused_parameters, False)
@@ -3246,6 +3244,18 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.nccl_debug, parse_env("NCCL_DEBUG"))
             self.assertEqual(ddp_logging_data.nccl_nthreads, parse_env("NCCL_NTHREADS"))
             self.assertEqual(ddp_logging_data.nccl_ib_timeout, parse_env("NCCL_IB_TIMEOUT"))
+
+        @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
+        @skip_if_no_gpu
+        def test_ddp_logging_data_gpu(self):
+            group, group_id, rank = self._init_global_test()
+            model_DDP = copy.deepcopy(DDP_NET)
+            model_DDP.cuda(rank)
+            model_DDP = nn.parallel.DistributedDataParallel(model_DDP, device_ids=[rank])
+            ddp_logging_data = model_DDP.get_ddp_logging_data()
+            self.assertEqual(ddp_logging_data.device_ids, str(rank))
+            self.assertEqual(ddp_logging_data.output_device, str(rank))
 
         @skipIfNoTorchVision
         def test_SyncBatchNorm_process_group(self):
