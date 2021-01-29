@@ -534,14 +534,39 @@ static void PrepareListAppendAndInsertForONNX(Block* b) {
   }
 }
 
-static void ChangeInputTypeForInplaceOps(Node* inplaceNode) {
-  // TODO: Check if binary op
-  auto newInputNode = inplaceNode->owningGraph()->create(aten::type_as, 1);
-  auto orignalInputs = inplaceNode->inputs();
-  newInputNode->insertBefore(inplaceNode);
-  newInputNode->addInput(orignalInputs[1]);
-  newInputNode->addInput(orignalInputs[0]);
-  inplaceNode->replaceInput(1, newInputNode->outputs()[0]);
+// Handles special case of binary inplace ops, where the first input node
+// has a lower type precedence than the second input node. When the 
+// inplace node is converted to a regular op, this information is lost and
+// the resulting type is based on type precedence, just like regular ops.
+// To avoid this loss of information, we add a cast node before the input 
+// node with the higher data type precedence, so that both the input types
+// are the same.
+// An example scenario would be:
+// Before:
+// graph(%0 : Float),
+//        %1 : Half):
+//   %4 : Float = onnx::Cast[to=1](%1)
+//   %5 : Float = onnx::Add(%4, %0)
+//   ...
+// After:
+// graph(%0 : Float),
+//        %1 : Half):
+//   %4 : Half = onnx::Cast[to=10](%0)
+//   %5 : Half = onnx::Add(%1, %4)
+//   ...
+
+static void ImplicitCastForBinaryInplaceOps(Node* inplaceNode) {
+  // Check type if inplace operation is a binary node
+  auto name = inplaceNode->schema().name();
+  if((name == "aten::add_") || (name == "aten::sub_") ||
+     (name == "aten::mul_") || (name == "aten::div_")) {
+    auto newInputNode = inplaceNode->owningGraph()->create(aten::type_as, 1);
+    auto orignalInputs = inplaceNode->inputs();
+    newInputNode->insertBefore(inplaceNode);
+    newInputNode->addInput(orignalInputs[1]);
+    newInputNode->addInput(orignalInputs[0]);
+    inplaceNode->replaceInput(1, newInputNode->outputs()[0]);
+  }
 }
 
 // Remove Mutation pass does not handle mutation on block inputs.
@@ -571,7 +596,7 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
       if (!mr.inplaceOpVariant(node)) {
         continue;
       }
-      ChangeInputTypeForInplaceOps(node);
+      ImplicitCastForBinaryInplaceOps(node);
 
       auto it = std::find(node->inputs().begin(), node->inputs().end(), input);
 
