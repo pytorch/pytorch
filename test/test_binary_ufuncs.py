@@ -364,13 +364,25 @@ class TestBinaryUfuncs(TestCase):
         else:
             an, bn = a.float().cpu().numpy(), b.float().cpu().numpy()
 
-        for mode, np_ref in (("true", np.true_divide), ("floor", np.floor_divide)):
+        for mode, np_ref in (
+                ("true", np.true_divide),
+                ("floor", np.floor_divide),
+                ("trunc", lambda a, b: np.trunc(np.true_divide(a, b)).astype(a.dtype))
+        ):
             with np.errstate(all='ignore'):
-                expect = np_ref(an, bn)
+                expect = torch.from_numpy(np_ref(an, bn))
+
+            # Contiguous (likely vectorized)
             with set_default_dtype(torch.double):
                 actual = torch.divide(a, b, rounding_mode=mode)
-            self.assertEqual(actual, torch.from_numpy(expect),
-                             exact_device=False, exact_dtype=exact_dtype)
+            self.assertEqual(actual, expect, exact_device=False, exact_dtype=exact_dtype)
+
+            # Non-contiguous (not vectorized)
+            expect = expect[::2]
+            with set_default_dtype(torch.double):
+                actual = torch.divide(a[::2], b[::2], rounding_mode=mode)
+
+            self.assertEqual(actual, expect, exact_device=False, exact_dtype=exact_dtype)
 
     # TODO: update to run on CUDA -- what is this test even testing?
     @onlyCPU
