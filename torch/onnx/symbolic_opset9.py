@@ -302,8 +302,13 @@ def sign(g, self):
 
 def _slice(g, input, axes, starts, ends):
     assert len(starts) == len(ends)
-    if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807:
+    if len(starts) == 1 and starts[0] is None and ends[0] is None:
         return input
+    # onnx slice expects integer so we need to manually convert here
+    if starts[0] is None:
+        starts[0] = 9223372036854775807
+    if ends[0] is None:
+        ends[0] = 9223372036854775807
     return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
 
 
