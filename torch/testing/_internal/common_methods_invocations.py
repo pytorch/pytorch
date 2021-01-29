@@ -19,7 +19,7 @@ from torch.testing import \
 from torch.testing._internal.common_device_type import \
     (skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCPUIfNoMkl,
      skipCUDAIfRocm, expectedAlertNondeterministic, precisionOverride)
-from torch.testing._internal.common_cuda import tf32_is_not_fp32
+from torch.testing._internal.common_cuda import CUDA11OrLater
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
      random_symmetric_matrix, random_symmetric_psd_matrix,
@@ -351,7 +351,7 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
         (0, 0, 0),
     ]
 
-    vector_ords = (None, 0, 0.5, 1, 2, 3.5, inf, -0.5, -1, -2, -3.5)
+    vector_ords = (None, 0, 0.5, 1, 2, 3.5, inf, -0.5, -1, -2, -3.5, -inf)
     matrix_ords = (None, 'fro', 'nuc', 1, 2, inf, -1, -2, -inf)
 
     inputs = []
@@ -379,7 +379,7 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
                 # TODO: remove this check when `max` is implemented for
                 #       float16 and bfloat16. Issue:
                 #       https://github.com/pytorch/pytorch/issues/50790
-                if is_vector_norm and is_dtype_half and ord == inf:
+                if is_vector_norm and is_dtype_half and ord in [inf, -inf]:
                     continue
 
                 inputs.append(SampleInput(
@@ -783,6 +783,63 @@ class HermitianOpInfo(OpInfo):
         return hermitian_func
 
 
+class TriangularOpInfo(OpInfo):
+    """Operator information for function that take lower or upper triangular matrices as input.
+    They require a modified function to be tested for gradcheck, because the finite-difference algorithm
+    for calculating derivatives does not preserve the triangular property of the input and returning incorrect results.
+    """
+
+    def get_op(self):
+        """
+        Returns the function variant of the operator, torch.<op_name>,
+        compatible with gradcheck for triangular input functions.
+        It works only for single input argument and upper kwarg
+        """
+        def triangular_func(non_triangular_input, upper=False):
+            if upper:
+                triangular_input = non_triangular_input.triu()
+            else:
+                triangular_input = non_triangular_input.tril()
+            return self.op(triangular_input, upper=upper)
+
+        return triangular_func
+
+    def get_method(self):
+        """
+        Returns the method variant of the operator
+        compatible with gradcheck for triangular input functions.
+        It works only for single input argument and upper kwarg
+        """
+        def triangular_func(non_triangular_input, upper=False):
+            if upper:
+                triangular_input = non_triangular_input.triu()
+            else:
+                triangular_input = non_triangular_input.tril()
+            return self.method_variant(triangular_input, upper=upper)
+
+        return triangular_func
+
+    def sample_inputs(self, device, dtype, requires_grad=False):
+        """
+        This function generates Cholesky factors of positive-definite (non-singular) Hermitian (symmetric) matrices
+        for cholesky_inverse.
+        """
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+        inputs = (
+            torch.zeros(0, 0, dtype=dtype, device=device),  # 0x0 matrix
+            torch.zeros(0, 2, 2, dtype=dtype, device=device),  # zero batch of matrices
+            random_hermitian_pd_matrix(S, dtype=dtype, device=device),  # single matrix
+            random_hermitian_pd_matrix(S, 2, dtype=dtype, device=device),  # batch of matrices
+        )
+        test_cases = (torch.linalg.cholesky(a) for a in inputs)
+        out = []
+        for a in test_cases:
+            a.requires_grad = requires_grad
+            out.append(SampleInput(a))
+            out.append(SampleInput(a, kwargs=dict(upper=True)))
+        return out
+
+
 def sample_inputs_linalg_pinv(op_info, device, dtype, requires_grad=False):
     """
     This function generates input for torch.linalg.pinv with distinct singular values so that autograd is always stable
@@ -843,6 +900,21 @@ def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False):
         b.requires_grad = requires_grad
         out.append(SampleInput((a, b)))
     return out
+
+
+def sample_inputs_std_var(op_info, device, dtype, requires_grad):
+    tensor_nd = make_tensor((S, S, S), device=device, dtype=dtype,
+                            low=None, high=None, requires_grad=requires_grad)
+    tensor_1d = make_tensor((S,), device=device, dtype=dtype,
+                            low=None, high=None, requires_grad=requires_grad)
+
+    return [
+        SampleInput(tensor_nd),
+        SampleInput(tensor_nd, kwargs=dict(dim=1)),
+        SampleInput(tensor_nd, kwargs=dict(dim=1, unbiased=True, keepdim=True)),
+        SampleInput(tensor_1d, kwargs=dict(dim=0, unbiased=True, keepdim=True)),
+        SampleInput(tensor_1d, kwargs=dict(dim=0, unbiased=False, keepdim=False)),
+    ]
 
 
 def _sample_inputs_svd(op_info, device, dtype, requires_grad=False, is_linalg_svd=False):
@@ -1035,8 +1107,9 @@ op_db: List[OpInfo] = [
     OpInfo('addmm',
            dtypes=floating_types(),
            dtypesIfCPU=all_types_and_complex_and(torch.float16, torch.bfloat16),
+           # BFloat16 support on CUDA requires CUDA 11 and SM53
            dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
-                                           *[torch.bfloat16] if tf32_is_not_fp32() else []),
+                                           *[torch.bfloat16] if CUDA11OrLater else []),
            dtypesIfROCM=floating_types_and(torch.half),
            assert_autodiffed=True,
            autodiff_nonfusible_nodes=['aten::add', 'aten::mm'],
@@ -1130,6 +1203,23 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_broadcast_to),
+    TriangularOpInfo('cholesky_inverse',
+                     op=torch.cholesky_inverse,
+                     dtypes=floating_and_complex_types(),
+                     # TODO: RuntimeError: cholesky_inverse does not support automatic differentiation for outputs
+                     # with complex dtype.
+                     test_complex_grad=False,
+                     test_inplace_grad=False,
+                     check_batched_gradgrad=False,
+                     supports_tensor_out=True,
+                     decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+                     skips=(
+                         # These tests do not take into account custom op.get_op()
+                         # TODO: implement op.input_func instead of modifying op.get_op()
+                         # See https://github.com/pytorch/pytorch/issues/50837
+                         SkipInfo('TestCommon', 'test_variant_consistency_jit'),
+                         SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                                  dtypes=[torch.complex64, torch.complex128]),)),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -1310,11 +1400,7 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            sample_inputs_func=sample_inputs_slogdet,
            output_func=itemgetter(1),
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
-           skips=(
-               # These tests do not work with output_func=itemgetter(1)
-               # TODO: remove this once https://github.com/pytorch/pytorch/issues/49326 is resolved
-               SkipInfo('TestCommon', 'test_variant_consistency_jit'),)),
+           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     UnaryUfuncInfo('log',
                    ref=np.log,
                    domain=(0, float('inf')),
@@ -1436,6 +1522,18 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
+    OpInfo('std',
+           dtypes=floating_types_and(),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_std_var,
+           supports_tensor_out=False,
+           test_complex_grad=False,
+           test_inplace_grad=False,
+           # std has only partial support for complex and half (#51127)
+           skips=(SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
+                           dtypes=[torch.half, torch.complex64, torch.complex128]),),
+           assert_autodiffed=True,
+           ),
     UnaryUfuncInfo('tan',
                    ref=np.tan,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -1725,6 +1823,18 @@ op_db: List[OpInfo] = [
                   supports_tensor_out=False,
                   test_inplace_grad=False,
                   sample_inputs_func=sample_repeat_tile),
+    OpInfo('var',
+           dtypes=floating_types_and(),
+           dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_std_var,
+           supports_tensor_out=False,
+           test_complex_grad=False,
+           test_inplace_grad=False,
+           # var has only partial support for complex and half (#51127)
+           skips=(SkipInfo('TestOpInfo', 'test_unsupported_dtypes',
+                           dtypes=[torch.half, torch.complex64, torch.complex128]),),
+           assert_autodiffed=True,
+           ),
 ]
 
 if TEST_SCIPY:
@@ -1733,6 +1843,29 @@ if TEST_SCIPY:
         if x.dtype in [np.complex64, np.complex128]:
             return (1 / (1 + np.exp(-x)))
         return scipy.special.expit(x)
+
+    def reference_lgamma(x):
+        # scipy.special.gammaln returns `-inf` when input is `-inf`.
+        # While Pytorch, C and C++, all return `inf` when input is `-inf`.
+        # Reference:
+        # https://en.cppreference.com/w/cpp/numeric/math/lgamma
+        # https://en.cppreference.com/w/c/numeric/math/lgamma
+
+        # To handle the above discrepancy,
+        # we replace -inf with inf so values
+        # that were originally -inf map to inf as expected
+        if x.dtype.kind == 'f':
+            x = np.where(x == float('-inf'), np.array(float('inf'), dtype=x.dtype), x)
+
+        out = scipy.special.gammaln(x)
+
+        if x.dtype == np.float16:
+            # `scipy.special.gammaln` returns output of float32 when input is float16,
+            # while `torch.lgamma` preserves `float16`. But due to smaller range of float16,
+            # Pytorch version outputs `inf` while SciPy returns finite values.
+            out = out.astype(np.float16)
+
+        return out
 
     op_db_scipy_reference: List[OpInfo] = [
         UnaryUfuncInfo('sigmoid',
@@ -1811,6 +1944,27 @@ if TEST_SCIPY:
                                     dtypes=[torch.bfloat16]),
                        )
                        ),
+        UnaryUfuncInfo('lgamma',
+                       ref=reference_lgamma,
+                       decorators=(precisionOverride({torch.float16: 7e-1}),),
+                       dtypes=all_types_and(torch.bool),
+                       dtypesIfCPU=all_types_and(torch.bool, torch.bfloat16),
+                       dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+                       skips=(
+                           # Reference: https://github.com/pytorch/pytorch/pull/50140#discussion_r552615345
+                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                    dtypes=[torch.bfloat16]),
+                           # Reference: https://github.com/pytorch/pytorch/pull/50140#issuecomment-756150214
+                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                    dtypes=[torch.float32, torch.float64], active_if=IS_WINDOWS),
+                           # Backward of `lgamma` uses `digamma` but `digamma`
+                           # is not implemented for `BFloat16`
+                           # Error Raised:
+                           #   RuntimeError: "digamma" not implemented for 'BFloat16'
+                           SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                    dtypes=[torch.bfloat16]),
+                       ),
+                       safe_casts_outputs=True),
         OpInfo('xlogy',
                dtypes=all_types_and(torch.bool),
                dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -2293,16 +2447,6 @@ def method_tests():
         ('prod', (torch.tensor(0., requires_grad=True)), NO_ARGS, 'scalar_zero'),
         ('prod', (torch.tensor(0., requires_grad=True)), (0,), 'scalar_dim_zero', (), [0]),
         ('prod', (torch.tensor(0., requires_grad=True)), (0, True,), 'scalar_keepdim_dim_zero', (), [0]),
-        ('var', (S, S, S), NO_ARGS, '', (True,)),
-        ('var', (S, S, S), (1,), 'dim', (True,), [0]),
-        ('var', (S, S, S), (1, True, True), 'keepdim_dim', (True,), [0]),
-        ('var', (S,), (0,), 'dim_1d', (True,), [0]),
-        ('var', (S,), (0, True, True), 'keepdim_dim_1d', (True,), [0]),
-        ('std', (S, S, S), NO_ARGS, '', (True,)),
-        ('std', (S, S, S), (1,), 'dim', (True,), [0]),
-        ('std', (S, S, S), (1, True, True), 'keepdim_dim', (True,), [0]),
-        ('std', (S,), (0,), 'dim_1d', (True,), [0]),
-        ('std', (S,), (0, True, True), 'keepdim_dim_1d', (True,), [0]),
         ('var_mean', (S, S, S), NO_ARGS, ''),
         ('var_mean', (S, S, S), (1,), 'dim', [0]),
         ('var_mean', (S, S, S), (1, True, True), 'keepdim_dim', [0]),
