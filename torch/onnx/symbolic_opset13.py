@@ -5,7 +5,7 @@
 import torch
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
-from torch.onnx.symbolic_opset9 import overload_by_arg_count, _maybe_cast_reduce_op_input
+from torch.onnx.symbolic_opset9 import overload_by_arg_count, _maybe_cast_reduce_op_input, nonzero
 
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -106,9 +106,20 @@ def unbind(g, self, dim=0, _outputs=None):
     return squeezed_outputs
 
 
-def glu(g, input, dim):
-    first, second = g.op('Split', input, dim, outputs=2)
-    return g.op('Mul', first, g.op('Sigmoid', second))
+# Emitted from `torch.nonzero(x, as_tuple=True)`
+def nonzero_numpy(g, input, _outputs=None):
+    return unbind(g, nonzero(g, input), 1, _outputs=_outputs)
+
+
+@parse_args('v', 'v', 'v', 'i')
+def where(g, condition, self=None, other=None, _outputs=None):
+    # Assumes that torch.where's first argument takes only Bool and Byte tensors.
+    if condition.type().scalarType() != 'Bool':
+        condition = g.op("Cast", condition, to_i=sym_help.cast_pytorch_to_onnx['Bool'])
+    if self is None:
+        condition = nonzero(g, condition)
+        return sym_help._unbind_helper(g, condition, g.op("Constant", value_t=torch.tensor(1)), _outputs)
+    return g.op("Where", condition, self, other)
 
 
 def _reduce_op_symbolic(onnx_op_name):

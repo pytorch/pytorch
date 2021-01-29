@@ -660,6 +660,10 @@ def prelu(g, self, weight):
     return g.op("PRelu", self, weight)
 
 
+def silu(g, input):
+    return g.op('Mul', input, g.op('Sigmoid', input))
+
+
 def relu(g, input):
     return g.op("Relu", input)
 
