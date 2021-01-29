@@ -1242,7 +1242,7 @@ Tensor& std_out(Tensor& result, const Tensor& self, DimnameList dim, bool unbias
 }
 
 Tensor var(const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
-  return  at::var(self, dimnames_to_positions(self, dim), unbiased, keepdim);
+  return at::var(self, dimnames_to_positions(self, dim), unbiased, keepdim);
 }
 
 Tensor& var_out(Tensor& result, const Tensor& self, DimnameList dim, bool unbiased, bool keepdim) {
@@ -1259,55 +1259,31 @@ std::tuple<Tensor,Tensor> std_mean(const Tensor& self, DimnameList dim, bool unb
 }
 
 Tensor std(const Tensor& self, DimnameList dim, c10::optional<int64_t> correction, bool keepdim) {
-  // FIXME: dim=None shouldn't call the DimnameList overload
-  if (dim.size() == 1 && dim[0].isWildcard()) {
-    return at::std(self, /*dim=*/c10::nullopt, correction, keepdim);
-  }
   return at::std(self, dimnames_to_positions(self, dim), correction, keepdim);
 }
 
 Tensor& std_out(const Tensor& self, DimnameList dim, c10::optional<int64_t> correction,
                 bool keepdim, Tensor& result) {
-  // FIXME: dim=None shouldn't call the DimnameList overload
-  if (dim.size() == 1 && dim[0].isWildcard()) {
-    return at::std_out(result, self, /*dim=*/c10::nullopt, correction, keepdim);
-  }
   return at::std_out(result, self, dimnames_to_positions(self, dim), correction, keepdim);
 }
 
 Tensor var(const Tensor& self, DimnameList dim, c10::optional<int64_t> correction, bool keepdim) {
-  // FIXME: dim=None shouldn't call the DimnameList overload
-  if (dim.size() == 1 && dim[0].isWildcard()) {
-    return at::var(self, /*dim=*/c10::nullopt, correction, keepdim);
-  }
   return at::var(self, dimnames_to_positions(self, dim), correction, keepdim);
 }
 
 Tensor& var_out(const Tensor& self, DimnameList dim, c10::optional<int64_t> correction,
                 bool keepdim, Tensor& result) {
-  // FIXME: dim=None shouldn't call the DimnameList overload
-  if (dim.size() == 1 && dim[0].isWildcard()) {
-    return at::var_out(result, self, /*dim=*/c10::nullopt, correction, keepdim);
-  }
   return at::var_out(
       result, self, dimnames_to_positions(self, dim), correction, keepdim);
 }
 
 std::tuple<Tensor,Tensor> var_mean(const Tensor& self, DimnameList dim,
                                    c10::optional<int64_t> correction, bool keepdim) {
-  // FIXME: dim=None shouldn't call the DimnameList overload
-  if (dim.size() == 1 && dim[0].isWildcard()) {
-    return at::var_mean(self, /*dim=*/c10::nullopt, correction, keepdim);
-  }
   return at::var_mean(self, dimnames_to_positions(self, dim), correction, keepdim);
 }
 
 std::tuple<Tensor,Tensor> std_mean(const Tensor& self, DimnameList dim,
                                    c10::optional<int64_t> correction, bool keepdim) {
-  // FIXME: dim=None shouldn't call the DimnameList overload
-  if (dim.size() == 1 && dim[0].isWildcard()) {
-    return at::std_mean(self, /*dim=*/c10::nullopt, correction, keepdim);
-  }
   return at::std_mean(self, dimnames_to_positions(self, dim), correction, keepdim);
 }
 

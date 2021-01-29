@@ -423,6 +423,17 @@ bool is_float_or_complex_list(PyObject* obj) {
   return true;
 }
 
+static bool is_int(PyObject* obj) {
+  if (THPUtils_checkLong(obj)) {
+    return true;
+  }
+  if (THPVariable_Check(obj)) {
+    auto& var = ((THPVariable*)obj)->cdata;
+    return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
+  }
+  return false;
+}
+
 // argnum is needed for raising the TypeError, it's used in the error message.
 auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded_args, int argnum) -> bool
 {
@@ -450,14 +461,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       return false;
     }
     case ParameterType::INT64: {
-      if (THPUtils_checkLong(obj)) {
-        return true;
-      }
-      if (THPVariable_Check(obj)) {
-        auto& var = ((THPVariable*)obj)->cdata;
-        return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
-      }
-      return false;
+      return is_int(obj);
     }
     case ParameterType::DIMNAME: return THPUtils_checkDimname(obj);
     case ParameterType::DIMNAME_LIST: {
@@ -472,7 +476,13 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
     }
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
-        return true;
+        auto seq = py::reinterpret_borrow<py::object>(obj);
+        if (PySequence_Size(seq.ptr()) == 0) {
+          return true;
+        }
+        py::object item = py::reinterpret_steal<py::object>(
+          PySequence_GetItem(seq.ptr(), 0));
+        return is_int(item.ptr());
       }
       // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
       return size > 0 && THPUtils_checkLong(obj);
