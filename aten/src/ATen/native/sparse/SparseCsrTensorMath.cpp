@@ -78,7 +78,8 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
     int64_t out_stride0 = out.stride(0);
     int64_t out_stride1 = out.stride(1);
     
-    AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "csr_mm_crow_indices", [&] {
+    AT_DISPATCH_INDEX_TYPES(
+      crow_indices.scalar_type(), "csr_mm_crow_indices", [&] () {
       AT_DISPATCH_FLOATING_TYPES(
         values.scalar_type(), "sparse_csr_mm_cpu", [&] {
           scalar_t cast_alpha = alpha.to<scalar_t>();
@@ -187,7 +188,8 @@ Tensor& add_out_dense_sparse_csr_cpu(Tensor& out, const Tensor& dense,
   }
 
   // Use just one wrapper since both indices have the same type.
-  AT_DISPATCH_INDEX_TYPES(src_crow_indices.scalar_type(), "csr_add_out_crow_indices", [&] {
+  AT_DISPATCH_INDEX_TYPES(
+    src_crow_indices.scalar_type(), "csr_add_out_crow_indices", [&] {
     AT_DISPATCH_ALL_TYPES(commonDtype, "add_out_op2_sparse_csr", [&] {
       auto values_accessor = src_values.accessor<scalar_t, 1>();
       auto crow_indices_accessor = src_crow_indices.accessor<index_t, 1>();

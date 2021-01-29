@@ -40,10 +40,10 @@ namespace at { namespace native {
 #include <ATen/mkl/Descriptors.h>
 #include <ATen/mkl/Limits.h>
 
-#ifdef MKL_LP64
-  #define TORCH_INT_TYPE kInt
+#ifdef MKL_ILP64
+  #define TORCH_INT_TYPE at::kLong
 #else
-  #define TORCH_INT_TYPE kLong
+  #define TORCH_INT_TYPE at::kInt
 #endif
 
 namespace at { namespace native {
@@ -99,10 +99,10 @@ namespace at { namespace native {
     }
 
     static bool inline is_mkl_int32_index() {
-#ifdef MKL_LP64
-      return true;
-#else
+#ifdef MKL_ILP64
       return false;
+#else
+      return true;
 #endif
     }
 
@@ -116,14 +116,13 @@ namespace at { namespace native {
         TORCH_WARN("Pytorch is compiled with MKL LP64 and will convert col_indices to int32.");
       }
     }
-    std::cout << "REACH MKL DISPATCH\n";
     AT_DISPATCH_FLOATING_TYPES(
       dense.scalar_type(), "addmm_sparse_csr_dense", [&] {
-        sparse_mm_mkl_template<scalar_t>(self, sparse_.col_indices().toType(TORCH_INT_TYPE),
-                                         sparse_.crow_indices().toType(TORCH_INT_TYPE), sparse_.values(), dense, t,
+        sparse_mm_mkl_template<scalar_t>(self, sparse_.col_indices().to(TORCH_INT_TYPE),
+                                         sparse_.crow_indices().to(TORCH_INT_TYPE), 
+                                         sparse_.values(), dense, t,
                                          alpha, beta, sparse_.sizes(), dense.sizes());
     });
-    std::cout << "POST MKL DISPATCH\n";
     return self;
   }
 }}

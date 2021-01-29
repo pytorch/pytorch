@@ -53,10 +53,10 @@ __ https://en.wikipedia.org/wiki/Sparse_matrix
 Sparse COO tensors
 ++++++++++++++++++
 
-The default storage format for sparse tensors in PyTorch is the so-called
-Coordinate format, or COO format. In COO format, the specified elements
-are stored as tuples of element indices and the corresponding values.
-In particular,
+PyTorch implements the so-called Coordinate format, or COO
+format, as one of the storage formats for implementing sparse
+tensors.  In COO format, the specified elements are stored as tuples
+of element indices and the corresponding values. In particular,
 
   - the indices of specified elements are collected in ``indices``
     tensor of size ``(ndim, nse)`` and with element type
@@ -371,7 +371,8 @@ Sparse CSR Tensor
 The CSR (Compressed Sparse Row) sparse tensor format implemented the CSR format
 for storage of 2 dimensional tensors. Although there is no support for N-dimensional
 tensors, the primary advantage over the COO format is better use of storage and
-much faster computation operations such as matvec.
+much faster computation operations such as sparse matrix-vector multiplication
+using MKL and MAGMA backends. CUDA support does not exist as of now.
 
 A CSR sparse tensor consists of three 1-D tensors: ``crow_indices``, ``col_indices``
 and ``values``:
@@ -383,22 +384,32 @@ and ``values``:
   - The ``values`` tensor  contains the values of the CSR tensor. This is a 1-D tensor
   of size ``nnz``.
 
+.. note::
+
+The index tensors ``crow_indices`` and ``col_indices`` should have element type either
+``torch.int64`` (default) or ``torch.int32``. If you want to use MKL-enabled matrix
+operations, use ``torch.int32``. This is as a result of the default linking of pytorch
+being with MKL LP64, which uses 32 bit integer indexing.
+
 Construction
 ------------
 
 Sparse CSR matrices can be directly constructed by using the :func:`torch.sparse_csr_tensor`
 method. The user must supply the row and column indices and values tensors separately.
-
-
-.. warning::
-
-As a result of pytorch being linked with 32-bit MKL, we must use 32 bit
-integer indices in the ``crow_indices`` and ``col_indices`` functions.
-Therefore, a reduction scheme where the resulting dimensions exceed ``INT_MAX``
-for 32 bit integers is not supported (as of now).
+The ``size`` argument is optional and will be deduced from the the ``crow_indices``
+and ``col_indices`` if it is not present.
 
 Operations on sparse CSR tensors
 --------------------------------
+
+The simplest way of constructing a sparse CSR tensor from a strided tensor
+is to use :meth:`tensor.to_sparse_csr`. Any zeros in the strided tensor will
+be interpreted as missing values in the sparse tensor:
+
+
+
+The sparse matrix-vector multiplication can be performed with the
+:meth:`tensor.matvec` method:
 
 
 Supported Linear Algebra operations
@@ -418,7 +429,9 @@ multiplication, and ``@`` is matrix multiplication.
    :delim: ;
 
    :func:`torch.mv`;no; ``M[sparse_coo] @ V[strided] -> V[strided]``
+   :func:`torch.mv`;no; ``M[sparse_csr] @ V[strided] -> V[strided]``
    :func:`torch.matmul`; no; ``M[sparse_coo] @ M[strided] -> M[strided]``
+   :func:`torch.matmul`; no; ``M[sparse_csr] @ M[strided] -> M[strided]``
    :func:`torch.mm`; no; ``M[sparse_coo] @ M[strided] -> M[strided]``
    :func:`torch.sparse.mm`; yes; ``M[sparse_coo] @ M[strided] -> M[strided]``
    :func:`torch.smm`; no; ``M[sparse_coo] @ M[strided] -> M[sparse_coo]``
@@ -526,6 +539,7 @@ Sparse tensor functions
 +++++++++++++++++++++++
 
 .. autofunction:: torch.sparse_coo_tensor
+.. autofunction:: torch.sparse_csr_tensor
 .. autofunction:: torch.sparse.sum
 .. autofunction:: torch.sparse.addmm
 .. autofunction:: torch.sparse.mm
