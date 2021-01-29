@@ -388,17 +388,34 @@ namespace impl {
 
       using ReturnType = typename guts::infer_function_traits_t<KernelFunctor>::return_type;
       constexpr bool has_outputs = !std::is_same<void, ReturnType>::value;
+#ifdef __cpp_if_constexpr
+      if constexpr (has_outputs) {
+#else
       guts::if_constexpr<has_outputs>([&] (auto delay_check) {
+#endif
         // Decay ReturnType to ReturnType_ so that if a reference gets returned, we actually store it by value
         // and don't get a dangling reference. This is only required because some kernels still return `Tensor&`.
+#ifdef __cpp_if_constexpr
+        using ReturnType_ = std::decay_t<ReturnType>;
+        ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, stack);
+#else
         using ReturnType_ = std::decay_t<typename decltype(delay_check)::template type_identity<ReturnType>>;
         ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, delay_check(stack));
+#endif
         torch::jit::drop(*stack, num_inputs);
         push_outputs<ReturnType_, AllowDeprecatedTypes>::call(std::move(output), stack);
+#ifdef __cpp_if_constexpr
+      } else {
+#else
       }, /* else */ [&] {
+#endif
         call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, stack);
         torch::jit::drop(*stack, num_inputs);
+#ifdef __cpp_if_constexpr
+      }
+#else
       });
+#endif
     }
   };
 
