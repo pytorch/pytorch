@@ -2,6 +2,7 @@
 
 #include <c10/util/Optional.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <c10/util/Optional.h>
 
 namespace torch {
 namespace jit {
