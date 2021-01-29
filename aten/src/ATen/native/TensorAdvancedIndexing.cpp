@@ -333,6 +333,12 @@ Tensor index_put(const Tensor & self, const torch::List<c10::optional<Tensor>>& 
 }
 
 Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
+  if (accumulate && self.device().type() == kCPU) {
+    // See Note [Writing Nondeterministic Operations]
+    // Nondeterministic because of cpu_atomic_add_float usage
+    // See https://github.com/pytorch/pytorch/issues/51366
+    globalContext().alertNotDeterministic("index_put CPU with `accumulate=True`");
+  }
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   if (at::has_internal_overlap(self) == MemOverlap::YES) {
     TORCH_WARN(

@@ -2939,6 +2939,13 @@ Tensor embedding_dense_double_backward(const Tensor & grad, const Tensor & indic
 }
 
 Tensor index_backward(Tensor zeros_like_self, const torch::List<c10::optional<Tensor>>& indices, const Tensor& grad) {
+  if (zeros_like_self.device().type() == c10::kCPU) {
+    // See Note [Writing Nondeterministic Operations]
+    // Nondeterministic because of cpu_atomic_add_float usage
+    // See https://github.com/pytorch/pytorch/issues/51366
+    at::globalContext().alertNotDeterministic(
+      "index_backward CPU with list of index tensors");
+  }
   return at::_index_put_impl_(zeros_like_self, indices, grad, true, true);
 }
 

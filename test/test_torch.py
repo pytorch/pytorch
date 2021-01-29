@@ -3456,6 +3456,23 @@ class TestTorchDeviceType(TestCase):
                 _test_in_place_broadcastable(small2, small_expanded, large_expanded)
                 _test_in_place_broadcastable(small2, small, large)
 
+    def test_index_put_nondeterministic_alert(self, device):
+        def test_func(slf, accumulate):
+            S = 10
+            a = torch.randn(S, device=device)
+            a.index_put((torch.tensor(0, device=device),), torch.zeros((), device=device), accumulate=True)
+
+        @expectedAlertNondeterministic('index_put CPU with `accumulate=True`', 'cpu')
+        def test_func_expect_error(slf, accumulate):
+            test_func(slf, accumulate)
+
+        if torch.device(device).type == 'cpu':
+            test_func_expect_error(self, True)
+        else:
+            test_func(self, True)
+
+        test_func(self, False)
+
     # Ensures that kthvalue throws nondeterministic alerts in the correct cases
     @dtypes(torch.double)
     def test_kthvalue_nondeterministic_alert(self, device, dtype):
