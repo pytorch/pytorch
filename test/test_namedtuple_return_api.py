@@ -15,6 +15,7 @@ all_operators_with_namedtuple_return = {
     'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'lstsq',
     'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "unpack_dual", 'linalg_qr',
     '_svd_helper', 'linalg_svd', 'linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
+    'fake_quantize_per_channel_affine_cachemask',
 }
 
 
@@ -51,6 +52,8 @@ class TestNamedTupleAPI(TestCase):
 
     def test_namedtuple_return(self):
         a = torch.randn(5, 5)
+        per_channel_scale = torch.randn(5)
+        per_channel_zp = torch.zeros(5, dtype=torch.int64)
 
         op = namedtuple('op', ['operators', 'input', 'names', 'hasout'])
         operators = [
@@ -70,6 +73,9 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['linalg_slogdet'], input=(), names=('sign', 'logabsdet'), hasout=True),
             op(operators=['fake_quantize_per_tensor_affine_cachemask'],
                input=(0.1, 0, 0, 255), names=('output', 'mask',), hasout=False),
+            op(operators=['fake_quantize_per_channel_affine_cachemask'],
+               input=(per_channel_scale, per_channel_zp, 1, 0, 255),
+               names=('output', 'mask',), hasout=False),
             op(operators=['unpack_dual'], input=(0,), names=('primal', 'tangent'), hasout=False),
         ]
 
