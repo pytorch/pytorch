@@ -1890,6 +1890,11 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
   auto b_data = b.data_ptr<scalar_t>();
   magma_int_t n = magma_int_cast(A.size(-2), "A.size(-2)");
   magma_int_t nrhs = magma_int_cast(b.size(-1), "b.size(-1)");
+  // magma returns early if m <= 0 || n <= 0 for magmaTriangularSolveBatched
+  // magmaTriangularSolve is calling cuBLAS and it prints 
+  // ** On entry to DTRSM  parameter number 9 had an illegal value
+  // so let's use proper lda parameter here
+  magma_int_t lda = std::max<magma_int_t>(1, n);
   magma_int_t batch_size = magma_int_cast(batchCount(A), "batchCount");
 
   MAGMAQueue magma_queue(b.get_device());
@@ -1898,8 +1903,9 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
   // 1. the RHS and LHS tensors have 2 dimensions, or
   // 2. the RHS and LHS tensors have more than 2 dimensions but all batch dimensions are 1
   if (batch_size == 1) {
+    // TODO: this magma call is just a wrapper around cublas<t>trsm, consider using cublas directly here
     magmaTriangularSolve<scalar_t>(
-        uplo, trans, diag, n, nrhs, A_data, n, b_data, n, magma_queue);
+        uplo, trans, diag, n, nrhs, A_data, lda, b_data, lda, magma_queue);
   } else {
     auto A_mat_stride = matrixStride(A);
     auto b_mat_stride = matrixStride(b);
@@ -1929,7 +1935,7 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
 
       magmaTriangularSolveBatched<scalar_t>(
           uplo, trans, diag, n, nrhs, A_array_cur,
-          n, b_array_cur, n, batch_limit, magma_queue);
+          lda, b_array_cur, lda, batch_limit, magma_queue);
     }
 
     // Compute whatever is left = batch_size - floor(batch_size / batch_limit) * batch_limit
@@ -1937,7 +1943,7 @@ AT_ERROR("triangular_solve: MAGMA library not found in "
     if (batch_size % batch_limit != 0) {
       magmaTriangularSolveBatched<scalar_t>(
           uplo, trans, diag, n, nrhs, &A_array[mini_idx],
-          n, &b_array[mini_idx], n, batch_size % batch_limit, magma_queue);
+          lda, &b_array[mini_idx], lda, batch_size % batch_limit, magma_queue);
     }
   }
 #endif
