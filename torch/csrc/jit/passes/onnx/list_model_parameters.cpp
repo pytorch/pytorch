@@ -113,7 +113,8 @@ std::vector<IValue> getParamAttributes(
       if (type->is_parameter(slot) || type->is_buffer(slot) ||
           (attr.isObject() && !attr.toObjectRef().type()->is_module()) ||
           attr.isBool()) {
-        if (attrValues.find(fullName) == attrValues.end() && attr.isTensor()) {
+        if (attrValues.find(fullName) == attrValues.end() &&
+            attr.isTensor()) { // TODO: Handle float/int
           TORCH_INTERNAL_ASSERT(attr.isTensor());
           auto tensor_ = attr.toTensor();
           if (isEval && tensor_.requires_grad()) {
@@ -137,7 +138,8 @@ std::vector<IValue> getParamAttributes(
                 << " encountered in handling model params."
                 << " This class type does not extend __getstate__ method.";
           }
-        } else if (attr.isNone() || attr.isBool()) { // TODO: Handle float/int
+        } else if (attr.isNone() || (attr.isBool() && name == "training")) {
+          // This attr is constant for ONNX.
           auto attrVal = tryInsertConstant(*graph, attr);
           n->output()->replaceAllUsesWith(*attrVal);
           n->destroy();

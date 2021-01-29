@@ -11,8 +11,8 @@ import os
 from torch.nn.utils import rnn as rnn_utils
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
-from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, disableScriptTest,
-                                 skipIfUnsupportedOpsetVersion, skipIfNoLapack,
+from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion,
+                                 skipIfNoLapack, disableScriptTest, disableOldJitPassesTest,
                                  skipIfUnsupportedMaxOpsetVersion, skipIfONNXShapeInference)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
@@ -3654,7 +3654,31 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5)
         self.run_test(UnbindModel2(), x)
 
+    @disableScriptTest()  # scripting tests run for opsets > 11. See: test_split_script
     def test_split(self):
+        class SplitModel(torch.nn.Module):
+            def forward(self, input):
+                return input.split([2, 1, 2]), input.split([3, 2])[0]
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(SplitModel(), x)
+
+        class SplitModel2(torch.nn.Module):
+            def forward(self, input):
+                return input.split([2, 1, 1], -2), input.split([2, 2], -2)[-1]
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(SplitModel2(), x)
+
+        class SplitModel3(torch.nn.Module):
+            def forward(self, input):
+                return input.split([2, 1, 2])
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(SplitModel3(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_split_script(self):
         class SplitModel(torch.nn.Module):
             def forward(self, input):
                 return input.split([2, 1, 2]), input.split([3, 2])[0]
@@ -5448,7 +5472,26 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(9)
+    @disableScriptTest()  # scripting tests run for opsets > 11. See: test_where_condition_script
     def test_where_condition(self):
+        class Model1(torch.nn.Module):
+            def forward(self, input):
+                return torch.stack(torch.where(input > 0.5), dim=1)
+
+        x = torch.randint(0, 2, (2, 3, 4), dtype=bool)
+        self.run_test(Model1(), (x))
+
+        class Model2(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.stack(torch.where(input > other), dim=1)
+
+        x = torch.randint(0, 1, (2, 3, 4), dtype=bool)
+        y = torch.randint(1, 2, (2, 3, 4), dtype=bool)
+        self.run_test(Model2(), (x, y))
+
+    @skipIfUnsupportedOpsetVersion([13])
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_where_condition_script(self):
         class Model1(torch.nn.Module):
             def forward(self, input):
                 return torch.stack(torch.where(input > 0.5), dim=1)
@@ -5956,9 +5999,11 @@ class TestONNXRuntime(unittest.TestCase):
         model = torch.jit.script(MyModule())
         box_regression = torch.randn([4, 4])
         proposal = [torch.randn(2, 4), torch.randn(2, 4)]
+        outputs = model(box_regression, proposal)
 
         with self.assertRaises(RuntimeError) as cm:
-            self.run_test(model, (box_regression, proposal))
+            convert_to_onnx(model, input=(box_regression, proposal),
+                            example_outputs=outputs, use_new_jit_passes=True)
 
     @skipIfUnsupportedOpsetVersion([13])
     def test_initializer_sequence(self):
@@ -6252,40 +6297,7 @@ class TestONNXRuntime(unittest.TestCase):
                       test_with_inputs=[(images, features), (images2, test_features)],
                       dict_check=False)
 
-    def test_custom_class_attr_error(self):
-        class BoxCoder(object):
-            def __init__(self, bbox_xform_clip):
-                # type: (torch.Tensor) -> None
-                self.bbox_xform_clip = bbox_xform_clip
-
-            def __getstate__(self):
-                return self.bbox_xform_clip
-
-            def decode(self, rel_codes):
-                # type: (Tensor) -> Tensor
-                pred_ctr_x = torch.clamp(rel_codes[:, 0::4], max=self.bbox_xform_clip[0])
-                return pred_ctr_x
-
-        class MyModule(torch.nn.Module):
-            __annotations__ = {
-                'box_coder': BoxCoder,
-            }
-
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.box_coder = BoxCoder(torch.tensor([0.2]))
-
-            def forward(self, box_regression: torch.Tensor):
-                val = self.box_coder.bbox_xform_clip
-                self.box_coder.bbox_xform_clip = torch.tensor([0.4])
-                return self.box_coder.decode(box_regression) * val
-
-        model = torch.jit.script(MyModule())
-        box_regression = torch.randn([4, 4])
-
-        with self.assertRaises(RuntimeError) as cm:
-            self.run_test(model, (box_regression))
-
+    @disableOldJitPassesTest()
     def test_set_attr(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -6303,6 +6315,7 @@ class TestONNXRuntime(unittest.TestCase):
         box_regression = torch.randn(3, 2)
         self.run_test(model, (box_regression, weight))
 
+    @disableOldJitPassesTest()
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_set_attr_2(self):
         class MyModule(torch.nn.Module):
@@ -6328,6 +6341,7 @@ class TestONNXRuntime(unittest.TestCase):
         anchors = torch.ones(3, 10, 3)
         self.run_test(model, (anchors))
 
+    @disableOldJitPassesTest()
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_set_attr_3(self):
         class MyModule(torch.nn.Module):
@@ -6353,6 +6367,7 @@ class TestONNXRuntime(unittest.TestCase):
         anchors = torch.rand(3, 10)
         self.run_test(model, (anchors))
 
+    @disableOldJitPassesTest()
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_set_attr_4(self):
         class MyModule(torch.nn.Module):

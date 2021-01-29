@@ -902,7 +902,8 @@ void trackAndRegisterAttributesInBlocks(
 
   // Add model_parameters and model_buffers as model inputs. Order is
   // preserved based on the appearance in the graph.
-  if (type->is_parameter(slot) || type->is_buffer(slot)) {
+  if (type->is_parameter(slot) || type->is_buffer(slot) ||
+      (attr.isObject() && !attr.toObjectRef().type()->is_module())) {
     if (allAttrValues.find(fullName) == allAttrValues.end()) {
       paramConst = findArgumentAsInputParam(graph, fullName, attr);
       allAttrValues.insert({fullName, paramConst});
