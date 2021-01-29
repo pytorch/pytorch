@@ -130,35 +130,38 @@ fake_quantize_configs_short_dict = {
     'attr_names': ['N', 'C', 'H', 'W'],
     'attrs': [
         [1, 3, 512, 512],
-        [1, 3, 512, 512]
     ],
     'tags': ['short']
 }
 
 fake_quantize_configs_long_dict = {
     'N': [1],
-    'C': [1, 3, 8],
+    'C': [1, 3, 8, 32],
     'H': [256, 1024],
     'W': [256, 1024],
     'tags': ['long']
 }
 
 fake_quantize_configs_short = op_bench.config_list(
+    cross_product_configs={
+        'device': ('cpu', 'cuda'),
+    },
     **fake_quantize_configs_short_dict
 )
 
 fake_quantize_configs_long = op_bench.cross_product_configs(
+    device=('cpu', 'cuda'),
     **fake_quantize_configs_long_dict
 )
 
 
 class FakeQuantizeBenchmark(op_bench.TorchBenchmarkBase):
     r"""Benchmarks fake quantization with default parameters."""
-    def init(self, N, C, H, W):
+    def init(self, N, C, H, W, device):
         self.inputs = {
-            "input": torch.rand(N, C, H, W)
+            "input": torch.rand(N, C, H, W).to(device)
         }
-        self.op = tq.FakeQuantize()
+        self.op = tq.FakeQuantize().to(device)
         self.set_module_name('FakeQuantize')
 
     def forward(self, input):
@@ -168,6 +171,7 @@ class FakeQuantizeBenchmark(op_bench.TorchBenchmarkBase):
 op_bench.generate_pt_test(
     fake_quantize_configs_short + fake_quantize_configs_long,
     FakeQuantizeBenchmark)
+
 
 # op_type is used to describe the type of operator used in benchmarking:
 # py_module represents the operator written in Python that can

@@ -177,14 +177,16 @@ std::unordered_set<Value*> GetOptimizableValues(
   std::unordered_set<Value*> cannot_reuse;
   for (const auto& n : graph->nodes()) {
     for (const auto& v : n->inputs()) {
-      if (canRunOutOfPlace(n) && canReuseInputs(n)) {
+      if (canRunOutOfPlace(n) && canReuseInputsOutputs(n) &&
+          canReuseInputs(n)) {
         can_reuse.insert(v);
       } else {
         cannot_reuse.insert(v);
       }
     }
     for (const auto& v : n->outputs()) {
-      if (canRunOutOfPlace(n) && canReuseOutputs(n)) {
+      if (canRunOutOfPlace(n) && canReuseInputsOutputs(n) &&
+          canReuseOutputs(n)) {
         can_reuse.insert(v);
       } else {
         cannot_reuse.insert(v);
@@ -698,15 +700,23 @@ MemoryPlanner::MemoryPlanner(
   // some Values should share storage, this map will
   // keep track of the index into managed_storage_
   std::unordered_map<Value*, size_t> shared;
+  // the StorageImpls of Tensor views should not be managed
+  std::unordered_set<c10::StorageImpl*> managed_storage_impls;
 
   // Snapshot of the current memory state
   for (const auto& pnode : runtime->get_nodes()) {
     for (auto i = 0; i < pnode.outputs().size(); ++i) {
       const auto& ival = pnode.outputs()[i];
-      const auto& val = pnode.get_node()->outputs()[i];
+      auto* val = pnode.get_node()->outputs()[i];
       if (managed_values.count(val)) {
         TORCH_CHECK(ival.isTensor());
         auto* impl = ival.toTensor().storage().unsafeGetStorageImpl();
+
+        auto didInsert = managed_storage_impls.insert(impl).second;
+        if (!didInsert) {
+          continue;
+        }
+
         if (shared.count(val)) {
           managed_storage_[shared.at(val)].second.emplace_back(impl);
         } else {
@@ -741,12 +751,10 @@ void MemoryPlanner::allocate() {
   if (managed_bytes_ == 0) {
     return;
   }
-
   buffer_ = allocate_buffer(managed_bytes_);
 
   size_t offset = 0;
   uint8_t* start = static_cast<uint8_t*>(buffer_.get());
-
   for (const auto& ms : managed_storage_) {
     auto tensor_size = ms.first;
     if (tensor_size == 0) {

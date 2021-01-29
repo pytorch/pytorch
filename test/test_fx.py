@@ -1438,6 +1438,12 @@ class TestFX(JitTestCase):
             i += 1
         self.assertEqual(i, 3)
 
+    def test_no_mutation(self):
+        from torch.fx.immutable_collections import immutable_list
+        x = immutable_list([3, 4])
+        with self.assertRaisesRegex(NotImplementedError, "new_args"):
+            x[0] = 4
+
 
 def run_getitem_target():
     from torch.fx.symbolic_trace import _wrapped_methods_to_patch
