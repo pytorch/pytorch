@@ -783,7 +783,7 @@ static inline Tensor& bmm_out_or_baddbmm_(Tensor& self_or_result, const Tensor& 
             self_or_result.scalar_type() != kHalf &&
             self_or_result.scalar_type() != kBFloat16 &&
             at::native::is_floating_point(self_or_result)) ||
-            at::native::is_complex(self_or_result))
+            at::is_complex(self_or_result))
             && batch_items_contiguous_or_transposed(batch1)
             && batch_items_contiguous_or_transposed(batch2)
             && self_or_result.is_contiguous()) {
@@ -2223,17 +2223,17 @@ Tensor chain_matmul(TensorList matrices) {
 Calculates the Kronecker product between two Tensors.
 */
 Tensor& kron_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto maxdim = std::max(self.dim(), other.dim());
-  auto pad_self = maxdim - self.dim();
-  auto pad_other = maxdim - other.dim();
+  int64_t maxdim = std::max(self.dim(), other.dim());
+  int64_t pad_self = maxdim - self.dim();
+  int64_t pad_other = maxdim - other.dim();
   c10::SmallVector<int64_t, 10> a_reshape(2 * maxdim);
   c10::SmallVector<int64_t, 10> b_reshape(2 * maxdim);
   c10::SmallVector<int64_t, 10> result_reshape(maxdim);
-  for (int i = 0; i < maxdim; i++) {
-    a_reshape[2 * i] = i >= pad_self ? self.sizes()[i - pad_self] : 1;
+  for (int64_t i = 0; i < maxdim; i++) {
+    a_reshape[2 * i] = (i >= pad_self ? self.sizes()[i - pad_self] : 1);
     a_reshape[2 * i + 1] = 1;
     b_reshape[2 * i] = 1;
-    b_reshape[2 * i + 1] = i >= pad_other ? other.sizes()[i - pad_other] : 1;
+    b_reshape[2 * i + 1] = (i >= pad_other ? other.sizes()[i - pad_other] : 1);
     result_reshape[i] = a_reshape[2 * i] * b_reshape[2 * i + 1];
   }
   auto self_view = at::_unsafe_view(self, a_reshape);
@@ -2241,8 +2241,14 @@ Tensor& kron_out(Tensor& result, const Tensor& self, const Tensor& other) {
   if (!result.defined()) {
     result = at::_unsafe_view(at::mul(self_view, other_view), result_reshape);
   } else {
-    at::mul_out(result, self_view, other_view);
-    result.resize_(result_reshape);
+    c10::SmallVector<int64_t, 10> mul_shape(2 * maxdim);
+    for (int64_t i = 0; i < maxdim; i++) {
+      mul_shape[2 * i] = a_reshape[2 * i];
+      mul_shape[2 * i + 1] = b_reshape[2 * i + 1];
+    }
+    resize_output(result, result_reshape);
+    auto result_mul = at::_unsafe_view(result, mul_shape);
+    at::mul_out(result_mul, self_view, other_view);
   }
   return result;
 }

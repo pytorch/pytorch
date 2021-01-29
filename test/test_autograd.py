@@ -2859,29 +2859,6 @@ class TestAutograd(TestCase):
             run_symeig_test(3, (2, 9, 9), largest=largest)
             run_symeig_test(3, (2, 2, 9, 9), largest=largest)
 
-    @skipIfNoLapack
-    def test_cholesky_inverse(self):
-        def _test_with_size(upper, dims):
-            # We require to create a Cholesky factor which requires that the diagonal elements are positive.
-            # Initializing too small values for the diagonal elements could cause issues when being perturbed
-            # to obtain the numerical Jacobian, thereby leading to inconsistent gradcheck
-            A = torch.randn(*dims)
-            A.diagonal().uniform_(0.1, 5.0)
-            A.requires_grad_()
-
-            def func(A, upper):
-                if upper:
-                    root = A.triu()
-                else:
-                    root = A.tril()
-                return torch.cholesky_inverse(root, upper)
-
-            gradcheck(func, [A, upper])
-            gradgradcheck(func, [A, upper])
-
-        for upper, dims in product([True, False], [(3, 3), (5, 5)]):
-            _test_with_size(upper, dims)
-
     def test_gradcheck_fail_when_no_differentiable_outputs_and_num_grad_not_zero(self):
         def autograd_fn(input):
             output = torch.detach(input)
@@ -7376,6 +7353,20 @@ class TestAutogradDeviceType(TestCase):
         v1 = x.unbind()
         with self.assertRaises(RuntimeError):
             v1[0].mul_(2)
+
+    def test_inplace_view_of_multiple_output_view(self, device):
+        a = torch.rand(10, device=device, requires_grad=True).clone()
+        b = a.unbind(0)
+        c = b[0].view_as(b[0])
+        with self.assertRaises(RuntimeError):
+            c.mul_(2)
+
+    def test_inplace_multiple_output_view_of_view(self, device):
+        a = torch.rand(10, device=device, requires_grad=True).clone()
+        b = a.view_as(a)
+        c = b.unbind(0)
+        with self.assertRaises(RuntimeError):
+            c[0].mul_(2)
 
     def test_inplace_view_makes_base_require_grad(self, device):
         # in-place modification to view makes base require grad
