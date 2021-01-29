@@ -3590,20 +3590,6 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(6, 4)
         self.run_test(ViewModel(), (x, y))
 
-    def test_linear(self):
-        class LinearModel(torch.nn.Module):
-            def __init__(self):
-                super(LinearModel, self).__init__()
-                self.fc = torch.nn.Linear(16, 16)
-
-            def forward(self, x):
-                out = self.fc(x)
-                out = self.fc(out)
-                return out
-
-        x = torch.randn(3, 16)
-        self.run_test(LinearModel(), (x,))
-
     @disableScriptTest()
     def test_weight_norm(self):
         # addmm for 3-d inputs converts to onnx::MatMul
@@ -7191,6 +7177,30 @@ TestONNXRuntime_opset13 = type(str("TestONNXRuntime_opset13"),
                                dict(TestONNXRuntime.__dict__, opset_version=13,
                                     keep_initializers_as_inputs=False,
                                     onnx_shape_inference=True))
+
+# opset 9 tests, with use_new_jit_passes=True for using new jit API,
+# and with keep_initializers_as_inputs=False for IR version 4 style export.
+TestONNXRuntime_IRv4_old_jit_API = type(str("TestONNXRuntime_IRv4_old_jit_API"),
+                                        (unittest.TestCase,),
+                                        dict(TestONNXRuntime.__dict__,
+                                             keep_initializers_as_inputs=False,
+                                             use_new_jit_passes=False))
+
+
+# opset 12 tests, with use_new_jit_passes=True for using new jit API,
+# and keep_initializers_as_inputs=False for IR version 4 style export.
+TestONNXRuntime_opset12_IRv4_old_jit_API = type(str("TestONNXRuntime_opset12_IRv4_old_jit_API"),
+                                                (unittest.TestCase,),
+                                                dict(TestONNXRuntime.__dict__, opset_version=12,
+                                                     keep_initializers_as_inputs=False,
+                                                     use_new_jit_passes=False))
+
+
+# opset 12 tests, with _onnx_shape_inference=True.
+TestONNXRuntime_opset12_onnx_shape_inference = type(str("TestONNXRuntime_opset12_onnx_shape_inference"),
+                                                    (unittest.TestCase,),
+                                                    dict(TestONNXRuntime.__dict__, opset_version=12,
+                                                         onnx_shape_inference=True))
 
 if __name__ == '__main__':
     unittest.main()
