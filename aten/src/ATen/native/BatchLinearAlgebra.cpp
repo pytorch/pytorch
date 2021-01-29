@@ -1031,13 +1031,14 @@ static void apply_triangular_solve(Tensor& b, Tensor& A, Tensor& infos, bool upp
   auto batch_size = batchCount(A);
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
+  auto lda = std::max<int64_t>(1, n);
   auto infos_data = infos.data_ptr<int>();
 
   for (int64_t i = 0; i < batch_size; i++) {
     scalar_t* A_working_ptr = &A_data[i * A_mat_stride];
     scalar_t* b_working_ptr = &b_data[i * b_mat_stride];
     int* infos_working_ptr = &infos_data[i];
-    lapackTriangularSolve<scalar_t>(uplo, trans, diag, n, nrhs, A_working_ptr, n, b_working_ptr, n, infos_working_ptr);
+    lapackTriangularSolve<scalar_t>(uplo, trans, diag, n, nrhs, A_working_ptr, lda, b_working_ptr, lda, infos_working_ptr);
   }
 #endif
 }
