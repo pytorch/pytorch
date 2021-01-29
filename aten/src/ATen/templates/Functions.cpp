@@ -25,4 +25,8 @@ std::tuple<Tensor,Tensor> std_mean(const Tensor& self, int dim) {
 
 ${function_definitions}
 
-}
+namespace redispatch {
+    ${function_redispatch_definitions}
+} // namespace redispatch
+
+} // namespace at
