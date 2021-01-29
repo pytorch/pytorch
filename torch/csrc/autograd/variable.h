@@ -666,7 +666,7 @@ inline Variable make_variable(
     bool allow_tensor_metadata_change = true) {
   if (data.defined()) {
     if (data.getIntrusivePtr().use_count() == 1 && data.getIntrusivePtr()->unique_version()) {
-      auto data_impl = data.getIntrusivePtr();
+      auto data_impl = data.unsafeReleaseIntrusivePtr();
       data_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
       if (requires_grad) {
         data_impl->set_autograd_meta(std::make_unique<AutogradMeta>(data_impl.get(), requires_grad));
