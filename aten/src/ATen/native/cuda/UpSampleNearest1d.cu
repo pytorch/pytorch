@@ -66,8 +66,8 @@ __global__ void upsample_nearest1d_backward_out_frame(
   int dst_x = dst_idx % dst_dim_w;
   // note that we do not want to clamp src_x to src_dim_w, since we might
   // intentionally want to skip in case of scale_factor < 1.0
-  int src_x = nearest_neighbor_bw_compute_source_index(scale_factor, dst_x, src_dim_w+1);
-  int src_x_up = nearest_neighbor_bw_compute_source_index(scale_factor, dst_x+1, src_dim_w+1);
+  int src_x = nearest_neighbor_bw_compute_source_index(scale_factor, dst_x, src_dim_w);
+  int src_x_up = nearest_neighbor_bw_compute_source_index(scale_factor, dst_x+1, src_dim_w);
 
   for (int b = 0; b < dim_b; b++) {
     accscalar_t grad = 0;

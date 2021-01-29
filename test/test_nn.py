@@ -8759,6 +8759,29 @@ class TestNN(NNTestCase):
             out_t_5 = m(in_t_9[:, :, :5, :5, :5])
         self.assertEqual(out_t_9[:, :, :15, :15, :15], out_t_5)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_interpolate_illegal_memory_access(self):
+        in_s = 45
+        out_s = 14
+
+        input = torch.ones((1, 1, in_s), device='cuda', requires_grad=True)
+        # note we allocated grad_output to be larger so out of bound access
+        # woudl be visible in grad_input
+        grad = torch.ones((1, 1, out_s*2), device='cuda', requires_grad=True)
+        grad = grad[:, :, :out_s]
+
+        input_ref = input.detach().cpu().requires_grad_()
+        grad_ref = grad.cpu()
+
+        out = F.interpolate(input, size=(out_s,), mode='nearest')
+        out.backward(grad)
+
+        out_ref = F.interpolate(input_ref, size=(out_s,), mode='nearest')
+        out_ref.backward(grad_ref)
+
+        self.assertEqual(out_ref, out)
+        self.assertEqual(input_ref.grad, input.grad)
+
     def test_interpolate(self):
         def _test_interpolate_helper(in_t, scale_factor, layer):
             out_size = int(math.floor(in_t.shape[-1] * scale_factor))
