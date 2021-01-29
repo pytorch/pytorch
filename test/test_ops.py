@@ -42,7 +42,6 @@ class TestOpInfo(TestCase):
     # Verifies that ops have their supported dtypes
     #   registered correctly by testing that each claimed supported dtype
     #   does NOT throw a runtime error
-    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @ops(op_db, dtypes=OpDTypes.supported)
     def test_supported_dtypes(self, device, dtype, op):
@@ -279,17 +278,15 @@ class TestCommon(JitCommonTestCase):
                 #   autodiff support. Context manager forces the graph to contain
                 #   DifferentiableGraph nodes if they are present
                 with disable_autodiff_subgraph_inlining():
-                    def fn(*inputs, **kwargs):
-                        output = func(*inputs, **kwargs)
-                        return op.output_func(output)
 
 
                     # Check scripted forward, grad, and grad grad
-                    script_fn = create_script_fn(self, name, func_type, op.output_func)
+                    script_fn = create_script_fn(self, name, func_type)
 
                     check_against_reference(self,
                                             script_fn,
-                                            fn,
+                                            func,
+                                            op.output_func,
                                             (*sample.input,) + sample.args,
                                             sample.kwargs,
                                             no_grad=not test_backward)
@@ -298,7 +295,8 @@ class TestCommon(JitCommonTestCase):
                     traced_fn = create_traced_fn(self, variant)
                     check_against_reference(self,
                                             traced_fn,
-                                            fn,
+                                            func,
+                                            op.output_func,
                                             (*sample.input,) + sample.args,
                                             sample.kwargs,
                                             no_grad=not test_backward)
