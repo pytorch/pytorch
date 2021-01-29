@@ -1096,7 +1096,7 @@
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
 - func: copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)
-  variants: method
+  variants: function, method
   device_guard: False
   dispatch:
     DefaultBackend: copy_
@@ -1566,7 +1566,7 @@
     QuantizedCPU, QuantizedCUDA: empty_per_channel_affine_quantized
 
 - func: resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)
-  variants: method
+  variants: function, method
   device_guard: False
   dispatch:
     CPU: resize_
