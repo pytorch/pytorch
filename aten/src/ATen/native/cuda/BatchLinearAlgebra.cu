@@ -1985,7 +1985,7 @@ inline void apply_orgqr_batched_magma(Tensor& self, const Tensor& tau, Tensor& i
   auto n = magma_int_cast(n_columns, "n");
   auto k = magma_int_cast(tau.size(-1), "k");
   auto tau_stride = std::max<int>(1, k);
-  auto lda = std::max<int>(1, n);
+  auto lda = std::max<magma_int_t>(1, m);
 
   // LAPACK's requirement
   TORCH_INTERNAL_ASSERT(m >= n);
@@ -1998,12 +1998,13 @@ inline void apply_orgqr_batched_magma(Tensor& self, const Tensor& tau, Tensor& i
   Tensor work = at::empty({lwork}, self.options());
   auto work_data = work.data_ptr<scalar_t>();
 
+  // T_sizes = (*tau.shape, tau.shape[-1])
   auto T_sizes = tau.sizes().vec();
   T_sizes.push_back(k);
   Tensor T = at::zeros(T_sizes, self.options());
-  auto ldt = std::max<int>(1, k);
+  T.transpose_(-2, -1);  // make T column-major
+  auto ldt = std::max<magma_int_t>(1, k);
   auto T_matrix_stride = matrixStride(T);
-  T.transpose_(-2, -1);
   auto T_data = T.data_ptr<scalar_t>();
 
   scalar_t** self_array;
@@ -2038,25 +2039,28 @@ inline void apply_orgqr_batched_magma(Tensor& self, const Tensor& tau, Tensor& i
       scalar_t** self_array_cur = &self_array[mini_idx];
       scalar_t** tau_array_cur = &tau_array[mini_idx];
       scalar_t** T_array_cur = &T_array[mini_idx];
-      magmaLarftBatched<scalar_t>(n, k, 0, self_array_cur, lda, tau_array_cur, T_array_cur, ldt, &work_data, lwork, batch_limit, magma_queue);
+      magmaLarftBatched<scalar_t>(m, k, 0, self_array_cur, lda, tau_array_cur, T_array_cur, ldt, &work_data, lwork, batch_limit, magma_queue);
     }
 
     // Compute whatever is left = batchsize - floor(batchsize / batch_limit) * batch_limit
     // which concisely is equal to batchsize % batch_limit
     if (batchsize % batch_limit != 0) {
-      magmaLarftBatched<scalar_t>(n, k, 0, &self_array[mini_idx], lda, &tau_array[mini_idx], &T_array[mini_idx], ldt, &work_data, lwork, batchsize % batch_limit, magma_queue);
+      magmaLarftBatched<scalar_t>(m, k, 0, &self_array[mini_idx], lda, &tau_array[mini_idx], &T_array[mini_idx], ldt, &work_data, lwork, batchsize % batch_limit, magma_queue);
     }
   }
 
+  // Compute result = (I - V T V^H) Ic,
+  // where I is an m x m identity matrix, Ic is an m x n identity matrix,
+  // V is an m x k matrix of reflectors and T is a k x k matrix
+  // With LAPACK same result could be obtained using LARFB
   auto V = at::narrow(self, /*dim=*/-1, /*start=*/0, /*length=*/k);
-
-  // Compute result = I - V T V^H
-  // In LAPACK same result could be obtained using LARFB
-  auto W = at::matmul(T, V.conj().transpose(-2, -1));
-  at::matmul_out(self, V, W);
+  auto W = at::narrow_copy(V, /*dim=*/-2, /*start=*/0, /*length=*/n);  // W <- Ic^H V: n x m @ m x k = n x k
+  at::matmul_out(W, T, W.conj().transpose(-2, -1));  // W <- T W^H: k x k @ k x n = k x n
+  at::matmul_out(self, V, W);  // self <- V W: m x k @ k x n = m x n
   self.mul_(-1);
-  self.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).add_(1);
+  self.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).add_(1); // self <- self + Ic: m x n + m x n = m x n
 
+  // infos is not used here, make sure that it's filled with zeros
   infos.fill_(0);
 #endif
 }
