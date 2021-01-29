@@ -255,8 +255,9 @@ cmake_dependent_option(
 option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
-option(USE_DEPLOY "Enable torch::deploy embedded python interpreter" OFF)
-
+cmake_dependent_option(
+    USE_DEPLOY "Build embedded torch::deploy interpreter" OFF
+    "BUILD_PYTHON" OFF)
 # Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
 # On Windows platform, if user does not install libuv in build conda env and
 # does not set libuv_ROOT environment variable. Set USE_DISTRIBUTED to OFF.
@@ -925,3 +926,8 @@ endif()
 
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
+
+# ---[ Torch Deploy
+if(USE_DEPLOY)
+  add_subdirectory(torch/csrc/deploy)
+endif()
