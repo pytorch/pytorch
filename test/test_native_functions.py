@@ -117,7 +117,7 @@ class TestNativeFunctions(TestCase):
         with self.assertRaisesRegex(RuntimeError, "value of type .* instead found type"):
             torch.jit.script(IntListWrapperModule())(torch.zeros(1), [0.5])
 
-        with self.assertRaisesRegex(TypeError, "must be .* not Tensor"):
+        with self.assertRaisesRegex(TypeError, "must be .* Tensor"):
             IntListWrapperModule()(torch.zeros(1), torch.zeros(1))
 
         with self.assertRaisesRegex(RuntimeError, "value of type .* instead found type"):
