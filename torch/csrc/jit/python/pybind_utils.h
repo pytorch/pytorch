@@ -293,6 +293,8 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   } else if (py::isinstance<py::float_>(input)) {
     return InferredType(FloatType::get());
+  } else if (PyComplex_CheckExact(input.ptr())) {
+    return InferredType(ComplexDoubleType::get());
   } else if (py::isinstance<py::str>(input)) {
     return InferredType(StringType::get());
   } else if (THPLayout_Check(input.ptr())) {
@@ -344,6 +346,16 @@ inline InferredType tryToInferType(py::handle input) {
     auto rref_ivalue = input.cast<torch::distributed::rpc::PyRRef>().toIValue();
     return InferredType(rref_ivalue.type());
 #endif
+  }
+
+  if (as_module(py::cast<py::object>(input))) {
+    return InferredType("Cannot infer type of ScriptModule");
+  }
+
+  auto module_type = py::module::import("torch.nn").attr("Module");
+  py::bool_ is_module = py::isinstance(input, module_type);
+  if (py::cast<bool>(is_module)) {
+    return InferredType("Cannot infer concrete type of torch.nn.Module");
   }
 
   // Try container types
