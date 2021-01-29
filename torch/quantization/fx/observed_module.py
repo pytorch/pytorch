@@ -10,7 +10,8 @@ class ObservedGraphModule(GraphModule):
         return ['_activation_post_process_map',
                 '_patterns',
                 '_qconfig_map',
-                '_prepare_custom_config_dict']
+                '_prepare_custom_config_dict',
+                '_node_name_to_scope']
 
     def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph):
         preserved_attrs = dict()

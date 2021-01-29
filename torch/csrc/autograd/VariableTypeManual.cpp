@@ -242,7 +242,7 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    at::redispatch::copy_(ks & c10::after_autograd_keyset, self_, src_, non_blocking);
+    self_._redispatch_copy_(ks & c10::after_autograd_keyset, src_, non_blocking);
   }
   increment_version(self);
   rebase_history(self , std::move(grad_fn));
@@ -278,7 +278,7 @@ Tensor& resize_(
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    at::redispatch::resize_(ks & c10::after_autograd_keyset, self_, size, optional_memory_format);
+    self_._redispatch_resize_(ks & c10::after_autograd_keyset, size, optional_memory_format);
   }
 
   if (self.fw_grad(/* level */ 0).defined()) {
@@ -300,7 +300,7 @@ Tensor& resize_as_(
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    at::redispatch::resize_as_(ks & c10::after_autograd_keyset, self_, the_template_, optional_memory_format);
+    self_._redispatch_resize_as_(ks & c10::after_autograd_keyset, the_template_, optional_memory_format);
   }
 
   // Handle fw grad

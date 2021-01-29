@@ -37,6 +37,7 @@ TESTS = [
     'test_cuda_primary_ctx',
     'test_dataloader',
     'test_dataset',
+    'test_datapipe',
     'distributed/test_data_parallel',
     'distributed/test_distributed_fork',
     'distributed/test_distributed_spawn',
@@ -368,7 +369,7 @@ def run_test(test_module, test_directory, options, launcher_cmd=None, extra_unit
     argv = [test_module + '.py'] + unittest_args
 
     # Multiprocessing related tests cannot run with coverage.
-    # Tracking issue: https://github.com/pytorch/pytorch/issues/50661 
+    # Tracking issue: https://github.com/pytorch/pytorch/issues/50661
     disable_coverage = sys.platform == 'win32' and test_module in WINDOWS_COVERAGE_BLOCKLIST
 
     # Extra arguments are not supported with pytest
