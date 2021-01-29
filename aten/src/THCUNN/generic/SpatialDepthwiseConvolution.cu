@@ -13,9 +13,6 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
                   int padW, int padH,
                   int dilationW, int dilationH)
 {
-  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
-  TORCH_CHECK(false, "SpatialDepthwiseConvolution_updateOutput not suppported with BFloat16");
-  #else
   THCUNN_assertSameGPU(state, 3, input, output, weight);
 
   // Only handle 4D Input Tensors for now
@@ -94,7 +91,6 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, weight);
   if (bias) THCTensor_(free)(state, bias);
-  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
@@ -108,9 +104,6 @@ void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
                   int padW, int padH,
                   int dilationW, int dilationH)
 {
-  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
-  TORCH_CHECK(false, "SpatialDepthwiseConvolution_updateGradInput not suppported with BFloat16");
-  #else
   THCUNN_assertSameGPU(state, 3, gradOutput, gradInput, weight);
 
   // Only handle 4D Input Tensors for now
@@ -203,7 +196,6 @@ void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
 
   THCTensor_(free)(state, weight);
   THCTensor_(free)(state, gradOutput);
-  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
@@ -216,9 +208,6 @@ void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
                   int padW, int padH,
                   int dilationW, int dilationH)
 {
-  #if defined(THC_REAL_IS_BFLOAT16) && !defined(__HIP_PLATFORM_HCC__)
-  TORCH_CHECK(false, "SpatialDepthwiseConvolution_accGradParameters not suppported with BFloat16");
-  #else
   THCUNN_assertSameGPU(state, 3, input, gradOutput, gradWeight);
 
   // Only handle 4D Input Tensors for now
@@ -271,7 +260,6 @@ void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
   THCudaCheck(cudaGetLastError());
 
   THCTensor_(free)(state, gradOutput);
-  #endif // THC_REAL_IS_BFLOAT16 && !__HIP_PLATFORM_HCC__
 }
 
 #endif

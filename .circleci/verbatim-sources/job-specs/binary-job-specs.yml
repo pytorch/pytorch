@@ -135,7 +135,7 @@
   smoke_mac_test:
     <<: *binary_linux_test_upload_params
     macos:
-      xcode: "9.4.1"
+      xcode: "12.0"
     steps:
       - checkout
       - run:
@@ -160,7 +160,7 @@
   binary_mac_build:
     <<: *binary_mac_params
     macos:
-      xcode: "9.4.1"
+      xcode: "12.0"
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -174,7 +174,7 @@
 
     - run:
         name: Build
-        no_output_timeout: "1h"
+        no_output_timeout: "90m"
         command: |
           # Do not set -u here; there is some problem with CircleCI
           # variable expansion with PROMPT_COMMAND
@@ -201,7 +201,7 @@
   binary_ios_build:
     <<: *pytorch_ios_params
     macos:
-      xcode: "11.2.1"
+      xcode: "12.0"
     steps:
     - attach_workspace:
         at: ~/workspace
@@ -228,7 +228,7 @@
   binary_ios_upload:
     <<: *pytorch_ios_params
     macos:
-      xcode: "11.2.1"
+      xcode: "12.0"
     steps:
     - attach_workspace:
         at: ~/workspace

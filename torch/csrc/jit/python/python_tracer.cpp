@@ -23,24 +23,43 @@ namespace tracer {
 
 // Python interpreter retrieval routine adapted from
 // https://stackoverflow.com/a/8706144
+std::vector<StackEntry> _pythonCallstack() {
+  pybind11::gil_scoped_acquire gil;
+  PyFrameObject* frame = PyEval_GetFrame();
+  std::vector<StackEntry> entries;
+
+  while (nullptr != frame) {
+    size_t line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
+    std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
+    std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
+    auto source = std::make_shared<Source>(funcname, filename, line);
+    entries.emplace_back(
+        StackEntry{funcname, SourceRange(source, 0, funcname.size())});
+    frame = frame->f_back;
+  }
+  return entries;
+}
+
 SourceRange getPythonInterpreterSourceRange() {
+  auto cs = pythonCallstack();
   c10::optional<std::string> source_filename;
   size_t source_line = 0;
   std::stringstream stack_trace;
-
-  pybind11::gil_scoped_acquire gil;
-  PyFrameObject* frame = PyEval_GetFrame();
-
-  while (nullptr != frame) {
-    int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
-    std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
-    std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
-    stack_trace << filename << "(" << line << "): " << funcname << "\n";
-    if (!source_filename) {
-      source_filename = filename;
-      source_line = line;
+  for (const auto& entry : cs) {
+    auto& range = entry.range;
+    if (range.source()) {
+      auto& src = range.source();
+      if (src && src->filename()) {
+        auto line =
+            src->starting_line_no() + src->lineno_for_offset(range.start());
+        stack_trace << *(src->filename()) << "(" << line
+                    << "): " << entry.filename << "\n";
+        if (!source_filename) {
+          source_filename = *(src->filename());
+          source_line = line;
+        }
+      }
     }
-    frame = frame->f_back;
   }
 
   auto stack_trace_text = stack_trace.str();
@@ -123,6 +142,7 @@ void pythonWarn(const std::string& reason) {
 }
 
 void initPythonTracerBindings(PyObject* module) {
+  setPythonCallstack(_pythonCallstack);
   setRecordSourceLocation(pythonRecordSourceLocation);
 
   auto m = py::handle(module).cast<py::module>();
@@ -156,7 +176,9 @@ void initPythonTracerBindings(PyObject* module) {
           })
       .def(
           "set_graph",
-          [](TracingState& s, std::shared_ptr<Graph> g) { s.graph = g; })
+          [](TracingState& s, std::shared_ptr<Graph> g) {
+            s.graph = std::move(g);
+          })
       .def("graph", [](TracingState& s) { return s.graph; });
 
   m.def("_tracer_warn_use_python", []() { tracer::setWarn(pythonWarn); });
@@ -171,7 +193,7 @@ void initPythonTracerBindings(PyObject* module) {
       py::arg("self") = nullptr);
   m.def("_get_tracing_state", []() { return getTracingState(); });
   m.def("_set_tracing_state", [](std::shared_ptr<TracingState> state) {
-    return setTracingState(state);
+    return setTracingState(std::move(state));
   });
   m.def("_get_value_trace", [](const Variable& var) {
     return getValueTrace(var);
@@ -179,7 +201,7 @@ void initPythonTracerBindings(PyObject* module) {
   m.def("_set_value_trace", [](const Variable& var, Value* value) {
     return setValueTrace(var, value);
   });
-  m.def("_tracer_set_get_unique_name_fn", [](py::function func) {
+  m.def("_tracer_set_get_unique_name_fn", [](const py::function& func) {
     const auto& tracing_state = getTracingState();
     AT_ASSERT(tracing_state);
     tracing_state->lookup_var_name_fn =

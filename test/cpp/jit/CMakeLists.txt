@@ -1,12 +1,27 @@
 set(JIT_TEST_ROOT ${TORCH_ROOT}/test/cpp/jit)
 
+# Build separate libraries the define custom classes/operators used from our Python tests.
+# These are intended to be used with torch.ops.load_library() in our Python test suite.
+add_library(torchbind_test SHARED
+  ${JIT_TEST_ROOT}/test_custom_class_registrations.h
+  ${JIT_TEST_ROOT}/test_custom_class_registrations.cpp
+)
+target_link_libraries(torchbind_test torch)
+
+add_library(jitbackend_test SHARED ${JIT_TEST_ROOT}/test_backend.cpp)
+target_link_libraries(jitbackend_test torch)
+
+if(INSTALL_TEST)
+  install(TARGETS torchbind_test DESTINATION lib)
+  install(TARGETS jitbackend_test DESTINATION lib)
+endif()
+
+
+# Build the cpp gtest binary containing the cpp-only tests.
 set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_alias_analysis.cpp
   ${JIT_TEST_ROOT}/test_argument_spec.cpp
   ${JIT_TEST_ROOT}/test_autodiff.cpp
-  ${JIT_TEST_ROOT}/test_backend.cpp
-  ${JIT_TEST_ROOT}/test_base.cpp
-  ${JIT_TEST_ROOT}/test_base.h
   ${JIT_TEST_ROOT}/test_class_import.cpp
   ${JIT_TEST_ROOT}/test_class_parser.cpp
   ${JIT_TEST_ROOT}/test_class_type.cpp
@@ -15,6 +30,8 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_cleanup_passes.cpp
   ${JIT_TEST_ROOT}/test_create_autodiff_subgraphs.cpp
   ${JIT_TEST_ROOT}/test_custom_class.cpp
+  ${JIT_TEST_ROOT}/test_custom_class_registrations.h
+  ${JIT_TEST_ROOT}/test_custom_class_registrations.cpp
   ${JIT_TEST_ROOT}/test_custom_operators.cpp
   ${JIT_TEST_ROOT}/test_dce.cpp
   ${JIT_TEST_ROOT}/test_fuser.cpp
@@ -27,6 +44,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_jit_type.cpp
   ${JIT_TEST_ROOT}/test_lite_interpreter.cpp
   ${JIT_TEST_ROOT}/test_lite_trainer.cpp
+  ${JIT_TEST_ROOT}/test_memory_dag.cpp
   ${JIT_TEST_ROOT}/test_misc.cpp
   ${JIT_TEST_ROOT}/test_mobile_type_parser.cpp
   ${JIT_TEST_ROOT}/test_module_api.cpp
@@ -44,12 +62,14 @@ if(USE_CUDA)
   list(APPEND JIT_TEST_SRCS ${JIT_TEST_ROOT}/test_gpu.cpp)
 endif()
 
-set(JIT_TEST_SRCS ${JIT_TEST_SRCS} PARENT_SCOPE)
-
 add_executable(test_jit
   ${TORCH_ROOT}/test/cpp/common/main.cpp
-  ${JIT_TEST_ROOT}/gtest.cpp
-  ${JIT_TEST_SRCS})
+  ${JIT_TEST_SRCS}
+)
+
+# TODO temporary until we can delete the old gtest polyfills.
+target_compile_definitions(test_jit PRIVATE USE_GTEST)
+
 if(USE_SYSTEM_ONNX)
   target_link_libraries(test_jit PRIVATE onnx_proto onnx)
 endif()
@@ -76,8 +96,6 @@ elseif(USE_ROCM)
     ${ROCM_HIPRTC_LIB}
     ${PYTORCH_HIP_HCC_LIBRARIES}
     ${TORCH_CUDA_LIBRARIES})
-
-  target_link_libraries(test_jit PRIVATE caffe2_gpu)
 
   target_compile_definitions(test_jit PRIVATE USE_ROCM)
 endif()

@@ -7,14 +7,13 @@ thread_local std::shared_ptr<ThreadLocalDebugInfo> debug_info = nullptr;
 }
 
 /* static */
-std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::get(
-    DebugInfoKind kind) {
-  auto cur = debug_info;
+DebugInfoBase* ThreadLocalDebugInfo::get(DebugInfoKind kind) {
+  ThreadLocalDebugInfo* cur = debug_info.get();
   while (cur) {
     if (cur->kind_ == kind) {
-      return cur->info_;
+      return cur->info_.get();
     }
-    cur = cur->parent_info_;
+    cur = cur->parent_info_.get();
   }
   return nullptr;
 }
@@ -49,6 +48,15 @@ std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::_pop(DebugInfoKind kind) {
   auto res = debug_info;
   debug_info = debug_info->parent_info_;
   return res->info_;
+}
+
+/* static */
+std::shared_ptr<DebugInfoBase> ThreadLocalDebugInfo::_peek(DebugInfoKind kind) {
+  TORCH_CHECK(
+      debug_info && debug_info->kind_ == kind,
+      "Expected debug info of type ",
+      (size_t)kind);
+  return debug_info->info_;
 }
 
 

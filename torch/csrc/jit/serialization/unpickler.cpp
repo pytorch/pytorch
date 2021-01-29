@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
 #include <torch/csrc/jit/api/function_impl.h>
@@ -29,7 +29,7 @@ static void restoreAccurateTypeTagsIfPossible(const IValue& root) {
 // objects it contains as attributes.
 // `IfPossible` - we can only do this recovery when we have an object as
 // the top-level unpickled thing (which is guaranteed for Modules, but
-// not for torch.load/torch,save). Otherwise we do not know the types
+// not for torch.load/torch.save). Otherwise we do not know the types
 // of the contained objects and cannot restore the tags.
 void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
   struct Work {
@@ -54,8 +54,10 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
     }
     switch (w.static_type->kind()) {
       case TensorType::Kind:
+      case StorageType::Kind:
       case NumberType::Kind:
       case FloatType::Kind:
+      case ComplexDoubleType::Kind:
       case IntType::Kind:
       case NoneType::Kind:
       case GeneratorType::Kind:
@@ -67,6 +69,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case StringType::Kind:
       case FunctionType::Kind:
       case DeviceObjType::Kind:
+      case StreamObjType::Kind:
       case QSchemeType::Kind:
       case LayoutType::Kind:
       case ScalarTypeType::Kind:
@@ -113,7 +116,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         auto elem_type = w.static_type->cast<ListType>()->getElementType();
         auto lst = w.value.toList();
         lst.unsafeSetElementType(elem_type);
-        for (const IValue& item : lst) {
+        for (const IValue item : lst) {
           Work elem = {elem_type, item};
           to_process.emplace_back(std::move(elem));
         }
@@ -146,7 +149,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
   }
 }
 
-void restoreContainerTypeTags(IValue& ivalue, TypePtr type) {
+void restoreContainerTypeTags(IValue& ivalue, const TypePtr& type) {
   if (auto dict_type = type->cast<DictType>()) {
     auto dict = ivalue.toGenericDict();
     dict.unsafeSetKeyType(dict_type->getKeyType());
@@ -222,7 +225,7 @@ void Unpickler::setInput(size_t memo_id) {
 // avoid it by calling push_back for bool
 template <typename T>
 inline void append(std::vector<T>& a, T&& e) {
-  a.emplace_back(std::move(e));
+  a.emplace_back(std::forward<T>(e));
 }
 template <>
 inline void append<bool>(std::vector<bool>& a, bool&& e) {
@@ -352,7 +355,7 @@ PickleOpCode Unpickler::readInstruction() {
         dict.insert_or_assign(stack_[i], stack_[i + 1]);
       }
       stack_.erase(stack_.begin() + start, stack_.end());
-      stack_.push_back(std::move(dict));
+      stack_.emplace_back(std::move(dict));
     } break;
     case PickleOpCode::SETITEMS: {
       size_t start = marks_.back();
@@ -416,6 +419,12 @@ PickleOpCode Unpickler::readInstruction() {
           /*resizable=*/false); // NB: we didn't set any allocator for the
                                 // tensor
       auto options = at::CPU(type).options();
+
+      if (use_storage_device_) {
+        options = options.device(storage.device());
+        device = storage.device();
+      }
+
       at::Tensor tensor;
       if (options.backend() == c10::Backend::QuantizedCPU) {
         tensor = at::_empty_affine_quantized({}, options, 0, 0)
@@ -424,14 +433,15 @@ PickleOpCode Unpickler::readInstruction() {
         tensor = at::empty({0}, options).set_(storage);
       }
 
-      if (device.type() == DeviceType::CUDA) {
+      if (device.type() == DeviceType::CUDA ||
+          device.type() == DeviceType::XPU) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(
             "supported devices include CPU and CUDA, however got ",
             DeviceTypeName(device.type(), false));
       }
-      stack_.push_back(std::move(tensor));
+      stack_.emplace_back(std::move(tensor));
     } break;
     default: {
       AT_ERROR(
@@ -531,6 +541,15 @@ void Unpickler::readGlobal(
     // Unpickle a tensor
     bool quantized = class_name == "_rebuild_qtensor";
     rebuildTensor(quantized);
+  } else if (module_name == "builtins" && class_name == "complex") {
+    globals_.emplace_back([this] {
+      auto elems = pop(stack_).toTuple()->elements();
+      AT_ASSERT(elems.size() == 2);
+      auto complex =
+          c10::complex<double>(elems.at(0).toDouble(), elems.at(1).toDouble());
+      stack_.emplace_back(complex);
+    });
+
   } else if (module_name == "collections" && class_name == "OrderedDict") {
     // collections.OrderedDict is used in tensor serialization for a tensor's
     // backward hooks (but they are not actually saved with this Pickler)
@@ -549,7 +568,7 @@ void Unpickler::readGlobal(
     stack_.emplace_back(int64_t(globals_.size() - 1));
     return;
   } else if (module_name == "torch.distributed.rpc" && class_name == "rref") {
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
     return rebuildRRef();
 #else
     TORCH_INTERNAL_ASSERT(
@@ -624,7 +643,7 @@ void Unpickler::rebuildTensor(bool quantized) {
     auto tup = pop(stack_).toTuple();
     const auto& elements = tup->elements();
     size_t idx = 0;
-    auto storage_tensor = elements.at(idx++).toTensor();
+    auto& storage_tensor = elements.at(idx++).toTensor();
     int64_t storage_offset = elements.at(idx++).toInt();
     std::vector<int64_t> size = tupleToIntList(elements.at(idx++));
     std::vector<int64_t> stride = tupleToIntList(elements.at(idx++));
@@ -665,11 +684,11 @@ void Unpickler::rebuildTensor(bool quantized) {
     impl->set_storage_offset(storage_offset);
     impl->set_sizes_and_strides(size, stride);
     result = autograd::make_variable(result, requires_grad);
-    stack_.push_back(std::move(result));
+    stack_.emplace_back(std::move(result));
   });
 }
 
-#ifdef USE_DISTRIBUTED
+#ifdef USE_RPC
 void Unpickler::rebuildRRef() {
   globals_.emplace_back([this] {
     // It is the same as how rref is unpickled in python,

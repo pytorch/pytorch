@@ -5,17 +5,17 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/SmallVector.h>
-#include <torch/library.h>
+#include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quant_utils.h>
-#include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+#include <torch/library.h>
 
 namespace {
 // To have a sanity check for maximum matrix size.
 constexpr int64_t kReasonableMaxDim = 1000000;
-}
+} // namespace
 
 template <int kSpatialDim = 2>
 bool ConvDimChecks(
@@ -307,6 +307,9 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
   const int dilation_d = kSpatialDim == 2 ? 1 : dilation_[0];
   const int dilation_h = dilation_[kSpatialDim - 2];
   const int dilation_w = dilation_[kSpatialDim - 1];
+  const int output_padding_d = kSpatialDim == 2 ? 0 : output_padding_[0];
+  const int output_padding_h = output_padding_[kSpatialDim - 2];
+  const int output_padding_w = output_padding_[kSpatialDim - 1];
 
   if (kSpatialDim == 2) {
     TORCH_CHECK(
@@ -381,7 +384,13 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
                            : std::vector<int>{pad_d, pad_h, pad_w},
           kSpatialDim == 2
               ? std::vector<int>{dilation_h, dilation_w}
-              : std::vector<int>{dilation_d, dilation_h, dilation_w});
+              : std::vector<int>{dilation_d, dilation_h, dilation_w},
+          kSpatialDim == 2
+              ? std::vector<int>{output_padding_h, output_padding_w}
+              : std::vector<int>{output_padding_d,
+                                 output_padding_h,
+                                 output_padding_w},
+          transpose());
 
   const float act_scale = act.q_scale();
   const int32_t act_zero_point = act.q_zero_point();
@@ -397,8 +406,20 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_impl(
   GetQuantizationParams(
       act_scale, output_scale, &output_multiplier_float, &act_times_w_scale);
 
-  const at::SmallVector<int64_t, kSpatialDim + 2> output_shape =
-      MakeConvOutputShape<kSpatialDim>(N, M, conv_p.OUT_DIM);
+  at::SmallVector<int64_t, kSpatialDim + 2> output_shape;
+  if (transpose()) {
+    output_shape = MakeDeConvOutputShape<kSpatialDim>(
+        N,
+        M,
+        kSpatialDim == 2 ? std::vector<int64_t>{H, W} : std::vector<int64_t>{D, H, W},
+        kernel,
+        stride(),
+        padding(),
+        output_padding(),
+        dilation());
+  } else {
+    output_shape = MakeConvOutputShape<kSpatialDim>(N, M, conv_p.OUT_DIM);
+  }
   if (N > 0) {
     TORCH_CHECK(
         std::all_of(
@@ -850,30 +871,33 @@ class QConvInt8ForBC final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("conv1d",          QConv1dInt8<false>::run);
-  m.impl("conv1d_relu",     QConv1dInt8<true>::run);
-  m.impl("conv2d.new",      QConvInt8<2, false>::run);
-  m.impl("conv2d_relu.new", QConvInt8<2, true>::run);
-  m.impl("conv3d.new",      QConvInt8<3, false>::run);
-  m.impl("conv3d_relu.new", QConvInt8<3, true>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d"),          QConv1dInt8<false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d_relu"),     QConv1dInt8<true>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d.new"),      QConvInt8<2, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_relu.new"), QConvInt8<2, true>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d.new"),      QConvInt8<3, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d_relu.new"), QConvInt8<3, true>::run);
   // for backward compatibility
-  m.impl("conv2d", QConvInt8ForBC<2, false>::run);
-  m.impl("conv2d_relu", QConvInt8ForBC<2, true>::run);
-  m.impl("conv3d", QConvInt8ForBC<3, false>::run);
-  m.impl("conv3d_relu", QConvInt8ForBC<3, true>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d"), QConvInt8ForBC<2, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_relu"), QConvInt8ForBC<2, true>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d"), QConvInt8ForBC<3, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d_relu"), QConvInt8ForBC<3, true>::run);
 
   // transpose
-  m.impl("conv_transpose1d",  QConv1dInt8<false>::run);
-  m.impl("conv_transpose2d",  QConvInt8<2, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose1d"),  QConv1dInt8<false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_transpose2d"),  QConvInt8<2, false>::run);
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::conv_transpose3d"),
+      QConvInt8<3, false>::run);
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
-  m.impl("conv2d",      QConvInt8<2, false>::run);
-  m.impl("conv2d_relu", QConvInt8<2, true>::run);
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv2d"),      QConvInt8<2, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv2d_relu"), QConvInt8<2, true>::run);
 
   // transpose
-  m.impl("conv_transpose1d",  QConv1dInt8<false>::run);
-  m.impl("conv_transpose2d",  QConvInt8<2, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose1d"),  QConv1dInt8<false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("_quantized::conv_transpose2d"),  QConvInt8<2, false>::run);
 }
 
 } // namespace

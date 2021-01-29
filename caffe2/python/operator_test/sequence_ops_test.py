@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core
 from functools import partial
@@ -11,7 +11,6 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
 import numpy as np
 import unittest
-import os
 
 
 def _gen_test_add_padding(with_pad_data=True,

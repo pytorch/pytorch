@@ -5,12 +5,12 @@ import torch.onnx
 # This import monkey-patches graph manipulation methods on Graph, used for the
 # ONNX symbolics
 import torch.onnx.utils
-from sys import maxsize
 
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 import torch.onnx.symbolic_opset9
 
+from sys import maxsize
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
@@ -136,11 +136,11 @@ def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_
 
 def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if dynamic_slice:
-        starts = g.op("Unsqueeze", starts, axes_i=[0])
-        ends = g.op("Unsqueeze", ends, axes_i=[0])
+        starts = sym_help._unsqueeze_helper(g, starts, [0])
+        ends = sym_help._unsqueeze_helper(g, ends, [0])
         if isinstance(axes, int):
             axes = g.op("Constant", value_t=torch.tensor(axes))
-        axes = g.op("Unsqueeze", axes, axes_i=[0])
+        axes = sym_help._unsqueeze_helper(g, axes, [0])
     else:
         assert len(starts) == len(ends)
         assert len(starts) == len(axes)
@@ -205,66 +205,39 @@ def embedding_bag(g,
                   include_last_offset):
     if scale_grad_by_freq and sym_help._training_mode:
         return sym_help._onnx_unsupported('embedding_bag with scale_grad_by_freq for training mode')
-
-    from torch.onnx.symbolic_opset9 import size, div, select
-
-    # Check if initial indices was 2D. In functional.py:
-    # offsets is set to torch.arange(0, indices.numel(), indices.size(1))
-    # Then indices is reshaped to 1D: indices.reshape(-1)
-    if len(list(indices.node().inputs())) > 0 and indices.node().inputs().__next__().type().sizes() is not None \
-            and len(indices.node().inputs().__next__().type().sizes()) == 2:
-        # Assert include_last_offset is False
-        assert not include_last_offset
-        embeddings = g.op("Gather", embedding_matrix, indices)
-        dim_0 = size(g, offsets, g.op("Constant", value_t=torch.LongTensor([0])))
-        dim_1 = div(g, size(g, indices, g.op("Constant", value_t=torch.LongTensor([0]))), dim_0)
-        dim_2 = g.op("Constant", value_t=torch.LongTensor([-1]))
-
-        shape = [dim_0, dim_1, dim_2]
-        shape = g.op("Concat", *shape, axis_i=0)
-
-        if not sym_help._is_none(per_sample_weights):
-            per_sample_weights = g.op("Unsqueeze", per_sample_weights, axes_i=[1])
-            embeddings = g.op("Mul", embeddings, per_sample_weights)
-
-        embeddings = g.op("Reshape", embeddings, shape)
-        if mode == 0:
-            embeddings = g.op("ReduceSum", embeddings, axes_i=[1], keepdims_i=0)
-        elif mode == 1:
-            embeddings = g.op("ReduceMean", embeddings, axes_i=[1], keepdims_i=0)
-        else:
-            embeddings = g.op("ReduceMax", embeddings, axes_i=[1], keepdims_i=0)
-        # aten::embedding_bag returns a tuple of 4 elements: output, offset2bag, bag_size, max_indices.
-        # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.          
-        return embeddings, None, None, None
-    elif offsets.type().sizes() is not None:
+    from torch.onnx.symbolic_opset9 import select
+    import warnings
+    warnings.warn("Export of embedding_bag with dynamic input/offsets shape is not supported in opset 10. "
+                  "Please use opset 11 or higher to export model for dynamic input shape.'")
+    offsets_dim_0 = sym_help._get_tensor_dim_size(offsets, 0)
+    if offsets_dim_0 is not None:
         if include_last_offset:
-            offset_len = offsets.type().sizes()[0] - 1
+            offset_len = offsets_dim_0 - 1
             offsets_extended = offsets
         else:
-            offset_len = offsets.type().sizes()[0]
+            offset_len = offsets_dim_0
             offsets_extended = [offsets, g.op("Constant", value_t=torch.tensor([maxsize]))]
             offsets_extended = g.op("Concat", *offsets_extended, axis_i=0)
         list_ = []
         for i in range(offset_len):
-            start_ = g.op("Unsqueeze", select(g, offsets_extended, torch.tensor(0), torch.tensor(i)), axes_i=[0])
-            end_ = g.op("Unsqueeze", select(g, offsets_extended, torch.tensor(0), torch.tensor(i + 1)), axes_i=[0])
+            start_ = sym_help._unsqueeze_helper(g, select(g, offsets_extended, torch.tensor(0), torch.tensor(i)), [0])
+            end_ = sym_help._unsqueeze_helper(g, select(g, offsets_extended, torch.tensor(0), torch.tensor(i + 1)), [0])
             axes_ = g.op("Constant", value_t=torch.tensor([0]))
             indices_row = g.op("Slice", indices, start_, end_, axes_)
 
             embeddings = g.op("Gather", embedding_matrix, indices_row)
             if not sym_help._is_none(per_sample_weights):
                 per_sample_weights_row = g.op("Slice", per_sample_weights, start_, end_, axes_)
-                per_sample_weights_row = g.op("Unsqueeze", per_sample_weights_row, axes_i=[1])
+                per_sample_weights_row = sym_help._unsqueeze_helper(g, per_sample_weights_row, [1])
                 embeddings = g.op("Mul", embeddings, per_sample_weights_row)
             if mode == 0:
-                embeddings = g.op("ReduceSum", embeddings, axes_i=[0], keepdims_i=0)
+                embeddings = sym_help._reducesum_helper(g, embeddings, axes_i=[0], keepdims_i=0)
             elif mode == 1:
                 embeddings = g.op("ReduceMean", embeddings, axes_i=[0], keepdims_i=0)
             else:
                 embeddings = g.op("ReduceMax", embeddings, axes_i=[0], keepdims_i=0)
 
-            embeddings = g.op("Unsqueeze", embeddings, axes_i=[0])
+            embeddings = sym_help._unsqueeze_helper(g, embeddings, [0])
             list_.append(embeddings)
 
         output = g.op("Concat", *list_, axis_i=0)
@@ -272,7 +245,8 @@ def embedding_bag(g,
         # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.
         return output, None, None, None
     else:
-        return sym_help._onnx_unsupported('embedding_bag with unknown shape of indices')
+        return sym_help._onnx_unsupported('embedding_bag with unknown shape of offsets for opset 10 is not supported. '
+                                          'please use opset 11 or higher.')
 
 
 @parse_args('v', 't', 'i', 'i', 'i')

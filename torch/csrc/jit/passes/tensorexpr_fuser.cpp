@@ -1,9 +1,13 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
+
 #include <ATen/record_function.h>
+#include <c10/util/FunctionRef.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/jit_opt_limit.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/remove_redundant_profiles.h>
@@ -14,6 +18,11 @@
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
 
+// NOLINTNEXTLINE
+C10_DEFINE_bool(
+    torch_jit_disable_cat,
+    false,
+    "disable aten::cat in TE fusion groups");
 namespace torch {
 namespace jit {
 
@@ -29,16 +38,29 @@ bool isSupportedForBlock(Node* node) {
   }
 }
 
-namespace tensorexpr {
-bool isSupported(Node* node) {
-  // For Block codegen we allow limited ops.
-  if (tensorexpr::getTEGenerateBlockCode()) {
-    return isSupportedForBlock(node);
-  }
+bool usedOnlyInSize(Value* v) {
+  const auto& uses = v->uses();
+  return std::all_of(uses.begin(), uses.end(), [](const Use& u) {
+    return u.user->matches("aten::size(Tensor self) -> int[]");
+  });
+}
 
+Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
+  AT_ASSERT(!sizes.empty());
+  Graph* graph = sizes[0]->owningGraph();
+  Node* broadcast_n =
+      graph->insertNode(graph->create(prim::BroadcastSizes, sizes));
+  broadcast_n->output()->setType(ListType::ofInts());
+  db->createValue(broadcast_n->output());
+  return broadcast_n->output();
+}
+
+namespace tensorexpr {
+
+static const OperatorSet& supported_eltwise_set() {
   // clang-format off
   // breaks up the schema strings so they are no longer discoverable with ctrl-F
-  static const OperatorSet supported_operator_set{
+    static const OperatorSet supported_eltwise_set{
       "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
       "aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor",
       "aten::_cast_Float(Tensor self, bool non_blocking) -> Tensor",
@@ -62,17 +84,25 @@ bool isSupported(Node* node) {
       "aten::lt.Tensor(Tensor self, Tensor other) -> Tensor",
       "aten::lt.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
-      "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor",
-      // TODO : do we support pow.Scalar ?
-      "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor",
+      // TODO: uncomment when we properly support pow
+      // "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor",
+      // "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor",
       // TODO: support clamp_min, clamp_max
       "aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor",
       "aten::lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor",
       "aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor",
+      "aten::to.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::to.device(Tensor self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::to.dtype_layout(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None"
+      ", bool? pin_memory=None, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::to.prim_Device(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
+      "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
+      "aten::isnan(Tensor self) -> Tensor",
+      "aten::lgamma(Tensor self) -> Tensor",
       "aten::log10(Tensor self) -> Tensor",
       "aten::log(Tensor self) -> Tensor",
       "aten::log2(Tensor self) -> Tensor",
-      // TODO: log1p
+      "aten::log1p(Tensor self) -> Tensor",
       "aten::exp(Tensor self) -> Tensor",
       "aten::erf(Tensor self) -> Tensor",
       "aten::erfc(Tensor self) -> Tensor",
@@ -96,16 +126,16 @@ bool isSupported(Node* node) {
       "aten::round(Tensor self) -> Tensor",
       "aten::trunc(Tensor self) -> Tensor",
       "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
+      // "aten::masked_fill.Scalar(Tensor self, Tensor mask, Scalar value) -> Tensor",
+      // "aten::masked_fill.Tensor(Tensor self, Tensor mask, Tensor value) -> Tensor", TODO: requires 0-dim Tensor
       "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
-      "aten::cat(Tensor[] tensors, int dim=0) -> Tensor",
       "aten::sigmoid(Tensor self) -> Tensor",
       "aten::relu(Tensor self) -> Tensor",
       "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor",
       "aten::neg(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
       "aten::expm1(Tensor self) -> Tensor",
-      "aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)",
       "aten::frac(Tensor self) -> Tensor",
       // TODO: uncomment once we can handle rand+broadcasts
       // "aten::rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
@@ -123,20 +153,40 @@ bool isSupported(Node* node) {
       "aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor",
       "aten::where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> Tensor",
       "aten::where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor",
-      "aten::where(Tensor condition) -> Tensor[]",
       // TODO: enable other min/max variants, operators that can be both
       // elementwise or reductions:
       "aten::min.other(Tensor self, Tensor other) -> Tensor",
       "aten::max.other(Tensor self, Tensor other) -> Tensor",
       // TODO: enable slice, shape inference is not implemented for this op yet
   };
+  // clang-format on
+
+  return supported_eltwise_set;
+}
+
+bool isSupported(Node* node) {
+  // For Block codegen we allow limited ops.
+  if (tensorexpr::getTEGenerateBlockCode()) {
+    return isSupportedForBlock(node);
+  }
+
+  static const OperatorSet cuda_only_operator_set{
+      "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
+  };
   static const OperatorSet supported_reduction_set{
       "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
       "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
+      "aten::softmax.int(Tensor self, int dim , ScalarType? dtype=None) -> Tensor",
+      "aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor",
+  };
+  static const OperatorSet supported_misc_set{
+      "aten::cat(Tensor[] tensors, int dim=0) -> Tensor",
+      "aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)",
   };
   // clang-format on
 
-  if (node->isMemberOf(supported_operator_set) ||
+  if (node->isMemberOf(supported_eltwise_set()) ||
+      node->isMemberOf(supported_misc_set) ||
       (texpr_reductions_enabled && node->isMemberOf(supported_reduction_set))) {
     // We only insert guards on Tensor types, so we rely on the output
     // of a node being uniquely determined by its input types.
@@ -150,6 +200,17 @@ bool isSupported(Node* node) {
       }
     }
 
+    // Operator is only supported on CUDA.
+    if (node->isMemberOf(cuda_only_operator_set)) {
+      auto device = tensorexpr::pickDeviceType(node->inputs());
+      if (!device) {
+        device = tensorexpr::pickDeviceType(node->outputs());
+      }
+      if (!device || device->is_cpu()) {
+        return false;
+      }
+    }
+
     // non-const dtype / device
     for (auto arg_name : {"dtype", "device"}) {
       if (auto index = node->schema().argumentIndexWithName(arg_name)) {
@@ -159,6 +220,10 @@ bool isSupported(Node* node) {
       }
     }
 
+    if (FLAGS_torch_jit_disable_cat && node->kind() == aten::cat) {
+      return false;
+    }
+
     return true;
   }
 
@@ -166,6 +231,7 @@ bool isSupported(Node* node) {
   switch (node->kind()) {
     case prim::ConstantChunk:
     case prim::ListConstruct:
+    case prim::TensorExprGroup:
       return true;
   }
 
@@ -174,7 +240,7 @@ bool isSupported(Node* node) {
 
 } // namespace tensorexpr
 
-static bool texpr_fuser_enabled_ = false;
+static bool texpr_fuser_enabled_ = true;
 
 void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled_ = val;
@@ -201,42 +267,35 @@ bool texprReductionsEnabled() {
   return texpr_reductions_enabled;
 }
 
-struct nodesComparator {
-  bool operator()(Node* a, Node* b) const {
-    return a->isAfter(b);
-  }
-};
-
-// TODO: if a value has differently typed uses, temporarrily insert a node
-// specializing the type for each use and later remove, instead of bailing
-bool profiledWithDifferentTypes(Value* v) {
-  std::vector<TypePtr> types;
-  for (const auto& use : v->uses()) {
-    if (use.user->kind() == prim::profile) {
-      types.push_back(use.user->ty(attr::profiled_type));
-    }
-  }
-  for (size_t i = 1; i < types.size(); ++i) {
-    if (types.at(i - 1) != types.at(i)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 void removeProfileNodesAndSpecializeTypes(Block* b) {
   for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
     if (it->kind() == prim::profile) {
       GRAPH_DEBUG("Removing prim::profile: %", it->output()->debugName());
       it->output()->replaceAllUsesWith(it->input());
-      if (!profiledWithDifferentTypes(it->input())) {
-        it->input()->setType(it->ty(attr::profiled_type));
-      } else {
-        GRAPH_DEBUG(
-            "Ignoring value with differently typed profiles :%",
-            it->output()->debugName());
+      auto profiled_type = it->ty(attr::profiled_type)->expect<TensorType>();
+
+      // A value can be profiled with differently typed uses.
+      // This can occur from:
+      // - having a use which is not executed, so the type will be
+      // TensorType::get()
+      // - control-flow that depends on tensor type:
+      //   if x.size() == 2 op(x) else op(x)
+      // - mutation of the value on a field represented in the tensor type
+      //   op(x); x.resize_([...]); op(x)
+
+      // The most common case today with num_profiles = 1 is from the first
+      // case. Here we can just ignore non-profiled uses, and choose any of the
+      // profiled uses. Because we guard all tensor types in the runtime, even
+      // if we set a Value to have a profiled type from one use and then execute
+      // a use with a different profiled type, we will still be correct.
+      // In the future we could consider unifying the types of uses, or adding a
+      // type refinement node so uses can have the correct corresponding type.
+      if (profiled_type == TensorType::get()) {
+        continue;
       }
+      it->input()->setType(it->ty(attr::profiled_type));
       it.destroyCurrent();
+
     } else {
       for (Block* ib : it->blocks()) {
         removeProfileNodesAndSpecializeTypes(ib);
@@ -246,7 +305,9 @@ void removeProfileNodesAndSpecializeTypes(Block* b) {
 }
 
 void RemoveProfileNodesAndSpecializeTypes(std::shared_ptr<Graph>& graph) {
+  GRAPH_DEBUG("Before removeProfileNodesAndSpecializeTypes:\n", *graph);
   removeProfileNodesAndSpecializeTypes(graph->block());
+  GRAPH_DEBUG("After removeProfileNodesAndSpecializeTypes:\n", *graph);
 }
 
 void removeTensorTypeSpecialization(Value* v) {
@@ -282,10 +343,233 @@ void RemoveTensorTypeSpecializations(std::shared_ptr<Graph>& graph) {
   removeTensorTypeSpecializations(graph->block());
 }
 
+void insertTypeGuard(
+    Node* guarded_node,
+    tensor_type_converter_t type_converter,
+    Symbol kind) {
+  GRAPH_DEBUG("Inserting a typecheck guard for a node", *guarded_node);
+  auto subgraph = SubgraphUtils::getSubgraph(guarded_node);
+
+  // Fixup types of the subgraph inputs
+  std::vector<Value*> inputs_to_check;
+  std::vector<TypePtr> guard_types;
+  for (Value* input : guarded_node->inputs()) {
+    // We only check inputs of the guarded nodes and expect user to infer
+    // intermediates and outputs shapes
+    if (!input->type()->cast<TensorType>()) {
+      continue;
+    }
+
+    // fusion outputs are already guarded
+    if (input->node()->kind() == prim::Constant ||
+        input->node()->kind() == prim::FusionGroup) {
+      continue;
+    }
+    inputs_to_check.push_back(input);
+    guard_types.push_back(type_converter(input->type()->expect<TensorType>()));
+  }
+  if (!inputs_to_check.size()) {
+    return;
+  }
+
+  // Add prim::TypeCheck node
+  //
+  // TypeCheck nodes  look like the following:
+  //   %out1 : Float(2, 3), %out2 : Int(10, 30), %types_match : bool =
+  //   prim::TypeCheck(%inp1 : Tensor, %inp2 : Tensor)
+  //
+  // They have N inputs whose types we are going to check and N+1 outputs. The
+  // first N outputs specify expected types and N+1-th output holds the result
+  // of the check (bool).
+  Node* typecheck_node =
+      guarded_node->owningGraph()
+          ->create(kind, inputs_to_check, inputs_to_check.size() + 1)
+          ->insertBefore(guarded_node);
+  typecheck_node->tys_(attr::types, guard_types);
+  Value* typecheck_result = typecheck_node->output(inputs_to_check.size());
+
+  std::unordered_map<Value*, Value*> typechecked_inputs;
+  for (size_t i = 0; i < typecheck_node->inputs().size(); ++i) {
+    typechecked_inputs[typecheck_node->input(i)] = typecheck_node->output(i);
+  }
+
+  // Fixup types of the typecheck node outputs, which are used by the op in
+  // execution
+  typecheck_node->output(inputs_to_check.size())->setType(BoolType::get());
+  for (size_t i = 0; i < typecheck_node->inputs().size(); ++i) {
+    typecheck_node->output(i)->setType(typecheck_node->input(i)->type());
+  }
+
+  // Insert if
+  auto versioning_if =
+      guarded_node->owningGraph()
+          ->create(prim::If, {typecheck_result}, guarded_node->outputs().size())
+          ->insertAfter(typecheck_node);
+  for (size_t idx = 0; idx < guarded_node->outputs().size(); ++idx) {
+    versioning_if->output(idx)->setType(guarded_node->output(idx)->type());
+    guarded_node->output(idx)->replaceAllUsesWith(versioning_if->output(idx));
+  }
+  auto true_block = versioning_if->addBlock();
+  auto false_block = versioning_if->addBlock();
+
+  // Fill in the false block. It should contain the unoptimized
+  // copy of the fused subgraph.
+  WithInsertPoint guard(false_block->return_node());
+  const auto subgraph_outputs = insertGraph(
+      *guarded_node->owningGraph(), *subgraph, guarded_node->inputs());
+  for (Value* output : subgraph_outputs) {
+    false_block->registerOutput(output);
+  }
+
+  // types get copied to the fallback graph, so remove specializations before
+  // replacing
+  removeTensorTypeSpecializations(false_block);
+  replaceBlockWithFallbackGraph(false_block, guarded_node->inputs());
+
+  // Fill in the true block. It has all inputs type-checked and its
+  // body should be the fusion group node.
+  guarded_node->moveBefore(true_block->return_node());
+  for (size_t idx = 0; idx < guarded_node->inputs().size(); ++idx) {
+    if (typechecked_inputs.count(guarded_node->input(idx))) {
+      guarded_node->replaceInput(
+          idx, typechecked_inputs.at(guarded_node->input(idx)));
+    }
+  }
+  for (Value* output : guarded_node->outputs()) {
+    true_block->registerOutput(output);
+  }
+}
+
 class TensorExprFuser {
  public:
-  TensorExprFuser(std::shared_ptr<Graph> graph, size_t min_group_size)
-      : graph_(std::move(graph)), min_group_size_(min_group_size) {}
+  TensorExprFuser(
+      std::shared_ptr<Graph> graph,
+      size_t min_group_size,
+      bool disable_shape_checks)
+      : graph_(std::move(graph)),
+        min_group_size_(min_group_size),
+        disable_shape_checks_(disable_shape_checks) {}
+
+  // Builds up expressions that compute shapes of all intermediates (and
+  // outputs) of the fusion group, based on the sizes of inputs. You should run
+  // DCE to remove those that you end up not using.
+  std::unordered_map<Value*, Value*> buildShapeExpressions(Node* fusion_group) {
+    GRAPH_DUMP("buildShapeExpressions for ", fusion_group->g(attr::Subgraph));
+    WithInsertPoint insert_guard{fusion_group->next()};
+    std::unordered_map<Value*, Value*> shape_of;
+
+    Graph* graph = fusion_group->owningGraph();
+    auto subgraph = fusion_group->g(attr::Subgraph);
+
+    auto inputs = fusion_group->inputs();
+    auto sinputs = subgraph->inputs();
+    AT_ASSERT(inputs.size() == sinputs.size());
+    for (size_t i = 0; i < inputs.size(); ++i) {
+      if (inputs[i]->type()->isSubtypeOf(TensorType::get())) {
+        Value* soutput = graph->insert(aten::size, {inputs[i]});
+        aliasDb_->createValue(soutput);
+        GRAPH_DEBUG(
+            "Adding a mapping for %",
+            sinputs[i]->debugName(),
+            " ",
+            getHeader(soutput->node()));
+        shape_of[sinputs[i]] = soutput;
+      }
+    }
+
+    // When we have a guarantee that an output won't be removed, because it's
+    // used in expressions that don't involve size checks, we can use its size
+    // instead of computing a long chain of broadcasts, starting from the
+    // beginning of the kernel.
+    auto outputs = fusion_group->outputs();
+    auto soutputs = subgraph->outputs();
+    AT_ASSERT(outputs.size() == soutputs.size());
+    for (size_t i = 0; i < outputs.size(); ++i) {
+      if (usedOnlyInSize(outputs[i]))
+        continue;
+      Value* soutput = graph->insert(aten::size, {outputs[i]});
+      aliasDb_->createValue(soutput);
+      shape_of[soutputs[i]] = soutput;
+    }
+
+    for (Node* n : subgraph->nodes()) {
+      if (n->kind() == prim::ConstantChunk) {
+        Node* sizes_node = graph->insertNode(
+            graph->create(prim::ChunkSizes, shape_of.at(n->input()), 2));
+        sizes_node->i_(attr::dim, n->i(attr::dim));
+        sizes_node->i_(attr::chunks, n->i(attr::chunks));
+        for (Value* output : sizes_node->outputs()) {
+          aliasDb_->createValue(output);
+        }
+        Value* regular_size = sizes_node->outputs().at(0);
+        Value* last_size = sizes_node->outputs().at(1);
+        regular_size->setType(ListType::ofInts());
+        last_size->setType(ListType::ofInts());
+        auto outputs = n->outputs();
+        for (Value* o : outputs.slice(0, outputs.size() - 1)) {
+          shape_of.emplace(o, regular_size);
+        }
+        shape_of.emplace(outputs.at(outputs.size() - 1), last_size);
+        continue;
+      }
+
+      // we only support shape calculations for elementwise and
+      // a few exceptions (e.g. prim::ConstantChunk, etc) listed above
+      if (!n->isMemberOf(tensorexpr::supported_eltwise_set())) {
+        continue;
+      }
+
+      auto tensor_inputs = filter(n->inputs(), [](Value* v) {
+        return v->type()->isSubtypeOf(TensorType::get());
+      });
+      GRAPH_DEBUG("Building sizes for ", getHeader(n));
+      bool all_inputs_have_sizes = true;
+      auto shapes = fmap(tensor_inputs, [&](Value* v) {
+        GRAPH_DEBUG("Getting aten::size for %", v->debugName());
+        all_inputs_have_sizes &= shape_of.count(v);
+        return shape_of.count(v) != 0 ? shape_of.at(v) : nullptr;
+      });
+
+      if (!all_inputs_have_sizes) {
+        GRAPH_DEBUG(
+            "Not all tensor arguments have sizes available to compute the broadcasted size",
+            getHeader(n));
+        continue;
+      }
+      shape_of.emplace(
+          n->output(),
+          shapes.size() == 1 ? shapes[0]
+                             : broadcastSizes(shapes, aliasDb_.get()));
+    }
+    return shape_of;
+  }
+
+  void removeOutputsUsedOnlyInSize(Node* fusion_group) {
+    if (fusion_group->kind() != prim::TensorExprGroup)
+      return;
+    auto subgraph = fusion_group->g(attr::Subgraph);
+
+    auto shape_of = buildShapeExpressions(fusion_group);
+    auto outputs = fusion_group->outputs().vec();
+    auto soutputs = subgraph->outputs().vec();
+    // XXX: Iterating in this order is not only good for performance reasons!
+    // It is also crucial for correctness (i has to reflect the current true
+    // index of outputs[i])!
+    for (int64_t i = static_cast<int64_t>(outputs.size()) - 1; i >= 0; --i) {
+      auto output = outputs[i];
+      auto soutput = soutputs[i];
+      if (usedOnlyInSize(output) && shape_of.count(soutput) > 0) {
+        auto uses = output->uses();
+        for (Use u : uses) {
+          AT_ASSERT(u.user->matches("aten::size(Tensor self) -> int[]"));
+          u.user->output()->replaceAllUsesWith(shape_of.at(soutput));
+          u.user->destroy();
+        }
+        fusion_group->eraseOutput(i);
+        subgraph->eraseOutput(i);
+      }
+    }
+  }
 
   void run() {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
@@ -293,128 +577,65 @@ class TensorExprFuser {
     GRAPH_DUMP("After removing redundant profile nodes: ", graph_);
     createFusionGroups(graph_->block());
     GRAPH_DUMP("After creating fusion groups: ", graph_);
-    guardFusionGroups(graph_->block());
+    // we maintain alias db correctness during initial fusion, but it is
+    // difficult to maintain correctness after inlining so inline only after
+    // fusion is done.
+    inlineSmallFusionGroups(graph_->block());
+    GRAPH_DUMP("After inlining small fusion groups: ", graph_);
+    prepareFusionGroupAndGuardOutputs(graph_->block());
     GRAPH_DUMP("After guarding fusion groups: ", graph_);
     removeTensorTypeSpecializations(graph_->block());
     GRAPH_DUMP("After removing tensor type specializations: ", graph_);
   }
 
  private:
-  // Merges `to_merge` into a subgraph by executing merge_fn.
-  // merge_fn takes in map that will be filled with the mapping b/w
-  // to_merge's outputs and the corresponding values in the subgraph.
-  // merge_fn returns the merged-into subgraph
-  Node* aliasingSafeSubgraphMerge(
-      Node* to_merge,
-      const std::function<Node*(std::unordered_map<Value*, Value*>&)>&
-          merge_fn) {
-    // When we merge a node into a subgraph, the new subgraph outputs
-    // have the same aliasing properties as the original node's outputs.
-    // Here we create a placeholder node, transfer the aliasing properties
-    // to the placeholder, execute the merge, and transfer the aliasing
-    // properties to the appropriate fusion group outputs
-    Node* placeholder_node =
-        graph_->insertNode(graph_->create(prim::Uninitialized, 0));
-    std::vector<Value*> existing_values;
-    for (size_t i = 0; i < to_merge->outputs().size(); ++i) {
-      Value* existing = to_merge->outputs().at(i);
-      Value* new_value = placeholder_node->insertOutput(i)->copyMetadata(
-          to_merge->outputs().at(i));
-      aliasDb_->replaceWithNewValue(existing, new_value);
-      existing_values.push_back(existing);
-    }
-    std::unordered_map<Value*, Value*> vmap;
-    Node* fusion_group = merge_fn(vmap);
-    for (size_t i = 0; i < existing_values.size(); ++i) {
-      TORCH_INTERNAL_ASSERT(vmap.count(existing_values.at(i)));
-      Value* subgraph_value = vmap[existing_values.at(i)];
-      auto subgraph = SubgraphUtils::getSubgraph(fusion_group);
-      size_t subgraph_output_index = 0;
-      for (; subgraph_output_index < subgraph->outputs().size();
-           ++subgraph_output_index) {
-        if (subgraph->outputs().at(subgraph_output_index) == subgraph_value) {
-          break;
-        }
-      }
-      if (subgraph_output_index != subgraph->outputs().size()) {
-        aliasDb_->replaceWithNewValue(
-            placeholder_node->outputs().at(i),
-            fusion_group->outputs().at(subgraph_output_index));
-      }
-    }
-    placeholder_node->destroy();
-    return fusion_group;
-  }
-
   Node* getOrCreateTensorExprSubgraph(Node* n) {
     if (n->hasAttribute(attr::Subgraph) && n->kind() == prim::TensorExprGroup) {
       return n;
     }
     GRAPH_UPDATE("Creating a tensorexpr::Group node from: ", *n);
-    return aliasingSafeSubgraphMerge(
-        n, [&](std::unordered_map<Value*, Value*>& vmap) {
-          return SubgraphUtils::createSingletonSubgraph(
-              n, prim::TensorExprGroup, vmap);
-        });
+    return SubgraphUtils::createSingletonSubgraphAndUpdateAliasing(
+        n, prim::TensorExprGroup, *aliasDb_);
   }
 
-  void mergeNodeIntoSubgraphAndUpdateAliasing(Node* n, Node* subgraph) {
-    aliasingSafeSubgraphMerge(n, [&](std::unordered_map<Value*, Value*>& vmap) {
-      SubgraphUtils::mergeNodeIntoSubgraph(n, subgraph, vmap);
-      return subgraph;
-    });
-  }
-
-  // Add unvisited input nodes to the queue for further merging into the fusion
-  // group.
-  void updateQueue(
-      Node* fusion_group,
-      std::set<Node*, nodesComparator>& queue,
-      const std::unordered_set<Node*>& visited) {
-    for (auto input : fusion_group->inputs()) {
-      if (!visited.count(input->node())) {
-        queue.insert(input->node());
+  value_list sortReverseTopological(ArrayRef<Value*> inputs, Block* b) {
+    value_list result;
+    for (auto i : inputs) {
+      if (i->node()->owningBlock() == b) {
+        result.push_back(i);
       }
     }
+    // Sort in reverse topological order
+    std::sort(result.begin(), result.end(), [&](Value* a, Value* b) {
+      return a->node()->isAfter(b->node());
+    });
+    return result;
   }
 
   // Create a fusion group starting from the node N.
   // We then try to pull inputs into the fusion group and repeat that process
   // until there is nothing we can pull in.
-  Node* createFusionGroup(Node* n) {
-    // Queue of the nodes we should consider for merging into the fusion groups
-    // (those nodes are usually inputs of the fusion group).
-    // We use an ordered set here to visit them in the right order: the fusion
-    // group is closer to the end of the block and we are trying to pull later
-    // nodes first.
-    // NB: the order in the list in theory could stale if we move nodes around.
-    // However, this should only happen to the nodes we could not fuse, and
-    // hence it should not be a problem.
-    std::set<Node*, nodesComparator> queue;
-    std::unordered_set<Node*> visited_nodes;
-
-    Node* fusion_group = n;
+  std::pair<graph_node_list::iterator, bool> createFusionGroup(
+      Node* fusion_node) {
     if (min_group_size_ == 1) {
-      fusion_group = getOrCreateTensorExprSubgraph(n);
+      fusion_node = getOrCreateTensorExprSubgraph(fusion_node);
     }
-
-    updateQueue(fusion_group, queue, visited_nodes);
 
     GRAPH_DEBUG("Iteratively pull input nodes into the fusion group...\n");
-    while (!queue.empty()) {
-      debugDumpFusionGroup("Current fusion group: ", fusion_group);
-      GRAPH_DEBUG(queue.size(), " nodes are in the queue.\n");
-
-      Node* input_node = *queue.begin();
-      queue.erase(queue.begin());
-
-      GRAPH_DEBUG("Trying to merge: ", *input_node);
-      fusion_group = tryMerge(fusion_group, input_node);
-      visited_nodes.insert(input_node);
-      updateQueue(fusion_group, queue, visited_nodes);
+    auto inputs = sortReverseTopological(
+        fusion_node->inputs(), fusion_node->owningBlock());
+    for (auto input : inputs) {
+      debugDumpFusionGroup("Current fusion group: ", fusion_node);
+      GRAPH_DEBUG("Trying to merge: ", *input->node());
+      if (auto maybe_fusion_group = tryMerge(fusion_node, input->node())) {
+        // we successfully merged, so the new group's `inputs` may have
+        // changed. So rescan the new group for more merging opportunities.
+        return std::make_pair(
+            maybe_fusion_group.value()->reverseIterator(), true);
+      }
     }
 
-    return fusion_group;
+    return std::make_pair(++fusion_node->reverseIterator(), false);
   }
 
   static void debugDumpFusionGroup(const std::string& msg, Node* n) {
@@ -424,69 +645,86 @@ class TensorExprFuser {
     }
   }
 
+  // No Ops in eager shouldn't be outputs of Fusion Groups because it
+  // will degrade perf and change aliasing relationships
+  static bool unexecutedEagerOp(Node* n) {
+    if (n->kind() != aten::to) {
+      return false;
+    }
+
+    return *n->input(0)->type()->expect<TensorType>() ==
+        *n->output()->type()->expect<TensorType>();
+  }
+
+  std::pair<graph_node_list::iterator, bool> scanNode(Node* n) {
+    GRAPH_DEBUG("Considering node:", *n)
+
+    if (!canHandle(n)) {
+      return std::make_pair(++n->reverseIterator(), false);
+    }
+    // There are some nodes that we can support, but we don't want to start a
+    // fusion group from - skip them.
+    if (n->kind() == prim::ListConstruct || n->kind() == aten::slice ||
+        n->kind() == aten::unsqueeze || n->kind() == prim::ConstantChunk ||
+        n->kind() == prim::Constant || unexecutedEagerOp(n)) {
+      return std::make_pair(++n->reverseIterator(), false);
+    }
+    return createFusionGroup(n);
+  }
+
   // Merge fusible nodes into subgraphs in prim::TensorExprGroup nodes.
   void createFusionGroups(Block* block) {
-    std::vector<Node*> fusion_groups;
-    auto reverse_iter = block->nodes().reverse();
-    Node* prev_fusion_group = nullptr;
-    for (auto it = reverse_iter.begin(); it != reverse_iter.end();) {
-      Node* n = *it;
-      GRAPH_DEBUG("Considering node:", *n)
+    bool any_changed = true;
+    while (any_changed) {
+      any_changed = false;
+      for (auto it = block->nodes().rbegin(); it != block->nodes().rend();) {
+        bool changed;
+        std::tie(it, changed) = scanNode(*it);
+        any_changed |= changed;
+      }
+    }
 
+    for (Node* n : block->nodes()) {
       for (Block* b : n->blocks()) {
         createFusionGroups(b);
       }
+    }
 
-      if (!canHandle(n)) {
-        it++;
-        continue;
+    // Try to merge adjacent fusion groups together. Because we have only merged
+    // by looking at graph inputs, without this we would not attempt to merge
+    // adjacent fusion groups that don't have a depdency on each other
+
+    std::vector<Node*> initial_fusion_groups;
+    for (Node* n : block->nodes()) {
+      if (n->kind() == prim::TensorExprGroup) {
+        initial_fusion_groups.push_back(n);
       }
-      // There are some nodes that we can support, but we don't want to start a
-      // fusion group from - skip them.
-      if (n->kind() == prim::ListConstruct || n->kind() == aten::slice ||
-          n->kind() == aten::unsqueeze || n->kind() == prim::ConstantChunk ||
-          n->kind() == prim::Constant) {
-        it++;
-        continue;
-      }
+    }
 
-      Node* fusion_group = createFusionGroup(n);
-      debugDumpFusionGroup("Fusion group constructed: ", fusion_group);
+    Node* prev_fusion_group =
+        initial_fusion_groups.size() ? initial_fusion_groups[0] : nullptr;
 
+    for (size_t i = 1; i < initial_fusion_groups.size(); ++i) {
       // Try merging the just created fusion group into the previous one.
       // If it did not work, then put the previous fusion group into
       // fusion_groups vector - we will not touch it anymore in this loop.
       // If merging suceeded, save the merged group as the "previous" fusion
       // group so that we can try to merge the next one into it.
-      if (prev_fusion_group) {
+
+      Node* fusion_group = initial_fusion_groups[i];
+      debugDumpFusionGroup(
+          "Trying to merge into the previous fusion group: ",
+          prev_fusion_group);
+      if (auto merged_fusion_group =
+              tryMerge(prev_fusion_group, fusion_group)) {
+        prev_fusion_group = *merged_fusion_group;
         debugDumpFusionGroup(
-            "Trying to merge into the previous fusion group: ",
+            "Successfully merged into the previous fusion group: ",
             prev_fusion_group);
-        if (canMerge(prev_fusion_group, fusion_group)) {
-          prev_fusion_group = tryMerge(prev_fusion_group, fusion_group);
-          debugDumpFusionGroup(
-              "Successfully merged into the previous fusion group: ",
-              prev_fusion_group);
-        } else {
-          GRAPH_DEBUG("Cannot merge into the previous fusion group");
-          fusion_groups.push_back(prev_fusion_group);
-          prev_fusion_group = fusion_group;
-        }
       } else {
+        GRAPH_DEBUG("Cannot merge into the previous fusion group");
         prev_fusion_group = fusion_group;
       }
-      it = prev_fusion_group->reverseIterator();
-      it++;
-    }
-
-    // We were adding groups into the vector lagging by one - catch up with
-    // adding the last one
-    if (prev_fusion_group) {
-      fusion_groups.push_back(prev_fusion_group);
-    }
-
-    for (Node* n : fusion_groups) {
-      inlineIfTooSmall(n);
     }
   }
 
@@ -519,12 +757,26 @@ class TensorExprFuser {
       SubgraphUtils::unmergeSubgraph(n);
       return true;
     }
+    // Cleanup the subgraph from duplicated constants while we're at it.
+    ConstantPooling(subgraph);
     return false;
   }
 
-  Node* tryMerge(Node* fusion_group, Node* to_merge) {
+  void inlineSmallFusionGroups(Block* block) {
+    for (auto it = block->nodes().begin(); it != block->nodes().end();) {
+      Node* n = *it;
+      it++;
+
+      for (Block* b : n->blocks()) {
+        inlineSmallFusionGroups(b);
+      }
+      inlineIfTooSmall(n);
+    }
+  }
+
+  c10::optional<Node*> tryMerge(Node* fusion_group, Node* to_merge) {
     if (!canMerge(fusion_group, to_merge)) {
-      return fusion_group;
+      return c10::nullopt;
     }
 
     std::vector<Node*> nodes_to_merge = {to_merge};
@@ -541,7 +793,7 @@ class TensorExprFuser {
       GRAPH_UPDATE("Trying to move node next to fusion group: ", getHeader(n));
       if (!aliasDb_->moveBeforeTopologicallyValid(n, move_point)) {
         GRAPH_UPDATE("Failed to move because of AliasDB checks!");
-        return fusion_group;
+        return c10::nullopt;
       }
       move_point = n;
     }
@@ -552,21 +804,33 @@ class TensorExprFuser {
 
     for (auto n : nodes_to_merge) {
       GRAPH_UPDATE("Merging ", getHeader(n));
-      mergeNodeIntoSubgraphAndUpdateAliasing(n, fusion_group);
+      SubgraphUtils::mergeNodeIntoSubgraphAndUpdateAliasing(
+          n, fusion_group, *aliasDb_);
     }
     return fusion_group;
   }
 
+  bool shapeIsKnown(Value* v) {
+    if (v->type()->cast<TensorType>()) {
+      if (!v->isCompleteTensor()) {
+        return false;
+      }
+      if (*v->type()->cast<TensorType>()->dim() == 0) {
+        return false;
+      }
+    }
+    return true;
+  }
   bool allShapesAreKnown(Node* node) {
     // TODO: Relax the checks to support dynamic shapes
     for (Value* input : node->inputs()) {
-      if (input->type()->cast<TensorType>()) {
-        if (!input->isCompleteTensor()) {
-          return false;
-        }
-        if (*input->type()->cast<TensorType>()->dim() == 0) {
-          return false;
-        }
+      if (!shapeIsKnown(input)) {
+        return false;
+      }
+    }
+    for (Value* output : node->outputs()) {
+      if (!shapeIsKnown(output)) {
+        return false;
       }
     }
     return true;
@@ -598,6 +862,91 @@ class TensorExprFuser {
     return true;
   }
 
+  bool typesAreSupported(Node* node) {
+    // clang-format off
+    // breaks up the schema strings so they are no longer discoverable with ctrl-F
+    static const OperatorSet float_only_operator_set{
+      "aten::fmod.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::fmod.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
+    };
+    static const OperatorSet int_only_operator_set{
+      "aten::__lshift__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__lshift__.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::__rshift__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__rshift__.Tensor(Tensor self, Tensor other) -> Tensor",
+    };
+    // clang-format on
+
+    for (const Value* v : node->inputs()) {
+      if (auto const& tt = v->type()->cast<TensorType>()) {
+        auto const& st = tt->scalarType();
+
+        // All tensors must be typed.
+        if (!st) {
+          return false;
+        }
+
+        // Byte tensors introduce too many corner cases in type promotion.
+        // Better not to try to handle them.
+        if (*st == c10::ScalarType::Byte) {
+          return false;
+        }
+
+        // These operators only support floats, because integer divisors need to
+        // raise ZeroDivisionError.
+        if (node->isMemberOf(float_only_operator_set) && !isFloatingType(*st)) {
+          return false;
+        }
+
+        // These operators have complicated casting rules for floats.
+        if (node->isMemberOf(int_only_operator_set) && isFloatingType(*st)) {
+          return false;
+        }
+      } else if (node->isMemberOf(float_only_operator_set)) {
+        // Check scalar operands of float-only ops.
+        if (!v->type()->cast<FloatType>()) {
+          return false;
+        }
+      } else if (node->isMemberOf(int_only_operator_set)) {
+        if (!v->type()->cast<IntType>()) {
+          return false;
+        }
+      }
+    }
+    if (node->kind() == aten::to) {
+      // only support same-device conversion
+      auto device = tensorexpr::pickDeviceType(node->inputs());
+      auto output_device = tensorexpr::pickDeviceType(node->outputs());
+      if (!device || !output_device || *device != *output_device) {
+        return false;
+      }
+      // non_blocking only applies in cross-device conversion, which we bail on
+      // copy arg only applies if op is a no-op, which we dont start fusion
+      // group from memory format is separately handled in NNC output
+
+      // all non-Tensor arguments must be constant
+      for (size_t i = 1; i < node->inputs().size(); i++) {
+        if (node->inputs().at(i)->node()->kind() != prim::Constant) {
+          return false;
+        }
+      }
+      // cant support non-constant pin_memory or pin_memory = True
+      if (auto maybe_index =
+              node->schema().argumentIndexWithName("pin_memory")) {
+        int index = *maybe_index;
+        auto inp = node->input(index);
+        if (inp->type() != NoneType::get() &&
+            constant_as<bool>(inp).value_or(true)) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
 #define REQ(cond)                           \
   if (!(cond)) {                            \
     GRAPH_DEBUG("Failed cond " #cond "\n"); \
@@ -605,17 +954,10 @@ class TensorExprFuser {
   }
 
   bool canHandle(Node* node) {
-    REQ(node->kind() != prim::Constant);
-    REQ(allShapesAreKnown(node));
+    REQ(disable_shape_checks_ || allShapesAreKnown(node));
     REQ(isFusableOnDevice(node));
 
-    // Don't include nodes whose inputs are tensor constants - we cannot handle
-    // them at the moment.
-    // TODO: actually support tensor constants and remove this.
     for (Value* input : node->inputs()) {
-      if (input->node()->kind() == prim::Constant) {
-        REQ(!input->type()->cast<TensorType>())
-      }
       if (auto const& tt = input->type()->cast<TensorType>()) {
         auto st = tt->scalarType();
         if (!st) {
@@ -639,6 +981,13 @@ class TensorExprFuser {
     }
 
     REQ(tensorexpr::isSupported(node));
+    REQ(typesAreSupported(node));
+
+    // A hook to optimizations limitter to allow bisecting the pass
+    if (!JIT_OPT_ALLOWED) {
+      return false;
+    }
+
     return true;
   }
 
@@ -723,111 +1072,44 @@ class TensorExprFuser {
   }
 #undef REQ
 
-  void guardFusionGroup(Node* fusion_group) {
-    GRAPH_DEBUG("Inserting a typecheck guard for a node", *fusion_group);
+  // TODO: support constant tensors instead of setting them as input
+  void liftTensorConstantsFromFusionGroups(Node* fusion_group) {
     auto subgraph = SubgraphUtils::getSubgraph(fusion_group);
-
-    // Fixup types of the subgraph inputs
-    std::vector<Value*> inputs_to_check;
-    for (Value* input : fusion_group->inputs()) {
-      // We only check inputs of the fusion group and expect NNC to infer
-      // intermediates and outputs shapes
-      if (!input->type()->cast<TensorType>()) {
-        continue;
+    WithInsertPoint guard(fusion_group);
+    for (auto it = subgraph->block()->nodes().begin();
+         it != subgraph->block()->nodes().end();
+         ++it) {
+      auto n = *it;
+      if (n->kind() == prim::Constant &&
+          n->output()->type()->cast<TensorType>()) {
+        auto constant =
+            fusion_group->owningGraph()->insertConstant(*toIValue(n->output()));
+        fusion_group->addInput(constant);
+        auto inputToGraph = subgraph->addInput();
+        inputToGraph->setType(n->output()->type());
+        n->output()->replaceAllUsesWith(inputToGraph);
+        it.destroyCurrent();
       }
-
-      // fusion outputs are already guarded
-      if (input->node()->kind() == prim::Constant ||
-          input->node()->kind() == prim::FusionGroup) {
-        continue;
-      }
-      inputs_to_check.push_back(input);
-    }
-    if (!inputs_to_check.size()) {
-      return;
-    }
-
-    // Add prim::TypeCheck node
-    //
-    // TypeCheck nodes  look like the following:
-    //   %out1 : Float(2, 3), %out2 : Int(10, 30), %types_match : bool =
-    //   prim::TypeCheck(%inp1 : Tensor, %inp2 : Tensor)
-    //
-    // They have N inputs whose types we are going to check and N+1 outputs. The
-    // first N outputs specify expected types and N+1-th output holds the result
-    // of the check (bool).
-    Node* typecheck_node =
-        fusion_group->owningGraph()
-            ->create(
-                prim::TypeCheck, inputs_to_check, inputs_to_check.size() + 1)
-            ->insertBefore(fusion_group);
-    Value* typecheck_result = typecheck_node->output(inputs_to_check.size());
-
-    std::unordered_map<Value*, Value*> typechecked_inputs;
-    for (size_t i = 0; i < typecheck_node->inputs().size(); ++i) {
-      typechecked_inputs[typecheck_node->input(i)] = typecheck_node->output(i);
-    }
-
-    // Fixup types of the typecheck node outputs, which are used by the op in
-    // execution
-    typecheck_node->output(inputs_to_check.size())->setType(BoolType::get());
-    for (size_t i = 0; i < typecheck_node->inputs().size(); ++i) {
-      typecheck_node->output(i)->setType(typecheck_node->input(i)->type());
-    }
-
-    // Insert if
-    auto versioning_if =
-        fusion_group->owningGraph()
-            ->create(
-                prim::If, {typecheck_result}, fusion_group->outputs().size())
-            ->insertAfter(typecheck_node);
-    for (size_t idx = 0; idx < fusion_group->outputs().size(); ++idx) {
-      versioning_if->output(idx)->setType(fusion_group->output(idx)->type());
-      fusion_group->output(idx)->replaceAllUsesWith(versioning_if->output(idx));
-    }
-    auto true_block = versioning_if->addBlock();
-    auto false_block = versioning_if->addBlock();
-
-    // Fill in the false block. It should contain the unoptimized
-    // copy of the fused subgraph.
-    WithInsertPoint guard(false_block->return_node());
-    const auto subgraph_outputs = insertGraph(
-        *fusion_group->owningGraph(), *subgraph, fusion_group->inputs());
-    for (Value* output : subgraph_outputs) {
-      false_block->registerOutput(output);
-    }
-
-    // types get copied to the fallback graph, so remove specializations before
-    // replacing
-    removeTensorTypeSpecializations(false_block);
-    replaceBlockWithFallbackGraph(false_block, fusion_group->inputs());
-
-    // Fill in the true block. It has all inputs type-checked and its
-    // body should be the fusion group node.
-    fusion_group->moveBefore(true_block->return_node());
-    for (size_t idx = 0; idx < fusion_group->inputs().size(); ++idx) {
-      if (typechecked_inputs.count(fusion_group->input(idx))) {
-        fusion_group->replaceInput(
-            idx, typechecked_inputs.at(fusion_group->input(idx)));
-      }
-    }
-    for (Value* output : fusion_group->outputs()) {
-      true_block->registerOutput(output);
     }
   }
 
-  void guardFusionGroups(Block* block) {
+  void prepareFusionGroupAndGuardOutputs(Block* block) {
     std::vector<Node*> fusion_groups;
     for (Node* n : block->nodes()) {
       for (Block* b : n->blocks()) {
-        guardFusionGroups(b);
+        prepareFusionGroupAndGuardOutputs(b);
       }
       if (n->kind() == prim::TensorExprGroup) {
         fusion_groups.push_back(n);
       }
     }
     for (Node* fusion_group : fusion_groups) {
-      guardFusionGroup(fusion_group);
+      removeOutputsUsedOnlyInSize(fusion_group);
+      liftTensorConstantsFromFusionGroups(fusion_group);
+      insertTypeGuard(
+          fusion_group,
+          [](const TensorTypePtr& t) { return t; },
+          prim::TypeCheck);
     }
   }
 
@@ -836,9 +1118,14 @@ class TensorExprFuser {
 
   // Minimal size of a fusion group
   size_t min_group_size_;
+  // If true, shapes are ignored
+  bool disable_shape_checks_;
 };
 
-void FuseTensorExprs(std::shared_ptr<Graph>& graph, size_t min_group_size) {
+void FuseTensorExprs(
+    std::shared_ptr<Graph>& graph,
+    size_t min_group_size,
+    bool disable_shape_checks) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Temporary change for Block code generation.
@@ -849,7 +1136,7 @@ void FuseTensorExprs(std::shared_ptr<Graph>& graph, size_t min_group_size) {
   // Get rid of dead code so that we don't waste effort fusing it.
   EliminateDeadCode(graph);
 
-  TensorExprFuser fuser(graph, min_group_size);
+  TensorExprFuser fuser(graph, min_group_size, disable_shape_checks);
   fuser.run();
 
   EliminateCommonSubexpression(graph);
@@ -863,16 +1150,7 @@ Operation createTensorExprOp(const Node* node) {
       std::make_shared<tensorexpr::TensorExprKernel>(node->g(attr::Subgraph));
   return [kernel](Stack* stack) {
     RECORD_FUNCTION("TensorExpr", std::vector<c10::IValue>());
-    if (!tensorexpr::fallbackAllowed()) {
-      kernel->run(*stack);
-      return 0;
-    }
-
-    try {
-      kernel->run(*stack);
-    } catch (const std::runtime_error& e) {
-      kernel->fallback(*stack);
-    }
+    kernel->run(*stack);
     return 0;
   };
 }

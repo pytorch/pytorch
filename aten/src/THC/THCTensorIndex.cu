@@ -1,7 +1,6 @@
 #include <THC/THC.h>
 #include <THC/THCTensorMath.h>
 #include <THC/THCGeneral.h>
-#include <THC/THCBlas.h>
 #include <THC/THCTensorCopy.h>
 #include <TH/THHalf.h>
 #include <THC/THCApply.cuh>
@@ -216,20 +215,6 @@ struct WrapIndexOp {
   }
 
   int64_t size;
-};
-
-template <typename T, typename IndexType, int Dims>
-struct TensorTakeOp {
-  TensorTakeOp(TensorInfo<T, IndexType> info, IndexType numel, int64_t*, int64_t*)
-    : info(info), numel(numel) {}
-
-  __device__ __forceinline__ void operator()(T* out, int64_t* index) {
-    auto offset = indexToOffset<Dims>(info, *index, numel);
-    *out = info.data[offset];
-  }
-
-  const TensorInfo<T, IndexType> info;
-  IndexType numel;
 };
 
 template <typename T, typename IndexType, int Dims>

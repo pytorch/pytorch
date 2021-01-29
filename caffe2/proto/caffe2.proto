@@ -186,6 +186,9 @@ message TensorBoundShape {
   }
   repeated DimType dim_type = 2;  // dim_type.size() == shape.dims.size()
   optional string name = 3;
+  // a flag to indicate whether the shape is final and cannot be changed
+  // eg: input/output of in-place ops
+  optional bool shape_is_final = 4;
 }
 
 message TensorBoundShapes {
@@ -236,7 +239,6 @@ enum DeviceTypeProto {
   PROTO_XLA = 9;                    // XLA / TPU
   // Change the following number if you add more devices in the code.
   PROTO_COMPILE_TIME_MAX_DEVICE_TYPES = 10;
-  PROTO_ONLY_FOR_TEST = 20901;   // This device type is only for test.
 }
 
 // Device-specific options. We do not distinguish DeviceOption protos for

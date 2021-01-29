@@ -291,7 +291,7 @@ void ROIAlignRotatedForward(
 } // namespace
 
 template <>
-bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
+C10_EXPORT bool RoIAlignRotatedOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(0); // Input data to pool
   auto& R = Input(1); // RoIs
 
@@ -424,17 +424,4 @@ C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
     ") -> Tensor",
     RoIAlignRotatedOpFloatCPU);
 
-C10_EXPORT_CAFFE2_OP_TO_C10_CPU(
-    RoIAlignRotated2,
-    "__caffe2::RoIAlignRotated("
-      "Tensor features, "
-      "Tensor rois, "
-      "str order, "
-      "float spatial_scale, "
-      "int pooled_h, "
-      "int pooled_w, "
-      "int sampling_ratio, "
-      "bool aligned"
-    ") -> Tensor",
-    RoIAlignRotatedOpFloatCPU);
 // clang-format on

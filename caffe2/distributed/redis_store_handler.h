@@ -10,7 +10,7 @@ extern "C" {
 
 namespace caffe2 {
 
-class CAFFE2_API RedisStoreHandler : public StoreHandler {
+class TORCH_API RedisStoreHandler : public StoreHandler {
  public:
   explicit RedisStoreHandler(std::string& host, int port, std::string& prefix);
   virtual ~RedisStoreHandler();
@@ -22,6 +22,10 @@ class CAFFE2_API RedisStoreHandler : public StoreHandler {
       const std::chrono::milliseconds& timeout = kDefaultTimeout) override;
 
   virtual int64_t add(const std::string& name, int64_t value) override;
+
+  virtual int64_t getNumKeys() override;
+
+  virtual bool deleteKey(const std::string& key) override;
 
   virtual bool check(const std::vector<std::string>& names) override;
 

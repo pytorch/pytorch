@@ -126,7 +126,7 @@ struct C10_API DeviceGuardImplInterface {
 /**
  * Increments the event's version and enqueues a job with this version
  * in the stream's work queue. When the stream process that job
- * it nofifies all streams waiting on / blocked by that version of the
+ * it notifies all streams waiting on / blocked by that version of the
  * event to continue and marks that version as recorded.
  * */
   virtual void record(
@@ -209,7 +209,15 @@ public:
   static ::c10::impl::DeviceGuardImplRegistrar C10_ANONYMOUS_VARIABLE(g_##DeviceType)(::c10::DeviceType::DevType, new DeviceGuardImpl());
 
 inline const DeviceGuardImplInterface* getDeviceGuardImpl(DeviceType type) {
-  auto p = device_guard_impl_registry[static_cast<size_t>(type)].load();
+  // Two adjacent int16_t fields DeviceType and DeviceIndex has field access
+  // miscompiled on NVCC. To workaround this issue, we apply a mask to the
+  // DeviceType. First check if the DeviceType is 16-bit.
+  // FB employees can see
+  //   https://fb.workplace.com/groups/llvm.gcc/permalink/4053565044692080/
+  // for more details
+  static_assert(sizeof(DeviceType) == 1, "DeviceType is not 8-bit");
+  auto p = device_guard_impl_registry[static_cast<size_t>(type) & 0xFF].load();
+
   // This seems to be the first place where you make use of a device
   // when you pass devices to factory functions.  Give a nicer error
   // message in this case.

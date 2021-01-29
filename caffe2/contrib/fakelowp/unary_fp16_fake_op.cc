@@ -6,9 +6,7 @@
 
 C10_DECLARE_bool(caffe2_fbgemm_fake_fp16_clamp);
 
-namespace caffe2 {
-
-namespace {
+namespace fake_fp16{
 auto sig_lut = std::vector<at::Half>{
     0.0000e+00f, 0.0000e+00f, 0.0000e+00f, 0.0000e+00f, 0.0000e+00f,
     0.0000e+00f, 0.0000e+00f, 5.9605e-08f, 5.9605e-08f, 5.9605e-08f,
@@ -99,14 +97,6 @@ at::Half CalcSigmoidByLUT(at::Half x) {
   at::Half res2 = std::fma(-p, sig_lut[bin], sig_lut[bin]);
 
   return at::Half(res1 + res2);
-}
-
-OpSchema::Cost CostInferenceForRelu(
-    const OperatorDef& def,
-    const vector<TensorShape>& in) {
-  struct OpSchema::Cost cost = PointwiseCostInference<0>(def, in);
-  cost.params_bytes = 0;
-  return cost;
 }
 
 const int TANH_LINEAR_MAX_VALUE = 10048;
@@ -346,31 +336,6 @@ at::Half CalcTanhByPolynomial(at::Half input) {
   return tanhResult;
 }
 
-struct SigmoidEmulatorFunctor {
-  bool operator()(
-      const int N,
-      const float* X,
-      float* Y,
-      CPUContext* /* unused */) const {
-    for (int i = 0; i < N; i++) {
-      Y[i] = CalcSigmoidByLUT((at::Half)X[i]);
-    }
-    return true;
-  }
-};
-
-struct TanhEmulatorFunctor {
-  bool operator()(
-      const int N,
-      const float* X,
-      float* Y,
-      CPUContext* /* unused */) const {
-    for (int i = 0; i < N; i++) {
-      Y[i] = CalcTanhByLUT((at::Half)X[i]);
-    }
-    return true;
-  }
-};
 
 static const float swishLutKnot[] = {
     -0.000000025618f, -0.000000027492f, -0.000000029503f, -0.000000031660f,
@@ -501,7 +466,7 @@ at::Half CalcSwishByLUT(at::Half x) {
   float f_x = x;
   float f_one_over_delta = one_over_delta;
   float f_a_one_over_delta = -a_one_over_delta;
-  fake_fp16::fma_fp16(1, &f_x, &f_one_over_delta, &f_a_one_over_delta);
+  fma_fp16(1, &f_x, &f_one_over_delta, &f_a_one_over_delta);
   at::Half bin_calc = f_a_one_over_delta;
 
   uint32_t bin = bin_calc < 0 ? 0 : (uint32_t)floor(bin_calc);
@@ -516,7 +481,7 @@ at::Half CalcSwishByLUT(at::Half x) {
   float f_delta = delta;
   float f_bin = at::Half(bin);
   float f_a = a;
-  fake_fp16::fma_fp16(1, &f_delta, &f_bin, &f_a);
+  fma_fp16(1, &f_delta, &f_bin, &f_a);
   at::Half bin_x = at::Half(f_a);
 
   at::Half p = at::Half(x - bin_x) * one_over_delta;
@@ -525,7 +490,7 @@ at::Half CalcSwishByLUT(at::Half x) {
   float f_p = -p;
   float lutVal = at::Half(swishLutKnot[bin]);
 
-  fake_fp16::fma_fp16(1, &f_p, &lutVal, &lutVal);
+  fma_fp16(1, &f_p, &lutVal, &lutVal);
   at::Half res2 = lutVal;
 
   return at::Half(res1 + res2);
@@ -555,7 +520,45 @@ at::Half CalcLogit(at::Half input, float eps) {
   }
 }
 
-} // namespace
+} // namespace fake_fp16
+
+namespace caffe2 {
+using namespace fake_fp16;
+
+
+struct SigmoidEmulatorFunctor {
+  bool operator()(
+      const int N,
+      const float* X,
+      float* Y,
+      CPUContext* /* unused */) const {
+    for (int i = 0; i < N; i++) {
+      Y[i] = CalcSigmoidByLUT((at::Half)X[i]);
+    }
+    return true;
+  }
+};
+
+struct TanhEmulatorFunctor {
+  bool operator()(
+      const int N,
+      const float* X,
+      float* Y,
+      CPUContext* /* unused */) const {
+    for (int i = 0; i < N; i++) {
+      Y[i] = CalcTanhByLUT((at::Half)X[i]);
+    }
+    return true;
+  }
+};
+
+OpSchema::Cost CostInferenceForRelu(
+    const OperatorDef& def,
+    const vector<TensorShape>& in) {
+  struct OpSchema::Cost cost = PointwiseCostInference<0>(def, in);
+  cost.params_bytes = 0;
+  return cost;
+}
 
 REGISTER_CPU_OPERATOR(
     ReluFakeFp16,

@@ -103,7 +103,7 @@ commands:
           name: (Optional) Merge target branch
           no_output_timeout: "10m"
           command: |
-            if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+            if [[ -n "$CIRCLE_PULL_REQUEST" && "$CIRCLE_BRANCH" != "nightly" ]]; then
               PR_NUM=$(basename $CIRCLE_PULL_REQUEST)
               CIRCLE_PR_BASE_BRANCH=$(curl -s https://api.github.com/repos/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME/pulls/$PR_NUM | jq -r '.base.ref')
               if [[ "${BUILD_ENVIRONMENT}" == *"xla"* || "${BUILD_ENVIRONMENT}" == *"gcc5"* ]] ; then

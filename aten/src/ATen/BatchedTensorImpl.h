@@ -74,8 +74,6 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
 
   // Override a bunch of methods inherited from TensorImpl to return error messages.
   bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const override;
-  IntArrayRef strides() const override;
-  int64_t stride(int64_t d) const override;
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;
   void set_storage_offset(int64_t storage_offset) override;
@@ -123,6 +121,15 @@ inline std::bitset<kVmapMaxTensorDims> createBatchDimBitset(BatchDimsRef bdims) 
   return is_bdim;
 }
 
+// Creates a bitset for all of the levels present in `bdims`
+inline std::bitset<kVmapNumLevels> createVmapLevelsBitset(BatchDimsRef bdims) {
+  std::bitset<kVmapNumLevels> result;
+  for (const auto& bdim : bdims) {
+    result.set(bdim.level());
+  }
+  return result;
+}
+
 inline std::ostream& operator<<(std::ostream& out, const BatchDim& bdim) {
   out << "(lvl=" << bdim.level() << ", dim=" << bdim.dim() << ")";
   return out;
@@ -133,6 +140,10 @@ TORCH_API Tensor makeBatched(const Tensor& tensor, BatchDims bdims);
 
 // Adds a batch dim to `tensor`, returning a BatchedTensor
 TORCH_API Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim);
+
+// Checks if an inplace operation on self and other is "vmap compatible".
+// See NOTE: [vmap-incompatible in-place operations] for the definition of this.
+TORCH_API bool inplaceIsVmapCompatible(const Tensor& self, const Tensor& other);
 
 
 }

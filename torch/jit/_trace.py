@@ -22,7 +22,6 @@ from torch.jit._state import _python_cu, _enabled
 from torch.jit._script import ScriptModule, _CachedForward, script
 from torch._jit_internal import _qualified_name
 from torch.autograd import function
-from torch import _jit_internal
 from torch.nn import Module
 
 _flatten = torch._C._jit_flatten
@@ -195,7 +194,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
     parameters), so don't expect the model to come out exactly the same as what
     you passed in.
 
-    Arguments:
+    Args:
         model (compiled torch.nn.Module or function): the module/function to be
             verified.  The module/function definition MUST have been decorated with
             `@torch.jit.compile`.
@@ -549,23 +548,11 @@ def make_module(mod, _module_class, _compilation_unit):
         return mod
     elif torch._jit_internal.module_has_exports(mod):
 
-        def make_stubs_from_exported_methods(mod):
-            exported = []
-            for name in dir(mod):
-                item = getattr(mod, name, None)
-                if (
-                    torch._jit_internal.get_torchscript_modifier(item)
-                    is _jit_internal.FunctionModifiers.EXPORT
-                ):
-                    exported.append(name)
-
-            stubs = []
-            for method in exported:
-                stubs.append(torch.jit._recursive.make_stub_from_method(mod, method))
-            return stubs
-
+        infer_methods_stubs_fn = torch.jit._recursive.make_stubs_from_exported_methods
         return torch.jit._recursive.create_script_module(
-            mod, make_stubs_from_exported_methods, share_types=False
+            mod,
+            infer_methods_stubs_fn,
+            share_types=False
         )
     else:
         if _module_class is None:
@@ -639,7 +626,7 @@ def trace(
         invocations of the model. The tracer will try to emit warnings when
         doing something that may cause an incorrect trace to be produced.
 
-    Arguments:
+    Args:
         func (callable or torch.nn.Module):  A Python function or `torch.nn.Module`
             that will be run with `example_inputs`. `func` arguments and return
             values  must be tensors or (possibly nested) tuples that contain
@@ -843,7 +830,7 @@ def trace_module(
 
     See :func:`torch.jit.trace <torch.jit.trace>` for more information on tracing.
 
-    Arguments:
+    Args:
         mod (torch.nn.Module):  A ``torch.nn.Module`` containing methods whose names are
                                 specified in ``inputs``. The given methods will be compiled
                                 as a part of a single `ScriptModule`.
@@ -1023,7 +1010,6 @@ class TracedModule(ScriptModule):
                     "TracedModules don't support parameter sharing between modules"
                 )
             id_set.add(param)
-
         tmp_module.training = orig.training
 
         for name, param in orig._parameters.items():
@@ -1049,6 +1035,8 @@ class TracedModule(ScriptModule):
             )
 
         for name, submodule in orig._modules.items():
+            if submodule is None:
+                continue
             tmp_module._modules[name] = make_module(
                 submodule, TracedModule, _compilation_unit=None
             )
@@ -1059,7 +1047,7 @@ class TracedModule(ScriptModule):
 
         self.__dict__["_name"] = type(orig).__name__
         self.__dict__["_actual_script_module"] = script_module
-        for name in ("_parameters", "_buffers", "_modules"):
+        for name in ("_parameters", "_buffers", "_modules", "training"):
             delattr(self, name)
 
     def forward(self, *args, **kwargs):
@@ -1089,23 +1077,13 @@ class TopLevelTracedModule(TracedModule):
         """
         Re-construct an instance of TopLevelTracedModule using an instance of a C++ module.
 
-        Arguments:
+        Args:
             cpp_module: The C++ module that this TopLevelTracedModule will be rebuilt around.
         """
         self.__dict__["_actual_script_module"]._reconstruct(cpp_module)
 
 
 def _script_if_tracing(fn):
-    """
-    Compiles ``fn`` when it is first called during tracing. ``torch.jit.script``
-    has a non-negligible start up time when it is first called due to
-    lazy-initializations of many compiler builtins. Therefore you should not use
-    it in library code. However, you may want to have parts of your library work
-    in tracing even if they use control flow. In these cases, you should use
-    ``@torch.jit._script_if_tracing`` to substitute for
-    ``torch.jit.script``.
-    """
-
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         if not is_tracing():
@@ -1139,7 +1117,7 @@ def _get_trace_graph(f, args=(), kwargs=None, strict=True, _force_outplace=False
     Tracing is guaranteed not to change the semantics of the function/module
     that is traced.
 
-    Arguments:
+    Args:
         f (torch.nn.Module or function): the function or module
             to be traced.
         args (tuple or Tensor): the positional arguments to pass to the

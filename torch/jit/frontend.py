@@ -4,6 +4,7 @@ import ast
 import inspect
 import string
 from textwrap import dedent
+from typing import List
 from torch._C._jit_tree_views import (
     ClassDef, Ident, Stmt, Decl, Def, Var,
     EmptyTypeAnnotation, Param, ExprStmt, Assign,
@@ -13,6 +14,7 @@ from torch._C._jit_tree_views import (
     ListLiteral, TupleLiteral, DictLiteral, Const,
     StringLiteral, ListComp, Attribute, BinOp, UnaryOp,
     SliceExpr, Subscript, TernaryIf, With, WithItem, Property,
+    DictComp,
 )
 from torch._utils_internal import get_source_lines_and_file
 
@@ -132,7 +134,7 @@ def get_class_properties(cls, self_name):
     """
     Get a list of Property objects representing the properties of a class.
 
-    Arguments:
+    Args:
         cls:  The class to get properties of.
         self_name: The name of the class that the properties should belong to.
     Returns:
@@ -142,12 +144,12 @@ def get_class_properties(cls, self_name):
     props = inspect.getmembers(
         cls, predicate=lambda m: isinstance(m, property))
     # Any property that should not compiled must be in this list on the Module.
-    ignored_properties = getattr(cls, "__ignored_properties__", [])
+    unused_properties = getattr(cls, "__jit_unused_properties__", [])
 
     # Create Property TreeView objects from inspected property objects.
     properties = []
     for prop in props:
-        if prop[0] not in ignored_properties:
+        if prop[0] not in unused_properties and not should_drop(prop[1].fget):
             getter = get_jit_def(prop[1].fget, f"__{prop[0]}_getter", self_name=self_name)
             setter = get_jit_def(prop[1].fset, f"__{prop[0]}_setter", self_name=self_name) if prop[1].fset else None
             properties.append(Property(getter.range(), Ident(getter.range(), prop[0]), getter, setter))
@@ -164,9 +166,14 @@ def get_jit_class_def(cls, self_name):
         and not is_static_fn(cls, m.__name__)
         and m.__name__ in cls.__dict__
     )
+
+    def is_classmethod(fn):
+        return inspect.ismethod(fn) and getattr(fn, "__self__", None) == cls
+
     methods = [get_jit_def(method[1],
                            method[0],
-                           self_name=self_name) for method in methods]
+                           self_name=self_name,
+                           is_classmethod=is_classmethod(method[1])) for method in methods]
 
     properties = get_class_properties(cls, self_name)
 
@@ -179,11 +186,47 @@ def get_jit_class_def(cls, self_name):
     return build_class_def(ctx, py_ast.body[0], methods, properties, self_name)
 
 
-def get_jit_def(fn, def_name, self_name=None):
+def normalize_source_lines(sourcelines: List[str]) -> List[str]:
+    """
+    This helper function accepts a list of source lines. It finds the
+    indentation level of the function definition (`def`), then it indents
+    all lines in the function body to a point at or greater than that
+    level. This allows for comments and continued string literals that
+    are at a lower indentation than the rest of the code.
+    Args:
+        sourcelines: function source code, separated into lines by
+                        the '\n' character
+    Returns:
+        A list of source lines that have been correctly aligned
+    """
+
+    def remove_prefix(text, prefix):
+        return text[text.startswith(prefix) and len(prefix):]
+
+    # Find the line and line number containing the function definition
+    for i, l in enumerate(sourcelines):
+        if l.lstrip().startswith("def"):
+            idx = i
+            break
+    fn_def = sourcelines[idx]
+
+    # Get a string representing the amount of leading whitespace
+    whitespace = fn_def.split("def")[0]
+
+    # Add this leading whitespace to all lines before and after the `def`
+    aligned_prefix = [whitespace + remove_prefix(s, whitespace) for s in sourcelines[:idx]]
+    aligned_suffix = [whitespace + remove_prefix(s, whitespace) for s in sourcelines[idx + 1:]]
+
+    # Put it together again
+    aligned_prefix.append(fn_def)
+    return aligned_prefix + aligned_suffix
+
+
+def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
     """
     Build a JIT AST (TreeView) from the given function.
 
-    Arguments:
+    Args:
         fn: A function object to compile
         def_name: The name to give to the resulting AST object. This is not
             always the same as `fn.__name__`, for example:
@@ -195,21 +238,28 @@ def get_jit_def(fn, def_name, self_name=None):
         self_name: If this function is a method, what the type name of `self` is.
     """
     sourcelines, file_lineno, filename = get_source_lines_and_file(fn, torch._C.ErrorReport.call_stack())
+    sourcelines = normalize_source_lines(sourcelines)
     source = ''.join(sourcelines)
     dedent_src = dedent(source)
     py_ast = ast.parse(dedent_src)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
-        raise RuntimeError("Expected a single top-level function")
+        raise RuntimeError(f"Expected a single top-level function: {filename}:{file_lineno}")
     leading_whitespace_len = len(source.split('\n', 1)[0]) - len(dedent_src.split('\n', 1)[0])
     type_line = torch.jit.annotations.get_type_line(source)
     ctx = SourceContext(source, filename, file_lineno, leading_whitespace_len, True)
     fn_def = py_ast.body[0]
 
+    if is_classmethod:
+        arg_name = fn_def.args.args[0].arg
+        # Insert a statement that assigns the first argument to the class
+        assign_stmt = ast.parse(f"{arg_name} = {self_name}").body[0]
+        fn_def.body.insert(0, assign_stmt)
+
     # Swap out the function signature and body if it is unused
     if should_drop(fn):
         unused_fn_def = ast.parse("def unused_fn(self: Any):\n\traise RuntimeError(\"Cannot call @unused methods\")")
         if len(unused_fn_def.body) != 1 or not isinstance(unused_fn_def.body[0], ast.FunctionDef):
-            raise RuntimeError("Expected a single top-level function")
+            raise RuntimeError(f"Expected a single top-level function: {filename}:{file_lineno}")
         unused_def = unused_fn_def.body[0]
         fn_def.body = unused_def.body
         # kwarg/vararg not supported by `build_def`
@@ -305,6 +355,32 @@ def get_default_args(fn):
     }
 
 
+def get_default_args_for_class(cls):
+    """
+    Get default arguments for all methods in a class (except for static methods).
+
+    Args:
+        cls: type - The class type to inspect for default arguments.
+    Returns:
+        A Dict[str, Dict[str, Any]] which maps each method name to a Dict[str, Any]
+        that maps each argument name to its default value.
+    """
+    # Get methods (except static methods because those are compiled separately as
+    # if they were independent script functions).
+    methods = inspect.getmembers(
+        cls,
+        predicate=lambda m: (inspect.ismethod(m) or inspect.isfunction(m))
+        and not is_static_fn(cls, m.__name__)
+        and m.__name__ in cls.__dict__
+    )
+
+    # Get method defaults. Property defaults do not need to be considered
+    # because setters cannot be invoked without a value.
+    defaults = {method_name: get_default_args(method_impl) for method_name, method_impl in methods}
+
+    return defaults
+
+
 class WithItemBuilder(Builder):
     @staticmethod
     def build_withitem(ctx, item):
@@ -324,6 +400,12 @@ class StmtBuilder(Builder):
         ast.Mult: '*',
         ast.Div: '/',
         ast.Mod: '%',
+        ast.BitOr: '|',
+        ast.BitAnd: '&',
+        ast.BitXor: '^',
+        ast.LShift: '<<',
+        ast.RShift: '>>',
+        ast.Pow: '**',
     }
 
     @staticmethod
@@ -339,7 +421,7 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_Assign(ctx, stmt):
         rhs = build_expr(ctx, stmt.value)
-        lhs = list(map(lambda x: build_expr(ctx, x), stmt.targets))
+        lhs = [build_expr(ctx, x) for x in stmt.targets]
         return Assign(lhs, rhs)
 
     @staticmethod
@@ -353,12 +435,9 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_Delete(ctx, stmt):
-        if len(stmt.targets) > 1:
-            source_range = ctx.make_range(stmt.lineno, stmt.col_offset,
-                                          stmt.col_offset + len("del"))
-            raise NotSupportedError(
-                source_range, 'del with more than one operand is not supported')
-        return Delete(build_expr(ctx, stmt.targets[0]))
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("del"))
+
+        return Delete(r, [build_expr(ctx, target) for target in stmt.targets])
 
     @staticmethod
     def build_Return(ctx, stmt):
@@ -404,6 +483,9 @@ class StmtBuilder(Builder):
     @staticmethod
     def build_For(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("for"))
+        if stmt.orelse:
+            raise NotSupportedError(r, "else branches of for loops aren't supported")
+
         return For(
             r, [build_expr(ctx, stmt.target)],
             [build_expr(ctx, stmt.iter)], build_stmts(ctx, stmt.body))
@@ -631,11 +713,10 @@ class ExprBuilder(Builder):
             return SliceExpr(base.range(), lower, upper, step)
 
         def build_Index(ctx, base, index_expr):
-            if isinstance(index_expr.value, ast.Tuple) or \
-                    isinstance(index_expr.value, ast.List):
+            if isinstance(index_expr.value, ast.Tuple):
                 raise NotSupportedError(base.range(),
                                         "slicing multiple dimensions with "
-                                        "sequences not supported yet")
+                                        "tuples not supported yet")
             return build_expr(ctx, index_expr.value)
 
         def build_ExtSlice(ctx, base, extslice):
@@ -660,9 +741,7 @@ class ExprBuilder(Builder):
             if isinstance(expr.slice.value, ast.Tuple):
                 # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
                 # XXX: Indexing using a list is **different**! It triggers advanced indexing.
-                indices = []
-                for index_expr in expr.slice.value.elts:
-                    indices.append(build_expr(ctx, index_expr))
+                indices = [build_expr(ctx, index_expr) for index_expr in expr.slice.value.elts]
                 return Subscript(base, indices)
             else:
                 return Subscript(base, [build_expr(ctx, expr.slice.value)])
@@ -670,6 +749,17 @@ class ExprBuilder(Builder):
             return Subscript(base, [build_SliceExpr(ctx, base, expr.slice)])
         elif sub_type is ast.ExtSlice:
             return Subscript(base, build_ExtSlice(ctx, base, expr.slice))
+        elif sys.version_info >= (3, 9):  # In Python3.9 array indicies are not wrapped in ast.Index
+            if sub_type is ast.Tuple:
+                # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
+                indices = []
+                for index_expr in expr.slice.elts:
+                    if isinstance(index_expr, ast.Slice):
+                        indices.append(build_SliceExpr(ctx, base, index_expr))
+                    else:
+                        indices.append(build_expr(ctx, index_expr))
+                return Subscript(base, indices)
+            return Subscript(base, [build_expr(ctx, expr.slice)])
         else:  # Ellipsis (can only happen in Python 2)
             raise NotSupportedError(base.range(), "ellipsis is not supported")
 
@@ -741,17 +831,33 @@ class ExprBuilder(Builder):
     @staticmethod
     def build_ListComp(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset)
-        if (len(stmt.generators) > 1):
-            raise NotSupportedError(r, "multiple comprehension generators not supported yet")
+        if (len(stmt.generators) != 1):
+            raise NotSupportedError(r, "Only a single generator is currently supported")
 
         if (len(stmt.generators[0].ifs) != 0):
-            raise NotSupportedError(r, "comprehension ifs not supported yet")
+            raise NotSupportedError(r, "Comprehension ifs are not supported yet")
 
         elt_expr = build_expr(ctx, stmt.elt)
         target_expr = build_expr(ctx, stmt.generators[0].target)
-
         iter_expr = build_expr(ctx, stmt.generators[0].iter)
+
         return ListComp(r, elt_expr, target_expr, iter_expr)
+
+    @staticmethod
+    def build_DictComp(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset)
+        if (len(stmt.generators) != 1):
+            raise NotSupportedError(r, "Only a single generator is currently supported")
+
+        if (len(stmt.generators[0].ifs) != 0):
+            raise NotSupportedError(r, "Comprehension ifs are not supported yet")
+
+        key_expr = build_expr(ctx, stmt.key)
+        value_expr = build_expr(ctx, stmt.value)
+        target_expr = build_expr(ctx, stmt.generators[0].target)
+        iter_expr = build_expr(ctx, stmt.generators[0].iter)
+
+        return DictComp(r, key_expr, value_expr, target_expr, iter_expr)
 
     @staticmethod
     def build_Starred(ctx, expr):

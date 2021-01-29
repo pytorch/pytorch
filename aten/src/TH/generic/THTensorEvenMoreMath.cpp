@@ -5,6 +5,7 @@
 #include <TH/generic/THTensorApply.hpp>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/WrapDimUtils.h>
+#include <ATen/MemoryOverlap.h>
 
 // Finds non-zero elements of a tensor and returns their subscripts
 void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
@@ -74,69 +75,6 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
 }
 
 #if !defined(TH_REAL_IS_HALF) /* non half part */
-
-void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src )
-{
-  THTensor *srct = THTensor_(newContiguous)(src);
-  scalar_t *src_data = srct->data<scalar_t>();
-  ptrdiff_t cntr = 0;
-  ptrdiff_t nelem = THTensor_(nElement)(srct);
-  if (THTensor_(nElement)(tensor) != THByteTensor_nElement(mask))
-  {
-    c10::raw::intrusive_ptr::decref(srct);
-    THError("Number of elements of destination tensor != Number of elements in mask");
-  }
-  TH_TENSOR_APPLY2(scalar_t, tensor, unsigned char, mask,
-                   if (*mask_data > 1)
-                   {
-                     c10::raw::intrusive_ptr::decref(srct);
-                     THFree(mask_counter);
-                     THFree(tensor_counter);
-                     THError("Mask tensor can take 0 and 1 values only");
-                   }
-                   else if (*mask_data == 1)
-                   {
-                     if (cntr == nelem)
-                     {
-                       c10::raw::intrusive_ptr::decref(srct);
-                       THFree(mask_counter);
-                       THFree(tensor_counter);
-                       THError("Number of elements of src < number of ones in mask");
-                     }
-                     *tensor_data = *src_data;
-                     src_data++;
-                     cntr++;
-                   });
-  c10::raw::intrusive_ptr::decref(srct);
-}
-
-void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTensor* src )
-{
-  THTensor *srct = THTensor_(newContiguous)(src);
-  scalar_t *src_data = srct->data<scalar_t>();
-  ptrdiff_t cntr = 0;
-  ptrdiff_t nelem = THTensor_(nElement)(srct);
-  if (THTensor_(nElement)(tensor) != THBoolTensor_nElement(mask))
-  {
-    c10::raw::intrusive_ptr::decref(srct);
-    THError("Number of elements of destination tensor != Number of elements in mask");
-  }
-  TH_TENSOR_APPLY2(scalar_t, tensor, bool, mask,
-                   if (*mask_data)
-                   {
-                     if (cntr == nelem)
-                     {
-                       c10::raw::intrusive_ptr::decref(srct);
-                       THFree(mask_counter);
-                       THFree(tensor_counter);
-                       THError("Number of elements of src < number of ones in mask");
-                     }
-                     *tensor_data = *src_data;
-                     src_data++;
-                     cntr++;
-                   });
-  c10::raw::intrusive_ptr::decref(srct);
-}
 
 #if !defined(TH_REAL_IS_BOOL)
 void THTensor_(mul)(THTensor *r_, THTensor *t, scalar_t value)
@@ -216,50 +154,6 @@ static inline int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t nu
   return linearIndex < 0 ? linearIndex + numel : linearIndex;
 }
 
-void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
-{
-  THTensor_(resizeNd)(r_, index->dim(), THTensor_getSizePtr(index), NULL);
-  THTensor* dst = THTensor_(newContiguous)(r_);
-
-  index = THLongTensor_newContiguous(index);
-  int64_t* index_data = THLongTensor_data(index);
-  ptrdiff_t srcElements = THTensor_(nElement)(src);
-  scalar_t* src_data = src->data<scalar_t>();
-  scalar_t* dst_data = dst->data<scalar_t>();
-  ptrdiff_t nIndices = THLongTensor_nElement(index);
-  int isContiguous = THTensor_(isContiguous)(src);
-
-  // Exceptions must not be thrown across parallel sections, so we
-  // record the position of the invalid index and throw the exception after the
-  // loop.
-  std::atomic<int64_t> invalidIdxPos(-1);
-
-  at::parallel_for(0, nIndices, TH_OMP_OVERHEAD_THRESHOLD,
-      [&](int64_t start, int64_t end) {
-    for (auto i = start; i < end; i++) {
-      int64_t idx = index_data[i];
-      if (idx < srcElements && idx >= -srcElements) {
-        idx = THTensor_(wrapLinearIndex)(idx, srcElements);
-        if (isContiguous) {
-          dst_data[i] = src_data[idx];
-        } else {
-          dst_data[i] = src_data[THTensor_(dataOffset)(src, idx)];
-        }
-      } else {
-        int64_t tmp = -1;
-        invalidIdxPos.compare_exchange_strong(tmp, i);
-      }
-    }
-  });
-
-  if (invalidIdxPos >= 0) {
-    THTensor_(checkLinearIndex)(index_data[invalidIdxPos], srcElements);
-  }
-
-  THLongTensor_free(index);
-  THTensor_(freeCopyTo)(dst, r_);
-}
-
 void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int accumulate)
 {
   THArgCheck(THLongTensor_nElement(index) == THTensor_(nElement)(src), 3,
@@ -298,6 +192,13 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar
   numel = THLongTensor_nElement(index);
   THArgCheck(THTensor_nDimensionLegacyNoScalars(index) == 1, 3, "Index is supposed to be a vector");
   THArgCheck(dim < THTensor_nDimensionLegacyNoScalars(tensor), 4,"Indexing dim %d is out of bounds of tensor", dim);
+  at::assert_no_overlap(tensor, index);
+  if (at::has_internal_overlap(tensor) == at::MemOverlap::YES) {
+    TORCH_WARN(
+      "Use of index_fill_ on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[mask] = scalar");
+  }
 
   index = THLongTensor_newContiguous(index);
   index_data = THLongTensor_data(index);

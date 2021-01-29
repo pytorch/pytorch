@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
+
 #include <onnx/onnx_pb.h>
 
 namespace torch {
@@ -50,16 +51,6 @@ void buildParamsMapFromValueToParamsMap(
   }
 }
 
-Node* addNodeToBlock(Block* block, Value* input, Symbol kind) {
-  auto new_node = block->appendNode(block->owningGraph()->create(kind));
-  auto new_input = new_node->addInput(input);
-  for (size_t i = 0; i < new_node->outputs().size(); i++) {
-    auto output = new_node->outputs()[i];
-    block->registerOutput(output);
-  }
-  return new_node;
-}
-
 c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
   switch (onnx_type) {
     case ::ONNX_NAMESPACE::TensorProto_DataType_UNDEFINED:
@@ -92,6 +83,41 @@ c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
       TORCH_CHECK("unexpected tensor scalar type");
   }
   return c10::optional<at::ScalarType>{};
+}
+
+Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs) {
+  auto new_node = block->appendNode(block->owningGraph()->create(kind));
+  for (auto input : inputs) {
+    auto new_input = new_node->addInput(input);
+  }
+  return new_node;
+}
+
+Value* addInputToBlock(Block* block) {
+  return block->addInput();
+}
+
+Node* createONNXUnsqueeze(
+    Graph* graph,
+    Node* n_to_insert_before,
+    Value* input,
+    int axis,
+    int opset_version) {
+  Node* unsqueeze_node = graph->create(onnx::Unsqueeze, 1);
+  unsqueeze_node->addInput(input);
+  unsqueeze_node->insertBefore(n_to_insert_before);
+  if (opset_version >= OPSET_VERSION_13) {
+    // ONNX spec sets `axes` as input for opset >= 13.
+    Node* unsqueeze_axes = graph->create(onnx::Constant, 1);
+    unsqueeze_axes->insertBefore(unsqueeze_node);
+    unsqueeze_axes->t_(
+        attr::value, at::unsqueeze(at::scalar_to_tensor(at::Scalar(axis)), 0));
+    unsqueeze_node->addInput(unsqueeze_axes->output());
+  } else {
+    // ONNX spec sets `axes` as attribute for opset < 13.
+    unsqueeze_node->is_(attr::axes, {0});
+  }
+  return unsqueeze_node;
 }
 
 } // namespace jit

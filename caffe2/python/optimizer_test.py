@@ -1,6 +1,6 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
+
+
+
 from caffe2.proto import caffe2_pb2
 import caffe2.python.optimizer as optimizer
 from caffe2.python.optimizer import (

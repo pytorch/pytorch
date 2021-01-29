@@ -1,4 +1,5 @@
 import bisect
+import random
 import warnings
 
 from torch._utils import _accumulate
@@ -157,13 +158,13 @@ class TensorDataset(Dataset[Tuple[Tensor, ...]]):
 
     Each sample will be retrieved by indexing tensors along the first dimension.
 
-    Arguments:
+    Args:
         *tensors (Tensor): tensors that have the same size of the first dimension.
     """
     tensors: Tuple[Tensor, ...]
 
     def __init__(self, *tensors: Tensor) -> None:
-        assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors)
+        assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors), "Size mismatch between tensors"
         self.tensors = tensors
 
     def __getitem__(self, index):
@@ -178,7 +179,7 @@ class ConcatDataset(Dataset[T_co]):
 
     This class is useful to assemble different existing datasets.
 
-    Arguments:
+    Args:
         datasets (sequence): List of datasets to be concatenated
     """
     datasets: List[Dataset[T_co]]
@@ -231,7 +232,7 @@ class ChainDataset(IterableDataset):
     chainning operation is done on-the-fly, so concatenating large-scale
     datasets with this class will be efficient.
 
-    Arguments:
+    Args:
         datasets (iterable of IterableDataset): datasets to be chained together
     """
     def __init__(self, datasets: Iterable[Dataset]) -> None:
@@ -253,11 +254,68 @@ class ChainDataset(IterableDataset):
         return total
 
 
+class BufferedShuffleDataset(IterableDataset[T_co]):
+    r"""Dataset shuffled from the original dataset.
+
+    This class is useful to shuffle an existing instance of an IterableDataset.
+    The buffer with `buffer_size` is filled with the items from the dataset first. Then,
+    each item will be yielded from the buffer by reservoir sampling via iterator.
+
+    `buffer_size` is required to be larger than 0. For `buffer_size == 1`, the
+    dataset is not shuffled. In order to fully shuffle the whole dataset, `buffer_size`
+    is required to be greater than or equal to the size of dataset.
+
+    When it is used with :class:`~torch.utils.data.DataLoader`, each item in the
+    dataset will be yielded from the :class:`~torch.utils.data.DataLoader` iterator.
+    And, the method to set up a random seed is different based on :attr:`num_workers`.
+
+    For single-process mode (:attr:`num_workers == 0`), the random seed is required to
+    be set before the :class:`~torch.utils.data.DataLoader` in the main process.
+
+        >>> ds = BufferedShuffleDataset(dataset)
+        >>> random.seed(...)
+        >>> print(list(torch.utils.data.DataLoader(ds, num_workers=0)))
+
+    For multi-process mode (:attr:`num_workers > 0`), the random seed is set by a callable
+    function in each worker.
+
+        >>> ds = BufferedShuffleDataset(dataset)
+        >>> def init_fn(worker_id):
+        ...     random.seed(...)
+        >>> print(list(torch.utils.data.DataLoader(ds, ..., num_workers=n, worker_init_fn=init_fn)))
+
+    Args:
+        dataset (IterableDataset): The original IterableDataset.
+        buffer_size (int): The buffer size for shuffling.
+    """
+    dataset: IterableDataset[T_co]
+    buffer_size: int
+
+    def __init__(self, dataset: IterableDataset[T_co], buffer_size: int) -> None:
+        super(BufferedShuffleDataset, self).__init__()
+        assert buffer_size > 0, "buffer_size should be larger than 0"
+        self.dataset = dataset
+        self.buffer_size = buffer_size
+
+    def __iter__(self) -> Iterator[T_co]:
+        buf: List[T_co] = []
+        for x in self.dataset:
+            if len(buf) == self.buffer_size:
+                idx = random.randint(0, self.buffer_size - 1)
+                yield buf[idx]
+                buf[idx] = x
+            else:
+                buf.append(x)
+        random.shuffle(buf)
+        while buf:
+            yield buf.pop()
+
+
 class Subset(Dataset[T_co]):
     r"""
     Subset of a dataset at specified indices.
 
-    Arguments:
+    Args:
         dataset (Dataset): The whole Dataset
         indices (sequence): Indices in the whole set selected for subset
     """
@@ -283,7 +341,7 @@ def random_split(dataset: Dataset[T], lengths: Sequence[int],
 
     >>> random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(42))
 
-    Arguments:
+    Args:
         dataset (Dataset): Dataset to be split
         lengths (sequence): lengths of splits to be produced
         generator (Generator): Generator used for the random permutation.

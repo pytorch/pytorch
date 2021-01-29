@@ -1,3 +1,5 @@
+#ifndef USE_VULKAN_API
+
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
@@ -45,7 +47,12 @@ TEST(VulkanTest, upsampleNearest2D) {
   auto t_out =
       tv_out.to(at::TensorOptions{at::Device{at::kCPU}}.dtype(at::kFloat));
 
-  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+  bool check = almostEqual(t_out_expected, t_out);
+  if (!check) {
+    std::cout << "expected:\n" << t_out_expected << std::endl;
+    std::cout << "got:\n" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
 }
 
 TEST(VulkanTest, add) {
@@ -208,7 +215,12 @@ TEST(VulkanTest, conv2dDWWeightsOnCPU) {
   auto tv_in = t_in.vulkan();
   auto tv_out = at::conv2d(tv_in, t_w, t_b, stride, padding, dilation, groups);
   auto t_out = tv_out.cpu();
-  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+  bool check = almostEqual(t_out_expected, t_out);
+  if (!check) {
+    std::cout << "expected:\n" << t_out_expected << std::endl;
+    std::cout << "got:\n" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
 }
 
 TEST(VulkanTest, addmm) {
@@ -227,7 +239,12 @@ TEST(VulkanTest, addmm) {
   auto tv_b = t_b.vulkan();
   auto tv_out = at::addmm(tv_b, tv_m1, tv_m2, beta, alpha);
   auto t_out = tv_out.cpu();
-  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+  bool check = almostEqual(t_out_expected, t_out);
+  if (!check) {
+    std::cout << "expected:\n" << t_out_expected << std::endl;
+    std::cout << "got:\n" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
 }
 
 TEST(VulkanTest, mm) {
@@ -242,7 +259,12 @@ TEST(VulkanTest, mm) {
   auto tv_m2 = t_m2.vulkan();
   auto tv_out = tv_m1.mm(tv_m2);
   auto t_out = tv_out.cpu();
-  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+  bool check = almostEqual(t_out_expected, t_out);
+  if (!check) {
+    std::cout << "expected:\n" << t_out_expected << std::endl;
+    std::cout << "got:\n" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
 }
 
 TEST(VulkanTest, clamp) {
@@ -301,7 +323,12 @@ TEST(VulkanTest, mean) {
   auto tv_in = t_in.vulkan();
   auto tv_out = at::mean(tv_in, {2, 3}, false);
   auto t_out = tv_out.cpu();
-  ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+  bool check = almostEqual(t_out_expected, t_out);
+  if (!check) {
+    std::cout << "expected:\n" << t_out_expected << std::endl;
+    std::cout << "got:\n" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
 }
 
 enum class OpType { conv2d, hardtanh_, mean, addmm };
@@ -874,7 +901,7 @@ TEST(VulkanTest, cat) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanTest, max_pool2d) {
+TEST(VulkanTest, DISABLED_max_pool2d) {
   if (!at::is_vulkan_available())
     return;
 
@@ -900,10 +927,10 @@ TEST(VulkanTest, avg_pool2d) {
 
   auto t_in =
       at::rand({1, 3, 7, 7}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  auto t_out_expected = at::avg_pool2d(t_in, {2, 2}, {1}, {0}, {1});
+  auto t_out_expected = at::avg_pool2d(t_in, {2, 2}, {1}, {0}, true);
   auto tv_in = t_in.vulkan();
 
-  auto tv_out = at::avg_pool2d(tv_in, {2, 2}, {1}, {0}, {1});
+  auto tv_out = at::avg_pool2d(tv_in, {2, 2}, {1}, {0}, true);
   auto t_out = tv_out.cpu();
 
   const auto check = almostEqual(t_out, t_out_expected);
@@ -913,3 +940,5 @@ TEST(VulkanTest, avg_pool2d) {
   }
   ASSERT_TRUE(check);
 }
+
+#endif /* USE_VULKAN_API */

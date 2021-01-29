@@ -5,7 +5,7 @@ import torch.onnx
 from torch.onnx import utils, OperatorExportTypes, TrainingMode
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type
 import torch.utils.cpp_extension
-from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
+from test_pytorch_common import skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion
 import caffe2.python.onnx.backend as backend
 from verify import verify
 
@@ -517,8 +517,8 @@ class TestUtilityFuns(TestCase):
         f = io.BytesIO()
 
         # run export in diagnose mode
-        graph, unsupported_ops = torch.onnx._diagnose_export(model, (x,), f,
-                                                             opset_version=9)
+        graph, unsupported_ops = utils._find_missing_ops_onnx_export(model, (x,), f,
+                                                                     opset_version=9)
         iter = graph.nodes()
         assert next(iter).kind() == "onnx::Constant"
         assert next(iter).kind() == "prim::Constant"
@@ -618,6 +618,8 @@ class TestUtilityFuns(TestCase):
         assert next(iter).kind() == "aten::quantize_per_tensor"
         assert next(iter).kind() == "aten::dequantize"
 
+    # prim::ListConstruct is exported as onnx::SequenceConstruct for opset >= 11
+    @skipIfUnsupportedOpsetVersion([11, 12])
     def test_prim_fallthrough(self):
         # Test prim op
         class PrimModule(torch.jit.ScriptModule):
@@ -677,6 +679,31 @@ class TestUtilityFuns(TestCase):
                                                    operator_export_type=OperatorExportTypes.ONNX)
 
         assert len(params_dict) == 2
+
+    def test_scripting_param(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 16, kernel_size=1, stride=2, padding=3, bias=True)
+                self.bn = torch.nn.BatchNorm2d(16, affine=True)
+
+            def forward(self, x):
+                x = self.conv(x)
+                bn = self.bn(x)
+                return bn
+
+        model = torch.jit.script(MyModule())
+        x = torch.randn(10, 3, 128, 128)
+        example_outputs = model(x)
+        f = io.BytesIO()
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        graph, _, __ = utils._model_to_graph(model, (x,), do_constant_folding=True, example_outputs=example_outputs,
+                                             operator_export_type=OperatorExportTypes.ONNX)
+
+        graph_input_params = [param.debugName() for param in graph.inputs()]
+        assert all(item in graph_input_params for item in dict(model.named_parameters())), \
+            "Graph parameter names does not match model parameters."
 
     def test_modifying_params(self):
         class MyModel(torch.nn.Module):

@@ -29,7 +29,6 @@ RegisterOperators reg(
     {Operator(
          prim::profile,
          [](const Node* node) -> Operation {
-           auto callback = node->cast<ProfileOp>()->getCallback();
            return [](Stack* stack) {
              AT_ERROR(
                  "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
@@ -37,9 +36,8 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
-         prim::profile_optional,
+         prim::profile_ivalue,
          [](const Node* node) -> Operation {
-           auto callback = node->cast<ProfileOptionalOp>()->getCallback();
            return [](Stack* stack) {
              AT_ERROR(
                  "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
@@ -57,8 +55,35 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
+         prim::RequiresGradCheck /* (...)  -> (..., bool) */,
+         [](const Node* node) -> Operation {
+           std::vector<bool> rg_props =
+               fmap(node->tys(attr::types), [](const TypePtr& t) {
+                 // if an rg property changes we assume a tensor does require
+                 // gradients which is set in `guardDifferentiableGraph`
+                 TORCH_INTERNAL_ASSERT(
+                     t->cast<TensorType>()->requiresGrad().has_value());
+                 return *t->cast<TensorType>()->requiresGrad();
+               });
+           return [rg_props](Stack* stack) {
+             auto num_inputs = rg_props.size();
+             // Check every input's shape against profiled (expected) shape.
+             for (size_t i = 0; i < num_inputs; i++) {
+               auto& input = peek(stack, i, num_inputs);
+               const auto& t = input.toTensor();
+               if (rg_props[i] != t.requires_grad()) {
+                 push(stack, false);
+                 return;
+               }
+             }
+
+             push(stack, true);
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
          prim::TypeCheck /* (...)  -> (..., bool) */,
-         [](const Node * /* node */) -> Operation {
+         [](const Node* /* node */) -> Operation {
            return [](Stack* /* stack */) {
              AT_ERROR("prim::TypeCheck not yet implemented"); // NOLINT
            };
@@ -212,6 +237,13 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "aten::percentFormat(str self, ...) -> str",
+         [](Stack* stack) {
+           size_t num_inputs = pop(stack).toInt();
+           percentFormat(*stack, num_inputs);
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "aten::to.prim_other(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
          [](Stack* stack) {
            at::Tensor self;
@@ -223,14 +255,6 @@ RegisterOperators reg(
            push(
                stack,
                to_dispatch(self, device, scalarType, non_blocking, copy));
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::eq.device(Device a, Device b) -> bool",
-         [](Stack* stack) {
-           auto a = pop(stack).toDevice();
-           auto b = pop(stack).toDevice();
-           push(stack, a == b);
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -263,6 +287,14 @@ RegisterOperators reg(
            at::Tensor a;
            pop(stack, a);
            push(stack, a.is_mkldnn());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::is_vulkan(Tensor a) -> bool",
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_vulkan());
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -302,14 +334,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::cpu(Tensor(a) self) -> Tensor(a|b)",
-         [](Stack* stack) {
-           at::Tensor a;
-           pop(stack, a);
-           push(stack, a.cpu());
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "prim::index(Device self) -> int?",
          [](Stack* stack) {
            auto d = pop(stack).toDevice();
@@ -339,6 +363,34 @@ RegisterOperators reg(
          [](Stack* stack) { stack->emplace_back(at::Tensor()); },
          aliasAnalysisSpecialCase()),
      Operator(
+         "prim::ReductionSizes(int[] size, int[] red_axes, bool keepdim = False) -> int[]",
+         [](Stack* stack) {
+           bool keepdim = pop(stack).toBool();
+           c10::List<int64_t> axes = pop(stack).toIntList();
+           c10::List<int64_t> size = pop(stack).toIntList();
+           if (keepdim) {
+             for (const auto& axis : axes) {
+               size.set(axis, 1);
+             }
+           } else {
+             int64_t index = 0;
+             auto iter = size.begin();
+             std::sort(axes.begin(), axes.end());
+             for (const auto& axis : axes) {
+               // move iter to the next axis
+               iter += axis - index;
+
+               // input iter points to axis and is updated to axis + 1
+               iter = size.erase(iter);
+
+               // update current index for iter
+               index = axis + 1;
+             }
+           }
+           push(stack, IValue(std::move(size)));
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::BroadcastSizes(...) -> int[]",
          [](Stack* stack) {
            auto num_inputs = pop(stack).toInt();
@@ -349,7 +401,7 @@ RegisterOperators reg(
                  at::infer_size(size, peek(stack, i, num_inputs).toIntVector());
            }
            drop(stack, num_inputs);
-           push(stack, IValue(std::move(size)));
+           push(stack, IValue(size));
          },
          aliasAnalysisSpecialCase()),
      Operator(
@@ -443,6 +495,38 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "prim::AutogradAllZero(...) -> bool",
+         [](Stack* stack) {
+           auto num_inputs = pop(stack).toInt();
+           bool result = true;
+           for (const IValue& v : last(stack, num_inputs)) {
+             TORCH_INTERNAL_ASSERT(v.isTensor());
+             if (v.toTensor().defined()) {
+               result = false;
+               break;
+             }
+           }
+           drop(stack, num_inputs);
+           stack->emplace_back(result);
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
+         "prim::AutogradAllNonZero(...) -> bool",
+         [](Stack* stack) {
+           auto num_inputs = pop(stack).toInt();
+           bool result = true;
+           for (const IValue& v : last(stack, num_inputs)) {
+             TORCH_INTERNAL_ASSERT(v.isTensor());
+             if (!v.toTensor().defined()) {
+               result = false;
+               break;
+             }
+           }
+           drop(stack, num_inputs);
+           stack->emplace_back(result);
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "prim::AutogradAdd(Any a, Any b) -> Any",
          [](Stack* stack) {
            at::Tensor a, b;
@@ -485,80 +569,6 @@ RegisterOperators reg(
            }
          },
          aliasAnalysisFromSchema()),
-     Operator(
-         prim::tolist,
-         // This operator has to be unschematized because the return type
-         // depends on the type hint and input. The implementation of this
-         // operator below is intended to be as close to the Python
-         // implementation in torch/csrc/utils/tensor_list.cpp as possible.
-         [](const Node* node) -> Operation {
-           return [](Stack* stack) {
-             int elem_ty_val;
-             int dim_val;
-             at::Tensor t;
-
-             pop(stack, elem_ty_val);
-             pop(stack, dim_val);
-             pop(stack, t);
-
-             // If the Tensor is not on the CPU, transfer it.
-             if (!t.device().is_cpu()) {
-               t = t.cpu();
-             }
-
-             // Rebuild the output type using elem_ty_val and dim_val. Start
-             // with the element type corresponding to elem_ty_val.
-             TypePtr out_ty;
-             if (elem_ty_val == 0) {
-               out_ty = IntType::get();
-             } else if (elem_ty_val == 1) {
-               out_ty = FloatType::get();
-             } else if (elem_ty_val == 2) {
-               out_ty = BoolType::get();
-             } else {
-               TORCH_CHECK(
-                   false,
-                   "Unsupported element type for tolist; only int, float and bool are supported");
-             }
-
-             // Check that type of the Tensor matches that of the annotation.
-             // Make an exception for the case in which the annotated type is
-             // float and the Tensor data type is also float; the elements will
-             // be casted to double later.
-             TORCH_CHECK(
-                 (out_ty == FloatType::get() && t.is_floating_point()) ||
-                     tryScalarTypeFromJitType(out_ty) == t.scalar_type(),
-                 "Output annotation element type and runtime tensor element type must match for tolist()");
-
-             // Check that the dimension of the Tensor matches that of the
-             // annotation.
-             TORCH_CHECK(
-                 dim_val == t.dim(),
-                 "Output annotation list dimension and runtime tensor dimension must match for tolist()");
-
-             // Wrap out_ty in a ListType dim times.
-             for (int i = 0; i < dim_val; ++i) {
-               out_ty = ListType::create(out_ty);
-             }
-
-             int64_t dim = t.dim();
-             auto sizes = t.sizes();
-             auto strides = t.strides();
-             size_t element_size = t.element_size();
-             char* data = static_cast<char*>(t.data_ptr());
-             auto result = tensorToListRecursive(
-                 data,
-                 0,
-                 dim,
-                 out_ty,
-                 t.scalar_type(),
-                 sizes,
-                 strides,
-                 element_size);
-             push(stack, std::move(result));
-           };
-         },
-         aliasAnalysisSpecialCase()),
      Operator(
          prim::ConstantChunk,
          [](const Node* node) -> Operation {
@@ -603,6 +613,18 @@ RegisterOperators reg(
            };
          },
          aliasAnalysisSpecialCase()),
+     // This operator is generated inside the compiler for indexing into
+     // ModuleDict without a statically determinable key. Accordingly,
+     // self must be a ModuleType and the output must be an InterfaceType.
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "prim::ModuleDictIndex(Any self, str ind) -> Any"),
+         [](Stack* stack) {
+           IValue ind = pop(stack);
+           IValue module_dict = pop(stack);
+           push(stack, module_dict.toModule().attr(ind.toStringRef()));
+         },
+         aliasAnalysisFromSchema()),
      Operator(
          "aten::dict() -> Dict(str, Tensor)",
          [](Stack* stack) {
@@ -670,24 +692,9 @@ RegisterOperators logging_operators(
          },
          aliasAnalysisFromSchema())});
 
-template <typename T>
 void hashValue(Stack* stack) {
   auto value = pop(stack);
-  auto hash = std::hash<T>()(value.to<T>());
-  push(stack, int64_t(hash));
-}
-
-// As described in https://docs.python.org/3/library/functions.html#round
-// When a number is exactly halfway between two integers, python builtin round
-// function will round to even number. We use round(x/2)*2 to handle the
-// special halfway case. For positive 'x', round(x/2)*2 =
-// round((x_e + x_r)/2)*2 = x_e + round(x_r/2)*2, where x_e is an even integer,
-// x_r is either 0.5 of 1.5, round(x_r/2)*2 results a 0 or 2, so the final
-// result will always be a even number. Due to symmetricity, it also applies to
-// negative cases.
-double round_to_even(double a) {
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
-  return a - std::floor(a) == 0.5 ? (std::round(a * 0.5) * 2.0) : std::round(a);
+  push(stack, value.hash());
 }
 
 RegisterOperators reg2({
@@ -729,10 +736,6 @@ RegisterOperators reg2({
 
     // `listContains<T>` is not implemented for non-primitive types
     // TODO: Add List[bool] once .to<c10::List<bool>> doesn't throw an error
-    Operator(
-        "aten::__contains__.int_list(int[] l, int item) -> bool",
-        listContains<int64_t>,
-        aliasAnalysisFromSchema()),
     Operator(
         "aten::__contains__.float_list(float[] l, float item) -> bool",
         listContains<double>,
@@ -914,8 +917,6 @@ RegisterOperators reg2({
     DEFINE_INT_OP(aten::__lshift__, a << b),
     DEFINE_INT_OP(aten::__rshift__, a >> b),
 
-    DEFINE_UNARY_OP(aten::round, round_to_even(a), float, float),
-    DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
     DEFINE_GENERIC_BINARY_OP(aten::log, std::log(a) / std::log(b), float),
     DEFINE_INT_FLOAT_OP(aten::log, std::log(a) / std::log(b), float),
     DEFINE_SCALAR_SCALAR_BINARY_OP(
@@ -1124,16 +1125,8 @@ RegisterOperators reg2({
 
 #undef DEFINE_DIVMOD_MIXED_OP
     Operator(
-        "aten::hash.str(str t) -> int",
-        hashValue<std::string>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::hash.int(int t) -> int",
-        hashValue<int>,
-        aliasAnalysisFromSchema()),
-    Operator(
-        "aten::hash.float(float t) -> int",
-        hashValue<double>,
+        "aten::hash.generic(t value) -> int",
+        hashValue,
         aliasAnalysisFromSchema()),
 });
 

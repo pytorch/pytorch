@@ -10,9 +10,8 @@ namespace at {
 
 ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
     : dispatch_key_(c10::impl::tls_local_dispatch_key_set()),
-      debug_info_(c10::ThreadLocalDebugInfo::current()),
-      observers_enabled_(at::isRecordFunctionEnabled()) {
-  callbacks_ = _getTLSCallbacks();
+      debug_info_(c10::ThreadLocalDebugInfo::current()) {
+  rf_tls_ = at::get_record_function_tls_();
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   keep_grad_mode_ = keep_grad_mode;
@@ -20,6 +19,7 @@ ThreadLocalState::ThreadLocalState(bool keep_grad_mode)
     grad_mode_enabled_ = GradMode::is_enabled();
   }
 #endif
+  bumped_record_all_functions_ = at::checkRecordAllFunctions();
 }
 
 /* static */
@@ -31,9 +31,7 @@ void ThreadLocalState::setThreadLocalState(
   }
 #endif
 
-  _setTLSCallbacks(state.callbacks_);
-
-  at::enableRecordFunction(state.observers_enabled_);
+  at::set_record_function_tls_(state.rf_tls_);
 
   c10::ThreadLocalDebugInfo::_forceCurrentDebugInfo(state.debug_info_);
 

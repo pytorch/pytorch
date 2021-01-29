@@ -88,11 +88,11 @@ torch::nn::GRU|Yes|No
 torch::nn::RNNCell|Yes|No
 torch::nn::LSTMCell|Yes|No
 torch::nn::GRUCell|Yes|No
-torch::nn::Transformer|No|No
+torch::nn::Transformer|Yes|No
 torch::nn::TransformerEncoder|No|No
 torch::nn::TransformerDecoder|No|No
-torch::nn::TransformerEncoderLayer|No|No
-torch::nn::TransformerDecoderLayer|No|No
+torch::nn::TransformerEncoderLayer|Yes|No
+torch::nn::TransformerDecoderLayer|Yes|No
 torch::nn::Identity|Yes|No
 torch::nn::Linear|Yes|No
 torch::nn::Bilinear|Yes|No
@@ -125,6 +125,7 @@ torch::nn::CosineEmbeddingLoss|Yes|No
 torch::nn::MultiMarginLoss|Yes|No
 torch::nn::TripletMarginLoss|Yes|No
 torch::nn::PixelShuffle|Yes|No
+torch::nn::PixelUnshuffle|Yes|No
 torch::nn::Upsample|Yes|No
 torch::nn::DataParallel|No|No
 torch::nn::parallel::DistributedDataParallel|No|No

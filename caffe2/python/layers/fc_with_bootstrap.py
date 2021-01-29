@@ -1,6 +1,6 @@
 ## @package fc_with_bootstrap
 # Module caffe2.python.layers.fc_with_bootstrap
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 import math
 

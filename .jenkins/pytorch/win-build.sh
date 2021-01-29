@@ -15,7 +15,7 @@ COMPACT_JOB_NAME=pytorch-win-ws2019-cuda10-cudnn7-py3-build
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source "$SCRIPT_PARENT_DIR/common.sh"
 
-export IMAGE_COMMIT_ID=`git rev-parse HEAD`
+export IMAGE_COMMIT_ID=$(git rev-parse HEAD)
 export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
 if [[ ${JOB_NAME} == *"develop"* ]]; then
   export IMAGE_COMMIT_TAG=develop-${IMAGE_COMMIT_TAG}
@@ -37,6 +37,21 @@ if [ -n "$(ls $CI_SCRIPTS_DIR/*)" ]; then
 fi
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
+
+set +ex
+grep -E -R 'PyLong_(From|As)(Unsigned|)Long\(' --exclude=python_numbers.h torch/
+PYLONG_API_CHECK=$?
+if [[ $PYLONG_API_CHECK == 0 ]]; then
+  echo "Usage of PyLong_{From,As}{Unsigned}Long API may lead to overflow errors on Windows"
+  echo "because \`sizeof(long) == 4\` and \`sizeof(unsigned long) == 4\`."
+  echo "Please include \"torch/csrc/python_numbers.h\" and use the correspoding APIs instead."
+  echo "PyLong_FromLong -> THPUtils_packInt32 / THPUtils_packInt64"
+  echo "PyLong_AsLong -> THPUtils_unpackInt (32-bit) / THPUtils_unpackLong (64-bit)"
+  echo "PyLong_FromUnsignedLong -> THPUtils_packUInt32 / THPUtils_packUInt64"
+  echo "PyLong_AsUnsignedLong -> THPUtils_unpackUInt32 / THPUtils_unpackUInt64"
+  exit 1
+fi
+set -ex
 
 $SCRIPT_HELPERS_DIR/build_pytorch.bat
 

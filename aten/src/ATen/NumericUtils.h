@@ -42,12 +42,18 @@ inline bool _isnan(T val) {
 template <typename T,
          typename std::enable_if<std::is_same<T, at::Half>::value, int>::type = 0>
 inline C10_HOST_DEVICE bool _isnan(T val) {
-  return at::_isnan(float(val));
+  return at::_isnan(static_cast<float>(val));
 }
 
 
+template <typename T,
+         typename std::enable_if<std::is_same<T, at::BFloat16>::value, int>::type = 0>
 inline C10_HOST_DEVICE bool _isnan(at::BFloat16 val) {
-  return at::_isnan(float(val));
+  return at::_isnan(static_cast<float>(val));
+}
+
+inline C10_HOST_DEVICE bool _isnan(at::BFloat16 val) {
+  return at::_isnan(static_cast<float>(val));
 }
 
 template <typename T>

@@ -65,6 +65,7 @@ install(FILES
   THGenerateComplexTypes.h
   THGenerateIntTypes.h
   THGenerateQUInt8Type.h
+  THGenerateQUInt4x2Type.h
   THGenerateQInt8Type.h
   THGenerateQInt32Type.h
   THGenerateQTypes.h
@@ -78,7 +79,6 @@ install(FILES
   THHalf.h
   THTensor.hpp
   THStorageFunctions.hpp
-  THGenerator.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH")
 
 install(FILES

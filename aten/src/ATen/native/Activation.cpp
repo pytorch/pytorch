@@ -116,27 +116,22 @@ Tensor & elu_(
   return at::elu_out(self, self, alpha, scale, input_scale);
 }
 
-Tensor& elu_backward_out(
-    Tensor& grad_input,
-    const Tensor& grad_output,
-    Scalar alpha,
-    Scalar scale,
-    Scalar input_scale,
-    const Tensor& output) {
-  auto iter = TensorIterator::binary_op(grad_input, grad_output, output);
-  elu_backward_stub(iter.device_type(), iter, alpha, scale, input_scale);
-  return grad_input;
-}
-
 Tensor elu_backward(
     const Tensor& grad_output,
     Scalar alpha,
     Scalar scale,
     Scalar input_scale,
-    const Tensor& output) {
+    bool is_result,
+    const Tensor& self_or_result) {
+  TORCH_CHECK(
+    !is_result || alpha.to<double>() >= 0.0,
+    "In-place elu backward calculation is triggered with a negative slope which is not supported. "
+    "This is caused by calling in-place forward function with a negative slope, "
+    "please call out-of-place version instead.");
+
   Tensor result;
-  auto iter = TensorIterator::binary_op(result, grad_output, output);
-  elu_backward_stub(iter.device_type(), iter, alpha, scale, input_scale);
+  auto iter = TensorIterator::binary_op(result, grad_output, self_or_result);
+  elu_backward_stub(iter.device_type(), iter, alpha, scale, input_scale, is_result);
   return iter.output();
 }
 
@@ -224,6 +219,13 @@ Tensor silu_backward(
   return grad_input;
 }
 
+Tensor math_silu_backward(
+    const Tensor& grad_output,
+    const Tensor& input) {
+  auto input_sigmoid = at::sigmoid(input);
+  return grad_output * (input_sigmoid * (1 + input * (1 - input_sigmoid)));
+}
+
 template <typename scalar_t>
 inline void _rrelu_with_noise_train(
     Tensor& output,
@@ -270,8 +272,8 @@ Tensor& rrelu_with_noise_out_cpu(
     });
     return output;
   } else {
-    auto lower_tensor = scalar_to_tensor(lower, self.device());
-    auto upper_tensor = scalar_to_tensor(upper, self.device());
+    auto lower_tensor = scalar_to_tensor(lower);
+    auto upper_tensor = scalar_to_tensor(upper);
     auto negative = (lower_tensor + upper_tensor) / 2;
     Scalar negative_slope = negative.item();
     return at::leaky_relu_out(output, self, negative_slope);
@@ -307,8 +309,8 @@ Tensor rrelu_with_noise_backward(
     Scalar upper,
     bool training,
     bool is_result) {
-  auto lower_tensor = scalar_to_tensor(lower, grad_output.device());
-  auto upper_tensor = scalar_to_tensor(upper, grad_output.device());
+  auto lower_tensor = scalar_to_tensor(lower);
+  auto upper_tensor = scalar_to_tensor(upper);
   if (training && (upper_tensor - lower_tensor).item().to<float>() > 1E-6) {
     return grad_output.mul(noise);
   } else {

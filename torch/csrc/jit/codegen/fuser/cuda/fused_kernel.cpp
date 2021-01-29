@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
+
 #include <torch/csrc/jit/codegen/fuser/compiler.h>
 
 #include <ATen/ATen.h>
@@ -28,11 +29,13 @@ const at::cuda::NVRTC& nvrtc() {
   return at::globalContext().getNVRTC();
 }
 
-static void getMajorMinor(
+// query codegen output arch and target
+void codegenOutputQuery(
     const cudaDeviceProp* const prop,
     int& major,
-    int& minor) {
-  int nvrtc_major, nvrtc_minor;
+    int& minor,
+    bool& compile_to_sass) {
+  int nvrtc_major = 0, nvrtc_minor = 0;
   AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcVersion(&nvrtc_major, &nvrtc_minor));
 
   // Short-circuits if NVRTC version too low
@@ -51,22 +54,30 @@ static void getMajorMinor(
     minor = 0;
   } else if (nvrtc_major <= 9 && prop->major >= 7) { // 9 supports 3-7.2
     major = 7;
-    if (prop->major == 7 && prop->minor <= 2)
-      minor = prop->minor;
-    else
-      minor = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    minor = (prop->major == 7 && prop->minor <= 2) ? prop->minor : 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   } else if (nvrtc_major <= 10 && prop->major >= 7) { // 10 supports 3-7.5
     major = 7;
-    if (prop->major == 7 && prop->minor <= 5)
-      minor = prop->minor;
-    else
-      minor = 0;
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    minor = (prop->major == 7 && prop->minor <= 5) ? prop->minor : 0;
+  } else if (
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      nvrtc_major == 11 && nvrtc_minor == 0 &&
+      // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+      prop->major >= 8) { // 11.0 supports 3.5-8.0
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
+    major = 8;
+    minor = 0;
   }
+
+  // if we are clamping major/minor, sass is not compatible
+  compile_to_sass = ((major == prop->major) && (minor == prop->minor));
 }
 
 // Compiles the specified kernel and stores the metadata required to run it
 FusedKernelCUDA::FusedKernelCUDA(
-    int16_t device,
+    at::DeviceIndex device,
     std::string name,
     std::string code,
     std::vector<TensorDesc> input_desc,
@@ -101,7 +112,8 @@ FusedKernelCUDA::FusedKernelCUDA(
   // calculations)
   prop_ = at::cuda::getCurrentDeviceProperties();
   int major, minor;
-  getMajorMinor(prop_, major, minor);
+  bool compile_to_sass = false;
+  codegenOutputQuery(prop_, major, minor, compile_to_sass);
 
   // Creates the NVRTC program
   nvrtcProgram program;
@@ -111,7 +123,19 @@ FusedKernelCUDA::FusedKernelCUDA(
 #ifdef __HIP_PLATFORM_HCC__
   std::vector<const char*> args = {};
 #else
-  const std::string compute = "--gpu-architecture=compute_" +
+  const std::string compute = std::string("--gpu-architecture=") +
+#if CUDA_VERSION >= 11010
+      // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
+      // which gives better backwards compatibility to work on older driver,
+      // (since older driver doesn't necessrily recognize PTX emitted by new
+      // toolkit);
+      // Meanwhile, for forward compatibility (future device with
+      // `compile_to_sass==false`), since SASS are not necessarily compatible,
+      // we fallback to PTX instead.
+      (compile_to_sass ? "sm_" : "compute_") +
+#else
+      "compute_" +
+#endif
       std::to_string(major) + std::to_string(minor);
   const std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
@@ -131,9 +155,22 @@ FusedKernelCUDA::FusedKernelCUDA(
       [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
   AT_CUDA_NVRTC_CHECK(result);
   size_t ptx_size;
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTXSize(program, &ptx_size));
+#if CUDA_VERSION >= 11010
+  // compile_to_sass determines whether we are generating SASS or PTX, hence
+  // the different API.
+  const auto getSize = compile_to_sass
+      ? at::globalContext().getNVRTC().nvrtcGetCUBINSize
+      : at::globalContext().getNVRTC().nvrtcGetPTXSize;
+  const auto getFunc = compile_to_sass
+      ? at::globalContext().getNVRTC().nvrtcGetCUBIN
+      : at::globalContext().getNVRTC().nvrtcGetPTX;
+#else
+  const auto getSize = at::globalContext().getNVRTC().nvrtcGetPTXSize;
+  const auto getFunc = at::globalContext().getNVRTC().nvrtcGetPTX;
+#endif
+  AT_CUDA_NVRTC_CHECK(getSize(program, &ptx_size));
   ptx_.resize(ptx_size);
-  AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetPTX(program, ptx_.data()));
+  AT_CUDA_NVRTC_CHECK(getFunc(program, ptx_.data()));
 
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoadData(&module_, ptx_.data()));
   AT_CUDA_DRIVER_CHECK(
@@ -222,7 +259,7 @@ static std::shared_ptr<FusedKernel> createFusionKernel(
     std::vector<PartitionDesc> concat_desc,
     bool has_random) {
   return std::make_shared<FusedKernelCUDA>(
-      device,
+      static_cast<at::DeviceIndex>(device),
       std::move(name),
       std::move(code),
       std::move(input_desc),

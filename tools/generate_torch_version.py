@@ -2,6 +2,7 @@ import argparse
 import os
 import subprocess
 from pathlib import Path
+from distutils.util import strtobool
 
 def get_sha():
     try:
@@ -12,8 +13,6 @@ def get_sha():
 def get_torch_version(sha=None):
     pytorch_root = Path(__file__).parent.parent
     version = open('version.txt', 'r').read().strip()
-    if sha is None:
-        sha = get_sha()
 
     if os.getenv('PYTORCH_BUILD_VERSION'):
         assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
@@ -22,12 +21,14 @@ def get_torch_version(sha=None):
         if build_number > 1:
             version += '.post' + str(build_number)
     elif sha != 'Unknown':
+        if sha is None:
+            sha = get_sha()
         version += '+' + sha[:7]
     return version
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate torch/version.py from build and environment metadata.")
-    parser.add_argument("--is_debug", type=bool, help="Whether this build is debug mode or not.")
+    parser.add_argument("--is_debug", type=strtobool, help="Whether this build is debug mode or not.")
     parser.add_argument("--cuda_version", type=str)
     parser.add_argument("--hip_version", type=str)
 
@@ -47,7 +48,7 @@ if __name__ == "__main__":
         # NB: This is not 100% accurate, because you could have built the
         # library code with DEBUG, but csrc without DEBUG (in which case
         # this would claim to be a release build when it's not.)
-        f.write("debug = {}\n".format(repr(args.is_debug)))
+        f.write("debug = {}\n".format(repr(bool(args.is_debug))))
         f.write("cuda = {}\n".format(repr(args.cuda_version)))
         f.write("git_version = {}\n".format(repr(sha)))
         f.write("hip = {}\n".format(repr(args.hip_version)))

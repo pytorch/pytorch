@@ -1,15 +1,14 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
 import unittest
-from caffe2.python import brew, core, workspace
+from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.python.model_helper import ModelHelper
 import caffe2.python.ideep_test_util as mu
 
 

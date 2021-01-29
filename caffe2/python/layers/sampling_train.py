@@ -1,9 +1,9 @@
 ## @package sampling_train
 # Module caffe2.python.layers.sampling_train
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import schema
 from caffe2.python.layers.layers import ModelLayer, get_layer_class

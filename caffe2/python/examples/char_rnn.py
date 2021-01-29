@@ -1,9 +1,9 @@
 ## @package char_rnn
 # Module caffe2.python.examples.char_rnn
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import core, workspace, model_helper, utils, brew
 from caffe2.python.rnn_cell import LSTM

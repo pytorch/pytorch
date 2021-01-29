@@ -373,6 +373,10 @@ RegisterOperators reg({
         [](Stack* stack) { push(stack, true); },
         aliasAnalysisFromSchema()),
     OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::has_torch_function(...) -> bool"),
+        [](Stack* stack) { push(stack, false); },
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
             "aten::_no_grad_uniform_(Tensor(a!) tensor, float a, float b) -> Tensor(a!)"),
         [](Stack* stack) {
@@ -431,10 +435,7 @@ RegisterOperators reg({
         aliasAnalysisConservative()),
     Operator(
         "aten::set_grad_enabled(bool val) -> ()",
-        [](Stack* stack) {
-          torch::GradMode::set_enabled(pop(stack).toBool());
-          push(stack, IValue());
-        },
+        [](Stack* stack) { torch::GradMode::set_enabled(pop(stack).toBool()); },
         aliasAnalysisConservative()),
 });
 } // namespace

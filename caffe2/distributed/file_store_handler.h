@@ -4,7 +4,7 @@
 
 namespace caffe2 {
 
-class CAFFE2_API FileStoreHandler : public StoreHandler {
+class TORCH_API FileStoreHandler : public StoreHandler {
  public:
   explicit FileStoreHandler(const std::string& path, const std::string& prefix);
   virtual ~FileStoreHandler();
@@ -16,6 +16,10 @@ class CAFFE2_API FileStoreHandler : public StoreHandler {
       const std::chrono::milliseconds& timeout = kDefaultTimeout) override;
 
   virtual int64_t add(const std::string& name, int64_t value) override;
+
+  virtual bool deleteKey(const std::string& key) override;
+
+  virtual int64_t getNumKeys() override;
 
   virtual bool check(const std::vector<std::string>& names) override;
 

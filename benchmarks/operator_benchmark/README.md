@@ -60,13 +60,15 @@ add_short_configs = op_bench.cross_product_configs(
 )
 
 class AddBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, K):
-        self.input_one = torch.rand(M, N, K)
-        self.input_two = torch.rand(M, N, K)
+    def init(self, M, N, K, device):
+        self.inputs = {
+            "input_one": torch.rand(M, N, K, device=device, requires_grad=self.auto_set()),
+            "input_two": torch.rand(M, N, K, device=device, requires_grad=self.auto_set())
+        }
         self.set_module_name("add")
 
-    def forward(self):
-        return torch.add(self.input_one, self.input_two)
+    def forward(self, input_one, input_two):
+        return torch.add(input_one, input_two)
 
 op_bench.generate_pt_test(add_short_configs, AddBenchmark)
 ```
@@ -174,14 +176,15 @@ add_short_configs = op_bench.config_list(
 )
 
 class AddBenchmark(op_bench.TorchBenchmarkBase):
+    def init(self, M, N, K, device):
+        self.inputs = {
+            "input_one": torch.rand(M, N, K, device=device, requires_grad=self.auto_set()),
+            "input_two": torch.rand(M, N, K, device=device, requires_grad=self.auto_set())
+        }
+        self.set_module_name("add")
 
-    def init(self, M, N, K):
-        self.input_one = torch.rand(M, N, K)
-        self.input_two = torch.rand(M, N, K)
-        self.set_module_name("add")
-
-    def forward(self):
-        return torch.add(self.input_one, self.input_two)
+    def forward(self, input_one, input_two):
+        return torch.add(input_one, input_two)
 
 op_bench.generate_pt_test(add_long_configs + add_short_configs, AddBenchmark)
 
@@ -218,26 +221,28 @@ Let's look at it in detail:
 
 #### Part 2. Create Tensors and Add Computation
 After inputs are provided, we now look at adding the computation of an operator. Adding a new operator requires implementing a new `TorchBenchmarkBase` subclass. Every new class is required to implement 2 methods:
-* `init` is used to create tensors based on the inputs we provided before. In this example, the parameters to `init` are `M, N, and K` which have been specified in the input configuration.
-* `forward` includes the operator to be tested and the computation based on the created tensors in `init`. Besides the object itself, it doesn't take any additional parameters. 
+* `init` is used to create tensors based on the inputs we provided before. In this example, the parameters to `init` are `M, N, and K` which have been specified in the input configuration. `init` also packed all the needed inputs together into a dictionary `self.inputs` which will be provided to `forward` as arguments for running the benchmark.
+* `forward` includes the operator to be tested and the computation based on the created tensors in `init`. Apart from `self`, the order of the arguments must match the entries specified in `self.inputs`.  
 
 The example below shows the code for `torch.add`:  
 ```
 # Given one set of M, N, K, the init method creates input tensors based on
 # that. The forward method does torch.add calculation on those input tensors.
-class AddBenchmark(op_bench.TorchBenchmarkBase):
 
-    def init(self, M, N, K):
+class AddBenchmark(op_bench.TorchBenchmarkBase):
+    def init(self, M, N, K, device):
         # this is the method where you need to create tensors
         # M, N, and K can be in different order, but they must match with
         # names in the configs.
-        self.input_one = torch.rand(M, N, K)
-        self.input_two = torch.rand(M, N, K)
-        self.set_module_name("add")
+        self.inputs = {
+            "input_one": torch.rand(M, N, K, device=device, requires_grad=self.auto_set()),
+            "input_two": torch.rand(M, N, K, device=device, requires_grad=self.auto_set())
+        }
+        self.set_module_name("add")
 
-    def forward(self):
+    def forward(self, input_one, input_two):
         # this is the method to have operator and do computation
-        return torch.add(self.input_one, self.input_two)
+        return torch.add(input_one, input_two)
 ```
 
 #### Part 3. Register Tests With the Benchmark Suite
@@ -336,15 +341,16 @@ unary_ops_list = op_bench.op_list(
 )
 
 class UnaryOpBenchmark(op_bench.TorchBenchmarkBase):
+    def init(self, M, N, device, op_func):
+        self.inputs = {
+            "input": torch.rand(M, N, device=device)
+        }
+        self.op_func = op_func
 
-    def init(self, M, N, op_func):
-        self.input_one = torch.rand(M, N)
-        self.op_func = op_func
+    def forward(self, input):
+        return self.op_func(input)
 
-    def forward(self):
-        return self.op_func(self.input_one)
-
-op_bench.generate_pt_tests_from_list(unary_ops_list, unary_ops_configs, UnaryOpBenchmark)
+op_bench.generate_pt_tests_from_op_list(unary_ops_list, unary_ops_configs, UnaryOpBenchmark)
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()
@@ -371,27 +377,28 @@ unary_ops_list = op_bench.op_list(
 In this example, both operators share the same input so we only need to implement one TorchBenchmakrBase subclass. 
 Every new subclass is required to implement 3 methods:
 * `init` is used to create tensors and set the operator name and function. In this example, the parameters to `init` are `M`, `N`, and `op_func` which have been specified in the configurations.
-* `forward` includes the operator to be tested and the computation based on the created tensors in `init`. Besides the object itself, it doesn't take any additional parameters. 
+* `forward` includes the operator to be tested and the computation based on the created tensors in `init`. Apart from `self`, the order of the arguments must match the entries specified in `self.inputs`.
 Here is the code for `abs` and `acos`:
 
 ```
 class UnaryOpBenchmark(op_bench.TorchBenchmarkBase):
-
-    def init(self, M, N, op_func):
+    def init(self, M, N, device, op_func):
         # The M and N match with the attr_names in the input configuration
         # The op_func matches with the attr_name in the ops configuration
-        self.input_one = torch.rand(M, N)
-        self.op_func = op_func
+        self.inputs = {
+            "input": torch.rand(M, N, device=device)
+        }
+        self.op_func = op_func
 
-    def forward(self):
-        return self.op_func(self.input_one)
+    def forward(self, input):
+        return self.op_func(input)
 ```
 
 #### Part 3. Register a List of Operators
-To register multiple operators,  we introduced the `generate_pt_tests_from_list` function which takes three parameters. First, the list of operators. Second,the configs. Third, the benchmark class.  
+To register multiple operators,  we introduced the `generate_pt_tests_from_op_list` function which takes three parameters. First, the list of operators. Second,the configs. Third, the benchmark class.  
 Here is an example:
 ```
-op_bench.generate_pt_tests_from_list(unary_ops_list, unary_ops_configs, UnaryOpBenchmark)
+op_bench.generate_pt_tests_from_op_list(unary_ops_list, unary_ops_configs, UnaryOpBenchmark)
 ```
 
 

@@ -16,11 +16,11 @@
 #include <ATen/cpu/vml.h>
 #include <ATen/native/Distributions.h>
 #include <ATen/native/TensorFactories.h>
-#include <ATen/native/Math.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/DistributionTemplates.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/cpu/zmath.h>
+#include <c10/util/MathConstants.h>
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
@@ -167,7 +167,7 @@ static void abs_kernel(TensorIterator& iter) {
 }
 
 static void angle_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "angle_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "angle_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [=](scalar_t a) -> scalar_t { return angle_impl(a); },
@@ -213,11 +213,14 @@ static void bitwise_not_kernel(TensorIterator& iter) {
           });
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "bitwise_not_cpu", [&]() {
-      cpu_kernel(
+      cpu_kernel_vec(
           iter,
           [](scalar_t a) -> scalar_t {
             return ~a;
-      });
+          },
+          [](Vec256<scalar_t> a) -> Vec256<scalar_t> {
+            return ~a;
+          });
     });
   }
 }
@@ -235,19 +238,19 @@ static void logical_not_kernel(TensorIterator& iter) {
   // NOTE: this implementation differs from the CUDA implementation which only does single dispatch
   // (to avoid expensive compilation) because CPU kernels don't handle dynamic_casting
   // (see needs_dynamic_casting).
-  AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(1), "logical_not_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(1), "logical_not_cpu", [&]() {
     using self_t = scalar_t;
-    AT_DISPATCH_ALL_TYPES_AND2(kBool, kHalf, iter.dtype(0), "logical_not_cpu", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(0), "logical_not_cpu", [&]() {
       cpu_kernel(iter, [](self_t a) -> scalar_t { return static_cast<scalar_t>(!a); });
     });
   });
 }
 
 static void reciprocal_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "reciprocal_cpu", [&]() {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "reciprocal_cpu", [&]() {
     cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return static_cast<scalar_t>(1.0) / a; },
+        [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t { return static_cast<scalar_t>(1.0) / a; },
         [=](Vec256<scalar_t> a) { return a.reciprocal(); });
   });
 }
@@ -270,16 +273,16 @@ static void sign_kernel(TensorIterator& iter){
         auto one_vec = Vec256<scalar_t>(static_cast<scalar_t>(1));
 
         cpu_kernel_vec(
-            iter,
-            [=](scalar_t a) -> scalar_t { return (0 < a) - (a < 0); },
-            [=](Vec256<scalar_t> self_vec){
+          iter,
+          [=](scalar_t a) -> scalar_t { return (0 < a) - (a < 0); },
+          [=](Vec256<scalar_t> self_vec){
 
-                // Comparision operators returns bitmask.
-                auto left = Vec256<scalar_t>::blendv(zero_vec, one_vec, zero_vec < self_vec);
-                auto right = Vec256<scalar_t>::blendv(zero_vec, one_vec, self_vec < zero_vec);
+              // Comparison operators returns bitmask.
+              auto left = Vec256<scalar_t>::blendv(zero_vec, one_vec, zero_vec < self_vec);
+              auto right = Vec256<scalar_t>::blendv(zero_vec, one_vec, self_vec < zero_vec);
 
-                return left - right;
-            });
+              return left - right;
+          });
     });
   }
 }
@@ -287,6 +290,30 @@ static void sign_kernel(TensorIterator& iter){
 static void signbit_kernel(TensorIterator& iter){
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cpu", [&]() {
     cpu_kernel(iter, [](scalar_t a) -> bool { return a < 0; });
+  });
+}
+
+static void sgn_kernel(TensorIterator& iter){
+  AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sgn_cpu", [&]() {
+    cpu_kernel_vec(
+      iter,
+      [=](scalar_t a) -> scalar_t { return sgn_impl(a); },
+      [=](Vec256<scalar_t> a) { return a.sgn(); });
+  });
+}
+
+static void sinc_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.common_dtype(), "sinc_cpu", [&]() {
+    cpu_kernel(
+        iter,
+        [=](scalar_t a) -> scalar_t {
+          if (a == scalar_t(0)) {
+            return scalar_t(1);
+          } else {
+            scalar_t product = c10::pi<scalar_t> * a;
+            return std::sin(product) / product;
+          }
+        });
   });
 }
 
@@ -309,7 +336,7 @@ static void cosh_kernel(TensorIterator& iter) {
 }
 
 static void acosh_kernel(TensorIterator& iter) {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "acosh_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "acosh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::acosh(a); });
@@ -317,7 +344,7 @@ static void acosh_kernel(TensorIterator& iter) {
 }
 
 static void asinh_kernel(TensorIterator& iter) {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "asinh_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "asinh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::asinh(a); });
@@ -325,7 +352,7 @@ static void asinh_kernel(TensorIterator& iter) {
 }
 
 static void atanh_kernel(TensorIterator& iter) {
-    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "atanh_cpu", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "atanh_cpu", [&]() {
       cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return std::atanh(a); });
@@ -333,7 +360,7 @@ static void atanh_kernel(TensorIterator& iter) {
 }
 
 static void digamma_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "digamma", [&]() {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "digamma", [&]() {
     cpu_kernel(
         iter,
         [=](scalar_t a) -> scalar_t { return calc_digamma(a); });
@@ -371,37 +398,61 @@ static void polygamma_kernel(TensorIterator& iter, int64_t n) {
   }
 }
 
+static void nan_to_num_kernel(
+    TensorIterator& iter,
+    c10::optional<double> nan,
+    c10::optional<double> pos_inf,
+    c10::optional<double> neg_inf) {
+  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.dtype(), "nan_to_num", [&]() {
+    scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
+    scalar_t pos_inf_replacement = pos_inf.has_value()
+        ? static_cast<scalar_t>(pos_inf.value())
+        : std::numeric_limits<scalar_t>::max();
+    scalar_t neg_inf_replacement = neg_inf.has_value()
+        ? static_cast<scalar_t>(neg_inf.value())
+        : std::numeric_limits<scalar_t>::lowest();
+
+    cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
+      return (
+          at::_isnan(a)
+              ? nan_replacement
+              : (a == std::numeric_limits<scalar_t>::infinity()
+                     ? pos_inf_replacement
+                     : (a == -std::numeric_limits<scalar_t>::infinity()
+                            ? neg_inf_replacement
+                            : a)));
+    });
+  });
+}
+
 static void clamp_kernel(TensorIterator& iter, Scalar min_scalar, Scalar max_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_cpu", [&]() {
-    c10::scalar_value_type<scalar_t>::type (*zabs_)(scalar_t) = zabs;
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_cpu", [&]() {
     auto min = min_scalar.to<scalar_t>();
     auto max = max_scalar.to<scalar_t>();
     auto min_vec = Vec256<scalar_t>(min);
     auto max_vec = Vec256<scalar_t>(max);
     cpu_kernel_vec(iter,
-     [=](scalar_t a) -> scalar_t { return zabs_(a) < zabs_(min) ? min : (zabs_(a) > zabs_(max) ? max : a); },
+     [=](scalar_t a) -> scalar_t { return std::min(std::max(a, min), max); },
      [=](Vec256<scalar_t> a) { return vec256::clamp(a, min_vec, max_vec); });
   });
 }
 
 static void clamp_max_kernel(TensorIterator& iter, Scalar max_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_max_cpu", [&]() {
-    c10::scalar_value_type<scalar_t>::type (*zabs_)(scalar_t) = zabs;
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_max_cpu", [&]() {
     auto max = max_scalar.to<scalar_t>();
     auto max_vec = Vec256<scalar_t>(max);
     cpu_kernel_vec(iter,
-     [=](scalar_t a) -> scalar_t { return zabs_(a) > zabs_(max) ? max : a; },
+     [=](scalar_t a) -> scalar_t { return std::min(a, max); },
      [=](Vec256<scalar_t> a) { return vec256::clamp_max(a, max_vec); });
   });
 }
 
 static void clamp_min_kernel(TensorIterator& iter, Scalar min_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_min_cpu", [&]() {
-    c10::scalar_value_type<scalar_t>::type (*zabs_)(scalar_t) = zabs;
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "clamp_min_cpu", [&]() {
     auto min = min_scalar.to<scalar_t>();
     auto min_vec = Vec256<scalar_t>(min);
     cpu_kernel_vec(iter,
-     [=](scalar_t a) -> scalar_t { return zabs_(a) < zabs_(min) ? min : a; },
+     [=](scalar_t a) -> scalar_t { return std::max(a, min); },
      [=](Vec256<scalar_t> a) { return vec256::clamp_min(a, min_vec); });
   });
 }
@@ -536,10 +587,10 @@ static void random_full_64_bits_range_kernel(TensorIterator& iter, c10::optional
 }
 
 static void rsqrt_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "rsqrt_cpu", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.common_dtype(), "rsqrt_cpu", [&] {
     cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t {
+        [=](scalar_t a) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
           return (static_cast<scalar_t>(1)) / std::sqrt(a);
         },
         [=](Vec256<scalar_t> a) { return a.rsqrt(); });
@@ -551,7 +602,7 @@ static void rsqrt_kernel(TensorIterator& iter) {
 #define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                             \
   static void op##_kernel(TensorIterator& iter) {                             \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                              \
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), op##_vml_cpu, [&]() {            \
+    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() {            \
       iter.serial_for_each(                                                   \
           [&](char** data_, const int64_t* strides, int64_t n) { \
             scalar_t* out_data = reinterpret_cast<scalar_t*>(data_[0]);       \
@@ -582,7 +633,7 @@ static void rsqrt_kernel(TensorIterator& iter) {
 #define IMPLEMENT_COMPLEX_KERNEL(dispatchtypes, op)                             \
   static void op##_kernel(TensorIterator& iter) {                             \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                              \
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), op##_vml_cpu, [&]() {\
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() {\
       iter.serial_for_each(                                                   \
           [&](char** data_, const int64_t* strides, int64_t n) {              \
             scalar_t* out_data = reinterpret_cast<scalar_t*>(data_[0]);       \
@@ -636,9 +687,12 @@ REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
 REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel);
 REGISTER_DISPATCH(frac_stub, &frac_kernel);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
+REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(sign_stub, &sign_kernel);
 REGISTER_DISPATCH(signbit_stub, &signbit_kernel);
+REGISTER_DISPATCH(sgn_stub, &sgn_kernel);
+REGISTER_DISPATCH(sinc_stub, &sinc_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
 REGISTER_DISPATCH(acosh_stub, &acosh_kernel);
@@ -669,7 +723,7 @@ IMPLEMENT_COMPLEX_KERNEL(FLOATING, log10)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, log1p)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, log2)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, i0)
-IMPLEMENT_COMPLEX_KERNEL(FLOATING, round)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, round)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, sin)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, sqrt)
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, tan)

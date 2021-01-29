@@ -111,6 +111,11 @@ Works only with Python3.\n A few examples:
         action='store_true',
         help="Print generated kernel(s).",
     )
+    parser.add_argument(
+        "--no-dynamic-shape",
+        action='store_true',
+        help="Disable shape randomization in dynamic benchmarks.",
+    )
 
     args = parser.parse_args()
 
@@ -128,6 +133,7 @@ Works only with Python3.\n A few examples:
     elif args.cuda_fuser == "nvf":
         import torch
         torch._C._jit_set_profiling_executor(True)
+        torch._C._jit_set_texpr_fuser_enabled(False)
         torch._C._jit_set_nvfuser_enabled(True)
         torch._C._jit_set_profiling_mode(True)
     else :
@@ -270,9 +276,10 @@ Works only with Python3.\n A few examples:
                             config[i] = value
                         except ValueError:
                             pass
-                    bench = bench_cls(*config)
+                    # TODO: output dtype in the config and  parse it back from the str
+                    bench = bench_cls(config[0], config[1], torch.float32, *config[2:])
                     bench.jit_mode = args.jit_mode
-                    bench.output_type = args.output_type
+                    bench.output_type = args.output
                     bench.run(args)
 
             if not match_class_name:

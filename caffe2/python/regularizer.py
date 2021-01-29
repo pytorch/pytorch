@@ -1,6 +1,6 @@
 # @package optimizer
 # Module caffe2.python.regularizer
-from __future__ import absolute_import, division, print_function, unicode_literals
+
 
 from caffe2.python import core, utils
 import numpy as np

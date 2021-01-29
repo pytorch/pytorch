@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/operator.h>
+
 #include <ATen/ATen.h>
 #include <ATen/core/alias_info.h>
 #include <torch/csrc/jit/frontend/edit_distance.h>
@@ -224,24 +225,30 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       c10::onnx::Shape, // only used in onnx
       prim::AutogradZero, // temporarily inserted by autograd
       prim::AutogradAnyNonZero, // temporarily inserted by autograd
+      prim::AutogradAllNonZero, // temporarily inserted by autograd
+      prim::AutogradAllZero, // temporarily inserted by autograd
       prim::AutogradAdd, // temporarily inserted by autograd
       prim::ConstantChunk, // optimization pass adds it
       prim::DifferentiableGraph, // optimization pass adds it,
       prim::FunctionalGraph, // optimization pass adds it,
+      prim::ReductionSizes, // optimization pass (fuser) adds it
       prim::BroadcastSizes, // optimization pass (fuser) adds it
       prim::ChunkSizes, // optimization pass (fuser) adds it
       prim::Drop, // used in interpreter only
       prim::FusedConcat, // optimization pass adds it
       prim::FusionGroup, // optimization pass adds it
       prim::CudaFusionGroup, // optimization pass adds it
+      prim::CudaFusionGuard, // optimization pass adds it
       prim::TensorExprGroup, // optimization pass adds it
+      prim::StaticSubgraph, // optimization pass adds it
       prim::Load, // used in interpreter only
       prim::MMTreeReduce, // used as an optimization
       prim::MMBatchSide, // used as an optimization
       prim::Store, // used in interpreter only
       prim::profile, // used in interpreter only
-      prim::profile_optional, // used in interpreter only
+      prim::profile_ivalue, // used in interpreter only
       prim::TypeCheck, // used in interpreter only
+      prim::RequiresGradCheck, // used in interpreter only
       prim::FallbackGraph, // converted into prim::CallFunction
 
   };
@@ -271,6 +278,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::CudaFusionGroup,
       prim::DifferentiableGraph,
       prim::TensorExprGroup,
+      prim::StaticSubgraph,
       prim::FunctionalGraph,
       prim::Constant,
       prim::Uninitialized,
@@ -284,7 +292,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::MMBatchSide,
       prim::BroadcastSizes,
       prim::ChunkSizes,
-      prim::Function,
+      prim::Closure,
       prim::TupleUnpack,
       prim::TupleIndex,
       prim::TupleSlice,
@@ -298,8 +306,9 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::GetAttr,
       prim::SetAttr,
       prim::profile,
-      prim::profile_optional,
+      prim::profile_ivalue,
       prim::TypeCheck,
+      prim::RequiresGradCheck,
       prim::Print,
       prim::CallFunction,
       prim::CallMethod,

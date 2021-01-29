@@ -61,8 +61,8 @@ public:
     }
   }
   // Test if a DispatchKey is in the set
-  bool has(DispatchKey t) const {
-    TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
+  bool inline has(DispatchKey t) const {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(t != DispatchKey::Undefined);
     return static_cast<bool>(repr_ & DispatchKeySet(t).repr_);
   }
   // Test if DispatchKeySet is a superset of ks.
@@ -70,7 +70,7 @@ public:
     return (repr_ & ks.repr_) == ks.repr_;
   }
   // Perform set union
-  DispatchKeySet operator|(DispatchKeySet other) const {
+  constexpr DispatchKeySet operator|(DispatchKeySet other) const {
     return DispatchKeySet(repr_ | other.repr_);
   }
   // Perform set intersection
@@ -118,13 +118,13 @@ public:
       .highestPriorityTypeId();
   }
 private:
-  DispatchKeySet(uint64_t repr) : repr_(repr) {}
+  constexpr DispatchKeySet(uint64_t repr) : repr_(repr) {}
   uint64_t repr_ = 0;
 
 public:
   // STL iterator for DispatchKeySet. Iterates through all DispatchKeys in the
   // set. The iterator is only invalidated by the destruction of the underlying
-  // DispatchKeySet as the iterator stores a pointer to the raw represenation of
+  // DispatchKeySet as the iterator stores a pointer to the raw representation of
   // the DispatchKeySet.
   class iterator {
    public:
@@ -186,16 +186,57 @@ public:
 C10_API std::string toString(DispatchKeySet);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
+// autograd_dispatch_keyset should include all runtime autograd keys.
+// Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
+// NB: keys in this set also get associated with Math
+constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
+    DispatchKey::AutogradCPU,
+    DispatchKey::AutogradCUDA,
+    DispatchKey::AutogradXLA,
+    DispatchKey::AutogradNestedTensor,
+    DispatchKey::AutogradXPU,
+    DispatchKey::AutogradPrivateUse1,
+    DispatchKey::AutogradPrivateUse2,
+    DispatchKey::AutogradPrivateUse3,
+    DispatchKey::AutogradOther,
+});
+
+// backend dispatch keys that map to DispatchKey::AutogradOther
+// NB: keys in this set also get associated with Math
+constexpr DispatchKeySet autogradother_backends = DispatchKeySet({
+  DispatchKey::HIP,
+  DispatchKey::FPGA,
+  DispatchKey::MSNPU,
+  DispatchKey::Vulkan,
+  DispatchKey::Metal,
+  DispatchKey::MKLDNN,
+  DispatchKey::OpenGL,
+  DispatchKey::OpenCL,
+  DispatchKey::IDEEP,
+  DispatchKey::QuantizedCPU,
+  DispatchKey::QuantizedCUDA,
+  DispatchKey::ComplexCPU,
+  DispatchKey::ComplexCUDA,
+  DispatchKey::CustomRNGKeyId,
+  DispatchKey::MkldnnCPU,
+  DispatchKey::SparseCPU,
+  DispatchKey::SparseCUDA,
+  DispatchKey::SparseHIP,
+  DispatchKey::Meta,
+});
+
+// true if t is a backend dispatch key
+C10_API bool isBackendDispatchKey(DispatchKey t);
+
 // Resolve alias dispatch key to DispatchKeySet if applicable
 C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
 
-// TODO(#43441): Once we have iterator-like funtionality on DispatchKeySet
-//      we can remove this API and use c10::getRuntimeDispatchKeySet instead.
-//      This API is only used in aten/src/ATen/core/dispatch/OperatorEntry.cpp.
-C10_API ArrayRef<DispatchKey> getRuntimeDispatchKeys(DispatchKey k);
+// Returns a DispatchKeySet of all backend keys mapped to Autograd dispatch key t,
+// DispatchKeySet is empty if t is not alias of DispatchKey::Autograd.
+C10_API DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t);
 
 // This API exists because we have a use case for checking
-// getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefind)
+// getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefined)
 // in OperatorEntry.cpp but we disallow it in has() API.
 C10_API bool isIncludedInAlias(DispatchKey k, DispatchKey alias);
 
@@ -212,6 +253,6 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // is the most likely key that will need this treatment;
   // After Autograd keys are moved from globally enabled set to TensorImpl,
   // we should remove all Autograd keys before taking highestPriority.
-  return (s - getRuntimeDispatchKeySet(DispatchKey::Autograd)).highestPriorityTypeId();
+  return (s - autograd_dispatch_keyset).highestPriorityTypeId();
 }
 }

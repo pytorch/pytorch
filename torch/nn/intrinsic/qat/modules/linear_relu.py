@@ -1,8 +1,8 @@
 import torch.nn.qat as nnqat
-import torch.nn.intrinsic
+import torch.nn.intrinsic as nni
 import torch.nn.functional as F
 
-class LinearReLU(nnqat.Linear):
+class LinearReLU(nnqat.Linear, nni._FusedModule):
     r"""
     A LinearReLU module fused from Linear and ReLU modules, attached with
     FakeQuantize modules for weight, used in
@@ -24,7 +24,7 @@ class LinearReLU(nnqat.Linear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
-    _FLOAT_MODULE = torch.nn.intrinsic.LinearReLU
+    _FLOAT_MODULE = nni.LinearReLU
 
     def __init__(self, in_features, out_features, bias=True,
                  qconfig=None):
@@ -34,5 +34,5 @@ class LinearReLU(nnqat.Linear):
         return F.relu(F.linear(input, self.weight_fake_quant(self.weight), self.bias))
 
     @classmethod
-    def from_float(cls, mod, qconfig=None):
-        return super(LinearReLU, cls).from_float(mod, qconfig)
+    def from_float(cls, mod):
+        return super(LinearReLU, cls).from_float(mod)

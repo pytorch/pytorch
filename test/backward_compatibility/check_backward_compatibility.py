@@ -1,4 +1,3 @@
-
 import argparse
 import datetime
 import re
@@ -28,78 +27,38 @@ from torch._C import parse_schema
 # NB: function name DOES NOT include overload name!
 allow_list = [
     ("c10_experimental", datetime.date(2222, 1, 1)),
-    # We export some functions and classes for test_jit.py directly from libtorch.so,
-    # it's not important to have BC for them
-    ("_TorchScriptTesting.*", datetime.date(9999, 1, 1)),
+    # Internal
+    ("static", datetime.date(9999, 1, 1)),
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
-    ("tensorexpr::Group", datetime.date(2020, 9, 9)),
-    ("aten::append*", datetime.date(2020, 4, 15)),
-    ("aten::_min", datetime.date(2020, 9, 9)),
-    ("aten::_max", datetime.date(2020, 9, 9)),
-    ("aten::amax", datetime.date(2020, 10, 9)),
-    ("aten::amin", datetime.date(2020, 10, 9)),
-    ("aten::min_values", datetime.date(2020, 10, 9)),
-    ("aten::max_values", datetime.date(2020, 10, 9)),
-    ("aten::split_with_sizes", datetime.date(2020, 7, 29)),
-    ("aten::eq", datetime.date(2020, 7, 30)),
-    ("aten::log", datetime.date(2020, 7, 30)),
-    ("aten::__and__", datetime.date(2020, 7, 30)),
-    ("aten::__or__", datetime.date(2020, 7, 30)),
-    ("aten::__xor__", datetime.date(2020, 7, 30)),
-    ("aten::add", datetime.date(2020, 7, 30)),
-    ("aten::__upsample_bilinear", datetime.date(2020, 7, 30)),
-    ("aten::hash", datetime.date(2020, 7, 30)),
-    ("aten::divmod", datetime.date(2020, 7, 30)),
-    ("aten::sorted", datetime.date(2020, 8, 30)),
-    ("aten::__contains__", datetime.date(2020, 7, 30)),
-    ("aten::ne", datetime.date(2020, 7, 30)),
-    ("aten::index", datetime.date(2020, 7, 30)),
-    ("aten::isnan", datetime.date(2020, 7, 30)),
-    ("aten::pow", datetime.date(2020, 7, 30)),
-    ("aten::atan2", datetime.date(2020, 7, 30)),
-    ("aten::copy_", datetime.date(2020, 7, 30)),
-    ("aten::sort", datetime.date(2020, 7, 30)),
-    ('aten::_convolution', datetime.date(2020, 10, 15)),
-    ('aten::cudnn_convolution', datetime.date(2020, 10, 15)),
-    ('aten::cudnn_convolution_transpose', datetime.date(2020, 10, 15)),
-    ('aten::_convolution_double_backward', datetime.date(2020, 10, 15)),
-    ('aten::cudnn_convolution_backward_input', datetime.date(2020, 10, 15)),
-    ('aten::cudnn_convolution_backward', datetime.date(2020, 10, 15)),
-    ('aten::cudnn_convolution_backward_weight', datetime.date(2020, 10, 15)),
-    ('aten::cudnn_convolution_transpose_backward', datetime.date(2020, 10, 15)),
-    ('aten::cudnn_convolution_transpose_backward_input', datetime.date(2020, 10, 15)),
-    ('aten::cudnn_convolution_transpose_backward_weight', datetime.date(2020, 10, 15)),
-    ("aten::_cudnn_init_dropout_state", datetime.date(2020, 7, 30)),
-    ("aten::sparse_coo_tensor", datetime.date(2020, 7, 30)),
-    ("aten::_sparse_coo_tensor_with_dims", datetime.date(2020, 7, 30)),
-    ("aten::_sparse_coo_tensor_with_dims_and_tensors", datetime.date(2020, 7, 30)),
-    ("aten::__lshift__", datetime.date(2020, 7, 30)),
-    ("aten::__rshift__", datetime.date(2020, 7, 30)),
-    ("aten::__round_to_zero_floordiv", datetime.date(2020, 7, 30)),
-    ("aten::gcd", datetime.date(2020, 7, 30)),
-    ("aten::unflatten", datetime.date(2020, 8, 14)),
-    ("aten::linalg_outer", datetime.date(2020, 8, 30)),
-    # WARNING: overload name here doesn't do anything
-    ("aten::linalg_outer.out", datetime.date(2020, 8, 30)),
-    ("aten::linalg_norm", datetime.date(2020, 9, 30)),
-    ("aten::linalg_norm.ord_str", datetime.date(2020, 9, 30)),
-    ("aten::linalg_norm.out", datetime.date(2020, 9, 30)),
-    ("aten::linalg_norm.ord_str_out", datetime.date(2020, 9, 30)),
-    ("aten::_compute_linear_combination", datetime.date(2020, 9, 1)),
-    ("aten::linspace", datetime.date(2020, 9, 30)),
-    ("aten::linspace.out", datetime.date(2020, 9, 30)),
-    ("aten::logspace", datetime.date(2020, 9, 30)),
-    ("aten::logspace.out", datetime.date(2020, 9, 30)),
-    ("__getstate__", datetime.date(2020, 9, 11), "Conv[23]dPackedParams"),
-    ("aten::_var", datetime.date(2020, 10, 1)),
-    ("aten::_std", datetime.date(2020, 10, 1)),
-    ("aten::_foreach_add_", datetime.date(2020, 10, 1)),
-    ("aten::stft", datetime.date(2020, 10, 1)),
-    ("aten::istft", datetime.date(2020, 10, 1)),
+    ("aten::_qr_helper", datetime.date(2021, 1, 31)),
+    ("aten::fft", datetime.date(2021, 1, 31)),
+    ("aten::ifft", datetime.date(2021, 1, 31)),
+    ("aten::irfft", datetime.date(2021, 1, 31)),
+    ("aten::rfft", datetime.date(2021, 1, 31)),
+    ("aten::_svd_helper", datetime.date(2021, 1, 31)),
+    ("aten::_cudnn_rnn_flatten_weight", datetime.date(2020, 12, 31)),
+    ("aten::_cudnn_rnn", datetime.date(2020, 12, 31)),
+    ("aten::_cudnn_rnn_backward", datetime.date(2020, 12, 31)),
+    ("aten::quantile", datetime.date(2021, 1, 31)),
+    ("aten::nanquantile", datetime.date(2021, 1, 31)),
+    ("aten::_fft_with_size", datetime.date(2021, 1, 31)),
+    ("aten::thnn_conv_depthwise2d_backward", datetime.date(2021, 1, 31)),
+    ("aten::slow_conv3d_backward", datetime.date(2021, 1, 31)),
+    ("aten::thnn_conv2d_backward", datetime.date(2021, 1, 31)),
+    ("aten::slow_conv_transpose3d_backward", datetime.date(2021, 1, 31)),
+    ("aten::slow_conv_transpose2d_backward", datetime.date(2021, 1, 31)),
+    ("aten::set_", datetime.date(2021, 1, 31)),
+    ("aten::native_layer_norm", datetime.date(2021, 1, 31)),
+    ("aten::native_layer_norm_backward", datetime.date(2021, 1, 31)),
+    ("aten::elu_backward", datetime.date(2021, 1, 31)),
+    ("aten::_multinomial_alias_setup", datetime.date(2021, 1, 31)),
+    ("aten::_multinomial_alias_draw", datetime.date(2021, 1, 31)),
+    ("prim::profile_optional", datetime.date(2021, 1, 31)),
+    ("aten::fake_quantize_per_tensor_affine_backward", datetime.date(2021, 2, 20)),
+    ("aten::fake_quantize_per_channel_affine_backward", datetime.date(2021, 2, 20)),
 ]
-
 
 def allow_listed(schema, allow_list):
     for item in allow_list:
@@ -113,6 +72,15 @@ def allow_listed(schema, allow_list):
                 return bool(regexp_args.search(str(schema)))
             return True
     return False
+
+
+# The nightly will fail to parse newly added syntax to schema declarations
+# Add new schemas that will fail the nightly here
+dont_parse_list = [
+    ("_TorchScriptTesting.*", datetime.date(2099, 9, 17)),
+    ("test_backend", datetime.date(2099, 9, 17)),
+    ("dist_c10d", datetime.date(2021, 1, 30)),
+]
 
 
 def dont_parse(schema_line):
@@ -184,6 +152,10 @@ if __name__ == "__main__":
             line = f.readline()
             if not line:
                 break
+
+            if dont_parse(line.strip()):
+                print("Not parsing schema line: ", line.strip())
+                continue
             s = parse_schema(line.strip())
             slist.append(s)
 
