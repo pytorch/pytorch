@@ -150,7 +150,7 @@ class DistributedOptimizer:
     to the latest forward pass executed on a given worker. Also, there is no
     guaranteed ordering across workers.
 
-    DistributedOptimizer creates the local optimizer with TorchScript enabled
+    `DistributedOptimizer` creates the local optimizer with TorchScript enabled
     by default, so that optimizer updates are not blocked by the Python Global
     Interpreter Lock (GIL) during multithreaded training (e.g. Distributed Model
     Parallel). This feature is currently in beta stage, enabled for optimizers
