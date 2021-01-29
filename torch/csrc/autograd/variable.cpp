@@ -450,17 +450,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tenso
           fn->size = self.sizes().vec();
           fn->stride = self.strides().vec();
           fn->storage_offset = self.storage_offset();
-
-          // If we are here, the tensor we are operating on is a differentiable view, meaning
-          // that a valid graph exists to which we should attach the new node. To do this
-          // correctly, we temporarily disable grad mode here while collecting edges. Without
-          // this logic, the collected edges will be an empty set, and the graph will be
-          // invalidated by connecting the new node to nowhere.
-          {
-            AutoGradMode grad_mode(true);
-            fn->set_next_edges(torch::autograd::collect_next_edges(view_info.base_));
-          }
-
+          fn->set_next_edges(torch::autograd::collect_next_edges(view_info.base_));
           fn->add_input_metadata(
             view_info.base_.options(),
             self.sizes(), // Note: sizes(), not base_.sizes(), is intentional
