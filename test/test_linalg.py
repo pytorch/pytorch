@@ -3418,7 +3418,9 @@ class TestLinalg(TestCase):
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
     def test_triangular_solve(self, device, dtype):
-        for (k, n), (upper, unitriangular, transpose) in itertools.product(zip([2, 3, 5], [3, 5, 7]),
+        ks = [0, 1, 3]
+        ns = [0, 5]
+        for (k, n), (upper, unitriangular, transpose) in itertools.product(zip(ks, ns),
                                                                            itertools.product([True, False], repeat=3)):
             b, A = self.triangular_solve_test_helper((n, n), (n, k), upper,
                                                      unitriangular, device, dtype)
@@ -3453,10 +3455,29 @@ class TestLinalg(TestCase):
             Ax = np.matmul(A.cpu(), x_act.cpu())
             self.assertEqual(b, Ax)
 
-        for (upper, unitriangular, transpose), batchsize in itertools.product(itertools.product(
-                [True, False], repeat=3), [1, 3, 4]):
+        def triangular_solve_zero_batch_helper(A_dims, b_dims, upper, unitriangular, transpose):
+            b, A = self.triangular_solve_test_helper(A_dims, b_dims, upper,
+                                                     unitriangular, device, dtype)
+            x = torch.triangular_solve(b, A, upper=upper,
+                                       unitriangular=unitriangular,
+                                       transpose=transpose)[0]
+            self.assertTrue(x.shape == b.shape)
+
+        for upper, unitriangular, transpose in itertools.product([True, False], repeat=3):
+            batchsize = 3
             triangular_solve_batch_helper((batchsize, 5, 5), (batchsize, 5, 10),
                                           upper, unitriangular, transpose)
+
+            # test empty input
+            triangular_solve_batch_helper((batchsize, 0, 0), (batchsize, 0, 10),
+                                          upper, unitriangular, transpose)
+            triangular_solve_batch_helper((batchsize, 0, 0), (batchsize, 0, 0),
+                                          upper, unitriangular, transpose)
+
+            # test zero batch case
+            batchsize = 0
+            triangular_solve_zero_batch_helper((batchsize, 5, 5), (batchsize, 5, 10),
+                                               upper, unitriangular, transpose)
 
 
     @slowTest
@@ -3536,26 +3557,6 @@ class TestLinalg(TestCase):
         err_str = r"triangular_solve_cpu: U\(3,3\) is zero, singular U\."
         with self.assertRaisesRegex(RuntimeError, err_str):
             torch.triangular_solve(b, A)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float64, torch.complex128)
-    def test_triangular_solve_autograd(self, device, dtype):
-        def run_test(A_dims, B_dims):
-            A = torch.rand(*A_dims, dtype=dtype).requires_grad_()
-            b = torch.rand(*B_dims, dtype=dtype).requires_grad_()
-
-            for upper, transpose, unitriangular in itertools.product((True, False), repeat=3):
-                def func(A, b):
-                    return torch.triangular_solve(b, A, upper, transpose, unitriangular)
-
-                gradcheck(func, [A, b])
-                gradgradcheck(func, [A, b])
-
-        run_test((3, 3), (3, 4))
-        run_test((3, 3), (3, 2))
-        run_test((2, 3, 3), (2, 3, 4))
-        run_test((2, 3, 3), (2, 3, 2))
 
     def check_single_matmul(self, x, y, shape):
         a = np.array(x, copy=False)
