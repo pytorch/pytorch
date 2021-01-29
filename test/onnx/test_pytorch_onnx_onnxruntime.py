@@ -3994,7 +3994,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
-    @unittest.skip("Enable this once remove is suported by torchscript")
+    @unittest.skip("Enable this once remove is supported by torchscript")
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_list_remove(self):
         class ListModel(torch.nn.Module):
