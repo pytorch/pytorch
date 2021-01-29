@@ -225,7 +225,7 @@ Tensor _fw_primal(const Tensor & self, int64_t level) {
 }
 
 // We don't have an outplace copy, so this can't be generated automatically
-Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool non_blocking) {
+Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
   auto& self_ = unpack(self, "self", 0);
@@ -242,7 +242,7 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    self_._redispatch_copy_(ks & c10::after_autograd_keyset, src_, non_blocking);
+    self_.copy_(src_, non_blocking);
   }
   increment_version(self);
   rebase_history(self , std::move(grad_fn));
@@ -268,7 +268,6 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
 }
 
 Tensor& resize_(
-    c10::DispatchKeySet ks,
     Tensor& self,
     IntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
@@ -278,7 +277,7 @@ Tensor& resize_(
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    self_._redispatch_resize_(ks & c10::after_autograd_keyset, size, optional_memory_format);
+    self_.resize_(size, optional_memory_format);
   }
 
   if (self.fw_grad(/* level */ 0).defined()) {
@@ -289,7 +288,6 @@ Tensor& resize_(
 }
 
 Tensor& resize_as_(
-    c10::DispatchKeySet ks,
     Tensor& self,
     const Tensor& the_template,
     c10::optional<MemoryFormat> optional_memory_format) {
@@ -300,7 +298,7 @@ Tensor& resize_as_(
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    self_._redispatch_resize_as_(ks & c10::after_autograd_keyset, the_template_, optional_memory_format);
+    at::resize_as_(the_template_, optional_memory_format);
   }
 
   // Handle fw grad
