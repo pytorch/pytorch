@@ -78,30 +78,32 @@ Tensor& addmm_out_sparse_csr_dense_cpu(
     int64_t out_stride0 = out.stride(0);
     int64_t out_stride1 = out.stride(1);
     
-    AT_DISPATCH_FLOATING_TYPES(
-      values.scalar_type(), "sparse_csr_mm_cpu", [&] {
-        scalar_t cast_alpha = alpha.to<scalar_t>();
-        scalar_t cast_beta = beta.to<scalar_t>();
-        scalar_t* dense_ptr = op1.data_ptr<scalar_t>();
-        scalar_t* out_ptr = out.data_ptr<scalar_t>();
+    AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "csr_mm_crow_indices", [&] {
+      AT_DISPATCH_FLOATING_TYPES(
+        values.scalar_type(), "sparse_csr_mm_cpu", [&] {
+          scalar_t cast_alpha = alpha.to<scalar_t>();
+          scalar_t cast_beta = beta.to<scalar_t>();
+          scalar_t* dense_ptr = op1.data_ptr<scalar_t>();
+          scalar_t* out_ptr = out.data_ptr<scalar_t>();
 
-        auto col_indices_accessor = col_indices.accessor<int32_t, 1>();
-        auto crow_indices_accessor = crow_indices.accessor<int32_t, 1>();
-        auto values_accessor = values.accessor<scalar_t, 1>();
+          auto col_indices_accessor = col_indices.accessor<index_t, 1>();
+          auto crow_indices_accessor = crow_indices.accessor<index_t, 1>();
+          auto values_accessor = values.accessor<scalar_t, 1>();
 
-        for (int irow = 0; irow < crow_indices.size(0)-1; ++irow) {
-          int start_index = crow_indices_accessor[irow];
-          int end_index = crow_indices_accessor[irow+1];
+          for (int irow = 0; irow < crow_indices.size(0)-1; ++irow) {
+            int start_index = crow_indices_accessor[irow];
+            int end_index = crow_indices_accessor[irow+1];
 
-          for (int i = start_index; i < end_index; ++i) {
-            auto val = values_accessor[i];
-            auto icol = col_indices_accessor[i];
+            for (int i = start_index; i < end_index; ++i) {
+              auto val = values_accessor[i];
+              auto icol = col_indices_accessor[i];
 
-            THBlas_axpy<scalar_t>(dim_k,
-              cast_alpha * val, dense_ptr + icol * dense_stride0, dense_stride1,
-              out_ptr + irow * out_stride0, out_stride1);
+              THBlas_axpy<scalar_t>(dim_k,
+                cast_alpha * val, dense_ptr + icol * dense_stride0, dense_stride1,
+                out_ptr + irow * out_stride0, out_stride1);
+            }
           }
-        }
+      });
     });
   }
   return out;
@@ -184,26 +186,29 @@ Tensor& add_out_dense_sparse_csr_cpu(Tensor& out, const Tensor& dense,
     resultBuffer.copy_(dense);
   }
 
-  AT_DISPATCH_ALL_TYPES(commonDtype, "add_out_op2_sparse_csr", [&] {
-    auto values_accessor = src_values.accessor<scalar_t, 1>();
-    auto crow_indices_accessor = src_crow_indices.accessor<int32_t, 1>();
-    auto col_indices_accessor = src_col_indices.accessor<int32_t, 1>();
+  // Use just one wrapper since both indices have the same type.
+  AT_DISPATCH_INDEX_TYPES(src_crow_indices.scalar_type(), "csr_add_out_crow_indices", [&] {
+    AT_DISPATCH_ALL_TYPES(commonDtype, "add_out_op2_sparse_csr", [&] {
+      auto values_accessor = src_values.accessor<scalar_t, 1>();
+      auto crow_indices_accessor = src_crow_indices.accessor<index_t, 1>();
+      auto col_indices_accessor = src_col_indices.accessor<index_t, 1>();
 
-    scalar_t *out_ptr = out.data_ptr<scalar_t>();
-    scalar_t cast_value = alpha.to<scalar_t>();
+      scalar_t *out_ptr = out.data_ptr<scalar_t>();
+      scalar_t cast_value = alpha.to<scalar_t>();
 
-    for (int32_t irow = 0; irow < src_crow_indices.size(0)-1; ++irow) {
-      int32_t start_index = crow_indices_accessor[irow];
-      int32_t end_index = crow_indices_accessor[irow + 1];
-      auto out_strides0 = out.strides()[0];
-      auto out_strides1 = out.strides()[1];
+      for (int32_t irow = 0; irow < src_crow_indices.size(0)-1; ++irow) {
+        int32_t start_index = crow_indices_accessor[irow];
+        int32_t end_index = crow_indices_accessor[irow + 1];
+        auto out_strides0 = out.strides()[0];
+        auto out_strides1 = out.strides()[1];
 
-      for (int i = start_index; i < end_index; ++i) {
-        auto icol = col_indices_accessor[i];
-        auto index = out.storage_offset() + irow * out_strides0 + icol * out_strides1;
-        out_ptr[index] += cast_value * values_accessor[i];
+        for (int i = start_index; i < end_index; ++i) {
+          auto icol = col_indices_accessor[i];
+          auto index = out.storage_offset() + irow * out_strides0 + icol * out_strides1;
+          out_ptr[index] += cast_value * values_accessor[i];
+        }
       }
-    }
+    });
   });
   return out;
 }

@@ -626,25 +626,30 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
   static PythonArgParser parser({
       "sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, IntArrayRef size, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
       "sparse_csr_tensor(PyObject* crow_indices, PyObject* col_indices, PyObject* values, *, ScalarType dtype=None, Layout? layout=None, Device? device=None, bool pin_memory=False, bool requires_grad=False)",
-
   });
   ParsedArgs<9> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
+  THPObjectPtr crow_indices_dtype_attr(PyObject_GetAttrString(r.pyobject(0), "dtype"));
+  THPObjectPtr col_indices_dtype_attr(PyObject_GetAttrString(r.pyobject(1), "dtype"));
+  at::ScalarType crow_indices_scalar_type = reinterpret_cast<THPDtype*>(
+    crow_indices_dtype_attr.get())->scalar_type;
+  at::ScalarType col_indices_scalar_type = reinterpret_cast<THPDtype*>(
+    col_indices_dtype_attr.get())->scalar_type;
 
   if (r.idx == 0) {
     bool type_inference = r.isNone(4);
     const auto inferred_dispatch_key = denseTypeIdWithDefault(r, 7, dispatch_key);
     const auto inferred_scalar_type = r.scalartypeWithDefault(4, scalar_type);
-    const auto inferred_crow_indices_type = r.scalartypeWithDefault(0, kInt);
-    const auto inferred_col_indices_type = r.scalartypeWithDefault(1, kInt);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(7));    
 
-    Tensor crow_indices =  internal_new_from_data(inferred_dispatch_key, inferred_crow_indices_type, r.deviceOptional(7), r.pyobject(0),
-                                              /*copy_variables=*/false, /*copy_numpy=*/true,
-                                              /*type_inference=*/false);
-    Tensor col_indices = internal_new_from_data(inferred_dispatch_key, inferred_col_indices_type, r.deviceOptional(7), r.pyobject(1),
-                                              /*copy_variables=*/false, /*copy_numpy=*/true,
-                                              /*type_inference=*/false);
+    Tensor crow_indices =  internal_new_from_data(inferred_dispatch_key,
+      crow_indices_scalar_type, r.deviceOptional(7), r.pyobject(0),
+      /*copy_variables=*/false, /*copy_numpy=*/true,
+      /*type_inference=*/false);
+    Tensor col_indices = internal_new_from_data(inferred_dispatch_key, 
+      col_indices_scalar_type, r.deviceOptional(7), r.pyobject(1),
+      /*copy_variables=*/false, /*copy_numpy=*/true,
+      /*type_inference=*/false);
     Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(7), r.pyobject(2),
                                             /*copy_variables=*/false, /*copy_numpy=*/true,
                                             /*type_inference=*/type_inference);
@@ -655,19 +660,19 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     bool type_inference = r.isNone(3);
     const auto inferred_dispatch_key = denseTypeIdWithDefault(r, 6, dispatch_key);
     const auto inferred_scalar_type = r.scalartypeWithDefault(3, scalar_type);
-    const auto inferred_crow_indices_type = r.scalartypeWithDefault(0, kInt);
-    const auto inferred_col_indices_type = r.scalartypeWithDefault(1, kInt);
     at::OptionalDeviceGuard device_guard(r.deviceOptional(6));
 
-    Tensor crow_indices = internal_new_from_data(inferred_dispatch_key, inferred_crow_indices_type, r.deviceOptional(6),
-                                                r.pyobject(0), /*copy_variables=*/false, /*copy_numpy=*/true,
-                                                /*type_inference=*/false);
-    Tensor col_indices = internal_new_from_data(inferred_dispatch_key, inferred_col_indices_type, r.deviceOptional(6),
-                                                r.pyobject(1), /*copy_variables=*/false, /*copy_numpy=*/true,
-                                                /*type_inference=*/false);
     Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(6),
                                            r.pyobject(2), /*copy_variables=*/false, /*copy_numpy=*/true,
-                                           /*type_inference=*/false);
+                                           /*type_inference=*/type_inference);
+    Tensor crow_indices = internal_new_from_data(legacyExtractDispatchKey(values.key_set()),
+      crow_indices_scalar_type, r.deviceOptional(6),
+      r.pyobject(0), /*copy_variables=*/false, /*copy_numpy=*/true,
+      /*type_inference=*/false);
+    Tensor col_indices = internal_new_from_data(legacyExtractDispatchKey(values.key_set()), 
+      col_indices_scalar_type, r.deviceOptional(6),
+      r.pyobject(1), /*copy_variables=*/false, /*copy_numpy=*/true,
+      /*type_inference=*/false);
     return at::sparse_csr_tensor(crow_indices, col_indices, values, 
                                  options(inferred_dispatch_key, inferred_scalar_type).layout(at::kSparseCsr)).set_requires_grad(r.toBool(7));
   }

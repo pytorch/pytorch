@@ -40,12 +40,18 @@ namespace at { namespace native {
 #include <ATen/mkl/Descriptors.h>
 #include <ATen/mkl/Limits.h>
 
+#ifdef MKL_LP64
+  #define TORCH_INT_TYPE kInt
+#else
+  #define TORCH_INT_TYPE kLong
+#endif
+
 namespace at { namespace native {
     using namespace at::sparse;
     
-    static inline void sparse_mm_mkl_impl(float * res, int32_t * col_indices, int32_t * crow_indices, float * values,
+    static inline void sparse_mm_mkl_impl(float * res, MKL_INT * col_indices, MKL_INT * crow_indices, float * values,
                                           float * dense, float * t, float alpha, float beta,
-                                          int32_t nrows, int32_t ncols, int32_t dense_ncols) {
+                                          MKL_INT nrows, MKL_INT ncols, MKL_INT dense_ncols) {
       sparse_matrix_t A = 0;
       matrix_descr desc;
       desc.type = SPARSE_MATRIX_TYPE_GENERAL;
@@ -59,12 +65,10 @@ namespace at { namespace native {
       mkl_sparse_destroy(A);
     }
 
-    // TODO: The types here are long int32_t but int32_t = LongTensor only when using lp64 for MKL. SHould we resort
-    // to using IntTensor for the indices and crow_indices?
-    static inline void sparse_mm_mkl_impl(double * res, int32_t * col_indices, int32_t * crow_indices,
+    static inline void sparse_mm_mkl_impl(double * res, MKL_INT * col_indices, MKL_INT * crow_indices,
                                           double * values, 
                                           double * dense, double * t, double alpha, double beta, 
-                                          int32_t nrows, int32_t ncols, int32_t dense_ncols) {
+                                          MKL_INT nrows, MKL_INT ncols, MKL_INT dense_ncols) {
       sparse_matrix_t A = 0;
       matrix_descr desc;
       desc.type = SPARSE_MATRIX_TYPE_GENERAL;
@@ -84,8 +88,8 @@ namespace at { namespace native {
                                               const Tensor& dense, const Tensor& t, Scalar alpha,
                                               Scalar beta, IntArrayRef size, IntArrayRef dense_size) {
       sparse_mm_mkl_impl(res.data_ptr<scalar_t>(),
-                         col_indices.data_ptr<int32_t>(),
-                         crow_indices.data_ptr<int32_t>(),
+                         col_indices.data_ptr<MKL_INT>(),
+                         crow_indices.data_ptr<MKL_INT>(),
                          values.data_ptr<scalar_t>(),
                          dense.data_ptr<scalar_t>(),
                          t.data_ptr<scalar_t>(),
@@ -94,12 +98,29 @@ namespace at { namespace native {
                          size[0], size[1], dense_size[1]);
     }
 
+    static bool inline is_mkl_int32_index() {
+#ifdef MKL_LP64
+      return true;
+#else
+      return false;
+#endif
+    }
+
   Tensor _sparse_mm_mkl_(Tensor& self, const SparseTensor& sparse_, const Tensor& dense,
                         const Tensor& t, Scalar alpha, Scalar beta) {
+    if (is_mkl_int32_index()) {
+      if (sparse_.crow_indices().scalar_type() != kInt) {
+        TORCH_WARN("Pytorch is compiled with MKL LP64 and will convert crow_indices to int32.");
+      }
+      if (sparse_.col_indices().scalar_type() != kInt) {
+        TORCH_WARN("Pytorch is compiled with MKL LP64 and will convert col_indices to int32.");
+      }
+    }
+
     AT_DISPATCH_FLOATING_TYPES(
       dense.scalar_type(), "addmm_sparse_csr_dense", [&] {
-        sparse_mm_mkl_template<scalar_t>(self, sparse_.col_indices(),
-                                         sparse_.crow_indices(), sparse_.values(), dense, t,
+        sparse_mm_mkl_template<scalar_t>(self, sparse_.col_indices().toType(TORCH_INT_TYPE),
+                                         sparse_.crow_indices().toType(TORCH_INT_TYPE), sparse_.values(), dense, t,
                                          alpha, beta, sparse_.sizes(), dense.sizes());
     });
     return self;

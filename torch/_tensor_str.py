@@ -315,6 +315,29 @@ def _str_intern(inp):
         if values.numel() == 0:
             values_str += ', size=' + str(tuple(values.shape))
         tensor_str = indices_prefix + indices_str + '),\n' + ' ' * indent + values_prefix + values_str + ')'
+    elif self.is_sparse_csr:
+        suffixes.append('size=' + str(tuple(self.shape)))
+        suffixes.append('nnz=' + str(self._nnz()))
+        if not has_default_dtype:
+            suffixes.append('dtype=' + str(self.dtype))
+        crow_indices_prefix = 'crow_indices=tensor('
+        crow_indices = self.crow_indices().detach()
+        crow_indices_str = _tensor_str(crow_indices, indent + len(crow_indices_prefix))
+        if crow_indices.numel() == 0:
+            crow_indices_str += ', size=' + str(tuple(crow_indices.shape))
+        col_indices_prefix = 'col_indices=tensor('
+        col_indices = self.col_indices().detach()
+        col_indices_str = _tensor_str(col_indices, indent + len(col_indices_prefix))
+        if col_indices.numel() == 0:
+            col_indices_str += ', size=' + str(tuple(col_indices.shape))
+        values_prefix = 'values=tensor('
+        values = self.values().detach()
+        values_str = _tensor_str(values, indent + len(values_prefix))
+        if values.numel() == 0:
+            values_str += ', size=' + str(tuple(values.shape))
+        tensor_str = crow_indices_prefix + crow_indices_str + '),\n' + ' ' * indent +\
+            col_indices_prefix + col_indices_str + '),\n' + ' ' * indent +\
+            values_prefix + values_str + ')'
     elif self.is_quantized:
         suffixes.append('size=' + str(tuple(self.shape)))
         if not has_default_dtype:

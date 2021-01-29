@@ -42,11 +42,6 @@ void SparseCsrTensorImpl::resize_and_clear_(int64_t nnz_size, IntArrayRef size) 
   auto empty_col_indices = at::empty(nnz_size, col_indices().options());
   auto empty_values = at::empty(nnz_size, values().options());
 
-  TORCH_CHECK(empty_col_indices.scalar_type() == kInt, 
-    "empty_col_indices must be an int32 type, but got: ", empty_col_indices.dtype());
-  TORCH_CHECK(empty_crow_indices.scalar_type() == kInt,
-    "empty_crow_indices must be int32 type, but got: ",   empty_crow_indices.dtype());
-
   crow_indices_ = empty_crow_indices;
   col_indices_ = empty_col_indices;
   values_ = empty_values;
@@ -64,6 +59,18 @@ void SparseCsrTensorImpl::resize_as_(const Tensor& src) {
   
 void SparseCsrTensorImpl::set_member_tensors_unsafe(const Tensor& crow_indices, const Tensor& col_indices,
                                                       const Tensor& values) {
+  auto crow_indices_type = crow_indices.scalar_type();
+  auto col_indices_type = col_indices.scalar_type();
+
+  TORCH_CHECK(crow_indices_type == col_indices_type, "both crow_indices and col_indices should have the same type.");
+  TORCH_CHECK(crow_indices_type == kInt || crow_indices_type == kLong, 
+              "crow_indices must be an int32 or int64 type, but got: ", crow_indices_type);
+  TORCH_CHECK(col_indices_type == kInt || col_indices_type == kLong,
+              "col_indices must be int32 or int64 type, but got: ", col_indices_type);
+  TORCH_CHECK(values.scalar_type() == typeMetaToScalarType(dtype()), 
+              "dtype of values (", values.scalar_type(), ") must match dtype of sparse tensor (", 
+              typeMetaToScalarType(dtype()), ")");
+
   TORCH_CHECK(col_indices.layout() == kStrided, 
               "expected col_indices to be a dense tensor, but got indices of layout ", 
               col_indices.layout());
@@ -90,14 +97,6 @@ void SparseCsrTensorImpl::set_member_tensors_unsafe(const Tensor& crow_indices, 
   TORCH_CHECK(col_indices.dim() == 1, "col_indices must have dim=1 but got col_indices.dim()=",
               col_indices.dim()); 
   TORCH_CHECK(values.dim() == 1, "values must have dim=1 but got values.dim()=", values.dim());
-
-  TORCH_CHECK(col_indices.scalar_type() == kInt, "col_indices must be an int32 type, but got: ", 
-              col_indices.dtype());
-  TORCH_CHECK(crow_indices.scalar_type() == kInt, "crow_indices must be int32 type, but got: ", 
-              crow_indices.dtype());
-  TORCH_CHECK(values.scalar_type() == typeMetaToScalarType(dtype()), 
-              "dtype of values (", values.scalar_type(), ") must match dtype of sparse tensor (", 
-              typeMetaToScalarType(dtype()), ")");
 
   crow_indices_ = crow_indices;
   col_indices_ = col_indices;

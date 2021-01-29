@@ -55,9 +55,8 @@ Tensor sparse_csr_tensor(const Tensor& crow_indices, const Tensor& col_indices,
   
   std::vector<int64_t> size(2);
   size[0] = crow_indices.numel() - 1;
-  Tensor max_col_indices = std::get<0>(col_indices.max(1, false));
-  auto max_col_indices_accessor = max_col_indices.accessor<int64_t, 1>();
-  size[1] = max_col_indices_accessor[0];
+  Tensor max_col_indices = std::get<0>(col_indices.max(0, false));
+  size[1] = *max_col_indices.data_ptr<int64_t>() + 1;
 
   SparseTensor self = new_csr_tensor(options);
   get_sparse_csr_impl(self)->resize_and_clear_(values.numel(), size);
