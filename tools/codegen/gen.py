@@ -182,16 +182,23 @@ Target = Enum('Target', ('DEFINITION', 'DECLARATION', 'REGISTRATION'))
 
 # Dispatch keys that "support all backends".  These codegen slightly differently
 # then backend specific keys.
-def is_generic_dispatch_key(dk: str) -> bool:
-    return dk in {'DefaultBackend', 'Math'}
+def is_generic_dispatch_key(dk: DispatchKey) -> bool:
+    return dk in {DispatchKey.DefaultBackend, DispatchKey.Math}
 
 # CUDA specific dispatch keys
-def is_cuda_dispatch_key(dk: str) -> bool:
-    return 'CUDA' in dk
+def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
+    return dk in {
+        DispatchKey.CUDA,
+        DispatchKey.QuantizedCUDA,
+        DispatchKey.ComplexCUDA,
+        DispatchKey.SparseCUDA,
+        DispatchKey.AutogradCUDA,
+        DispatchKey.CUDATensorId,
+    }
 
 # Structured kernel generation is only supported for certain key types;
 # otherwise use old-style
-def is_structured_dispatch_key(dk: str) -> bool:
+def is_structured_dispatch_key(dk: DispatchKey) -> bool:
     return dk in STRUCTURED_DISPATCH_KEYS
 
 # Generates RegisterSchema.cpp.  Depending on the selector, either
@@ -227,7 +234,7 @@ class RegisterSchema:
 #     directly to kernels, but with user-friendly cpp-style API
 @dataclass(frozen=True)
 class RegisterDispatchKey:
-    dispatch_key: str
+    dispatch_key: DispatchKey
 
     target: Target
 
@@ -265,7 +272,7 @@ void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
 """
 
     def gen_structured_class_set_output_body(self, k: SchemaKind) -> str:
-        if self.dispatch_key == 'CUDA':
+        if self.dispatch_key == DispatchKey.CUDA:
             maybe_set_guard = """
 auto current_device = guard_.current_device();
 if (C10_UNLIKELY(current_device.has_value())) {
@@ -279,7 +286,7 @@ if (C10_UNLIKELY(current_device.has_value())) {
             maybe_set_guard = ''
 
         if k is SchemaKind.functional:
-            if self.dispatch_key == "Meta":
+            if self.dispatch_key == DispatchKey.Meta:
                 return """
 if (strides.empty()) {
     outputs_[output_idx] = at::empty_meta(sizes, options);
@@ -290,10 +297,10 @@ if (strides.empty()) {
             else:
                 expanded_topts = "optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), " \
                     "options.device_opt(), options.pinned_memory_opt()"
-                if self.dispatch_key == "CPU":
+                if self.dispatch_key == DispatchKey.CPU:
                     empty_impl = "at::native::empty_cpu"
                     empty_strided_impl = "at::native::empty_strided_cpu"
-                elif self.dispatch_key == "CUDA":
+                elif self.dispatch_key == DispatchKey.CUDA:
                     empty_impl = "at::native::empty_cuda"
                     empty_strided_impl = "at::native::empty_strided_cuda"
                 else:
@@ -348,7 +355,7 @@ if (!strides.empty()) {{
             assert len(f.func.arguments.out) == 1, "multi-out structured not supported yet"
             output_type = "std::reference_wrapper<Tensor>"
 
-        if self.dispatch_key == 'CUDA':
+        if self.dispatch_key == DispatchKey.CUDA:
             if self.rocm:
                 guard_field = 'c10::hip::OptionalHIPGuardMasqueradingAsCUDA guard_;'
             else:
@@ -369,7 +376,7 @@ struct {class_name} final : public {parent_class} {{
 """
 
     def gen_structured(self, g: StructuredNativeFunctions) -> List[str]:
-        if self.dispatch_key == 'Meta':
+        if self.dispatch_key == DispatchKey.Meta:
             assert self.dispatch_key not in g.out.dispatch, \
                 "Do not explicitly specify Meta dispatch key on structured " \
                 "functions, they will be automatically generated for you"
@@ -412,7 +419,7 @@ struct {class_name} final : public {parent_class} {{
                 return f"TORCH_API {cpp_sig.decl()};\n"
 
             elif self.target is Target.DEFINITION:
-                if self.dispatch_key == 'Meta':
+                if self.dispatch_key == DispatchKey.Meta:
                     class_name = f"structured_{meta.name(g)}_meta_{k.name}"
                     parent_class = f"at::meta::{meta.name(g)}"
                 else:
@@ -434,7 +441,7 @@ struct {class_name} final : public {parent_class} {{
                     ret_expr = out_expr
                     op_init = f"{class_name} op({out_expr});"
 
-                if self.dispatch_key == 'Meta':
+                if self.dispatch_key == DispatchKey.Meta:
                     impl_call = ""
                 else:
                     impl_call = f"op.impl({functional_exprs}, {out_expr});"
@@ -615,7 +622,7 @@ class ComputeFunction:
 
             dispatcher_exprs = translate(sig.arguments(), dispatcher_sig.arguments())
             if self.is_redispatching_function:
-                dispatcher_exprs_str = ', '.join(['dispatchKeySet'] + [a.expr for a in dispatcher_exprs])
+                dispatcher_exprs_str = ', '.join(['dispatchKey'] + [a.expr for a in dispatcher_exprs])
                 dispatcher_call = 'redispatch'
             else:
                 dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
@@ -658,9 +665,10 @@ class ComputeTensorMethod:
         sig_group = CppSignatureGroup.from_native_function(f, method=True, fallback_binding=f.manual_cpp_binding)
 
         if self.target is Target.DECLARATION:
-            result = f"{sig_group.signature.decl(is_redispatching_function=self.is_redispatching_function)} const;\n"
+            prefix = '_redispatch_' if self.is_redispatching_function else ''
+            result = f"{sig_group.signature.decl(prefix=prefix, is_redispatching_function=self.is_redispatching_function)} const;\n"
             if sig_group.faithful_signature is not None:
-                result += f"{sig_group.faithful_signature.decl(is_redispatching_function=self.is_redispatching_function)} const;\n"
+                result += f"{sig_group.faithful_signature.decl(prefix=prefix, is_redispatching_function=self.is_redispatching_function)} const;\n"
             return result
 
         assert self.target is Target.DEFINITION
@@ -676,15 +684,17 @@ class ComputeTensorMethod:
 
             dispatcher_exprs = translate(sig.arguments(), dispatcher_sig.arguments(), method=True)
             if self.is_redispatching_function:
-                dispatcher_exprs_str = ', '.join(['dispatchKeySet'] + [a.expr for a in dispatcher_exprs])
+                dispatcher_exprs_str = ', '.join(['dispatchKey'] + [a.expr for a in dispatcher_exprs])
+                prefix = 'Tensor::_redispatch_'
                 dispatcher_call = 'redispatch'
             else:
                 dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
+                prefix = 'Tensor::'
                 dispatcher_call = 'call'
 
             return f"""
 // aten::{f.func}
-{sig.defn(prefix="Tensor::", is_redispatching_function=self.is_redispatching_function)} const {{
+{sig.defn(prefix=prefix, is_redispatching_function=self.is_redispatching_function)} const {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
         .typed<{dispatcher_sig.type()}>();
@@ -1075,7 +1085,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         ('device_guard', f.device_guard),
         ('with_gil', False),
         ('deprecated', False),
-        ('has_math_kernel', 'Math' in f.dispatch),
+        ('has_math_kernel', DispatchKey.Math in f.dispatch),
     ])
 
 @with_native_function
@@ -1087,7 +1097,7 @@ def compute_registration_declarations(f: NativeFunction) -> str:
     comment_data : Dict[str, str] = {
         'schema': f'aten::{f.func}',
         # TODO: What exactly is the semantics of the 'dispatch' field?
-        'dispatch': str(f.dispatch.keys() != {'Math'}),
+        'dispatch': str(f.dispatch.keys() != {DispatchKey.Math}),
         'default': str(any(is_generic_dispatch_key(k) for k in f.dispatch))
     }
     return f"""{returns_type} {name}({args_str}); // {json.dumps(comment_data)}
@@ -1292,30 +1302,28 @@ def main() -> None:
 #include <ATen/hip/HIPDevice.h>
 #include <ATen/hip/HIPContext.h>'''
 
-    # NB: substrings in these dispatch keys matter, we do tests to see if
-    # a key contains, e.g., CUDA to classify it as a CUDA backend
     dispatch_keys = [
-        "CPU",
-        "SparseCPU",
-        "MkldnnCPU",
-        "CUDA",
-        "SparseCUDA",
-        "QuantizedCPU",
-        "QuantizedCUDA",
-        "Math",
-        "DefaultBackend",
+        DispatchKey.CPU,
+        DispatchKey.SparseCPU,
+        DispatchKey.MkldnnCPU,
+        DispatchKey.CUDA,
+        DispatchKey.SparseCUDA,
+        DispatchKey.QuantizedCPU,
+        DispatchKey.QuantizedCUDA,
+        DispatchKey.Math,
+        DispatchKey.DefaultBackend,
         # Meta is a magic key: it is automatically generated for structured
         # kernels
-        "Meta",
+        DispatchKey.Meta,
     ]
     # Only a limited set of dispatch keys get CPUFunctions.h headers generated
     # for them; this is the set
     functions_keys = {
-        "CPU",
-        "CUDA",
+        DispatchKey.CPU,
+        DispatchKey.CUDA,
     }
     if options.backend_whitelist:
-        dispatch_keys = [k for k in dispatch_keys if is_generic_dispatch_key(k) or k in options.backend_whitelist]
+        dispatch_keys = [k for k in dispatch_keys if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist]
 
     for dispatch_key in dispatch_keys:
         fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
@@ -1323,8 +1331,8 @@ def main() -> None:
         fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
             'extra_cuda_headers': extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else '',
             'legacy_th_headers':
-                '#include <ATen/LegacyTHFunctionsCPU.h>' if dispatch_key == "CPU" else
-                '#include <ATen/LegacyTHFunctionsCUDA.h>' if dispatch_key == "CUDA" else
+                '#include <ATen/LegacyTHFunctionsCPU.h>' if dispatch_key == DispatchKey.CPU else
+                '#include <ATen/LegacyTHFunctionsCUDA.h>' if dispatch_key == DispatchKey.CUDA else
                 '',
             'DispatchKey': dispatch_key,
             'dispatch_definitions': list(concatMap(
@@ -1377,11 +1385,11 @@ def main() -> None:
     })
     core_fm.write('TensorBody.h', lambda: {
         'tensor_method_declarations': list(mapMaybe(ComputeTensorMethod(Target.DECLARATION, is_redispatching_function=False), native_functions)),
-        # 'tensor_method_redispatch_declarations': list(mapMaybe(ComputeTensorMethod(Target.DECLARATION, is_redispatching_function=True), native_functions)),
+        'tensor_method_redispatch_declarations': list(mapMaybe(ComputeTensorMethod(Target.DECLARATION, is_redispatching_function=True), native_functions)),
     })
     core_fm.write('TensorMethods.cpp', lambda: {
         'tensor_method_definitions': list(mapMaybe(ComputeTensorMethod(Target.DEFINITION, is_redispatching_function=False), native_functions)),
-        # 'tensor_method_redispatch_definitions': list(mapMaybe(ComputeTensorMethod(Target.DEFINITION, is_redispatching_function=True), native_functions)),
+        'tensor_method_redispatch_definitions': list(mapMaybe(ComputeTensorMethod(Target.DEFINITION, is_redispatching_function=True), native_functions)),
     })
     core_fm.write('ATenOpList.cpp', lambda: {
         'aten_ops': list(mapMaybe(compute_aten_op, native_functions)),

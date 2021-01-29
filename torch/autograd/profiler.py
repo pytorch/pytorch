@@ -223,7 +223,7 @@ class EventList(list):
                     '"pid": "CPU functions", '
                     '"args": {}}, '
                     % (
-                        evt.name,
+                        evt.trace_name,
                         evt.time_range.start,
                         evt.time_range.elapsed_us(),
                         evt.thread
@@ -241,7 +241,7 @@ class EventList(list):
                             '"pid": "CPU functions", '
                             '"id": %s, '
                             '"cat": "cpu_to_cuda", '
-                            '"args": {}}, ' % (evt.name, evt.time_range.start,
+                            '"args": {}}, ' % (evt.trace_name, evt.time_range.start,
                                                evt.thread, next_id))
                     f.write('{"name": "%s", '
                             '"ph": "f", '
@@ -847,10 +847,11 @@ class FunctionEvent(FormattedTimesMixin):
             self, id, name, thread, start_us, end_us, fwd_thread=None, input_shapes=None,
             stack=None, scope=0, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
             is_remote=False, sequence_nr=-1, node_id=-1, device_type=DeviceType.CPU, device_index=0,
-            is_legacy=False, flops=None):
+            is_legacy=False, flops=None, trace_name=None):
         self.id: int = id
         self.node_id: int = node_id
         self.name: str = name
+        self.trace_name: str = trace_name if trace_name is not None else self.name
         self.time_range: Interval = Interval(start_us, end_us)
         self.thread: int = thread
         self.fwd_thread: Optional[int] = fwd_thread
@@ -1101,6 +1102,18 @@ def filter_name(name):
     ]
     return name in filtered_out_names
 
+# Demangles and optionally rewrites the provided event name,
+# with_wildcard - whether to replace certain numbered event names
+# with a wildcard name to aggregate them together in the profiler table
+# output
+def rewrite_name(name, with_wildcard=False):
+    string_table = StringTable()
+    name = string_table[name]
+    if with_wildcard:
+        if name.startswith("ProfilerStep#"):
+            name = "ProfilerStep*"
+    return name
+
 # Parsing of kineto profiler events
 def parse_kineto_results(result):
     # result.events() has most of the events - PyTorch op-level and device-level events
@@ -1120,7 +1133,6 @@ def parse_kineto_results(result):
     assert start_record is not None, "Invalid profiler output, __start_profile is missing"
 
     # Create and return FunctionEvent list
-    string_table = StringTable()
     function_events = []
     cuda_corr_map: Dict[int, List[torch.autograd.KinetoEvent]] = {}
     for kineto_event in result.events():
@@ -1142,7 +1154,8 @@ def parse_kineto_results(result):
         is_async = kineto_event.start_thread_id() != kineto_event.end_thread_id()
         fe = FunctionEvent(
             id=kineto_event.correlation_id(),
-            name=string_table[kineto_event.name()],
+            name=rewrite_name(name=kineto_event.name(), with_wildcard=True),
+            trace_name=rewrite_name(name=kineto_event.name(), with_wildcard=False),
             thread=kineto_event.start_thread_id(),
             start_us=rel_start_us,
             end_us=rel_end_us,
@@ -1193,7 +1206,6 @@ def parse_legacy_records(thread_records):
     cuda_records = {}
     functions = []
     record_stack = []
-    string_table = StringTable()
 
     # cuda start events and the overall profiler start event don't happen
     # at exactly the same time because we need to record an event on each device
@@ -1271,7 +1283,8 @@ def parse_legacy_records(thread_records):
                 fe = FunctionEvent(
                     id=record.handle(),
                     node_id=record.node_id(),
-                    name=string_table[start.name()],
+                    name=rewrite_name(name=start.name(), with_wildcard=True),
+                    trace_name=rewrite_name(name=start.name(), with_wildcard=False),
                     thread=start.thread_id(),
                     start_us=start_record.cpu_elapsed_us(start),
                     end_us=start_record.cpu_elapsed_us(record),
@@ -1569,6 +1582,14 @@ def build_table(
 
     append(header_sep)
 
+    def trim_path(path, src_column_width):
+        if len(path) > src_column_width:
+            offset = len(path) - src_column_width
+            path = path[offset:]
+            if len(path) > 3:
+                path = "..." + path[3:]
+        return path
+
     event_limit = 0
     for evt in events:
         if event_limit == row_limit:
@@ -1629,14 +1650,14 @@ def build_table(
         if has_stack:
             src_field = ""
             if len(evt.stack) > 0:
-                src_field = evt.stack[0][:src_column_width]
+                src_field = trim_path(evt.stack[0], src_column_width)
             row_values.append(src_field)
         append(row_format.format(*row_values))
 
         if has_stack:
             empty_headers = [""] * (len(headers) - 1)
             for entry in evt.stack[1:MAX_STACK_ENTRY]:
-                append(row_format.format(*(empty_headers + [entry[:src_column_width]])))
+                append(row_format.format(*(empty_headers + [trim_path(entry, src_column_width)])))
             empty_headers.append("")
             append(row_format.format(*empty_headers))
 

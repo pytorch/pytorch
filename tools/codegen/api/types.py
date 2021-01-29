@@ -157,13 +157,14 @@ class CppSignature:
         return n
 
     # Render the C++ declaration for this signature
-    def decl(self, *, is_redispatching_function: bool = False) -> str:
+    def decl(self, *, prefix: str = "", is_redispatching_function: bool = False) -> str:
         returns_type = cpp.returns_type(self.func.returns)
         cpp_args = [a.decl() for a in self.arguments()]
         if is_redispatching_function:
-            cpp_args = ['c10::DispatchKeySet dispatchKeySet'] + cpp_args
+            cpp_args = ['c10::DispatchKey dispatchKey'] + cpp_args
         cpp_args_str = ', '.join(cpp_args)
-        return f"{returns_type} {self.name()}({cpp_args_str})"
+        name = prefix + self.name()
+        return f"{returns_type} {name}({cpp_args_str})"
 
     # Render the C++ definition for this signature, not including
     # the body (with curly braces)
@@ -171,7 +172,7 @@ class CppSignature:
         returns_type = cpp.returns_type(self.func.returns)
         cpp_args = [a.defn() for a in self.arguments()]
         if is_redispatching_function:
-            cpp_args = ['c10::DispatchKeySet dispatchKeySet'] + cpp_args
+            cpp_args = ['c10::DispatchKey dispatchKey'] + cpp_args
         cpp_args_str = ', '.join(cpp_args)
         name = prefix + self.name()
         return f"{returns_type} {name}({cpp_args_str})"
