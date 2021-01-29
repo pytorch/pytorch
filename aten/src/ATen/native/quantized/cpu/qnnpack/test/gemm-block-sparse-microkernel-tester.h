@@ -489,7 +489,6 @@ class GemmBlockSparseMicrokernelTester {
  private:
   size_t mr_{1};
   size_t nr_{1};
-  size_t kr_{1};
   size_t m_{1};
   size_t n_{1};
   size_t k_{1};
