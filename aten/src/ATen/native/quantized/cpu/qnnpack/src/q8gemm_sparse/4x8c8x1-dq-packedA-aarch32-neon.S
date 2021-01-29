@@ -102,8 +102,6 @@ BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_8x1_ukernel_4x8_packedA__aarch32_neon
     # r7 = blocks_id_ptr
     LDR r7, [sp, 104]
 
-    .p2align 5
-0:
     VEOR q8, q8, q8
     VEOR q9, q9, q9
     VEOR q10, q10, q10
@@ -135,6 +133,7 @@ BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_8x1_ukernel_4x8_packedA__aarch32_neon
     SUBS r8, r8, 2
     BLO 1f
 
+    .p2align 5
 k_loop:
     # Load 2 non zero blocks of weights. Each block = 8x1.
     VLD1.8 {d0}, [r6]!
