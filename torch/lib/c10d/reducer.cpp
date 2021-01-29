@@ -58,7 +58,8 @@ Reducer::Reducer(
       bucket_bytes_cap_(bucket_bytes_cap),
       divFactor_(kUnsetDivFactor),
       comm_hook_(nullptr),
-      ddp_logging_data_(std::move(std::make_unique<c10::DDPLoggingData>())) {
+      ddp_logging_data_(std::move(std::make_unique<c10::DDPLoggingData>())),
+      num_iterations_(0) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
@@ -701,6 +702,10 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
   // - found a bucket that's not yet ready for reduction.
   for (; next_bucket_ < buckets_.size() && buckets_[next_bucket_].pending == 0;
        next_bucket_++) {
+    num_buckets_ready_++;
+    if (num_buckets_ready_ == 1) {
+      comm_start_time_ = current_time_in_nanos();
+    }
     auto& bucket = buckets_[next_bucket_];
     std::vector<at::Tensor> tensors;
     tensors.reserve(bucket.replicas.size());
@@ -979,6 +984,12 @@ void Reducer::populate_bucket_views_out(
   }
 }
 
+void Reducer::prepare_for_forward() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  num_iterations_++;
+  forward_start_time_ = current_time_in_nanos();
+}
+
 // Traverse the autograd graph starting at the specified output.
 // All parameters for which we have a pointer to their gradient accumulation
 // functions, but don't show up in the autograd graph will be marked ready for
@@ -995,6 +1006,16 @@ void Reducer::prepare_for_backward(
   expect_autograd_hooks_ = true;
   next_bucket_ = 0;
   backward_stats_base_ = current_time_in_nanos();
+
+  // Reset num_buckets_ready_ at the beginning of backward computation
+  // in each iteration.
+  num_buckets_ready_ = 0;
+
+  // Set ith iteration when the runtime stats are set
+  ddp_logging_data_->iteration = num_iterations_;
+  set_avg_forward_compute_time();
+  set_rebuilt_bucket_stats();
+
   for (auto& bucket : buckets_) {
     for (auto& replica : bucket.replicas) {
       replica.pending = replica.variables.size();
@@ -1059,6 +1080,8 @@ void Reducer::prepare_for_backward(
       "to have unused parameters."
     );
   }
+
+  set_unused_parameter_stats();
 }
 
 void Reducer::copy_bucket_to_grad(
@@ -1187,6 +1210,9 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
 }
 
 void Reducer::finalize_backward() {
+  set_avg_backward_compute_time();
+  set_avg_compute_comm_overlap_time();
+
   // No longer expect autograd hooks to fire after this function returns.
   TORCH_INTERNAL_ASSERT(expect_autograd_hooks_);
   expect_autograd_hooks_ = false;
@@ -1257,6 +1283,8 @@ void Reducer::finalize_backward() {
     }
     local_used_maps_reduced_ = false;
   }
+
+  set_avg_backward_comm_time();
 }
 
 void Reducer::runGradCallbackForVariable(
@@ -1498,16 +1526,18 @@ void Reducer::set_parameter_stats() {
   }
 }
 
-void Reducer::set_bucket_stats() {
+std::string Reducer::get_bucket_stats() {
+  std::string bucket_sizes = "";
   for (const auto& bucket : buckets_) {
     const auto& variables = bucket.replicas[0].variables;
     int bucket_size = 0;
     for (const auto& v : variables) {
       bucket_size += v.numel() * v.element_size();
     }
-    ddp_logging_data_->bucket_sizes += std::to_string(bucket_size);
-    ddp_logging_data_->bucket_sizes += ", ";
+    bucket_sizes += std::to_string(bucket_size);
+    bucket_sizes += ", ";
   }
+  return bucket_sizes;
 }
 
 void Reducer::set_construction_logging_data(
@@ -1523,8 +1553,9 @@ void Reducer::set_construction_logging_data(
   ddp_logging_data_->iteration = 0;
   ddp_logging_data_->dtype = std::string(replicas_[0][0].dtype().name());
 
+  ddp_logging_data_->bucket_sizes = get_bucket_stats();
+
   set_parameter_stats();
-  set_bucket_stats();
   set_env_variables();
 
   // DistributedDataParallel constructor input parameters
@@ -1537,6 +1568,47 @@ void Reducer::set_construction_logging_data(
   ddp_logging_data_->backend_name = process_group_->getBackendName();
 
   LogPyTorchDDPUsage(*ddp_logging_data_);
+}
+
+void Reducer::set_unused_parameter_stats() {
+  for (const auto& unused_index : unused_parameters_) {
+    const auto& v
+      = replicas_[unused_index.replica_index][unused_index.variable_index];
+    ddp_logging_data_->unused_parameter_size += v.numel() * v.element_size();
+  }
+}
+
+void Reducer::set_rebuilt_bucket_stats() {
+  ddp_logging_data_->has_rebuilt_buckets = has_rebuilt_bucket_;
+  ddp_logging_data_->rebuilt_bucket_sizes = get_bucket_stats();
+}
+
+void Reducer::set_avg_forward_compute_time() {
+  ddp_logging_data_->avg_forward_compute_time = (
+    (current_time_in_nanos() - forward_start_time_)
+    + ddp_logging_data_->avg_forward_compute_time
+      * (num_iterations_ - 1)) / num_iterations_;
+}
+
+void Reducer::set_avg_backward_compute_time() {
+  ddp_logging_data_->avg_backward_compute_time = (
+    (current_time_in_nanos() - backward_stats_base_)
+    + ddp_logging_data_->avg_backward_compute_time
+      * (num_iterations_ - 1)) / num_iterations_;
+}
+
+void Reducer::set_avg_backward_comm_time() {
+  ddp_logging_data_->avg_backward_comm_time = (
+    (current_time_in_nanos() - comm_start_time_)
+    + ddp_logging_data_->avg_backward_comm_time
+      * (num_iterations_ - 1)) / num_iterations_;
+}
+
+void Reducer::set_avg_compute_comm_overlap_time() {
+  ddp_logging_data_->avg_backward_compute_comm_overlap_time = (
+    (current_time_in_nanos() - comm_start_time_)
+    + ddp_logging_data_->avg_backward_compute_comm_overlap_time
+      * (num_iterations_ - 1)) / num_iterations_;
 }
 
 c10::DDPLoggingData Reducer::get_ddp_logging_data() {

@@ -50,6 +50,10 @@ class Reducer {
   void prepare_for_backward(
       const std::vector<torch::autograd::Variable>& outputs);
 
+  // Called at the begginning of forward() inside DistributedDataParallel,
+  // right now it caputures the starting time of forward in each iteration.
+  void prepare_for_forward();
+
   // Returns the relative time in nanoseconds when gradients were ready,
   // with respect to the time `prepare_for_backward` was called. The outer
   // vector is for model replicas and the inner vector is for parameters.
@@ -112,6 +116,12 @@ class Reducer {
       const std::string& device_ids,
       const std::string&  output_device,
       bool broadcast_buffers);
+  void set_rebuilt_bucket_stats();
+  void set_unused_parameter_stats();
+  void set_avg_forward_compute_time();
+  void set_avg_backward_compute_time();
+  void set_avg_backward_comm_time();
+  void set_avg_compute_comm_overlap_time();
 
   // An Interface for users to get DDPLoggingData and log them
   // in the applications.
@@ -207,7 +217,7 @@ class Reducer {
 
   void set_env_variables();
   void set_parameter_stats();
-  void set_bucket_stats();
+  std::string get_bucket_stats();
 
   // A bucket replica represents [1..N] gradients to be reduced,
   // with the same dtype, on the same device.
@@ -338,6 +348,11 @@ class Reducer {
   int64_t backward_stats_base_;
   std::vector<std::vector<int64_t>> backward_stats_;
 
+  // The timestamp of forward call starting time in each iteration.
+  int64_t forward_start_time_;
+  // The timestamp of first communication call starting time in each iteration.
+  int64_t comm_start_time_;
+
   // Following variables are to help build dynamic bucket order
   bool has_rebuilt_bucket_;
   std::vector<at::Tensor> rebuilt_params_;
@@ -378,6 +393,13 @@ class Reducer {
   // ddp_logging_data_ is used to hold all the ddp related logging
   // data fields.
   std::unique_ptr<c10::DDPLoggingData> ddp_logging_data_;
+
+  // track the number of iterations trained by users
+  long num_iterations_;
+
+  // track the number of buckets that have been ready for
+  // communication calls like allReduce or communication hooks.
+  int num_buckets_ready_;
 };
 
 // This is equivalent to take_tensors but returns indices into the
