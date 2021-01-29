@@ -426,9 +426,6 @@ std::vector<int64_t> ComputeShapeFromReshape(
       break;
     }
   }
-  if (!reshape_has_zero) {
-    return reshape;
-  }
   int minus_one_pos = -1;
   auto input_shape_size = static_cast<int>(input_shape.size());
   for (auto i = 0; i < input_shape_size; i++) {
@@ -436,6 +433,9 @@ std::vector<int64_t> ComputeShapeFromReshape(
       minus_one_pos = i;
       break;
     }
+  }
+  if (!reshape_has_zero && minus_one_pos == -1) {
+    return reshape;
   }
   std::vector<int64_t> final_shape;
   double shape_ratio = 1.0;
