@@ -2,7 +2,6 @@
 
 #include <ATen/core/builtin_function.h>
 #include <ATen/core/jit_type.h>
-#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/backends/backend_resolver.h>
 

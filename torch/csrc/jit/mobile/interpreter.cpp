@@ -19,6 +19,27 @@ InterpreterState::InterpreterState(std::shared_ptr<Code> code)
   registers_.resize(code_->register_size_);
 }
 
+namespace{
+void createObject(Stack& stack, const at::ClassTypePtr& type) {
+  auto userObj = c10::ivalue::Object::create(
+      c10::StrongTypePtr(type->compilation_unit(), type),
+      type->numAttributes());
+  push(stack, std::move(userObj));
+}
+
+void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
+  at::TypePtr ty = pop(stack).type();
+  for (const at::TypePtr& candidate : types) {
+    if (ty->isSubtypeOf(candidate)) {
+      push(stack, true);
+      return;
+    }
+  }
+
+  push(stack, false);
+}
+}
+
 using namespace at;
 
 bool InterpreterState::run(Stack& stack) {
@@ -173,6 +194,19 @@ bool InterpreterState::run(Stack& stack) {
       case NAMED_TUPLE_CONSTRUCT: {
         auto type = code_->types_[inst.X]->expect<at::TupleType>();
         namedTupleConstruct(stack, type, inst.N);
+        ++pc;
+      } break;
+      case CREATE_OBJECT: {
+        auto type =
+            code_->types_[inst.X]->expect<c10::ClassType>();
+        createObject(stack, type);
+        ++pc;
+      } break;
+      case ISINSTANCE: {
+        at::ArrayRef<TypePtr> types(
+            &(code_->types_[inst.X]),
+            &(code_->types_[inst.X + inst.N]));
+        isinstance(stack, types);
         ++pc;
       } break;
       case WARN: {

@@ -23,11 +23,11 @@ const std::string& Function::name() const {
 }
 
 void Function::append_instruction(OpCode op, int X, int N) {
-  TORCH_CHECK(
-      op != CREATE_OBJECT,
-      "CREATE_OBJECT is not supported in mobile module. ",
-      "Workaround: instead of using arbitrary class type (class Foo()), ",
-      "define a pytorch class (class Foo(torch.nn.Module)).");
+//  TORCH_CHECK(
+//      op != CREATE_OBJECT,
+//      "CREATE_OBJECT is not supported in mobile module. ",
+//      "Workaround: instead of using arbitrary class type (class Foo()), ",
+//      "define a pytorch class (class Foo(torch.nn.Module)).");
   TORCH_CHECK(
       isOpSupportedInMobile(op),
       toString(op),

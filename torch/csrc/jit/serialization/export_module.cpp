@@ -181,11 +181,11 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
         }
       }
     } else {
-      TORCH_CHECK(
-          ins.op != CREATE_OBJECT,
-          "CREATE_OBJECT is not supported in mobile module. ",
-          "Workaround: instead of using arbitrary class type (class Foo()), ",
-          "define a pytorch class (class Foo(torch.nn.Module)).");
+//      TORCH_CHECK(
+//          ins.op != CREATE_OBJECT,
+//          "CREATE_OBJECT is not supported in mobile module. ",
+//          "Workaround: instead of using arbitrary class type (class Foo()), ",
+//          "define a pytorch class (class Foo(torch.nn.Module)).");
       TORCH_CHECK(
           isOpSupportedInMobile(ins.op),
           toString(ins.op),

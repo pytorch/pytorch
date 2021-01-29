@@ -216,8 +216,15 @@ void parseMethods(
       function->append_constant(constant);
     }
 
+    static const c10::QualifiedName classPrefix = "__torch__.torch.classes";
     for (const auto& t : types_list) {
-      function->append_type(c10::parseType(t.toStringRef()));
+      c10::QualifiedName qn(t.toStringRef());
+      if (classPrefix.isPrefixOf(qn)) {
+        function->append_type(getCustomClass(qn.qualifiedName()));
+      }
+      else {
+        function->append_type(c10::parseType(t.toStringRef()));
+      }
     }
 
     function->set_register_size(register_size);
@@ -341,14 +348,15 @@ c10::IValue BytecodeDeserializer::readArchive(
     return len;
   };
 
-  static const c10::QualifiedName torchPrefix = "__torch__";
+  static const c10::QualifiedName torchPrefix__ = "__torch__";
+  static const c10::QualifiedName torchPrefix = "torch";
   auto type_resolver = [&](const c10::QualifiedName& qn) {
     TypePtr type;
     // HACK: first we check whether the name starts with `__torch__` to tell if
     // it's "supposed" to be a class type. This is a reliable check today, but
     // there is no guarantee that this is the case. The real solution is to
     // merge type parsers so we can share class resolution logic.
-    if (torchPrefix.isPrefixOf(qn)) {
+    if (torchPrefix.isPrefixOf(qn) || torchPrefix__.isPrefixOf(qn)) {
       if (compilation_unit_->get_class(qn) == nullptr) {
         auto typeptr = ClassType::create(qn, compilation_unit_, true);
         compilation_unit_->register_type(typeptr);

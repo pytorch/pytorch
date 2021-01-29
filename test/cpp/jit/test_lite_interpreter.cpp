@@ -351,19 +351,27 @@ TEST(LiteInterpreterTest, ToBackend) {
   fake_dict.insert("", "");
   compile_spec.insert("forward", fake_dict);
   auto any_dict_ty = DictType::create(StringType::get(), AnyType::get());
+  // lowered module
   auto lm = torch::jit::detail::codegen_backend_module(
       "mul_test_backend", m, compile_spec, any_dict_ty);
 
   std::stringstream lms;
   lm.save(lms);
-  lm.save("/Users/myuan/models/backend/backend_c.pt");
-  auto loaded_m = load(lms);
+//  auto loaded_m = load(lms);
+//  lm.save("/Users/myuan/models/backend/backend_c.pt");
 
   auto minput = 5 * torch::ones({});
   auto ref = m.run_method("forward", minput).toTensor().item<float>();
-  auto res = lm.run_method("forward", minput);
-  double output = res.toTensor().item<float>();
-  AT_ASSERT(ref == output);
+  auto res = lm.run_method("forward", minput).toTensor().item<float>();
+  AT_ASSERT(ref == res);
+
+  std::stringstream lmms;
+  lm._save_for_mobile(lmms);
+//  lm._save_for_mobile("/Users/myuan/models/backend/backend_c.ptl");
+  // lowered mobile module
+  auto lmm = _load_for_mobile(lmms);
+  auto lres = lmm.run_method("forward", minput).toTensor().item<float>();
+  AT_ASSERT(ref == lres);
 }
 
 TEST(LiteInterpreterTest, BuiltinFunction) {
