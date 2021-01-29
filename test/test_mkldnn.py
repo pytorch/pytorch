@@ -196,9 +196,10 @@ class TestMkldnn(TestCase):
             if not train:
                 self._test_serialization(mkldnn_conv, (x.to_mkldnn(),))
                 self._test_tracing(mkldnn_conv, (x.to_mkldnn(),))
-            elif train and dim != 1:
+            elif dim != 1:
                 loss2 = y_mkldnn.sum()
                 loss2.backward()
+                self.assertTrue(x2.grad.is_mkldnn)
                 self.assertEqual(x1.grad, x2.grad.to_dense())
                 self.assertEqual(conv.weight.grad,
                                  mkldnn_conv.weight.grad,

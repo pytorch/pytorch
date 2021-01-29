@@ -100,8 +100,7 @@ struct TORCH_API AccumulateGrad : public Node {
       if (!GradMode::is_enabled() &&
           !new_grad.is_sparse() &&
           new_grad.use_count() <= num_expected_refs &&
-          ((!new_grad.is_mkldnn() && utils::obeys_layout_contract(new_grad, variable))
-           || new_grad.is_mkldnn())){
+          (new_grad.is_mkldnn() || utils::obeys_layout_contract(new_grad, variable))){
         // we aren't setting up for double-backward
         // not sparse
         // no other user-visible tensor references new_grad
@@ -171,6 +170,7 @@ struct TORCH_API AccumulateGrad : public Node {
         // 1. `variable_grad` is sparse, and `new_grad` is sparse.
         // 2. `variable_grad` is dense, and `new_grad` is sparse.
         // 3. `variable_grad` is dense, and `new_grad` is dense.
+        // 4. `variable_grad` is mkldnn, and `new_grad` is mkldnn.
         //
         // In all of these four cases, `variable_grad += new_grad` is a
         // valid operation which adds `new_grad` to `variable_grad` in
