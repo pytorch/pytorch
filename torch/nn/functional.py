@@ -3526,7 +3526,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         if not torch.jit.is_scripting() and torch._C._get_tracing_state():
             # make scale_factor a tensor in tracing so constant doesn't get baked in
             output_size = [
-                torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i], dtype=torch.float32)).float()).to(torch.int64)
+                (torch.floor((input.size(i + 2).float() * torch.tensor(scale_factors[i], dtype=torch.float32)).float()))
                 for i in range(dim)
             ]
         else:

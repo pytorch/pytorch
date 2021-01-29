@@ -423,17 +423,6 @@ bool is_float_or_complex_list(PyObject* obj) {
   return true;
 }
 
-static bool is_int(PyObject* obj) {
-  if (THPUtils_checkLong(obj)) {
-    return true;
-  }
-  if (THPVariable_Check(obj)) {
-    auto& var = ((THPVariable*)obj)->cdata;
-    return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
-  }
-  return false;
-}
-
 // argnum is needed for raising the TypeError, it's used in the error message.
 auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded_args, int argnum) -> bool
 {
@@ -461,7 +450,14 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       return false;
     }
     case ParameterType::INT64: {
-      return is_int(obj);
+      if (THPUtils_checkLong(obj)) {
+        return true;
+      }
+      if (THPVariable_Check(obj)) {
+        auto& var = ((THPVariable*)obj)->cdata;
+        return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) && !var.requires_grad() && var.dim() == 0;
+      }
+      return false;
     }
     case ParameterType::DIMNAME: return THPUtils_checkDimname(obj);
     case ParameterType::DIMNAME_LIST: {
@@ -481,7 +477,9 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
         }
         auto item = py::reinterpret_steal<py::object>(
             PySequence_GetItem(obj, 0));
-        return is_int(item.ptr());
+        // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
+        // in an intlist argument Even float or complex scalars
+        return (THPVariable_Check(item.ptr()) || THPUtils_checkIndex(item.ptr()));
       }
       // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
       return size > 0 && THPUtils_checkLong(obj);
