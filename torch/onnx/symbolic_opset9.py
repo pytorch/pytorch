@@ -659,8 +659,10 @@ def prelu(g, self, weight):
         weight = sym_help._unsqueeze_helper(g, weight, list(range(1, self_rank - 1)))
     return g.op("PRelu", self, weight)
 
+
 def silu(g, input):
     return g.op('Mul', input, g.op('Sigmoid', input))
+
 
 def relu(g, input):
     return g.op("Relu", input)
