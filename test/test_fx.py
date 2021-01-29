@@ -14,6 +14,7 @@ from math import sqrt
 from pathlib import Path
 from torch.multiprocessing import Process
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap
+from torch.fx.node import Target
 from torch.fx.experimental import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from copy import deepcopy
@@ -1010,21 +1011,51 @@ class TestFX(JitTestCase):
         gm = torch.fx.symbolic_trace(fn)
 
         class NegSigmSwapInterpreter(Interpreter):
-            def call_function(self, n : Node) -> Any:
-                if n.target == torch.sigmoid:
-                    n = copy.copy(n)
-                    n.target = torch.neg
+            def call_function(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+                if target == torch.sigmoid:
+                    return torch.neg(*args, **kwargs)
                 return super().call_function(n)
 
-            def call_method(self, n : Node) -> Any:
-                if n.target == 'neg':
-                    n = copy.copy(n)
-                    n.target = 'sigmoid'
+            def call_method(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+                if target == 'neg':
+                    call_self, *args_tail = args
+                    return call_self.sigmoid(*args_tail, **kwargs)
                 return super().call_method(n)
 
         input = torch.randn(3, 4)
         result = NegSigmSwapInterpreter(gm).run(input)
         self.assertEqual(result, torch.neg(input).sigmoid())
+
+    def test_interpreter_partial_eval(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 4))
+                self.linear = torch.nn.Linear(4, 5)
+
+            def forward(self, x):
+                return self.linear(x + self.param).clamp(min=0.0, max=1.0)
+
+        gm = torch.fx.symbolic_trace(MyModule())
+        interp = Interpreter(gm)
+        env = {}
+        for node in gm.graph.nodes:
+            if node.op == 'call_module' and node.target == 'linear':
+                env[node] = torch.arange(0, 12, 1).reshape(3, 4) - 6.0
+                break
+        assert len(env) == 1
+        x = torch.randn(3, 4)
+        result = interp.run(x, initial_env=env)
+        self.assertEqual(result, (torch.arange(0, 12, 1).reshape(3, 4) - 6.0).clamp(0.0, 1.0))
+
+    def test_interpreter_star_args(self):
+        def with_star_args(x, *args):
+            return x + args[0]
+
+        gm = torch.fx.symbolic_trace(with_star_args)
+        interp = Interpreter(gm)
+        result = interp.run(torch.ones(3, 4), torch.ones(3, 4), torch.rand(3, 4))
+        self.assertEqual(result, torch.ones(3, 4) * 2.0)
 
     def test_transformer_noop(self):
         class MyModule(torch.nn.Module):
@@ -1052,16 +1083,15 @@ class TestFX(JitTestCase):
         gm = torch.fx.symbolic_trace(fn)
 
         class NegSigmSwapXformer(Transformer):
-            def call_function(self, n : Node) -> Any:
-                if n.target == torch.sigmoid:
-                    n = copy.copy(n)
-                    n.target = torch.neg
+            def call_function(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+                if target == torch.sigmoid:
+                    return torch.neg(*args, **kwargs)
                 return super().call_function(n)
 
-            def call_method(self, n : Node) -> Any:
-                if n.target == 'neg':
-                    n = copy.copy(n)
-                    n.target = 'sigmoid'
+            def call_method(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+                if target == 'neg':
+                    call_self, *args_tail = args
+                    return call_self.sigmoid(*args_tail, **kwargs)
                 return super().call_method(n)
 
         transformed = NegSigmSwapXformer(gm).transform()
@@ -1548,6 +1578,12 @@ class TestFX(JitTestCase):
             self.assertEqual(target, node.target)
             i += 1
         self.assertEqual(i, 3)
+
+    def test_no_mutation(self):
+        from torch.fx.immutable_collections import immutable_list
+        x = immutable_list([3, 4])
+        with self.assertRaisesRegex(NotImplementedError, "new_args"):
+            x[0] = 4
 
 
 def run_getitem_target():

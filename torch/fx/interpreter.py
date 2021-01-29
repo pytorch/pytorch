@@ -1,9 +1,9 @@
 from .graph_module import GraphModule
 from .graph import Graph
-from .node import Argument, Node, map_arg
+from .node import Argument, Node, Target, map_arg
 from .proxy import Proxy
 from .symbolic_trace import Tracer
-from typing import Any, Dict, Iterator, Tuple
+from typing import Any, Dict, Iterator, Optional, Tuple
 
 class Interpreter:
     """
@@ -31,16 +31,15 @@ class Interpreter:
         method equivalents). We could subclass Interpreter like so::
 
             class NegSigmSwapInterpreter(Interpreter):
-                def call_function(self, n : Node) -> Any:
-                    if n.target == torch.sigmoid:
-                        n = copy.copy(n)
-                        n.target = torch.neg
+                def call_function(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+                    if target == torch.sigmoid:
+                        return torch.neg(*args, **kwargs)
                     return super().call_function(n)
 
-                def call_method(self, n : Node) -> Any:
-                    if n.target == 'neg':
-                        n = copy.copy(n)
-                        n.target = 'sigmoid'
+                def call_method(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+                    if target == 'neg':
+                        call_self, *args_tail = args
+                        return call_self.sigmoid(*args_tail, **kwargs)
                     return super().call_method(n)
 
             def fn(x):
@@ -62,7 +61,7 @@ class Interpreter:
 
         self.clear_env_on_return : bool = True
 
-    def run(self, *args) -> Any:
+    def run(self, *args, initial_env : Optional[Dict[Node, Any]] = None) -> Any:
         """
         Run `module` via interpretation and return the result.
 
@@ -72,6 +71,8 @@ class Interpreter:
         Returns:
             Any: The value returned from executing the Module
         """
+        self.env = initial_env if initial_env else {}
+
         # Positional function args are consumed left-to-right by
         # `placeholder` nodes. Use an iterator to keep track of
         # position and extract those values.
@@ -89,8 +90,6 @@ class Interpreter:
 
             if node.op == 'output':
                 output_val = self.env[node]
-                if self.clear_env_on_return:
-                    self.env = {}
                 return output_val
 
     def run_node(self, n : Node) -> Any:
@@ -106,11 +105,14 @@ class Interpreter:
         Returns:
             Any: The result of executing ``n``
         """
-        return getattr(self, n.op)(n)
+        args, kwargs = self.fetch_args_kwargs_from_env(n)
+        assert isinstance(args, tuple)
+        assert isinstance(kwargs, dict)
+        return getattr(self, n.op)(n.target, args, kwargs)
 
     # Main Node running APIs
 
-    def placeholder(self, n : Node) -> Any:
+    def placeholder(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
         """
         Execute a ``placeholder`` node. Note that this is stateful:
         ``Interpreter`` maintains an internal iterator over
@@ -118,96 +120,106 @@ class Interpreter:
         next() on that iterator.
 
         Args:
-            n (Node): The placeholder node to run
+            target (Target): The call target for this node. See :ref:`Node` for details on semantics
+            args (Tuple): Tuple of positional args for this invocation
+            kwargs (Dict): Dict of keyword arguments for this invocation
 
         Returns:
             Any: The argument value that was retrieved.
         """
-        return next(self.args_iter)
+        assert isinstance(target, str)
+        if target.startswith('*'):
+            # For a starred parameter e.g. `*args`, retrieve all
+            # remaining values from the args list.
+            return list(self.args_iter)
+        else:
+            return next(self.args_iter)
 
-    def get_attr(self, n : Node) -> Any:
+    def get_attr(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
         """
         Execute a ``get_attr`` node. Will retrieve an attribute
         value from the ``Module`` hierarchy of ``self.module``.
 
         Args:
-            n (Node): The get_attr node to run
+            target (Target): The call target for this node. See :ref:`Node` for details on semantics
+            args (Tuple): Tuple of positional args for this invocation
+            kwargs (Dict): Dict of keyword arguments for this invocation
 
         Return:
             Any: The value of the attribute that was retrieved
         """
-        assert isinstance(n.target, str)
-        return self.fetch_attr(n.target)
+        assert isinstance(target, str)
+        return self.fetch_attr(target)
 
-    def call_function(self, n : Node) -> Any:
+    def call_function(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
         """
         Execute a ``call_function`` node and return the result.
 
         Args:
-            n (Node): The call_function node to run
+            target (Target): The call target for this node. See :ref:`Node` for details on semantics
+            args (Tuple): Tuple of positional args for this invocation
+            kwargs (Dict): Dict of keyword arguments for this invocation
 
         Return
             Any: The value returned by the function invocation
         """
-        # Retrieve executed args and kwargs values from the environment
-        args, kwargs = self.fetch_args_kwargs_from_env(n)
-
-        assert not isinstance(n.target, str)
+        assert not isinstance(target, str)
 
         # Execute the function and return the result
-        return n.target(*args, **kwargs)
+        return target(*args, **kwargs)
 
-    def call_method(self, n : Node) -> Any:
+    def call_method(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
         """
         Execute a ``call_method`` node and return the result.
 
         Args:
-            n (Node): The call_method node to run
+            target (Target): The call target for this node. See :ref:`Node` for details on semantics
+            args (Tuple): Tuple of positional args for this invocation
+            kwargs (Dict): Dict of keyword arguments for this invocation
 
         Return
             Any: The value returned by the method invocation
         """
-        # Retrieve executed args and kwargs values from the environment
-        args, kwargs = self.fetch_args_kwargs_from_env(n)
         # args[0] is the `self` object for this method call
         self_obj, *args_tail = args
 
         # Execute the method and return the result
-        assert isinstance(n.target, str)
-        return getattr(self_obj, n.target)(*args_tail, **kwargs)
+        assert isinstance(target, str)
+        return getattr(self_obj, target)(*args_tail, **kwargs)
 
-    def call_module(self, n : Node) -> Any:
+    def call_module(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
         """
         Execute a ``call_module`` node and return the result.
 
         Args:
-            n (Node): The call_module node to run
+            target (Target): The call target for this node. See :ref:`Node` for details on semantics
+            args (Tuple): Tuple of positional args for this invocation
+            kwargs (Dict): Dict of keyword arguments for this invocation
 
         Return
             Any: The value returned by the module invocation
         """
         # Retrieve executed args and kwargs values from the environment
-        args, kwargs = self.fetch_args_kwargs_from_env(n)
 
         # Execute the method and return the result
-        assert isinstance(kwargs, dict)
-        if n.target not in self.submodules:
-            raise RuntimeError(f'Node {n} referenced nonexistent submodule {n.target}!')
+        assert isinstance(target, str)
+        submod = self.fetch_attr(target)
 
-        return self.submodules[n.target](*args, **kwargs)
+        return submod(*args, **kwargs)
 
-    def output(self, n : Node) -> Any:
+    def output(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
         """
         Execute an ``output`` node. This really just retrieves
         the value referenced by the ``output`` node and returns it.
 
         Args:
-            n (Node): The output node to run
+            target (Target): The call target for this node. See :ref:`Node` for details on semantics
+            args (Tuple): Tuple of positional args for this invocation
+            kwargs (Dict): Dict of keyword arguments for this invocation
 
         Return:
             Any: The return value referenced by the output node
         """
-        args, _ = self.fetch_args_kwargs_from_env(n)
         return args[0]
 
     # Helper methods
@@ -279,16 +291,15 @@ class Transformer(Interpreter):
         method equivalents). We could subclass ``Transformer`` like so::
 
             class NegSigmSwapXformer(Transformer):
-                def call_function(self, n : Node) -> Any:
-                    if n.target == torch.sigmoid:
-                        n = copy.copy(n)
-                        n.target = torch.neg
+                def call_function(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+                    if target == torch.sigmoid:
+                        return torch.neg(*args, **kwargs)
                     return super().call_function(n)
 
-                def call_method(self, n : Node) -> Any:
-                    if n.target == 'neg':
-                        n = copy.copy(n)
-                        n.target = 'sigmoid'
+                def call_method(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+                    if target == 'neg':
+                        call_self, *args_tail = args
+                        return call_self.sigmoid(*args_tail, **kwargs)
                     return super().call_method(n)
 
             def fn(x):
@@ -317,29 +328,33 @@ class Transformer(Interpreter):
         self.tracer = TransformerTracer(self.new_graph)
         self.tracer.root = module
 
-    def placeholder(self, n : Node) -> Proxy:
+    def placeholder(self, target : Target, args : Tuple, kwargs : Dict) -> Proxy:
         """
         Execute a ``placeholder`` node. In ``Transformer``, this is
         overridden to insert a new ``placeholder`` into the output
         graph.
 
         Args:
-            n (Node): The placeholder node to execute
+            target (Target): The call target for this node. See :ref:`Node` for details on semantics
+            args (Tuple): Tuple of positional args for this invocation
+            kwargs (Dict): Dict of keyword arguments for this invocation
         """
-        assert isinstance(n.target, str)
-        return Proxy(self.new_graph.placeholder(n.target), self.tracer)
+        assert isinstance(target, str)
+        return Proxy(self.new_graph.placeholder(target), self.tracer)
 
-    def get_attr(self, n : Node) -> Proxy:
+    def get_attr(self, target : Target, args : Tuple, kwargs : Dict) -> Proxy:
         """
         Execute a ``get_attr`` node. In ``Transformer``, this is
         overridden to insert a new ``get_attr`` node into the output
         graph.
 
         Args:
-            n (Node): The get_attr node to execute
+            target (Target): The call target for this node. See :ref:`Node` for details on semantics
+            args (Tuple): Tuple of positional args for this invocation
+            kwargs (Dict): Dict of keyword arguments for this invocation
         """
-        assert isinstance(n.target, str)
-        return Proxy(self.new_graph.get_attr(n.target), self.tracer)
+        assert isinstance(target, str)
+        return Proxy(self.new_graph.get_attr(target), self.tracer)
 
     def transform(self) -> GraphModule:
         """
