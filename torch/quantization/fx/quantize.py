@@ -332,6 +332,9 @@ class Quantizer:
         self.patterns: Optional[Dict[Pattern, QuantizeHandler]] = None
         self.prepare_custom_config_dict: Dict[str, Any] = {}
 
+        # mapping from node name to the scope of the module which contains the node.
+        self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
+
 
     def _qat_swap_modules(
             self, root: torch.nn.Module,
@@ -347,7 +350,7 @@ class Quantizer:
             qconfig_dict: Any,
             node_name_to_scope: Dict[str, Tuple[str, type]]) -> None:
         global_qconfig = qconfig_dict.get("", None)
-
+        self.node_name_to_scope = node_name_to_scope
         self.qconfig_map = dict()
         for node in input_graph.nodes:
             if node.op == "get_attr":
@@ -359,9 +362,13 @@ class Quantizer:
                 # precedence: [TODO] module_name_qconfig (need scope support
                 # from fx)
                 # > function_qconfig > global_qconfig
+                # module_name takes precedence over function qconfig
                 function_qconfig = get_object_type_qconfig(
                     qconfig_dict, node.target, global_qconfig)
-                self.qconfig_map[node.name] = function_qconfig
+                module_path, module_type = node_name_to_scope[node.name]
+                qconfig = get_qconfig(
+                    qconfig_dict, module_type, module_path, function_qconfig)
+                self.qconfig_map[node.name] = qconfig
             elif node.op == "call_method":
                 module_path, module_type = node_name_to_scope[node.name]
                 # use the qconfig of the module that the node belongs to
@@ -563,6 +570,7 @@ class Quantizer:
         observed._qconfig_map = self.qconfig_map  # type: ignore
         observed._prepare_custom_config_dict = \
             self.prepare_custom_config_dict  # type: ignore
+        observed._node_name_to_scope = self.node_name_to_scope  # type: ignore
 
     def restore_state(self, observed: GraphModule) -> None:
         assert is_observed_module(observed), \
@@ -573,6 +581,7 @@ class Quantizer:
         self.qconfig_map = observed._qconfig_map  # type: ignore
         self.prepare_custom_config_dict = \
             observed._prepare_custom_config_dict  # type: ignore
+        self.node_name_to_scope = observed._node_name_to_scope  # type: ignore
 
     def prepare(
             self,
@@ -795,8 +804,7 @@ class Quantizer:
                 root_module = self.modules[""]
                 assert isinstance(node.args[0], Node)
                 quant_env[node.name] = quantize_node(
-                    root_module, self.quantized_graph,
-                    load_non_quantized(node.args[0]), observer_module)
+                    self, load_non_quantized(node.args[0]), observer_module, node, is_input=True)
 
         # additional state to override inputs to be quantized, if specified
         # by the user
@@ -924,8 +932,6 @@ class Quantizer:
 
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
-        get_new_packed_weight_name = \
-            get_new_attr_name_with_prefix('_fx_pass_packed_weight_')
         quantized_root = quantized
         quantized_graph = quantized.graph
         for node in quantized_graph.nodes:
@@ -933,6 +939,10 @@ class Quantizer:
             if prepack_node is node:
                 packed_weight = packed_weights[node.name]
                 # add a prepacked attribute to root
+                op_node = list(prepack_node.users)[0]
+                module_path, _ = self.node_name_to_scope[op_node.name]
+                get_new_packed_weight_name = \
+                    get_new_attr_name_with_prefix(module_path + '_packed_weight_')
                 packed_weight_name = get_new_packed_weight_name(quantized_root)
                 setattr(quantized_root, packed_weight_name, packed_weight)
                 # replace prepack node with a getattr node

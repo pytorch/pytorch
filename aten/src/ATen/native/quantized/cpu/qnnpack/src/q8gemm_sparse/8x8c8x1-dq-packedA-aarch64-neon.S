@@ -71,10 +71,6 @@ BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA__aarch64_neon
     EOR x12, x12, x12
     EOR x13, x13, x13
 
-#ifndef IGNORE_CODE_ALIGN_DIRECTIVES
-    .p2align 5
-#endif
-0:
     EOR v8.16b, v8.16b, v8.16b
     EOR v9.16b, v9.16b, v9.16b
     EOR v10.16b, v10.16b, v10.16b
@@ -110,6 +106,9 @@ BEGIN_FUNCTION pytorch_q8gemm_dq_sparse_8x1_ukernel_8x8_packedA__aarch64_neon
     SUBS x8, x8, 2
     B.LO 1f
 
+#ifndef IGNORE_CODE_ALIGN_DIRECTIVES
+    .p2align 5
+#endif
 k_loop:
     # k_loop processes two k values
     # Load two 8x1 blocks

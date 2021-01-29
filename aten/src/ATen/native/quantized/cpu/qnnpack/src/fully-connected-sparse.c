@@ -70,6 +70,8 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
   }
 
   if (kernel_row_block_size == 8 && kernel_col_block_size == 1) {
+    // This is to gate 8x1 on SSE2 since we have not implemented SSE2
+    // kernel that suppors 8x1 sparsity pattern.
     if (pytorch_qnnp_params.q8gemm_sparse_c8x1.packA == NULL) {
       status = pytorch_qnnp_status_invalid_parameter;
       goto error;
