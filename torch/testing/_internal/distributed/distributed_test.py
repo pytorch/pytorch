@@ -550,7 +550,7 @@ class DistributedTest:
         @skip_if_small_worldsize
         @unittest.skipIf(BACKEND != "gloo", "Only gloo backend supports timeouts")
         def test_barrier_timeout_group(self):
-            timeout = timedelta(seconds=1)
+            timeout = timedelta(seconds=5)
             _, group_id, _ = self._init_group_test(timeout=timeout)
             if group_id is not None:
                 self._test_barrier_timeout(group_id, timeout)
