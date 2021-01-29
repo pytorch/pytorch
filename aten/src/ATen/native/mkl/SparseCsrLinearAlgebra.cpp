@@ -116,13 +116,14 @@ namespace at { namespace native {
         TORCH_WARN("Pytorch is compiled with MKL LP64 and will convert col_indices to int32.");
       }
     }
-
+    std::cout << "REACH MKL DISPATCH\n";
     AT_DISPATCH_FLOATING_TYPES(
       dense.scalar_type(), "addmm_sparse_csr_dense", [&] {
         sparse_mm_mkl_template<scalar_t>(self, sparse_.col_indices().toType(TORCH_INT_TYPE),
                                          sparse_.crow_indices().toType(TORCH_INT_TYPE), sparse_.values(), dense, t,
                                          alpha, beta, sparse_.sizes(), dense.sizes());
     });
+    std::cout << "POST MKL DISPATCH\n";
     return self;
   }
 }}

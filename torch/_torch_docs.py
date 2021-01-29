@@ -7900,6 +7900,28 @@ Example::
             [-0.0881,  0.4370,  0.2275,  1.0284]])
 """.format(**common_args))
 
+add_docstr(torch.sparse_csr_tensor,
+           r"""
+sparse_csr_tensor(crow_indices, col_indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Args:
+    crow_indices (array_like):
+    col_indices (array_like):
+    values (array_list):
+    size (list, tuple, :class:`torch.Size`, optional):
+
+Keyword args:
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        Default: if None, infers data type from :attr:`values`.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, uses the current device for the default tensor type
+        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
+        for CPU tensor types and the current CUDA device for CUDA tensor types.
+    {requires_grad}
+
+Example ::
+""".format(**factory_common_args))
+
 add_docstr(torch.sparse_coo_tensor,
            r"""
 sparse_coo_tensor(indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
