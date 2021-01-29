@@ -298,7 +298,7 @@ Tensor& resize_as_(
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    at::resize_as_(the_template_, optional_memory_format);
+    at::resize_as_(self_, the_template_, optional_memory_format);
   }
 
   // Handle fw grad
