@@ -274,6 +274,10 @@ In addition, Dropout layer need defined in init function so that inferencing can
         def forward(self, x):
             x = self.dropout(x)
 
+The .data field is an old field that is kept for backward compatibility and should be avoided when writing models.
+It's usage is dangerous and can make computations wrong, furthermore it can produce an incorrect trace graph and
+therefore an incorrect ONNX graph. A safer alternative is to use .detach() instead.
+
 Using dictionaries to handle Named Arguments as model inputs
 ------------------------------------------------------------
 
