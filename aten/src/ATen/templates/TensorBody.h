@@ -626,6 +626,7 @@ class TORCH_API Tensor {
   //example
   //Tensor * add(Tensor & b);
   ${tensor_method_declarations}
+  ${tensor_method_redispatch_declarations}
 
   // Special C++ only overloads for std()-like functions (See gh-40287)
   // These are needed because int -> bool conversion takes precedence over int -> IntArrayRef

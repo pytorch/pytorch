@@ -55,6 +55,8 @@ TensorOptions Tensor::options() const {
 
 ${tensor_method_definitions}
 
+${tensor_method_redispatch_definitions}
+
 caffe2::TypeMeta Tensor::dtype() const noexcept {
   return impl_->dtype();
 }
