@@ -400,15 +400,15 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
 
 template<class Return, class... Args>
 inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<Return(Args...)>& op, bool pre_sampled, DispatchKey dispatchKey, const KernelFunction& kernel, Args... args) {
-  if (shouldRecord(dispatchKey) && op.operatorIterator_->op.isObserved()) {
     // Check if we need to run callbacks registered with RecordFunction
     // If true and callbacks need inputs, we box the arguments and pass
     // them into the callbacks and also into the kernel call
 
     // Note: for perf reasons we wouldn't want to pass arguments into
     // the function call or prematurely box them
-    at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
-    if (C10_UNLIKELY(guard.isActive())) {
+  at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
+  if (C10_UNLIKELY(guard.isActive())) {
+    if (shouldRecord(dispatchKey) && op.operatorIterator_->op.isObserved()) {
       if (guard.needsInputs()) {
         runRecordFunction(guard, op, dispatchKey, impl::boxArgs(args...));
       } else {
@@ -453,20 +453,20 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   bool pre_sampled = false;
   if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
-    if (shouldRecord(dispatchKey) && entry.isObserved()) {
-      // using already existing stack to record function execution in observers
-      at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
-      if (C10_UNLIKELY(guard.isActive())) {
+    // using already existing stack to record function execution in observers
+    at::RecordFunction guard(at::RecordScope::FUNCTION, pre_sampled);
+    if (C10_UNLIKELY(guard.isActive())) {
+      if (shouldRecord(dispatchKey) && entry.isObserved()) {
         if (guard.needsInputs()) {
           runRecordFunction(guard, op, dispatchKey, *stack);
         } else {
           runRecordFunction(guard, op, dispatchKey);
         }
       }
-      // keeping the guard alive while executing the kernel
-      kernel.callBoxed(op, stack);
-      return;
     }
+    // keeping the guard alive while executing the kernel
+    kernel.callBoxed(op, stack);
+    return;
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
   kernel.callBoxed(op, stack);
