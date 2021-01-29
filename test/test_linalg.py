@@ -21,7 +21,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
-     skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
+     skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyOnCPUAndCUDA, dtypesIfCUDA,
      onlyCUDA)
 from torch.testing import floating_and_complex_types, floating_types, all_types
 from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
@@ -3943,7 +3943,7 @@ class TestLinalg(TestCase):
             self.assertEqual(res, expected, msg="renorm failed for {}-norm".format(p))
 
     @skipCPUIfNoLapack
-    @skipCUDAIfNoCusolver
+    @skipCUDAIfNoMagmaAndNoCusolver
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_orgqr(self, device, dtype):
         def generate_reflectors_and_tau(A):
@@ -3996,7 +3996,7 @@ class TestLinalg(TestCase):
             run_test(shape)
 
     @skipCPUIfNoLapack
-    @skipCUDAIfNoCusolver
+    @skipCUDAIfNoMagmaAndNoCusolver
     def test_orgqr_errors_and_warnings(self, device):
         test_cases = [
             # input1 size, input2 size, error regex
