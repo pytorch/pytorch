@@ -11,9 +11,7 @@
 #include <qnnpack/q8gemm_sparse.h>
 #include <requantization/runtime-sse2.h>
 
-#define MR 8
-#define COL_BLOCK_SIZE 4
-#define PACKED_A_BLOCK_SIZE COL_BLOCK_SIZE*MR
+#include "8x4c1x4-packed-sse2.h"
 
 // This is a super slow kernel in that it does not use intrinsics to
 // tranpose. Since this is for x86 we are not optimizing it.
