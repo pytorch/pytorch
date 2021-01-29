@@ -47,6 +47,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             if node.op == "call_module":
                 self.assertFalse(is_activation_post_process(modules[node.target]))
 
+    # TODO: merge with eager mode compare_and_validate_results
     @override_qengines
     def compare_and_validate_model_weights_results_fx(
         self, float_model, q_model, expected_weight_dict_keys
@@ -59,6 +60,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         for k, v in weight_dict.items():
             self.assertTrue(v["float"].shape == v["quantized"].shape)
 
+    # TODO: merge with compare_weights_linear_static_fx
     @override_qengines
     def test_compare_weights_conv_static_fx(self):
         r"""Compare the weights of float and static quantized conv layer"""
@@ -96,8 +98,8 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
         prepared_model = prepare_fx(float_model, qconfig_dict)
 
-        prepared_float_model = copy.deepcopy(prepared_model)
-        prepared_float_model.eval()
+        backup_prepared_model = copy.deepcopy(prepared_model)
+        backup_prepared_model.eval()
 
         # Run calibration
         test_only_eval_fn(prepared_model, self.calib_data)
@@ -105,7 +107,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
         expected_weight_dict_keys = {"fc1._packed_params._packed_params"}
         self.compare_and_validate_model_weights_results_fx(
-            prepared_float_model, q_model, expected_weight_dict_keys
+            backup_prepared_model, q_model, expected_weight_dict_keys
         )
 
     @override_qengines
@@ -120,17 +122,17 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
         prepared_model = prepare_fx(float_model, qconfig_dict)
 
-        prepared_float_model = copy.deepcopy(prepared_model)
-        prepared_float_model.eval()
+        backup_prepared_model = copy.deepcopy(prepared_model)
+        backup_prepared_model.eval()
 
         q_model = convert_fx(prepared_model)
 
         expected_weight_dict_keys = {"fc1._packed_params._packed_params"}
         self.compare_and_validate_model_weights_results_fx(
-            prepared_float_model, q_model, expected_weight_dict_keys
+            backup_prepared_model, q_model, expected_weight_dict_keys
         )
 
-    # TODO: Add submodule and functional testcases for compare_model_stub_fx
+    # TODO: merge with eager mode compare_and_validate_results
     @override_qengines
     def compare_and_validate_model_stub_results_fx(
         self, float_model, q_model, module_swap_list, data, expected_ob_dict_keys
@@ -145,6 +147,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             for i, val in enumerate(v["quantized"]):
                 self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
+    # TODO : merge with compare_model_stub_linear_static_fx
     @override_qengines
     def test_compare_model_stub_conv_static_fx(self):
         r"""Compare the output of static quantized conv layer and its float shadow module"""
@@ -160,7 +163,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
             prepared_model = prepare_fx(float_model, qconfig_dict)
 
-            prepared_float_model = copy.deepcopy(prepared_model)
+            backup_prepared_model = copy.deepcopy(prepared_model)
 
             # Run calibration
             test_only_eval_fn(prepared_model, self.img_data_2d)
@@ -170,7 +173,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
             expected_ob_dict_keys = {"conv.stats"}
             self.compare_and_validate_model_stub_results_fx(
-                prepared_float_model,
+                backup_prepared_model,
                 q_model,
                 module_swap_list,
                 self.img_data_2d[0][0],
@@ -179,7 +182,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
     @override_qengines
     def test_compare_model_stub_linear_static_fx(self):
-        r"""Compare the output of static quantized linear layer and its float (after prepare) shadow module"""
+        r"""Compare the output of static quantized linear layer and its float shadow module"""
 
         qengine = torch.backends.quantized.engine
         qconfig = get_default_qconfig(qengine)
@@ -190,7 +193,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
         prepared_model = prepare_fx(float_model, qconfig_dict)
 
-        prepared_float_model = copy.deepcopy(prepared_model)
+        backup_prepared_model = copy.deepcopy(prepared_model)
 
         # Run calibration
         test_only_eval_fn(prepared_model, self.calib_data)
@@ -201,7 +204,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
 
         expected_ob_dict_keys = {"fc1.stats"}
         self.compare_and_validate_model_stub_results_fx(
-            prepared_float_model,
+            backup_prepared_model,
             q_model,
             module_swap_list,
             linear_data,

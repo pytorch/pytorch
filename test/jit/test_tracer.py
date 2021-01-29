@@ -1877,6 +1877,24 @@ class TestTracer(JitTestCase):
         tm = torch.jit.trace(m, torch.tensor(1.))
         self.assertFalse(hasattr(tm, "submod"))
 
+    def test_trace_with_conditional_property(self):
+        class Net(nn.Module):
+            def __init__(self, attr=None):
+                super(Net, self).__init__()
+                if attr is not None:
+                    self._attr = attr
+                self.attr_name = '_attr'
+
+            @property
+            def attr(self):
+                return getattr(self, self.attr_name)
+
+            def forward(self, x):
+                return x
+
+        x = torch.ones(1)
+        torch.jit.trace(Net(), x)
+
 
 class TestMixTracingScripting(JitTestCase):
     def test_trace_script(self):
