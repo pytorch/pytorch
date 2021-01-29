@@ -222,7 +222,7 @@ def _unimplemented(op, msg):
 
 def _onnx_unsupported(op_name):
     raise RuntimeError('Unsupported: ONNX export of operator {}. '
-                       'Please open a bug to request ONNX export support for the missing operator.'.format(op_name))
+                       'Please feel free to request support or submit a pull request on PyTorch GitHub.'.format(op_name))
 
 
 def _onnx_opset_unsupported(op_name, current_opset, supported_opset):
