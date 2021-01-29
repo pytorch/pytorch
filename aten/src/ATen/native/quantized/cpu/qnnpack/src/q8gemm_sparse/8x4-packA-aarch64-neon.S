@@ -79,11 +79,10 @@ BEGIN_FUNCTION pytorch_q8gemm_sparse_packA_ukernel_8x4__aarch64_neon
     ADD x1, x1, 3
     LSR x1, x1, 2
 
-    .p2align 5
-0:
     SUBS x1, x1, 2
     B.LO 1f
 
+    .p2align 5
 k_loop:
     LD1 {v0.d}[0], [x2], 8
     LD1 {v0.d}[1], [x8], 8
