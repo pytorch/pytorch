@@ -189,6 +189,34 @@ def get_linear_prepack_op_for_dtype(dtype):
     else:
         raise Exception("can't get linear prepack op for dtype:", dtype)
 
+def get_qconv_prepack_op(conv_op: Callable) -> Callable:
+    prepack_ops = {
+        torch.nn.functional.conv1d: torch.ops.quantized.conv1d_prepack,
+        torch.nn.functional.conv2d: torch.ops.quantized.conv2d_prepack,
+        torch.nn.functional.conv3d: torch.ops.quantized.conv3d_prepack
+    }
+    prepack_op = prepack_ops.get(conv_op, None)
+    assert prepack_op, "Didn't find prepack op for {}".format(conv_op)
+    return prepack_op
+
+def get_qconv_op(conv_op: Callable, has_relu: bool) -> Callable:
+    qconv_op = {
+        # has relu
+        True: {
+            torch.nn.functional.conv1d: torch.ops.quantized.conv1d_relu,
+            torch.nn.functional.conv2d: torch.ops.quantized.conv2d_relu,
+            torch.nn.functional.conv3d: torch.ops.quantized.conv3d_relu
+        },
+        False: {
+            torch.nn.functional.conv1d: torch.ops.quantized.conv1d,
+            torch.nn.functional.conv2d: torch.ops.quantized.conv2d,
+            torch.nn.functional.conv3d: torch.ops.quantized.conv3d
+        }
+    }
+    qconv = qconv_op[has_relu].get(conv_op)
+    assert qconv, "Can't find corresponding quantized conv op for {} {}".format(conv_op, has_relu)
+    return qconv
+
 # Returns a function that can get a new attribute name for module with given
 # prefix, for example,
 # >> get_new_observer_name = get_new_attr_name_with_prefix('_observer')

@@ -932,8 +932,6 @@ class Quantizer:
 
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
-        get_new_packed_weight_name = \
-            get_new_attr_name_with_prefix('_fx_pass_packed_weight_')
         quantized_root = quantized
         quantized_graph = quantized.graph
         for node in quantized_graph.nodes:
@@ -941,6 +939,10 @@ class Quantizer:
             if prepack_node is node:
                 packed_weight = packed_weights[node.name]
                 # add a prepacked attribute to root
+                op_node = list(prepack_node.users)[0]
+                module_path, _ = self.node_name_to_scope[op_node.name]
+                get_new_packed_weight_name = \
+                    get_new_attr_name_with_prefix(module_path + '_packed_weight_')
                 packed_weight_name = get_new_packed_weight_name(quantized_root)
                 setattr(quantized_root, packed_weight_name, packed_weight)
                 # replace prepack node with a getattr node
