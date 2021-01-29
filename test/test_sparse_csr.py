@@ -17,6 +17,7 @@ import unittest
 import operator
 import numpy as np
 import math
+import warnings
 from collections import defaultdict
 from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
 
@@ -117,6 +118,16 @@ class TestSparseCSR(TestCase):
         dense = torch.randn(size)
         sparse = dense.to_sparse_csr()
         self.assertEqual(sparse.to_dense(), dense)
+
+    def test_mkl_matvec_warnings(self):
+        if torch.has_mkl:
+            sp = tensor.sparse_csr_tensor(torch.tensor([0, 2, 4]),
+                                        torch.tensor([0, 1, 0, 1]),
+                                        torch.tensor([1, 2, 3, 4]))
+            vec = torch.randn((2, 1))
+            with warnings.catch_warnings(record=True) as w:
+                sp.matmul(vec)
+                print(w)       
 
     def test_dense_convert_error(self):
         size = (4, 2, 4)

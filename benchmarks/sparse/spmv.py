@@ -93,7 +93,7 @@ if __name__ == "__main__":
     elif args.format == 'both':
         time_coo, time_csr = test_sparse_coo_and_csr(m, nnz, test_count)
 
-    if args.format == 'both':
+    if args.format != 'both':
         print("format=", args.format, " nnz_ratio=", nnz_ratio, " m=", m,
             " time=", time, file=outfile)
     else:
