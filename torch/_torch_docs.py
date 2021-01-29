@@ -9645,8 +9645,7 @@ slogdet(input) -> (Tensor, Tensor)
 
 Calculates the sign and log absolute value of the determinant(s) of a square matrix or batches of square matrices.
 
-.. note:: :func:`torch.slogdet` is deprecated. Please use :func:`torch.linalg.slogdet`
-          instead, which is similar to NumPy's ``numpy.linalg.slogdet``.
+.. note:: :func:`torch.slogdet` is deprecated. Please use :func:`torch.linalg.slogdet` instead.
 
 .. note::
     If ``input`` has zero determinant, this returns ``(0, -inf)``.
