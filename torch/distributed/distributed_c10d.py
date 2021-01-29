@@ -276,14 +276,17 @@ def _check_single_tensor(param, param_name):
                            "to be of type torch.Tensor.".format(param_name))
 
 
-def _check_tensor_list(param, param_name):
+def _check_tensor_list(param, param_name, raise_error=True):
     """
     Helper to check that the parameter ``param_name`` is a list of tensors.
     """
     if not isinstance(param, list) or \
        not all(isinstance(p, torch.Tensor) for p in param):
-        raise RuntimeError("Invalid function argument. Expected parameter `{}` "
+        if raise_error:
+            raise RuntimeError("Invalid function argument. Expected parameter `{}` "
                            "to be of type List[torch.Tensor].".format(param_name))
+        return False
+    return True
 
 
 def _check_op(op):
@@ -1026,6 +1029,13 @@ def broadcast(tensor,
         None, if not async_op or if not part of the group
 
     """
+    # If generic objects are being broadcast, we expect the first argument to be
+    # a list of objects that need to be broadcast.
+    if isinstance(tensor, list):
+        assert not async_op, """Object-based collectives currently do not
+            support async_op=True. Please file an issue if you need this support."""
+        return _broadcast_object_list(tensor, src, group)
+
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
         return
@@ -1419,7 +1429,7 @@ def _tensor_to_object(tensor, tensor_size):
     return out
 
 
-def all_gather_object(object_list, obj, group=None):
+def _all_gather_object(object_list, obj, group=None):
     """
     Gathers picklable objects from the whole group into a list. Similar to
     :func:`all_gather`, but Python objects can be passed in. Note that the object
@@ -1450,7 +1460,7 @@ def all_gather_object(object_list, obj, group=None):
         ``torch.cuda.set_device()``.
 
     .. warning::
-        :func:`all_gather_object` uses ``pickle`` module implicitly, which is
+        :func:`_all_gather_object` uses ``pickle`` module implicitly, which is
         known to be insecure. It is possible to construct malicious pickle data
         which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
@@ -1461,7 +1471,7 @@ def all_gather_object(object_list, obj, group=None):
         >>> # Assumes world_size of 3.
         >>> gather_objects = ["foo", 12, {1: 2}] # any picklable object
         >>> output = [None for _ in gather_objects]
-        >>> dist.all_gather_object(output, gather_objects[dist.get_rank()])
+        >>> dist._all_gather_object(output, gather_objects[dist.get_rank()])
         >>> output
         ['foo', 12, {1: 2}]
     """
@@ -1507,7 +1517,7 @@ def all_gather_object(object_list, obj, group=None):
         object_list[i] = _tensor_to_object(tensor, tensor_size)
 
 
-def gather_object(obj, object_gather_list=None, dst=0, group=None):
+def _gather_object(obj, object_gather_list=None, dst=0, group=None):
     """
     Gathers picklable objects from the whole group in a single process.
     Similar to :func:`gather`, but Python objects can be passed in. Note that the
@@ -1534,7 +1544,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     .. note:: Note that this API is not supported when using the NCCL backend.
 
     .. warning::
-        :func:`gather_object` uses ``pickle`` module implicitly, which is
+        :func:`_gather_object` uses ``pickle`` module implicitly, which is
         known to be insecure. It is possible to construct malicious pickle data
         which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
@@ -1543,9 +1553,9 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
         >>> # Assumes world_size of 3.
-        >>> gather_objects = ["foo", 12, {1: 2}] # any picklable object
+        >>> _gather_objects = ["foo", 12, {1: 2}] # any picklable object
         >>> output = [None for _ in gather_objects]
-        >>> dist.gather_object(
+        >>> dist._gather_object(
                 gather_objects[dist.get_rank()],
                 output if dist.get_rank() == 0 else None,
                 dst=0
@@ -1607,7 +1617,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
 
-def broadcast_object_list(object_list, src, group=None):
+def _broadcast_object_list(object_list, src, group=None):
     """
     Broadcasts picklable objects in ``object_list`` to the whole group. Similar
     to :func:`broadcast`, but Python objects can be passed in.
@@ -1638,7 +1648,7 @@ def broadcast_object_list(object_list, src, group=None):
         will be a blocking call.
 
     .. warning::
-        :func:`broadcast_object_list` uses ``pickle`` module implicitly, which
+        :func:`_broadcast_object_list` uses ``pickle`` module implicitly, which
         is known to be insecure. It is possible to construct malicious pickle
         data which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
@@ -1651,7 +1661,7 @@ def broadcast_object_list(object_list, src, group=None):
         >>>     objects = ["foo", 12, {1: 2}] # any picklable object
         >>> else:
         >>>     objects = [None, None, None]
-        >>> dist.broadcast_object_list(objects, src=0)
+        >>> dist._broadcast_object_list(objects, src=0)
         >>> broadcast_objects
         ['foo', 12, {1: 2}]
     """
@@ -1699,7 +1709,7 @@ def broadcast_object_list(object_list, src, group=None):
             object_list[i] = _tensor_to_object(obj_view, obj_size)
 
 
-def scatter_object_list(
+def _scatter_object_list(
     scatter_object_output_list, scatter_object_input_list, src=0, group=group.WORLD
 ):
     """
@@ -1728,7 +1738,7 @@ def scatter_object_list(
         blocking call.
 
     .. warning::
-        :func:`scatter_object_list` uses ``pickle`` module implicitly, which
+        :func:`_scatter_object_list` uses ``pickle`` module implicitly, which
         is known to be insecure. It is possible to construct malicious pickle
         data which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
@@ -1743,7 +1753,7 @@ def scatter_object_list(
         >>>     # Can be any list on non-src ranks, elements are not used.
         >>>     objects = [None, None, None]
         >>> output_list = [None]
-        >>> dist.scatter_object_list(output_list, objects, src=0)
+        >>> dist._scatter_object_list(output_list, objects, src=0)
         >>> # Rank i gets objects[i]. For example, on rank 2:
         >>> output_list
         [{1: 2}]
@@ -1849,6 +1859,13 @@ def all_gather(tensor_list,
         [tensor([1.+1.j, 2.+2.j]), tensor([3.+3.j, 4.+4.j])] # Rank 1
 
     """
+    # If a list of non-tensor objects is provided, call into object-based helper.
+    if not _check_tensor_list(tensor_list, "tensor_list", raise_error=False):
+        # Call into object-based API
+        assert not async_op, """Object-based collectives currently do not
+            support async_op=True. Please file an issue if you need this support."""
+        return _all_gather_object(tensor_list, tensor, group=group)
+
     _check_tensor_list(tensor_list, "tensor_list")
     _check_single_tensor(tensor, "tensor")
     if _rank_not_in_group(group):
@@ -1977,6 +1994,12 @@ def gather(tensor,
         None, if not async_op or if not part of the group
 
     """
+    # If a non-tensor object is provided, call into object-based helper.
+    if not isinstance(tensor, torch.Tensor):
+        assert not async_op, """Object-based collectives currently do not
+            support async_op=True. Please file an issue if you need this support."""
+        return _gather_object(tensor, gather_list, dst, group)
+
     _check_single_tensor(tensor, "tensor")
 
     # Parameter ``gather_list`` may be left unspecified on non-dst ranks.
@@ -2035,6 +2058,15 @@ def scatter(tensor,
         None, if not async_op or if not part of the group
 
     """
+    # If generic python objects are being scattered, we expect list who's first
+    # element will store the result of the scatter for this rank as the first
+    # argument.
+    if isinstance(tensor, list):
+        # call into object-based API
+        assert not async_op, """Object-based collectives currently do not
+            support async_op=True. Please file an issue if you need this support."""
+        return _scatter_object_list(tensor, scatter_list, src=src, group=group)
+
     _check_single_tensor(tensor, "tensor")
 
     # Parameter ``scatter_list`` may be left unspecified on non-src ranks.

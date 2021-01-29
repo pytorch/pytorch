@@ -3448,7 +3448,7 @@ class DistributedTest:
 
             gather_objects = collectives_object_test_list
             output_gathered = [None for _ in range(dist.get_world_size())]
-            dist.all_gather_object(
+            dist.all_gather(
                 output_gathered, gather_objects[self.rank % len(gather_objects)]
             )
 
@@ -3457,7 +3457,7 @@ class DistributedTest:
                 self.assertEqual(val, expected)
 
                 output_gathered = [None for _ in range(dist.get_world_size())]
-                dist.all_gather_object(
+                dist.all_gather(
                     output_gathered, gather_objects[self.rank % len(gather_objects)]
                 )
 
@@ -3469,9 +3469,9 @@ class DistributedTest:
             output_gathered = [None for _ in range(dist.get_world_size())]
             gather_on_rank = 0
             my_rank = dist.get_rank()
-            dist.gather_object(
+            dist.gather(
                 gather_objects[self.rank % len(gather_objects)],
-                object_gather_list=output_gathered if my_rank == gather_on_rank else None,
+                output_gathered if my_rank == gather_on_rank else None,
                 dst=gather_on_rank,
             )
             if my_rank != gather_on_rank:
@@ -3490,7 +3490,7 @@ class DistributedTest:
             b = Bar()
             gather_objects = [b for _ in range(dist.get_world_size())]
             with self.assertRaisesRegex(AttributeError, "Can't pickle local object"):
-                dist.all_gather_object(
+                dist.all_gather(
                     [None for _ in range(dist.get_world_size())], gather_objects[self.rank]
                 )
 
@@ -3507,9 +3507,9 @@ class DistributedTest:
             with self.assertRaisesRegex(
                 RuntimeError, "ProcessGroupNCCL does not support gather"
             ):
-                dist.gather_object(
+                dist.gather(
                     "foo",
-                    object_gather_list=output_gathered
+                    output_gathered
                     if my_rank == gather_on_rank
                     else None,
                     dst=gather_on_rank,
@@ -3982,13 +3982,13 @@ class DistributedTest:
             single_obj_list = [objects[0]]
             if self.rank != src_rank:
                 self.assertNotEqual(single_obj_list[0], collectives_object_test_list[0])
-            dist.broadcast_object_list(single_obj_list, src=0)
+            dist.broadcast(single_obj_list, src=0)
             self.assertEqual(single_obj_list[0], collectives_object_test_list[0])
 
             # Multiple input objects test
             if self.rank != src_rank:
                 self.assertNotEqual(objects, collectives_object_test_list)
-            dist.broadcast_object_list(objects, src=0)
+            dist.broadcast(objects, src=0)
             self.assertEqual(objects, collectives_object_test_list)
 
         @require_backend({"gloo", "nccl"})
@@ -4440,7 +4440,7 @@ class DistributedTest:
                 i += 1
 
             output_obj_list = [None]
-            dist.scatter_object_list(output_obj_list, scatter_list, src=src_rank)
+            dist.scatter(output_obj_list, scatter_list, src=src_rank)
             self.assertEqual(
                 output_obj_list[0],
                 collectives_object_test_list[self.rank % len(collectives_object_test_list)],
@@ -4450,4 +4450,4 @@ class DistributedTest:
                 RuntimeError,
                 "Expected argument scatter_object_output_list to be a list of size at least 1.",
             ):
-                dist.scatter_object_list([], scatter_list, src=src_rank)
+                dist.scatter([], scatter_list, src=src_rank)
