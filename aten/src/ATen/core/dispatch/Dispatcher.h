@@ -128,7 +128,6 @@ public:
   // ------------------------------------------------------------------------
 
   template<class Return, class... Args>
-  C10_ALWAYS_INLINE
   Return call(const TypedOperatorHandle<Return (Args...)>& op, Args... args) const;
 
   // Like call, but override the default DispatchKey calculation code,
