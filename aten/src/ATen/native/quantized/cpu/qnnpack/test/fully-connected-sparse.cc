@@ -12,7 +12,7 @@
 
 #define SPARSE_OP_TEST(ROW_BS, COL_BS) \
  \
-TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
+TEST(FULLY_CONNECTED_SPARSE_OP_##ROW_BS ## x ##COL_BS, \
     integration_test_dynamic_prepacked) { \
   FullyConnectedSparseOperatorTester() \
       .batchSize(4) \
@@ -24,7 +24,7 @@ TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
       .testQ8_prepacked(FullyConnectedSparseOperatorTester::Mode::Dynamic); \
 } \
  \
-TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
+TEST(FULLY_CONNECTED_SPARSE_OP_##ROW_BS ## x ##COL_BS, \
     zero_batch_dynamic_prepacked) { \
   FullyConnectedSparseOperatorTester() \
       .batchSize(0) \
@@ -36,7 +36,7 @@ TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
       .testQ8_prepacked(FullyConnectedSparseOperatorTester::Mode::Dynamic); \
 } \
  \
-TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
+TEST(FULLY_CONNECTED_SPARSE_OP_##ROW_BS ## x ##COL_BS, \
     unit_batch_dynamic_prepacked) { \
   FullyConnectedSparseOperatorTester() \
       .batchSize(1) \
@@ -48,7 +48,7 @@ TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
       .testQ8_prepacked(FullyConnectedSparseOperatorTester::Mode::Dynamic); \
 } \
  \
-TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
+TEST(FULLY_CONNECTED_SPARSE_OP_##ROW_BS ## x ##COL_BS, \
     unit_batch_with_qmin_dynamic_prepacked) { \
   FullyConnectedSparseOperatorTester() \
       .batchSize(1) \
@@ -61,7 +61,7 @@ TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
       .testQ8_prepacked(FullyConnectedSparseOperatorTester::Mode::Dynamic); \
 } \
  \
-TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
+TEST(FULLY_CONNECTED_SPARSE_OP_##ROW_BS ## x ##COL_BS, \
     unit_batch_with_qmax_dynamic_prepacked) { \
   FullyConnectedSparseOperatorTester() \
       .batchSize(1) \
@@ -74,7 +74,7 @@ TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
       .testQ8_prepacked(FullyConnectedSparseOperatorTester::Mode::Dynamic); \
 } \
  \
-TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
+TEST(FULLY_CONNECTED_SPARSE_OP_##ROW_BS ## x ##COL_BS, \
     unit_batch_with_input_stride_dynamic_prepacked) { \
   FullyConnectedSparseOperatorTester() \
       .batchSize(1) \
@@ -87,7 +87,7 @@ TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
       .testQ8_prepacked(FullyConnectedSparseOperatorTester::Mode::Dynamic); \
 } \
  \
-TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
+TEST(FULLY_CONNECTED_SPARSE_OP_##ROW_BS ## x ##COL_BS, \
     unit_batch_with_output_stride_dynamic_prepacked) { \
   FullyConnectedSparseOperatorTester() \
       .batchSize(1) \
@@ -100,7 +100,7 @@ TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
       .testQ8_prepacked(FullyConnectedSparseOperatorTester::Mode::Dynamic); \
 } \
  \
-TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
+TEST(FULLY_CONNECTED_SPARSE_OP_##ROW_BS ## x ##COL_BS, \
     small_batch_dynamic_prepacked) { \
   FullyConnectedSparseOperatorTester() \
       .batchSize(12) \
@@ -112,7 +112,7 @@ TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
       .testQ8_prepacked(FullyConnectedSparseOperatorTester::Mode::Dynamic); \
 } \
  \
-TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
+TEST(FULLY_CONNECTED_SPARSE_OP_##ROW_BS ## x ##COL_BS, \
     small_batch_with_qmin_dynamic_prepacked) { \
   FullyConnectedSparseOperatorTester() \
       .batchSize(12) \
@@ -125,7 +125,7 @@ TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
       .testQ8_prepacked(FullyConnectedSparseOperatorTester::Mode::Dynamic); \
 } \
  \
-TEST(FULLY_CONNECTED_OP_##ROW_BS ## x ##COL_BS, \
+TEST(FULLY_CONNECTED_SPARSE_OP_##ROW_BS ## x ##COL_BS, \
     small_batch_with_qmax_dynamic_prepacked) { \
   FullyConnectedSparseOperatorTester() \
       .batchSize(13) \

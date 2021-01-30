@@ -255,7 +255,7 @@ class Q8GEMMSparse : public benchmark::Fixture {
         sparsity(),
         kernel_zero_points.data());
     bcsr_matrix_ =
-      generateBlockCSRMatrix(
+      qnnpack::generateBlockCSRMatrix(
           k_.data(),
           nc(),
           kc(),
@@ -351,7 +351,7 @@ class Q8GEMMSparse : public benchmark::Fixture {
   std::vector<uint8_t> a_;
   std::vector<uint8_t> k_;
   std::vector<float> b_;
-  std::unique_ptr<BCSRMatrix> bcsr_matrix_;
+  std::unique_ptr<qnnpack::BCSRMatrix> bcsr_matrix_;
   std::vector<float> c_;
   uint32_t mr_{0};
   uint32_t nr_{0};
