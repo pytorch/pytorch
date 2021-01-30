@@ -54,6 +54,7 @@ else:
 
 class Foo:
     def __init__(self, x):
+        # Can be tensor or int
         self.x = x
 
     def __eq__(self, other):
