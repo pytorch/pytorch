@@ -7,11 +7,12 @@ import torch
 import torch.nn as nn
 import torch.optim
 import torch.utils.data
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN, IS_WINDOWS, TemporaryFileName)
 import torch.autograd.profiler as profiler
 from torch.autograd.profiler import profile
-from torch.autograd import kineto_available
+from torch.autograd import kineto_available, DeviceType
 
 try:
     import psutil
@@ -133,6 +134,31 @@ class TestProfiler(TestCase):
         self.assertTrue(found_gemm)
         self.assertTrue(found_memcpy)
         # p.export_chrome_trace("/tmp/test_trace.json")
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not TEST_MULTIGPU, "Multiple GPUs needed")
+    def test_kineto_multigpu(self):
+        with profile(use_cuda=True, use_kineto=True) as prof:
+            for gpu_id in [0, 1]:
+                x = torch.randn(10, 10).cuda(gpu_id)
+                y = torch.randn(10, 10).cuda(gpu_id)
+                z = x.matmul(y)
+
+        found_gemm_0 = False
+        found_gemm_1 = False
+        found_cuda = False
+        for evt in prof.function_events:
+            if "gemm" in evt.name.lower() and evt.device_type == DeviceType.CUDA:
+                if evt.device_index == 0:
+                    found_gemm_0 = True
+                elif evt.device_index == 1:
+                    found_gemm_1 = True
+            if "cuda" in evt.name.lower() and evt.device_type == DeviceType.CPU:
+                found_cuda = True
+
+        self.assertTrue(found_gemm_0)
+        self.assertTrue(found_gemm_1)
+        self.assertTrue(found_cuda)
 
     def test_high_level_trace(self):
         """Checks that python side high level events are recorded.
