@@ -155,6 +155,10 @@ class JitTestCase(JitCommonTestCase):
 
         allowed_nodes = {'prim::Constant', FUSION_GROUP, 'prim::BailoutTemplate',
                          'prim::TupleConstruct', 'prim::If', 'prim::CompleteTypeCheck', 'prim::RequiresGradCheck'} | set(except_for)
+        fusion_groups : Dict[torch._C.Block, List[torch._C.Node]] = defaultdict(list)
+        get_nodes_and_parents_recursively(graph, FUSION_GROUP, fusion_groups)
+        self.assertTrue(len(fusion_groups) == 1, 'got {}'.format(graph))
+        (graph, fusion_nodes) = list(fusion_groups.items())[0]
         # the block contains one FUSION_GROUP and the rest of nodes are `allowed_nodes`
         self.assertTrue(len(fusion_nodes) == 1, 'got {}'.format(graph))
         self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
