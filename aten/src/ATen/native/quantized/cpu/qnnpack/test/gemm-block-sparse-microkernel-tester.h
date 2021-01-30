@@ -260,8 +260,8 @@ class GemmBlockSparseMicrokernelTester {
         min_elem = *std::min_element(b.cbegin(), b.cend());
       } while (max_elem == min_elem);
 
-      std::unique_ptr<BCSRMatrix> bcsr_matrix =
-        generateBlockCSRMatrix(
+      std::unique_ptr<qnnpack::BCSRMatrix> bcsr_matrix =
+        qnnpack::generateBlockCSRMatrix(
             b.data(), n(), k(), blockSize(), kernel_zero_points.data());
 
       ASSERT_NE(
