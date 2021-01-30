@@ -175,4 +175,33 @@ print('----End normal model.')
 
 #     [np.testing.assert_allclose(trace_results_all_before, trace_results_new_02, rtol=1e-03, atol=1e-05)]
 
+print('End normal model.')
+
+print('Start script model.')
+with torch.no_grad():
+    trace_m_all = torch.jit.trace(NeuralNet_All(total_input_size, total_hidden_size, total_num_classes), x)
+    trace_m_1 = torch.jit.trace(NeuralNet_1st(total_input_size, total_hidden_size), x)
+    
+    trace_m_all.load_state_dict(all_params, strict=False)
+    trace_m_all.eval()
+
+    trace_m_1.load_state_dict(all_params, strict=False)
+    trace_m_1.eval()
+    trace_results_1 = trace_m_1(x)
+
+    trace_m_2 = torch.jit.trace(NeuralNet_2nd(total_hidden_size, total_num_classes), trace_results_1)
+    trace_m_2.load_state_dict(all_params, strict=False)
+    trace_m_2.eval()
+
+    trace_results_all = trace_m_all(dummy_input)
+
+    trace_results_1 = trace_m_1(dummy_input)
+    [np.testing.assert_allclose(result_1, trace_results_1, rtol=1e-03, atol=1e-05)]
+
+    trace_results_2 = trace_m_2(trace_results_1)
+
+    [np.testing.assert_allclose(trace_results_all, results_all, rtol=1e-03, atol=1e-05)]
+
+    [np.testing.assert_allclose(trace_results_all, trace_results_2, rtol=1e-03, atol=1e-05)]
+
 print('End')
