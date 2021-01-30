@@ -93,7 +93,7 @@ void raw_cudnn_convolution_forward_out(
 {
   TORCH_CHECK(!benchmark, "not supported yet");
   if (output.numel() == 0) {
-    return output;
+    return;
   }
 
   cudnnHandle_t handle = getCudnnHandle();
