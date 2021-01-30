@@ -260,8 +260,8 @@ class GemmBlockSparseMicrokernelTester {
         min_elem = *std::min_element(b.cbegin(), b.cend());
       } while (max_elem == min_elem);
 
-      std::unique_ptr<BCSRMatrix> bcsr_matrix =
-        generateBlockCSRMatrix(
+      std::unique_ptr<qnnpack::BCSRMatrix> bcsr_matrix =
+        qnnpack::generateBlockCSRMatrix(
             b.data(), n(), k(), blockSize(), kernel_zero_points.data());
 
       ASSERT_NE(
@@ -363,19 +363,18 @@ class GemmBlockSparseMicrokernelTester {
       std::vector<uint8_t> kernel_zero_points
         (num_zero_points_padded, bZeroPoint());
 
-      std::unique_ptr<BCSRMatrix> bcsr_matrix;
       uint8_t max_elem, min_elem;
       // This loop to ensure the assert_ne on b mat does not fire.
       do {
         std::generate(b.begin(), b.end(), std::ref(u8rng));
         fillBlockSparseWeights(
             b.data(), n(), k(), blockSize(), sparsity(), kernel_zero_points.data());
-        bcsr_matrix =
-          generateBlockCSRMatrix(
-              b.data(), n(), k(), blockSize(), kernel_zero_points.data());
         max_elem = *std::max_element(b.cbegin(), b.cend());
         min_elem = *std::min_element(b.cbegin(), b.cend());
       } while (max_elem == min_elem);
+      std::unique_ptr<qnnpack::BCSRMatrix> bcsr_matrix =
+        qnnpack::generateBlockCSRMatrix(
+            b.data(), n(), k(), blockSize(), kernel_zero_points.data());
 
       ASSERT_NE(
           *std::max_element(a.cbegin(), a.cend()),
