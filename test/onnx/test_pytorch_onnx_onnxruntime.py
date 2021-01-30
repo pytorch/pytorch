@@ -5833,6 +5833,7 @@ class TestONNXRuntime(unittest.TestCase):
     @disableScriptTest()
     def test_transformer_encoder(self):
         from torch.nn import TransformerEncoderLayer, TransformerEncoder
+
         class MyModule(torch.nn.Module):
             def __init__(self, ninp, nhead, nhid, dropout, nlayers):
                 super(MyModule, self).__init__()
