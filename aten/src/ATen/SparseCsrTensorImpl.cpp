@@ -57,7 +57,7 @@ void SparseCsrTensorImpl::resize_as_(const Tensor& src) {
   sizes_and_strides_.set_sizes(src.sizes());
 }
   
-void SparseCsrTensorImpl::set_member_tensors_unsafe(const Tensor& crow_indices, const Tensor& col_indices,
+void SparseCsrTensorImpl::set_member_tensors(const Tensor& crow_indices, const Tensor& col_indices,
                                                       const Tensor& values) {
   auto crow_indices_type = crow_indices.scalar_type();
   auto col_indices_type = col_indices.scalar_type();
@@ -91,12 +91,6 @@ void SparseCsrTensorImpl::set_member_tensors_unsafe(const Tensor& crow_indices, 
   TORCH_CHECK(col_indices.size(0) == values.size(0), 
               "col_indices and values must have same nnz, but got nnz from indices: ",
               col_indices.size(0), ", nnz from values: ", values.size(0));
-
-  TORCH_CHECK(crow_indices.dim() == 1, "crow_indices must have dim=1 but got crow_indices.dim()=", 
-              crow_indices.dim());
-  TORCH_CHECK(col_indices.dim() == 1, "col_indices must have dim=1 but got col_indices.dim()=",
-              col_indices.dim()); 
-  TORCH_CHECK(values.dim() == 1, "values must have dim=1 but got values.dim()=", values.dim());
 
   crow_indices_ = crow_indices;
   col_indices_ = col_indices;

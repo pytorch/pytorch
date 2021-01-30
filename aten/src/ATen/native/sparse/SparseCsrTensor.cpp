@@ -38,12 +38,19 @@ Tensor sparse_csr_tensor(const Tensor& crow_indices, const Tensor& col_indices,
                          const TensorOptions& options) {
   TORCH_CHECK(!options.has_layout() || options.layout() == kSparseCsr, 
     "expected sparse CSR layout, but got layout ", options.layout());
+
+  TORCH_CHECK(crow_indices.dim() == 1, "crow_indices must have dim=1 but got crow_indices.dim()=", 
+              crow_indices.dim());
+  TORCH_CHECK(col_indices.dim() == 1, "col_indices must have dim=1 but got col_indices.dim()=",
+              col_indices.dim()); 
+  TORCH_CHECK(values.dim() == 1, "values must have dim=1 but got values.dim()=", values.dim());
+
   TORCH_CHECK(crow_indices.numel() == size[0] + 1, 
     "crow_indices.numel() must be size(0)+1, but got: ", crow_indices.numel());
 
   SparseTensor self = new_csr_tensor(options);
   get_sparse_csr_impl(self)->resize_and_clear_(values.numel(), size);
-  get_sparse_csr_impl(self)->set_member_tensors_unsafe(crow_indices, col_indices, values);
+  get_sparse_csr_impl(self)->set_member_tensors(crow_indices, col_indices, values);
   
   return self;
 }
@@ -54,15 +61,17 @@ Tensor sparse_csr_tensor(const Tensor& crow_indices, const Tensor& col_indices,
     "expected sparse CSR layout, but got layout ", options.layout());
   
   std::vector<int64_t> size(2);
-  size[0] = crow_indices.numel() - 1;
-  Tensor max_col_indices = std::get<0>(col_indices.max(0, false));
-  size[1] = *max_col_indices.data_ptr<int64_t>() + 1;
 
-  SparseTensor self = new_csr_tensor(options);
-  get_sparse_csr_impl(self)->resize_and_clear_(values.numel(), size);
-  get_sparse_csr_impl(self)->set_member_tensors_unsafe(crow_indices, col_indices, values);
+  if (crow_indices.numel() > 0 && col_indices.numel() > 0) {
+    size[0] = crow_indices.numel() - 1;
+    Tensor max_col_indices = std::get<0>(col_indices.max(0, false));
+    size[1] = *max_col_indices.data_ptr<int64_t>() + 1;
+  } else {
+    size[0] = 0;
+    size[1] = 0;
+  }
 
-  return self;
+  return at::sparse_csr_tensor(crow_indices, col_indices, values, size, options);
 }
 
 // Access members of CSR tensors.

@@ -35,7 +35,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
 
   void resize_and_clear_(int64_t nnz_size, IntArrayRef size);
   void resize_as_(const Tensor& src);
-  void set_member_tensors_unsafe(const Tensor& crow_indices, const Tensor& col_indices,
+  void set_member_tensors(const Tensor& crow_indices, const Tensor& col_indices,
                                  const Tensor& values);
   
   Tensor crow_indices() const { return crow_indices_; }

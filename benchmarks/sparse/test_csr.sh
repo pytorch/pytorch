@@ -5,14 +5,14 @@ cd $PYTORCH_HOME
 
 echo "" >> $OUTFILE
 echo "----- USE_MKL=1 -----" >> $OUTFILE
-#rm -rf build
+rm -rf build
 
 export USE_MKL=1
-#export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
-#python setup.py build --cmake-only
-#ccmake build  # or cmake-gui build
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+python setup.py build --cmake-only
+ccmake build  # or cmake-gui build
 
-#python setup.py install
+python setup.py install
 
 cd benchmarks
 echo "!! SPARSE SPMM TIME BENCHMARK!! " >> $OUTFILE
@@ -26,10 +26,10 @@ echo "----------------------" >> $OUTFILE
 
 cd $PYTORCH_HOME
 echo "----- USE_MKL=0 ------" >> $OUTFILE
-#rm -rf build
+rm -rf build
 
-#export USE_MKL=0
-#python setup.py install
+export USE_MKL=0
+python setup.py install
 
 cd benchmarks
 for dim0 in 1000 5000 10000; do
