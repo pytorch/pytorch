@@ -52,7 +52,6 @@ namespace CUDACachingAllocator {
 // work.
 //
 
-
 namespace {
 
 using stream_set = std::unordered_set<cuda::CUDAStream>;
@@ -208,6 +207,11 @@ class DeviceCachingAllocator {
   size_t allowed_memory_maximum = 0;
 
   bool set_fraction = false;
+
+  // captures_underway tracks if a capture might be underway on any stream.
+  // Most of the time it's zero, in which case malloc can avoid calling
+  // cudaStreamGetCaptureInfo in the hot path.
+  int captures_underway = 0;
 
  public:
 
@@ -510,6 +514,20 @@ class DeviceCachingAllocator {
     }
   }
 
+  void incrementCapturesUnderway() {
+    // We could make captures_underway an atomic.
+    // But this call is rare and the access in malloc is frequent.
+    // captures_underway as a bare int keeps the access in malloc dead simple.
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    captures_underway++;
+  }
+
+  // Called by a thread when ending capture.
+  void decrementCapturesUnderway() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    captures_underway--;
+  }
+
  private:
 
   // All private methods do not acquire the allocator mutex.
@@ -662,7 +680,11 @@ class DeviceCachingAllocator {
       p.err = cudaErrorMemoryAllocation;
       return false;
     } else {
-      p.err = cudaMalloc(&ptr, size);
+      {
+        // It's ok to capture cudaMallocs, as long as we never cudaFree those addresses before replay.
+        at::cuda::cudaStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+        p.err = cudaMalloc(&ptr, size);
+      }
       if (p.err != cudaSuccess) {
         if (p.err == cudaErrorMemoryAllocation) {
           // If this is the first attempt (!isRetry), we can forgive and clear CUDA's
@@ -983,7 +1005,11 @@ struct CudaCachingAllocator : public Allocator {
     C10_CUDA_CHECK(cudaGetDevice(&device));
     void* r = nullptr;
     if (forceUncachedAllocator()) {
-      C10_CUDA_CHECK(cudaMalloc(&r, size));
+      {
+        // It's ok to capture cudaMallocs, as long as we never cudaFree those addresses before replay.
+        at::cuda::cudaStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+        C10_CUDA_CHECK(cudaMalloc(&r, size));
+      }
       return {r, r, &uncached_delete, Device(DeviceType::CUDA, device)};
     }
     if (size != 0) {
@@ -1056,6 +1082,21 @@ void resetPeakStats(int device) {
 
 std::vector<SegmentInfo> snapshot() {
   return caching_allocator.snapshot();
+}
+
+// CUDAGraph interactions
+void incrementCapturesUnderway(int device) {
+  assertValidDevice(device);
+  caching_allocator.device_allocator[device]->incrementCapturesUnderway();
+}
+
+void decrementCapturesUnderway(int device) {
+  assertValidDevice(device);
+  caching_allocator.device_allocator[device]->decrementCapturesUnderway();
+}
+
+void setPoolForCapture(CUDAGraphid_t graph_id, CUDAGraphid_t mempool_id){
+  // caching_allocator.setPoolForCapture(graph_id, mempool_id);
 }
 
 //

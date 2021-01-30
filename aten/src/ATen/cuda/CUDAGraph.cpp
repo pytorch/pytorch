@@ -1,6 +1,8 @@
-#include <ATen/cuda/Exceptions.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraph.h>
+#include <ATen/cuda/Exceptions.h>
 #include <ATen/Functions.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 
 namespace at {
@@ -30,7 +32,7 @@ CUDAGraph::CUDAGraph()
 #endif
 }
 
-void CUDAGraph::capture_begin() {
+void CUDAGraph::capture_begin(CUDAGraphid_t pool/*=0*/) {
 #if CUDA_VERSION >= 11000
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
@@ -68,6 +70,24 @@ void CUDAGraph::capture_begin() {
   cudaStreamCaptureStatus status;
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &id_));
   TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
+
+  TORCH_INTERNAL_ASSERT(id_ > 0);
+  if (pool != 0) {
+    // pool != 0 means user requested we share the memory pool that value identifies.
+    mempool_id_ = pool;
+  } else {
+    // User did not ask us to share a mempool. Use our own id_ as our mempool_id_.
+    mempool_id_ = id_;
+  }
+
+  // When CUDACachingAllocator allocates, it calls cudaStreamGetCaptureInfo to get the current stream's
+  // capture id, if any. Here we tell CUDACachingAllocator: if the stream has a capture id matching
+  // this graph's id_, use the private pool mempool_id_ identifies.
+  c10::cuda::CUDACachingAllocator::setPoolForCapture(id_, mempool_id_);
+
+  // Tells the allocator at least one capture is underway, so it should check the current stream's capture
+  // status and id when allocating.
+  c10::cuda::CUDACachingAllocator::incrementCapturesUnderway();
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
 #endif
@@ -75,6 +95,8 @@ void CUDAGraph::capture_begin() {
 
 void CUDAGraph::capture_end() {
 #if CUDA_VERSION >= 11000
+  c10::cuda::CUDACachingAllocator::decrementCapturesUnderway();
+
   auto stream = at::cuda::getCurrentCUDAStream();
 
   TORCH_CHECK(stream == capture_stream_,
@@ -158,6 +180,18 @@ void CUDAGraph::reset() {
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
 #endif
+}
+
+// Returns an id another graph's capture_begin can use to share the same memory pool as this graph.
+// For simplicity, we just use the id_ as given by
+CUDAGraphid_t CUDAGraph::pool() {
+#if CUDA_VERSION >= 11000
+  TORCH_CHECK(has_graph_exec_,
+              "Called CUDAGraph::pool without a preceding successful capture.");
+#else
+  TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
+#endif
+  return mempool_id_;
 }
 
 CUDAGraph::~CUDAGraph() {

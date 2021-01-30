@@ -1,6 +1,8 @@
 #ifndef THC_DEVICE_ALLOCATOR_INC
 #define THC_DEVICE_ALLOCATOR_INC
 
+#include <ATen/cuda/CUDAGraph.h>
+
 #include <c10/cuda/CUDAStream.h>
 #include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAMacros.h>
@@ -120,6 +122,11 @@ C10_CUDA_API DeviceStats getDeviceStats(int device);
 C10_CUDA_API void resetAccumulatedStats(int device);
 C10_CUDA_API void resetPeakStats(int device);
 C10_CUDA_API std::vector<SegmentInfo> snapshot();
+
+// CUDAGraph interactions
+C10_CUDA_API void incrementCapturesUnderway();
+C10_CUDA_API void decrementCapturesUnderway();
+C10_CUDA_API void setPoolForCapture(CUDAGraphid_t graph_id, CUDAGraphid_t mempool_id);
 
 C10_CUDA_API std::mutex* getFreeMutex();
 
