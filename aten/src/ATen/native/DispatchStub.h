@@ -69,8 +69,9 @@ struct TORCH_API DispatchStub<rT (*)(Args...), T> {
   DispatchStub(const DispatchStub&) = delete;
   DispatchStub& operator=(const DispatchStub&) = delete;
 
-  template <typename... ArgTypes>
-  rT operator()(DeviceType device_type, ArgTypes&&... args) {
+private:
+  FnPtr get_call_ptr(DeviceType device_type) {
+    FnPtr call_ptr = nullptr;
     if (device_type == DeviceType::CPU) {
       // Use memory_order_relaxed here since even if two threads race,
       // they will still compute the same value for cpu_dispatch_ptr.
@@ -79,16 +80,25 @@ struct TORCH_API DispatchStub<rT (*)(Args...), T> {
         fptr = choose_cpu_impl();
         cpu_dispatch_ptr.store(fptr, std::memory_order_relaxed);
       }
-      return (*fptr)(std::forward<ArgTypes>(args)...);
+      call_ptr = fptr;
     } else if (device_type == DeviceType::CUDA) {
       AT_ASSERTM(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
-      return (*cuda_dispatch_ptr)(std::forward<ArgTypes>(args)...);
+      call_ptr = cuda_dispatch_ptr;
     } else if (device_type == DeviceType::HIP) {
       AT_ASSERTM(hip_dispatch_ptr, "DispatchStub: missing HIP kernel");
-      return (*hip_dispatch_ptr)(std::forward<ArgTypes>(args)...);
-    } else {
+      call_ptr = hip_dispatch_ptr;
+    }
+    if (call_ptr == nullptr) {
       AT_ERROR("DispatchStub: unsupported device type", device_type);
     }
+    return call_ptr;
+  }
+
+public:
+  template <typename... ArgTypes>
+  rT operator()(DeviceType device_type, ArgTypes&&... args) {
+    FnPtr call_ptr = get_call_ptr(device_type);
+    return (*call_ptr)(std::forward<ArgTypes>(args)...);
   }
 
   FnPtr choose_cpu_impl() {
