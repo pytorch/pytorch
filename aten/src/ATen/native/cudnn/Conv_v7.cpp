@@ -668,7 +668,7 @@ void raw_cudnn_convolution_forward_out(
   split_batch_dim_to_32bit_out(output, input, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32, 1024 * 1024 * 256, raw_cudnn_convolution_forward_out_32bit);
 }
 
-#endif // CUDNN_VERSION < 8000
+#endif // !HAS_CUDNN_V8()
 
 // ---------------------------------------------------------------------
 //
@@ -828,4 +828,4 @@ void raw_cudnn_convolution_backward_weight_out(
 
 }}  // namespace at::native
 
-#endif  // !HAS_CUDNN_V8()
+#endif
