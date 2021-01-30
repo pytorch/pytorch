@@ -10,12 +10,18 @@ Overview
 Writing Transformations
 -----------------------
 
-What is a FX transform? In the abstract, it’s something that takes
-your ``nn.Module``, does something with it, and then returns a new
-``nn.Module``. Specifically, FX converts your input ``nn.Module``
-into a graph form. Then, your FX transform will use this graph to build
-a new graph (which may simply be a copy), and then returns
-a ``nn.Module``. You should think of the ``nn.Module`` that your FX
+What is a FX transform? Essentially, it's a function that looks like this.
+
+::
+
+    def transform(m: nn.Module) -> nn.Module:
+        fx_model: GraphModule = fx.symbolice_trace(m)
+        new_model = ...
+        return new_model
+
+Your transform will take in an ``nn.Module``, convert it into a FX GraphModule
+with ``fx.symbolic_trace``, and return a new ``nn.Module``.
+You should think of the ``nn.Module`` that your FX
 transform returns as identical to a regular ``nn.Module``-- you can pass
 it to another FX transform, you can pass it to TorchScript, or you can
 run it. Ensuring that the inputs and outputs of your FX transform are a
@@ -40,18 +46,23 @@ replace ``torch.add`` with ``torch.mul``.
         def forward(self, x, y):
             return torch.add(x, y)
 
-    # Symbolically trace an instance of the module
-    traced = symbolic_trace(original_module)
+    def transform(m: nn.Module) -> nn.Module:
+        fx_model: GraphModule = fx.symbolic_trace(m)
+        # FX represents its graph as an ordered list of nodes, so we can iterate through them.
+        for node in fx_model.graph.nodes:
+            # Checks if we're calling a function (i.e: torch.add)
+            if node.op == 'call_function':
+                # The target attribute is the function that call_function calls.
+                if node.target == torch.add:
+                    node.target = torch.mul
 
-    for node in traced.graph.nodes:
-        if n.target == torch.add:
-            n.target = torch.mul
-
-    traced.recompile()
+        traced.lint() # Does some checks to make sure the graph is well-formed.
+        traced.recompile() # regenerates the python code that corresponds to the graph.
 
 We can also do more involved graph rewrites, such as appending a ReLU
 after a node. To aid in these transformations, FX also has utility
-functions for transforming the graph. You can find more   .
+functions for transforming the graph. You can find more in the FX documentation.
+TODO: Add link to the FX documentation.
 
 ::
 
@@ -95,7 +106,7 @@ manipulation can be awkward, and it’s often easier to implicitly
 generate the graph by retracing.
 
 To use this method, we write the graph that we want inserted as regular
-PyTorch code and pass in implicit proxy objects. These proxy objects
+PyTorch code and pass in Proxy objects. These Proxy objects
 will capture the operations that are performed on them and append them to
 the graph.
 
@@ -107,24 +118,27 @@ the graph.
     decomposition_rules = {}
     decomposition_rules[F.relu] = relu_decomposition
 
-    new_graph = fx.Graph()
-    for node in traced.graph.nodes:
-        if node.op == 'call_function':
-            tracer = GraphAppendingTracer(new_graph)
-            proxy_args = [Proxy(i, tracer=tracer) if isinstance(x, fx.Node)
-                          for x in node.args]
-            new_node = decomposition_rules[node.target](proxy_args)
-            new_node.name = node.name
-        else: # Otherwise, just append the original graph.
-            new_graph.node_copy(node)
+    def decompose(model: torch.nn.Module) -> torch.nn.Module:
+        model = fx.symbolic_trace(model)
+        new_graph = fx.Graph()
+        env = {}
+        for node in model.graph.nodes:
+            if node.op == 'call_function' and node.target in decomposition_rules:
+                tracer = fx.proxy.Tracer(new_graph)
+                proxy_args = [fx.Proxy(env[x.name], tracer=tracer) if isinstance(x, fx.Node) else x for x in node.args]
+                new_node = decomposition_rules[node.target](*proxy_args).node
+                env[node.name] = new_node
+            else:
+                new_node = new_graph.node_copy(node, lambda x: env[x.name])
+                env[node.name] = new_node
+        return fx.GraphModule(model, new_graph)
 
 In addition to avoiding explicit graph manipulation, using Proxies also allows you to
 specify your rewrite rules as native Python code. For transformations
 that require a large amount of rewrite rules (such as vmap or grad),
 this can often improve readability and maintainability of the rules.
 
-Example transformations that use this technique include (vmap), (grad),
-and the (decomposition) pass.
+TODO: Example transformations (need to be included first)
 
 FX Transforms That Don’t Return A Module
 ----------------------------------------
@@ -146,9 +160,8 @@ Reinterpreting the FX graph is generally most useful when you want
 runtime information that FX typically doesn’t capture (due to being a
 symbolic trace). This can be used for capturing shape information for
 downstream passes, but it can also be used to capture other information
-about execution. For example, this (roofline analysis pass in FX)
-reinterprets the FX graph while capturing information about the runtime
-of each operation in order to identify bottlenecks.
+about execution.
+TODO: Add roofline analysis pass once it gets merged.
 
 Examples
 ~~~~~~~~
