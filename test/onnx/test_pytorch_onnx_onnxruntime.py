@@ -5997,7 +5997,7 @@ class TestONNXRuntime(unittest.TestCase):
             self.run_test(model, (box_regression, proposal))
 
     @skipIfUnsupportedOpsetVersion([13])
-        def test_initializer_sequence(self):
+    def test_initializer_sequence(self):
         class MyModule(torch.nn.Module):
             def __init__(self, input_size, hidden_size, num_classes):
                 super(MyModule, self).__init__()
