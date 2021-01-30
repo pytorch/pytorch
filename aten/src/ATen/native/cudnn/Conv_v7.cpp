@@ -1,4 +1,5 @@
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+#include <ATen/native/cudnn/Macros.h>
 
 #if AT_CUDNN_ENABLED()
 
@@ -614,7 +615,7 @@ if (args.params.dataType == CUDNN_DATA_FLOAT) {                                 
 //
 // ---------------------------------------------------------------------
 
-#if defined(CUDNN_VERSION) && CUDNN_VERSION < 8000
+#if !HAS_CUDNN_V8()
 
 void raw_cudnn_convolution_forward_out_32bit(
     const Tensor& output, const Tensor& input, const Tensor& weight,
@@ -827,4 +828,4 @@ void raw_cudnn_convolution_backward_weight_out(
 
 }}  // namespace at::native
 
-#endif
+#endif  // !HAS_CUDNN_V8()

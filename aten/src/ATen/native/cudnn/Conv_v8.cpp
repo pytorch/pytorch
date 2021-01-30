@@ -1,8 +1,9 @@
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+#include <ATen/native/cudnn/Macros.h>
+
+#if AT_CUDNN_ENABLED() && HAS_CUDNN_V8()
+
 #include <ATen/cudnn/cudnn-wrapper.h>
-
-#if AT_CUDNN_ENABLED() && defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
-
 #include <cudnn_frontend.h>
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
