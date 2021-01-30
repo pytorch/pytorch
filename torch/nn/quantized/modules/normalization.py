@@ -16,8 +16,8 @@ class LayerNorm(torch.nn.LayerNorm):
             normalized_shape, eps=eps, elementwise_affine=elementwise_affine)
         self.weight = weight
         self.bias = bias
-        self.scale = scale
-        self.zero_point = zero_point
+        self.register_buffer('scale', torch.tensor([scale]))
+        self.register_buffer('zero_point', torch.tensor([zero_point]))
 
     def forward(self, input):
         return torch.ops.quantized.layer_norm(
