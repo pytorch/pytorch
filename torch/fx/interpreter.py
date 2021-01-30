@@ -31,12 +31,14 @@ class Interpreter:
         method equivalents). We could subclass Interpreter like so::
 
             class NegSigmSwapInterpreter(Interpreter):
-                def call_function(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+                def call_function(self, target : Target,
+                                  args : Tuple, kwargs : Dict) -> Any:
                     if target == torch.sigmoid:
                         return torch.neg(*args, **kwargs)
                     return super().call_function(n)
 
-                def call_method(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+                def call_method(self, target : Target,
+                                args : Tuple, kwargs : Dict) -> Any:
                     if target == 'neg':
                         call_self, *args_tail = args
                         return call_self.sigmoid(*args_tail, **kwargs)
@@ -59,14 +61,16 @@ class Interpreter:
         self.submodules = dict(self.module.named_modules())
         self.env : Dict[Node, Any] = {}
 
-        self.clear_env_on_return : bool = True
-
     def run(self, *args, initial_env : Optional[Dict[Node, Any]] = None) -> Any:
         """
         Run `module` via interpretation and return the result.
 
         Args:
             *args: The arguments to the Module to run, in positional order
+            initial_env (Optional[Dict[Node, Any]]): An optional starting environment for execution.
+                This is a dict mapping `Node` to any value. This can be used, for example, to
+                pre-populate results for certain `Nodes` so as to do only partial evaluation within
+                the interpreter.
 
         Returns:
             Any: The value returned from executing the Module
@@ -112,7 +116,7 @@ class Interpreter:
 
     # Main Node running APIs
 
-    def placeholder(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+    def placeholder(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Any:
         """
         Execute a ``placeholder`` node. Note that this is stateful:
         ``Interpreter`` maintains an internal iterator over
@@ -120,7 +124,9 @@ class Interpreter:
         next() on that iterator.
 
         Args:
-            target (Target): The call target for this node. See `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for details on semantics
+            target (Target): The call target for this node. See
+                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
 
@@ -135,13 +141,15 @@ class Interpreter:
         else:
             return next(self.args_iter)
 
-    def get_attr(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+    def get_attr(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Any:
         """
         Execute a ``get_attr`` node. Will retrieve an attribute
         value from the ``Module`` hierarchy of ``self.module``.
 
         Args:
-            target (Target): The call target for this node. See `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for details on semantics
+            target (Target): The call target for this node. See
+                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
 
@@ -151,12 +159,14 @@ class Interpreter:
         assert isinstance(target, str)
         return self.fetch_attr(target)
 
-    def call_function(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+    def call_function(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Any:
         """
         Execute a ``call_function`` node and return the result.
 
         Args:
-            target (Target): The call target for this node. See `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for details on semantics
+            target (Target): The call target for this node. See
+                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
 
@@ -168,12 +178,14 @@ class Interpreter:
         # Execute the function and return the result
         return target(*args, **kwargs)
 
-    def call_method(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+    def call_method(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Any:
         """
         Execute a ``call_method`` node and return the result.
 
         Args:
-            target (Target): The call target for this node. See `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for details on semantics
+            target (Target): The call target for this node. See
+                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
 
@@ -187,12 +199,14 @@ class Interpreter:
         assert isinstance(target, str)
         return getattr(self_obj, target)(*args_tail, **kwargs)
 
-    def call_module(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+    def call_module(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Any:
         """
         Execute a ``call_module`` node and return the result.
 
         Args:
-            target (Target): The call target for this node. See `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for details on semantics
+            target (Target): The call target for this node. See
+                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
 
@@ -207,13 +221,15 @@ class Interpreter:
 
         return submod(*args, **kwargs)
 
-    def output(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+    def output(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Any:
         """
         Execute an ``output`` node. This really just retrieves
         the value referenced by the ``output`` node and returns it.
 
         Args:
-            target (Target): The call target for this node. See `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for details on semantics
+            target (Target): The call target for this node. See
+                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
 
@@ -291,12 +307,12 @@ class Transformer(Interpreter):
         method equivalents). We could subclass ``Transformer`` like so::
 
             class NegSigmSwapXformer(Transformer):
-                def call_function(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+                def call_function(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Any:
                     if target == torch.sigmoid:
                         return torch.neg(*args, **kwargs)
                     return super().call_function(n)
 
-                def call_method(self, target : Target, args : Tuple, kwargs : Dict) -> Any:
+                def call_method(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Any:
                     if target == 'neg':
                         call_self, *args_tail = args
                         return call_self.sigmoid(*args_tail, **kwargs)
@@ -328,28 +344,32 @@ class Transformer(Interpreter):
         self.tracer = TransformerTracer(self.new_graph)
         self.tracer.root = module
 
-    def placeholder(self, target : Target, args : Tuple, kwargs : Dict) -> Proxy:
+    def placeholder(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Proxy:
         """
         Execute a ``placeholder`` node. In ``Transformer``, this is
         overridden to insert a new ``placeholder`` into the output
         graph.
 
         Args:
-            target (Target): The call target for this node. See `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for details on semantics
+            target (Target): The call target for this node. See
+                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
         """
         assert isinstance(target, str)
         return Proxy(self.new_graph.placeholder(target), self.tracer)
 
-    def get_attr(self, target : Target, args : Tuple, kwargs : Dict) -> Proxy:
+    def get_attr(self, target : 'Target', args : Tuple[Any], kwargs : Dict[str, Any]) -> Proxy:
         """
         Execute a ``get_attr`` node. In ``Transformer``, this is
         overridden to insert a new ``get_attr`` node into the output
         graph.
 
         Args:
-            target (Target): The call target for this node. See `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for details on semantics
+            target (Target): The call target for this node. See
+                `Node <https://pytorch.org/docs/master/fx.html#torch.fx.Node>`__ for
+                details on semantics
             args (Tuple): Tuple of positional args for this invocation
             kwargs (Dict): Dict of keyword arguments for this invocation
         """
