@@ -10,7 +10,8 @@
 
 #include "fully-connected-sparse-operator-tester.h"
 
-TEST(FULLY_CONNECTED_OP, integration_test_dynamic) {
+#if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
+TEST(FULLY_CONNECTED_SPARSE_OP, integration_test_dynamic) {
   FullyConnectedSparseOperatorTester()
       .batchSize(4)
       .inputChannels(4)
@@ -19,7 +20,7 @@ TEST(FULLY_CONNECTED_OP, integration_test_dynamic) {
       .testQ8(FullyConnectedSparseOperatorTester::Mode::Dynamic);
 }
 
-TEST(FULLY_CONNECTED_OP, zero_batch_dynamic) {
+TEST(FULLY_CONNECTED_SPARSE_OP, zero_batch_dynamic) {
   FullyConnectedSparseOperatorTester()
       .batchSize(0)
       .inputChannels(2)
@@ -28,7 +29,7 @@ TEST(FULLY_CONNECTED_OP, zero_batch_dynamic) {
       .testQ8(FullyConnectedSparseOperatorTester::Mode::Dynamic);
 }
 
-TEST(FULLY_CONNECTED_OP, unit_batch_dynamic) {
+TEST(FULLY_CONNECTED_SPARSE_OP, unit_batch_dynamic) {
   FullyConnectedSparseOperatorTester()
       .batchSize(1)
       .inputChannels(23)
@@ -37,7 +38,7 @@ TEST(FULLY_CONNECTED_OP, unit_batch_dynamic) {
       .testQ8(FullyConnectedSparseOperatorTester::Mode::Dynamic);
 }
 
-TEST(FULLY_CONNECTED_OP, unit_batch_with_qmin_dynamic) {
+TEST(FULLY_CONNECTED_SPARSE_OP, unit_batch_with_qmin_dynamic) {
   FullyConnectedSparseOperatorTester()
       .batchSize(1)
       .inputChannels(23)
@@ -47,7 +48,7 @@ TEST(FULLY_CONNECTED_OP, unit_batch_with_qmin_dynamic) {
       .testQ8(FullyConnectedSparseOperatorTester::Mode::Dynamic);
 }
 
-TEST(FULLY_CONNECTED_OP, unit_batch_with_qmax_dynamic) {
+TEST(FULLY_CONNECTED_SPARSE_OP, unit_batch_with_qmax_dynamic) {
   FullyConnectedSparseOperatorTester()
       .batchSize(1)
       .inputChannels(23)
@@ -57,7 +58,7 @@ TEST(FULLY_CONNECTED_OP, unit_batch_with_qmax_dynamic) {
       .testQ8(FullyConnectedSparseOperatorTester::Mode::Dynamic);
 }
 
-TEST(FULLY_CONNECTED_OP, unit_batch_with_input_stride_dynamic) {
+TEST(FULLY_CONNECTED_SPARSE_OP, unit_batch_with_input_stride_dynamic) {
   FullyConnectedSparseOperatorTester()
       .batchSize(1)
       .inputChannels(23)
@@ -67,7 +68,7 @@ TEST(FULLY_CONNECTED_OP, unit_batch_with_input_stride_dynamic) {
       .testQ8(FullyConnectedSparseOperatorTester::Mode::Dynamic);
 }
 
-TEST(FULLY_CONNECTED_OP, unit_batch_with_output_stride_dynamic) {
+TEST(FULLY_CONNECTED_SPARSE_OP, unit_batch_with_output_stride_dynamic) {
   FullyConnectedSparseOperatorTester()
       .batchSize(1)
       .inputChannels(23)
@@ -77,7 +78,7 @@ TEST(FULLY_CONNECTED_OP, unit_batch_with_output_stride_dynamic) {
       .testQ8(FullyConnectedSparseOperatorTester::Mode::Dynamic);
 }
 
-TEST(FULLY_CONNECTED_OP, small_batch_dynamic) {
+TEST(FULLY_CONNECTED_SPARSE_OP, small_batch_dynamic) {
   FullyConnectedSparseOperatorTester()
       .batchSize(12)
       .inputChannels(23)
@@ -86,7 +87,7 @@ TEST(FULLY_CONNECTED_OP, small_batch_dynamic) {
       .testQ8(FullyConnectedSparseOperatorTester::Mode::Dynamic);
 }
 
-TEST(FULLY_CONNECTED_OP, small_batch_with_qmin_dynamic) {
+TEST(FULLY_CONNECTED_SPARSE_OP, small_batch_with_qmin_dynamic) {
   FullyConnectedSparseOperatorTester()
       .batchSize(12)
       .inputChannels(23)
@@ -96,7 +97,7 @@ TEST(FULLY_CONNECTED_OP, small_batch_with_qmin_dynamic) {
       .testQ8(FullyConnectedSparseOperatorTester::Mode::Dynamic);
 }
 
-TEST(FULLY_CONNECTED_OP, small_batch_with_qmax_dynamic) {
+TEST(FULLY_CONNECTED_SPARSE_OP, small_batch_with_qmax_dynamic) {
   FullyConnectedSparseOperatorTester()
       .batchSize(12)
       .inputChannels(23)
@@ -201,3 +202,4 @@ TEST(FULLY_CONNECTED_OP, small_batch_with_qmax_dynamic_prepacked) {
       .iterations(3)
       .testQ8_prepacked(FullyConnectedSparseOperatorTester::Mode::Dynamic);
 }
+#endif
