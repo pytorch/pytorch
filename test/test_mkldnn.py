@@ -1,5 +1,6 @@
 import copy
 import itertools
+import functools
 import unittest
 
 try:
@@ -15,9 +16,11 @@ import torch.nn.functional as F
 import torch.jit
 import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
-from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryFileName
+from torch.testing._internal.common_utils import TestCase, run_tests, TemporaryFileName, gradcheck, gradgradcheck
 
-from torch.autograd.gradcheck import gradgradcheck, gradcheck
+# batched grad doesn't support mkldnn
+gradcheck = functools.partial(gradcheck, check_batched_grad=False)
+gradgradcheck = functools.partial(gradgradcheck, check_batched_grad=False)
 
 types = [torch.float, torch.bfloat16]
 
