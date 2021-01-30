@@ -380,8 +380,8 @@ class GemmBlockSparseMicrokernelTester {
 
     for (size_t iteration = 0; iteration < iterations(); iteration++) {
       std::generate(a.begin(), a.end(), std::ref(u8rng));
-      std::fill(bias.begin(), bias.end(), 0);
-      std::fill(c.begin(), c.end(), 2.0f);
+      std::generate(bias.begin(), bias.end(), std::ref(s32rng));
+      std::fill(c.begin(), c.end(), 0.0f);
       size_t num_zero_points_padded = n() + 8;
       std::vector<uint8_t> kernel_zero_points
         (num_zero_points_padded, bZeroPoint());
