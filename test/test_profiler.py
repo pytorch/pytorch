@@ -10,9 +10,8 @@ import torch.utils.data
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN, IS_WINDOWS, TemporaryFileName)
-import torch.autograd.profiler as profiler
-from torch.autograd.profiler import profile
-from torch.autograd import kineto_available, DeviceType
+from torch.autograd.profiler import profile as _profile
+from torch.profiler import profile, kineto_available, DeviceType, ProfilerActivity
 
 try:
     import psutil
@@ -34,7 +33,7 @@ class TestProfilerCUDA(TestCase):
         p = psutil.Process()
         last_rss = collections.deque(maxlen=5)
         for outer_idx in range(10):
-            with profile(use_cuda=True):
+            with _profile(use_cuda=True):
                 for _ in range(1024):
                     t = torch.mm(t, t)
 
@@ -80,7 +79,7 @@ class TestProfiler(TestCase):
 
         mod = DummyModule()
 
-        with profile(with_stack=True, use_kineto=kineto_available()) as p:
+        with _profile(with_stack=True, use_kineto=kineto_available()) as p:
             x = torch.randn(10, 10, requires_grad=True)
             y = torch.randn(10, 10, requires_grad=True)
             z = x + y
@@ -116,11 +115,11 @@ class TestProfiler(TestCase):
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_kineto(self):
-        with profile(use_cuda=True, use_kineto=True):
+        with _profile(use_cuda=True, use_kineto=True):
             self.payload()
 
         # rerun to avoid initial start overhead
-        with profile(use_cuda=True, use_kineto=True) as p:
+        with _profile(use_cuda=True, use_kineto=True) as p:
             self.payload()
         print(p.key_averages().table(
             sort_by="self_cuda_time_total", row_limit=-1))
@@ -138,7 +137,10 @@ class TestProfiler(TestCase):
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @unittest.skipIf(not TEST_MULTIGPU, "Multiple GPUs needed")
     def test_kineto_multigpu(self):
-        with profile(use_cuda=True, use_kineto=True) as prof:
+        with profile(
+            activities=[
+                ProfilerActivity.CPU,
+                ProfilerActivity.CUDA]) as prof:
             for gpu_id in [0, 1]:
                 x = torch.randn(10, 10).cuda(gpu_id)
                 y = torch.randn(10, 10).cuda(gpu_id)
@@ -147,7 +149,7 @@ class TestProfiler(TestCase):
         found_gemm_0 = False
         found_gemm_1 = False
         found_cuda = False
-        for evt in prof.function_events:
+        for evt in prof.events():
             if "gemm" in evt.name.lower() and evt.device_type == DeviceType.CUDA:
                 if evt.device_index == 0:
                     found_gemm_0 = True
@@ -226,7 +228,7 @@ class TestProfiler(TestCase):
             for key, count in expected_event_count.items():
                 self.assertTrue((key in actual_event_count.keys()) and (count == actual_event_count[key]))
 
-        with profile() as prof:
+        with _profile() as prof:
             train()
         expected_event_count = {
             # "+1" because the final iteration will enter __next__ but skip the loop body.
@@ -238,13 +240,13 @@ class TestProfiler(TestCase):
 
         # Test on pickle/unpickle. Expect to work in multi-processing.
         optimizer = pickle.loads(pickle.dumps(optimizer))
-        with profile() as prof:
+        with _profile() as prof:
             train()
         judge(expected_event_count, prof)
 
         # Test on customized optimizer.
         optimizer = CustomSGD(model.parameters(), lr=1e-4)
-        with profile() as prof:
+        with _profile() as prof:
             train()
         expected_event_count = {
             "enumerate(DataLoader)#_SingleProcessDataLoaderIter.__next__": (N + 1),
@@ -261,7 +263,7 @@ class TestProfiler(TestCase):
             nn.ReLU(),
         )
         inputs = torch.randn(40, 16, 18, 260)
-        with profiler.profile(record_shapes=True, with_flops=True) as prof:
+        with _profile(record_shapes=True, with_flops=True) as prof:
             model(inputs)
         profiler_output = prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=10)
         print(profiler_output)
@@ -272,7 +274,7 @@ class TestProfiler(TestCase):
     def test_kineto_profiler_api(self):
         called_num = [0]
 
-        with profile(use_cuda=True, use_kineto=True):
+        with _profile(use_cuda=True, use_kineto=True):
             self.payload()
 
         def trace_handler(p):
@@ -281,7 +283,7 @@ class TestProfiler(TestCase):
             # p.export_chrome_trace("/tmp/test_trace_" + str(called_num[0]) + ".json")
             called_num[0] += 1
 
-        with torch.profiler.profile(
+        with profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
                 torch.profiler.ProfilerActivity.CUDA],
@@ -298,7 +300,7 @@ class TestProfiler(TestCase):
         self.assertEqual(called_num[0], 2)
 
         # case without enable_pred
-        with torch.profiler.profile(
+        with profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
                 torch.profiler.ProfilerActivity.CUDA]
@@ -309,7 +311,7 @@ class TestProfiler(TestCase):
             sort_by="self_cuda_time_total", row_limit=-1))
 
     def test_export_stacks(self):
-        with profile(with_stack=True, use_kineto=kineto_available()) as p:
+        with _profile(with_stack=True, use_kineto=kineto_available()) as p:
             x = torch.randn(10, 10)
             y = torch.randn(10, 10)
             z = torch.mm(x, y)
