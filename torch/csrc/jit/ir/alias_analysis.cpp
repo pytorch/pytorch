@@ -91,8 +91,8 @@ bool isMutableTypeImpl(
   // getMutableTypePtrImpl
   auto kind = type->kind();
   if (kind == TypeKind::TensorType || kind == TypeKind::ListType ||
-      kind == TypeKind::ClassType || kind == TypeKind::DictType
-      || kind == TypeKind::UnionType) {
+      kind == TypeKind::ClassType || kind == TypeKind::DictType ||
+      kind == TypeKind::UnionType) {
     return true;
   }
   MutableTypePtrHelper helper(mutable_type_cache);
