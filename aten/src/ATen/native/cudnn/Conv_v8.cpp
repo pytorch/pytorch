@@ -126,7 +126,7 @@ void raw_cudnn_convolution_forward_out(
   auto search = engine_cache.find(key);
   if (search != engine_cache.end()) {
     run(search->second);
-    return output;
+    return;
   }
 
   auto op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
@@ -159,7 +159,7 @@ void raw_cudnn_convolution_forward_out(
     try {
       run(cfg);
       engine_cache[key] = cfg;
-      return output;
+      return;
     } catch (cudnn_frontend::cudnnException &e) {} catch(CuDNNError &e) {}
   }
   TORCH_CHECK(false, "Unable to find an engine to execute this computation");
