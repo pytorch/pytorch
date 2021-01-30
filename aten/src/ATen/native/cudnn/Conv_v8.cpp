@@ -162,6 +162,6 @@ void raw_cudnn_convolution_forward_out(
   TORCH_CHECK(false, "Unable to find an engine to execute this computation");
 }
 
-}}
+}} // at::native
 
 #endif  // AT_CUDNN_ENABLED and CUDNN_VERSION
