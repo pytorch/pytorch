@@ -7,4 +7,7 @@
 // enable this only if you know what you are doing.
 #define _ENABLE_CUDNN_V8_API true
 
+// Note: The version below should not actually be 8000. Instead, it should
+// be whatever version of cuDNN that v8 API work with PyTorch correctly.
+// The version is set to 8000 today for convenience of debugging.
 #define HAS_CUDNN_V8() (_ENABLE_CUDNN_V8_API && defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000)
