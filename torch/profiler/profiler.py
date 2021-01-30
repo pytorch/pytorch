@@ -268,6 +268,14 @@ class profile(object):
         assert self.profiler
         return self.profiler.key_averages(group_by_input_shape, group_by_stack_n)
 
+    def events(self):
+        """
+        Returns the list of unaggregated profiler events,
+        to be used in the trace callback or after the profiling is finished
+        """
+        assert self.profiler
+        return self.profiler.function_events
+
     def _enter_actions(self):
         if self.current_action == ProfilerAction.WARMUP:
             self._start_warmup()
