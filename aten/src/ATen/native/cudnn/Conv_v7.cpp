@@ -1,7 +1,8 @@
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
-#include <ATen/native/cudnn/Macros.h>
 
 #if AT_CUDNN_ENABLED()
+
+#include <ATen/native/cudnn/Macros.h>
 
 #include <limits>
 #include <vector>

@@ -1,7 +1,10 @@
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+
+#if AT_CUDNN_ENABLED()
+
 #include <ATen/native/cudnn/Macros.h>
 
-#if AT_CUDNN_ENABLED() && HAS_CUDNN_V8()
+#if HAS_CUDNN_V8()
 
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <cudnn_frontend.h>
@@ -164,4 +167,5 @@ void raw_cudnn_convolution_forward_out(
 
 }} // at::native
 
-#endif  // AT_CUDNN_ENABLED and CUDNN_VERSION
+#endif  // HAS_CUDNN_V8
+#endif  // AT_CUDNN_ENABLED
