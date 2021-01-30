@@ -109,7 +109,7 @@ void raw_cudnn_convolution_forward_out(
 
     auto workspace_size = plan.getWorkspaceSize();
     auto workspace = at::empty({workspace_size}, input.options().dtype(kByte));
-    void * data_ptrs[] = {input.data_ptr(), output.data_ptr(), weight.data_ptr()};
+    void *data_ptrs[] = {input.data_ptr(), output.data_ptr(), weight.data_ptr()};
     // std::cout << plan.describe() << " requires workspace " << workspace_size << std::endl;
     int64_t uids[] = {'x', 'y', 'w'};
     auto variantPack = cudnn_frontend::VariantPackBuilder()
