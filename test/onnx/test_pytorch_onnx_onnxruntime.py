@@ -2741,6 +2741,7 @@ class TestONNXRuntime(unittest.TestCase):
         indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
         self.run_test(GatherModel(), input=(input, indices))
 
+    @disableScriptTest()  # RuntimeError: Python type cannot be used as a value
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_gather_constant_fold(self):
         class GatherModule(torch.nn.Module):
