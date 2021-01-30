@@ -52,7 +52,6 @@ total_num_classes=10
 dummy_input = torch.randn(10, 5)
 x = torch.randn(32, 5)
 
-
 print('Start normal model.')
 
 with torch.no_grad():
