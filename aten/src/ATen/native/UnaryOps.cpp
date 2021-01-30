@@ -272,7 +272,9 @@ Tensor& ceil_out(Tensor& result, const Tensor& self) {
   // Note: this is consistent with NumPy
   TORCH_CHECK(!self.is_complex(),
     "ceil is not supported for complex inputs");
-  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/false)) {
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+    TORCH_CHECK(self.dtype() == result.dtype(),
+                "Found dtype ", result.dtype(), " but expected ", self.dtype());
     return result.copy_(self);
   }
 
@@ -280,16 +282,16 @@ Tensor& ceil_out(Tensor& result, const Tensor& self) {
 }
 
 Tensor ceil(const Tensor& self) {
-  // Note: this is consistent with Numpy
-  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/false)) {
-    return self.to(c10::kDouble);
+  // Note: Numpy would promote integral types to float64
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+    return self;
   }
   return unary_op_impl(self, at::ceil_out);
 }
 
 Tensor& ceil_(Tensor& self) {
-  // Note: in place ceil_ for integral type is just self
-  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/false)) {
+  // Note: In-place ceil_ for integral type is just self
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     return self;
   }
   return unary_op_impl_(self, at::ceil_out);
@@ -327,7 +329,9 @@ Tensor& floor_out(Tensor& result, const Tensor& self) {
   // Note: this is consistent with NumPy
   TORCH_CHECK(!self.is_complex(),
     "floor is not supported for complex inputs");
-  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/false)) {
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+    TORCH_CHECK(self.dtype() == result.dtype(),
+                "Found dtype ", result.dtype(), " but expected ", self.dtype());
     return result.copy_(self);
   }
 
@@ -335,19 +339,19 @@ Tensor& floor_out(Tensor& result, const Tensor& self) {
 }
 
 Tensor floor(const Tensor& self) {
-  // Note: this is consistent with Numpy
-  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/false)) {
-    return self.to(c10::kDouble);
+  // Note: Numpy would promote integral types to float64
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
+    return self;
   }
   return unary_op_impl(self, at::floor_out);
 }
 
 Tensor& floor_(Tensor& self) {
-  // Note: in place floor_ for integral type is just self
-  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/false)) {
+  // Note: In-place floor_ for integral type is just self
+  if (c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     return self;
   }
-return unary_op_impl_(self, at::floor_out);
+  return unary_op_impl_(self, at::floor_out);
 }
 
 Tensor& i0_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, i0_stub); }
