@@ -988,6 +988,12 @@ void Reducer::prepare_for_forward() {
   std::lock_guard<std::mutex> lock(mutex_);
   num_iterations_++;
   forward_start_time_ = current_time_in_nanos();
+  // Log runtime (e.g. avg performance) stats at randomly selected iterations.
+  if (num_iterations_ == 10
+    || num_iterations_ == 1000
+    || num_iterations_ == 10000) {
+    LogPyTorchDDPUsage(*ddp_logging_data_);
+  }
 }
 
 // Traverse the autograd graph starting at the specified output.
