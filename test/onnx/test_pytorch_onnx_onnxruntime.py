@@ -6334,6 +6334,18 @@ class TestONNXRuntime(unittest.TestCase):
                       test_with_inputs=[(images, features), (images2, test_features)],
                       dict_check=False)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @disableScriptTest()
+    def test_unsafe_chunk(self):
+        class ChunkModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.unsafe_chunk(x, 3, dim=1)
+
+        model = ChunkModel()
+        model.eval()
+        x = torch.randn(1, 18)
+        self.run_test(model, x, input_names=['x'])
+
     @disableOldJitPassesTest()
     def test_set_attr(self):
         class MyModule(torch.nn.Module):
