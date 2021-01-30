@@ -650,38 +650,9 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(c10::pi<double>) / 4.));
 }
 
-// NB: If you use this macro, you may also need to add a CUDA forwarding
-// stub in CUDAUnaryOps
-
-#define IMPLEMENT_UNARY_OP_CORE(op)                                    \
-  Tensor op(const Tensor& self) {                                      \
-    Tensor result = at::empty({0}, self.options());                    \
-    at::op##_out(result, self);                                        \
-    return result;                                                     \
-  }
-
-#define IMPLEMENT_UNARY_OP_OUT_INPLACE(op, prefix, device)             \
-  Tensor& _##op##__##prefix(Tensor& self) {                            \
-    return at::op##_out(self, self);                                   \
-  }                                                                    \
-  Tensor& _##op##_out_##prefix(Tensor& result, const Tensor& self) {   \
-    checkDeviceType(#op, result, DeviceType::device);                  \
-    checkLayout(#op, result, Layout::Strided);                         \
-    auto iter = TensorIterator::unary_op(result, self);                \
-    op##_stub(iter.device_type(), iter);                               \
-    return result;                                                     \
-  }
-
-#define IMPLEMENT_UNARY_OP_VEC(op)                                     \
-  IMPLEMENT_UNARY_OP_CORE(op)                                          \
-  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)
-
-#define IMPLEMENT_UNARY_OP_VEC_CUDA(op)                                \
-  IMPLEMENT_UNARY_OP_CORE(op)                                          \
-  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cpu, CPU)                         \
-  IMPLEMENT_UNARY_OP_OUT_INPLACE(op, cuda, CUDA)
-
-IMPLEMENT_UNARY_OP_VEC_CUDA(lgamma)
+Tensor& lgamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_float_out(result, self, lgamma_stub); }
+Tensor lgamma(const Tensor& self) { return unary_op_impl_float(self, lgamma_stub); }
+Tensor& lgamma_(Tensor& self) { return unary_op_impl_(self, at::lgamma_out); }
 
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(angle_stub);

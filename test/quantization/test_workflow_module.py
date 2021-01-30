@@ -13,6 +13,7 @@ from torch.quantization import (
     FixedQParamsFakeQuantize,
     default_debug_qconfig,
     default_observer,
+    default_histogram_observer,
     default_per_channel_weight_observer,
     default_affine_fixed_qparams_fake_quant,
     get_observer_dict,
@@ -697,6 +698,29 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         loaded = torch.jit.load(buf)
         self.assertTrue(torch.equal(obs.get_tensor_value()[0], loaded.get_tensor_value()[0]))
 
+class TestHistogramObserver(QuantizationTestCase):
+    @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
+           qscheme=st.sampled_from(
+               (torch.per_tensor_affine, torch.per_tensor_symmetric))
+           )
+    def test_observer_scriptable(self, qdtype, qscheme):
+        ob_list = [
+            HistogramObserver(dtype=qdtype, qscheme=qscheme),
+            default_histogram_observer()
+        ]
+        for obs in ob_list:
+            scripted = torch.jit.script(obs)
+
+            x = torch.rand(3, 4)
+            obs(x)
+            scripted(x)
+            self.assertTrue(torch.equal(obs.histogram, scripted.histogram))
+            buf = io.BytesIO()
+            torch.jit.save(scripted, buf)
+            buf.seek(0)
+            loaded = torch.jit.load(buf)
+            self.assertTrue(torch.equal(obs.histogram, scripted.histogram))
+
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())
@@ -837,6 +861,65 @@ class TestFakeQuantize(TestCase):
             dout, X, scale, zero_point, quant_min, quant_max)
         Y_prime.backward(dout)
         np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
+
+    def _test_forward_per_tensor_cachemask_impl(self, device):
+        for torch_type in (torch.qint8, torch.quint8):
+            X = torch.randn(4, 8).to(device)
+            # pick the scale + zp so that some values get clipped
+            obs = torch.quantization.MinMaxObserver(torch_type)
+            obs(X * 0.75)
+            scale, zero_point = obs.calculate_qparams()
+            scale, zero_point = float(scale), int(zero_point)
+            quant_min, quant_max = obs._calculate_qmin_qmax()
+
+            Y_test, _mask = torch.fake_quantize_per_tensor_affine_cachemask(
+                X, scale, zero_point, quant_min, quant_max)
+            Y_ref = _fake_quantize_per_tensor_affine_reference(
+                X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
+            self.assertTrue(torch.allclose(Y_test, Y_ref, rtol=tolerance, atol=tolerance))
+
+    def test_forward_per_tensor_cachemask_cpu(self):
+        device = torch.device('cpu')
+        self._test_forward_per_tensor_cachemask_impl(device)
+
+    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    def test_forward_per_tensor_cachemask_cuda(self):
+        device = torch.device('cuda')
+        self._test_forward_per_tensor_cachemask_impl(device)
+
+    def _test_backward_per_tensor_cachemask_impl(self, device):
+        for torch_type in (torch.qint8, torch.quint8):
+            X = torch.randn(4, 8).to(device)
+            X.requires_grad_()
+            # pick the scale + zp so that some values get clipped
+            obs = torch.quantization.MinMaxObserver(torch_type)
+            obs(X * 0.75)
+            scale, zero_point = obs.calculate_qparams()
+            scale, zero_point = float(scale), int(zero_point)
+            quant_min, quant_max = obs._calculate_qmin_qmax()
+
+            # forward pass
+            Y_test, mask = torch.fake_quantize_per_tensor_affine_cachemask(
+                X, scale, zero_point, quant_min, quant_max)
+            Y_ref = _fake_quantize_per_tensor_affine_reference(
+                X.cpu(), scale, zero_point, quant_min, quant_max).to(device)
+            self.assertTrue(torch.allclose(Y_test, Y_ref, rtol=tolerance, atol=tolerance))
+
+            # backward pass
+            dout = torch.rand(X.shape, dtype=torch.float).to(device)
+            dX = _fake_quantize_per_tensor_affine_grad_reference(
+                dout, X, scale, zero_point, quant_min, quant_max)
+            Y_test.backward(dout)
+            self.assertTrue(torch.allclose(dX, X.grad))
+
+    def test_backward_per_tensor_cachemask_cpu(self):
+        device = torch.device('cpu')
+        self._test_backward_per_tensor_cachemask_impl(device)
+
+    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    def test_backward_per_tensor_cachemask_cuda(self):
+        device = torch.device('cuda')
+        self._test_backward_per_tensor_cachemask_impl(device)
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
@@ -1218,6 +1301,32 @@ class TestFakeQuantize(TestCase):
             X, scale, zero_point, axis, quant_min, quant_max)
         np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
 
+    def _test_forward_per_channel_cachemask_impl(self, device):
+        for torch_type in (torch.qint8, torch.quint8):
+
+            X = torch.randn(1, 2, 4, 4).to(device)
+            # pick the scale + zp so that some values get clipped
+            axis = 1
+            obs = torch.quantization.PerChannelMinMaxObserver(axis, torch_type).to(device)
+            obs(X * 0.75)
+            scale, zero_point = obs.calculate_qparams()
+            # TODO(future PR): fix the wrong dtype in obs.calculate_qparams and remove the cast
+            zero_point = zero_point.to(torch.int64)
+            quant_min, quant_max = obs._calculate_qmin_qmax()
+
+            Y = _fake_quantize_per_channel_affine_reference(
+                X.cpu(), scale.cpu(), zero_point.cpu(), axis, quant_min, quant_max)
+            Y_prime, _mask = torch.fake_quantize_per_channel_affine_cachemask(
+                X, scale, zero_point, axis, quant_min, quant_max)
+            np.testing.assert_allclose(Y, Y_prime.cpu(), rtol=tolerance, atol=tolerance)
+
+    def test_forward_per_channel_cachemask_cpu(self):
+        self._test_forward_per_channel_cachemask_impl('cpu')
+
+    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    def test_forward_per_channel_cachemask_cuda(self):
+        self._test_forward_per_channel_cachemask_impl('cuda')
+
     def _test_learnable_forward_per_channel(self, X_base, device, scale_base, zero_point_base, axis):
         r"""Tests the forward path of the learnable FakeQuantizePerTensorAffine op.
         """
@@ -1288,6 +1397,34 @@ class TestFakeQuantize(TestCase):
         Y_prime.backward(dout)
         np.testing.assert_allclose(dX.cpu().detach().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
 
+    def _test_backward_per_channel_cachemask_impl(self, device):
+        for torch_type in (torch.qint8, torch.quint8):
+            X = torch.randn(1, 2, 4, 4).to(device)
+            # pick the scale + zp so that some values get clipped
+            axis = 1
+            obs = torch.quantization.PerChannelMinMaxObserver(axis, torch_type).to(device)
+            obs(X * 0.75)
+            scale, zero_point = obs.calculate_qparams()
+            # TODO(future PR): fix the wrong dtype in obs.calculate_qparams and remove the cast
+            zero_point = zero_point.to(torch.int64)
+            quant_min, quant_max = obs._calculate_qmin_qmax()
+            X.requires_grad_()
+            Y_prime, _mask = torch.fake_quantize_per_channel_affine_cachemask(
+                X, scale, zero_point, axis, quant_min, quant_max)
+            dout = torch.rand(X.shape, dtype=torch.float).to(device)
+            dX = _fake_quantize_per_channel_affine_grad_reference(
+                dout, X, scale, zero_point, axis, quant_min, quant_max)
+            Y_prime.backward(dout)
+            np.testing.assert_allclose(
+                dX.cpu().detach().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
+
+    def test_backward_per_channel_cachemask_cpu(self):
+        self._test_backward_per_channel_cachemask_impl('cpu')
+
+    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    def test_backward_per_channel_cachemask_cuda(self):
+        self._test_backward_per_channel_cachemask_impl('cuda')
+
     def _test_learnable_backward_per_channel(self, X_base, device, scale_base, zero_point_base, axis):
         r"""Tests the backward path of the learnable FakeQuantizePerTensorAffine op.
         """
@@ -1305,7 +1442,6 @@ class TestFakeQuantize(TestCase):
             zero_point_curr.requires_grad_()
 
             for grad_factor in [0.1, 1.0, 10.0]:
-                print(X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max, grad_factor)
                 Y_prime = torch._fake_quantize_learnable_per_channel_affine(
                     X_curr, scale_curr, zero_point_curr, axis, quant_min, quant_max, grad_factor).to(device)
 
@@ -1352,75 +1488,17 @@ class TestFakeQuantize(TestCase):
         self._test_learnable_backward_per_channel(
             X_base, 'cpu', scale_base, zero_point_base, axis)
 
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
+                                   qparams=hu.qparams(dtypes=torch.quint8)))
     @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
-    def test_learnable_backward_per_channel_cuda(self):
+    def test_learnable_backward_per_channel_cuda(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
-        axis = 0
-        X = torch.rand(2, 5) * 2 - 1
+        X, (scale, zero_point, axis, torch_type) = X
         X_base = torch.tensor(X).to('cuda')
-        channel_size = X_base.size(axis)
-        scale_base = torch.normal(mean=0, std=1, size=(channel_size,)).clamp(1e-4, 100)
-        zero_point_base = torch.normal(mean=0, std=128, size=(channel_size,))
+        scale_base = to_tensor(scale, 'cuda')
+        zero_point_base = to_tensor(zero_point, 'cuda')
         self._test_learnable_backward_per_channel(
             X_base, 'cuda', scale_base, zero_point_base, axis)
-
-    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
-    def test_backward_per_channel_cuda_debug(self):
-        X = torch.tensor(
-            [
-                [0.9372, -0.6003, 0.7599, 0.3244, -0.5678],
-                [-0.7616, -0.2766, -0.9666, 0.7006, 0.9239],
-            ]
-        ).to('cuda')
-        s = torch.tensor([6.8104e-01, 1.0000e-04]).to('cuda')
-        z = torch.tensor([15, 0.], dtype=torch.int64).to('cuda')
-        dout = torch.tensor(
-            [
-                [0.7291, 0.4305, 0.2764, 0.3478, 0.5510],
-                [0.2707, 0.6633, 0.2541, 0.9235, 0.5398],
-            ]
-        ).to('cuda')
-        n_bits = 4
-        X.requires_grad_()
-        Y_prime = torch.fake_quantize_per_channel_affine(X, s, z, 0, 0, 15)
-        Y_prime.backward(dout)
-        Xgrad_ref = torch.tensor(
-            [
-                [0.0000, 0.4305, 0.0000, 0.3478, 0.5510],
-                [0.0000, 0.0000, 0.0000, 0.0000, 0.0000]
-            ]
-        ).to('cuda')
-        print(X.grad)
-        self.assertTrue(torch.allclose(X.grad, Xgrad_ref), "X.grad={}".format(X.grad))
-
-    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
-    def test_learnable_backward_per_channel_cuda_debug(self):
-        X = torch.tensor(
-            [
-                [0.9372, -0.6003, 0.7599, 0.3244, -0.5678],
-                [-0.7616, -0.2766, -0.9666, 0.7006, 0.9239],
-            ]
-        ).to('cuda')
-        s = torch.tensor([6.8104e-01, 1.0000e-04]).to('cuda')
-        z = torch.tensor([15, 0.0]).to('cuda')
-        dout = torch.tensor(
-            [
-                [0.7291, 0.4305, 0.2764, 0.3478, 0.5510],
-                [0.2707, 0.6633, 0.2541, 0.9235, 0.5398],
-            ]
-        ).to('cuda')
-        n_bits = 4
-        X.requires_grad_()
-        Y_prime = torch._fake_quantize_learnable_per_channel_affine(X, s, z, 0, 0, 15, 1.0)
-        Y_prime.backward(dout)
-        Xgrad_ref = torch.tensor(
-            [
-                [0.0000, 0.4305, 0.0000, 0.3478, 0.5510],
-                [0.0000, 0.0000, 0.0000, 0.0000, 0.0000]
-            ]
-        ).to('cuda')
-        print(X.grad)
-        self.assertTrue(torch.allclose(X.grad, Xgrad_ref), "X.grad={}".format(X.grad))
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),

@@ -9,18 +9,10 @@ struct TensorIterator;
 
 namespace native {
 
-using fake_quant_tensor_fn = void (*)(
+using fake_quant_tensor_cachemask_fn = void (*)(
     Tensor& output,
+    Tensor& mask,
     const Tensor& input,
-    float sc,
-    int64_t z_point,
-    int64_t quant_min,
-    int64_t quant_max);
-
-using fake_quant_grad_tensor_fn = void (*)(
-    Tensor& input_grad,
-    const Tensor& input,
-    const Tensor& output_grad,
     float sc,
     int64_t z_point,
     int64_t quant_min,
@@ -35,8 +27,7 @@ using fake_quant_learnable_grad_tensor_fn = void (*)(
     int64_t quant_max,
     float grad_factor);
 
-DECLARE_DISPATCH(fake_quant_tensor_fn, fake_quant_tensor_stub);
-DECLARE_DISPATCH(fake_quant_grad_tensor_fn, fake_quant_grad_tensor_stub);
+DECLARE_DISPATCH(fake_quant_tensor_cachemask_fn, fake_quant_tensor_cachemask_stub);
 DECLARE_DISPATCH(fake_quant_learnable_grad_tensor_fn, fake_quant_grad_learnable_tensor_stub);
 
 using fake_quant_per_channel_fn = void (*)(
@@ -44,11 +35,18 @@ using fake_quant_per_channel_fn = void (*)(
     int64_t quant_min,
     int64_t quant_max);
 
-DECLARE_DISPATCH(fake_quant_per_channel_fn, fake_quant_per_channel_stub);
-DECLARE_DISPATCH(fake_quant_per_channel_fn, fake_quant_grad_per_channel_stub);
+using fake_quant_per_channel_cachemask_fn = void (*)(
+    TensorIterator &iter,
+    TensorIterator &iter_mask,
+    int64_t quant_min,
+    int64_t quant_max);
+
+DECLARE_DISPATCH(fake_quant_per_channel_cachemask_fn, fake_quant_per_channel_cachemask_stub);
 
 using fake_quant_learnable_per_channel_fn = void (*)(
-    TensorIterator &iter,
+    TensorIterator &iter_x,
+    TensorIterator &iter_scale,
+    TensorIterator &iter_zero_point,
     int64_t quant_min,
     int64_t quant_max,
     float grad_factor);

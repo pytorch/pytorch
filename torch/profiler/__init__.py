@@ -10,3 +10,4 @@ examine their input shapes and stack traces, study device kernel activity and vi
 '''
 
 from .profiler import profile, schedule, ProfilerAction, ProfilerActivity
+from torch.autograd import kineto_available
