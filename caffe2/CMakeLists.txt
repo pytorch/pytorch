@@ -442,7 +442,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(TORCH_SRCS ${GENERATED_CXX_TORCH})
   list(APPEND TORCH_SRCS ${GENERATED_H_TORCH})
-  append_filelist("libtorch_cmake_sources" TORCH_SRCS)
+  # append_filelist("libtorch_cmake_sources" TORCH_SRCS)
+  append_filelist("libtorch_lite_cmake_sources" TORCH_SRCS)
 
   # Required workaround for LLVM 9 includes.
   if(NOT MSVC)
