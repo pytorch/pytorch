@@ -44,7 +44,7 @@ void THCPGraph_init(PyObject *module) {
            py::call_guard<py::gil_scoped_release>(),
            R"(``reset`` deletes the graph currently held by this instance.)")
       .def("pool",
-           &::at::cuda::CUDAGraph::reset,
+           &::at::cuda::CUDAGraph::pool,
            py::call_guard<py::gil_scoped_release>(),
            R"(``pool`` retrieves the id of this graph's memory pool.
            This id can optionally be passed to another graph's capture_begin,
