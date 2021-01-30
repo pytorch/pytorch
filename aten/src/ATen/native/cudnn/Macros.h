@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ATen/cudnn/cudnn-wrapper.h>
+
 // Warning: The following macro is guard for enabling cuDNN v8 API,
 // which is not finished yet on PyTorch. This macro will be removed
 // once the cuDNN v8 binding is done.
