@@ -69,12 +69,6 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
     goto error;
   }
 
-  const uint32_t nr = pytorch_qnnp_params.q8gemm_sparse.nr;
-  const uint32_t kr = pytorch_qnnp_params.q8gemm_sparse.kr;
-
-  const uint32_t n_stride = (output_channels + (nr - 1)) & -nr;
-  const uint32_t k_stride = (input_channels + (kr - 1)) & -kr;
-
   fully_connected->sparse_matrix.col_indices = kernel_col_indices;
   fully_connected->sparse_matrix.row_values = kernel_row_values;
   fully_connected->sparse_matrix.values = kernel_values;
