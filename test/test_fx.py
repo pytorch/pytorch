@@ -14,7 +14,7 @@ from math import sqrt
 from pathlib import Path
 from torch.multiprocessing import Process
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph, wrap
-from torch.fx.experimental import shape_prop
+from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from copy import deepcopy
 
