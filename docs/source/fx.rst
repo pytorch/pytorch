@@ -19,11 +19,11 @@ What is a FX transform? Essentially, it's a function that looks like this.
         new_model = ...
         return new_model
 
-Your transform will take in an ``nn.Module``, convert it into a FX GraphModule
-with ``fx.symbolic_trace``, and return a new ``nn.Module``.
-You should think of the ``nn.Module`` that your FX
-transform returns as identical to a regular ``nn.Module``-- you can pass
-it to another FX transform, you can pass it to TorchScript, or you can
+Your transform will take in an :class:`torch.nn.Module`, convert it into a
+:class:`GraphModule` with :meth:``symbolic_trace``, and return a new
+``nn.Module``. You should think of the ``nn.Module`` that your FX transform
+returns as identical to a regular ``nn.Module``-- you can pass it to another
+FX transform, you can pass it to TorchScript, or you can
 run it. Ensuring that the inputs and outputs of your FX transform are a
 ``nn.Module`` will ensure composability.
 
