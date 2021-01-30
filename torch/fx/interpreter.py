@@ -193,7 +193,7 @@ class Interpreter:
             Any: The value returned by the method invocation
         """
         # args[0] is the `self` object for this method call
-        self_obj, *args_tail = args
+        self_obj, *args_tail = args  # type: ignore
 
         # Execute the method and return the result
         assert isinstance(target, str)
