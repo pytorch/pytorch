@@ -4,7 +4,8 @@ import math
 import numpy as np
 import torch
 import torch.distributed as dist
-import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
+
+from . import default_hooks as default
 
 
 def _orthogonalize(matrix, epsilon=1e-8):
@@ -204,7 +205,9 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
                     total_length
                 )
             )
-            state.error_dict[bucket_index] = torch.zeros(total_length, device=device, dtype=dtype)
+            state.error_dict[bucket_index] = torch.zeros(
+                total_length, device=device, dtype=dtype
+            )
 
         # Keep a copy of the input tensor,
         # so that we can compute the local error caused by compression later,
