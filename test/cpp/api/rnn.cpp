@@ -14,8 +14,13 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   auto nhid = 32;
   auto model = std::make_shared<SimpleContainer>();
   auto l1 = model->add(Linear(1, nhid), "l1");
-  auto rnn = model->add(model_maker(nhid), "rnn");
-  auto lo = model->add(Linear(nhid, 1), "lo");
+  auto rnn_model = model_maker(nhid);
+  auto rnn = model->add(rnn_model, "rnn");
+  auto nout = nhid;
+  if (rnn_model.get()->options_base.proj_size() > 0) {
+    nout = rnn_model.get()->options_base.proj_size();
+  }
+  auto lo = model->add(Linear(nout, 1), "lo");
 
   torch::optim::Adam optimizer(model->parameters(), 1e-2);
   auto forward_op = [&](torch::Tensor x) {
@@ -44,7 +49,6 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
         torch::rand({nlen, bs, 1}, backend).round().to(torch::kFloat32);
     auto labels = inputs.sum(0).detach();
     inputs.set_requires_grad(true);
-
     auto outputs = forward_op(inputs);
     torch::Tensor loss = torch::mse_loss(outputs, labels);
 
@@ -90,6 +94,35 @@ void check_lstm_sizes(std::tuple<torch::Tensor, std::tuple<torch::Tensor, torch:
   ASSERT_GT(cx.norm().item<float>(), 0);
 }
 
+void check_lstm_sizes_proj(std::tuple<torch::Tensor, std::tuple<torch::Tensor, torch::Tensor>> lstm_output) {
+  // Expect the LSTM to have 32 outputs and 3 layers, with an input of batch
+  // 10 and 16 time steps (10 x 16 x n)
+
+  torch::Tensor output = std::get<0>(lstm_output);
+  std::tuple<torch::Tensor, torch::Tensor> state = std::get<1>(lstm_output);
+  torch::Tensor hx = std::get<0>(state);
+  torch::Tensor cx = std::get<1>(state);
+
+  ASSERT_EQ(output.ndimension(), 3);
+  ASSERT_EQ(output.size(0), 10);
+  ASSERT_EQ(output.size(1), 16);
+  ASSERT_EQ(output.size(2), 32);
+
+  ASSERT_EQ(hx.ndimension(), 3);
+  ASSERT_EQ(hx.size(0), 3); // layers
+  ASSERT_EQ(hx.size(1), 16); // Batchsize
+  ASSERT_EQ(hx.size(2), 32); // 32 hidden dims
+
+  ASSERT_EQ(cx.ndimension(), 3);
+  ASSERT_EQ(cx.size(0), 3); // layers
+  ASSERT_EQ(cx.size(1), 16); // Batchsize
+  ASSERT_EQ(cx.size(2), 64); // 64 cell dims
+
+  // Something is in the hiddens
+  ASSERT_GT(hx.norm().item<float>(), 0);
+  ASSERT_GT(cx.norm().item<float>(), 0);
+}
+
 struct RNNTest : torch::test::SeedingFixture {};
 
 TEST_F(RNNTest, CheckOutputSizes) {
@@ -115,6 +148,33 @@ TEST_F(RNNTest, CheckOutputSizes) {
   torch::Tensor diff = torch::cat({next_hx, next_cx}, 0) - torch::cat({output_hx, output_cx}, 0);
 
   // Hiddens changed
+  ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
+}
+
+TEST_F(RNNTest, CheckOutputSizesProj) {
+  LSTM model(LSTMOptions(128, 64).num_layers(3).dropout(0.2).proj_size(32));
+  // Input size is: sequence length, batch size, input size
+  auto x = torch::randn({10, 16, 128}, torch::requires_grad());
+  auto output = model->forward(x);
+  auto y = x.mean();
+
+  y.backward();
+  check_lstm_sizes_proj(output);
+
+  auto next = model->forward(x, std::get<1>(output));
+
+  check_lstm_sizes_proj(next);
+
+  auto output_hx = std::get<0>(std::get<1>(output));
+  auto output_cx = std::get<1>(std::get<1>(output));
+
+  auto next_hx = std::get<0>(std::get<1>(next));
+  auto next_cx = std::get<1>(std::get<1>(next));
+
+  torch::Tensor diff = next_hx - output_hx;
+  // Hiddens changed
+  ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
+  diff = next_cx - output_cx;
   ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
 }
 
@@ -192,6 +252,11 @@ TEST_F(RNNTest, EndToEndLSTM) {
       [](int s) { return LSTM(LSTMOptions(s, s).num_layers(2)); }));
 }
 
+TEST_F(RNNTest, EndToEndLSTMProj) {
+  ASSERT_TRUE(test_RNN_xor<LSTM>(
+      [](int s) { return LSTM(LSTMOptions(s, s).num_layers(2).proj_size(s / 2)); }));
+}
+
 TEST_F(RNNTest, EndToEndGRU) {
   ASSERT_TRUE(
       test_RNN_xor<GRU>([](int s) { return GRU(GRUOptions(s, s).num_layers(2)); }));
@@ -235,9 +300,43 @@ TEST_F(RNNTest, Sizes_CUDA) {
   ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
 }
 
+TEST_F(RNNTest, SizesProj_CUDA) {
+  torch::manual_seed(0);
+  LSTM model(LSTMOptions(128, 64).num_layers(3).dropout(0.2).proj_size(32));
+  model->to(torch::kCUDA);
+  auto x =
+      torch::randn({10, 16, 128}, torch::requires_grad().device(torch::kCUDA));
+  auto output = model->forward(x);
+  auto y = x.mean();
+
+  y.backward();
+  check_lstm_sizes_proj(output);
+
+  auto next = model->forward(x, std::get<1>(output));
+
+  check_lstm_sizes_proj(next);
+
+  auto output_hx = std::get<0>(std::get<1>(output));
+  auto output_cx = std::get<1>(std::get<1>(output));
+
+  auto next_hx = std::get<0>(std::get<1>(next));
+  auto next_cx = std::get<1>(std::get<1>(next));
+
+  torch::Tensor diff = next_hx - output_hx;
+  // Hiddens changed
+  ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
+  diff = next_cx - output_cx;
+  ASSERT_GT(diff.abs().sum().item<float>(), 1e-3);
+}
+
 TEST_F(RNNTest, EndToEndLSTM_CUDA) {
   ASSERT_TRUE(test_RNN_xor<LSTM>(
       [](int s) { return LSTM(LSTMOptions(s, s).num_layers(2)); }, true));
+}
+
+TEST_F(RNNTest, EndToEndLSTMProj_CUDA) {
+  ASSERT_TRUE(test_RNN_xor<LSTM>(
+      [](int s) { return LSTM(LSTMOptions(s, s).num_layers(2).proj_size(s / 2)); }, true));
 }
 
 TEST_F(RNNTest, EndToEndGRU_CUDA) {
@@ -258,6 +357,9 @@ TEST_F(RNNTest, PrettyPrintRNNs) {
   ASSERT_EQ(
       c10::str(LSTM(LSTMOptions(128, 64).num_layers(3).dropout(0.2))),
       "torch::nn::LSTM(input_size=128, hidden_size=64, num_layers=3, bias=true, batch_first=false, dropout=0.2, bidirectional=false)");
+  ASSERT_EQ(
+      c10::str(LSTM(LSTMOptions(128, 64).num_layers(3).dropout(0.2).proj_size(32))),
+      "torch::nn::LSTM(input_size=128, hidden_size=64, num_layers=3, bias=true, batch_first=false, dropout=0.2, bidirectional=false, proj_size=32)");
   ASSERT_EQ(
       c10::str(GRU(GRUOptions(128, 64).num_layers(3).dropout(0.5))),
       "torch::nn::GRU(input_size=128, hidden_size=64, num_layers=3, bias=true, batch_first=false, dropout=0.5, bidirectional=false)");
@@ -457,6 +559,55 @@ TEST_F(RNNTest, BidirectionalMultilayerGRU_CPU_vs_CUDA) {
 TEST_F(RNNTest, BidirectionalMultilayerLSTM_CPU_vs_CUDA) {
   // Create two LSTMs with the same options
   auto opt = LSTMOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true);
+  LSTM lstm_cpu {opt};
+  LSTM lstm_cuda {opt};
+
+  // Copy weights and biases from CPU LSTM to CUDA LSTM
+  {
+    at::NoGradGuard guard;
+    for (const auto& param : lstm_cpu->named_parameters(/*recurse=*/false)) {
+      lstm_cuda->named_parameters()[param.key()].copy_(lstm_cpu->named_parameters()[param.key()]);
+    }
+  }
+
+  lstm_cpu->flatten_parameters();
+  lstm_cuda->flatten_parameters();
+
+  // Move LSTM to CUDA
+  lstm_cuda->to(torch::kCUDA);
+
+  auto options = torch::TensorOptions()
+                  .dtype(torch::kFloat32).requires_grad(false);
+  auto input_cpu = torch::tensor({1, 2, 3, 4, 5, 6}, options)
+                  .reshape({3, 1, 2});
+  auto input_cuda = torch::tensor({1, 2, 3, 4, 5, 6}, options)
+                  .reshape({3, 1, 2}).to(torch::kCUDA);
+
+  // Call forward on both LSTMs
+  auto output_cpu = lstm_cpu->forward(input_cpu);
+  auto output_cuda = lstm_cuda->forward(input_cuda);
+
+  output_cpu = lstm_output_to_device(output_cpu, torch::kCPU);
+
+  // Assert that the output and state are equal on CPU and CUDA
+  ASSERT_EQ(std::get<0>(output_cpu).dim(), std::get<0>(output_cuda).dim());
+  for (int i = 0; i < std::get<0>(output_cpu).dim(); i++) {
+    ASSERT_EQ(std::get<0>(output_cpu).size(i), std::get<0>(output_cuda).size(i));
+  }
+  for (int i = 0; i < std::get<0>(output_cpu).size(0); i++) {
+    for (int j = 0; j < std::get<0>(output_cpu).size(1); j++) {
+      for (int k = 0; k < std::get<0>(output_cpu).size(2); k++) {
+        ASSERT_NEAR(
+          std::get<0>(output_cpu)[i][j][k].item<float>(),
+          std::get<0>(output_cuda)[i][j][k].item<float>(), 1e-5);
+      }
+    }
+  }
+}
+
+TEST_F(RNNTest, BidirectionalMultilayerLSTMProj_CPU_vs_CUDA) {
+  // Create two LSTMs with the same options
+  auto opt = LSTMOptions(2, 4).num_layers(3).batch_first(false).bidirectional(true).proj_size(2);
   LSTM lstm_cpu {opt};
   LSTM lstm_cuda {opt};
 

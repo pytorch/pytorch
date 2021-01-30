@@ -6,10 +6,11 @@
 #endif
 
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/Unicode.h>
 
 /* stuff for mapped files */
 #ifdef _WIN32
-#include <windows.h>
+#include <c10/util/win32-headers.h>
 #endif
 
 #if defined(HAVE_MMAP)
@@ -74,24 +75,26 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
 #ifdef _WIN32
   if (flags_ & TH_ALLOCATOR_MAPPED_SHAREDMEM) {
     // Shadowing
-    const char *filename;
-    const char *eventname;
+    const wchar_t *filename;
+    const wchar_t *eventname;
+    const std::wstring wFilename = c10::u8u16(filename_);
+    const std::wstring wEventname = c10::u8u16(eventname_);
     LARGE_INTEGER hfilesz;
 
     if (filename_[0] == '/') {
-      filename = filename_.c_str() + 1;
-      eventname = eventname_.c_str() + 1;
+      filename = wFilename.c_str() + 1;
+      eventname = wEventname.c_str() + 1;
     } else {
-      filename = filename_.c_str();
-      eventname = eventname_.c_str();
+      filename = wFilename.c_str();
+      eventname = wEventname.c_str();
     }
 
     hfilesz.QuadPart = size;
 
     if (flags_ & TH_ALLOCATOR_MAPPED_EXCLUSIVE) {
-      event_ = CreateEvent(nullptr, FALSE, FALSE, eventname);
+      event_ = CreateEventW(nullptr, FALSE, FALSE, eventname);
     } else if (flags_ & TH_ALLOCATOR_MAPPED_NOCREATE) {
-      event_ = OpenEvent(EVENT_ALL_ACCESS, FALSE, eventname);
+      event_ = OpenEventW(EVENT_ALL_ACCESS, FALSE, eventname);
     } else {
       AT_ERROR("Expected either TH_ALLOCATOR_MAPPED_EXCLUSIVE or TH_ALLOCATOR_MAPPED_NOCREATE");
     }
@@ -101,9 +104,9 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
     }
 
     if (flags_ & TH_ALLOCATOR_MAPPED_EXCLUSIVE) {
-      handle_ = CreateFileMapping(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, hfilesz.HighPart, hfilesz.LowPart, filename);
+      handle_ = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, hfilesz.HighPart, hfilesz.LowPart, filename);
     } else if (flags_ & TH_ALLOCATOR_MAPPED_NOCREATE) {
-      handle_ = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, filename);
+      handle_ = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, filename);
     } else {
       AT_ERROR("Expected either TH_ALLOCATOR_MAPPED_EXCLUSIVE or TH_ALLOCATOR_MAPPED_NOCREATE");
     }
@@ -136,15 +139,21 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
       AT_ERROR("TH_ALLOCATOR_MAPPED_FROMFD not supported on Windows");
     }
 
+    // Shadowing
+    const wchar_t *filename;
+    const std::wstring wFilename = c10::u8u16(filename_);
+
+    filename = wFilename.c_str();
+
     /* open file */
     /* FILE_FLAG_RANDOM_ACCESS ? */
     if (flags_) {
-      hfile = CreateFileA(filename_.c_str(), GENERIC_READ|GENERIC_WRITE, FILE_SHARE_WRITE|FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
+      hfile = CreateFileW(filename, GENERIC_READ|GENERIC_WRITE, FILE_SHARE_WRITE|FILE_SHARE_READ, 0, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0);
       if (hfile == INVALID_HANDLE_VALUE) {
         AT_ERROR("could not open file <", filename_, "> in read-write mode; error code: <", GetLastError(), ">");
       }
     } else {
-      hfile = CreateFileA(filename_.c_str(), GENERIC_READ, FILE_SHARE_WRITE|FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+      hfile = CreateFileW(filename, GENERIC_READ, FILE_SHARE_WRITE|FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
       if (hfile == INVALID_HANDLE_VALUE) {
         AT_ERROR("could not open file <", filename_, "> in read-only mode; error code: <", GetLastError(), ">");
       }
@@ -181,11 +190,11 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
 
     /* get map handle */
     if (flags_) {
-      if ( (hmfile = CreateFileMapping(hfile, NULL, PAGE_READWRITE, hfilesz.HighPart, hfilesz.LowPart, NULL)) == NULL ) {
+      if ( (hmfile = CreateFileMappingW(hfile, NULL, PAGE_READWRITE, hfilesz.HighPart, hfilesz.LowPart, NULL)) == NULL ) {
         AT_ERROR("could not create a map on file <", filename_, ">; error code: <", GetLastError(), ">");
       }
     } else {
-      if ( (hmfile = CreateFileMapping(hfile, NULL, PAGE_WRITECOPY, hfilesz.HighPart, hfilesz.LowPart, NULL)) == NULL ) {
+      if ( (hmfile = CreateFileMappingW(hfile, NULL, PAGE_WRITECOPY, hfilesz.HighPart, hfilesz.LowPart, NULL)) == NULL ) {
         AT_ERROR("could not create a map on file <", filename_, ">; error code: <", GetLastError(), ">");
       }
     }
@@ -333,7 +342,7 @@ typedef struct{
   HANDLE handle;
   HANDLE wait;
 } ReleaseContext;
-static VOID CALLBACK WaitForReleaseHandle(PVOID lpParam, BOOLEAN TimerOrWaitFired)
+static void CALLBACK WaitForReleaseHandle(PVOID lpParam, BOOLEAN TimerOrWaitFired)
 {
   if (lpParam) {
     ReleaseContext *ctx = (ReleaseContext *)lpParam;

@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/mobile/import.h>
+
 #include <ATen/core/ivalue.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
@@ -122,6 +123,7 @@ void parseMethods(
         "The numbers of bytecode values and debug info values do not match.");
   }
 
+  // Process all methods in this mobile module.
   for (size_t i = method_i_start; i < vals.size(); ++i) {
     const auto& element = vals[i];
     const auto& m_tuple = element.toTuple()->elements();
@@ -190,6 +192,8 @@ void parseMethods(
     }
 
     std::unordered_set<std::string> unsupported_op_names;
+    // ops_list is the list of operator names that were read in from
+    // bytecode.plk for the method that is currently being processed.
     for (const auto& op : ops_list) {
       auto op_item = op.toTuple()->elements();
       TORCH_CHECK(
@@ -227,8 +231,14 @@ class BytecodeDeserializer final {
  public:
   explicit BytecodeDeserializer(std::unique_ptr<PyTorchStreamReader> reader);
   mobile::Module deserialize(c10::optional<at::Device> device);
+  mobile::Module deserialize(
+      c10::optional<at::Device> device,
+      ExtraFilesMap& extra_files);
   std::unordered_map<std::string, std::string> deserializeMetadata(
       c10::optional<at::Device> device);
+  void deserialize_only_extra(
+      c10::optional<at::Device> device,
+      ExtraFilesMap& extra_files);
 
  private:
   c10::IValue readArchive(
@@ -254,10 +264,43 @@ std::unordered_map<std::string, std::string> BytecodeDeserializer::
   return readMobileMetadata(mcu);
 }
 
+void BytecodeDeserializer::deserialize_only_extra(
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files) {
+  device_ = device;
+  for (const auto& kv : extra_files) {
+    const std::string& key = "extra/" + kv.first;
+    if (reader_->hasRecord(key)) {
+      at::DataPtr meta_ptr;
+      size_t meta_size = 0;
+      std::tie(meta_ptr, meta_size) = reader_->getRecord(key);
+      extra_files[kv.first] =
+          std::string(static_cast<char*>(meta_ptr.get()), meta_size);
+    }
+  }
+}
+
+mobile::Module BytecodeDeserializer::deserialize(
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files) {
+  deserialize_only_extra(device, extra_files);
+  return deserialize(device);
+}
+
 mobile::Module BytecodeDeserializer::deserialize(
     c10::optional<at::Device> device) {
   device_ = device;
   auto mcu = std::make_shared<mobile::CompilationUnit>();
+
+  // bvals can have 2 possible formats:
+  //
+  // 1. Old format: bvals is an array (Tuple) of N elements, each element being
+  // itself a Tuple(method_name, method_table).
+  //
+  // 2. New format: bvals is an array (Tuple) of 1+N elements. The first element
+  // being a Tuple (int, table), and the integer stands for the bytecode version
+  // number. The rest of the elements are the same as before.
+  //
   auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
 
   c10::optional<std::vector<IValue>> debug_info_bvals;
@@ -385,22 +428,46 @@ c10::IValue BytecodeDeserializer::readArchive(
 mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device) {
-  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  auto module = _load_for_mobile(std::move(rai), device);
-  return module;
+  ExtraFilesMap extra_files;
+  return _load_for_mobile(in, device, extra_files);
 }
 
 mobile::Module _load_for_mobile(
     const std::string& filename,
     c10::optional<at::Device> device) {
-  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
-  auto module = _load_for_mobile(std::move(rai), device);
-  return module;
+  ExtraFilesMap extra_files;
+  return _load_for_mobile(filename, device, extra_files);
 }
 
 mobile::Module _load_for_mobile(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device) {
+  ExtraFilesMap extra_files;
+  return _load_for_mobile(std::move(rai), device, extra_files);
+}
+
+mobile::Module _load_for_mobile(
+    std::istream& in,
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files) {
+  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+  auto module = _load_for_mobile(std::move(rai), device, extra_files);
+  return module;
+}
+
+mobile::Module _load_for_mobile(
+    const std::string& filename,
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files) {
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  auto module = _load_for_mobile(std::move(rai), device, extra_files);
+  return module;
+}
+
+mobile::Module _load_for_mobile(
+    std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device,
+    ExtraFilesMap& extra_files) {
   auto observer = torch::observerConfig().getModuleObserver();
   auto instance_key = std::rand();
   if (observer) {
@@ -409,7 +476,7 @@ mobile::Module _load_for_mobile(
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
   BytecodeDeserializer deserializer(std::move(reader));
   try {
-    mobile::Module result = deserializer.deserialize(std::move(device));
+    mobile::Module result = deserializer.deserialize(device, extra_files);
     std::unordered_map<std::string, std::string> copied_metadata =
         result.metadata();
     if (result.metadata().find("model_name") == result.metadata().end()) {
@@ -449,6 +516,21 @@ mobile::Module _load_for_mobile(
       TORCH_RETHROW(error);
     }
   }
+}
+
+void _load_extra_only_for_mobile(
+    const std::string& filename,
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files) {
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  auto observer = torch::observerConfig().getModuleObserver();
+  auto instance_key = std::rand();
+  if (observer) {
+    observer->onEnterLoadModel(instance_key);
+  }
+  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+  BytecodeDeserializer deserializer(std::move(reader));
+  deserializer.deserialize_only_extra(device, extra_files);
 }
 
 } // namespace jit

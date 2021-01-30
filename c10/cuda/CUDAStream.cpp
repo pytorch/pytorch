@@ -43,12 +43,9 @@ static constexpr int kStreamsPerPoolBits = 5;
 static constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
 static constexpr unsigned int kDefaultFlags = cudaStreamNonBlocking;
 
-// Note: stream priority is not supported by HIP
 // Note: lower numbers are higher priorities, zero is default priority
-#ifndef __HIP_PLATFORM_HCC__
 static int kHighPriority = -1;
 static int kLowPriority = 0;
-#endif // __HIP_PLATFORM_HCC__
 
 // Default streams
 static std::once_flag init_flag;
@@ -63,7 +60,7 @@ static LeakyStreamInternals default_streams[C10_COMPILE_TIME_MAX_GPUS];
 // in the pool to be returned when a stream is requested (round-robin fashion
 // , see the note in CUDAStream.h).
 //
-// unique_ptr<T[]> is used instead of vector<T> because T might be non-moveable
+// unique_ptr<T[]> is used instead of vector<T> because T might be non-movable
 // and non-copyable.
 static std::once_flag device_flags[C10_COMPILE_TIME_MAX_GPUS];
 static std::atomic<uint32_t> low_priority_counters[C10_COMPILE_TIME_MAX_GPUS];
@@ -178,7 +175,7 @@ static StreamId CUDAStream_getStreamId(const LeakyStreamInternals* ptr) {
         StreamIdType::HIGH, ptr - high_priority_streams[device_index].data());
   }
 
-  AT_ASSERTM(
+  TORCH_INTERNAL_ASSERT(
       0,
       "Could not compute stream ID for ",
       ptr,
@@ -200,7 +197,7 @@ static void initGlobalStreamState() {
   num_gpus = device_count();
   // Check if the number of GPUs matches the expected compile-time max number
   // of GPUs.
-  AT_ASSERTM(
+  TORCH_CHECK(
       num_gpus <= C10_COMPILE_TIME_MAX_GPUS,
       "Number of CUDA devices on the machine is larger than the compiled "
       "max number of gpus expected (",
@@ -229,17 +226,10 @@ static void initDeviceStreamState(DeviceIndex device_index) {
     lowpri_stream.device_index = device_index;
     hipri_stream.device_index = device_index;
 
-#ifndef __HIP_PLATFORM_HCC__
     C10_CUDA_CHECK(cudaStreamCreateWithPriority(
         &lowpri_stream.stream, kDefaultFlags, kLowPriority));
     C10_CUDA_CHECK(cudaStreamCreateWithPriority(
         &hipri_stream.stream, kDefaultFlags, kHighPriority));
-#else
-    C10_CUDA_CHECK(
-        cudaStreamCreateWithFlags(&lowpri_stream.stream, kDefaultFlags));
-    C10_CUDA_CHECK(
-        cudaStreamCreateWithFlags(&hipri_stream.stream, kDefaultFlags));
-#endif // __HIP_PLATFORM_HCC__
   }
 }
 
@@ -279,7 +269,7 @@ LeakyStreamInternals* CUDAStream_internals(CUDAStream s) {
   size_t si = streamIdIndex(s.unwrap().id());
   switch (st) {
     case StreamIdType::DEFAULT:
-      AT_ASSERTM(
+      TORCH_INTERNAL_ASSERT(
           si == 0,
           "Unrecognized stream ",
           s.unwrap(),
@@ -294,7 +284,7 @@ LeakyStreamInternals* CUDAStream_internals(CUDAStream s) {
     case StreamIdType::HIGH:
       return &high_priority_streams[device_index][si];
     default:
-      AT_ASSERTM(
+      TORCH_INTERNAL_ASSERT(
           0,
           "Unrecognized stream ",
           s.unwrap(),

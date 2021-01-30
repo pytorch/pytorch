@@ -1,5 +1,4 @@
 import torch
-from ....modules.linear import Linear as NNLinear
 import torch.nn.quantized as nnq
 from torch.nn.quantized.modules.utils import _quantize_weight
 
@@ -80,7 +79,10 @@ class Linear(nnq.Linear):
             mod (Module): a float module, either produced by torch.quantization
                           utilities or provided by the user
         """
-        assert type(mod) == NNLinear, 'nn.quantized.dynamic.Linear.from_float only works for nn.Linear'
+        float_modules = [torch.nn.Linear, torch.nn.modules.linear._LinearWithBias]
+        assert type(mod) in float_modules, \
+            'nn.quantized.dynamic.Linear.from_float only works for one of' + \
+            str([float_mod.__name__ for float_mod in float_modules])
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         if mod.qconfig is not None and mod.qconfig.weight is not None:
             weight_observer = mod.qconfig.weight()
@@ -91,7 +93,8 @@ class Linear(nnq.Linear):
             from torch.quantization.qconfig import default_dynamic_qconfig
             weight_observer = default_dynamic_qconfig.weight()
         dtype = weight_observer.dtype
-        assert dtype in [torch.qint8, torch.float16], 'The only supported dtypes for dynamic quantized linear are qint8 and float16'
+        assert dtype in [torch.qint8, torch.float16], "The only supported dtypes for " \
+            "dynamic quantized linear are qint8 and float16 got: {}".format(dtype)
         weight_observer(mod.weight)
         if dtype == torch.qint8:
             qweight = _quantize_weight(mod.weight.float(), weight_observer)

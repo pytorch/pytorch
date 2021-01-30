@@ -4,13 +4,13 @@ import inspect
 import re
 import torch
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn
+    is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn, Union, is_union
 from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore
 from ._state import _get_script_class
 
-from torch._C import TensorType, TupleType, FloatType, IntType, \
+from torch._C import TensorType, TupleType, FloatType, IntType, ComplexDoubleType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
-    DeviceObjType, StreamObjType, FutureType, EnumType
+    DeviceObjType, StreamObjType, FutureType, EnumType, UnionType
 
 
 from textwrap import dedent
@@ -44,7 +44,8 @@ class EvalEnv(object):
         'List': List,
         'Dict': Dict,
         'Optional': Optional,
-        'Future': Future,
+        'Union': Union,
+        'Future': Future
     }
 
     def __init__(self, rcb):
@@ -284,6 +285,11 @@ def try_ann_to_type(ann, loc):
     if is_dict(ann):
         key = try_ann_to_type(ann.__args__[0], loc)
         value = try_ann_to_type(ann.__args__[1], loc)
+        # Raise error if key or value is None
+        if key is None:
+            raise ValueError(f"Unknown type annotation: '{ann.__args__[0]}' at {loc.highlight()}")
+        if value is None:
+            raise ValueError(f"Unknown type annotation: '{ann.__args__[1]}' at {loc.highlight()}")
         return DictType(key, value)
     if is_optional(ann):
         if issubclass(ann.__args__[1], type(None)):
@@ -294,12 +300,16 @@ def try_ann_to_type(ann, loc):
         msg = "Unsupported annotation {} could not be resolved because {} could not be resolved."
         assert valid_type, msg.format(repr(ann), repr(contained))
         return OptionalType(valid_type)
+    if is_union(ann):
+        return UnionType([try_ann_to_type(a, loc) for a in ann.__args__])
     if torch.distributed.rpc.is_available() and is_rref(ann):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))
     if is_future(ann):
         return FutureType(try_ann_to_type(ann.__args__[0], loc))
     if ann is float:
         return FloatType.get()
+    if ann is complex:
+        return ComplexDoubleType.get()
     if ann is int:
         return IntType.get()
     if ann is str:
@@ -342,7 +352,7 @@ def ann_to_type(ann, loc):
     the_type = try_ann_to_type(ann, loc)
     if the_type is not None:
         return the_type
-    raise ValueError(f"Unknown type annotation: '{ann}'")
+    raise ValueError(f"Unknown type annotation: '{ann}' at {loc.highlight()}")
 
 
 __all__ = [
@@ -356,9 +366,12 @@ __all__ = [
     'is_list',
     'Dict',
     'is_dict',
+    'is_optional',
+    'is_union'
     'TensorType',
     'TupleType',
     'FloatType',
+    'ComplexDoubleType',
     'IntType',
     'ListType',
     'StringType',

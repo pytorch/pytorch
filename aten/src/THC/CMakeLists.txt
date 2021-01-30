@@ -41,14 +41,12 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cpp
 
   ${CMAKE_CURRENT_SOURCE_DIR}/THCReduceApplyUtils.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCBlas.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCSleep.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCStorage.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCStorageCopy.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorCopy.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMath.cu
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathBlas.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathMagma.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathPairwise.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensorMathReduce.cu
@@ -68,7 +66,6 @@ install(FILES
           THC.h
           ${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h
           THCGeneral.hpp
-          THCBlas.h
           THCSleep.h
           THCStorage.h
           THCStorageCopy.h
@@ -141,8 +138,6 @@ install(FILES
           generic/THCTensorMasked.cu
           generic/THCTensorMath.h
           generic/THCTensorMath.cu
-          generic/THCTensorMathBlas.cu
-          generic/THCTensorMathBlas.h
           generic/THCTensorMathMagma.h
           generic/THCTensorMathMagma.cu
           generic/THCTensorMathPairwise.h

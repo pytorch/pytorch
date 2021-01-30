@@ -6,13 +6,17 @@ namespace caffe2 {
 namespace internal {
 at::Tensor index_with_uint8_handling(
     const at::Tensor& self,
-    at::TensorList indices) {
+    const torch::List<c10::optional<at::Tensor>>& indices) {
   // Support BC only for the simplest case of mask indexing
-  if (indices.size() == 1 && indices[0].scalar_type() == at::kByte) {
-    TORCH_WARN(
-        "Indexing with uint8 mask tensor in ATenOp is now deprecated,"
-        " please use a bool mask instead.");
-    return at::index(self, {indices[0].to(at::kBool)});
+  if (indices.size() == 1) {
+    c10::optional<at::Tensor> first = indices[0];
+    if (first.has_value()
+        && first->scalar_type() == at::kByte) {
+      TORCH_WARN(
+          "Indexing with uint8 mask tensor in ATenOp is now deprecated,"
+          " please use a bool mask instead.");
+      return at::index(self, {first->to(at::kBool)});
+    }
   }
   return at::index(self, indices);
 }

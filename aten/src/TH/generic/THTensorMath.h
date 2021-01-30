@@ -9,9 +9,6 @@ TH_API int THTensor_(equal)(THTensor *ta, THTensor *tb);
 
 #if !defined(TH_REAL_IS_HALF)
 
-TH_API void THTensor_(maskedCopy)(THTensor *tensor, THByteTensor *mask, THTensor* src);
-TH_API void THTensor_(maskedCopyBool)(THTensor *tensor, THBoolTensor *mask, THTensor* src);
-
 TH_API ptrdiff_t THTensor_(numel)(THTensor *t);
 
 #if !defined(TH_REAL_IS_BOOL)
@@ -31,7 +28,6 @@ TH_API void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index,
 
 TH_API void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t, int64_t k, int dimension, int keepdim);
 TH_API void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int dimension, int keepdim);
-TH_API accreal THTensor_(trace)(THTensor *t);
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 

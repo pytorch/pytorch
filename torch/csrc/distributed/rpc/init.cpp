@@ -38,7 +38,16 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
     throw python_error();
   }
 
-  auto module = py::handle(rpc_module).cast<py::module>();
+  auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
+  if (!torch_C_module) {
+    throw python_error();
+  }
+
+  auto torch_C_m = py::handle(torch_C_module).cast<py::module>();
+  auto m =
+      torch_C_m.def_submodule("_distributed_rpc", "distributed rpc bindings");
+
+  auto module = py::handle(m).cast<py::module>();
 
   auto rpcBackendOptions =
       shared_ptr_class_<RpcBackendOptions>(
@@ -114,6 +123,20 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               "join", &RpcAgent::join, py::call_guard<py::gil_scoped_release>())
           .def(
               "sync", &RpcAgent::sync, py::call_guard<py::gil_scoped_release>())
+          .def(
+              "shutdown",
+              &RpcAgent::shutdown,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_worker_info",
+              (const WorkerInfo& (RpcAgent::*)(void) const) &
+                  RpcAgent::getWorkerInfo,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "get_worker_info",
+              (const WorkerInfo& (RpcAgent::*)(const std::string&) const) &
+                  RpcAgent::getWorkerInfo,
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "get_worker_infos",
               &RpcAgent::getWorkerInfos,
@@ -223,7 +246,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   to the local node and returns it. If the current node is the
                   owner, returns a reference to the local value.
 
-                  Arguments:
+                  Args:
                       timeout (float, optional): Timeout for ``to_here``. If
                           the call does not complete within this timeframe, an
                           exception indicating so will be raised. If this
@@ -240,9 +263,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               )")
           .def(
               "rpc_sync",
-              [](const PyRRef& self) {
-                return self.createRRefProxy(RRefProxyType::RPC_SYNC);
+              [](const PyRRef& self, float timeoutSeconds) {
+                return self.createRRefProxy(
+                    RRefProxyType::RPC_SYNC, timeoutSeconds);
               },
+              py::arg("timeout") = kUnsetRpcTimeout,
               py::call_guard<py::gil_scoped_release>(),
               R"(
                   Create a helper proxy to easily launch an ``rpc_sync`` using
@@ -256,6 +281,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   >>>
                   >>> rpc.rpc_sync(rref.owner(), run, args=(rref, func_name, args, kwargs))
 
+                  Args:
+                      timeout (float, optional): Timeout for ``rref.rpc_sync()``.
+                          If the call does not complete within this timeframe, an
+                          exception indicating so will be raised. If this argument
+                          is not provided, the default RPC timeout will be used.
+
                   Example::
                       >>> from torch.distributed import rpc
                       >>> rref = rpc.remote("worker1", torch.add, args=(torch.zeros(2, 2), 1))
@@ -264,9 +295,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               )")
           .def(
               "rpc_async",
-              [](const PyRRef& self) {
-                return self.createRRefProxy(RRefProxyType::RPC_ASYNC);
+              [](const PyRRef& self, float timeoutSeconds) {
+                return self.createRRefProxy(
+                    RRefProxyType::RPC_ASYNC, timeoutSeconds);
               },
+              py::arg("timeout") = kUnsetRpcTimeout,
               py::call_guard<py::gil_scoped_release>(),
               R"(
                   Create a helper proxy to easily launch an ``rpc_async`` using
@@ -280,6 +313,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   >>>
                   >>> rpc.rpc_async(rref.owner(), run, args=(rref, func_name, args, kwargs))
 
+                  Args:
+                      timeout (float, optional): Timeout for ``rref.rpc_async()``.
+                          If the call does not complete within this timeframe, an
+                          exception indicating so will be raised. If this argument
+                          is not provided, the default RPC timeout will be used.
+
                   Example::
                       >>> from torch.distributed import rpc
                       >>> rref = rpc.remote("worker1", torch.add, args=(torch.zeros(2, 2), 1))
@@ -288,9 +327,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               )")
           .def(
               "remote",
-              [](const PyRRef& self) {
-                return self.createRRefProxy(RRefProxyType::REMOTE);
+              [](const PyRRef& self, float timeoutSeconds) {
+                return self.createRRefProxy(
+                    RRefProxyType::REMOTE, timeoutSeconds);
               },
+              py::arg("timeout") = kUnsetRpcTimeout,
               py::call_guard<py::gil_scoped_release>(),
               R"(
                   Create a helper proxy to easily launch a ``remote`` using
@@ -303,6 +344,16 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   >>>   return getattr(rref.local_value(), func_name)(*args, **kwargs)
                   >>>
                   >>> rpc.remote(rref.owner(), run, args=(rref, func_name, args, kwargs))
+
+                  Args:
+                      timeout (float, optional): Timeout for ``rref.remote()``. If
+                          the creation of this :class:`~torch.distributed.rpc.RRef`
+                          is not successfully completed within the timeout, then the
+                          next time there is an attempt to use the RRef
+                          (such as ``to_here``), a timeout will be raised. If not
+                          provided, the default RPC timeout will be used. Please see
+                          ``rpc.remote()`` for specific timeout semantics for
+                          :class:`~torch.distributed.rpc.RRef`.
 
                   Example::
                       >>> from torch.distributed import rpc
@@ -350,6 +401,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
               // Intentionally not releasing GIL, as most accesses just
               // retrieve cached type py::object
               &PyRRef::getRRefType,
+              py::arg("timeout") = kUnsetRpcTimeout,
               R"(
                   Returns the type of the data object referenced by this
                   ``RRef``. On the owner, this is same as
@@ -357,6 +409,14 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   RPC to fetch the ``type`` object from the owner. After this
                   function is run once, the ``type`` object is cached by the
                   ``RRef``, and subsequent invocations no longer trigger RPC.
+
+                  Args:
+                    rref (torch.distributed.rpc.RRef): The RRef to get type of.
+                    timeout (float, optional): Timeout, in seconds for
+                          ``_get_type``. If the call does not complete within
+                          this timeframe, an exception indicating so will be
+                          raised. If this argument is not provided, the default
+                          RPC timeout will be used.
               )")
           .def(
               "_get_future",
@@ -411,10 +471,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
                   :meth:`~torch.distributed.autograd.get_gradients` should be
                   used to retrieve the gradients. If ``dist_autograd_ctx_id``
                   is ``None``, it is assumed that this is a local autograd graph
-                  and we only perform a local backward pass. The value of the
-                  RRef is expected to be a scalar Tensor.
+                  and we only perform a local backward pass. In the local case,
+                  the node calling this API has to be the owner of the RRef.
+                  The value of the RRef is expected to be a scalar Tensor.
 
-                Arguments:
+                Args:
                     dist_autograd_ctx_id (int, optional): The distributed
                         autograd context id for which we should retrieve the
                         gradients (default: -1).
@@ -441,7 +502,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           The backend options class for ``ProcessGroupAgent``, which is derived
           from ``RpcBackendOptions``.
 
-          Arguments:
+          Args:
               num_send_recv_threads (int, optional): The number of threads in
                   the thread-pool used by ``ProcessGroupAgent`` (default: 4).
               rpc_timeout (float, optional): The default timeout, in seconds,
@@ -471,7 +532,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
 
   shared_ptr_class_<ProcessGroupAgent>(module, "ProcessGroupAgent", rpcAgent)
       .def(py::init([](std::string workerName,
-                       const std::shared_ptr<::c10d::ProcessGroup>& pg,
+                       const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                        int numSendRecvThreads,
                        std::chrono::milliseconds rpcTimeout) {
         return std::make_unique<ProcessGroupAgent>(
@@ -483,12 +544,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
       }))
       .def(
           "get_worker_info",
-          (const WorkerInfo& (ProcessGroupAgent::*)(void)const) &
+          (const WorkerInfo& (ProcessGroupAgent::*)(void) const) &
               RpcAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          (const WorkerInfo& (ProcessGroupAgent::*)(const std::string&)const) &
+          (const WorkerInfo& (ProcessGroupAgent::*)(const std::string&) const) &
               ProcessGroupAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
@@ -553,11 +614,11 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
 
   shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
       .def(
-          py::init([](const std::shared_ptr<::c10d::Store>& store,
+          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
                       std::string selfName,
                       worker_id_t selfId,
                       int worldSize,
-                      std::shared_ptr<::c10d::ProcessGroup> processGroup,
+                      c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
                       TensorPipeRpcBackendOptions opts) {
             return std::make_shared<TensorPipeAgent>(
                 store,
@@ -584,12 +645,12 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          (const WorkerInfo& (TensorPipeAgent::*)(void)const) &
+          (const WorkerInfo& (TensorPipeAgent::*)(void) const) &
               RpcAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "get_worker_info",
-          (const WorkerInfo& (TensorPipeAgent::*)(const std::string&)const) &
+          (const WorkerInfo& (TensorPipeAgent::*)(const std::string&) const) &
               TensorPipeAgent::getWorkerInfo,
           py::call_guard<py::gil_scoped_release>())
       .def(
@@ -759,7 +820,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
     Set whether GIL wait times should be enabled or not. This incurs a slight
     overhead cost. Default is disabled for performance reasons.
 
-    Arguments:
+    Args:
         flag (bool): True to set GIL profiling, False to disable.
       )");
 
@@ -778,7 +839,7 @@ PyObject* rpc_init(PyObject* _unused, PyObject* noargs) {
           :meth:`~torch.distributed.rpc.rpc_sync` and
           :meth:`~torch.distributed.rpc.rpc_async`.
 
-          Arguments:
+          Args:
             rpcTimeoutSeconds (float): Timeout value in seconds.
       )");
 

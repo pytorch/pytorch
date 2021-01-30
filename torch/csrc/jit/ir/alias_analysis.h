@@ -56,7 +56,7 @@ class AliasDb {
   // if `recurseBlocks` is true, consider writes on the nodes in `n`s sub-blocks
   TORCH_API bool writesToAlias(Node* n, const ValueSet& vs) const;
 
-  // Does `a` and `b` potentially share a memory location or do either
+  // Do `a` and `b` potentially share a memory location or do either
   // hold in memory any element that exists in the other
   TORCH_API bool mayContainAlias(Value* a, Value* b) const;
 
@@ -113,6 +113,17 @@ class AliasDb {
   // For debugging: print alias db state to stdout
   TORCH_API void dump() const;
   TORCH_API std::string toString() const;
+
+  // Generates a DOT (www.graphviz.org) graph representation
+  //
+  // Returns `true` if the output file was successfully generated
+  //
+  // WARNING: The output dot file path can't include shell specific notations,
+  //  for example you can't use "~/temp/aliasdb.dot"
+  //  (instead, use "/home/user/temp/aliasdb.dot")
+  //
+  TORCH_API bool dumpToGraphvizFile(const char* filename) const;
+  TORCH_API std::string toGraphviz() const;
 
   static bool isMutableType(const Value* v);
   static bool isMutableType(const TypePtr& type);

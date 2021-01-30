@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
+
 #include <ATen/core/alias_info.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
@@ -11,6 +12,7 @@
 using c10::AliasInfo;
 using c10::BoolType;
 using c10::CapsuleType;
+using c10::ComplexDoubleType;
 using c10::DeviceObjType;
 using c10::DictType;
 using c10::FloatType;
@@ -24,11 +26,13 @@ using c10::OptionalType;
 using c10::QSchemeType;
 using c10::QuantizerType;
 using c10::RRefType;
+using c10::StorageType;
 using c10::StreamObjType;
 using c10::StringType;
 using c10::Symbol;
 using c10::TensorType;
 using c10::TupleType;
+using c10::UnionType;
 using c10::VarType;
 
 namespace torch {
@@ -41,7 +45,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"ScalarType", IntType::get()},
       {"Layout", IntType::get()},
       {"MemoryFormat", IntType::get()},
-      {"Storage", IntType::get()},
+      {"Storage", StorageType::get()},
       {"QScheme", QSchemeType::get()},
       {"Quantizer", QuantizerType::get()},
       {"ConstQuantizerPtr",
@@ -53,6 +57,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"Scalar", NumberType::get()},
       {"str", StringType::get()},
       {"float", FloatType::get()},
+      {"complex", ComplexDoubleType::get()},
       {"int", IntType::get()},
       {"bool", BoolType::get()},
       {"None", NoneType::get()},
@@ -150,7 +155,6 @@ c10::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
 }
 
 c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
-  c10::optional<c10::Device> device;
   L.expect('=');
   const std::string& dev = L.expect(TK_IDENT).text();
 
@@ -323,7 +327,18 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     L.expect(')');
     alias_info = parseAliasAnnotation();
     value = DictType::create(key_type, value_type);
-  } else if (
+  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Union") {
+    L.next();
+    L.expect('(');
+    std::vector<TypePtr> types;
+    types.emplace_back(parseType().first);
+    while (L.cur().kind != ')') {
+      L.expect(',');
+      types.emplace_back(parseType().first);
+    }
+    alias_info = parseAliasAnnotation();
+    value = UnionType::create(types);
+    } else if (
       complete_tensor_types && L.cur().kind == TK_IDENT &&
       parseTensorDType(L.cur().text())) {
     value = parseRefinedTensor();

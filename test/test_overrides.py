@@ -1,11 +1,10 @@
 import torch
 import numpy as np
-import unittest
 import inspect
 import functools
 import pprint
 
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -563,6 +562,8 @@ def generate_tensor_like_override_tests(cls):
                     func_args.append(instance_gen())
                 elif t == 'TensorList':
                     func_args.append([instance_gen(), instance_gen()])
+                elif t == 'c10::List<c10::optional<Tensor>>':
+                    func_args.append([instance_gen(), instance_gen()])
                 elif t == 'IntArrayRef':
                     size = arg.get('size', 2)
                     if size == 1:
@@ -775,7 +776,7 @@ class TestEinsumOverride(TestCase):
 class TestGradCheckOverride(TestCase):
     "Test that wrappers work with gradcheck."
     def test_gradcheck(self):
-        from torch.autograd import gradcheck, gradgradcheck
+        from torch.testing._internal.common_utils import gradcheck, gradgradcheck
 
         a = wrap(torch.tensor(5.0, dtype=torch.double))
         b = wrap(torch.tensor(6.0, dtype=torch.double))
@@ -783,8 +784,8 @@ class TestGradCheckOverride(TestCase):
         a.requires_grad = True
         b.requires_grad = True
 
-        gradcheck(torch.add, (a, b), raise_exception=False)
-        gradgradcheck(torch.add, (a, b), raise_exception=False)
+        gradcheck(torch.add, (a, b), raise_exception=False, check_batched_grad=False)
+        gradgradcheck(torch.add, (a, b), raise_exception=False, check_batched_grad=False)
 
         total_used_attrs = a.used_attrs.union(b.used_attrs)
         total_used_calls = a.used_calls.union(b.used_calls)
@@ -821,6 +822,128 @@ class TestGradCheckOverride(TestCase):
             torch.add,
         })
 
+class TestNamedTuple(TestCase):
+    """ Regression test for gh-47090 """
+    def test_max(self):
+        x = torch.tensor([1, 2])
+        xs = x.as_subclass(SubTensor2)
+        r = torch.max(x, dim=0)
+        rs = torch.max(xs, dim=0)
+        self.assertEqual(type(r), type(rs))
+        self.assertEqual(r, rs)
+
+class TestGradNewOnesOverride(TestCase):
+    """ Regression test for gh-47069 """
+    def test_newones(self):
+        t = torch.tensor([1, 2]).as_subclass(SubTensor2)
+        n = t.new_ones((1, 2))
+        self.assertEqual(type(n), SubTensor2)
+
+
+class TestBroadcastAllOverride(TestCase):
+    """ test for gh-37141 """
+    def test_broadcast_all(self):
+        from torch.distributions.utils import broadcast_all
+        a = torch.tensor([1.2, 3.4, 5.6])
+        a_w = Wrapper(a)
+        b = torch.tensor(5.0)
+        b_w = Wrapper(b)
+        c = torch.tensor([5.0, 5.0, 5.0])
+
+        o_1 = broadcast_all(a_w, b_w)
+        self.assertTrue(isinstance(o_1[0], Wrapper))
+        self.assertTrue(isinstance(o_1[1], Wrapper))
+        self.assertEqual(o_1[0]._data, a)
+        self.assertEqual(o_1[1]._data, c)
+
+        o_2 = broadcast_all(a_w, b)
+        self.assertTrue(isinstance(o_2[0], Wrapper))
+        self.assertTrue(isinstance(o_2[1], Wrapper))
+        self.assertEqual(o_2[0]._data, a)
+        self.assertEqual(o_2[1]._data, c)
+
+class TestWrapTorchFunction(TestCase):
+    def test_wrap_torch_function(self):
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs):
+                return -1
+
+        def dispatcher(a):
+            return (a,)
+
+        @torch.overrides.wrap_torch_function(dispatcher)
+        def f(a):
+            return a
+
+        self.assertEqual(f(A()), -1)
+
+class TestIndexing(TestCase):
+    """ Regression tests for gh-46277 """
+    def test_getitem(self):
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                return -1
+
+        t = torch.tensor([5])
+        self.assertEqual(t[A()], -1)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_getitem_subclass(self):
+        class A(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                return -1
+
+        t = torch.tensor([5])
+        self.assertEqual(t[A()], -1)
+        self.assertEqual(t[5, A()], -1)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_setitem(self):
+        triggered = set()
+
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                triggered.add(func)
+                return -1
+
+        t = torch.tensor([5])
+        t[A()] = 1
+        t[5, A()] = 1
+        self.assertIn(Tensor.__setitem__, triggered)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_setitem_val(self):
+        triggered = set()
+
+        class A:
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                triggered.add(func)
+                return -1
+
+        t = torch.tensor([5])
+        t[0] = A()
+        self.assertIn(Tensor.__setitem__, triggered)
+        self.assertEqual(t, torch.tensor([5]))
+
+    def test_setitem_subclass(self):
+        triggered = set()
+
+        class A(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args, kwargs=None):
+                triggered.add(func)
+                return -1
+
+        t = torch.tensor([5])
+        t[A()] = 1
+        t[5, A()] = 1
+        self.assertIn(Tensor.__setitem__, triggered)
+        self.assertEqual(t, torch.tensor([5]))
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

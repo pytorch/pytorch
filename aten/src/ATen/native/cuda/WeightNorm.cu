@@ -394,14 +394,14 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
             g.data_ptr<scalar_t>(),
             fast_dim_size,
             slower_dims_size);
+         C10_CUDA_KERNEL_LAUNCH_CHECK();
        });
   }
 
   // The kernel execution is asynchronous, so this will only catch errors on the kernel launch,
   // not the kernel's execution.  Errors in kernel execution aren't guaranteed to be caught
   // until a later error check on a synchronizing CUDA call.  Unfortunately, without manually
-  // synchronizing here, this is the best we can do.
-  AT_CUDA_CHECK(cudaGetLastError());
+  // synchronizing here, the foregoing is the best we can do.
 
   return std::tuple<Tensor, Tensor>{w, norms};
 }
@@ -486,14 +486,14 @@ std::tuple<Tensor, Tensor> weight_norm_cuda_backward
             saved_norms.data_ptr<accscalar_t>(),
             fast_dim_size,
             slower_dims_size);
+         C10_CUDA_KERNEL_LAUNCH_CHECK();
        });
   }
 
   // The kernel execution is asynchronous, so this will only catch errors on the kernel launch,
   // not the kernel's execution.  Errors in kernel execution aren't guaranteed to be caught
   // until a later error check on a synchronizing CUDA call.  Unfortunately, without manually
-  // synchronizing here, this is the best we can do.
-  AT_CUDA_CHECK(cudaGetLastError());
+  // synchronizing here, the foregoing is the best we can do.
 
   return std::tuple<Tensor, Tensor>{grad_v, grad_g};
 }

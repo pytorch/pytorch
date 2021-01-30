@@ -3,7 +3,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #ifdef _WIN32
-#include <windows.h>
+#include <c10/util/win32-headers.h>
 #else
 #include <pthread.h>
 #include <unistd.h>

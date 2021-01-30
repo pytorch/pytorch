@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/memory.h>
 
+#include <fstream>
+
 namespace torch {
 namespace jit {
 
@@ -45,6 +47,7 @@ class MutableTypePtrHelper {
       case TypeKind::DictType:
       case TypeKind::ClassType:
       case TypeKind::TensorType:
+      case TypeKind::UnionType:
         // TODO: lookup cached contained types. this is kind of tricky
         // because a List[Optional[T]] should still be
         // List[Optional[Unshaped(T)]], however the getMutableType(Optional[T])
@@ -63,7 +66,7 @@ class MutableTypePtrHelper {
       }
       case TypeKind::TupleType: {
         std::vector<TypePtr> mutable_types;
-        for (const auto& elem : type->expect<TupleType>()->elements()) {
+        for (const auto& elem : type->expectRef<TupleType>().elements()) {
           if (auto mut_elem = getMutableType(elem)) {
             mutable_types.push_back(*mut_elem);
           }
@@ -88,7 +91,8 @@ bool isMutableTypeImpl(
   // getMutableTypePtrImpl
   auto kind = type->kind();
   if (kind == TypeKind::TensorType || kind == TypeKind::ListType ||
-      kind == TypeKind::ClassType || kind == TypeKind::DictType) {
+      kind == TypeKind::ClassType || kind == TypeKind::DictType
+      || kind == TypeKind::UnionType) {
     return true;
   }
   MutableTypePtrHelper helper(mutable_type_cache);
@@ -390,6 +394,75 @@ std::string AliasDb::toString() const {
   return ss.str();
 }
 
+bool AliasDb::dumpToGraphvizFile(const char* filename) const {
+  std::ofstream dot_file(filename);
+  if (!dot_file.good()) {
+    std::cout << "Failed to create Graphviz file: '" << filename << "'\n";
+    return false;
+  }
+  dot_file << toGraphviz();
+  return true;
+}
+
+std::string AliasDb::toGraphviz() const {
+  std::stringstream dot;
+
+  // Local helper to generate a graphviz-friendly name encoding
+  // See also AliasDb::getElementName()
+  const auto name = [this](const Element* e) -> std::string {
+    if (e->values.empty()) {
+      for (const auto& ent : wildcardIndex_) {
+        if (ent.second == e) {
+          return std::string("\"WILDCARD for ") + ent.first->str() + "\"";
+        }
+      }
+      return "\"WILDCARD\"";
+    } else {
+      std::ostringstream ss;
+      if (e->values.size() == 1) {
+        ss << "\"\\%" << (*e->values.begin())->debugName() << "\"";
+        return ss.str();
+      }
+      ss << "\"(";
+      for (const Value* v : e->values) {
+        ss << "\\%" << v->debugName() << ", ";
+      }
+      ss << ")\"";
+      return ss.str();
+    }
+  };
+
+  // Include the textual representation for reference
+  dot << "/*\n";
+  dot << toString();
+  dot << "*/\n";
+
+  dot << "digraph fusion_ir {\n"
+      << "  rankdir=LR\n"
+      << "  node [shape=rect, color=gray];\n"
+      << "  edge [color=black];\n";
+
+  for (const auto& ptrPair : elementMap_) {
+    const auto element = ptrPair.second;
+    if (!element->pointsTo.empty()) {
+      for (const auto pointedTo : element->pointsTo) {
+        dot << "  " << name(element) << " -> "
+            << name(memoryDAG_->fromIndex(pointedTo)) << "\n";
+      }
+    }
+    if (!element->containedElements.empty()) {
+      for (const auto contained : element->containedElements) {
+        dot << "  " << name(element) << " -> "
+            << name(memoryDAG_->fromIndex(contained))
+            << " [style=dashed, color=blue]\n";
+      }
+    }
+  }
+
+  dot << "}\n";
+  return dot.str();
+}
+
 void AliasDb::analyze(const std::shared_ptr<Graph>& graph) {
   for (auto input : graph->inputs()) {
     setWildcard(input);
@@ -486,6 +559,7 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeGradOf(node);
     // TODO: think more about TensorExpr alias correctness
     case prim::TensorExprGroup:
+    case prim::StaticSubgraph:
     case prim::Constant:
     case prim::AutogradZero:
     case prim::AutogradAdd:
@@ -510,7 +584,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::GetAttr:
       if (isFrozen_ && node->kind() == prim::GetAttr) {
         auto& ty = node->input()->type();
-        if (ty->expect<ClassType>()->is_module()) {
+        if (ty->expectRef<ClassType>().is_module()) {
           return analyzeCreator(node);
         }
       }
@@ -523,11 +597,12 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeBroadcastingChunk(node);
     case prim::SetAttr:
       return analyzeSetAttr(node);
-    case prim::profile_optional:
+    case prim::profile_ivalue:
     case prim::profile:
       makePointerTo(node->output(), node->inputs().at(0));
       return;
-    case prim::TypeCheck: {
+    case prim::TypeCheck:
+    case prim::RequiresGradCheck: {
       auto num_inputs = node->inputs().size();
       for (size_t i = 0; i < num_inputs; i++) {
         makePointerTo(node->outputs().at(i), node->inputs().at(i));
@@ -570,7 +645,8 @@ void AliasDb::analyzeImpl(Node* node) {
           !aliasAnalysisHasSpecialCaseFor(node->kind()),
       "Special cases should be handled already if we're here.");
 
-  if (node->kind().is_aten() || node->kind().is_prim()) {
+  if (node->kind().is_aten() || node->kind().is_prim() ||
+      node->kind().is_cuda()) {
     // TODO There is nothing in the system that relies on aten:: and prim::
     // ops using AliasAnalysisKind::FROM_SCHEMA or
     // AliasAnalysisKind::INTERNAL_SPECIAL_CASE, but this is the intended
@@ -989,10 +1065,10 @@ void AliasDb::makePointerTo(const Value* from, const Value* to) {
     return;
   }
 
-  // the contained types of immutable type containers (optional, tuple, future)
-  // are unified, so these types can be mutable or immutable
+  // the contained types of immutable type containers (optional, tuple,
+  // future) are unified, so these types can be mutable or immutable
   // and point to a type which is mutable or immutable.
-  // Any is mutable but can point to a immutable type through refinement
+  // Any is mutable but can point to an immutable type through refinement
   if (isMutableTypeInternal(from) != isMutableTypeInternal(to)) {
     bool expected_kind = false;
     for (auto kind : {from->type()->kind(), to->type()->kind()}) {

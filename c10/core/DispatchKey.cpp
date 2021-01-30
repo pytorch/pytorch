@@ -15,6 +15,8 @@ const char* toString(DispatchKey t) {
       return "HIP";
     case DispatchKey::FPGA:
       return "FPGA";
+    case DispatchKey::XPU:
+      return "XPU";
     case DispatchKey::MSNPU:
       return "MSNPU";
     case DispatchKey::XLA:
@@ -35,6 +37,8 @@ const char* toString(DispatchKey t) {
       return "QuantizedCPU";
     case DispatchKey::QuantizedCUDA:
       return "QuantizedCUDA";
+    case DispatchKey::QuantizedXPU:
+      return "QuantizedXPU";
 
     case DispatchKey::ComplexCPU:
       return "ComplexCPU";
@@ -52,6 +56,11 @@ const char* toString(DispatchKey t) {
       return "SparseCUDA";
     case DispatchKey::SparseHIP:
       return "SparseHIP";
+    case DispatchKey::SparseXPU:
+      return "SparseXPU";
+
+    case DispatchKey::NestedTensor:
+      return "NestedTensor";
 
     case DispatchKey::PrivateUse1:
       return "PrivateUse1";
@@ -71,6 +80,8 @@ const char* toString(DispatchKey t) {
       return "AutogradCUDA";
     case DispatchKey::AutogradXLA:
       return "AutogradXLA";
+    case DispatchKey::AutogradNestedTensor:
+      return "AutogradNestedTensor";
     case DispatchKey::AutogradPrivateUse1:
       return "AutogradPrivateUse1";
     case DispatchKey::AutogradPrivateUse2:
@@ -132,6 +143,8 @@ DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
       return DispatchKey::AutogradCUDA;
     case DispatchKey::XLA:
       return DispatchKey::AutogradXLA;
+    case DispatchKey::NestedTensor:
+      return DispatchKey::AutogradNestedTensor;
     case DispatchKey::PrivateUse1:
       return DispatchKey::AutogradPrivateUse1;
     case DispatchKey::PrivateUse2:

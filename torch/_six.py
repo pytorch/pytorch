@@ -33,7 +33,6 @@ int_classes = int
 FileNotFoundError = builtins.FileNotFoundError
 StringIO = io.StringIO
 container_abcs = collections.abc
-PY3 = sys.version_info[0] == 3
 PY37 = sys.version_info[0] == 3 and sys.version_info[1] >= 7
 
 def with_metaclass(meta: type, *bases) -> type:

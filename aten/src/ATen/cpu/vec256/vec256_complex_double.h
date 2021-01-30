@@ -204,7 +204,8 @@ public:
   }
   Vec256<c10::complex<double>> acos() const {
     // acos(x) = pi/2 - asin(x)
-    const __m256d pi_2 = _mm256_setr_pd(M_PI/2, 0.0, M_PI/2, 0.0);
+    constexpr auto pi_2d = c10::pi<double> / 2;
+    const __m256d pi_2 = _mm256_setr_pd(pi_2d, 0.0, pi_2d, 0.0);
     return _mm256_sub_pd(pi_2, asin());
   }
   Vec256<c10::complex<double>> atan() const;
@@ -255,6 +256,9 @@ public:
   Vec256<c10::complex<double>> igamma(const Vec256<c10::complex<double>> &x) const {
     AT_ERROR("not supported for complex numbers");
   }
+  Vec256<c10::complex<double>> igammac(const Vec256<c10::complex<double>> &x) const {
+    AT_ERROR("not supported for complex numbers");
+  }
   Vec256<c10::complex<double>> neg() const {
     auto zero = _mm256_setzero_pd();
     return _mm256_sub_pd(zero, values);
@@ -275,18 +279,7 @@ public:
     return _mm256_round_pd(values, (_MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC));
   }
   Vec256<c10::complex<double>> sqrt() const {
-    //   sqrt(a + bi)
-    // = sqrt(2)/2 * [sqrt(sqrt(a**2 + b**2) + a) + sgn(b)*sqrt(sqrt(a**2 + b**2) - a)i]
-    // = sqrt(2)/2 * [sqrt(abs() + a) + sgn(b)*sqrt(abs() - a)i]
-
-    const __m256d scalar = _mm256_set1_pd(std::sqrt(2)/2);             //sqrt(2)/2      sqrt(2)/2
-    const __m256d sign_mask = _mm256_setr_pd(0.0, -0.0, 0.0, -0.0);
-    auto sign = _mm256_and_pd(values, sign_mask);
-    auto factor = _mm256_or_pd(scalar, sign);
-
-    auto a_a = _mm256_xor_pd(_mm256_movedup_pd(values), sign_mask);    // a             -a
-    auto res_re_im = _mm256_sqrt_pd(_mm256_add_pd(abs_(), a_a));       // sqrt(abs + a) sqrt(abs - a)
-    return _mm256_mul_pd(factor, res_re_im);
+    return map(std::sqrt);
   }
   Vec256<c10::complex<double>> reciprocal() const;
   Vec256<c10::complex<double>> rsqrt() const {
@@ -309,7 +302,7 @@ public:
     return _mm256_cmp_pd(values, other.values, _CMP_EQ_OQ);
   }
   Vec256<c10::complex<double>> operator!=(const Vec256<c10::complex<double>>& other) const {
-    return _mm256_cmp_pd(values, other.values, _CMP_NEQ_OQ);
+    return _mm256_cmp_pd(values, other.values, _CMP_NEQ_UQ);
   }
   Vec256<c10::complex<double>> operator<(const Vec256<c10::complex<double>>& other) const {
     TORCH_CHECK(false, "not supported for complex numbers");

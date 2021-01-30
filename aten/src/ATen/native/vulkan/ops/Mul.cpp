@@ -7,6 +7,8 @@ namespace vulkan {
 namespace ops {
 namespace {
 
+using namespace api::utils;
+
 Tensor mul_scalar(
     const Tensor& self_arg,
     const Scalar other) {
@@ -17,21 +19,19 @@ Tensor mul_scalar(
 
   vTensor v_output{
     context,
-    self.sizes(),
-    self.options(),
+    v_self.sizes(),
+    v_self.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if (v_output.has_image() && v_self.has_image()) {
-      const struct {
-        uint32_t width, height, channels;
+    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
+      const struct Block final {
+        uvec3 extents;
         float other;
       } block {
-        v_output.extents().width,
-        v_output.extents().height,
-        v_output.extents().depth,
+        v_output.extents(),
         other.to<float>(),
       };
 
@@ -46,10 +46,15 @@ Tensor mul_scalar(
           v_output.extents(),
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
-          v_output.image(command_buffer, vTensor::Access::Write),
+          v_output.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_self.image(command_buffer),
+          v_self.image(
+              command_buffer,
+              vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
@@ -58,34 +63,31 @@ Tensor mul_scalar(
       TORCH_CHECK(false, "Not implemented!");
     }
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
   return convert(v_output);
 }
 
 Tensor& mul_scalar_(
-    Tensor& self_arg,
+    Tensor& self,
     const Scalar other) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
-      self_arg.is_vulkan(),
-      "Vulkan: In-place add is only supported on Vulkan tensors.");
+      self.is_vulkan(),
+      "Vulkan: In-place mul_scalar is only supported on Vulkan tensors.");
 
-  vTensor& v_self = convert(self_arg);
+  vTensor& v_self = convert(self);
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if (v_self.has_image()) {
-      const struct {
-        uint32_t width, height, channels;
+    if C10_LIKELY(v_self.has_image()) {
+      const struct Block final {
+        uvec3 extents;
         float other;
       } block {
-        v_self.extents().width,
-        v_self.extents().height,
-        v_self.extents().depth,
+        v_self.extents(),
         other.to<float>(),
       };
 
@@ -99,7 +101,10 @@ Tensor& mul_scalar_(
           v_self.extents(),
           // Read-Write access triggers an async synchronization if necessory
           // and inserts appropriate barriers if hazards are detected.
-          v_self.image(command_buffer, vTensor::Access::Read | vTensor::Access::Write),
+          v_self.image(
+              command_buffer,
+              vTensor::Stage::Compute,
+              vTensor::Access::Read | vTensor::Access::Write),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
@@ -108,10 +113,9 @@ Tensor& mul_scalar_(
       TORCH_CHECK(false, "Not implemented!");
     }
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
-  return self_arg;
+  return self;
 }
 
 #ifdef USE_VULKAN_API

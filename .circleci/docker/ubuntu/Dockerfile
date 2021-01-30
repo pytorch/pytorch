@@ -48,13 +48,6 @@ RUN bash ./install_gcc.sh && rm install_gcc.sh
 ADD ./common/install_lcov.sh install_lcov.sh
 RUN  bash ./install_lcov.sh && rm install_lcov.sh
 
-# Install non-standard Python versions (via Travis binaries)
-ARG TRAVIS_PYTHON_VERSION
-ARG TRAVIS_DL_URL_PREFIX
-ENV PATH /opt/python/$TRAVIS_PYTHON_VERSION/bin:$PATH
-ADD ./common/install_travis_python.sh install_travis_python.sh
-RUN bash ./install_travis_python.sh && rm install_travis_python.sh
-
 # (optional) Install protobuf for ONNX
 ARG PROTOBUF
 ADD ./common/install_protobuf.sh install_protobuf.sh

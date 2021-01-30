@@ -76,6 +76,14 @@ void Error::add_context(std::string new_msg) {
   refresh_what();
 }
 
+namespace detail {
+
+void torchCheckFail(const char *func, const char *file, uint32_t line, const std::string& msg) {
+  throw ::c10::Error({func, file, line}, msg);
+}
+
+} // namespace detail
+
 namespace Warning {
 
 namespace {

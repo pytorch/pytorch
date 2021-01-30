@@ -109,7 +109,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
 
   std::unordered_set<c10::Stream> leaf_streams;
 
-  void init_to_execute(Node& graph_root, const edge_list& outputs);
+  void init_to_execute(Node& graph_root, const edge_list& outputs, bool accumulate_grad);
 
   // The value of worker_device in the thread that created this task.
   // See Note [Reentrant backwards]
@@ -144,7 +144,7 @@ struct GraphTask: std::enable_shared_from_this<GraphTask> {
 
   // CPU threads are dedicated to processing CPU work for the backward they invoked.
   // So any given graph task maintains its own cpu_ready_queue_ where you should send
-  // work for it to be done. We memorize the cpu_ready_queue_ per GraphTask so that
+  // work for it to be done. We memoize the cpu_ready_queue_ per GraphTask so that
   // we know which ready queue we should push to if we are on device thread (i.e. GPU)
   // and but next NodeTask should be run on CPU.
   std::shared_ptr<ReadyQueue> cpu_ready_queue_;
@@ -272,6 +272,7 @@ struct TORCH_API Engine {
       const variable_list& inputs,
       bool keep_graph,
       bool create_graph,
+      bool accumulate_grad,
       const edge_list& outputs = {});
 
   // Given a pre-populated GraphTask and GraphRoot, computes the backward pass
@@ -281,7 +282,8 @@ struct TORCH_API Engine {
   // machinery and shouldn't be exposed to users in anyway.
   virtual std::shared_ptr<at::ivalue::Future> execute_with_graph_task(
       const std::shared_ptr<GraphTask>& graph_task,
-      std::shared_ptr<Node> graph_root);
+      std::shared_ptr<Node> graph_root,
+      InputBuffer&& input_buffer);
 
   virtual std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() {
     return std::make_unique<AnomalyMetadata>();
