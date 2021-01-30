@@ -7,4 +7,4 @@
 // enable this only if you know what you are doing.
 #define _ENABLE_CUDNN_V8_API true
 
-#define HAS_CUDNN_V8() (_ENABLE_CUDNN_V8_API && defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000)
+#define HAS_CUDNN_V8() (_ENABLE_CUDNN_V8_API && defined(CUDNN_VERSION) && CUDNN_VERSION >= 8100)
