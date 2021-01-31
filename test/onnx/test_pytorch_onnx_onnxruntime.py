@@ -7209,6 +7209,7 @@ TestONNXRuntime_opset12_IRv4_old_jit_API = type(str("TestONNXRuntime_opset12_IRv
                                                      keep_initializers_as_inputs=False,
                                                      use_new_jit_passes=False))
 
+<<<<<<< HEAD
 
 # opset 12 tests, with _onnx_shape_inference=True.
 TestONNXRuntime_opset12_onnx_shape_inference = type(str("TestONNXRuntime_opset12_onnx_shape_inference"),
@@ -7216,5 +7217,7 @@ TestONNXRuntime_opset12_onnx_shape_inference = type(str("TestONNXRuntime_opset12
                                                     dict(TestONNXRuntime.__dict__, opset_version=12,
                                                          onnx_shape_inference=True))
 
+=======
+>>>>>>> [ONNX] Fix graph sequence output from loop node (#51305)
 if __name__ == '__main__':
     unittest.main()
