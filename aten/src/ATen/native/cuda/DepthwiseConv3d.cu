@@ -1,3 +1,4 @@
+#include <ATen/ATen.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/AccumulateType.h>
@@ -20,8 +21,8 @@ __global__ void conv_depthwise3d_cuda_kernel(
     PackedTensorAccessor32<scalar_t, 5> output,
     const PackedTensorAccessor32<scalar_t, 5> kernel,
     const scalar_t* bias,
-    int dT, int dH, int dW,
-    int pT, int pH, int pW,
+    int strideT, int strideH, int strideW,
+    int paddingT, int paddingH, int paddingW,
     int dilationT_, int dilationH_, int dilationW_)
 {
   const int kT = kKnownKernelT > 0 ? kKnownKernelT : kernel.size(2);
@@ -50,9 +51,9 @@ __global__ void conv_depthwise3d_cuda_kernel(
 
     const int in_channel = out_channel / channel_multiplier;
 
-    const int in_col_start = out_col * dW - pW;
-    const int in_row_start = out_row * dH - pH;
-    const int in_frame_start = out_frame * dT - pT;
+    const int in_col_start = out_col * strideW - paddingW;
+    const int in_row_start = out_row * strideH - paddingH;
+    const int in_frame_start = out_frame * strideT - paddingT;
 
     accscalar_t sum = 0;
     const scalar_t *kernel_ptr = kernel[out_channel].data();
@@ -92,8 +93,8 @@ conv_depthwise3d_cuda_backward_input_kernel(
     const PackedTensorAccessor32<scalar_t, 5> grad_output,
     PackedTensorAccessor32<scalar_t, 5> grad_input,
     const PackedTensorAccessor32<scalar_t, 5> kernel,
-    int dT_, int dH_, int dW_,
-    int pT, int pH, int pW,
+    int strideT_, int strideH_, int strideW_,
+    int paddingT, int paddingH, int paddingW,
     int dilationT_, int dilationH_, int dilationW_) {
   const int kT = kKnownKernelT > 0 ? kKnownKernelT : kernel.size(2);
   const int kH = kKnownKernelH > 0 ? kKnownKernelH : kernel.size(3);
@@ -110,9 +111,9 @@ conv_depthwise3d_cuda_backward_input_kernel(
   const int dilationT = kKnownDilationT > 0 ? kKnownDilationT : dilationT_;
   const int dilationH = kKnownDilationH > 0 ? kKnownDilationH : dilationH_;
   const int dilationW = kKnownDilationW > 0 ? kKnownDilationW : dilationW_;
-  const int dT = kKnownStrideT > 0 ? kKnownStrideT : dT_;
-  const int dH = kKnownStrideH > 0 ? kKnownStrideH : dH_;
-  const int dW = kKnownStrideW > 0 ? kKnownStrideW : dW_;
+  const int strideT = kKnownStrideT > 0 ? kKnownStrideT : strideT_;
+  const int strideH = kKnownStrideH > 0 ? kKnownStrideH : strideH_;
+  const int strideW = kKnownStrideW > 0 ? kKnownStrideW : strideW_;
   const int num_input = grad_input.size(0) * grad_input.stride(0);
 
   CUDA_KERNEL_LOOP(index, num_input) {
@@ -122,9 +123,9 @@ conv_depthwise3d_cuda_backward_input_kernel(
     const int in_channel = (index / iW / iH / iT) % iC;
     const int batch = index / iW / iH / iT / iC;
 
-    const int out_col_end = in_col + pW;
-    const int out_row_end = in_row + pH;
-    const int out_frame_end = in_frame + pT;
+    const int out_col_end = in_col + paddingW;
+    const int out_row_end = in_row + paddingH;
+    const int out_frame_end = in_frame + paddingT;
 
     const scalar_t* kernel_ptr = kernel[in_channel * channel_multiplier].data();
     accscalar_t sum = 0;
@@ -136,14 +137,14 @@ conv_depthwise3d_cuda_backward_input_kernel(
 
       for (int k_frame = 0; k_frame < kT; ++k_frame) {
         const int out_frame_raw = out_frame_end - k_frame * dilationT;
-        const int out_frame = out_frame_raw / dT;
+        const int out_frame = out_frame_raw / strideT;
         for (int k_row = 0; k_row < kH; ++k_row) {
           const int out_row_raw = out_row_end - k_row * dilationH;
-          const int out_row = out_row_raw / dH;
+          const int out_row = out_row_raw / strideH;
           for (int k_col = 0; k_col < kW; ++k_col) {
             const scalar_t op1 = __ldg(kernel_ptr++);
             const int out_col_raw = out_col_end - k_col * dilationW;
-            const int out_col = out_col_raw / dW;
+            const int out_col = out_col_raw / strideW;
 
             const int out_offs = (out_frame * oH + out_row) * oW + out_col;
 
@@ -152,9 +153,9 @@ conv_depthwise3d_cuda_backward_input_kernel(
                 out_col < oW && out_row < oH && out_frame < oT) {
               op2 = __ldg(gout_ptr + out_offs);
             }
-            if (out_frame * dT == out_frame_raw &&
-                out_row * dH == out_row_raw &&
-                out_col * dW == out_col_raw) {
+            if (out_frame * strideT == out_frame_raw &&
+                out_row * strideH == out_row_raw &&
+                out_col * strideW == out_col_raw) {
               sum += op1 * op2;
             }
           }
@@ -173,16 +174,16 @@ conv_depthwise3d_cuda_backward_weight_kernel(
     const PackedTensorAccessor32<scalar_t, 5> grad_output,
     const PackedTensorAccessor32<scalar_t, 5> input,
     PackedTensorAccessor32<scalar_t, 5> grad_kernel,
-    int dT, int dH_, int dW_,
-    int pT, int pH, int pW,
+    int strideT, int strideH_, int strideW_,
+    int paddingT, int paddingH, int paddingW,
     int dilationT, int dilationH, int dilationW) {
   const int kC = grad_kernel.size(0);
   const int kT = grad_kernel.size(2);
   const int kH = grad_kernel.size(3);
   const int kW = grad_kernel.size(4);
 
-  const int dH = kKnownStrideH > 0 ? kKnownStrideH : dH_;
-  const int dW = kKnownStrideW > 0 ? kKnownStrideW : dW_;
+  const int strideH = kKnownStrideH > 0 ? kKnownStrideH : strideH_;
+  const int strideW = kKnownStrideW > 0 ? kKnownStrideW : strideW_;
 
   const int k_col = blockIdx.x % kW;
   const int k_row = (blockIdx.x / kW) % kH;
@@ -217,7 +218,7 @@ conv_depthwise3d_cuda_backward_weight_kernel(
        outer_pos += nwarps, gout_frame += nwarps) {
     while (gout_frame >= oT) { gout_frame -= oT; batch ++; }
 
-    const int in_frame = (gout_frame * dT) + (k_frame * dilationT) - pT;
+    const int in_frame = (gout_frame * strideT) + (k_frame * dilationT) - paddingT;
 
     if (in_frame < 0 || in_frame >= iT) {
       continue;
@@ -233,8 +234,8 @@ conv_depthwise3d_cuda_backward_weight_kernel(
       const scalar_t op1 = __ldg(gout_ptr);
       gout_ptr += C10_WARP_SIZE;
 
-      const int in_col = (gout_col * dW) + (k_col * dilationW) - pW;
-      const int in_row = (gout_row * dH) + (k_row * dilationH) - pH;
+      const int in_col = (gout_col * strideW) + (k_col * dilationW) - paddingW;
+      const int in_row = (gout_row * strideH) + (k_row * dilationH) - paddingH;
       const int in_pos = in_row * iW + in_col;
 
       scalar_t op2 = (scalar_t)0;
@@ -338,8 +339,6 @@ void conv_depthwise_shape_check(
 
 }
 
-#define TENSOR_ARG(name, idx) TensorArg name##_arg{ name, #name, idx };
-
 #define NODEF_OR_EQUAL(x, y) ((y) < 0 || (x) == (y))
 #define NODEF_OR_EQUAL_3(x, y1, y2, y3) \
   (NODEF_OR_EQUAL(x[0], y1) && \
@@ -385,13 +384,9 @@ Tensor conv_depthwise3d_cuda(
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation) {
-  TENSOR_ARG(input, 1);
-  TENSOR_ARG(weight, 2);
-
-  checkAllSameGPU("conv_depthwise3d_cuda", {input_arg, weight_arg});
+  TORCH_CHECK(input.device() == weight.device(), "expects input and weight tensors to be on the same device.");
   if (bias.defined()) {
-    TENSOR_ARG(bias, 4);
-    checkAllSameGPU("conv_depthwise3d_cuda", {input_arg, bias_arg});
+    TORCH_CHECK(input.device() == bias.device(), "expects input and bias tensors to be on the same device.");
   }
 
   conv_depthwise_shape_check<3>(input, weight, bias, Tensor() /* undefined */,
@@ -481,7 +476,7 @@ Tensor conv_depthwise3d_cuda(
         dilation[0], dilation[1], dilation[2]);                             \
   }
 
-#define DWCONV3D_BACKWARD_WEIGHT_DISPATCH_SPECIALIZATION(dh, dw) \
+#define DWCONV3D_BACKWARD_WEIGHT_DISPATCH_SPECIALIZATION(dh, dw)            \
   if (NODEF_OR_EQUAL_3(stride, -1, (dh), (dw))) {                           \
     using accscalar_t = acc_type<scalar_t, true>;                           \
     conv_depthwise3d_cuda_backward_weight_kernel                            \
@@ -495,7 +490,7 @@ Tensor conv_depthwise3d_cuda(
         dilation[0], dilation[1], dilation[2]);                             \
   } else
 
-#define DWCONV3D_BACKWARD_WEIGHT_DISPATCH_OTHERS \
+#define DWCONV3D_BACKWARD_WEIGHT_DISPATCH_OTHERS                            \
   {                                                                         \
     using accscalar_t = acc_type<scalar_t, true>;                           \
     conv_depthwise3d_cuda_backward_weight_kernel                            \
@@ -518,13 +513,10 @@ std::tuple<Tensor, Tensor, Tensor> conv_depthwise3d_backward_cuda(
     IntArrayRef padding,
     IntArrayRef dilation,
     const std::array<bool, 3> output_mask) {
-  TENSOR_ARG(grad_output, 1);
-  TENSOR_ARG(input, 2);
-  TENSOR_ARG(weight, 3);
 
-  checkAllSameGPU("conv_depthwise3d_backward_cuda",
-                  {grad_output_arg, input_arg, weight_arg});
-
+  TORCH_CHECK(grad_output.device() == input.device() && 
+	      input.device() == weight.device(), 
+	      "expects input, weight and grad_output to be on the same device.");
   conv_depthwise_shape_check<3>(
       input, weight, Tensor() /* undefined */, grad_output,
       kernel_size, stride, padding, dilation);
@@ -627,8 +619,6 @@ std::tuple<Tensor, Tensor, Tensor> conv_depthwise3d_backward_cuda(
 
 #undef NODEF_OR_EQUAL_3
 #undef NODEF_OR_EQUAL
-
-#undef TENSOR_ARG
 
 }
 }
