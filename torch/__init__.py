@@ -598,6 +598,7 @@ import torch.autograd
 from torch.autograd import no_grad, enable_grad, set_grad_enabled
 import torch.fft
 import torch.futures
+import torch.fx
 import torch.nn
 import torch.nn.intrinsic
 import torch.nn.quantizable
