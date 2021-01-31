@@ -180,11 +180,11 @@ struct AllocParams {
 };
 
 cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 12000
-  if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  if (at::cuda::currentStreamCaptureStatusMayInitCtx() == at::cuda::CaptureStatus::None) {
 #endif
     return cudaMalloc(p, size);
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   } else {
     // It's ok to capture cudaMallocs, as long as we never cudaFree those addresses before replay.
     at::cuda::cudaStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};

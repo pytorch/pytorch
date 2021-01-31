@@ -67,14 +67,18 @@ inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
   return os;
 }
 
-inline CaptureStatus currentStreamCaptureStatus() {
-  #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-  // don't create a context if we don't have to
-  if (at::detail::getCUDAHooks().hasPrimaryContext(c10::cuda::current_device())) {
+inline CaptureStatus currentStreamCaptureStatusMayInitCtx() {
     cudaStreamCaptureStatus is_capturing;
     AT_CUDA_CHECK(cudaStreamIsCapturing(at::cuda::getCurrentCUDAStream(),
                                         &is_capturing));
     return CaptureStatus(is_capturing);
+}
+
+inline CaptureStatus currentStreamCaptureStatus() {
+  #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  // don't create a context if we don't have to
+  if (at::detail::getCUDAHooks().hasPrimaryContext(c10::cuda::current_device())) {
+    return currentStreamCaptureStatusMayInitCtx();
   } else {
     return CaptureStatus::None;
   }
