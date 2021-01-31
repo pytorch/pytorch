@@ -189,6 +189,8 @@ with torch.no_grad():
     trace_m_1.eval()
     trace_results_1 = trace_m_1(x)
 
+    torch._C._jit_nezha_update_graph(trace_m_all.graph, trace_m_1.graph)
+
     trace_m_2 = torch.jit.trace(NeuralNet_2nd(total_hidden_size, total_num_classes), trace_results_1)
     trace_m_2.load_state_dict(all_params, strict=False)
     trace_m_2.eval()
