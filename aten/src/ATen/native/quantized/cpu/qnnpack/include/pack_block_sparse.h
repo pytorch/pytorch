@@ -21,7 +21,6 @@ typedef struct {
   std::vector<uint32_t> row_values;
   std::vector<uint8_t> values;
   uint32_t col_block_size;
-  uint32_t row_block_siz{1};
   void print() {
     std::cout << "row ptr\n";
     for (const auto& t : row_values) {

@@ -775,8 +775,11 @@ class ExprBuilder(Builder):
 
     @staticmethod
     def build_Dict(ctx, expr):
-        return DictLiteral(ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1),
-                           [build_expr(ctx, e) for e in expr.keys], [build_expr(ctx, e) for e in expr.values])
+        range = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        if expr.keys and not expr.keys[0]:
+            raise NotSupportedError(range, "Dict expansion (e.g. `{**dict}`) is not supported")
+        return DictLiteral(range, [build_expr(ctx, e) for e in expr.keys],
+                           [build_expr(ctx, e) for e in expr.values])
 
     @staticmethod
     def build_Num(ctx, expr):
