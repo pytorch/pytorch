@@ -16,11 +16,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import _reduction as _Reduction
 from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_state, is_iterable, \
-    TEST_WITH_ROCM
+    TEST_WITH_ROCM, gradcheck, gradgradcheck
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import expectedAlertNondeterministic
-from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors, \
-    gradcheck, gradgradcheck
+from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
 from torch.autograd import Variable
 from torch.types import _TensorOrTensors
 import torch.backends.cudnn
@@ -5192,6 +5191,9 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
             if input.grad is not None:
                 with torch.no_grad():
                     input.grad.zero_()
+            if input_ip.grad is not None:
+                with torch.no_grad():
+                    input_ip.grad.zero_()
             output.backward(grad)
             output_ip.backward(grad)
             test_case.assertEqual(input.grad, input_ip.grad)
@@ -5324,6 +5326,7 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
         self.test_cpu = kwargs.get('test_cpu', True)
         self.with_tf32 = kwargs.get('with_tf32', True)
         self.tf32_precision = kwargs.get('tf32_precision', 0.001)
+        self.check_batched_grad = kwargs.get('check_batched_grad', True)
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -5356,10 +5359,10 @@ class CriterionTest(InputVariableMixin, TestBase):  # type: ignore[misc]
             def apply_fn(input1, input2, target, *params):  # type: ignore[misc]
                 return module(input1, input2, target)
 
-        gradcheck(apply_fn, inputs)
+        gradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
 
         if self.check_gradgrad:
-            gradgradcheck(apply_fn, inputs)
+            gradgradcheck(apply_fn, inputs, check_batched_grad=self.check_batched_grad)
 
     def test_cuda(self, test_case, dtype, extra_args=None):
         def convert_dtype(obj, dtype, requires_grad=False):

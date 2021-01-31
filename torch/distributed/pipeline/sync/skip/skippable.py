@@ -242,7 +242,7 @@ def skippable(
     """The decorator to define a :class:`nn.Module <torch.nn.Module>` with skip
     connections. Decorated modules are called "skippable". This functionality
     works perfectly fine even when the module is not wrapped by
-    :class:`~torchpipe.Pipe`.
+    :class:`~torch.distributed.pipeline.sync.Pipe`.
 
     Each skip tensor is managed by its name. Before manipulating skip tensors,
     a skippable module must statically declare the names for skip tensors by
@@ -282,23 +282,10 @@ def skippable(
                 return input + carol
 
     Every skip tensor must be associated with exactly one pair of `stash` and
-    `pop`. :class:`~torchpipe.Pipe` checks this restriction automatically
-    when wrapping a module. You can also check the restriction by
-    :func:`~torchpipe.skip.verify_skippables` without
-    :class:`~torchpipe.Pipe`.
-
-    .. note::
-
-        :func:`@skippable <skippable>` changes the type of the wrapped class.
-        But currently (mypy v0.740), mypy could not understand class decorators
-        yet (`#3135 <https://github.com/python/mypy/issues/3135>`_).
-
-        There are two workarounds:
-
-        1. Naively ignore type errors by ``# type: ignore``.
-        2. Use ``skippable()()`` as a function instead of a decorator.
-
-    .. seealso:: :ref:`Long Skip Connections`
+    `pop`. :class:`~torch.distributed.pipeline.sync.Pipe` checks this
+    restriction automatically when wrapping a module. You can also check the
+    restriction by :func:`verify_skippables`
+    without :class:`~torch.distributed.pipeline.sync.Pipe`.
 
     """
     stashable_names = frozenset(stash)
