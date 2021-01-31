@@ -104,7 +104,7 @@ void initGeneratorBindings(PyObject* module) {
       .def("manual_seed", &manualSeed, py::arg().noconvert())
       .def("manual_seed",
           [](py::object gen_obj, int64_t seed) {
-            return manualSeed(gen_obj, (uint64_t) seed);
+            return manualSeed(std::move(gen_obj), (uint64_t) seed);
           },
           py::arg().noconvert())
       .def("seed",
