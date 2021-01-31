@@ -1,3 +1,5 @@
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
+
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <c10/cuda/CUDAGuard.h>
@@ -177,6 +179,20 @@ struct AllocParams {
   cudaError_t err;
 };
 
+cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
+#endif
+    return cudaMalloc(p, size);
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+  } else {
+    // It's ok to capture cudaMallocs, as long as we never cudaFree those addresses before replay.
+    at::cuda::cudaStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+    return cudaMalloc(p, size);
+  }
+#endif
+}
+
 } // namespace
 
 class DeviceCachingAllocator {
@@ -195,9 +211,14 @@ class DeviceCachingAllocator {
   // unallocated cached blocks 1 MB or smaller
   BlockPool small_blocks;
 
-  // allocated or in use by a stream
+  // allocated or in use by a stream. Holds all active allocations,
+  // whether they came from graph_pools or one of the BlockPools above.
   std::unordered_set<Block*> active_blocks;
 
+  // captures_underway tracks if a capture might be underway on any stream.
+  // Most of the time it's zero, in which case malloc can avoid calling
+  // cudaStreamGetCaptureInfo in the hot path.
+  int captures_underway = 0;
   // outstanding cuda events
   std::deque<std::pair<cudaEvent_t, Block*>> cuda_events;
 
@@ -208,10 +229,31 @@ class DeviceCachingAllocator {
 
   bool set_fraction = false;
 
-  // captures_underway tracks if a capture might be underway on any stream.
-  // Most of the time it's zero, in which case malloc can avoid calling
-  // cudaStreamGetCaptureInfo in the hot path.
-  int captures_underway = 0;
+  // Members specific to CUDA graphs
+
+  struct PrivatePool {
+    PrivatePool() : use_count(1),
+                    large_blocks(BlockComparator),
+                    small_blocks(BlockComparator) {}
+    // Number of live graphs using this pool
+    int use_count;
+    // Number of unfreed cudaMallocs made for this pool. When use_count and cudaMalloc_count
+    // drop to zero, we can delete this PrivatePool from graph_pools.
+    int cudaMalloc_count;
+    // Instead of maintaining private BlockPools here, I could stuff all blocks (private or no)
+    // into the top-level large_blocks and small_blocks, and distinguish private blocks by adding
+    // a "pool id" check above the stream check in BlockComparator. BlockComparator is performance-
+    // critial though, I'd rather not add more logic to it.
+    BlockPool large_blocks;
+    BlockPool small_blocks;
+  };
+
+  // Private pools for CUDA graphs
+  std::unordered_map<CUDACaptureid_t/*pool id*/, PrivatePool> graph_pools;
+
+  // Maps a capturing stream to its assigned private pool,
+  // in case we want multiple captures to share the same pool
+  std::unordered_map<CUDACaptureid_t/*capture id*/, CUDACaptureid_t/*pool id*/> capture_to_pool_map;
 
  public:
 
@@ -230,7 +272,7 @@ class DeviceCachingAllocator {
     process_events();
 
     size = round_size(size);
-    auto& pool = get_pool(size);
+    auto& pool = get_pool(size, stream);
     const size_t alloc_size = get_allocation_size(size);
     AllocParams params(device, size, stream, &pool, alloc_size, stats);
     params.stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
@@ -514,18 +556,44 @@ class DeviceCachingAllocator {
     }
   }
 
-  void incrementCapturesUnderway() {
-    // We could make captures_underway an atomic.
-    // But this call is rare and the access in malloc is frequent.
-    // captures_underway as a bare int keeps the access in malloc dead simple.
+  // CUDAGraph interactions
+
+  // Called by CUDAGraph::capture_begin
+  void notifyCaptureBegin(CUDACaptureid_t graph_id, CUDACaptureid_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     captures_underway++;
+    auto it = graph_pools.find(mempool_id);
+    if (it == graph_pools.end()) {
+      graph_pools.insert({mempool_id, PrivatePool()});
+    } else {
+      it->second.use_count++;
+    }
+    // There's no way this graph_id should already have an assigned pool.
+    TORCH_INTERNAL_ASSERT(capture_to_pool_map.find(graph_id) == capture_to_pool_map.end());
+    capture_to_pool_map[graph_id] = mempool_id;
   }
 
-  // Called by a thread when ending capture.
-  void decrementCapturesUnderway() {
+  // Called by CUDAGraph::capture_end
+  void notifyCaptureEnd(CUDACaptureid_t graph_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     captures_underway--;
+    auto it = capture_to_pool_map.find(graph_id);
+    TORCH_INTERNAL_ASSERT(it != capture_to_pool_map.end());
+    capture_to_pool_map.erase(it);
+  }
+
+  // Called by CUDAGraph::reset
+  void notifyCaptureDestroy(CUDACaptureid_t mempool_id) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    // The graph's been destroyed. We can't blindly delete and cudaFree its mempool, because
+    //  1. other graph(s) might share the same pool
+    //  2. the user might still hold references to some output tensors allocated during capture.
+    // To handle 1 and 2, we track the number of graphs using this particular mempool.
+    // When the count reaches 0, we tell free_cached_blocks it may now cudaFree blocks from
+    // this graph's pool when it discovers they're completely (unsplit).
+    auto it = graph_pools.find(mempool_id);
+    TORCH_INTERNAL_ASSERT(it != graph_pools.end());
+    it->second.use_count--;
   }
 
  private:
@@ -607,7 +675,28 @@ class DeviceCachingAllocator {
     return subsumed_size;
   }
 
-  BlockPool& get_pool(size_t size) {
+  BlockPool& get_pool(size_t size, cudaStream_t stream) {
+    // captures_underway is a conservative guess that the current stream may be capturing.
+    // It's false unless some thread has begun and not yet ended a capture, so it's usually false,
+    // and we can short-circuit cudaStreamCaptureStatus (which does a TLS lookup).
+    if C10_UNLIKELY(captures_underway) {
+      CUDACaptureid_t id;
+      cudaStreamCaptureStatus status;
+      C10_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &id));
+      if (status != cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) {
+        TORCH_INTERNAL_ASSERT(status != cudaStreamCaptureStatus::cudaStreamCaptureStatusInvalidated);
+        // Retrieves the private pool assigned to this capture.
+        auto it0 = capture_to_pool_map.find(id);
+        TORCH_INTERNAL_ASSERT(it0 != capture_to_pool_map.end());
+        auto it1 = graph_pools.find(it0->second);
+        TORCH_INTERNAL_ASSERT(it1 != graph_pools.end());
+        if (size <= kSmallSize) {
+          return it1->second.small_blocks;
+        } else {
+          return it1->second.large_blocks;
+        }
+      }
+    }
     if (size <= kSmallSize) {
       return small_blocks;
     } else {
@@ -680,11 +769,7 @@ class DeviceCachingAllocator {
       p.err = cudaErrorMemoryAllocation;
       return false;
     } else {
-      {
-        // It's ok to capture cudaMallocs, as long as we never cudaFree those addresses before replay.
-        at::cuda::cudaStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
-        p.err = cudaMalloc(&ptr, size);
-      }
+      p.err = cudaMallocMaybeCapturing(&ptr, size);
       if (p.err != cudaSuccess) {
         if (p.err == cudaErrorMemoryAllocation) {
           // If this is the first attempt (!isRetry), we can forgive and clear CUDA's
@@ -702,12 +787,21 @@ class DeviceCachingAllocator {
       }
     }
 
+    // Dirty but simple check if the new cudaMalloc is for a CUDA graph's PrivatePool
+    for (auto& gp : graph_pools) {
+      if (p.pool == &gp.second.large_blocks ||
+          p.pool == &gp.second.small_blocks) {
+        gp.second.cudaMalloc_count++;
+        break;
+      }
+    }
+
     total_allocated_memory += size;
     p.block = new Block(p.device(), p.stream(), size, p.pool, (char*)ptr);
     update_stat_array(stats.segment, 1, p.stat_types);
     update_stat_array(stats.reserved_bytes, size, p.stat_types);
 
-    // p.block came from new, not cudaMalloc.  It should not be nullptr here.
+    // p.block came from new, not cudaMalloc. It should not be nullptr here.
     TORCH_INTERNAL_ASSERT(p.block != nullptr && p.block->ptr != nullptr);
     return true;
   }
@@ -721,10 +815,27 @@ class DeviceCachingAllocator {
     // Free all non-split cached blocks
     free_blocks(large_blocks);
     free_blocks(small_blocks);
+
+    for (auto it = graph_pools.begin(); it != graph_pools.end(); ) {
+      // See notifyCaptureDestroy for the strategy here.
+      TORCH_INTERNAL_ASSERT(it->second.use_count >= 0);
+      if (it->second.use_count > 0) {
+        ++it;
+        continue;
+      }
+      free_blocks(it->second.small_blocks, &it->second);
+      free_blocks(it->second.large_blocks, &it->second);
+      if (it->second.cudaMalloc_count == 0) {
+        it = graph_pools.erase(it);
+      } else {
+        ++it;
+      }
+    }
+
     return true;
   }
 
-  void free_blocks(BlockPool& blocks)
+  void free_blocks(BlockPool& blocks, PrivatePool* owner_PrivatePool=nullptr)
   {
     // Frees all non-split blocks
     auto it = blocks.begin();
@@ -733,6 +844,12 @@ class DeviceCachingAllocator {
       if (!block->prev && !block->next) {
         C10_CUDA_CHECK(cudaFree((void*)block->ptr));
         total_allocated_memory -= block->size;
+
+        if (owner_PrivatePool) {
+          // The cudaFreed block belonged to a CUDA graph's PrivatePool.
+          TORCH_INTERNAL_ASSERT(owner_PrivatePool->cudaMalloc_count > 0);
+          owner_PrivatePool->cudaMalloc_count--;
+        }
 
         StatTypes stat_types;
         stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
@@ -1005,11 +1122,9 @@ struct CudaCachingAllocator : public Allocator {
     C10_CUDA_CHECK(cudaGetDevice(&device));
     void* r = nullptr;
     if (forceUncachedAllocator()) {
-      {
-        // It's ok to capture cudaMallocs, as long as we never cudaFree those addresses before replay.
-        at::cuda::cudaStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
-        C10_CUDA_CHECK(cudaMalloc(&r, size));
-      }
+      // Deliberately don't use cudaMallocMaybeCapturing here, to force an error
+      // if someone tries to use forceUncachedAllocator while capturing.
+      C10_CUDA_CHECK(cudaMalloc(&r, size));
       return {r, r, &uncached_delete, Device(DeviceType::CUDA, device)};
     }
     if (size != 0) {
@@ -1085,18 +1200,19 @@ std::vector<SegmentInfo> snapshot() {
 }
 
 // CUDAGraph interactions
-void incrementCapturesUnderway(int device) {
+void notifyCaptureBegin(int device, CUDACaptureid_t graph_id, CUDACaptureid_t mempool_id) {
   assertValidDevice(device);
-  caching_allocator.device_allocator[device]->incrementCapturesUnderway();
+  caching_allocator.device_allocator[device]->notifyCaptureBegin(graph_id, mempool_id);
 }
 
-void decrementCapturesUnderway(int device) {
+void notifyCaptureEnd(int device, CUDACaptureid_t graph_id) {
   assertValidDevice(device);
-  caching_allocator.device_allocator[device]->decrementCapturesUnderway();
+  caching_allocator.device_allocator[device]->notifyCaptureEnd(graph_id);
 }
 
-void setPoolForCapture(CUDAGraphid_t graph_id, CUDAGraphid_t mempool_id){
-  // caching_allocator.setPoolForCapture(graph_id, mempool_id);
+void notifyCaptureDestroy(int device, CUDACaptureid_t mempool_id) {
+  assertValidDevice(device);
+  caching_allocator.device_allocator[device]->notifyCaptureDestroy(mempool_id);
 }
 
 //
