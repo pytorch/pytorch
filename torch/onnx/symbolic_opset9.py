@@ -302,13 +302,8 @@ def sign(g, self):
 
 def _slice(g, input, axes, starts, ends):
     assert len(starts) == len(ends)
-    if len(starts) == 1 and starts[0] is None and ends[0] is None:
+    if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807:
         return input
-    # onnx slice expects integer so we need to manually convert here
-    if starts[0] is None:
-        starts[0] = 9223372036854775807
-    if ends[0] is None:
-        ends[0] = 9223372036854775807
     return g.op("Slice", input, axes_i=axes, starts_i=starts, ends_i=ends)
 
 
@@ -1788,6 +1783,10 @@ def slice(g, self, *args):
             start = _parse_arg(start, 'i')
             end = _parse_arg(end, 'i')
             dim = _parse_arg(dim, 'i')
+            if start is None:
+                start = 0
+            if end is None:
+                end = 9223372036854775807
             return sym_help._slice_helper(g, self, axes=[dim], starts=[start], ends=[end])
     elif len(args) == 3:
         # aten::slice(t[] l, int start, int end, int step) -> t[]
@@ -1795,6 +1794,10 @@ def slice(g, self, *args):
         dim = 0
         start = _parse_arg(start, 'i')
         end = _parse_arg(end, 'i')
+        if start is None:
+            start = 0
+        if end is None:
+            end = 9223372036854775807
         return sym_help._slice_helper(g, self, axes=[dim], starts=[start], ends=[end])
     else:
         raise NotImplementedError("Unknown aten::slice signature")

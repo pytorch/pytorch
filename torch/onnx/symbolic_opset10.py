@@ -145,14 +145,9 @@ def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
         assert len(starts) == len(ends)
         assert len(starts) == len(axes)
         assert steps is None or len(starts) == len(steps)
-        if len(starts) == 1 and starts[0] is None and ends[0] is None\
+        if len(starts) == 1 and starts[0] == 0 and ends[0] == 9223372036854775807\
            and (steps is None or (len(steps) == 1 and steps[0] == 1)):
             return input
-        # onnx slice expects integer so we need to manually convert here
-        if starts[0] is None:
-            starts[0] = 9223372036854775807
-        if ends[0] is None:
-            ends[0] = 9223372036854775807
         axes = g.op("Constant", value_t=torch.tensor(axes))
         starts = g.op("Constant", value_t=torch.tensor(starts))
         ends = g.op("Constant", value_t=torch.tensor(ends))
@@ -182,6 +177,10 @@ def slice(g, self, *args):
         start = [sym_help._parse_arg(start, 'i')]
         end = [sym_help._parse_arg(end, 'i')]
         dim = [sym_help._parse_arg(dim, 'i')]
+        if start[0] is None:
+            start[0] = 0
+        if end[0] is None:
+            end = 9223372036854775807
         dynamic_slice = False
     return sym_help._slice_helper(g, self, axes=dim, starts=start, ends=end, steps=[step], dynamic_slice=dynamic_slice)
 
