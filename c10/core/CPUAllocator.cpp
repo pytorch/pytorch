@@ -292,6 +292,10 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
       allocated = allocated_;
       nbytes = it->second;
       size_table_.erase(it);
+    } else {
+      LOG(WARNING) << "Memory block of unknown size was allocated before the profiling started, "
+                   << "use 'enable_global_memory_reporting' to track tensor sizes outside of "
+                   << "the profiling scope";
     }
   }
   if (nbytes == 0) {

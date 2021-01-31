@@ -1,6 +1,7 @@
 #include <c10/core/Allocator.h>
 
 #include <c10/util/ThreadLocalDebugInfo.h>
+#include <atomic>
 
 namespace c10 {
 
@@ -34,7 +35,16 @@ at::Allocator* GetAllocator(const at::DeviceType& t) {
   return alloc;
 }
 
+namespace {
+std::atomic<bool> global_memory_reporting_ {false};
+}
+void enableGlobalMemoryReporting(bool enable) {
+  global_memory_reporting_ = true;
+}
 bool memoryProfilingEnabled() {
+  if (global_memory_reporting_) {
+    return true;
+  }
   auto* reporter_ptr = static_cast<MemoryReportingInfoBase*>(
       ThreadLocalDebugInfo::get(DebugInfoKind::PROFILER_STATE));
   return reporter_ptr && reporter_ptr->memoryProfilingEnabled();

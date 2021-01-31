@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <libshm.h>
 #include <TH/TH.h>
+#include <c10/core/Allocator.h>
 #include <c10/util/Logging.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
@@ -200,6 +201,15 @@ static PyObject * THPModule_setNumInteropThreads(PyObject *module, PyObject *arg
   int nthreads = (int)THPUtils_unpackLong(arg);
   THPUtils_assert(nthreads > 0, "set_num_interop_threads expects a positive integer");
   at::set_num_interop_threads(nthreads);
+  Py_RETURN_NONE;
+}
+
+static PyObject * THPModule_enableGlobalMemoryReporting(PyObject *module, PyObject *arg)
+{
+  THPUtils_assert(PyBool_Check(arg), "enable_global_memory_reporting expects a boolean, "
+          "but got %s", THPUtils_typename(arg));
+  bool enable = (bool)THPUtils_unpackLong(arg);
+  c10::enableGlobalMemoryReporting(enable);
   Py_RETURN_NONE;
 }
 
@@ -622,6 +632,7 @@ static PyMethodDef TorchMethods[] = {
   {"set_num_threads", THPModule_setNumThreads,     METH_O,       nullptr},
   {"get_num_interop_threads", THPModule_getNumInteropThreads,     METH_NOARGS,  nullptr},
   {"set_num_interop_threads", THPModule_setNumInteropThreads,     METH_O,       nullptr},
+  {"enable_global_memory_reporting", THPModule_enableGlobalMemoryReporting,     METH_O,       nullptr},
   {"_get_cudnn_enabled", THPModule_userEnabledCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_enabled", THPModule_setUserEnabledCuDNN, METH_O,  nullptr},
   {"_get_mkldnn_enabled", THPModule_userEnabledMkldnn, METH_NOARGS,     nullptr},
