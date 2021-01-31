@@ -2736,6 +2736,7 @@ class TestONNXRuntime(unittest.TestCase):
         indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
         self.run_test(GatherModel(), input=(input, indices))
 
+    @disableScriptTest()  # RuntimeError: Python type cannot be used as a value
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_gather_constant_fold(self):
         class GatherModule(torch.nn.Module):
@@ -3511,6 +3512,20 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         y = torch.randn(6, 4)
         self.run_test(ViewModel(), (x, y))
+
+    def test_linear(self):
+        class LinearModel(torch.nn.Module):
+            def __init__(self):
+                super(LinearModel, self).__init__()
+                self.fc = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                out = self.fc(x)
+                out = self.fc(out)
+                return out
+
+        x = torch.randn(3, 16)
+        self.run_test(LinearModel(), (x,))
 
     @disableScriptTest()
     def test_weight_norm(self):
