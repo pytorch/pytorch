@@ -419,7 +419,7 @@ auto ConvParams::use_cudnn_depthwise(
                          weight.scalar_type() == kHalf &&
                          is_depthwise(input, weight) &&
                          input.ndimension() == 4 &&
-			 weight.size(2) == weight.size(3) && // only square kernels
+                         weight.size(2) == weight.size(3) && // only square kernels
                          input.size(2) >= 7 && // min width/height 7
                          !is_dilated() && // no dilation supported
                          stride[0] == stride[1] && // equal strides
@@ -690,7 +690,7 @@ at::Tensor _convolution(
           }
           else {
              TORCH_CHECK(input.ndimension() == 5);
-	     output = at::conv_depthwise3d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
+             output = at::conv_depthwise3d(input.contiguous(), weight, kernel_size, bias, stride, padding, dilation);
           }
       }
   } else if (params.use_cudnn(input, weight)) {
