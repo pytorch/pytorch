@@ -446,12 +446,13 @@ std::vector<int64_t> ComputeShapeFromReshape(
       }
     } else if (minus_one_pos > -1) {
       if (i < input_shape_size - reshape_size + minus_one_pos + 1) {
-        shape_ratio *= static_cast<double>(input_shape[i]);        
+        shape_ratio *= static_cast<double>(input_shape[i]);
       } else {
         auto reshape_idx = i - input_shape_size + reshape_size;
         if (reshape[reshape_idx] != 0) {
-          shape_ratio *= static_cast<double>(input_shape[i]) / reshape[reshape_idx];          
-        }        
+          shape_ratio *=
+              static_cast<double>(input_shape[i]) / reshape[reshape_idx];
+        }
       }
     }
   }
