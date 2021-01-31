@@ -219,8 +219,20 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   // types
   std::vector<IValue> types;
   types.reserve(code.type_table().size());
+  static const std::string torch_prefix("__torch__");
+  static const std::string class_prefix("__torch__.torch.classes");
   for (const TypePtr& t : code.type_table()) {
-    types.emplace_back(t->annotation_str());
+    auto type_str = t->annotation_str();
+    if (type_str.find(torch_prefix) == 0) {
+      TORCH_CHECK(
+          type_str.find(class_prefix) == 0,
+          "__torch__ types other than torchbind (__torch__.torch.classes)"
+          "are not supported in lite interpreter. ",
+          "Workaround: instead of using arbitrary class type (class Foo()), ",
+          "define a pytorch class (class Foo(torch.nn.Module))."
+          );
+    }
+    types.emplace_back(type_str);
   }
 
   // since the register location is embedded into the bytecode, pass the

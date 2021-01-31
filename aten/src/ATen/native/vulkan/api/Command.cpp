@@ -71,9 +71,6 @@ void allocate_command_buffers(
 
 Command::Buffer::Buffer(const VkCommandBuffer command_buffer)
   : command_buffer_(command_buffer) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      command_buffer_,
-      "Invalid Vulkan command buffer!");
 }
 
 Command::Buffer::Buffer(Buffer&& buffer)

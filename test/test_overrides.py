@@ -776,7 +776,7 @@ class TestEinsumOverride(TestCase):
 class TestGradCheckOverride(TestCase):
     "Test that wrappers work with gradcheck."
     def test_gradcheck(self):
-        from torch.autograd import gradcheck, gradgradcheck
+        from torch.testing._internal.common_utils import gradcheck, gradgradcheck
 
         a = wrap(torch.tensor(5.0, dtype=torch.double))
         b = wrap(torch.tensor(6.0, dtype=torch.double))
@@ -784,8 +784,8 @@ class TestGradCheckOverride(TestCase):
         a.requires_grad = True
         b.requires_grad = True
 
-        gradcheck(torch.add, (a, b), raise_exception=False)
-        gradgradcheck(torch.add, (a, b), raise_exception=False)
+        gradcheck(torch.add, (a, b), raise_exception=False, check_batched_grad=False)
+        gradgradcheck(torch.add, (a, b), raise_exception=False, check_batched_grad=False)
 
         total_used_attrs = a.used_attrs.union(b.used_attrs)
         total_used_calls = a.used_calls.union(b.used_calls)
