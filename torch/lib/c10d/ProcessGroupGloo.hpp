@@ -27,6 +27,8 @@
 
 namespace c10d {
 
+constexpr const char* GLOO_BACKEND_NAME = "gloo";
+
 // ProcessGroupGloo implements Gloo bindings for c10d.
 //
 // All functions on this class are expected to be called in the same
@@ -132,6 +134,10 @@ class ProcessGroupGloo : public ProcessGroup {
     std::chrono::milliseconds timeout;
     int threads;
   };
+
+  const std::string getBackendName() const override {
+      return std::string(GLOO_BACKEND_NAME);
+  }
 
   // Helper functions to create a new device object.
   // They are static functions on this class to keep them logically
