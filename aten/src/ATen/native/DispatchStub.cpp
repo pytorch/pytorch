@@ -22,7 +22,7 @@ static CPUCapability compute_cpu_capability() {
     if (strcmp(envar, "avx") == 0) {
       return CPUCapability::AVX;
     }
-#endif     
+#endif
     if (strcmp(envar, "default") == 0) {
       return CPUCapability::DEFAULT;
     }
@@ -49,6 +49,30 @@ static CPUCapability compute_cpu_capability() {
 CPUCapability get_cpu_capability() {
   static CPUCapability capability = compute_cpu_capability();
   return capability;
+}
+
+DispatchStub::FnPtr DispatchStub::get_call_ptr(DeviceType device_type) {
+  FnPtr call_ptr = nullptr;
+  if (device_type == DeviceType::CPU) {
+    // Use memory_order_relaxed here since even if two threads race,
+    // they will still compute the same value for cpu_dispatch_ptr.
+    auto fptr = cpu_dispatch_ptr.load(std::memory_order_relaxed);
+    if (!fptr) {
+      fptr = choose_cpu_impl();
+      cpu_dispatch_ptr.store(fptr, std::memory_order_relaxed);
+    }
+    call_ptr = fptr;
+  } else if (device_type == DeviceType::CUDA) {
+    AT_ASSERTM(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
+    call_ptr = cuda_dispatch_ptr;
+  } else if (device_type == DeviceType::HIP) {
+    AT_ASSERTM(hip_dispatch_ptr, "DispatchStub: missing HIP kernel");
+    call_ptr = hip_dispatch_ptr;
+  }
+  if (call_ptr == nullptr) {
+    AT_ERROR("DispatchStub: unsupported device type", device_type);
+  }
+  return call_ptr;
 }
 
 }}  // namespace at::native
