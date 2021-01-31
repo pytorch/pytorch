@@ -70,7 +70,7 @@ struct TORCH_API DispatchStub<rT (*)(Args...), T> {
   DispatchStub& operator=(const DispatchStub&) = delete;
 
 private:
-  FnPtr get_call_ptr(DeviceType device_type);
+  TORCH_API FnPtr get_call_ptr(DeviceType device_type);
 
 public:
   template <typename... ArgTypes>
