@@ -721,5 +721,10 @@ Tensor msort(const Tensor& self) {
   return std::get<0>(at::sort(self, 0, false));
 }
 
+Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
+  return std::get<1>(at::sort(self, dim, descending));
+}
+
+
 } // namespace native
 } // namespace at
