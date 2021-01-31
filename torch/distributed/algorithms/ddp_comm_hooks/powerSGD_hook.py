@@ -430,7 +430,7 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     # Run vanilla allreduce in the first `start_powerSGD_iter` iterations.
     if state.iter < state.start_powerSGD_iter:
         state.maybe_increase_iter(bucket)
-        return default.allreduce_fut(group_to_use, input_tensor)
+        return default._allreduce_fut(group_to_use, input_tensor)
 
     # Apply PowerSGD after `start_powerSGD_iter` iterations.
     device = input_tensor.device
