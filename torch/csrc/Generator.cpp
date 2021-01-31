@@ -30,12 +30,13 @@ inline Generator createGenerator(const Device& device) {
   END_HANDLE_TH_ERRORS_PYBIND
 }
 
-inline Generator& manualSeed(Generator& gen, uint64_t seed) {
+inline py::object manualSeed(py::object gen_obj, uint64_t seed) {
   HANDLE_TH_ERRORS
+  Generator& gen = gen_obj.cast<Generator&>();
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(gen.mutex());
   gen.set_current_seed(seed);
-  return gen;
+  return gen_obj;
   END_HANDLE_TH_ERRORS_PYBIND
 }
 
@@ -56,7 +57,7 @@ void initGeneratorBindings(PyObject* module) {
             return createGenerator(Device(dev_str));
             END_HANDLE_TH_ERRORS_PYBIND
           }),
-          py::arg("device"))
+          py::arg("device").noconvert())
       .def(py::init(
           [](DeviceIndex index) {
             HANDLE_TH_ERRORS
@@ -65,11 +66,11 @@ void initGeneratorBindings(PyObject* module) {
             return createGenerator(Device(kCUDA, index));
             END_HANDLE_TH_ERRORS_PYBIND
           }),
-          py::arg("device"))
+          py::arg("device").noconvert())
       .def(py::init(
-          [](py::object obj) {
+          [](py::handle dev_obj) {
             HANDLE_TH_ERRORS
-            auto obj_ptr = obj.ptr();
+            auto obj_ptr = dev_obj.ptr();
             TORCH_CHECK_TYPE(
               THPDevice_Check(obj_ptr),
               "expect torch.device for creating Generator, got ",
@@ -79,7 +80,7 @@ void initGeneratorBindings(PyObject* module) {
             return createGenerator(device);
             END_HANDLE_TH_ERRORS_PYBIND
           }),
-          py::arg("device"))
+          py::arg("device").noconvert())
       .def(
           "get_state",
           [](Generator& gen) {
@@ -90,21 +91,22 @@ void initGeneratorBindings(PyObject* module) {
             END_HANDLE_TH_ERRORS_PYBIND
           })
       .def("set_state",
-          [](Generator& gen, Tensor& new_state) -> Generator& {
+          [](py::object gen_obj, Tensor& new_state) {
             HANDLE_TH_ERRORS
+            Generator& gen = gen_obj.cast<Generator&>();
             // See Note [Acquire lock when using random generators]
             std::lock_guard<std::mutex> lock(gen.mutex());
             gen.set_state(new_state);
-            return gen;
+            return gen_obj;
             END_HANDLE_TH_ERRORS_PYBIND
           },
-          py::arg("new_state"))
-      .def("manual_seed", &manualSeed, py::arg("seed"))
+          py::arg().noconvert())
+      .def("manual_seed", &manualSeed, py::arg().noconvert())
       .def("manual_seed",
-          [](Generator& gen, int64_t seed) -> Generator& {
-            return manualSeed(gen, (uint64_t)seed);
+          [](py::object gen_obj, int64_t seed) {
+            return manualSeed(gen_obj, (uint64_t) seed);
           },
-          py::arg("seed"))
+          py::arg().noconvert())
       .def("seed",
           [](Generator& gen) {
             HANDLE_TH_ERRORS
@@ -113,12 +115,12 @@ void initGeneratorBindings(PyObject* module) {
             return gen.seed();
             END_HANDLE_TH_ERRORS_PYBIND
           })
-      .def("initial_seed", [](const Generator& gen) { return gen.current_seed(); })
+      .def("initial_seed", &Generator::current_seed)
       // FIXME Refactor this after binding Device with pybind11
       .def_property_readonly(
           "device",
-          [](const Generator& gen) {
-              return py::handle((PyObject*)THPDevice_New(gen.device()));
+          [](const Generator& gen) -> py::handle {
+              return (PyObject*) THPDevice_New(gen.device());
           });
 }
 

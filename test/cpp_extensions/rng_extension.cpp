@@ -47,8 +47,12 @@ Generator createTestCPUGenerator(uint64_t value) {
   return at::make_generator<TestCPUGenerator>(value);
 }
 
-Generator& identity(Generator& g) {
-  return g;
+py::object identity(py::object gen_obj) {
+  TORCH_CHECK_TYPE(
+    py::isinstance<Generator&>(gen_obj),
+    "expected a torch.Generator, got ", Py_TYPE(gen_obj.ptr())->tp_name
+  );
+  return gen_obj;
 }
 
 size_t getInstanceCount() {
