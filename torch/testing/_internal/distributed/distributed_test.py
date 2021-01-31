@@ -550,7 +550,7 @@ class DistributedTest:
         @skip_if_small_worldsize
         @unittest.skipIf(BACKEND != "gloo", "Only gloo backend supports timeouts")
         def test_barrier_timeout_group(self):
-            timeout = timedelta(seconds=1)
+            timeout = timedelta(seconds=5)
             _, group_id, _ = self._init_group_test(timeout=timeout)
             if group_id is not None:
                 self._test_barrier_timeout(group_id, timeout)
@@ -3200,6 +3200,25 @@ class DistributedTest:
                 local_bs=local_bs,
                 global_bs=global_bs,
                 offset=bs_offset)
+
+        @unittest.skipIf(
+            BACKEND == "nccl", "nccl does not support DDP on CPU models"
+        )
+        def test_ddp_logging_data(self):
+            model_DDP = copy.deepcopy(DDP_NET)
+            model_DDP = nn.parallel.DistributedDataParallel(model_DDP)
+            ddp_logging_data = model_DDP.get_ddp_logging_data()
+            self.assertEqual(ddp_logging_data.world_size, dist.get_world_size())
+            self.assertEqual(ddp_logging_data.rank, dist.get_rank())
+            self.assertEqual(ddp_logging_data.module_name, 'Net')
+            self.assertEqual(ddp_logging_data.device_ids, [])
+            # output_device is -1 in default if it is not set, e.g.
+            # output_device of CPU training is -1.
+            self.assertEqual(ddp_logging_data.output_device, -1)
+            self.assertEqual(ddp_logging_data.broadcast_buffers, True)
+            self.assertEqual(ddp_logging_data.bucket_cap_mb, 25)
+            self.assertEqual(ddp_logging_data.find_unused_parameters, False)
+            self.assertEqual(ddp_logging_data.gradient_as_bucket_view, False)
 
         @skipIfNoTorchVision
         def test_SyncBatchNorm_process_group(self):
