@@ -10,7 +10,6 @@ import os
 import random
 
 from torch.nn.utils import rnn as rnn_utils
-<<<<<<< HEAD
 from model_defs.lstm_flattening_result import (LstmFlatteningResultWithSeqLength,
                                                LstmFlatteningResultWithoutSeqLength)
 from model_defs.rnn_model_with_packed_sequence import (RnnModelWithPackedSequence,
@@ -22,16 +21,6 @@ from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsuppo
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from typing import List, Tuple, Optional, Dict
-=======
-from model_defs.lstm_flattening_result import LstmFlatteningResult
-from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
-from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsupportedOpsetVersion,
-                                 skipIfNoLapack, disableScriptTest, disableOldJitPassesTest,
-                                 skipIfUnsupportedMaxOpsetVersion, skipIfONNXShapeInference)
-from test_pytorch_common import BATCH_SIZE
-from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
-from typing import List, Tuple, Optional
->>>>>>> [ONNX] Export get/set attribute nodes  (#50768)
 import model_defs.word_language_model as word_language_model
 
 import onnx
@@ -57,12 +46,7 @@ def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
                     do_constant_folding=True, keep_initializers_as_inputs=True,
                     dynamic_axes=None, input_names=None, output_names=None,
                     fixed_batch_size=False, training=None,
-<<<<<<< HEAD
                     onnx_shape_inference=False):
-=======
-                    onnx_shape_inference=False,
-                    use_new_jit_passes=True):
->>>>>>> [ONNX] Export get/set attribute nodes  (#50768)
     # export the model to ONNX
     f = io.BytesIO()
     input_copy = copy.deepcopy(input)
@@ -242,10 +226,6 @@ class TestONNXRuntime(unittest.TestCase):
     from torch.onnx.symbolic_helper import _export_onnx_opset_version
     opset_version = _export_onnx_opset_version
     keep_initializers_as_inputs = True  # For IR version 3 type export.
-<<<<<<< HEAD
-=======
-    use_new_jit_passes = True  # For testing main code-path
->>>>>>> [ONNX] Export get/set attribute nodes  (#50768)
     onnx_shape_inference = True
 
     def setUp(self):
@@ -705,7 +685,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), (x, {}))
 
     @disableScriptTest()
-<<<<<<< HEAD
     def test_dict_output(self):
         class DictModelOutput(OrderedDict):
             tensor_out: torch.Tensor
@@ -749,8 +728,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), (a, b, c, d))
 
     @disableScriptTest()
-=======
->>>>>>> [ONNX] Export get/set attribute nodes  (#50768)
     def test_optional_inputs_with_no_optionals(self):
         class NoOptionalModel(torch.nn.Module):
             def forward(self, input):
@@ -3699,7 +3676,6 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(6, 4)
         self.run_test(ViewModel(), (x, y))
 
-<<<<<<< HEAD
     def test_linear(self):
         class LinearModel(torch.nn.Module):
             def __init__(self):
@@ -3714,8 +3690,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 16)
         self.run_test(LinearModel(), (x,))
 
-=======
->>>>>>> [ONNX] Export get/set attribute nodes  (#50768)
     @disableScriptTest()
     def test_weight_norm(self):
         # addmm for 3-d inputs converts to onnx::MatMul
@@ -5677,10 +5651,6 @@ class TestONNXRuntime(unittest.TestCase):
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
-<<<<<<< HEAD
-=======
-    @disableScriptTest()
->>>>>>> [ONNX] Export get/set attribute nodes  (#50768)
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_binary_cross_entropy_with_logits(self):
         x = torch.randn(5)
@@ -6668,11 +6638,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         with self.assertRaises(RuntimeError) as cm:
             convert_to_onnx(model, input=(box_regression, proposal),
-<<<<<<< HEAD
                             example_outputs=outputs)
-=======
-                            example_outputs=outputs, use_new_jit_passes=True)
->>>>>>> [ONNX] Export get/set attribute nodes  (#50768)
 
     def test_initializer_sequence(self):
         class MyModule(torch.nn.Module):
@@ -6963,7 +6929,6 @@ class TestONNXRuntime(unittest.TestCase):
                       test_with_inputs=[(images, features), (images2, test_features)],
                       dict_check=False)
 
-<<<<<<< HEAD
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_set_attr_modules(self):
         class InnerModule2(torch.nn.Module):
@@ -7049,9 +7014,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 256)
         self.run_test(Module(), (x, ))
 
-=======
-    @disableOldJitPassesTest()
->>>>>>> [ONNX] Export get/set attribute nodes  (#50768)
     def test_set_attr(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -7069,10 +7031,6 @@ class TestONNXRuntime(unittest.TestCase):
         box_regression = torch.randn(3, 2)
         self.run_test(model, (box_regression, weight))
 
-<<<<<<< HEAD
-=======
-    @disableOldJitPassesTest()
->>>>>>> [ONNX] Export get/set attribute nodes  (#50768)
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_set_attr_2(self):
         class MyModule(torch.nn.Module):
@@ -7098,10 +7056,6 @@ class TestONNXRuntime(unittest.TestCase):
         anchors = torch.ones(3, 10, 3)
         self.run_test(model, (anchors))
 
-<<<<<<< HEAD
-=======
-    @disableOldJitPassesTest()
->>>>>>> [ONNX] Export get/set attribute nodes  (#50768)
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_set_attr_3(self):
         class MyModule(torch.nn.Module):
@@ -7111,16 +7065,11 @@ class TestONNXRuntime(unittest.TestCase):
                 self.conv.weight = torch.nn.Parameter(torch.zeros(3, 10))
                 self.conv.bias = torch.nn.Parameter(torch.zeros(3, 10, 3))
 
-<<<<<<< HEAD
             def set_cell_anchors(self, anchors, boxes):
-=======
-            def set_cell_anchors(self, anchors):
->>>>>>> [ONNX] Export get/set attribute nodes  (#50768)
                 self.conv.weight = torch.ones(3, 10)
                 if self.conv.bias is not None:
                     self.conv.bias = torch.randn(3, 10, 3)
                     self.conv.weight = anchors + self.conv.weight
-<<<<<<< HEAD
                     boxes[:] = torch.zeros(2, 3)
 
             def forward(self, anchors) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -7129,23 +7078,11 @@ class TestONNXRuntime(unittest.TestCase):
                 if self.conv.bias is not None:
                     return self.conv.weight, boxes
                 return anchors, boxes
-=======
-
-            def forward(self, anchors) -> torch.Tensor:
-                self.set_cell_anchors(anchors)
-                if self.conv.bias is not None:
-                    return self.conv.weight
-                return anchors
->>>>>>> [ONNX] Export get/set attribute nodes  (#50768)
 
         model = torch.jit.script(MyModule())
         anchors = torch.rand(3, 10)
         self.run_test(model, (anchors))
 
-<<<<<<< HEAD
-=======
-    @disableOldJitPassesTest()
->>>>>>> [ONNX] Export get/set attribute nodes  (#50768)
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_set_attr_4(self):
         class MyModule(torch.nn.Module):
@@ -7179,7 +7116,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (x, anchors))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-<<<<<<< HEAD
     def test_set_attr_in_loop(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -7208,8 +7144,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, anchors)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-=======
->>>>>>> [ONNX] Export get/set attribute nodes  (#50768)
     def test_index_put_if(self):
         @torch.jit.script
         def check_init(input_data, hidden_size, prev_state):
@@ -7224,10 +7158,7 @@ class TestONNXRuntime(unittest.TestCase):
             if prev_state.size(0) == 0:
                 state[:] = torch.zeros(batch_size, hidden_size, spatial_size_0, spatial_size_1) + state[:]
                 state_copy[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 2
-<<<<<<< HEAD
                 state_copy[:] = torch.zeros(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 2
-=======
->>>>>>> [ONNX] Export get/set attribute nodes  (#50768)
             else:
                 state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 4
             return state, state_copy
@@ -7259,14 +7190,9 @@ class TestONNXRuntime(unittest.TestCase):
             state = torch.zeros(state_size, device=input_data.device)
             state_copy = torch.zeros(state_size, device=input_data.device)
             if prev_state.size(0) == 0:
-<<<<<<< HEAD
                 for i in range(2):
                     state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * i
                     state_copy[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * i
-=======
-                state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 3
-                state_copy[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 2
->>>>>>> [ONNX] Export get/set attribute nodes  (#50768)
             elif prev_state.size(0) == 1:
                 s = state[:]
                 state[:] = prev_state + s
@@ -7288,7 +7214,6 @@ class TestONNXRuntime(unittest.TestCase):
         empty_tensor = torch.tensor([], dtype=torch.float).view(0, 0, 0, 0, 0)
         self.run_test(model, (random_data, empty_tensor))
 
-<<<<<<< HEAD
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_if_3(self):
         @torch.jit.script
@@ -7677,8 +7602,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 16)
         self.run_test(M(), (x,), input_names=['input_ids'],
                       dynamic_axes={'input_ids': {0: 'batch', 1: 'sequence'}})
-=======
->>>>>>> [ONNX] Export get/set attribute nodes  (#50768)
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
@@ -7828,32 +7751,5 @@ TestONNXRuntime_opset13 = type(str("TestONNXRuntime_opset13"),
                                     keep_initializers_as_inputs=False,
                                     onnx_shape_inference=True))
 
-<<<<<<< HEAD
-=======
-# opset 9 tests, with use_new_jit_passes=True for using new jit API,
-# and with keep_initializers_as_inputs=False for IR version 4 style export.
-TestONNXRuntime_IRv4_old_jit_API = type(str("TestONNXRuntime_IRv4_old_jit_API"),
-                                        (unittest.TestCase,),
-                                        dict(TestONNXRuntime.__dict__,
-                                             keep_initializers_as_inputs=False,
-                                             use_new_jit_passes=False))
-
-
-# opset 12 tests, with use_new_jit_passes=True for using new jit API,
-# and keep_initializers_as_inputs=False for IR version 4 style export.
-TestONNXRuntime_opset12_IRv4_old_jit_API = type(str("TestONNXRuntime_opset12_IRv4_old_jit_API"),
-                                                (unittest.TestCase,),
-                                                dict(TestONNXRuntime.__dict__, opset_version=12,
-                                                     keep_initializers_as_inputs=False,
-                                                     use_new_jit_passes=False))
-
-
-# opset 12 tests, with _onnx_shape_inference=True.
-TestONNXRuntime_opset12_onnx_shape_inference = type(str("TestONNXRuntime_opset12_onnx_shape_inference"),
-                                                    (unittest.TestCase,),
-                                                    dict(TestONNXRuntime.__dict__, opset_version=12,
-                                                         onnx_shape_inference=True))
-
->>>>>>> [ONNX] Export get/set attribute nodes  (#50768)
 if __name__ == '__main__':
     unittest.main()
