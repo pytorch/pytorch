@@ -106,7 +106,7 @@ def unbind(g, self, dim=0, _outputs=None):
     return squeezed_outputs
 
 
-# Emitted from `torch.nonzero(x, as_tuple=True)`
+#  Emitted from `torch.nonzero(x, as_tuple=True)`
 def nonzero_numpy(g, input, _outputs=None):
     return unbind(g, nonzero(g, input), 1, _outputs=_outputs)
 
