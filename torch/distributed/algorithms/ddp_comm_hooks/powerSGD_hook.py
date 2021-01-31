@@ -53,7 +53,7 @@ class PowerSGDState(object):
         self,
         process_group,
         matrix_approximation_rank=1,
-        start_powerSGD_iter=10,
+        start_powerSGD_iter=2,
         use_error_feedback=True,
         warm_start=True,
         random_seed=0,
