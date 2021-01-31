@@ -318,10 +318,14 @@ Runtime* runtime() {
       return new Runtime(Configuration::kRuntime);
     }
     catch (const std::exception& e) {
-      TORCH_WARN("Vulkan: Failed to initialize runtime! Error: ", e.what());
+      TORCH_WARN(
+          "Vulkan: Failed to initialize runtime! Error: ",
+          e.what());
     }
     catch (...) {
-      TORCH_WARN("Vulkan: Failed to initialize runtime! Error: Unknown");
+      TORCH_WARN(
+          "Vulkan: Failed to initialize runtime! "
+          "Error: Unknown");
     }
 
     return nullptr;
