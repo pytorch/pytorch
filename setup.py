@@ -848,6 +848,11 @@ def print_box(msg):
     print('-' * (size + 2))
 
 if __name__ == '__main__':
+    from datetime import datetime
+
+    begin_time = datetime.now()
+    print("-------------------------Begin @ ", begin_time)
+
     # Parse the command line and check the arguments
     # before we proceed with building deps and setup
     dist = Distribution()
@@ -860,8 +865,14 @@ if __name__ == '__main__':
     if not ok:
         sys.exit()
 
-    if RUN_BUILD_DEPS:
-        build_deps()
+    try:
+        if RUN_BUILD_DEPS:
+            build_deps()
+    except:
+        ex_end_time = datetime.now()
+        print("-------------------------C++ Exception ends @ ", begin_time)
+        print("-------------------------Elpased time: ", (ex_end_time - begin_time))
+        raise
 
     extensions, cmdclass, packages, entry_points, extra_install_requires = configure_extension_build()
 
@@ -1043,3 +1054,7 @@ if __name__ == '__main__':
     )
     if EMIT_BUILD_WARNING:
         print_box(build_update_message)
+
+    end_time = datetime.now()
+    print("---------------------------End @ ", begin_time)
+    print("-------------------------Elpased time: ", (end_time - begin_time))

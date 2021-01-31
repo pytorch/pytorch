@@ -38,6 +38,7 @@
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
+#include <torch/csrc/jit/passes/onnx/nezha_helper.h>
 #include <torch/csrc/jit/passes/onnx/eliminate_unused_items.h>
 #include <torch/csrc/jit/passes/onnx/eval_peephole.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
@@ -158,6 +159,11 @@ void initJITBindings(PyObject* module) {
              bool onnx_shape_inference = false) {
             ONNXAssignOutputShape(graph, tensors, desc, onnx_shape_inference);
           })
+      .def("_jit_nezha_update_graph", 
+          [](std::shared_ptr<Graph>& dst_graph,
+             std::shared_ptr<Graph>& src_graph) {
+            return NeZha_TryUpdateGraph(dst_graph, src_graph);
+          })        
       .def("_jit_pass_lower_all_tuples", LowerAllTuples)
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def(
