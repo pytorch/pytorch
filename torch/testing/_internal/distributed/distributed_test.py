@@ -3205,6 +3205,7 @@ class DistributedTest:
             BACKEND == "nccl", "nccl does not support DDP on CPU models"
         )
         def test_ddp_logging_data(self):
+            group, group_id, rank = self._init_global_test()
             model_DDP = copy.deepcopy(DDP_NET)
             model_DDP = nn.parallel.DistributedDataParallel(model_DDP)
             ddp_logging_data = model_DDP.get_ddp_logging_data()
@@ -3219,6 +3220,7 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.bucket_cap_mb, 25)
             self.assertEqual(ddp_logging_data.find_unused_parameters, False)
             self.assertEqual(ddp_logging_data.gradient_as_bucket_view, False)
+            self.assertEqual(ddp_logging_data.backend_name, dist.get_backend(group_id))
 
         @skipIfNoTorchVision
         def test_SyncBatchNorm_process_group(self):
