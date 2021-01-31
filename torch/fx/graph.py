@@ -59,8 +59,9 @@ def _get_import_str(qualname: str) -> Optional[str]:
     """
     Encodes the following import rule:
     - 'torch' is always imported as a base name (e.g. 'import torch').
-    - 'typing' is imported as a base name (e.g. 'import typing')
-    - All other attributes are imported as 'from foo.bar import baz'.
+    - 'typing' is imported as a base name (e.g. 'import typing').
+    - Single-atom names are not imported (e.g. 'len', 'getattr').
+    - All other names are imported as 'from foo.bar import baz'.
 
     This is the inverse of the rule in '_get_print_name()'.
     """
@@ -741,10 +742,13 @@ class Graph:
 
         # repr() for inf and nan floating point values aren't parseable by
         # python as literals. Explicitly import the names from the ``math`` module.
-        import_strs = {_get_import_str(qualname) for qualname in qualnames_used}
-        import_strs = filter(lambda x: x is not None, import_strs)
-        import_strs = sorted(list(import_strs))
-        import_block = '\n'.join(import_strs)
+        import_strs: Set[str] = set()
+        for qualname in qualnames_used:
+            import_str = _get_import_str(qualname)
+            if import_str is not None:
+                import_strs.add(import_str)
+
+        import_block = '\n'.join(sorted(import_strs))
 
         if len(body) == 0:
             # If the Graph has no non-placeholder nodes, no lines for the body
