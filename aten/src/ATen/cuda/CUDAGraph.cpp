@@ -60,14 +60,14 @@ void CUDAGraph::capture_begin(CUDACaptureid_t pool/*=0*/) {
 
   capture_stream_ = stream;
   capture_gen_ = gen;
-  capture_dev_ = c10::cuda::current_device()
+  capture_dev_ = c10::cuda::current_device();
 
   // cudaStreamCaptureModeGlobal is the most conservative option to
   // prevent potentially unsafe CUDA API calls during capture.  See
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
   AT_CUDA_CHECK(cudaStreamBeginCapture(capture_stream_, cudaStreamCaptureModeGlobal));
 
-  // Stashes the current graph's uuid.
+  // Stashes the current capture's uuid.
   cudaStreamCaptureStatus status;
   AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &id_));
   TORCH_INTERNAL_ASSERT(status == cudaStreamCaptureStatus::cudaStreamCaptureStatusActive);
@@ -81,13 +81,17 @@ void CUDAGraph::capture_begin(CUDACaptureid_t pool/*=0*/) {
     mempool_id_ = id_;
   }
 
-  // There's a small chance of a bad allocator interation here if another thread launches a kernel on
-  // capture_stream_ between the call to cudaStreamBeginCapture above and the call to
-  // notifyCaptureBegin below. How should we deal with it?
-
   // When CUDACachingAllocator allocates while a capture is underway, it calls cudaStreamGetCaptureInfo
   // to get the current stream's capture id, if any. Here we tell CUDACachingAllocator: if the stream
   // has a capture id matching this graph's id_, use the private pool mempool_id_ identifies.
+  //
+  // There's a small chance of a bad allocation here if another thread launches a kernel on
+  // capture_stream_ between the call to cudaStreamBeginCapture above and the call to
+  // notifyCaptureBegin below.
+  // But I don't think we need to worry about it because that use case makes no sense:
+  // The user has no business launching kernels on capture_stream_ from another thread
+  // while calling capture_begin. They'll have no idea if their side thread's
+  // kernel will end up as part of the capture or not.
   c10::cuda::CUDACachingAllocator::notifyCaptureBegin(capture_dev_, id_, mempool_id_);
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");

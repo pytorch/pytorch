@@ -33,7 +33,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   bool has_graph_ = false;
   bool has_graph_exec_ = false;
 
-  // uuid, retrieved from Cuda
+  // uuid of this instance's current capture, retrieved from Cuda
   CUDACaptureid_t id_;
 
   // uuid used to request a particular private mempool from CUDACachingAllocator.

@@ -180,11 +180,11 @@ struct AllocParams {
 };
 
 cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12000
   if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
 #endif
     return cudaMalloc(p, size);
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12000
   } else {
     // It's ok to capture cudaMallocs, as long as we never cudaFree those addresses before replay.
     at::cuda::cudaStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
@@ -568,7 +568,7 @@ class DeviceCachingAllocator {
     } else {
       it->second.use_count++;
     }
-    // There's no way this graph_id should already have an assigned pool.
+    // Makes sure this graph_id wasn't somehow assigned a private pool already.
     TORCH_INTERNAL_ASSERT(capture_to_pool_map.find(graph_id) == capture_to_pool_map.end());
     capture_to_pool_map[graph_id] = mempool_id;
   }
@@ -587,10 +587,10 @@ class DeviceCachingAllocator {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     // The graph's been destroyed. We can't blindly delete and cudaFree its mempool, because
     //  1. other graph(s) might share the same pool
-    //  2. the user might still hold references to some output tensors allocated during capture.
+    //  2. the user might still hold references to output tensors allocated during capture.
     // To handle 1 and 2, we track the number of graphs using this particular mempool.
     // When the count reaches 0, we tell free_cached_blocks it may now cudaFree blocks from
-    // this graph's pool when it discovers they're completely (unsplit).
+    // this graph's pool when it discovers they're unused (unsplit).
     auto it = graph_pools.find(mempool_id);
     TORCH_INTERNAL_ASSERT(it != graph_pools.end());
     it->second.use_count--;
@@ -677,7 +677,7 @@ class DeviceCachingAllocator {
 
   BlockPool& get_pool(size_t size, cudaStream_t stream) {
     // captures_underway is a conservative guess that the current stream may be capturing.
-    // It's false unless some thread has begun and not yet ended a capture, so it's usually false,
+    // It's only > 0 if some thread has begun and not yet ended a capture, so it's usually 0,
     // and we can short-circuit cudaStreamCaptureStatus (which does a TLS lookup).
     if C10_UNLIKELY(captures_underway) {
       CUDACaptureid_t id;

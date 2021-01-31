@@ -48,5 +48,5 @@ void THCPGraph_init(PyObject *module) {
            py::call_guard<py::gil_scoped_release>(),
            R"(``pool`` retrieves the id of this graph's memory pool.
            This id can optionally be passed to another graph's capture_begin,
-           which tells the other graph to share the same memory pool.)");
+           which hints that other graph may share the same memory pool.)");
 }
