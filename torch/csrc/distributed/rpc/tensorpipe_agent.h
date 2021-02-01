@@ -185,7 +185,9 @@ class TensorPipeAgent : public RpcAgent {
   std::shared_ptr<JitFuture> send(
       const WorkerInfo& to,
       Message&& message,
-      const float rpcTimeoutSeconds = kUnsetRpcTimeout) override;
+      const float rpcTimeoutSeconds = kUnsetRpcTimeout,
+      const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap =
+          {}) override;
 
   // join() and sync() would be deprecated -
   // https://github.com/pytorch/pytorch/issues/27647
@@ -209,6 +211,8 @@ class TensorPipeAgent : public RpcAgent {
 
   void addGilWaitTime(const std::chrono::microseconds gilWaitTime) override;
 
+  tensorpipe::DeviceMap getDeviceMap(const WorkerInfo& dest) override;
+
   using NetworkDataDict =
       std::unordered_map<std::string, AggregatedNetworkData>;
 
@@ -220,7 +224,17 @@ class TensorPipeAgent : public RpcAgent {
   static std::string guessUvAddress(
       tensorpipe::transport::uv::Context& uvContext);
 
+  // For testing purposes.
+  size_t timeoutMapSize();
+  size_t numPendingResponses();
+
  private:
+  // Removes the given messageId with the given expirationTime from the
+  // timeoutMap_.
+  void removeFromTimeoutMap(
+      uint64_t messageId,
+      steady_clock_time_point expirationTime);
+
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
   void collectNames();
 
@@ -242,7 +256,8 @@ class TensorPipeAgent : public RpcAgent {
       Message&& message,
       std::vector<c10::DeviceIndex>&& devices,
       std::shared_ptr<LazyStreamContext> ctx,
-      std::function<void(const tensorpipe::Error&)>) noexcept;
+      std::function<void(const tensorpipe::Error&)>,
+      const tensorpipe::DeviceMap& deviceMap = {}) noexcept;
 
   // Callback of listener accept()
   void onListenerAccepted(
@@ -269,14 +284,14 @@ class TensorPipeAgent : public RpcAgent {
       uint64_t requestSize,
       const std::string& destWorkerName);
 
-  inline std::vector<c10::DeviceIndex> getDevicesForTensors(
+  inline std::vector<c10::DeviceIndex> getDevicesForRemote(
       const std::string& remoteName,
       const Message& message) const;
 
 #ifdef USE_CUDA_NOT_ROCM
   // An RPC-specific CUDAFuture subclass. It overrides the extractDataPtrs
   // function to handle and only handle RPC Messages.
-  struct TORCH_CUDA_API RpcCUDAFuture final : at::cuda::CUDAFuture {
+  struct TORCH_CUDA_CPP_API RpcCUDAFuture final : at::cuda::CUDAFuture {
    public:
     using at::cuda::CUDAFuture::CUDAFuture;
 
@@ -357,12 +372,22 @@ class TensorPipeAgent : public RpcAgent {
   mutable std::mutex mutex_;
   uint64_t nextMessageID_{0};
 
+  // Metadata used for tracking of whether certain RPCs have timed out or not.
+  struct TimeoutMessageMetadata {
+    TimeoutMessageMetadata(
+        uint64_t messageId_,
+        std::shared_ptr<AtomicJitFuture> responseFuture_,
+        std::chrono::milliseconds timeout_)
+        : messageId(messageId_),
+          responseFuture(responseFuture_),
+          timeout(timeout_) {}
+    uint64_t messageId;
+    std::shared_ptr<AtomicJitFuture> responseFuture;
+    std::chrono::milliseconds timeout;
+  };
+
   // Map to store the expiration times for each message.
-  std::map<
-      steady_clock_time_point,
-      std::vector<std::pair<
-          std::shared_ptr<AtomicJitFuture>,
-          std::chrono::milliseconds>>>
+  std::map<steady_clock_time_point, std::vector<TimeoutMessageMetadata>>
       timeoutMap_;
 
   // Thread that will poll the timeoutMap_ for timed out messages and mark them
