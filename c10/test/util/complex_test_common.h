@@ -4,6 +4,7 @@
 #include <c10/util/complex.h>
 #include <c10/macros/Macros.h>
 #include <gtest/gtest.h>
+#include <unordered_map>
 
 #if (defined(__CUDACC__) || defined(__HIPCC__))
 #define MAYBE_GLOBAL __global__
@@ -167,6 +168,11 @@ TEST(TestConstructors, FromThrust) {
 }
 #endif
 
+TEST(TestConstructors, UnorderedMap) {
+  std::unordered_map<c10::complex<double>, c10::complex<double>> m;
+  m[c10::complex<double>(2.5, 3)] = c10::complex<double>(2, -3.2);
+  m[c10::complex<double>(2, 0)] = c10::complex<double>(0, -3);
+}
 
 }  // constructors
 

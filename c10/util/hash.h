@@ -2,7 +2,7 @@
 
 #include <functional>
 #include <vector>
-
+#include <c10/util/complex.h>
 namespace c10 {
 
 // NOTE: hash_combine is based on implementation from Boost
@@ -114,6 +114,17 @@ struct hash<std::vector<T>> {
     for (const auto& elem : v) {
       seed = hash_combine(seed, _hash_detail::simple_get_hash(elem));
     }
+    return seed;
+  }
+};
+
+// Specialization for c10::complex
+template <typename T>
+struct hash<c10::complex<T>> {
+  size_t operator()(const c10::complex<T>& c) const {
+    size_t seed = 0;
+    seed = hash_combine(seed, _hash_detail::simple_get_hash(c.real()));
+    seed = hash_combine(seed, _hash_detail::simple_get_hash(c.imag()));
     return seed;
   }
 };
