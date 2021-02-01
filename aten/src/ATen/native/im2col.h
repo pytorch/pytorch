@@ -6,9 +6,20 @@
 namespace at {
 namespace native {
 
-using col2im_fn = void (*)(
-    Tensor& im, // im2col: col
-    const Tensor& col, // im2col: im
+using contig_fn = void (*)(
+  Tensor& im,
+  const Tensor& col,
+  int64_t output_channels,
+  int64_t output_height, int64_t output_width,
+  int64_t input_height, int64_t input_width,
+  int64_t kH, int64_t kW,
+  int64_t pH, int64_t pW,
+  int64_t sH, int64_t sW,
+  int64_t dH, int64_t dW);
+
+using channels_last_fn = void (*)(
+    Tensor& im,
+    const Tensor& col,
     int64_t nbatch,
     int64_t output_channels,
     int64_t output_height, int64_t output_width,
@@ -18,8 +29,27 @@ using col2im_fn = void (*)(
     int64_t sH, int64_t sW,
     int64_t dH, int64_t dW);
 
-DECLARE_DISPATCH(col2im_fn, col2im_channels_last_stub);
-DECLARE_DISPATCH(col2im_fn, im2col_channels_last_stub);
+DECLARE_DISPATCH(contig_fn, col2im_stub);
+DECLARE_DISPATCH(contig_fn, im2col_stub);
+DECLARE_DISPATCH(channels_last_fn, col2im_channels_last_stub);
+DECLARE_DISPATCH(channels_last_fn, im2col_channels_last_stub);
+
+// skip im2col or col2im on certain conditions
+static inline bool skip_transforming(
+    IntArrayRef kernel_size,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef output_padding) {
+  TORCH_CHECK(
+      (kernel_size.size() == stride.size()) &&
+      (kernel_size.size() == padding.size()) &&
+      (kernel_size.size() == output_padding.size()));
+  bool res = true;
+  for (int64_t k = 0; k < kernel_size.size(); k++) {
+    res = res && (kernel_size[k] == 1) && (stride[k] == 1) && (padding[k] == 0) && (output_padding[k] == 0);
+  }
+  return res;
+}
 
 template <typename T>
 static void im2col(
