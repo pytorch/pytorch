@@ -117,6 +117,11 @@ bool canReuseInputsOutputs(Node* n) {
   return !SRViewOperatorRegistry()->Has(op_name);
 }
 
+bool isViewOp(Node* n) {
+  auto op_name = std::string(n->kind().toQualString());
+  return SRViewOperatorRegistry()->Has(op_name);
+}
+
 bool canReuseInputs(Node* n) {
   auto op_name = std::string(n->kind().toQualString());
   if (SROperatorRegistry()->Has(op_name)) {

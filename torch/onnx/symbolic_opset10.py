@@ -159,10 +159,10 @@ def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
 
 def slice(g, self, *args):
     if len(args) == 4:
-        # aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor
+        # aten::slice(Tensor self, int dim, int? start=None, int? end=None, int step=1) -> Tensor
         dim, start, end, step = args
     elif len(args) == 3:
-        # aten::slice(t[] l, int start, int end, int step) -> t[]
+        # aten::slice(t[] l, int? start=None, int? end=None, int step=1) -> t[]
         start, end, step = args
         dim = 0
     else:
@@ -173,6 +173,10 @@ def slice(g, self, *args):
        (not isinstance(end, int) and end.node().kind() != 'onnx::Constant') or
        (not isinstance(dim, int) and dim.node().kind() != 'onnx::Constant')):
         dynamic_slice = True
+        if start.type().kind() == "NoneType":
+            start = g.op("Constant", value_t=torch.tensor(0))
+        if end.type().kind() == "NoneType":
+            end = g.op("Constant", value_t=torch.tensor(9223372036854775807))
     else:
         start = [sym_help._parse_arg(start, 'i')]
         end = [sym_help._parse_arg(end, 'i')]
