@@ -12,9 +12,7 @@ if ERRORLEVEL 1 exit /b 1
 if ERRORLEVEL 1 exit /b 1
 
 echo Run nn tests
-python run_test.py --include test_nn --verbose --determine-from="%1"
+python run_test.py --exclude-jit-executor --shard 1 2 --verbose --determine-from="%1"
 if ERRORLEVEL 1 exit /b 1
 
 popd
-
-

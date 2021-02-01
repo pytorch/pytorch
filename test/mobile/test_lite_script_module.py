@@ -1,4 +1,3 @@
-import unittest
 import torch
 import torch.utils.bundled_inputs
 from torch.utils.mobile_optimizer import *
@@ -7,8 +6,9 @@ from typing import NamedTuple
 from collections import namedtuple
 
 from torch.jit.mobile import _load_for_lite_interpreter
+from torch.testing._internal.common_utils import TestCase, run_tests
 
-class TestLiteScriptModule(unittest.TestCase):
+class TestLiteScriptModule(TestCase):
 
     def test_load_mobile_module(self):
         class MyTestModule(torch.nn.Module):
@@ -287,4 +287,4 @@ class TestLiteScriptModule(unittest.TestCase):
             script_module._save_to_buffer_for_lite_interpreter()
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

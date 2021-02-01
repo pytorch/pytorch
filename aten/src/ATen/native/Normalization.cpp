@@ -490,9 +490,13 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_impl_index_backward(
 }
 
 Tensor batch_norm(
-    const Tensor& input, const Tensor& weight /* optional */, const Tensor& bias /* optional */,
-    const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
+    const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
     bool training, double momentum, double eps, bool cudnn_enabled) {
+  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
+  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
   if (input.numel()==0){
     //don't return view of input, don't return empty tensor because it will break gradient chain
     auto out = input.clone();

@@ -29,8 +29,6 @@ import torch.nn.utils.rnn as rnn_utils
 from torch.nn.utils import clip_grad_norm_, clip_grad_value_
 import torch.nn.utils.prune as prune
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
-from torch.autograd import gradcheck
-from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parameter import UninitializedParameter
 from torch.nn.parallel._functions import Broadcast
@@ -51,7 +49,7 @@ from torch.nn import MultiheadAttention
 
 from hypothesis import given
 import torch.testing._internal.hypothesis_utils as hu
-from torch.testing._internal.common_utils import _assertGradAndGradgradChecks
+from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck, gradgradcheck
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
@@ -3088,7 +3086,7 @@ class TestNN(NNTestCase):
                     out1 = wrapped_m(input)
                     return out0 + out1
 
-                torch.autograd.gradcheck(fn, (input.clone().requires_grad_(),))
+                gradcheck(fn, (input.clone().requires_grad_(),), check_batched_grad=False)
 
                 # test removing
                 pre_remove_out = wrapped_m(input)
@@ -3144,14 +3142,14 @@ class TestNN(NNTestCase):
                     out3 = wrapped_m(input)
                     return out0 + out1 + out2 + out3
 
-                torch.autograd.gradcheck(fn, (input.clone().requires_grad_(),))
+                gradcheck(fn, (input.clone().requires_grad_(),))
 
                 # assert that backprop reaches weight_orig in eval
                 if requires_grad:
                     def fn(weight):
                         return wrapped_m(input)
 
-                    torch.autograd.gradcheck(fn, (m.weight_orig,))
+                    gradcheck(fn, (m.weight_orig,))
 
     @skipIfNoLapack
     def test_spectral_norm_load_state_dict(self):
@@ -3473,44 +3471,6 @@ class TestNN(NNTestCase):
         num_features = 1000
         input = torch.randn(num_features, b, d, w, h)
         self._test_alpha_dropout(nn.FeatureAlphaDropout, input)
-
-    def test_pad(self):
-        inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
-        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,))
-        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,))
-        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,))
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,)))
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,)))
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='circular'), (inputs,)))
-
-        inputs = torch.randn(1, 2, 3, 4, 4, requires_grad=True)
-        self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,)))
-
-        # Assert assertion errors are raised for invalid circular padding values
-        inputs = torch.randn(1, 1, 4, requires_grad=True)
-        # Should raise error when trying to wrap around more than once
-        self.assertRaises(AssertionError, lambda: F.pad(inputs, (5, 4), mode='circular'))
-        self.assertRaises(AssertionError, lambda: F.pad(inputs, (3, 6), mode='circular'))
-        # Should raise error when negative padding results in negative output shape
-        self.assertRaises(AssertionError, lambda: F.pad(inputs, (-3, -2), mode='circular'))
-
-        # assert that relfection padding errors when pad >= input size
-        expected_err_msg = r"Padding size should be less than the corresponding input dimension"
-        self.assertRaisesRegex(RuntimeError, expected_err_msg,
-                               lambda: F.pad(torch.randn(1, 1, 2, 3), (1, 1, 3, 0), mode='reflect'))
-        self.assertRaisesRegex(RuntimeError, expected_err_msg,
-                               lambda: F.pad(torch.randn(1, 1, 2), (2, 1), mode='reflect'))
-
-        inputs = torch.rand(1, 3, 4, 4)
-        # assert that pad doesn't return a view into the input tensor
-        for mode in 'constant', 'reflect', 'replicate', 'circular':
-            out = F.pad(inputs, (0, 0, 0, 0), mode=mode)
-            out.fill_(4)
-            self.assertTrue(torch.all(inputs < 2))
-
-            out = F.pad(inputs, (0, 0, -1, -1), mode=mode)
-            out.fill_(4)
-            self.assertTrue(torch.all(inputs < 2))
 
     def test_pad_scalar_error(self):
         inputs = torch.tensor(0., requires_grad=True)
@@ -3962,7 +3922,9 @@ class TestNN(NNTestCase):
         tensors = (torch.randn(4, 4, device='cuda', requires_grad=True),
                    torch.randn(4, 4, device='cuda', requires_grad=True),
                    torch.randn(4, 4, device='cuda', requires_grad=True))
-        _assertGradAndGradgradChecks(self, lambda *i: Broadcast.apply((0, 1), *i), tensors)
+        # TODO(#50743): the following segfaults with check_batched_grad=True
+        _assertGradAndGradgradChecks(self, lambda *i: Broadcast.apply((0, 1), *i), tensors,
+                                     check_batched_grad=False)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_broadcast_not_requiring_grad(self):
@@ -4787,6 +4749,34 @@ class TestNN(NNTestCase):
                          F.poisson_nll_loss(input, target, reduction='mean'))
         with self.assertRaisesRegex(ValueError, 'is not valid'):
             F.poisson_nll_loss(input, target, reduction='total')
+
+    def test_gaussian_nll_loss_reduction_modes(self):
+        input = torch.tensor([[0.5, 1.5, 2.5], [2., 4., 6.]])
+        target = torch.tensor([[1., 2., 3.], [4., 5., 6.]])
+        var = torch.tensor([[0.5, 1., 1.5], [1., 1.5, 2.]])
+        component_wise_loss = 0.5 * (torch.sum(torch.log(var) + (input - target)**2 / var, dim=1))
+        self.assertEqual(component_wise_loss,
+                         F.gaussian_nll_loss(input, target, var, reduction='none'))
+        self.assertEqual(torch.sum(component_wise_loss),
+                         F.gaussian_nll_loss(input, target, var, reduction='sum'))
+        self.assertEqual(torch.mean(component_wise_loss),
+                         F.gaussian_nll_loss(input, target, var, reduction='mean'))
+        with self.assertRaisesRegex(ValueError, 'is not valid'):
+            F.gaussian_nll_loss(input, target, var, reduction='total')
+
+    def test_gaussian_nll_loss_args(self):
+        input = torch.randn(3, 5)
+        with self.assertRaisesRegex(ValueError, 'input and target must have same size'):
+            target = torch.randn(3, 6)
+            var = torch.ones(3, 5)
+            torch.nn.functional.gaussian_nll_loss(input, target, var)
+        with self.assertRaisesRegex(ValueError, 'var is of incorrect size'):
+            target = torch.randn(3, 5)
+            var = torch.ones(3, 3)
+            torch.nn.functional.gaussian_nll_loss(input, target, var)
+        with self.assertRaisesRegex(ValueError, 'var has negative entry/entries'):
+            var = -1 * torch.ones(3, 5)
+            torch.nn.functional.gaussian_nll_loss(input, target, var)
 
     def test_KLDivLoss_batch_mean(self):
         input_shape = (2, 5)
@@ -8591,6 +8581,18 @@ class TestNN(NNTestCase):
             self.assertEqual(torch.ones(1, 1, 4, 4).contiguous(memory_format=memory_format), out_t.data)
             self.assertEqual(torch.ones(1, 1, 4, 4, dtype=torch.uint8).contiguous(memory_format=memory_format), out_uint8_t.data)
 
+            # test forward when input's height is not same as width
+            m = nn.Upsample(size=(4, 2), mode='nearest')
+            in_t = torch.ones(1, 1, 2, 1).contiguous(memory_format=memory_format)
+            with warnings.catch_warnings(record=True) as w:
+                out_t = m(in_t)
+            self.assertEqual(torch.ones(1, 1, 4, 2).contiguous(memory_format=memory_format), out_t.data)
+
+            # test backward when input's height is not same as width
+            input = torch.ones(1, 1, 2, 1, requires_grad=True).contiguous(memory_format=memory_format)
+            gradcheck(lambda x: F.interpolate(x, size=(4, 2), mode='nearest'), [input])
+            gradgradcheck(lambda x: F.interpolate(x, size=(4, 2), mode='nearest'), [input])
+
             input = torch.randn(1, 1, 2, 2, requires_grad=True).contiguous(memory_format=memory_format)
             self.assertEqual(
                 F.interpolate(input, 4, mode='nearest'),
@@ -8749,6 +8751,29 @@ class TestNN(NNTestCase):
             out_t_9 = m(in_t_9)
             out_t_5 = m(in_t_9[:, :, :5, :5, :5])
         self.assertEqual(out_t_9[:, :, :15, :15, :15], out_t_5)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_interpolate_illegal_memory_access(self):
+        in_s = 45
+        out_s = 14
+
+        input = torch.ones((1, 1, in_s), device='cuda', requires_grad=True)
+        # note we allocated grad_output to be larger so out of bound access
+        # woudl be visible in grad_input
+        grad = torch.ones((1, 1, out_s * 2), device='cuda', requires_grad=True)
+        grad = grad[:, :, :out_s]
+
+        input_ref = input.detach().cpu().requires_grad_()
+        grad_ref = grad.cpu()
+
+        out = F.interpolate(input, size=(out_s,), mode='nearest')
+        out.backward(grad)
+
+        out_ref = F.interpolate(input_ref, size=(out_s,), mode='nearest')
+        out_ref.backward(grad_ref)
+
+        self.assertEqual(out_ref, out)
+        self.assertEqual(input_ref.grad, input.grad)
 
     def test_interpolate(self):
         def _test_interpolate_helper(in_t, scale_factor, layer):
@@ -9522,6 +9547,8 @@ class TestNNInit(TestCase):
                 self.assertEqual(gain, 1.4142135623730951)
             elif fn == 'leaky_relu':  # sqrt(2 / 1 + slope^2))
                 self.assertEqual(gain, 1.4141428569978354)
+            elif fn == 'selu':
+                self.assertEqual(gain, 0.75)
 
     def test_calculate_gain_leaky_relu(self):
         for param in [None, 0, 0.01, 10]:
@@ -9922,6 +9949,27 @@ class TestFusionEval(TestCase):
         Y_hat = conv_na_bn_fused(inputs)
 
         self.assertEqual(Y_ref, Y_hat, msg="Conv+BN(non-affine) fusion results are off")
+
+
+class TestConstantPadNd(TestCase):
+    def test_constant_pad_nd(self):
+        a = torch.tensor([[1, 2], [3, 4]])
+        res = torch.constant_pad_nd(a, [1, 2, 1, 0], 9)
+        expected = torch.tensor([
+            [9, 9, 9, 9, 9],
+            [9, 1, 2, 9, 9],
+            [9, 3, 4, 9, 9]
+        ])
+        self.assertEqual(res, expected)
+
+    def test_preserves_memory_format(self):
+        nchw_tensor = torch.rand((1, 2, 5, 3))
+        nchw_padded = torch.constant_pad_nd(nchw_tensor, [1, 2], 0.5)
+        self.assertTrue(nchw_padded.is_contiguous(memory_format=torch.contiguous_format))
+
+        nhwc_tensor = nchw_tensor.contiguous(memory_format=torch.channels_last)
+        nhwc_padded = torch.constant_pad_nd(nhwc_tensor, [1, 2], 0.5)
+        self.assertTrue(nhwc_padded.is_contiguous(memory_format=torch.channels_last))
 
 
 class TestAddRelu(TestCase):
@@ -10952,48 +11000,180 @@ class TestNNDeviceType(NNTestCase):
                 self._test_module_empty_input(mod, inp)
 
     @onlyOnCPUAndCUDA
-    def test_ReplicationPad_empty(self, device):
+    @dtypes(torch.float64, torch.complex128)
+    def test_pad(self, device, dtype):
+        inputs = torch.randn(1, 3, 4, 4, device=device, dtype=dtype, requires_grad=True)
+        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (1, 1, 1, 1)), (inputs,))
+        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1)), (inputs,))
+        _assertGradAndGradgradChecks(self, lambda x: F.pad(x, (-1, 1, -2, 1), value=2), (inputs,))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='replicate'), (inputs,)))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='reflect'), (inputs,)))
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (-1, 1, -2, 1), mode='circular'), (inputs,)))
+
+        inputs = torch.randn(1, 2, 3, 4, 4, device=device, dtype=dtype, requires_grad=True)
+        self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,)))
+
+        # Assert assertion errors are raised for invalid circular padding values
+        inputs = torch.randn(1, 1, 4, device=device, dtype=dtype, requires_grad=True)
+        # Should raise error when trying to wrap around more than once
+        self.assertRaises(AssertionError, lambda: F.pad(inputs, (5, 4), mode='circular'))
+        self.assertRaises(AssertionError, lambda: F.pad(inputs, (3, 6), mode='circular'))
+        # Should raise error when negative padding results in negative output shape
+        self.assertRaises(AssertionError, lambda: F.pad(inputs, (-3, -2), mode='circular'))
+
+        # assert that relfection padding errors when pad >= input size
+        expected_err_msg = r"Padding size should be less than the corresponding input dimension"
+        inputs = torch.randn(1, 1, 2, 3, device=device, dtype=dtype)
+        self.assertRaisesRegex(RuntimeError, expected_err_msg,
+                               lambda: F.pad(inputs, (1, 1, 3, 0), mode='reflect'))
+        inputs = torch.randn(1, 1, 2, device=device, dtype=dtype)
+        self.assertRaisesRegex(RuntimeError, expected_err_msg,
+                               lambda: F.pad(inputs, (2, 1), mode='reflect'))
+
+        inputs = torch.rand(1, 3, 4, 4, device=device, dtype=dtype)
+        # assert that pad doesn't return a view into the input tensor
+        for mode in 'constant', 'reflect', 'replicate', 'circular':
+            out = F.pad(inputs, (0, 0, 0, 0), mode=mode)
+            out.fill_(4)
+            self.assertTrue(torch.all(torch.abs(inputs) < 2))
+
+            out = F.pad(inputs, (0, 0, -1, -1), mode=mode)
+            out.fill_(4)
+            self.assertTrue(torch.all(torch.abs(inputs) < 2))
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float64, torch.complex128)
+    def test_ReplicationPad_empty(self, device, dtype):
         for mod, inp in [
-                (torch.nn.ReplicationPad1d(3), torch.randn(0, 3, 10, device=device)),
-                (torch.nn.ReplicationPad2d(3), torch.randn(0, 3, 10, 10, device=device)),
-                (torch.nn.ReplicationPad3d(3), torch.randn(0, 3, 10, 10, 10, device=device))]:
+                (torch.nn.ReplicationPad1d(3), torch.randn(0, 3, 10, device=device, dtype=dtype)),
+                (torch.nn.ReplicationPad2d(3), torch.randn(0, 3, 10, 10, device=device, dtype=dtype)),
+                (torch.nn.ReplicationPad3d(3), torch.randn(0, 3, 10, 10, 10, device=device, dtype=dtype))]:
             self._test_module_empty_input(mod, inp, check_size=False)
 
         with self.assertRaisesRegex(NotImplementedError, 'Only 3D'):
             mod = torch.nn.ReplicationPad1d(2)
-            inp = torch.randn(3, 10, device=device)
+            inp = torch.randn(3, 10, device=device, dtype=dtype)
             mod(inp)
 
         with self.assertRaisesRegex(RuntimeError, 'Expected 2D or 3D'):
             mod = torch.nn.ReplicationPad1d(2)
-            inp = torch.randn(3, 0, 10, device=device)
+            inp = torch.randn(3, 0, 10, device=device, dtype=dtype)
             mod(inp)
 
         with self.assertRaisesRegex(RuntimeError, 'Expected 3D or 4D'):
             mod = torch.nn.ReplicationPad2d((2, 2, 2, 2))
-            inp = torch.randn(43, 0, 10, 10, device=device)
+            inp = torch.randn(43, 0, 10, 10, device=device, dtype=dtype)
             mod(inp)
 
         with self.assertRaisesRegex(RuntimeError, 'Expected 4D or 5D'):
             mod = torch.nn.ReplicationPad3d((2, 2, 2, 2, 2, 2))
-            inp = torch.randn(3, 0, 10, 10, 10, device=device)
+            inp = torch.randn(3, 0, 10, 10, 10, device=device, dtype=dtype)
             mod(inp)
 
+    def test_ReplicationPad1d_large(self, device):
+        shapes = ([2, 65736, 4], [65736, 2, 4])
+        pl, pr = 3, 4
+        for shape in shapes:
+            x = torch.randn(shape, device=device, requires_grad=True)
+            model = torch.nn.ReplicationPad1d((pl, pr))
+
+            # forward
+            out = model(x)
+            self.assertEqual(out[:, :, pl : -pr], x)
+
+            left_padding = out[:, :, : pl]
+            self.assertEqual(left_padding, x[:, :, :1].expand_as(left_padding))
+            right_padding = out[:, :, -pr :]
+            self.assertEqual(right_padding, x[:, :, -1:].expand_as(right_padding))
+
+            # backward
+            g = torch.randn_like(out)
+            out.backward(g)
+            self.assertEqual(x.grad[:, :, 1 : -1], g[:, :, pl + 1 : -pr - 1])
+
+            self.assertEqual(x.grad[:, :, 0], g[:, :, : pl + 1].sum(-1))
+            self.assertEqual(x.grad[:, :, -1], g[:, :, -pr - 1:].sum(-1))
+
+    def test_ReplicationPad2d_large(self, device):
+        shapes = ([2, 65736, 4, 4], [65736, 2, 4, 4])
+        pl, pr, pt, pb = 3, 4, 5, 6
+        for shape in shapes:
+            x = torch.randn(shape, device=device, requires_grad=True)
+            model = torch.nn.ReplicationPad2d((pl, pr, pt, pb))
+
+            # forward center, edge
+            out = model(x)
+            self.assertEqual(out[:, :, pt : -pb, pl : -pr], x)
+
+            left_padding = out[:, :, pt : -pb, : pl]
+            self.assertEqual(left_padding, x[:, :, :, :1].expand_as(left_padding))
+            right_padding = out[:, :, pt : -pb, -pr :]
+            self.assertEqual(right_padding, x[:, :, :, -1:].expand_as(right_padding))
+            top_padding = out[:, :, : pt, pl : -pr]
+            self.assertEqual(top_padding, x[:, :, :1, :].expand_as(top_padding))
+            bottom_padding = out[:, :, -pb : , pl : -pr]
+            self.assertEqual(bottom_padding, x[:, :, -1:, :].expand_as(bottom_padding))
+
+            # forward corner
+            tl_padding = out[:, :, : pt + 1, : pl + 1]
+            self.assertEqual(tl_padding, x[:, :, :1, :1].expand_as(tl_padding))
+            tr_padding = out[:, :, : pt + 1, -pr - 1:]
+            self.assertEqual(tr_padding, x[:, :, :1, -1:].expand_as(tr_padding))
+            bl_padding = out[:, :, -pb - 1:, : pl + 1]
+            self.assertEqual(bl_padding, x[:, :, -1:, :1].expand_as(bl_padding))
+            br_padding = out[:, :, -pb - 1:, -pr - 1:]
+            self.assertEqual(br_padding, x[:, :, -1:, -1:].expand_as(br_padding))
+
+            # backward center, edge
+            g = torch.randn_like(out)
+            out.backward(g)
+            self.assertEqual(x.grad[:, :, 1:-1, 1:-1], g[:, :, pt + 1 : -pb - 1, pl + 1 : -pr - 1])
+
+            self.assertEqual(x.grad[:, :, 1:-1, 0], g[:, :, pt + 1 : -pb - 1, : pl + 1].sum(-1))
+            self.assertEqual(x.grad[:, :, 1:-1, -1], g[:, :, pt + 1 : -pb - 1, -pr - 1 :].sum(-1))
+            self.assertEqual(x.grad[:, :, 0, 1:-1], g[:, :, : pt + 1, pl + 1 : -pr - 1].sum(-2))
+            self.assertEqual(x.grad[:, :, -1, 1:-1], g[:, :, -pb - 1 :, pl + 1 : -pr - 1].sum(-2))
+
+            # backward corner
+            self.assertEqual(x.grad[:, :, 0, 0], g[:, :, : pt + 1, : pl + 1].sum((-2, -1)))
+            self.assertEqual(x.grad[:, :, 0, -1], g[:, :, : pt + 1, -pr - 1 :].sum((-2, -1)))
+            self.assertEqual(x.grad[:, :, -1, 0], g[:, :, -pb - 1 :, : pl + 1].sum((-2, -1)))
+            self.assertEqual(x.grad[:, :, -1, -1], g[:, :, -pb - 1 :, -pr - 1 :].sum((-2, -1)))
+
+    @largeTensorTest("6GB")
+    def test_ReplicationPad3d_large(self, device):
+        shapes = ([1, 65736, 2, 2, 2], [65736, 1, 2, 2, 2])
+        pl, pr, pt, pbt, pf, pbk = 3, 4, 5, 6, 7, 8
+
+        for shape in shapes:
+            x = torch.randn(shape, device=device, requires_grad=True)
+            model = torch.nn.ReplicationPad3d((pl, pr, pt, pbt, pf, pbk))
+
+            # forward center
+            out = model(x)
+            self.assertEqual(out[:, :, pf : -pbk, pt : -pbt, pl : -pr], x)
+
+            # backward center
+            g = torch.randn_like(out)
+            out.backward(g)
+            self.assertEqual(x.grad[:, :, 1:-1, 1:-1, 1:-1], g[:, :, pf + 1 : -pbk - 1, pt + 1 : -pbt - 1, pl + 1 : -pr - 1])
+
     @onlyOnCPUAndCUDA
-    def test_ReflectionPad_empty(self, device):
+    @dtypes(torch.float32, torch.complex64)
+    def test_ReflectionPad_empty(self, device, dtype):
         for mod, inp in [
-                (torch.nn.ReflectionPad1d(2), torch.randn(0, 3, 10, device=device)),
-                (torch.nn.ReflectionPad2d(2), torch.randn(0, 3, 10, 10, device=device))]:
+                (torch.nn.ReflectionPad1d(2), torch.randn(0, 3, 10, device=device, dtype=dtype)),
+                (torch.nn.ReflectionPad2d(2), torch.randn(0, 3, 10, 10, device=device, dtype=dtype))]:
             self._test_module_empty_input(mod, inp, check_size=False)
 
         with self.assertRaisesRegex(RuntimeError, '2D or 3D'):
             mod = torch.nn.ReflectionPad1d(2)
-            inp = torch.randn(3, 0, 10, device=device)
+            inp = torch.randn(3, 0, 10, device=device, dtype=dtype)
             mod(inp)
 
         with self.assertRaisesRegex(RuntimeError, '3D or 4D'):
             mod = torch.nn.ReflectionPad2d(2)
-            inp = torch.randn(3, 0, 10, 10, device=device)
+            inp = torch.randn(3, 0, 10, 10, device=device, dtype=dtype)
             mod(inp)
 
 
@@ -11266,6 +11446,7 @@ class TestNNDeviceType(NNTestCase):
         input = torch.randn(3, 5, requires_grad=True, device=device)
         cinput = torch.randn(3, 5, requires_grad=True, device=device, dtype=torch.cfloat)
         target = torch.tensor([1, 0, 4], device=device)
+        var = torch.ones(size=input.size(), requires_grad=True, device=device)
 
         for reduction in ['none', 'invalid']:
             def v(fn):
@@ -11285,6 +11466,7 @@ class TestNNDeviceType(NNTestCase):
             v(lambda: F.mse_loss(input, input, reduction=reduction))
             v(lambda: F.hinge_embedding_loss(input, input, reduction=reduction))
             v(lambda: F.poisson_nll_loss(input, input, reduction=reduction))
+            v(lambda: F.gaussian_nll_loss(input, input, var, reduction=reduction))
             v(lambda: F.binary_cross_entropy_with_logits(input, input, reduction=reduction))
 
             zeros = torch.zeros_like(input).to(torch.int64)
