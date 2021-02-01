@@ -3227,9 +3227,9 @@ Args:
 Example::
 
     >>> t = torch.tensor([[[1, 2],
-                           [3, 4]],
-                          [[5, 6],
-                           [7, 8]]])
+    ...                    [3, 4]],
+    ...                   [[5, 6],
+    ...                    [7, 8]]])
     >>> torch.flatten(t)
     tensor([1, 2, 3, 4, 5, 6, 7, 8])
     >>> torch.flatten(t, start_dim=1)
@@ -3491,13 +3491,13 @@ Keyword args:
 Example::
 
     >>> A = torch.tensor([[6.80, -2.11,  5.66,  5.97,  8.23],
-                          [-6.05, -3.30,  5.36, -4.44,  1.08],
-                          [-0.45,  2.58, -2.70,  0.27,  9.04],
-                          [8.32,  2.71,  4.35,  -7.17,  2.14],
-                          [-9.67, -5.14, -7.26,  6.08, -6.87]]).t()
+    ...                   [-6.05, -3.30,  5.36, -4.44,  1.08],
+    ...                   [-0.45,  2.58, -2.70,  0.27,  9.04],
+    ...                   [8.32,  2.71,  4.35,  -7.17,  2.14],
+    ...                   [-9.67, -5.14, -7.26,  6.08, -6.87]]).t()
     >>> B = torch.tensor([[4.02,  6.19, -8.22, -7.57, -3.03],
-                          [-1.56,  4.00, -8.67,  1.75,  2.86],
-                          [9.81, -4.09, -4.57, -8.61,  8.99]]).t()
+    ...                   [-1.56,  4.00, -8.67,  1.75,  2.86],
+    ...                   [9.81, -4.09, -4.57, -8.61,  8.99]]).t()
     >>> X, LU = torch.solve(B, A)
     >>> torch.dist(B, torch.mm(A, X))
     tensor(1.00000e-06 *
@@ -4795,15 +4795,15 @@ Returns:
 Example::
 
     >>> A = torch.tensor([[1., 1, 1],
-                          [2, 3, 4],
-                          [3, 5, 2],
-                          [4, 2, 5],
-                          [5, 4, 3]])
+    ...                   [2, 3, 4],
+    ...                   [3, 5, 2],
+    ...                   [4, 2, 5],
+    ...                   [5, 4, 3]])
     >>> B = torch.tensor([[-10., -3],
-                          [ 12, 14],
-                          [ 14, 12],
-                          [ 16, 16],
-                          [ 18, 16]])
+    ...                   [ 12, 14],
+    ...                   [ 14, 12],
+    ...                   [ 16, 16],
+    ...                   [ 18, 16]])
     >>> X, _ = torch.lstsq(B, A)
     >>> X
     tensor([[  2.0000,   1.0000],
@@ -6372,9 +6372,9 @@ Example::
             [ 2],
             [ 4]])
     >>> torch.nonzero(torch.tensor([[0.6, 0.0, 0.0, 0.0],
-                                    [0.0, 0.4, 0.0, 0.0],
-                                    [0.0, 0.0, 1.2, 0.0],
-                                    [0.0, 0.0, 0.0,-0.4]]))
+    ...                             [0.0, 0.4, 0.0, 0.0],
+    ...                             [0.0, 0.0, 1.2, 0.0],
+    ...                             [0.0, 0.0, 0.0,-0.4]]))
     tensor([[ 0,  0],
             [ 1,  1],
             [ 2,  2],
@@ -6382,9 +6382,9 @@ Example::
     >>> torch.nonzero(torch.tensor([1, 1, 1, 0, 1]), as_tuple=True)
     (tensor([0, 1, 2, 4]),)
     >>> torch.nonzero(torch.tensor([[0.6, 0.0, 0.0, 0.0],
-                                    [0.0, 0.4, 0.0, 0.0],
-                                    [0.0, 0.0, 1.2, 0.0],
-                                    [0.0, 0.0, 0.0,-0.4]]), as_tuple=True)
+    ...                             [0.0, 0.4, 0.0, 0.0],
+    ...                             [0.0, 0.0, 1.2, 0.0],
+    ...                             [0.0, 0.0, 0.0,-0.4]]), as_tuple=True)
     (tensor([0, 1, 2, 3]), tensor([0, 1, 2, 3]))
     >>> torch.nonzero(torch.tensor(5), as_tuple=True)
     (tensor([0]),)
@@ -6828,7 +6828,7 @@ Args:
 
 Example::
 
-    >>> torch.promote_types(torch.int32, torch.float32))
+    >>> torch.promote_types(torch.int32, torch.float32)
     torch.float32
     >>> torch.promote_types(torch.uint8, torch.long)
     torch.long
@@ -6846,7 +6846,7 @@ with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
 If :attr:`some` is ``True``, then this function returns the thin (reduced) QR factorization.
 Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
 
-.. warning:: ``torch.qr`` is deprecated. Please use ``torch.linalg.`` :func:`~torch.linalg.qr`
+.. warning:: ``torch.qr`` is deprecated. Please use :func:`torch.linalg.qr`
              instead.
 
              **Differences with** ``torch.linalg.qr``:
@@ -7235,8 +7235,8 @@ Example::
     tensor([ 0,  1])
 
     >>> torch.tensor([[0.11111, 0.222222, 0.3333333]],
-                     dtype=torch.float64,
-                     device=torch.device('cuda:0'))  # creates a torch.cuda.DoubleTensor
+    ...              dtype=torch.float64,
+    ...              device=torch.device('cuda:0'))  # creates a torch.cuda.DoubleTensor
     tensor([[ 0.1111,  0.2222,  0.3333]], dtype=torch.float64, device='cuda:0')
 
     >>> torch.tensor(3.14159)  # Create a scalar (zero-dimensional tensor)
@@ -7937,7 +7937,7 @@ Keyword args:
 Example::
 
     >>> i = torch.tensor([[0, 1, 1],
-                          [2, 0, 2]])
+    ...                   [2, 0, 2]])
     >>> v = torch.tensor([3, 4, 5], dtype=torch.float32)
     >>> torch.sparse_coo_tensor(i, v, [2, 4])
     tensor(indices=tensor([[0, 1, 1],
@@ -7952,8 +7952,8 @@ Example::
            size=(2, 3), nnz=3, layout=torch.sparse_coo)
 
     >>> torch.sparse_coo_tensor(i, v, [2, 4],
-                                dtype=torch.float64,
-                                device=torch.device('cuda:0'))
+    ...                         dtype=torch.float64,
+    ...                         device=torch.device('cuda:0'))
     tensor(indices=tensor([[0, 1, 1],
                            [2, 0, 2]]),
            values=tensor([3., 4., 5.]),
@@ -8312,53 +8312,52 @@ add_docstr(torch.svd,
 svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 Computes the singular value decomposition of either a matrix or batch of
-matrices :attr:`input`." The singular value decomposition is represented as a
-namedtuple ``(U, S, V)``, such that :math:`input = U \mathbin{@} diag(S) \times
-V^T`, where :math:`V^T` is the transpose of ``V``. If :attr:`input` is a batch
-of tensors, then ``U``, ``S``, and ``V`` are also batched with the same batch
-dimensions as :attr:`input`.
+matrices :attr:`input`. The singular value decomposition is represented as a
+namedtuple (`U,S,V`), such that
+:attr:`input` = `U` diag(`S`) `Vᴴ`,
+where `Vᴴ` is the transpose of `V` for the real-valued inputs,
+or the conjugate transpose of `V` for the complex-valued inputs.
+If :attr:`input` is a batch of tensors, then `U`, `S`, and `V` are also
+batched with the same batch dimensions as :attr:`input`.
 
 If :attr:`some` is ``True`` (default), the method returns the reduced singular
 value decomposition i.e., if the last two dimensions of :attr:`input` are
-``m`` and ``n``, then the returned `U` and `V` matrices will contain only
-:math:`min(n, m)` orthonormal columns.
+`m` and `n`, then the returned `U` and `V` matrices will contain only
+min(`n, m`) orthonormal columns.
 
 If :attr:`compute_uv` is ``False``, the returned `U` and `V` will be
-zero-filled matrices of shape :math:`(m \times m)` and :math:`(n \times n)`
+zero-filled matrices of shape `(m × m)` and `(n × n)`
 respectively, and the same device as :attr:`input`. The :attr:`some`
-argument has no effect when :attr:`compute_uv` is False.
+argument has no effect when :attr:`compute_uv` is ``False``.
 
-The dtypes of ``U`` and ``V`` are the same as :attr:`input`'s. ``S`` will
+Supports input of float, double, cfloat and cdouble data types.
+The dtypes of `U` and `V` are the same as :attr:`input`'s. `S` will
 always be real-valued, even if :attr:`input` is complex.
 
-.. warning:: ``torch.svd`` is deprecated. Please use ``torch.linalg.``
-             :func:`~torch.linalg.svd` instead, which is similar to NumPy's
+.. warning:: :func:`torch.svd` is deprecated. Please use
+             :func:`torch.linalg.svd` instead, which is similar to NumPy's
              ``numpy.linalg.svd``.
 
-.. note:: **Differences with** ``torch.linalg.`` :func:`~torch.linalg.svd`:
+.. note:: Differences with :func:`torch.linalg.svd`:
 
-             * :attr:`some` is the opposite of ``torch.linalg.``
-               :func:`~torch.linalg.svd`'s :attr:`full_matricies`. Note that
+             * :attr:`some` is the opposite of
+               :func:`torch.linalg.svd`'s :attr:`full_matricies`. Note that
                default value for both is ``True``, so the default behavior is
                effectively the opposite.
 
-             * it returns ``V``, whereas ``torch.linalg.``
-               :func:`~torch.linalg.svd` returns ``Vh``. The result is that
-               when using ``svd`` you need to manually transpose
-               ``V`` in order to reconstruct the original matrix.
+             * :func:`torch.svd` returns `V`, whereas :func:`torch.linalg.svd` returns `Vᴴ`.
 
-             * If :attr:`compute_uv=False`, it returns zero-filled tensors for
-               ``U`` and ``Vh``, whereas :meth:`~torch.linalg.svd` returns
+             * If :attr:`compute_uv=False`, :func:`torch.svd` returns zero-filled tensors for
+               ``U`` and ``Vh``, whereas :func:`torch.linalg.svd` returns
                empty tensors.
-
-Supports real-valued and complex-valued input.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
           then the singular values of each matrix in the batch is returned in descending order.
 
 .. note:: The implementation of SVD on CPU uses the LAPACK routine `?gesdd` (a divide-and-conquer
-          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the MAGMA routine
-          `gesdd` as well.
+          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the cuSOLVER routines
+          `gesvdj` and `gesvdjBatched` on CUDA 10.1.243 and later, and uses the MAGMA routine `gesdd`
+          on earlier versions of CUDA.
 
 .. note:: The returned matrix `U` will be transposed, i.e. with strides
           :code:`U.contiguous().transpose(-2, -1).stride()`.
@@ -8372,15 +8371,19 @@ Supports real-valued and complex-valued input.
 
 .. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is True.
 
-
 .. note:: With the complex-valued input the backward operation works correctly only
           for gauge invariant loss functions. Please look at `Gauge problem in AD`_ for more details.
 
+.. note:: Since `U` and `V` of an SVD is not unique, each vector can be multiplied by
+          an arbitrary phase factor :math:`e^{i \phi}` while the SVD result is still correct.
+          Different platforms, like Numpy, or inputs on different device types, may produce different
+          `U` and `V` tensors.
+
 Args:
-    input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
-                    batch dimensions consisting of :math:`m \times n` matrices.
+    input (Tensor): the input tensor of size `(*, m, n)` where `*` is zero or more
+                    batch dimensions consisting of `(m × n)` matrices.
     some (bool, optional): controls whether to compute the reduced or full decomposition, and
-                           consequently the shape of returned ``U`` and ``V``. Defaults to True.
+                           consequently the shape of returned `U` and `V`. Defaults to True.
     compute_uv (bool, optional): option whether to compute `U` and `V` or not. Defaults to True.
 
 Keyword args:
@@ -8717,7 +8720,7 @@ Args:
 Example::
 
     >>> src = torch.tensor([[4, 3, 5],
-                            [6, 7, 8]])
+    ...                     [6, 7, 8]])
     >>> torch.take(src, torch.tensor([0, 2, 5]))
     tensor([ 4,  5,  8])
 """.format(**common_args))

@@ -119,7 +119,7 @@ size_t normalizeAndCheckIndex(int64_t idx, int64_t list_size) {
 }
 
 static at::ScalarType tensorType(Tensor* t) {
-  return static_cast<at::ScalarType>(t->body()->dtype().scalar_type());
+  return static_cast<at::ScalarType>(t->buf()->dtype().scalar_type());
 }
 
 static std::vector<ExprHandle> computeIndicesToBroadcast(
@@ -608,7 +608,7 @@ std::vector<ExprHandle> TensorExprKernel::valueShape(
   if (it == tensors_.end()) {
     return {};
   }
-  return ExprVectorToExprHandleVector(it->second->dims());
+  return ExprVectorToExprHandleVector(it->second->buf()->dims());
 }
 
 Tensor* TensorExprKernel::computeOneOperand(
@@ -1052,7 +1052,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::relu: {
       return computeOneOperand("aten_relu", v, [](const ExprHandle& a) {
         auto zero = Cast::make(a.dtype(), 0);
-        return ifThenElse(CompareSelect::make(a, zero, kLT), zero, a);
+        return CompareSelect::make(a, zero, zero, a, kLT);
       });
     } break;
 
@@ -1125,7 +1125,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::type_as: {
       auto const& n = v->node();
       Tensor* rhs = tensors_.at(n->inputs()[1]->unique());
-      auto dtype = rhs->body()->dtype();
+      auto dtype = rhs->buf()->dtype();
       return computeOneOperand(
           "aten_type_as", v, [dtype](const ExprHandle& lhs) {
             return Cast::make(dtype, lhs);
@@ -1350,8 +1350,9 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::lgamma: {
-      return computeOneOperand(
-          "aten_lgamma", v, [](const ExprHandle& a) { return lgamma(a); });
+      return computeOneOperand("aten_lgamma", v, [](const ExprHandle& a) {
+        return lgamma(promoteIntegerToDefaultType(a));
+      });
     } break;
 
     case prim::ConstantChunk: {
@@ -1716,7 +1717,7 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
       break;
     }
     case TypeKind::FloatType: {
-      VarHandle v("v" + input->debugName(), kFloat);
+      VarHandle v("v" + input->debugName(), kDouble);
       kernelArgs_.emplace_back(v);
       scalars_.emplace(input->unique(), v);
       break;
@@ -1728,7 +1729,7 @@ void TensorExprKernel::bindInput(const torch::jit::Value* input) {
       break;
     }
     case TypeKind::IntType: {
-      VarHandle v("v" + input->debugName(), kInt);
+      VarHandle v("v" + input->debugName(), kLong);
       kernelArgs_.emplace_back(v);
       scalars_.emplace(input->unique(), v);
       break;
@@ -2196,9 +2197,9 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
   for (size_t i = 0, e = inputs.size(); i < e; i++) {
     auto const& input = inputs[i];
     if (input.isInt()) {
-      runArgs.emplace_back((int32_t)input.toInt());
+      runArgs.emplace_back(input.toInt());
     } else if (input.isDouble()) {
-      runArgs.emplace_back((float)input.toDouble());
+      runArgs.emplace_back(input.toDouble());
     } else if (input.isTensor()) {
       runArgs.emplace_back(input.toTensor().data_ptr());
     }

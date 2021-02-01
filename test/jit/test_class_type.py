@@ -11,7 +11,7 @@ from typing import Any
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, make_global
 import torch.testing._internal.jit_utils
 from torch.testing._internal.common_utils import IS_SANDCASTLE
 from typing import List, Tuple, Iterable, Optional, Dict
@@ -143,11 +143,11 @@ class TestClassType(JitTestCase):
                         self.attr = x
 
     def test_class_type_as_param(self):
-        global FooTest  # see [local resolution in python]
-
         class FooTest(object):  # noqa: B903
             def __init__(self, x):
                 self.attr = x
+
+        make_global(FooTest)  # see [local resolution in python]
 
         @torch.jit.script
         def fn(foo: FooTest) -> torch.Tensor:
@@ -279,12 +279,12 @@ class TestClassType(JitTestCase):
         self.assertEqual(2 * input, output)
 
     def test_python_interop(self):
-        global Foo   # see [local resolution in python]
-
         class Foo(object):  # noqa: B903
             def __init__(self, x, y):
                 self.x = x
                 self.y = y
+
+        make_global(Foo)   # see [local resolution in python]
 
         @torch.jit.script
         def use_foo(foo: Foo) -> Foo:
@@ -305,12 +305,12 @@ class TestClassType(JitTestCase):
         self.assertEqual(y, f2.y)
 
     def test_class_specialization(self):
-        global Foo  # see [local resolution in python]
-
         class Foo(object):  # noqa: B903
             def __init__(self, x, y):
                 self.x = x
                 self.y = y
+
+        make_global(Foo)  # see [local resolution in python]
 
         def use_foo(foo: Foo, foo2: Foo, tup: Tuple[Foo, Foo]) -> torch.Tensor:
             a, b = tup
@@ -329,8 +329,6 @@ class TestClassType(JitTestCase):
         FileCheck().check_count("prim::GetAttr", 4).run(graphstr)
 
     def test_class_sorting(self):
-        global Foo  # see [local resolution in python]
-
         class Foo(object):  # noqa: B903
             def __init__(self, x: int) -> None:
                 self.x = x
@@ -341,6 +339,8 @@ class TestClassType(JitTestCase):
 
             def getVal(self):
                 return self.x
+
+        make_global(Foo)  # see [local resolution in python]
 
         def test(li: List[Foo], reverse: bool = False) -> Tuple[List[int], List[int]]:
             li_sorted = sorted(li)
@@ -500,8 +500,6 @@ class TestClassType(JitTestCase):
         self.assertEqual(3 * input, output)
 
     def test_interface(self):
-        global Foo, Bar, OneTwo, OneTwoThree, OneTwoWrong, NotMember, NotMember2
-
         @torch.jit.script
         class Foo(object):
             def __init__(self):
@@ -570,6 +568,8 @@ class TestClassType(JitTestCase):
 
             def two(self, x: int) -> int:
                 return 3
+
+        make_global(Foo, Bar, OneTwo, OneTwoThree, OneTwoWrong, NotMember, NotMember2)
 
         def use_them(x):
             a = Foo()
@@ -652,8 +652,6 @@ class TestClassType(JitTestCase):
         # NamedTuple inheritance errors
 
     def test_overloaded_fn(self):
-        global Foo, MyClass  # see [local resolution in python]
-
         @torch.jit.script
         class Foo(object):
             def __init__(self, x):
@@ -672,6 +670,8 @@ class TestClassType(JitTestCase):
         def test_overload():
             a = Foo(torch.ones([3, 3]))
             return len(a), -a * torch.zeros([3, 3])
+
+        make_global(Foo)  # see [local resolution in python]
 
         self.checkScript(test_overload, ())
         # unary ops tested above
@@ -737,6 +737,8 @@ class TestClassType(JitTestCase):
                 return self.x * val * 3
 
 
+        make_global(Foo)  # see [local resolution in python]
+
         def add():
             return MyClass(4) + 3
         def sub():  # noqa: E306
@@ -787,8 +789,6 @@ class TestClassType(JitTestCase):
                 return Foo(torch.tensor(1)) + Foo(torch.tensor(1))
 
     def test_cast_overloads(self):
-        global Foo  # see [local resolution in python]
-
         @torch.jit.script
         class Foo(object):
             def __init__(self, val: float) -> None:
@@ -805,6 +805,8 @@ class TestClassType(JitTestCase):
 
             def __str__(self):
                 return str(self.val)
+
+        make_global(Foo)  # see [local resolution in python]
 
         def test(foo: Foo) -> Tuple[int, float, bool]:
             if foo:
@@ -914,8 +916,6 @@ class TestClassType(JitTestCase):
             self.assertEqual(m.w, m_loaded.w)
 
     def test_py_class_to_ivalue_missing_attribute(self):
-        global Foo  # see [local resolution in python]
-
         class Foo(object):
             i : int
             f : float
@@ -923,6 +923,8 @@ class TestClassType(JitTestCase):
             def __init__(self, i : int, f : float):
                 self.i = i
                 self.f = f
+
+        make_global(Foo)  # see [local resolution in python]
 
         @torch.jit.script
         def test_fn(x : Foo) -> float:
@@ -1132,8 +1134,6 @@ class TestClassType(JitTestCase):
         """
         Test static methods on class types.
         """
-        global ClassWithStaticMethod
-
         @torch.jit.script
         class ClassWithStaticMethod:
             def __init__(self, a: int, b: int):
@@ -1164,14 +1164,14 @@ class TestClassType(JitTestCase):
         def test_function(a: int, b: int) -> 'ClassWithStaticMethod':
             return ClassWithStaticMethod.create_from(a, b)
 
+        make_global(ClassWithStaticMethod)
+
         self.checkScript(test_function, (1, 2))
 
     def test_classmethod(self):
         """
         Test classmethods on class types.
         """
-        global ClassWithClassMethod
-
         @torch.jit.script
         class ClassWithClassMethod:
             def __init__(self, a: int):
@@ -1183,6 +1183,8 @@ class TestClassType(JitTestCase):
             @classmethod
             def create(cls, a: int) -> 'ClassWithClassMethod':
                 return cls(a)
+
+        make_global(ClassWithClassMethod)
 
         def test_function(a: int) -> 'ClassWithClassMethod':
             x = ClassWithClassMethod(a)
