@@ -92,6 +92,9 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
           to_process.emplace_back(std::move(elem));
         }
       } break;
+      case UnionType::Kind: {
+        // TODO: implement serialization/deserialization of Union
+      } break;
       case FutureType::Kind: {
         auto f = w.value.toFuture();
         auto t = w.static_type->expect<FutureType>();

@@ -338,7 +338,7 @@ std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
     }
     alias_info = parseAliasAnnotation();
     value = UnionType::create(types);
-  } else if (
+    } else if (
       complete_tensor_types && L.cur().kind == TK_IDENT &&
       parseTensorDType(L.cur().text())) {
     value = parseRefinedTensor();

@@ -17,6 +17,7 @@ namespace c10 {
   _(TensorType)             \
   _(StorageType)            \
   _(TupleType)              \
+  _(UnionType)              \
   _(ListType)               \
   _(DictType)               \
   _(NumberType)             \

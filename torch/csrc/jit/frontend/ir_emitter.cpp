@@ -183,9 +183,9 @@ NoneStatus canBeNone(Value* v) {
   if (v->node()->mustBeNone()) {
     return ALWAYS;
   }
-  if (v->type()->kind() == OptionalType::Kind ||
-      (v->type()->kind() == UnionType::Kind &&
-       v->type()->expect<UnionType>()->can_hold_none())) {
+  if (v->type()->kind() == OptionalType::Kind
+      || (v->type()->kind() == UnionType::Kind
+      && v->type()->expect<UnionType>()->can_hold_none())) {
     return MAYBE;
   }
   return NEVER;
@@ -2831,9 +2831,9 @@ struct to_ir {
         // get the right type. To do this, we make a None constant that
         // has the type Optional[T]
         if ((type->kind() == OptionalType::Kind ||
-             (type->kind() == UnionType::Kind &&
-              type->expect<UnionType>()->can_hold_none())) &&
-            expr->type()->isSubtypeOf(NoneType::get())) {
+          (type->kind() == UnionType::Kind &&
+          type->expect<UnionType>()->can_hold_none()))
+          && expr->type()->isSubtypeOf(NoneType::get())) {
           Node* none = graph->createNone();
           none->output()->setType(type);
           graph->insertNode(none);

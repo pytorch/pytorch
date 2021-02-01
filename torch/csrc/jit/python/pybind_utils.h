@@ -563,11 +563,11 @@ inline std::string friendlyTypeName(py::handle obj) {
     ss << "))";
     return ss.str();
   } else {
-    auto match = tryToInferType(obj);
-    if (!match.success()) {
-      return py::str(obj.get_type().attr("__name__"));
-    }
-    return toIValue(obj, match.type()).type()->annotation_str();
+      auto match = tryToInferType(obj);
+      if (!match.success()) {
+        return py::str(obj.get_type().attr("__name__"));
+      }
+      return toIValue(obj, match.type()).type()->annotation_str();
   }
 }
 

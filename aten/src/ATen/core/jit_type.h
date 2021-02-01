@@ -99,7 +99,7 @@ struct SingleElementType : public Type {
 
 struct UnionType;
 using UnionTypePtr = std::shared_ptr<UnionType>;
-struct CAFFE2_API UnionType : public Type {
+struct TORCH_API UnionType : public Type {
 
   friend struct Type;
 
