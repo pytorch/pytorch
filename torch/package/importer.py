@@ -1,5 +1,6 @@
 from typing import List, Callable, Dict, Optional, Any, Union, BinaryIO
 import builtins
+from contextlib import contextmanager
 import importlib
 import linecache
 from torch.serialization import _load
@@ -142,7 +143,8 @@ class PackageImporter:
             Any: the unpickled object.
         """
         pickle_file = self._zipfile_path(package, resource)
-        return _load(self.zip_reader, map_location, self, pickle_file=pickle_file)
+        with _set_current_importer(self):
+            return _load(self.zip_reader, map_location, self, pickle_file=pickle_file)
 
     def id(self):
         """
@@ -429,3 +431,22 @@ class _ModuleNode(_PathNode):
 
 class _ExternNode(_PathNode):
     pass
+
+
+_current_importer: Optional[PackageImporter] = None
+
+
+def get_current_importer() -> Optional[PackageImporter]:
+    global _current_importer
+    return _current_importer
+
+
+@contextmanager
+def _set_current_importer(importer):
+    global _current_importer
+    assert _current_importer is None
+    _current_importer = importer
+    try:
+        yield _current_importer
+    finally:
+        _current_importer = None

@@ -1,6 +1,7 @@
 from pickle import Pickler, whichmodule, _Pickler, _getattribute, _extension_registry, _compat_pickle  # type: ignore
 from pickle import GLOBAL, STACK_GLOBAL, EXT1, EXT2, EXT4, PicklingError
 from types import FunctionType
+import copyreg
 from struct import pack
 from ._mangling import demangle, is_mangled, get_mangle_prefix
 import importlib
@@ -137,10 +138,10 @@ def import_module_from_importers(module_name, importers):
         raise ModuleNotFoundError(module_name)
 
 def create_custom_import_pickler(data_buf, importers):
-    if importers == [importlib.import_module]:
-        # if we are using the normal import library system, then
-        # we can use the C implementation of pickle which is faster
-        return Pickler(data_buf, protocol=3)
-    else:
-        return CustomImportPickler(lambda mod: import_module_from_importers(mod, importers),
-                                   data_buf, protocol=3)
+    # if importers == [importlib.import_module]:
+    #     # if we are using the normal import library system, then
+    #     # we can use the C implementation of pickle which is faster
+    #     return Pickler(data_buf, protocol=3)
+    # else:
+    return CustomImportPickler(lambda mod: import_module_from_importers(mod, importers),
+                                data_buf, protocol=3)

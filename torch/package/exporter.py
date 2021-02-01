@@ -2,6 +2,7 @@ import torch
 from torch.serialization import normalize_storage_type, location_tag
 import io
 import pickletools
+from contextlib import contextmanager
 from .find_file_dependencies import find_files_source_depends_on
 from ._custom_import_pickler import create_custom_import_pickler, import_module_from_importers
 from ._importlib import _normalize_path
@@ -269,34 +270,35 @@ node [shape=box];
             obj (Any): The object to save, must be picklable.
             dependencies (bool, optional): If True, we scan the source for dependencies (see :ref:`Dependencies`).
         """
-        filename = self._filename(package, resource)
-        # Write the pickle data for `obj`
-        data_buf = io.BytesIO()
-        pickler = create_custom_import_pickler(data_buf, self.importers)
-        pickler.persistent_id = self._persistent_id
-        pickler.dump(obj)
-        data_value = data_buf.getvalue()
+        with _set_current_exporter(self):
+            filename = self._filename(package, resource)
+            # Write the pickle data for `obj`
+            data_buf = io.BytesIO()
+            pickler = create_custom_import_pickler(data_buf, self.importers)
+            pickler.persistent_id = self._persistent_id
+            pickler.dump(obj)
+            data_value = data_buf.getvalue()
 
-        if dependencies:
-            all_dependencies = []
-            for opcode, arg, pos in pickletools.genops(data_value):
-                if opcode.name == 'GLOBAL':  # a global reference
-                    assert isinstance(arg, str)
-                    module, field = arg.split(' ')
-                    if module not in all_dependencies:
-                        all_dependencies.append(module)
+            if dependencies:
+                all_dependencies = []
+                for opcode, arg, pos in pickletools.genops(data_value):
+                    if opcode.name == 'GLOBAL':  # a global reference
+                        assert isinstance(arg, str)
+                        module, field = arg.split(' ')
+                        if module not in all_dependencies:
+                            all_dependencies.append(module)
 
-            for dep in all_dependencies:
-                self.debug_deps.append((package + '.' + resource, dep))
+                for dep in all_dependencies:
+                    self.debug_deps.append((package + '.' + resource, dep))
 
-            if self.verbose:
-                dep_string = ''.join(f'  {dep}\n' for dep in all_dependencies)
-                print(f"{resource} depends on:\n{dep_string}\n")
+                if self.verbose:
+                    dep_string = ''.join(f'  {dep}\n' for dep in all_dependencies)
+                    print(f"{resource} depends on:\n{dep_string}\n")
 
-            for module_name in all_dependencies:
-                self.require_module_if_not_provided(module_name)
+                for module_name in all_dependencies:
+                    self.require_module_if_not_provided(module_name)
 
-        self._write(filename, data_value)
+            self._write(filename, data_value)
 
     def save_text(self, package: str, resource: str, text: str):
         """Save text data to the package
@@ -518,3 +520,22 @@ class _GlobGroup:
 
         result = ''.join(component_to_re(c) for c in pattern.split('.'))
         return re.compile(result)
+
+
+_current_exporter: Optional[PackageExporter] = None
+
+
+def get_current_exporter() -> Optional[PackageExporter]:
+    global _current_exporter
+    return _current_exporter
+
+
+@contextmanager
+def _set_current_exporter(exporter):
+    global _current_exporter
+    assert _current_exporter is None
+    _current_exporter = exporter
+    try:
+        yield _current_exporter
+    finally:
+        _current_exporter = None

@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.overrides
 from torch.nn.modules.module import _addindent
+from torch.package import PackageImporter
 import linecache
 from typing import Type, Dict, List, Any, Union, Optional
 from .graph import Graph
@@ -35,9 +36,14 @@ def patched_getline(*args, **kwargs):
     return _orig_getlines(*args, **kwargs)
 linecache.getlines = patched_getline
 
-def _forward_from_src(src : str):
+
+def _forward_from_src(src: str, current_importer: Optional[PackageImporter]):
     # If you add more globals here, remember to add their names to fx.graph._shadows_builtin_name!
     gbls: Dict[str, Any] = {'inf': math.inf, 'nan': math.nan, 'NoneType' : type(None)}
+    if current_importer is not None:
+        gbls['__loader__'] = current_importer
+        gbls['__builtins__'] = current_importer.patched_builtins
+
     exec_with_source(src, gbls)
     return gbls['forward']
 
@@ -56,12 +62,14 @@ def deserialize_graphmodule(body : dict) -> torch.nn.Module:
             super().__init__()
             self.__dict__ = body
 
+    current_importer = torch.package.importer.get_current_importer()
+
     try:
-        CodeOnlyModule.forward = _forward_from_src(body['_code'])
+        CodeOnlyModule.forward = _forward_from_src(body['_code'], current_importer)
     except KeyError:
         # BC: attribute name was changed from `code` to `_code` to facilitate
         # making `code` into a property and adding a docstring to it
-        CodeOnlyModule.forward = _forward_from_src(body['code'])
+        CodeOnlyModule.forward = _forward_from_src(body['code'], current_importer)
 
     from .symbolic_trace import Tracer
 
@@ -72,7 +80,9 @@ def deserialize_graphmodule(body : dict) -> torch.nn.Module:
             return True
 
     com = CodeOnlyModule(body)
-    return GraphModule(com, KeepModules().trace(com))
+    ret = GraphModule(com, KeepModules().trace(com))
+    ret.importer = current_importer
+    return ret
 
 # copy an attribute value with qualified name 'target' from 'from_module' to 'to_module'
 # This installs empty Modules where none exist yet if they are subpaths of target
@@ -164,6 +174,7 @@ class GraphModule(torch.nn.Module):
         """
         super().__init__()
         self.__class__.__name__ = class_name
+        self.importer: Optional[PackageImporter] = None
         if isinstance(root, torch.nn.Module):
             if hasattr(root, 'training'):
                 self.training = root.training
@@ -294,7 +305,7 @@ class {module_name}(torch.nn.Module):
         """
         self._code = self._graph.python_code(root_module='self')
         cls = type(self)
-        cls.forward = _forward_from_src(self._code)
+        cls.forward = _forward_from_src(self._code, self.importer)
 
         cls_call = cls.__call__
 
@@ -318,6 +329,17 @@ class {module_name}(torch.nn.Module):
         On the deserialization side, we symbolically trace through the generated
         code to regenerate the underlying ``Graph``
         """
+        current_exporter = torch.package.exporter.get_current_exporter()
+        if current_exporter is not None:
+            for import_ in self._graph._imports:
+                if isinstance(import_, tuple):
+                    # Of the form 'from base import attr'
+                    base, attr = import_
+                    current_exporter.require_module_if_not_provided(base)
+                else:
+                    # Of the form 'import import_'
+                    current_exporter.require_module_if_not_provided(import_)
+
         dict_without_graph = self.__dict__.copy()
         del dict_without_graph['_graph']
         return (deserialize_graphmodule, (dict_without_graph,))
