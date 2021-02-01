@@ -433,7 +433,7 @@ class TestForeach(TestCase):
                 if (dtype is torch.float16 or dtype is torch.bfloat16):
                     expected = [e.to(dtype=dtype) for e in expected]
 
-                 # we dont support bool and complex types on CUDA for now	
+                # we dont support bool and complex types on CUDA for now	
                 if (dtype in torch.testing.get_all_complex_dtypes() or dtype == torch.bool) and self.device_type == 'cuda':	
                     with self.assertRaisesRegex(RuntimeError, "not implemented for"):	
                         foreach_bin_op_(tensors, scalars)	
