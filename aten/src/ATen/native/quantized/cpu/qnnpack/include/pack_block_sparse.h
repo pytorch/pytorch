@@ -18,7 +18,7 @@
 
 namespace qnnpack {
 
-typedef struct {
+typedef struct BCSRMatrix {
   std::vector<uint32_t, AlignedAllocator<uint32_t, 16>> col_indices;
   std::vector<uint32_t, AlignedAllocator<uint32_t, 16>> row_values;
   std::vector<uint8_t, AlignedAllocator<uint8_t, 16>> values;
