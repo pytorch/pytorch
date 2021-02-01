@@ -213,6 +213,10 @@ ListTypePtr ListType::ofInts() {
   static auto value = ListType::create(IntType::get());
   return value;
 }
+ListTypePtr ListType::ofComplexDoubles() {
+  static auto value = ListType::create(ComplexDoubleType::get());
+  return value;
+}
 ListTypePtr ListType::ofFloats() {
   static auto value = ListType::create(FloatType::get());
   return value;
