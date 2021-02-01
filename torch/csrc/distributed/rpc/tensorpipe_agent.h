@@ -291,16 +291,18 @@ class TensorPipeAgent : public RpcAgent {
     using at::cuda::CUDAFuture::CUDAFuture;
 
    protected:
-    std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
+    //using DataPtrs = std::vector<std::reference_wrapper<const at::DataPtr>>;
+
+    std::shared_ptr<DataPtrs> extractDataPtrs(
         const at::IValue& value) override {
       const auto message = value.toCustomClass<Message>();
       TORCH_INTERNAL_ASSERT(
           message, "Passed a non-Message type to RpcCUDAFuture");
-      std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
+      auto dataPtrs = std::make_shared<DataPtrs>();
       for (const auto& tensor : message->tensors()) {
-        data_ptrs.emplace_back(tensor.storage().data_ptr());
+        dataPtrs->emplace_back(tensor.storage().data_ptr());
       }
-      return data_ptrs;
+      return dataPtrs;
     }
   };
 #endif

@@ -29,31 +29,47 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
     // an error. Uninitialized currentDevice_ could lead to crash when used
     // in CUDAGuard.
     currentDevice_ = c10::cuda::current_device();
+    dataPtrs_ = std::make_shared<DataPtrs>();
+    cudaEvents_ = std::make_shared<std::vector<at::cuda::CUDAEvent>>();
   }
 
  protected:
-  c10::intrusive_ptr<Future> createInstance(at::TypePtr type) override {
-    return c10::make_intrusive<CUDAFuture>(std::move(type));
+
+  using DataPtrs = std::vector<std::reference_wrapper<const at::DataPtr>>;
+
+  c10::intrusive_ptr<Future> createChild(at::TypePtr type) override {
+    auto child = c10::make_intrusive<CUDAFuture>(std::move(type));
+    // child future initially holds on to parent DataPtrs and CUDAEvents, and
+    // will wait for these CUDAEvents if its own value does not contain tensors
+    // or is not supported by JIT.
+    child->dataPtrs_ = dataPtrs_;
+    child->cudaEvents_ = cudaEvents_;
+    return child;
   }
 
   void postMarkCompletedHook(const at::IValue& value) override {
     currentDevice_ = c10::cuda::current_device();
 
     // Extract them once and cache them for later uses.
-    dataPtrs_ = extractDataPtrs(value);
-
-    std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
-    for (const at::DataPtr& data_ptr : dataPtrs_) {
-      if (data_ptr.device().is_cuda()) {
-        isCudaDeviceUsed[data_ptr.device().index()] = true;
+    auto dataPtrs = extractDataPtrs(value);
+    // Only replace parent Future's DataPtrs if value of this child Future is
+    // no empty.
+    if (!dataPtrs->empty()) {
+      dataPtrs_ = dataPtrs;
+      cudaEvents_->clear();
+      std::vector<bool> isCudaDeviceUsed(c10::cuda::device_count(), false);
+      for (const at::DataPtr& dataPtr : *dataPtrs_) {
+        if (dataPtr.device().is_cuda()) {
+          isCudaDeviceUsed[dataPtr.device().index()] = true;
+        }
       }
-    }
 
-    for (c10::DeviceIndex idx = 0; idx < isCudaDeviceUsed.size(); idx++) {
-      if (isCudaDeviceUsed[idx]) {
-        at::cuda::CUDAEvent cudaEvent;
-        cudaEvent.record(at::cuda::getCurrentCUDAStream(idx));
-        cudaEvents_.push_back(std::move(cudaEvent));
+      for (c10::DeviceIndex idx = 0; idx < isCudaDeviceUsed.size(); idx++) {
+        if (isCudaDeviceUsed[idx]) {
+          at::cuda::CUDAEvent cudaEvent;
+          cudaEvent.record(at::cuda::getCurrentCUDAStream(idx));
+          cudaEvents_->push_back(std::move(cudaEvent));
+        }
       }
     }
   }
@@ -70,7 +86,7 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
       // misbehaving this also ends up using memory on those devices, which the
       // user might not want.
       std::vector<at::cuda::CUDAStream> streams;
-      for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
+      for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
         c10::DeviceIndex idx = cudaEvent.device_index();
         // FIXME Should we find a way to allow to change the priority of
         // streams?
@@ -85,10 +101,10 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
 
       // Do not free the underlying data storage of value_ before its
       // usage on the stream finishes.
-      for (const at::DataPtr& data_ptr : dataPtrs_) {
-        if (data_ptr.device().is_cuda()) {
+      for (const at::DataPtr& dataPtr : *dataPtrs_) {
+        if (dataPtr.device().is_cuda()) {
           c10::cuda::CUDACachingAllocator::recordStream(
-              data_ptr, at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
+              dataPtr, at::cuda::getCurrentCUDAStream(dataPtr.device().index()));
         }
       }
 
@@ -99,33 +115,52 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
   }
 
   void postWaitHook(const at::IValue& value) override {
-    for (at::cuda::CUDAEvent& cudaEvent : cudaEvents_) {
+    for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
       cudaEvent.block(
           at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
     }
 
-    for (const at::DataPtr& data_ptr : dataPtrs_) {
-      if (data_ptr.device().is_cuda()) {
+    for (const at::DataPtr& dataPtr : *dataPtrs_) {
+      if (dataPtr.device().is_cuda()) {
         c10::cuda::CUDACachingAllocator::recordStream(
-            data_ptr, at::cuda::getCurrentCUDAStream(data_ptr.device().index()));
+            dataPtr, at::cuda::getCurrentCUDAStream(dataPtr.device().index()));
       }
     }
   }
 
-  virtual std::vector<std::reference_wrapper<const at::DataPtr>> extractDataPtrs(
+  virtual std::shared_ptr<DataPtrs> extractDataPtrs(
       const at::IValue& value) {
-    at::IValue::HashAliasedIValues sub_values;
-    // Prefer getSubValues() over visit() as the latter is a silent no-op for
-    // some unsupported types, whereas the former at least fails loudly.
-    value.getSubValues(sub_values);
-
-    std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
-    for (const at::IValue& sub_value : sub_values) {
-      if (sub_value.isTensor()) {
-        data_ptrs.emplace_back(sub_value.toTensor().storage().data_ptr());
+    auto dataPtrs = std::make_shared<DataPtrs>();
+    // former fails loudly while the latter is a silent no-op for unsupported
+    // types. We made the change because it's common for RPC user functions to
+    // return unsupported Python object types, and users don't have easy
+    // solutions to get around. Besides, the RemoteException in RPC is also an
+    // unsupported type. Adding it to JIT might be overkill. If we don't add
+    // RemoteException and use getSubValues() here, any errors in RPC functions
+    // would result in a crash on the caller.
+    // The current solution is that, the createChild() API initializes child
+    // Future dataPtrs_ and cudaEvents_ with parent dataPtrs_ and cudaEvents_.
+    // Note that, when creating a child Future, the parent Future might not be
+    // completed yet. Hence, the parent passes a shared_ptr of the DataPtrs
+    // cudaEvents_ instead of using a copy of the vector.
+    // When the child Future is marked as completed (the parent Future is
+    // guaranteed to complete at this time), it inspects the returned IValue
+    // using the `visit()` API and extracts DataPtrs accordingly. If it fails
+    // to extract any DataPtrs, it will use parent's DataPtrs, so that when
+    // application code only calls wait() on child Future but not parent Future,
+    // it should still work.
+    // FIXME: this is not perfect, as users functions can return unsupported
+    // custom Python objects with Tensors and the current solution won't
+    // recognize them. A better solution might be allowing users to decorate
+    // the callback function and provide custom logic to extract tensors.
+    value.visit([&dataPtrs](const IValue& subValue){
+      if (subValue.isTensor()) {
+        dataPtrs->emplace_back(subValue.toTensor().storage().data_ptr());
       }
-    }
-    return data_ptrs;
+      return false;
+    });
+
+    return dataPtrs;
   }
 
  private:
@@ -137,11 +172,11 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
   // are recorded on the appropriate streams when the future is marked completed
   // and can then be queried/waited/blocked on. There is one event for each
   // distinct device on which the value's tensors reside.
-  std::vector<at::cuda::CUDAEvent> cudaEvents_;
+  std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
 
   // A cached version of the data ptrs extracted from the value when the future
   // is first marked completed.
-  std::vector<std::reference_wrapper<const at::DataPtr>> dataPtrs_;
+  std::shared_ptr<DataPtrs> dataPtrs_;
 };
 
 } // namespace cuda

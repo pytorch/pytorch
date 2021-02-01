@@ -443,7 +443,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   c10::intrusive_ptr<Future> then(
       std::function<IValue(void)> callback,
       TypePtr type) {
-    auto fut = createInstance(std::move(type));
+    auto fut = createChild(std::move(type));
     addCallback(
         [fut, cb = std::move(callback)]() {
           try {
@@ -494,7 +494,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   // This hook is called by this class's then() method when it prepares the
   // instance it returns to the caller. It should be overridden by subclasses so
   // that they can produce an instace of their own type.
-  virtual c10::intrusive_ptr<Future> createInstance(at::TypePtr type) {
+  virtual c10::intrusive_ptr<Future> createChild(at::TypePtr type) {
     return c10::make_intrusive<Future>(type);
   }
 
