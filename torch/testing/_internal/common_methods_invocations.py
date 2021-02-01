@@ -1087,10 +1087,11 @@ def sample_inputs_logit(op_info, device, dtype, requires_grad):
 
     samples = (
         SampleInput(make_tensor((S, S, S), device, dtype, low=low, high=high, requires_grad=requires_grad)),
-        SampleInput(make_tensor((S, S, S), device, dtype, low=low, high=high, requires_grad=requires_grad), args=(0.2,)),
-        SampleInput(torch.rand((), device=device, dtype=dtype, requires_grad=requires_grad)),
-        SampleInput(torch.rand((), device=device, dtype=dtype, requires_grad=requires_grad), args=(0.2,)),
-        SampleInput(make_tensor((), device, dtype, low=low, high=high, requires_grad=requires_grad))
+        SampleInput(make_tensor((S, S, S), device, dtype, low=low,
+                                high=high, requires_grad=requires_grad), args=(0.2,)),
+        SampleInput(make_tensor((), device, dtype, low=low, high=high, requires_grad=requires_grad)),
+        SampleInput(make_tensor((), device, dtype, low=low,
+                                high=high, requires_grad=requires_grad), args=(0.2,)),
     )
 
     return samples
