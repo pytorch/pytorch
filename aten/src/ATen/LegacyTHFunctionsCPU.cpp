@@ -686,49 +686,6 @@ std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A) {
     }
     return std::tuple<Tensor, Tensor>(res1, res2);
 }
-Tensor & _th_potri_out(Tensor & output, const Tensor & self, bool upper) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-
-    switch (dispatch_scalar_type) {
-        case ScalarType::Double: {
-            auto output_ = checked_dense_tensor_unwrap(output, "output", 0, "_th_potri_out", false, DeviceType::CPU, dispatch_scalar_type);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_potri_out", false, DeviceType::CPU, dispatch_scalar_type);
-            THDoubleTensor_potri(output_, self_, upper);
-            break;
-        }
-        case ScalarType::Float: {
-            auto output_ = checked_dense_tensor_unwrap(output, "output", 0, "_th_potri_out", false, DeviceType::CPU, dispatch_scalar_type);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_potri_out", false, DeviceType::CPU, dispatch_scalar_type);
-            THFloatTensor_potri(output_, self_, upper);
-            break;
-        }
-        default:
-            AT_ERROR("_th_potri_out not supported on CPUType for ", dispatch_scalar_type);
-    }
-    return output;
-}
-Tensor _th_potri(const Tensor & self, bool upper) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-    auto output_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CPU, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
-    auto output = Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(output_));
-    switch (dispatch_scalar_type) {
-        case ScalarType::Double: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_potri", false, DeviceType::CPU, dispatch_scalar_type);
-            THDoubleTensor_potri(output_, self_, upper);
-            break;
-        }
-        case ScalarType::Float: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_potri", false, DeviceType::CPU, dispatch_scalar_type);
-            THFloatTensor_potri(output_, self_, upper);
-            break;
-        }
-        default:
-            AT_ERROR("_th_potri not supported on CPUType for ", dispatch_scalar_type);
-    }
-    return output;
-}
 std::tuple<Tensor &,Tensor &> _th_geqrf_out(Tensor & res1, Tensor & res2, const Tensor & self) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
