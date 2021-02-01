@@ -168,6 +168,13 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
   openssl x509 -noout -in <cert_file> -dates
   ```
 
+  - If you encountered error that some third_party modules are not checkout correctly, such as 
+  ```
+  Could not find .../pytorch/third_party/pybind11/CMakeLists.txt
+  ```
+  remove any `submodule.*` settings in your local git config (`.git/config` of your pytorch repo) and try again.
+  
+
 ## Nightly Checkout & Pull
 
 The `tools/nightly.py` script is provided to ease pure Python development of
