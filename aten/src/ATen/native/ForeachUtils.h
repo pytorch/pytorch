@@ -69,9 +69,11 @@ bool will_promote_tensor(const Tensor& tensor, Scalar scalar) {
   return result_dtype != tensor.scalar_type();
 }
 
+// Please, make sure to call check_foreach_api_restrictions before calling this method. 
+// There is a set of preconditions that have to be satisfied. 
 bool check_fast_path_restrictions(
-        ArrayRef<TensorList> tensorLists, 
-        ArrayRef<Scalar> scalarList = {}) {
+  ArrayRef<TensorList> tensorLists, 
+  ArrayRef<Scalar> scalarList = {}) {
     auto expected_device = tensorLists[0][0].device();
     auto expected_strides = tensorLists[0][0].strides();
 
@@ -97,7 +99,7 @@ bool check_fast_path_restrictions(
             return false;
           }
         } else if (scalarList.size() > 1) {
-          // Complex scalar list is not supported.
+          // Complex scalar list is not supported due to the limit for kernel launch argument (4KB)
           if (scalarList[i].isComplex()) {
             return false;
           }
