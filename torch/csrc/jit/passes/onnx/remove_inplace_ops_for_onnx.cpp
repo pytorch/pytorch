@@ -535,10 +535,10 @@ static void PrepareListAppendAndInsertForONNX(Block* b) {
 }
 
 // Handles special case of binary inplace ops, where the first input node
-// has a lower type precedence than the second input node. When the 
+// has a lower type precedence than the second input node. When the
 // inplace node is converted to a regular op, this information is lost and
 // the resulting type is based on type precedence, just like regular ops.
-// To avoid this loss of information, we add a cast node before the input 
+// To avoid this loss of information, we add a cast node before the input
 // node with the higher data type precedence, so that both the input types
 // are the same.
 // An example scenario would be:
@@ -557,9 +557,10 @@ static void PrepareListAppendAndInsertForONNX(Block* b) {
 
 static void ImplicitCastForBinaryInplaceOps(Node* inplaceNode) {
   // Check type if inplace operation is a binary node
-  auto name = inplaceNode->schema().name();
-  if((name == "aten::add_") || (name == "aten::sub_") ||
-     (name == "aten::mul_") || (name == "aten::div_")) {
+  if ((inplaceNode->kind() == aten::add_) ||
+      (inplaceNode->kind() == aten::sub_) ||
+      (inplaceNode->kind() == aten::mul_) ||
+      (inplaceNode->kind() == aten::div_)) {
     auto newInputNode = inplaceNode->owningGraph()->create(aten::type_as, 1);
     auto orignalInputs = inplaceNode->inputs();
     newInputNode->insertBefore(inplaceNode);
