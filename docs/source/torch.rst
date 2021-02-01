@@ -340,6 +340,7 @@ Pointwise Ops
     rsqrt
     sigmoid
     sign
+    sgn
     signbit
     sin
     sinc
