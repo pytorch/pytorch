@@ -222,7 +222,7 @@ def _unimplemented(op, msg):
 
 def _onnx_unsupported(op_name):
     raise RuntimeError('Unsupported: ONNX export of operator {}. '
-                       'Please open a bug to request ONNX export support for the missing operator.'.format(op_name))
+                       'Please feel free to request support or submit a pull request on PyTorch GitHub.'.format(op_name))
 
 
 def _onnx_opset_unsupported(op_name, current_opset, supported_opset):
@@ -565,10 +565,12 @@ def __interpolate_helper(g, input, size, scale_factor, mode, align_corners, reco
 
 
 def _unbind_helper(g, self, dim, _outputs):
-    if _export_onnx_opset_version <= 9:
+    if _export_onnx_opset_version < 11:
         from torch.onnx.symbolic_opset9 import unbind
-    else:
+    elif _export_onnx_opset_version <= 12:
         from torch.onnx.symbolic_opset11 import unbind  # type: ignore[no-redef]
+    else:
+        from torch.onnx.symbolic_opset13 import unbind  # type: ignore[no-redef]
     return unbind(g, self, dim, _outputs)
 
 
