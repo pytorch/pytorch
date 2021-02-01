@@ -10,7 +10,13 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/native/cuda/Loops.cuh>
 #include <THC/THCTensorInfo.cuh>
+#include <THC/THCThrustAllocator.cuh>
+
+#include <thrust/execution_policy.h>
+#include <thrust/device_ptr.h>
+#include <thrust/scan.h>
 
 namespace at { namespace native {
 
@@ -303,6 +309,103 @@ Tensor take_cuda(const Tensor& self, const Tensor& index) {
 Tensor& take_out_cuda(Tensor& out, const Tensor& self, const Tensor& index) {
     take_out_cuda_template(out, self, index);
     return out;
+}
+
+namespace {
+
+template <typename mask_t>
+void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& source){
+  auto srcSize = source.numel();
+
+  // Determine our output size
+  auto totalElements = mask.sum().item<int64_t>();
+
+  // The number of `1` elements present in the mask must be <= the
+  // number of elements available in `src`
+  TORCH_CHECK(totalElements <= srcSize, "source nElements must be == mask `1` elements");
+
+  auto mask_cont = mask.contiguous();
+
+  // Use a prefix sum to determine the output locations of the masked elements
+  auto maskPrefixSum = at::empty_like(mask, mask.options().dtype(kLong));
+
+  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+
+  thrust::device_ptr<mask_t> maskData(mask_cont.data_ptr<mask_t>());
+  thrust::device_ptr<int64_t> maskPrefixSumData(
+      maskPrefixSum.data_ptr<int64_t>());
+
+  thrust::exclusive_scan(
+      thrust::cuda::par(allocator).on(c10::cuda::getCurrentCUDAStream()),
+      maskData,
+      maskData + mask_cont.numel(),
+      maskPrefixSumData);
+
+  // We are getting elements from `src` based on an offset from
+  // `maskPrefixSum`, so that should be made contiguous too
+  auto source_contig = source.contiguous();
+
+  auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
+      .check_all_same_dtype(false)
+      .resize_outputs(false)
+      .add_output(self)
+      .add_input(self)
+      .add_input(mask_cont)
+      .add_input(maskPrefixSum)
+      .build();
+
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      ScalarType::Bool,
+      ScalarType::BFloat16,
+      ScalarType::Half,
+      self.scalar_type(),
+      "masked_scatter_",
+      [&]() {
+        auto source_ptr = source_contig.data_ptr<scalar_t>();
+        gpu_kernel(
+            iter, [=] GPU_LAMBDA(scalar_t a, mask_t mask, int64_t maskPrefixSum) -> scalar_t {
+              if (mask) {
+                return source_ptr[maskPrefixSum];
+              }
+              return a;
+            });
+        cudaGetLastError();
+      });
+}
+
+} // anonymous namespace
+
+Tensor & masked_scatter__cuda(Tensor& self, const Tensor& mask, const Tensor& source) {
+  at::assert_no_internal_overlap(self);
+  TORCH_CHECK(
+      self.scalar_type() == source.scalar_type(),
+      "masked_scatter: expected self and source to have same dtypes but got",
+      self.scalar_type(),
+      " and ",
+      source.scalar_type());
+
+  TensorArg self_arg{self, "self", 1};
+  TensorArg mask_arg{mask, "mask", 2};
+  TensorArg source_arg{source, "source", 3};
+  checkAllSameGPU("masked_scatter_", {self_arg, mask_arg, source_arg});
+
+  Tensor b_mask;
+  std::tie(b_mask) = expand_inplace(self, mask, "masked_scatter_");
+
+  if (b_mask.dtype() == ScalarType::Byte) {
+    TORCH_WARN("masked_scatter_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
+            "please use a mask with dtype torch.bool instead.");
+  }
+
+  auto mask_dtype = b_mask.scalar_type();
+  if (mask_dtype == ScalarType::Bool) {
+    masked_scatter_cuda_impl<bool>(self, b_mask, source);
+  } else {
+    masked_scatter_cuda_impl<uint8_t>(self, b_mask, source);
+  }
+
+  return self;
 }
 
 REGISTER_DISPATCH(index_stub, &index_kernel);
