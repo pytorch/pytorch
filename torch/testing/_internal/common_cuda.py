@@ -6,6 +6,7 @@ import torch.cuda
 from torch.testing._internal.common_utils import TEST_NUMBA
 import inspect
 import contextlib
+from distutils.version import LooseVersion
 
 
 TEST_CUDA = torch.cuda.is_available()
@@ -14,6 +15,10 @@ CUDA_DEVICE = torch.device("cuda:0") if TEST_CUDA else None
 # note: if ROCm is targeted, TEST_CUDNN is code for TEST_MIOPEN
 TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_acceptable(torch.tensor(1., device=CUDA_DEVICE))
 TEST_CUDNN_VERSION = torch.backends.cudnn.version() if TEST_CUDNN else 0
+
+CUDA11OrLater = torch.version.cuda and LooseVersion(torch.version.cuda) >= "11.0.0"
+CUDA9 = torch.version.cuda and torch.version.cuda.startswith('9.')
+SM53OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (5, 3)
 
 TEST_MAGMA = TEST_CUDA
 if TEST_CUDA:

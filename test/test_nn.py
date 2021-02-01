@@ -10,7 +10,7 @@ import warnings
 import pickle
 from copy import deepcopy
 from itertools import repeat, product
-from functools import reduce, partial
+from functools import reduce
 from operator import mul
 from collections import OrderedDict
 
@@ -29,8 +29,6 @@ import torch.nn.utils.rnn as rnn_utils
 from torch.nn.utils import clip_grad_norm_, clip_grad_value_
 import torch.nn.utils.prune as prune
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
-from torch.autograd import gradcheck
-from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parameter import UninitializedParameter
 from torch.nn.parallel._functions import Broadcast
@@ -51,7 +49,7 @@ from torch.nn import MultiheadAttention
 
 from hypothesis import given
 import torch.testing._internal.hypothesis_utils as hu
-from torch.testing._internal.common_utils import _assertGradAndGradgradChecks
+from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck, gradgradcheck
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_is_not_fp32, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
@@ -71,11 +69,6 @@ if TEST_NUMPY:
     import numpy as np
 
 DOUBLE_TENSORTYPES = [torch.double]
-
-# See #49409, we should remove these if we end up with a global gradcheck setting
-gradcheck = partial(gradcheck, check_batched_grad=True)
-gradgradcheck = partial(gradgradcheck, check_batched_grad=True)
-_assertGradAndGradgradChecks = partial(_assertGradAndGradgradChecks, check_batched_grad=True)
 
 
 # WARNING: If you add a new top-level test case to this file, you MUST
@@ -3093,7 +3086,7 @@ class TestNN(NNTestCase):
                     out1 = wrapped_m(input)
                     return out0 + out1
 
-                torch.autograd.gradcheck(fn, (input.clone().requires_grad_(),))
+                gradcheck(fn, (input.clone().requires_grad_(),), check_batched_grad=False)
 
                 # test removing
                 pre_remove_out = wrapped_m(input)
@@ -3149,14 +3142,14 @@ class TestNN(NNTestCase):
                     out3 = wrapped_m(input)
                     return out0 + out1 + out2 + out3
 
-                torch.autograd.gradcheck(fn, (input.clone().requires_grad_(),))
+                gradcheck(fn, (input.clone().requires_grad_(),))
 
                 # assert that backprop reaches weight_orig in eval
                 if requires_grad:
                     def fn(weight):
                         return wrapped_m(input)
 
-                    torch.autograd.gradcheck(fn, (m.weight_orig,))
+                    gradcheck(fn, (m.weight_orig,))
 
     @skipIfNoLapack
     def test_spectral_norm_load_state_dict(self):
@@ -8759,6 +8752,29 @@ class TestNN(NNTestCase):
             out_t_5 = m(in_t_9[:, :, :5, :5, :5])
         self.assertEqual(out_t_9[:, :, :15, :15, :15], out_t_5)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_interpolate_illegal_memory_access(self):
+        in_s = 45
+        out_s = 14
+
+        input = torch.ones((1, 1, in_s), device='cuda', requires_grad=True)
+        # note we allocated grad_output to be larger so out of bound access
+        # woudl be visible in grad_input
+        grad = torch.ones((1, 1, out_s * 2), device='cuda', requires_grad=True)
+        grad = grad[:, :, :out_s]
+
+        input_ref = input.detach().cpu().requires_grad_()
+        grad_ref = grad.cpu()
+
+        out = F.interpolate(input, size=(out_s,), mode='nearest')
+        out.backward(grad)
+
+        out_ref = F.interpolate(input_ref, size=(out_s,), mode='nearest')
+        out_ref.backward(grad_ref)
+
+        self.assertEqual(out_ref, out)
+        self.assertEqual(input_ref.grad, input.grad)
+
     def test_interpolate(self):
         def _test_interpolate_helper(in_t, scale_factor, layer):
             out_size = int(math.floor(in_t.shape[-1] * scale_factor))
@@ -9933,6 +9949,27 @@ class TestFusionEval(TestCase):
         Y_hat = conv_na_bn_fused(inputs)
 
         self.assertEqual(Y_ref, Y_hat, msg="Conv+BN(non-affine) fusion results are off")
+
+
+class TestConstantPadNd(TestCase):
+    def test_constant_pad_nd(self):
+        a = torch.tensor([[1, 2], [3, 4]])
+        res = torch.constant_pad_nd(a, [1, 2, 1, 0], 9)
+        expected = torch.tensor([
+            [9, 9, 9, 9, 9],
+            [9, 1, 2, 9, 9],
+            [9, 3, 4, 9, 9]
+        ])
+        self.assertEqual(res, expected)
+
+    def test_preserves_memory_format(self):
+        nchw_tensor = torch.rand((1, 2, 5, 3))
+        nchw_padded = torch.constant_pad_nd(nchw_tensor, [1, 2], 0.5)
+        self.assertTrue(nchw_padded.is_contiguous(memory_format=torch.contiguous_format))
+
+        nhwc_tensor = nchw_tensor.contiguous(memory_format=torch.channels_last)
+        nhwc_padded = torch.constant_pad_nd(nhwc_tensor, [1, 2], 0.5)
+        self.assertTrue(nhwc_padded.is_contiguous(memory_format=torch.channels_last))
 
 
 class TestAddRelu(TestCase):

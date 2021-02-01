@@ -11,7 +11,8 @@ import unittest
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict,
-    suppress_warnings, IS_MACOS, make_tensor, TEST_SCIPY, slowTest, skipIfNoSciPy)
+    suppress_warnings, IS_MACOS, make_tensor, TEST_SCIPY, slowTest, skipIfNoSciPy,
+    gradcheck)
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs)
 from torch.testing._internal.common_device_type import (
@@ -1113,8 +1114,7 @@ class TestUnaryUfuncs(TestCase):
 
         cpu_tensor.requires_grad = True
         for n in [0, 1, 2, 3, 4, 5]:
-            torch.autograd.gradcheck(lambda x: x.polygamma(n), cpu_tensor,
-                                     check_batched_grad=True)
+            gradcheck(lambda x: x.polygamma(n), cpu_tensor)
 
     # TODO: update to compare against NumPy by rationalizing with OpInfo
     @onlyCUDA
@@ -1677,15 +1677,11 @@ _types_no_half = [
 
 # TODO: all these should be replaced with OpInfos
 torch_op_tests = [
-    _TorchMathTestMeta('floor'),
-    _TorchMathTestMeta('ceil'),
     _TorchMathTestMeta('rad2deg'),
     _TorchMathTestMeta('deg2rad'),
     _TorchMathTestMeta('frac', reffn='fmod', refargs=lambda x: (x.numpy(), 1)),
     _TorchMathTestMeta('trunc'),
     _TorchMathTestMeta('round'),
-    # FIXME lgamma produces different result compared to scipy at -inf
-    _TorchMathTestMeta('lgamma', reffn='gammaln', ref_backend='scipy', replace_inf_with_nan=True),
     _TorchMathTestMeta('polygamma', args=[0], substr='_0', reffn='polygamma',
                        refargs=lambda x: (0, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
                        ref_backend='scipy'),
