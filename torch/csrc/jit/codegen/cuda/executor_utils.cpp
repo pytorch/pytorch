@@ -364,8 +364,16 @@ NvrtcFunction nvrtcCompile(
   const std::string compute = "--gpu-architecture=compute_" +
       std::to_string(major) + std::to_string(minor);
   std::vector<const char*> args = {
-      "--std=c++14", "--use_fast_math", compute.c_str(), "-default-device"};
+      "--std=c++14", compute.c_str(), "-default-device"};
 #endif
+
+  const char* disable_fastmath = getenv("PYTORCH_NVFUSER_DISABLE_FASTMATH");
+  if (!disable_fastmath || (atoi(disable_fastmath) == 0)) {
+    args.push_back("--use_fast_math");
+  } else {
+    TORCH_WARN_ONCE(
+        "fast math disabled in nvfuser, try set `PYTORCH_NVFUSER_DISABLE_FASTMATH=0`");
+  }
 
   const char* disable_fma = getenv("PYTORCH_NVFUSER_DISABLE_FMA");
   // int disable_fma_flag = disable_fma ? atoi(disable_fma) : 0;
