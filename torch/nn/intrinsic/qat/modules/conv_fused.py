@@ -105,9 +105,6 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
             zero_bias = torch.zeros_like(self.bias)
         else:
             zero_bias = torch.zeros(self.out_channels, device=scaled_weight.device)
-        # mypy error: "Tensor" not callable  [operator]
-        # self._conv_forward is a method
-        assert not isinstance(self._conv_forward, torch.Tensor)
         conv = self._conv_forward(input, scaled_weight, zero_bias)
         conv_orig = conv / scale_factor.reshape(bias_shape)
         if self.bias is not None:
