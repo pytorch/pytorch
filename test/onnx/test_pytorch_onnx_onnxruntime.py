@@ -5844,7 +5844,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return self.transformer_encoder(input)
 
         x = torch.rand(10, 32, 512)
-        self.run_test(MyModule(512, 8, 2048 , 0., 3), (x,))
+        self.run_test(MyModule(512, 8, 2048 , 0., 3), (x,), atol=1e-6)
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_fake_quantize_per_tensor(self):
