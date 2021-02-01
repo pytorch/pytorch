@@ -5830,7 +5830,7 @@ class TestONNXRuntime(unittest.TestCase):
         other_input = make_input(RNN_BATCH_SIZE + 1)
         self.run_test(model, other_input, batch_size=RNN_BATCH_SIZE + 1)
 
-    @disableScriptTest()
+    @disableScriptTest()  # TODO: RuntimeError: Exporting the operator __is_ to ONNX is not supported
     def test_transformer_encoder(self):
         from torch.nn import TransformerEncoderLayer, TransformerEncoder
 
