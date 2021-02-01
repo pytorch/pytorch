@@ -58,7 +58,7 @@ TensorIteratorConfig& TensorIteratorConfig::promote_inputs_to_common_dtype(const
   return *this;
 }
 
-TensorIteratorConfig& TensorIteratorConfig::set_common_dtype(c10::optional<ScalarType> common_dtype) {
+TensorIteratorConfig& TensorIteratorConfig::set_common_dtype(ScalarType common_dtype) {
   specified_common_dtype = common_dtype;
   return *this;
 }
@@ -266,6 +266,9 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
   //       to quickly acquire a common dtype
   Device common_device = kCPU;
   common_dtype_ = ScalarType::Undefined;
+  auto is_common_dtype_specified =
+      config.specified_common_dtype != ScalarType::Undefined;
+
   // NB: despite output_dtype's generic sounding name, it only is
   // used in a nontrivial way if check_all_same_dtype is true
   ScalarType output_dtype = ScalarType::Undefined;
@@ -348,19 +351,19 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     return;
   }
 
-  common_dtype_ = config.specified_common_dtype.value_or(common_dtype_);
-
-  // Computes a common dtype, if needed
-  if (has_different_input_dtypes && config.promote_inputs_to_common_dtype_ &&
-      !config.specified_common_dtype.has_value()) {
-    common_dtype_ = compute_common_dtype();
-  }
-
-  // Promotes common dtype to the default float scalar type, if needed
-  if (config.promote_integer_inputs_to_float_ &&
-      c10::isIntegralType(common_dtype_, /*include_bool=*/true) &&
-      !config.specified_common_dtype.has_value()) {
-    common_dtype_ = c10::typeMetaToScalarType(c10::get_default_dtype());
+  if (is_common_dtype_specified) {
+    common_dtype_ = config.specified_common_dtype;
+  } else {
+    // Computes a common dtype, if needed
+    if (has_different_input_dtypes && config.promote_inputs_to_common_dtype_) {
+      common_dtype_ = compute_common_dtype();
+    }
+    // Promotes common dtype to the default float scalar type, if needed
+    if (config.promote_integer_inputs_to_float_ &&
+        c10::isIntegralType(common_dtype_, /*include_bool=*/true) &&
+        !is_common_dtype_specified) {
+      common_dtype_ = c10::typeMetaToScalarType(c10::get_default_dtype());
+    }
   }
 
   // Reviews operands (2/2)
@@ -406,7 +409,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     }
 
     // Checks safe casting for inputs if common_dtype was specified by user.
-    if (config.specified_common_dtype.has_value() && !op.is_output && op.current_dtype != common_dtype_) {
+    if (is_common_dtype_specified && !op.is_output && op.current_dtype != common_dtype_) {
       TORCH_CHECK(canCast(op.current_dtype, common_dtype_),
                   "input type ", op.current_dtype, " can't be cast to the "
                   "desired common type ", common_dtype_);
@@ -900,17 +903,17 @@ TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a) {
     .build();
 }
 
-TensorIterator TensorIterator::unary_float_op(Tensor& out, const Tensor& a, c10::optional<ScalarType> common_dtype) {
+TensorIterator TensorIterator::unary_float_op(Tensor& out, const Tensor& a, ScalarType common_dtype) {
   return TensorIteratorConfig()
-      .set_check_mem_overlap(true)
-      .add_output(out)
-      .add_input(a)
-      .set_common_dtype(common_dtype)
-      .promote_inputs_to_common_dtype(true)
-      .cast_common_dtype_to_outputs(true)
-      .enforce_safe_casting_to_output(true)
-      .promote_integer_inputs_to_float(true)
-      .build();
+    .set_check_mem_overlap(true)
+    .add_output(out)
+    .add_input(a)
+    .set_common_dtype(common_dtype)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true)
+    .promote_integer_inputs_to_float(true)
+    .build();
 }
 
 TensorIterator TensorIterator::nullary_op(Tensor& out) {

@@ -417,7 +417,7 @@ struct TORCH_API TensorIterator final : public TensorIteratorBase {
   static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator unary_op(Tensor& out, const Tensor& a);
-  static TensorIterator unary_float_op(Tensor& out, const Tensor& a, c10::optional<ScalarType> common_dtype);
+  static TensorIterator unary_float_op(Tensor& out, const Tensor& a, ScalarType common_dtype);
   static TensorIterator nullary_op(Tensor& out);
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
   static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
@@ -480,7 +480,7 @@ public:
   // Sets the "common_dtype" to the specified dtype.
   // NOTE: If "common_dtype" is set, computation of common_dtype is skipped
   // and the specified dtype is directly used as the "common_dtype".
-  TensorIteratorConfig& set_common_dtype(c10::optional<ScalarType> common_dtype);
+  TensorIteratorConfig& set_common_dtype(ScalarType common_dtype);
 
   // Sets the promote_integer_inputs_to_float_ flag, which is false by default
   // NOTE: If set to true, the promote_inputs_to_common_dtype_ must also be true.
@@ -520,7 +520,7 @@ private:
 
   c10::optional<DimVector> static_shape_ = c10::nullopt;
   c10::optional<std::pair<ScalarType, Device>> static_dtype_and_device_ = c10::nullopt;
-  c10::optional<ScalarType> specified_common_dtype = c10::nullopt;
+  ScalarType specified_common_dtype = ScalarType::Undefined;
   bool check_mem_overlap_ = true;
   bool allow_cpu_scalars_ = false;
   bool is_reduction_ = false;

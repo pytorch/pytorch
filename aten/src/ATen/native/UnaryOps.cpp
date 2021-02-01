@@ -38,7 +38,7 @@ static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub
 }
 
 template <typename Stub>
-static inline Tensor& unary_op_impl_float_out(Tensor& result, const Tensor& self, Stub& stub, c10::optional<ScalarType> dtype = c10::nullopt) {
+static inline Tensor& unary_op_impl_float_out(Tensor& result, const Tensor& self, Stub& stub, ScalarType dtype = ScalarType::Undefined) {
   auto iter = TensorIterator::unary_float_op(result, self, dtype);
   stub(iter.device_type(), iter);
   iter.cast_outputs();
@@ -46,7 +46,7 @@ static inline Tensor& unary_op_impl_float_out(Tensor& result, const Tensor& self
 }
 
 template <typename Stub>
-Tensor unary_op_impl_float(const Tensor& self, Stub& stub, c10::optional<ScalarType> dtype = c10::nullopt) {
+Tensor unary_op_impl_float(const Tensor& self, Stub& stub, ScalarType dtype = ScalarType::Undefined) {
   Tensor result;
   auto iter = TensorIterator::unary_float_op(result, self, dtype);
   stub(iter.device_type(), iter);
