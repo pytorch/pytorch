@@ -663,48 +663,48 @@ static void rsqrt_kernel(TensorIterator& iter) {
 
 } // anonymous namespace
 
-// REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
-// REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel);
-// REGISTER_DISPATCH(logit_stub, &logit_kernel);
-// REGISTER_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel);
-// REGISTER_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel);
-// REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
-// REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
-// REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
-// REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
-// REGISTER_DISPATCH(normal_stub, &normal_kernel);
-// REGISTER_DISPATCH(uniform_stub, &uniform_kernel);
-// REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
-// REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel);
-// REGISTER_DISPATCH(random_stub, &random_kernel);
-// REGISTER_DISPATCH(abs_stub, &abs_kernel);
-// REGISTER_DISPATCH(angle_stub, &angle_kernel);
-// REGISTER_DISPATCH(real_stub, &real_kernel);
-// REGISTER_DISPATCH(imag_stub, &imag_kernel);
-// REGISTER_DISPATCH(conj_stub, &conj_kernel);
-// REGISTER_DISPATCH(exp2_stub, &exp2_kernel);
-// REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
-// REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel);
-// REGISTER_DISPATCH(frac_stub, &frac_kernel);
-// REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
-// REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel);
-// REGISTER_DISPATCH(neg_stub, &neg_kernel);
-// REGISTER_DISPATCH(sign_stub, &sign_kernel);
-// REGISTER_DISPATCH(signbit_stub, &signbit_kernel);
-// REGISTER_DISPATCH(sgn_stub, &sgn_kernel);
-// REGISTER_DISPATCH(sinc_stub, &sinc_kernel);
-// REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
-// REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
-// REGISTER_DISPATCH(acosh_stub, &acosh_kernel);
-// REGISTER_DISPATCH(asinh_stub, &asinh_kernel);
-// REGISTER_DISPATCH(atanh_stub, &atanh_kernel);
-// REGISTER_DISPATCH(digamma_stub, &digamma_kernel);
-// REGISTER_DISPATCH(trigamma_stub, &trigamma_kernel);
-// REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
-// REGISTER_DISPATCH(clamp_stub, &clamp_kernel);
-// REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel);
-// REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
-// REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel)
+REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
+REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel);
+REGISTER_DISPATCH(logit_stub, &logit_kernel);
+REGISTER_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel);
+REGISTER_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel);
+REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
+REGISTER_DISPATCH(exponential_stub, &exponential_kernel);
+REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
+REGISTER_DISPATCH(log_normal_stub, &log_normal_kernel);
+REGISTER_DISPATCH(normal_stub, &normal_kernel);
+REGISTER_DISPATCH(uniform_stub, &uniform_kernel);
+REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
+REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel);
+REGISTER_DISPATCH(random_stub, &random_kernel);
+REGISTER_DISPATCH(abs_stub, &abs_kernel);
+REGISTER_DISPATCH(angle_stub, &angle_kernel);
+REGISTER_DISPATCH(real_stub, &real_kernel);
+REGISTER_DISPATCH(imag_stub, &imag_kernel);
+REGISTER_DISPATCH(conj_stub, &conj_kernel);
+REGISTER_DISPATCH(exp2_stub, &exp2_kernel);
+REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel);
+REGISTER_DISPATCH(logical_not_stub, &logical_not_kernel);
+REGISTER_DISPATCH(frac_stub, &frac_kernel);
+REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
+REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel);
+REGISTER_DISPATCH(neg_stub, &neg_kernel);
+REGISTER_DISPATCH(sign_stub, &sign_kernel);
+REGISTER_DISPATCH(signbit_stub, &signbit_kernel);
+REGISTER_DISPATCH(sgn_stub, &sgn_kernel);
+REGISTER_DISPATCH(sinc_stub, &sinc_kernel);
+REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
+REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
+REGISTER_DISPATCH(acosh_stub, &acosh_kernel);
+REGISTER_DISPATCH(asinh_stub, &asinh_kernel);
+REGISTER_DISPATCH(atanh_stub, &atanh_kernel);
+REGISTER_DISPATCH(digamma_stub, &digamma_kernel);
+REGISTER_DISPATCH(trigamma_stub, &trigamma_kernel);
+REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
+REGISTER_DISPATCH(clamp_stub, &clamp_kernel);
+REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel);
+REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);
+REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel)
 
 
 IMPLEMENT_COMPLEX_KERNEL(FLOATING, acos)

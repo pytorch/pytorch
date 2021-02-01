@@ -64,6 +64,6 @@ void cat_serial_kernel(Tensor& result, TensorList tensors, int64_t dim) {
 
 } // anonymous namespace
 
-// REGISTER_DISPATCH(cat_serial_stub, &cat_serial_kernel);
+REGISTER_DISPATCH(cat_serial_stub, &cat_serial_kernel);
 
 }} // at::native

@@ -299,7 +299,7 @@ Tensor _convolution_depthwise3x3_winograd(
 
 }  // namespace
 
-// REGISTER_DISPATCH(convolution_depthwise3x3_winograd_stub, &_convolution_depthwise3x3_winograd);
+REGISTER_DISPATCH(convolution_depthwise3x3_winograd_stub, &_convolution_depthwise3x3_winograd);
 
 }  // namespace native
 }  // namespace at

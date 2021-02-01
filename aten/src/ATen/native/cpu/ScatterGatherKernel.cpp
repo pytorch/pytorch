@@ -353,11 +353,11 @@ void scatter_scalar_reduce_cpu_kernel(Tensor& self, const int64_t dim, const Ten
 
 } // anonymous namespace
 
-// REGISTER_DISPATCH(gather_stub, &gather_cpu_kernel);
-// REGISTER_DISPATCH(scatter_stub, &scatter_cpu_kernel);
-// REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cpu_kernel);
-// REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cpu_kernel);
-// REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cpu_kernel);
-// REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cpu_kernel);
+REGISTER_DISPATCH(gather_stub, &gather_cpu_kernel);
+REGISTER_DISPATCH(scatter_stub, &scatter_cpu_kernel);
+REGISTER_DISPATCH(scatter_fill_stub, &scatter_fill_cpu_kernel);
+REGISTER_DISPATCH(scatter_add_stub, &scatter_add_cpu_kernel);
+REGISTER_DISPATCH(scatter_reduce_stub, &scatter_reduce_cpu_kernel);
+REGISTER_DISPATCH(scatter_scalar_reduce_stub, &scatter_scalar_reduce_cpu_kernel);
 
 }} // namespace at::native

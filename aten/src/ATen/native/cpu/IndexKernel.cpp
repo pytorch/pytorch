@@ -192,15 +192,20 @@ void cpu_masked_scatter_kernel(TensorIterator& iter, const Tensor& source) {
 }
 
 void masked_scatter_kernel(TensorIterator& iter, const Tensor& source) {
-  AT_DISPATCH_ALL_TYPES_AND2(ScalarType::Bool, ScalarType::BFloat16,
-    iter.dtype(), "masked_scatter", [&] {
-      auto mask_dtype = iter.input_dtype(0);
-      if (mask_dtype == ScalarType::Bool) {
-        cpu_masked_scatter_kernel<scalar_t, bool>(iter, source);
-      } else {
-        cpu_masked_scatter_kernel<scalar_t, unsigned char>(iter, source);
-      }
-    });
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+      ScalarType::Bool,
+      ScalarType::BFloat16,
+      ScalarType::Half,
+      iter.dtype(),
+      "masked_scatter",
+      [&] {
+        auto mask_dtype = iter.input_dtype(0);
+        if (mask_dtype == ScalarType::Bool) {
+          cpu_masked_scatter_kernel<scalar_t, bool>(iter, source);
+        } else {
+          cpu_masked_scatter_kernel<scalar_t, unsigned char>(iter, source);
+        }
+      });
 }
 
 template <typename scalar_t, typename mask_t, typename func_t>
@@ -283,11 +288,11 @@ void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
 
 } // anonymous namespace
 
-// REGISTER_DISPATCH(index_stub, &index_kernel);
-// REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
-// REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel);
-// REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel);
-// REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel);
-// REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel);
+REGISTER_DISPATCH(index_stub, &index_kernel);
+REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
+REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel);
+REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel);
+REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel);
+REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel);
 
 }} // namespace at::native

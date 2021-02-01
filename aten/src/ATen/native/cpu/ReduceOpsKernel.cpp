@@ -386,19 +386,19 @@ static void argmin_kernel_impl(TensorIterator &iter) {
 
 }  // anonymous namespace
 
-// REGISTER_DISPATCH(nansum_stub, &nansum_kernel_impl);
-// REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
-// REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
-// REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
-// REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl);
-// REGISTER_DISPATCH(and_stub, &and_kernel_impl);
-// REGISTER_DISPATCH(or_stub, &or_kernel_impl);
-// REGISTER_DISPATCH(min_values_stub, &min_values_kernel_impl);
-// REGISTER_DISPATCH(max_values_stub, &max_values_kernel_impl);
-// REGISTER_DISPATCH(argmax_stub, &argmax_kernel_impl);
-// REGISTER_DISPATCH(argmin_stub, &argmin_kernel_impl);
-// REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel);
-// REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel);
-// REGISTER_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel);
+REGISTER_DISPATCH(nansum_stub, &nansum_kernel_impl);
+REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
+REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
+REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
+REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl);
+REGISTER_DISPATCH(and_stub, &and_kernel_impl);
+REGISTER_DISPATCH(or_stub, &or_kernel_impl);
+REGISTER_DISPATCH(min_values_stub, &min_values_kernel_impl);
+REGISTER_DISPATCH(max_values_stub, &max_values_kernel_impl);
+REGISTER_DISPATCH(argmax_stub, &argmax_kernel_impl);
+REGISTER_DISPATCH(argmin_stub, &argmin_kernel_impl);
+REGISTER_DISPATCH(cumprod_stub, &cumprod_cpu_kernel);
+REGISTER_DISPATCH(cumsum_stub, &cumsum_cpu_kernel);
+REGISTER_DISPATCH(logcumsumexp_stub, &logcumsumexp_cpu_kernel);
 
 }}  // namespace at::native

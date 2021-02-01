@@ -6,7 +6,6 @@
 
 #include <type_traits>
 #include <atomic>
-#include <iostream>
 
 // Implements instruction set specific function dispatch.
 //
@@ -205,8 +204,6 @@ struct RegisterHIPDispatch {
 #define REGISTER_HIP_DISPATCH(name, fn) \
   static RegisterHIPDispatch<decltype(fn), struct name> name ## __register(name, fn);
 
-#define f1 int
-
 // NB: This macro must be used in an actual 'cu' file; if you try using
 // it from a 'cpp' file it will not work!
 #if defined(__CUDACC__)
@@ -218,8 +215,6 @@ struct RegisterHIPDispatch {
 // #define REGISTER_DISPATCH(name, fn) REGISTER_HIP_DISPATCH(name, fn)
 #elif defined(CPU_CAPABILITY)
 #define REGISTER_DISPATCH(name, fn) REGISTER_ARCH_DISPATCH(name, CPU_CAPABILITY, fn)
-#else
-#define REGISTER_DISPATCH(name, fn) f1
 #endif
 
 
