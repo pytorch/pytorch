@@ -1,6 +1,6 @@
 import torch
-import unittest
 
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 
 class kernel_arena_scope(object):
@@ -37,4 +37,4 @@ class TestTensorExprPyBind(JitTestCase):
             torch.testing.assert_allclose(tA + tB, tC)
 
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()

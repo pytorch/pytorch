@@ -219,7 +219,13 @@ option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 cmake_dependent_option(
     USE_VALGRIND "Use Valgrind. Only available on Linux." ON
     "LINUX" OFF)
-option(USE_VULKAN "Use Vulkan GPU backend" OFF)
+
+if(NOT DEFINED USE_VULKAN)
+  cmake_dependent_option(
+      USE_VULKAN "Use Vulkan GPU backend" ON
+      "ANDROID" OFF)
+endif()
+
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference even on fp32 tensors" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation (needs libshaderc)" OFF)
@@ -249,8 +255,9 @@ cmake_dependent_option(
 option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
-option(USE_DEPLOY "Enable torch::deploy embedded python interpreter" OFF)
-
+cmake_dependent_option(
+    USE_DEPLOY "Build embedded torch::deploy interpreter" OFF
+    "BUILD_PYTHON" OFF)
 # Since TensorPipe does not support Windows, set it to OFF when WIN32 detected
 # On Windows platform, if user does not install libuv in build conda env and
 # does not set libuv_ROOT environment variable. Set USE_DISTRIBUTED to OFF.
@@ -919,3 +926,8 @@ endif()
 
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
+
+# ---[ Torch Deploy
+if(USE_DEPLOY)
+  add_subdirectory(torch/csrc/deploy)
+endif()
