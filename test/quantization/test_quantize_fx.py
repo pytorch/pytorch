@@ -2949,7 +2949,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
     @skip_if_no_torchvision
     @skipIfNoFBGEMM
-    # @unittest.skip("skip for now since tbb failed")
+    @unittest.skip("skip for now since tbb failed")
     def test_torchvision(self):
         from torchvision import models
         from torchvision.models import quantization as quantized_models
@@ -2966,13 +2966,10 @@ class TestQuantizeFxModels(QuantizationTestCase):
         # test eager and graph consistency
         model_list = quantized_model_list
         model_list = set(model_list)
-        model_list = set(["googlenet"])
-        # mobilenet: dropout error RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'QUInt8'
-        # inception_v3/googlenet qat is not working due to AdaptiveAveragePool qat
-        # we might observe the output of AdaptivveAveragePool in the futuren
+        # mobilenet/inception_v3/googlenet qat is not working due to AdaptiveAveragePool qat
+        # we might observe the output of AdaptiveAveragePool in the future
         # and re-enable the test
         fx_eager_not_matching = [
-            ("mobilenet_v2", "static"),
             ("mobilenet_v2", "qat"),
             ("inception_v3", "qat"),
             ("googlenet", "qat")
