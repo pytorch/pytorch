@@ -83,9 +83,6 @@ bool BatchedTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
 const Storage& BatchedTensorImpl::storage() const {
   TORCH_CHECK(false, "Due to limitations, we cannot access the storage() of a tensor from inside of vmap.");
 }
-int64_t BatchedTensorImpl::storage_offset() const {
-  TORCH_CHECK(false, "Due to limitations, we cannot access the storage_offset() of a tensor from inside of vmap.");
-}
 
 // The following are some internal inherited methods that we do not support.
 // They should never get called.

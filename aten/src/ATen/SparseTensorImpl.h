@@ -49,7 +49,6 @@ public:
 
   bool has_storage() const override;
   const Storage& storage() const override;
-  int64_t storage_offset() const override;
 
   // WARNING: This function does NOT preserve invariants of sparse_dim/dense_dim with
   // respect to indices and values
