@@ -11,10 +11,14 @@ from typing import Any, List, Optional
 
 import torch
 from torch.utils.benchmark.utils._stubs import CallgrindModuleType, TimeitModuleType
-from torch.utils import cpp_extension
+from torch.utils.benchmark.utils.historic.back_testing import IS_BACK_TESTING, CXX_FLAGS
+from torch.utils.benchmark.utils.historic.cpp_jit import compat_jit
+
+if not IS_BACK_TESTING:
+    from torch.utils import cpp_extension
 
 
-LOCK = threading.Lock()
+LOCK = threading.RLock()
 SOURCE_ROOT = os.path.split(os.path.abspath(__file__))[0]
 
 # We calculate uuid once at import time so that separate processes will have
@@ -35,44 +39,16 @@ BUILD_ROOT = os.path.join(
     f"benchmark_utils_jit_build_{uuid.uuid4()}".replace("-", "")
 )
 
-# BACK_TESTING_NOTE:
-#   There are two workflows where this code could be used. One is the obvious
-#   case where someone simply builds or installs PyTorch and uses Timer.
-#   The other is that the entire `torch/utils/benchmark` folder from a CURRENT
-#   PyTorch checkout is copy-pasted into a much OLDER version of the PyTorch
-#   source code. This is what we refer to here as "back testing". The rationale
-#   is that we might want to use current tooling to study some aspect of an
-#   earlier version of PyTorch. (e.g. a regression.)
-#
-#   The problem is that Timer relies on several aspects of core PyTorch, namely
-#   some binding functions for Valgrind symbols in `torch._C` and the
-#   `torch.__config__._cxx_flags()` method. If we were to naively copy code
-#   around this wouldn't work as the symbols of interest aren't present in
-#   earlier versions of PyTorch. In order to work around this, we must add back
-#   testing shims. These shims will never activate during normal use, but will
-#   allow Timer to function outside of the "correct" version of PyTorch by
-#   emulating functionality that was added later.
-#
-#   These shims are temporary, and as Timer becomes more integrated with
-#   PyTorch the cost and complexity of such shims will increase. Once back
-#   testing is no longer required (which is to say we have done enough historic
-#   analysis and the shims no longer justify their maintenance and code
-#   complexity costs) back testing paths will be removed.
+def _get_build_root() -> str:
+    with LOCK:
+        if not os.path.exists(BUILD_ROOT):
+            os.makedirs(BUILD_ROOT)
+            atexit.register(shutil.rmtree, BUILD_ROOT)
+        return BUILD_ROOT
 
-if hasattr(torch, "__config__") and hasattr(torch.__config__, "_cxx_flags"):
-    CXX_FLAGS = torch.__config__._cxx_flags().strip().split()
-    if "-g" not in CXX_FLAGS:
-        CXX_FLAGS.append("-g")
-else:
-    # FIXME: Remove when back testing is no longer required.
-    CXX_FLAGS = ["-O2", "-fPIC", "-g"]
 
 EXTRA_INCLUDE_PATHS: List[str] = [
     os.path.join(SOURCE_ROOT, "valgrind_wrapper"),
-
-    # These paths are only needed for back testing.
-    os.path.join(os.path.split(torch.__file__)[0], "lib", "include"),
-    os.path.join(os.path.split(torch.__file__)[0], "lib", "include", "torch", "csrc", "api", "include"),
 ]
 CONDA_PREFIX = os.getenv("CONDA_PREFIX")
 if CONDA_PREFIX is not None:
@@ -85,20 +61,26 @@ def get_compat_bindings() -> CallgrindModuleType:
     with LOCK:
         global COMPAT_CALLGRIND_BINDINGS
         if COMPAT_CALLGRIND_BINDINGS is None:
-            COMPAT_CALLGRIND_BINDINGS = cpp_extension.load(
-                name="callgrind_bindings",
-                sources=[os.path.join(
-                    SOURCE_ROOT,
-                    "historic",
-                    "compat_bindings.cpp"
-                )],
-                extra_cflags=CXX_FLAGS,
-                extra_include_paths=EXTRA_INCLUDE_PATHS,
-            )
+            build_dir = os.path.join(_get_build_root(), "compat_bindings")
+            os.makedirs(build_dir)
+            src_file = os.path.join(SOURCE_ROOT, "historic", "compat_bindings.cpp")
+            dest_file = os.path.join(build_dir, "callgrind_bindings.cpp")
+            shutil.copyfile(src_file, dest_file)
+            COMPAT_CALLGRIND_BINDINGS = compat_jit(
+                fpath=dest_file, cxx_flags=CXX_FLAGS, is_standalone=False)
     return COMPAT_CALLGRIND_BINDINGS
 
 
-def _compile_template(stmt: str, setup: str, src: str, is_standalone: bool) -> Any:
+def _compile_template(
+    template_name: str,
+    template_path: str,
+    stmt: str,
+    setup: str,
+    is_standalone: bool
+) -> Any:
+    with open(template_path, "rt") as f:
+        src = f.read()
+
     for before, after, indentation in (
         ("// SETUP_TEMPLATE_LOCATION", setup, 4),
         ("// STMT_TEMPLATE_LOCATION", stmt, 8)
@@ -114,19 +96,28 @@ def _compile_template(stmt: str, setup: str, src: str, is_standalone: bool) -> A
 
     # We want to isolate different Timers. However `cpp_extension` will
     # cache builds which will significantly reduce the cost of repeated
-    # invocations.
+    # invocations. For compat bindings, we don't care and just use a unique
+    # ID to guarantee Safety.
     with LOCK:
-        if not os.path.exists(BUILD_ROOT):
-            os.makedirs(BUILD_ROOT)
-            atexit.register(shutil.rmtree, BUILD_ROOT)
+        build_root = _get_build_root()
+        if IS_BACK_TESTING:
+            build_dir = os.path.join(build_root, f"timer_cpp_{uuid.uuid4()}")
+        else:
+            name = f"timer_cpp_{abs(hash(src))}"
+            build_dir = os.path.join(BUILD_ROOT, name)
 
-        name = f"timer_cpp_{abs(hash(src))}"
-        build_dir = os.path.join(BUILD_ROOT, name)
         os.makedirs(build_dir, exist_ok=True)
 
-        src_path = os.path.join(build_dir, "timer_src.cpp")
+        src_path = os.path.join(build_dir, f"{template_name}.cpp")
         with open(src_path, "wt") as f:
             f.write(src)
+
+    if IS_BACK_TESTING:
+        return compat_jit(
+            fpath=src_path,
+            cxx_flags=CXX_FLAGS,
+            is_standalone=is_standalone,
+        )
 
     # `cpp_extension` has its own locking scheme, so we don't need our lock.
     return cpp_extension.load(
@@ -142,19 +133,13 @@ def _compile_template(stmt: str, setup: str, src: str, is_standalone: bool) -> A
 
 def compile_timeit_template(stmt: str, setup: str) -> TimeitModuleType:
     template_path: str = os.path.join(SOURCE_ROOT, "timeit_template.cpp")
-    with open(template_path, "rt") as f:
-        src: str = f.read()
-
-    module = _compile_template(stmt, setup, src, is_standalone=False)
+    module = _compile_template("timer_timeit", template_path, stmt, setup, is_standalone=False)
     assert isinstance(module, TimeitModuleType)
     return module
 
 
 def compile_callgrind_template(stmt: str, setup: str) -> str:
     template_path: str = os.path.join(SOURCE_ROOT, "valgrind_wrapper", "timer_callgrind_template.cpp")
-    with open(template_path, "rt") as f:
-        src: str = f.read()
-
-    target = _compile_template(stmt, setup, src, is_standalone=True)
+    target = _compile_template("timer_callgrind", template_path, stmt, setup, is_standalone=True)
     assert isinstance(target, str)
     return target
