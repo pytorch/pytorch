@@ -27,9 +27,11 @@ class TestComplex(JitTestCase):
             def __init__(self):
                 super().__init__()
                 self.a = 3 + 5j
+                self.b = [2 + 3j, 3 + 4j, 0 - 3j, -4 + 0j]
 
             def forward(self, b: int):
                 return b
 
         loaded = self.getExportImportCopy(ComplexModule())
         self.assertEqual(loaded.a, 3 + 5j)
+        self.assertEqual(loaded.b, [2 + 3j, 3 + 4j, -3j, -4]
