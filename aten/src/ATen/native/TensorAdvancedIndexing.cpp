@@ -737,7 +737,9 @@ Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar so
   }
 
   // Handle the case when `self` is 0-dim
-  self = (0 == self.dim()) ? self.unsqueeze(-1) : self;
+  if (0 == self.dim()) {
+    self.unsqueeze_(-1);
+  }
 
   dim = at::maybe_wrap_dim(dim, self);
   TORCH_CHECK(index.dim() <= 1, "Index has to be a vector/scalar");
