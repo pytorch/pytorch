@@ -39,6 +39,8 @@ enum class DispatchKey : uint8_t {
   // this will get eliminated, but for now it's convenient)
   CatchAll = Undefined,
 
+  DynamicLayerFront,
+
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ BACKENDS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // A "backend" is colloquially used to refer to handlers for dispatch
   // which actually implement the numerics of an operation in question.
@@ -300,6 +302,8 @@ enum class DispatchKey : uint8_t {
   PrivateUse1_PreAutograd = AutogradPrivateUse1,
   PrivateUse2_PreAutograd = AutogradPrivateUse2,
   PrivateUse3_PreAutograd = AutogradPrivateUse3,
+
+  DynamicLayerBack,
 };
 
 // Note [Private use DispatchKey]

@@ -1013,6 +1013,26 @@ Tensor comparison_pointwise_batching_rule(const Tensor& self, const Tensor& othe
   return physical_args[0].getPhysicalToLogicalMap().apply(result);
 }
 
+// struct DynamicLayer {
+//   DynamicLayer(DispatchKey key, int64_t layerId): key_(key), layerId_(layerId) {}
+//   DispatchKey key_; 
+//   int64_t layerId_;
+// };
+// 
+// std::vector<DynamicLayer> dynamicLayerStack;
+// 
+// int64_t pushLayer(DispatchKey key) {
+//   auto layerId = 1 + dynamicLayerStack.size();
+//   dynamicLayerStack.emplace_back(key, layerId);
+//   return layerId;
+// }
+// 
+// DynamicLayer popLayer() {
+//   auto result = dynamicLayerStack.back();
+//   dynamicLayerStack.pop_back();
+//   return result;
+// }
+
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
@@ -1026,15 +1046,15 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("_add_batch_dim", native::_add_batch_dim);
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
 
-  m.impl("sum.dim_IntList", sum_batching_rule);
+//   m.impl("sum.dim_IntList", sum_batching_rule);
   m.impl("is_complex", native::is_complex);
   m.impl("conj", native::conj);
-
-  // inplace operations
-  m.impl("fill_.Scalar", fill_inplace_scalar_batching_rule);
-  m.impl("fill_.Tensor", fill_inplace_tensor_batching_rule);
-  m.impl("zero_", zero_inplace_batching_rule);
-
+// 
+//   // inplace operations
+//   m.impl("fill_.Scalar", fill_inplace_scalar_batching_rule);
+//   m.impl("fill_.Tensor", fill_inplace_tensor_batching_rule);
+//   m.impl("zero_", zero_inplace_batching_rule);
+// 
   // view operations
   m.impl("as_strided", as_strided_batching_rule);
   m.impl("chunk", chunk_batching_rule);
@@ -1066,94 +1086,94 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("unsqueeze", unsqueeze_batching_rule);
   m.impl("view", view_batching_rule);
   m.impl("view_as", native::view_as); // composite wrt autograd
-
-  // clamp operations
-  m.impl("clamp", clamp_batching_rule);
-  m.impl("clamp_min", clamp_min_batching_rule);
-  m.impl("clamp_max", clamp_max_batching_rule);
-
-  // unary pointwise, out-of-place, no additional arguments.
-#define UNARY_POINTWISE(op) m.impl(#op, \
-    unwrap_and_call<Tensor (*)(const Tensor&), at::op>);
-  UNARY_POINTWISE(abs);
-  UNARY_POINTWISE(acos);
-  UNARY_POINTWISE(asin);
-  UNARY_POINTWISE(atan);
-  UNARY_POINTWISE(ceil);
-  UNARY_POINTWISE(cos);
-  UNARY_POINTWISE(cosh);
-  UNARY_POINTWISE(_conj);
-  UNARY_POINTWISE(digamma);
-  UNARY_POINTWISE(exp);
-  UNARY_POINTWISE(expm1);
-  UNARY_POINTWISE(floor);
-  UNARY_POINTWISE(frac);
-  UNARY_POINTWISE(lgamma);
-  UNARY_POINTWISE(log);
-  UNARY_POINTWISE(log10);
-  UNARY_POINTWISE(log1p);
-  UNARY_POINTWISE(log2);
-  UNARY_POINTWISE(neg);
-  UNARY_POINTWISE(reciprocal);
-  UNARY_POINTWISE(relu);
-  UNARY_POINTWISE(round);
-  UNARY_POINTWISE(rsqrt);
-  UNARY_POINTWISE(sigmoid);
-  UNARY_POINTWISE(sign);
-  UNARY_POINTWISE(sin);
-  UNARY_POINTWISE(sinh);
-  UNARY_POINTWISE(sqrt);
-  UNARY_POINTWISE(tan);
-  UNARY_POINTWISE(tanh);
-  UNARY_POINTWISE(trunc);
-#undef UNARY_POINTWISE
-#define TO_BATCHING_RULE(name, ...) \
-  { \
-    using to_type = Tensor(Tensor::*)(__VA_ARGS__) const; \
-    m.impl(name, unwrap_and_call_method< \
-        to_type, &Tensor::to, __VA_ARGS__>);\
-  }
-  TO_BATCHING_RULE("to.device", Device, ScalarType, bool, bool, optional<MemoryFormat>)
-  TO_BATCHING_RULE("to.dtype", ScalarType, bool, bool, optional<MemoryFormat>)
-  TO_BATCHING_RULE("to.other", const Tensor&, bool, bool, optional<MemoryFormat>)
-  m.impl("to.dtype_layout", to_dtype_layout_batching_rule);
-#undef TO_BATCHING_RULE
-  m.impl("clone", clone_batching_rule);
-
-  using TensorTensorScalarType = Tensor (*)(const Tensor&, const Tensor&, Scalar);
-  using TensorTensorType = Tensor (*)(const Tensor&, const Tensor&);
-  using TensorScalarType = Tensor (*)(const Tensor&, Scalar);
-
-#define BINARY_POINTWISE(op) \
-  m.impl(#op".Tensor", binary_pointwise_batching_rule<TensorTensorType, at::op>); \
-  m.impl(#op".Scalar", unwrap_and_call<TensorScalarType, at::op, Scalar>);
-#define BINARY_POINTWISE_VA(op, ...) \
-  { \
-    using Binop = Tensor (*)(const Tensor&, const Tensor&, __VA_ARGS__); \
-    using Unop = Tensor (*)(const Tensor&, Scalar, __VA_ARGS__); \
-    m.impl(#op".Tensor", binary_pointwise_batching_rule<Binop, at::op, __VA_ARGS__>); \
-    m.impl(#op".Scalar", unwrap_and_call<Unop, at::op, Scalar, __VA_ARGS__>); \
-  }
-
-  BINARY_POINTWISE_VA(add, Scalar);
-  BINARY_POINTWISE_VA(sub, Scalar);
-  BINARY_POINTWISE_VA(rsub, Scalar);
-  BINARY_POINTWISE(mul);
-  BINARY_POINTWISE(div);
-
-  // at::pow has three out-of-place overloads
-  m.impl("pow.Tensor_Tensor", binary_pointwise_batching_rule<TensorTensorType, at::pow>);
-  m.impl("pow.Tensor_Scalar", unwrap_and_call<TensorScalarType, at::pow, Scalar>);
-  m.impl("pow.Scalar", pow_scalar_Tensor_batching_rule);
-
-  m.impl("sigmoid_backward", binary_pointwise_batching_rule<TensorTensorType, at::sigmoid_backward>);
-  m.impl(
-      "threshold_backward",
-      binary_pointwise_batching_rule<
-          TensorTensorScalarType,
-          at::threshold_backward,
-          Scalar>);
-
+// 
+//   // clamp operations
+//   m.impl("clamp", clamp_batching_rule);
+//   m.impl("clamp_min", clamp_min_batching_rule);
+//   m.impl("clamp_max", clamp_max_batching_rule);
+// 
+//   // unary pointwise, out-of-place, no additional arguments.
+// #define UNARY_POINTWISE(op) m.impl(#op, \
+//     unwrap_and_call<Tensor (*)(const Tensor&), at::op>);
+//   UNARY_POINTWISE(abs);
+//   UNARY_POINTWISE(acos);
+//   UNARY_POINTWISE(asin);
+//   UNARY_POINTWISE(atan);
+//   UNARY_POINTWISE(ceil);
+//   UNARY_POINTWISE(cos);
+//   UNARY_POINTWISE(cosh);
+//   UNARY_POINTWISE(_conj);
+//   UNARY_POINTWISE(digamma);
+//   UNARY_POINTWISE(exp);
+//   UNARY_POINTWISE(expm1);
+//   UNARY_POINTWISE(floor);
+//   UNARY_POINTWISE(frac);
+//   UNARY_POINTWISE(lgamma);
+//   UNARY_POINTWISE(log);
+//   UNARY_POINTWISE(log10);
+//   UNARY_POINTWISE(log1p);
+//   UNARY_POINTWISE(log2);
+//   UNARY_POINTWISE(neg);
+//   UNARY_POINTWISE(reciprocal);
+//   UNARY_POINTWISE(relu);
+//   UNARY_POINTWISE(round);
+//   UNARY_POINTWISE(rsqrt);
+//   UNARY_POINTWISE(sigmoid);
+//   UNARY_POINTWISE(sign);
+//   UNARY_POINTWISE(sin);
+//   UNARY_POINTWISE(sinh);
+//   UNARY_POINTWISE(sqrt);
+//   UNARY_POINTWISE(tan);
+//   UNARY_POINTWISE(tanh);
+//   UNARY_POINTWISE(trunc);
+// #undef UNARY_POINTWISE
+// #define TO_BATCHING_RULE(name, ...) \
+//   { \
+//     using to_type = Tensor(Tensor::*)(__VA_ARGS__) const; \
+//     m.impl(name, unwrap_and_call_method< \
+//         to_type, &Tensor::to, __VA_ARGS__>);\
+//   }
+//   TO_BATCHING_RULE("to.device", Device, ScalarType, bool, bool, optional<MemoryFormat>)
+//   TO_BATCHING_RULE("to.dtype", ScalarType, bool, bool, optional<MemoryFormat>)
+//   TO_BATCHING_RULE("to.other", const Tensor&, bool, bool, optional<MemoryFormat>)
+//   m.impl("to.dtype_layout", to_dtype_layout_batching_rule);
+// #undef TO_BATCHING_RULE
+//   m.impl("clone", clone_batching_rule);
+// 
+//   using TensorTensorScalarType = Tensor (*)(const Tensor&, const Tensor&, Scalar);
+//   using TensorTensorType = Tensor (*)(const Tensor&, const Tensor&);
+//   using TensorScalarType = Tensor (*)(const Tensor&, Scalar);
+// 
+// #define BINARY_POINTWISE(op) \
+//   m.impl(#op".Tensor", binary_pointwise_batching_rule<TensorTensorType, at::op>); \
+//   m.impl(#op".Scalar", unwrap_and_call<TensorScalarType, at::op, Scalar>);
+// #define BINARY_POINTWISE_VA(op, ...) \
+//   { \
+//     using Binop = Tensor (*)(const Tensor&, const Tensor&, __VA_ARGS__); \
+//     using Unop = Tensor (*)(const Tensor&, Scalar, __VA_ARGS__); \
+//     m.impl(#op".Tensor", binary_pointwise_batching_rule<Binop, at::op, __VA_ARGS__>); \
+//     m.impl(#op".Scalar", unwrap_and_call<Unop, at::op, Scalar, __VA_ARGS__>); \
+//   }
+// 
+//   BINARY_POINTWISE_VA(add, Scalar);
+//   BINARY_POINTWISE_VA(sub, Scalar);
+//   BINARY_POINTWISE_VA(rsub, Scalar);
+//   BINARY_POINTWISE(mul);
+//   BINARY_POINTWISE(div);
+// 
+//   // at::pow has three out-of-place overloads
+//   m.impl("pow.Tensor_Tensor", binary_pointwise_batching_rule<TensorTensorType, at::pow>);
+//   m.impl("pow.Tensor_Scalar", unwrap_and_call<TensorScalarType, at::pow, Scalar>);
+//   m.impl("pow.Scalar", pow_scalar_Tensor_batching_rule);
+// 
+//   m.impl("sigmoid_backward", binary_pointwise_batching_rule<TensorTensorType, at::sigmoid_backward>);
+//   m.impl(
+//       "threshold_backward",
+//       binary_pointwise_batching_rule<
+//           TensorTensorScalarType,
+//           at::threshold_backward,
+//           Scalar>);
+// 
   // for at::result_type, call the native::result_type implementation.
   // We don't have to do anything special because native::result_type operates
   // on the logical shape of the tensors.
@@ -1162,10 +1182,10 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("result_type.Scalar_Tensor", static_cast<ScalarType (*)(Scalar, const Tensor&)>(native::result_type));
   m.impl("result_type.Scalar_Scalar", static_cast<ScalarType (*)(Scalar, Scalar)>(native::result_type));
 
-#undef BINARY_POINTWISE_VA
-#undef BINARY_POINTWISE
-
-
+// #undef BINARY_POINTWISE_VA
+// #undef BINARY_POINTWISE
+// 
+// 
 #define TRIVIAL_OP(op) m.impl(#op, \
     unwrap_and_call<Tensor (*)(const Tensor&), at::op>);
   // complex number view operators
@@ -1174,43 +1194,43 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   TRIVIAL_OP(view_as_real);
   m.impl("view_as_complex", view_as_complex_batching_rule);
 #undef TRIVIAL
-
-  // matmul-like operators
-  m.impl("mv", mv_batching_rule);
-  m.impl("dot", dot_batching_rule);
-  m.impl("bmm", bmm_batching_rule);
-  m.impl("mm", mm_batching_rule);
-
-  // cat/stack
-  m.impl("cat", cat_batching_rule);
-  m.impl("stack", stack_batching_rule);
-
-  // backward operators
-  m.impl("select_backward", select_backward_batching_rule);
-  m.impl("slice_backward", slice_backward_batching_rule);
-  m.impl("trace_backward", trace_backward_batching_rule);
-  m.impl("diagonal_backward", diagonal_backward_batching_rule);
-
-  // Tensor.new_* operators
-  m.impl("new_empty", new_empty_batching_rule);
-  m.impl("new_empty_strided", new_empty_strided_batching_rule);
-  m.impl("new_zeros", new_zeros_batching_rule);
-
-  m.impl("contiguous", contiguous_batching_rule);
-
-  // Comparison ops
-#define COMPARISON_POINTWISE(op) \
-  m.impl(#op".Tensor", comparison_pointwise_batching_rule<TensorTensorType, at::op>); \
-  m.impl(#op".Scalar", unwrap_and_call<TensorScalarType, at::op, Scalar>);
-
-  COMPARISON_POINTWISE(eq);
-  COMPARISON_POINTWISE(gt);
-  COMPARISON_POINTWISE(ge);
-  COMPARISON_POINTWISE(le);
-  COMPARISON_POINTWISE(lt);
-  COMPARISON_POINTWISE(ne);
-
-#undef COMPARISON_POINTWISE
+// 
+//   // matmul-like operators
+//   m.impl("mv", mv_batching_rule);
+//   m.impl("dot", dot_batching_rule);
+//   m.impl("bmm", bmm_batching_rule);
+//   m.impl("mm", mm_batching_rule);
+// 
+//   // cat/stack
+//   m.impl("cat", cat_batching_rule);
+//   m.impl("stack", stack_batching_rule);
+// 
+//   // backward operators
+//   m.impl("select_backward", select_backward_batching_rule);
+//   m.impl("slice_backward", slice_backward_batching_rule);
+//   m.impl("trace_backward", trace_backward_batching_rule);
+//   m.impl("diagonal_backward", diagonal_backward_batching_rule);
+// 
+//   // Tensor.new_* operators
+//   m.impl("new_empty", new_empty_batching_rule);
+//   m.impl("new_empty_strided", new_empty_strided_batching_rule);
+//   m.impl("new_zeros", new_zeros_batching_rule);
+// 
+//   m.impl("contiguous", contiguous_batching_rule);
+// 
+//   // Comparison ops
+// #define COMPARISON_POINTWISE(op) \
+//   m.impl(#op".Tensor", comparison_pointwise_batching_rule<TensorTensorType, at::op>); \
+//   m.impl(#op".Scalar", unwrap_and_call<TensorScalarType, at::op, Scalar>);
+// 
+//   COMPARISON_POINTWISE(eq);
+//   COMPARISON_POINTWISE(gt);
+//   COMPARISON_POINTWISE(ge);
+//   COMPARISON_POINTWISE(le);
+//   COMPARISON_POINTWISE(lt);
+//   COMPARISON_POINTWISE(ne);
+// 
+// #undef COMPARISON_POINTWISE
 }
 
 } // namespace at
