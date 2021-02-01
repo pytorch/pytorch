@@ -81,7 +81,7 @@ TypePtr IValue::type() const {
     case Tag::Double:
       return FloatType::get();
     case Tag::ComplexDouble:
-      return ComplexDoubleType::get();
+      return ComplexType::get();
     case Tag::Int:
       return IntType::get();
     case Tag::Bool:

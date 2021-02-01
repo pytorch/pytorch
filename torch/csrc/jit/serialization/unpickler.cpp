@@ -57,7 +57,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case StorageType::Kind:
       case NumberType::Kind:
       case FloatType::Kind:
-      case ComplexDoubleType::Kind:
+      case ComplexType::Kind:
       case IntType::Kind:
       case NoneType::Kind:
       case GeneratorType::Kind:

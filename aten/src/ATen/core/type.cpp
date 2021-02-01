@@ -145,8 +145,8 @@ FloatTypePtr FloatType::get() {
   static auto value = FloatType::create();
   return value;
 }
-ComplexDoubleTypePtr ComplexDoubleType::get() {
-  static auto value = ComplexDoubleType::create();
+ComplexTypePtr ComplexType::get() {
+  static auto value = ComplexType::create();
   return value;
 }
 BoolTypePtr BoolType::get() {
@@ -214,7 +214,7 @@ ListTypePtr ListType::ofInts() {
   return value;
 }
 ListTypePtr ListType::ofComplexDoubles() {
-  static auto value = ListType::create(ComplexDoubleType::get());
+  static auto value = ListType::create(ComplexType::get());
   return value;
 }
 ListTypePtr ListType::ofFloats() {

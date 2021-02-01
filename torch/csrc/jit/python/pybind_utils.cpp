@@ -21,7 +21,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     }
     case TypeKind::FloatType:
       return py::cast<double>(obj);
-    case TypeKind::ComplexDoubleType: {
+    case TypeKind::ComplexType: {
       auto c_obj = py::cast<std::complex<double>>(obj.ptr());
       return static_cast<c10::complex<double>>(c_obj);
     }
