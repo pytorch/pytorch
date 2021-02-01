@@ -179,7 +179,8 @@ void CUDAGraph::reset() {
   //
   // If capture_begin, the capture, or capture_end failed at some point, this CUDAGraph, the generator,
   // and the allocator could end up in all kinds of weird states depending where failure occurred.
-  // I don't see an easy way for reset() to gracefully fix all such possible error states.
+  // If the user catches the failure exception in a script, or is running in REPL or (god forbid)
+  // a Juptyer notebook, I don't see an easy way for reset() to gracefully fix all such possible error states.
   if (has_graph_ || has_graph_exec_) {
     // notifyCaptureDestroy may throw. How should we handle this?
     c10::cuda::CUDACachingAllocator::notifyCaptureDestroy(capture_dev_, mempool_id_);
