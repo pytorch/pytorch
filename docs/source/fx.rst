@@ -22,12 +22,12 @@ What is a FX transform? Essentially, it's a function that looks like this.
 Your transform will take in an :class:`torch.nn.Module`, convert it into a
 :class:`GraphModule` with :meth:``symbolic_trace``, and return a new
 ``nn.Module``. You should think of the ``nn.Module`` that your FX transform
-returns as identical to a regular ``nn.Module``-- you can pass it to another
+returns as identical to a regular ``nn.Module`` -- you can pass it to another
 FX transform, you can pass it to TorchScript, or you can
 run it. Ensuring that the inputs and outputs of your FX transform are a
-``nn.Module`` will ensure composability.
+``nn.Module`` will allow for composability.
 
-Given that you’ve passed in a ``nn.Module`` that has been traced into a
+Given that you’ve passed in an ``nn.Module`` that has been traced into a
 graph, there are now two primary approaches you can take to building a new
 graph.
 
@@ -80,7 +80,7 @@ make use of the `subgraph rewriter. <https://github.com/pytorch/pytorch/blob/mas
 In general, writing your transformation through graph manipulation is a
 good fit if you need to make a few small changes or if you need a global
 view of your graph. However, if you need to entirely rewrite your graph, you may want to look at
-constructing your graph with Proxies (i.e: retracing).
+constructing your graph with Proxies (i.e. retracing).
 
 Examples
 ~~~~~~~~
@@ -95,10 +95,10 @@ Proxy/Retracing
 ---------------
 
 Although most transformations can be implemented as graph
-transformations, transformations that involve large numbers of rewriting
+transformations, transformations that involve a lot of graph rewrites
 are often more easily represented through retracing. For example, let’s
 imagine that we wanted to write a pass that decomposed
-PyTorch functions. For example, it would transform every ``F.relu(x)``
+PyTorch functions. It would transform every ``F.relu(x)``
 into ``(x > 0)*x``. One possibility would be to perform the requisite
 graph rewriting to insert the comparison and multiplication after the
 ``F.relu``, and then clean up the original ``F.relu``. However, graph
