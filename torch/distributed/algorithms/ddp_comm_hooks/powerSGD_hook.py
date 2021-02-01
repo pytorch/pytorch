@@ -5,6 +5,8 @@ import numpy as np
 import torch
 import torch.distributed as dist
 
+from . import default_hooks as default
+
 
 def _orthogonalize(matrix, epsilon=1e-8):
     """
@@ -127,7 +129,7 @@ class PowerSGDState(object):
 
         if self.iter == self.start_powerSGD_iter:
             logging.info(
-                "Starting to apply PowerSGD after {} iterations.".format(self.iter)
+                "Start to apply PowerSGD after {} iterations.".format(self.iter)
             )
 
 
@@ -183,15 +185,8 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
 
     # Run vanilla allreduce in the first `start_powerSGD_iter` iterations.
     if state.iter < state.start_powerSGD_iter:
-        fut = dist.all_reduce(
-            input_tensor, group=group_to_use, async_op=True
-        ).get_future()
-
-        def div_callback(fut):
-            return [fut.value()[0].div_(world_size)]
-
         state.maybe_increase_iter(bucket)
-        return fut.then(div_callback)
+        return default._allreduce_fut(group_to_use, input_tensor)
 
     # Apply PowerSGD after `start_powerSGD_iter` iterations.
     device = input_tensor.device
@@ -210,7 +205,9 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
                     total_length
                 )
             )
-            state.error_dict[bucket_index] = torch.zeros(total_length, device=device, dtype=dtype)
+            state.error_dict[bucket_index] = torch.zeros(
+                total_length, device=device, dtype=dtype
+            )
 
         # Keep a copy of the input tensor,
         # so that we can compute the local error caused by compression later,
