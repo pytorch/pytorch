@@ -1,6 +1,6 @@
 from .node import Node, Argument, Target, map_arg
 
-from typing import Callable, Any, List, Dict, Optional, Tuple, Set
+from typing import Callable, Any, List, Dict, Optional, Tuple, Set, Union
 import builtins
 import torch
 import types
@@ -89,7 +89,33 @@ def _type_repr(obj):
         return('...')
     if isinstance(obj, types.FunctionType):
         return obj.__name__
-    return repr(obj)
+
+    # Optional[T] is just an alias for Union[None, T], so FX-tracing a module with
+    # an optional arg will result in a Union-typed arg which is not TorchScript
+    # compatible. Prior to Python 3.9, __repr__ for Union does not account for this case,
+    # and so here we (recursively) convert the type hint reprs back to Optional.
+    if not hasattr(obj, "__args__"):
+        return repr(obj)
+
+    args = obj.__args__
+    is_union = hasattr(obj, "__origin__") and obj.__origin__ == Union
+    has_none = type(None) in args
+    if is_union:
+        args = [arg for arg in args if arg != type(None)]
+
+    converted_args = [_type_repr(arg) for arg in args]
+
+    if is_union:
+        joined_args = ", ".join(converted_args)
+        if len(converted_args) > 1:
+            joined_args = "typing.Union[{}]".format(joined_args)
+        return "typing.Optional[{}]".format(joined_args) if has_none else joined_args
+
+    # Why can't we use obj.__origin__ to reconstruct the type? Because
+    # that will reverse the work we have done above; all Optionals will be
+    # turned back into Unions.
+    type_name = obj.__origin__ if is_union else "typing." + obj._name
+    return "{}[{}]".format(type_name, ", ".join(converted_args))
 
 class _InsertPoint:
     def __init__(self, graph, new_insert):

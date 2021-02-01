@@ -974,6 +974,25 @@ class TestFX(JitTestCase):
             return a[0]
         torch.jit.script(symbolic_trace(forward))
 
+    def test_fn_type_annotation_optional(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x: torch.Tensor, k: Optional[int]) -> torch.Tensor:
+                return x
+
+        foo = symbolic_trace(Foo())
+        foo_scripted = torch.jit.script(foo)
+        foo_scripted(torch.rand(5), k=None)
+        foo_scripted(torch.rand(5), k=3)
+
+    def test_fn_type_recursive_optional(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x: List[Optional[torch.Tensor]]) -> Optional[torch.Tensor]:
+                return x[0]
+
+        foo = symbolic_trace(Foo())
+        foo_scripted = torch.jit.script(foo)
+        foo_scripted([None, torch.rand(5)])
+
     def test_wrapped_method(self):
         def wrap_with_relu(fn):
             @functools.wraps(fn)
