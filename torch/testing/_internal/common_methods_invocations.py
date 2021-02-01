@@ -1571,6 +1571,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
                    dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
                    skips=(
+                       # Reference: https://github.com/pytorch/pytorch/pull/51283#issuecomment-770614273
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.bfloat16]),
                    ),
@@ -1583,6 +1584,7 @@ op_db: List[OpInfo] = [
                    dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
                    dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
                    skips=(
+                       # Reference: https://github.com/pytorch/pytorch/pull/51283#issuecomment-770614273
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 dtypes=[torch.bfloat16]),
                    ),
