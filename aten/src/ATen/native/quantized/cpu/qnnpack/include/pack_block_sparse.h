@@ -14,7 +14,6 @@
 #include <cassert>
 
 #include <qnnpack/AlignedAllocator.h>
-#include <qnnpack/common.h>
 #include <qnnpack/math.h>
 
 namespace qnnpack {
@@ -24,10 +23,7 @@ typedef struct BCSRMatrix {
   std::vector<uint32_t, AlignedAllocator<uint32_t, 16>> row_values;
   std::vector<uint8_t, AlignedAllocator<uint8_t, 16>> values;
   uint32_t col_block_size;
-  uint32_t row_block_size;
   void print() {
-    std::cout << "row block size:" << row_block_size << std::endl;
-    std::cout << "col block size:" << col_block_size << std::endl;
     std::cout << "row ptr\n";
     for (const auto& t : row_values) {
       std::cout << t << ", ";
@@ -50,7 +46,6 @@ std::unique_ptr<BCSRMatrix> generateBlockCSRMatrix(
     const uint8_t* a,
     const size_t N,
     const size_t K,
-    const uint32_t row_block_size,
     const uint32_t col_block_size,
     const uint8_t* zero_points);
 
