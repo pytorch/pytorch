@@ -776,6 +776,7 @@ DEFINE_TO(c10::intrusive_ptr<ivalue::Object>, toObject)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(c10::List<int64_t>, toIntList)
 DEFINE_TO(c10::List<double>, toDoubleList)
+DEFINE_TO(c10::List<c10::complex<double>>, toComplexDoubleList)
 DEFINE_TO(c10::List<bool>, toBoolList)
 DEFINE_TO(c10::List<at::Tensor>, toTensorList)
 DEFINE_TO(c10::impl::GenericList, toList)
@@ -1026,6 +1027,22 @@ inline std::vector<double> IValue::toDoubleVector() const {
       payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
       "called toDoubleVector on null intrusive_ptr IValue");
   return createVectorFromList<double>(
+      static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
+}
+inline c10::List<c10::complex<double>> IValue::toComplexDoubleList() && {
+  AT_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
+  return c10::List<c10::complex<double>>(moveToIntrusivePtr<c10::detail::ListImpl>());
+}
+inline c10::List<c10::complex<double>> IValue::toComplexDoubleList() const& {
+  AT_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
+  return c10::List<c10::complex<double>>(toIntrusivePtr<c10::detail::ListImpl>());
+}
+inline std::vector<c10::complex<double>> IValue::toComplexDoubleVector() const {
+  AT_ASSERT(isComplexDoubleList(), "Expected ComplexDoubleList but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toComplexDoubleVector on null intrusive_ptr IValue");
+  return createVectorFromList<c10::complex<double>>(
       static_cast<const c10::detail::ListImpl*>(payload.u.as_intrusive_ptr));
 }
 inline c10::List<bool> IValue::toBoolList() && {

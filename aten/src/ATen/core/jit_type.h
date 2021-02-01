@@ -712,6 +712,7 @@ struct TORCH_API ListType
   static ListTypePtr ofTensors();
   static ListTypePtr ofInts();
   static ListTypePtr ofFloats();
+  static ListTypePtr ofComplexDoubles();
   static ListTypePtr ofBools();
   static ListTypePtr ofStrings();
 
@@ -1648,6 +1649,12 @@ struct getTypePtr_<double> final {
   }
 };
 template <>
+struct getTypePtr_<c10::complex<double>> final {
+  static TypePtr call() {
+    return ComplexDoubleType::get();
+  }
+};
+template <>
 struct getTypePtr_<int64_t> final {
   static TypePtr call() {
     return IntType::get();
@@ -2428,6 +2435,11 @@ private:
 inline bool IValue::isDoubleList() const {
   // note: avoids calling type() to avoid extra referencing counting for the returned type.
   return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == FloatType::Kind;
+}
+
+inline bool IValue::isComplexDoubleList() const {
+  // note: avoids calling type() to avoid extra referencing counting for the returned type.
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == ComplexDoubleType::Kind;
 }
 
 inline bool IValue::isTensorList() const {
