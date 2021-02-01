@@ -95,9 +95,12 @@ void BatchedTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
 void BatchedTensorImpl::set_storage_offset(int64_t storage_offset) {
   TORCH_INTERNAL_ASSERT(false, "Can't set_storage_offset for BatchedTensorImpl");
 }
+#ifdef DEBUG
 bool BatchedTensorImpl::has_storage() const {
-  TORCH_INTERNAL_ASSERT(false, "Can't query has_storage for BatchedTensorImpl");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!storage_, "BatchedTensorImpl assumes that storage_ is never set");
+  return false;
 }
+#endif
 
 Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
   TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor));
