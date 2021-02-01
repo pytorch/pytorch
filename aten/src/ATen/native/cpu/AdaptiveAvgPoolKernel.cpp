@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/native/DispatchStub.h>
 
 #include <ATen/Dispatch.h>
 #include <ATen/native/AdaptivePooling.h>
