@@ -18,6 +18,7 @@ from typing import (
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit
 from torch.utils.benchmark.utils._stubs import CallgrindModuleType
+from torch.utils.benchmark.utils.historic.back_testing import IS_BACK_TESTING, ScriptFunction
 
 
 __all__ = ["FunctionCount", "FunctionCounts", "CallgrindStats", "CopyIfCallgrind"]
@@ -25,16 +26,8 @@ __all__ = ["FunctionCount", "FunctionCounts", "CallgrindStats", "CopyIfCallgrind
 
 if TYPE_CHECKING:
     CompletedProcessType = subprocess.CompletedProcess[str]
-    ScriptFunction = torch.jit.ScriptFunction
 else:
     CompletedProcessType = subprocess.CompletedProcess
-
-    # This is only for back testing. Very old versions of PyTorch don't have
-    # the ScriptFunction symbol.
-    try:
-        from torch.jit import ScriptFunction
-    except ImportError:
-        ScriptFunction = torch._C.GraphExecutor
 
 
 FunctionCount = NamedTuple("FunctionCount", [("count", int), ("function", str)])
@@ -463,13 +456,13 @@ class GlobalsBridge:
 class _ValgrindWrapper(object):
     def __init__(self) -> None:
         self._bindings_module: Optional[CallgrindModuleType] = None
-        if hasattr(torch._C, "_valgrind_dump_stats"):
-            self._supported_platform: bool = torch._C._valgrind_supported_platform()
-
-        else:
+        if IS_BACK_TESTING:
             print("Callgrind bindings are not present in `torch._C`. JIT-ing bindings.")
             self._bindings_module = cpp_jit.get_compat_bindings()
             self._supported_platform = self._bindings_module._valgrind_supported_platform()
+
+        else:
+            self._supported_platform: bool = torch._C._valgrind_supported_platform()
 
         self._commands_available: Dict[str, bool] = {}
         if self._supported_platform:
