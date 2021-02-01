@@ -266,7 +266,7 @@ namespace impl {
 
   template<class T, bool AllowDeprecatedTypes>
   struct ivalue_to_arg final {
-    static T call(IValue& v) {
+    static decltype(auto) call(IValue& v) {
       assert_is_valid_input_type<T, AllowDeprecatedTypes>();
       return std::move(v).to<T>();
     }
@@ -276,6 +276,9 @@ namespace impl {
   // `toTensor()` overloads on IValue to avoid copying.
   template<bool AllowDeprecatedTypes>
   struct ivalue_to_arg<at::Tensor&, AllowDeprecatedTypes> final {
+    // We cannot use the default implementation if they asked for a
+    // `at::Tensor&` because it moves from the IValue, so it can't get
+    // an lvalue reference.
     static at::Tensor& call(IValue& v) {
       // Tensor& is valid, don't bother asserting
       return v.toTensor();
@@ -284,6 +287,9 @@ namespace impl {
 
   template<bool AllowDeprecatedTypes>
   struct ivalue_to_arg<const at::Tensor&, AllowDeprecatedTypes> final {
+    // We should not use the default implementation if they asked for
+    // a `const at::Tensor&` because it moves from the IValue and they
+    // didn't ask for that.
     static const at::Tensor& call(IValue& v) {
       // const Tensor& is valid, don't bother asserting
       return v.toTensor();

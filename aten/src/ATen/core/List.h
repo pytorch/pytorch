@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/core/ivalue_to.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeTraits.h>
 #include <c10/util/TypeList.h>
@@ -55,24 +56,14 @@ bool operator==(const T& lhs, const ListElementReference<T, Iterator>& rhs);
 
 template<class T>
 struct ListElementConstReferenceTraits {
-  // In the general case, we cannot expose a true const reference to
-  // the contents of an IValue, so we copy.
-  using const_reference = T;
+  // In the general case, we use IValue::to().
+  using const_reference = typename c10::detail::ivalue_to_const_ref_overload_return<T>::type;
 };
 
-template<>
-struct ListElementConstReferenceTraits<std::string> {
-  using const_reference = const std::string&;
-};
-
+// There is no to() overload for c10::optional<std::string>.
 template<>
 struct ListElementConstReferenceTraits<c10::optional<std::string>> {
   using const_reference = c10::optional<std::reference_wrapper<const std::string>>;
-};
-
-template<>
-struct ListElementConstReferenceTraits<at::Tensor> {
-  using const_reference = const at::Tensor&;
 };
 
 template<class T, class Iterator>
