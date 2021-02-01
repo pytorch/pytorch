@@ -2770,7 +2770,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 3, 2)
         self.run_test(GatherModule(), (x,))
 
-    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_expand(self):
         class ExpandModel(torch.nn.Module):
@@ -5548,7 +5547,6 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randint(1, 2, (2, 3, 4), dtype=bool)
         self.run_test(Model2(), (x, y))
 
-    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_where_condition_script(self):
         class Model1(torch.nn.Module):
