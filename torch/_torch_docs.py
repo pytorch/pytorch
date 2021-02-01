@@ -1721,6 +1721,11 @@ of each of the individual matrices. Similarly, when :attr:`upper` is ``False``, 
 tensor will be composed of lower-triangular Cholesky factors of each of the individual
 matrices.
 
+.. note:: ``torch.cholesky`` is deprecated. Please use :func:`torch.linalg.cholesky` instead.
+            **Differences with** ``torch.linalg.cholesky``:
+            * :func:`torch.linalg.cholesky` does not have the :attr:``upper`` parameter and
+              always returns a lower triangular matrix instead.
+
 Args:
     input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
                 batch dimensions consisting of symmetric positive-definite matrices.
