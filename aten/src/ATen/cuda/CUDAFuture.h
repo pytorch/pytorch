@@ -19,7 +19,8 @@
 #include <c10/macros/Export.h>
 #include <c10/util/intrusive_ptr.h>
 
-namespace at { namespace cuda {
+namespace at {
+namespace cuda {
 
 struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
  public:
@@ -34,7 +35,6 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
   }
 
  protected:
-
   using DataPtrs = std::vector<std::reference_wrapper<const at::DataPtr>>;
 
   c10::intrusive_ptr<Future> createChild(at::TypePtr type) override {
@@ -104,7 +104,8 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
       for (const at::DataPtr& dataPtr : *dataPtrs_) {
         if (dataPtr.device().is_cuda()) {
           c10::cuda::CUDACachingAllocator::recordStream(
-              dataPtr, at::cuda::getCurrentCUDAStream(dataPtr.device().index()));
+              dataPtr,
+              at::cuda::getCurrentCUDAStream(dataPtr.device().index()));
         }
       }
 
@@ -116,8 +117,7 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
 
   void postWaitHook(const at::IValue& value) override {
     for (at::cuda::CUDAEvent& cudaEvent : *cudaEvents_) {
-      cudaEvent.block(
-          at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
+      cudaEvent.block(at::cuda::getCurrentCUDAStream(cudaEvent.device_index()));
     }
 
     for (const at::DataPtr& dataPtr : *dataPtrs_) {
@@ -128,8 +128,7 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
     }
   }
 
-  virtual std::shared_ptr<DataPtrs> extractDataPtrs(
-      const at::IValue& value) {
+  virtual std::shared_ptr<DataPtrs> extractDataPtrs(const at::IValue& value) {
     auto dataPtrs = std::make_shared<DataPtrs>();
     // former fails loudly while the latter is a silent no-op for unsupported
     // types. We made the change because it's common for RPC user functions to
@@ -153,7 +152,7 @@ struct TORCH_CUDA_CPP_API CUDAFuture : at::ivalue::Future {
     // custom Python objects with Tensors and the current solution won't
     // recognize them. A better solution might be allowing users to decorate
     // the callback function and provide custom logic to extract tensors.
-    value.visit([&dataPtrs](const IValue& subValue){
+    value.visit([&dataPtrs](const IValue& subValue) {
       if (subValue.isTensor()) {
         dataPtrs->emplace_back(subValue.toTensor().storage().data_ptr());
       }

@@ -296,8 +296,6 @@ class TensorPipeAgent : public RpcAgent {
     using at::cuda::CUDAFuture::CUDAFuture;
 
    protected:
-    //using DataPtrs = std::vector<std::reference_wrapper<const at::DataPtr>>;
-
     std::shared_ptr<DataPtrs> extractDataPtrs(
         const at::IValue& value) override {
       const auto message = value.toCustomClass<Message>();
