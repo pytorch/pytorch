@@ -758,7 +758,7 @@ class Graph:
 
         code = ''.join(body)
         code = '\n'.join('    ' + line for line in code.split('\n'))
-        fn_code = f"""\
+        fn_code = f"""
 {import_block}
 def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
 {code}"""
