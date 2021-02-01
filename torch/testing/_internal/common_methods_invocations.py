@@ -1076,8 +1076,14 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad):
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad):
     low, high = op_info.domain
-    low = low if low is None else low + op_info._domain_eps
-    high = high if high is None else high - op_info._domain_eps
+
+    # Note: Operator is very sensitive at points near the
+    # start and end of domain and leads to NaN for float16
+    # if domain_eps is 1e-5.
+    domain_eps = op_info._domain_eps if dtype != torch.float16 else 3e-2
+
+    low = low + domain_eps
+    high = high - domain_eps
 
     samples = (
         SampleInput(make_tensor((S, S, S), device, dtype, low=low, high=high, requires_grad=requires_grad)),
@@ -2098,12 +2104,7 @@ if TEST_SCIPY:
                        dtypes=floating_types_and(torch.half),
                        dtypesIfCPU=floating_types_and(torch.bfloat16),
                        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
-                       sample_inputs_func=sample_inputs_logit,
-                       skips=(
-                           # TODO: Investigate if atol and rtol are relaxed or not.
-                           SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                                    dtypes=[torch.float16]),
-                       )),
+                       sample_inputs_func=sample_inputs_logit),
         OpInfo('xlogy',
                dtypes=all_types_and(torch.bool),
                dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
