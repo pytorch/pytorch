@@ -44,6 +44,13 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
                 "resolve torch::List issue, see "
                 "https://fb.workplace.com/groups/894363187646754/permalink/1149276442155426"
             )
+        # TODO: delete these special cases; see tools.codegen.api.cpp--these
+        # must be changed in tandem, but there are problems; see
+        # https://github.com/pytorch/pytorch/pull/51485
+        elif str(t.elem) == 'int':
+            return BaseCType("IntArrayRef", binds)
+        elif str(t.elem) == 'Dimname':
+            return BaseCType("DimnameList", binds)
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return BaseCType(f"ArrayRef<{elem.cpp_type()}>", binds)
     else:
