@@ -1,4 +1,4 @@
-from typing import Dict, Sequence, List, NoReturn
+from typing import Dict, Sequence, List, NoReturn, Union
 from tools.codegen.api.types import *
 
 # This file implements a small program synthesis engine that implements
@@ -44,14 +44,33 @@ class UnsatError(RuntimeError):
 #   }
 #
 # and you need to generate "exprs".
-#
-# TODO: Don't need full Binding for goals, CType will do
-# TODO: Don't need full Binding for bindings, list of Expr will do
-def translate(bindings: Sequence[Binding], goals: Sequence[Binding], *, method: bool = False) -> List[Expr]:
+def translate(
+    bindings: Sequence[Union[Expr, Binding]],
+    goals: Sequence[Union[CType, Binding]],
+    *, method: bool = False
+) -> List[Expr]:
+
+    binding_exprs: List[Expr]
+    for b in bindings:
+        if isinstance(b, Binding):
+            binding_exprs.append(Expr(
+                expr=b.name,
+                type=b.ctype,
+            ))
+        else:
+            binding_exprs.append(b)
+
+    goal_ctypes: List[CType]
+    for g in goals:
+        if isinstance(g, Binding):
+            goal_ctypes.append(g.ctype)
+        else:
+            goal_ctypes.append(g)
+
     # Add all the bindings to the context
     ctx: Dict[CType, str] = {}
-    for b in bindings:
-        ctx[b.ctype] = b.name
+    for b in binding_exprs:
+        ctx[b.type] = b.expr
 
     # Add implicit bindings if the generated code is inside a Tensor method
     if method:
@@ -63,15 +82,7 @@ def translate(bindings: Sequence[Binding], goals: Sequence[Binding], *, method: 
     def unsat(goal: CType) -> NoReturn:
         ctx_desc = '\n'.join(f"  {t.cpp_type()} {e};" for t, e in ctx.items())
         raise UnsatError(f'''
-Failed to synthesize the expression "{goal.cpp_type()} {goal.name}"
-while trying to translate from:
-
-  from_func({', '.join(b.defn() for b in bindings)})
-
-to:
-
-  to_func({', '.join(g.defn() for g in goals)})
-
+Failed to synthesize the expression "{goal.cpp_type()} {goal.name}".
 When I failed, the following bindings were available in the context:
 
 {ctx_desc}
@@ -140,4 +151,4 @@ Check this module for more information.
 
         unsat(goal)
 
-    return [Expr(solve(g.ctype, direct=False), g.ctype) for g in goals]
+    return [Expr(solve(g, direct=False), g) for g in goal_ctypes]
