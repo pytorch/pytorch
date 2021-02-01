@@ -118,9 +118,13 @@ class ExprGroup {
   // Returns all neighbors, producers and consumers
   std::vector<ExprGroup*> getNeighbors();
 
-  // Look at all neighbors of this and return who this could merge with based on
-  // level values of this, neighbors, and merged neighbors of neighbors
-  std::vector<ExprGroup*> getMergeCandidates();
+  // Return neighbors of this proven to be safe nodes to merge with in regards
+  // to maining an acyclic graph. This looks at, neighbors  if merged, neighbors
+  // level, and merged neighbors of neighbors level. If fallback_mode_enabled
+  // will return the inverse set of ExprGroups that are proven to be safe
+  // merges.
+  std::vector<ExprGroup*> getMergeCandidates(
+      bool fallback_mode_enabled = false);
 
   std::unique_ptr<ExprSortPayload>& payload() {
     return payload_;
@@ -195,6 +199,30 @@ class ExprGroup {
   std::unique_ptr<ExprSortPayload> payload_;
 };
 
+// This class sorts expressions guarantees two things, 1) Tensors are produced
+// before they're consumed 2) If the production of two tensors are supposed to
+// share a for loop, they're in an order where they can. (1) is pretty standard
+// of ordering a DAG. (2) is where things get a bit complicated and why we do
+// this sorting through segmentation. Consider a section of a DAG: T4 = T3 + T2.
+// Where T2 and T3 are not inputs to the fusion, all tensors are 3D, and we want
+// the production of T3 to share the inner most loop of T4 and we want the
+// production of T2 to share the middle loop with T4. i.e. we're looking for
+// For(i:I){
+//   For(j: J){
+//     For(k: K){
+//       T2[i, j, k] = ...
+//     }
+//     For(k: K){
+//       T3[i, j, k] = ...
+//       T4[i, j, k] = T2[i, j, k] + T3[i, j, k]
+//     }
+//   }
+// }
+// The only valid ordering of expressions is producing T2, then T3, then T4. If
+// we swapped T3 and T2, then T3 and T4 couldn't share their inner most loop,
+// because T2 has its own inner most loop. If we swapped either tensor with T4,
+// then we'd try to be using T2 or T3 without producing them (back to gaurantee
+// 1).
 class ExprSegmentationSorter {
  public:
   ExprSegmentationSorter(Fusion* fusion) : complete_fusion_(fusion) {}
@@ -216,6 +244,10 @@ class ExprSegmentationSorter {
   // Returns if sg1 and sg2 should be merged together, is called if they can
   // based on the current status of the DAG.
   bool supportedMerge(ExprGroup* sg1, ExprGroup* sg2);
+
+  // Returns true if the graph will remain an acyclic graph after merging sg1
+  // and sg2
+  bool testStillDag(ExprGroup* sg1, ExprGroup* sg2);
 
   // Merges two ExprGroups and returns the new ExprGroup
   ExprGroup* makeMergedNode(ExprGroup* sg1, ExprGroup* sg2);
@@ -257,6 +289,16 @@ class ExprSegmentationSorter {
   // Maintain my own fusion the state of which is not always the same as the
   // original provided fusion.
   Fusion* complete_fusion_;
+
+  // We use a theorem out of a paper mentioned in other comments. This theorem
+  // is good at identifying multiple expr groups to merge during a single
+  // iteration without producing a cyclic graph from an acyclic graph. This
+  // theorem is not guaranteed to find all possible nodes that can be merged
+  // together. We need to be able to group all disjoint groups of exprs or
+  // we fail to generate code. Therefore, if we can't find anything to make
+  // forward progress based on the theorem we fallback to manually looking if we
+  // can segmenet all combinations we haven't previously looked at.
+  bool fallback_mode_enabled_ = false;
 };
 
 std::vector<ExprGroup*> ExprGroup::getNeighbors() {
@@ -270,7 +312,8 @@ std::vector<ExprGroup*> ExprGroup::getNeighbors() {
   return neighbors;
 }
 
-std::vector<ExprGroup*> ExprGroup::getMergeCandidates() {
+std::vector<ExprGroup*> ExprGroup::getMergeCandidates(
+    bool fallback_mode_enabled) {
   std::vector<ExprGroup*> neighbors = getNeighbors();
 
   // Don't look for candidates if already merged
@@ -282,10 +325,12 @@ std::vector<ExprGroup*> ExprGroup::getMergeCandidates() {
   // so and merged neighbor is within 1 level or node merged with neighbor is
   // within 1 level, can't merge this node with anything else.
   bool can_merge_this = true;
+  bool neighbor_merged = false;
   for (auto neighbor : neighbors) {
     if (!neighbor->payload()->merged) {
       continue;
     }
+    neighbor_merged = true;
     if (std::abs(neighbor->payload()->level - payload()->level) <= 1) {
       can_merge_this = false;
     }
@@ -295,8 +340,19 @@ std::vector<ExprGroup*> ExprGroup::getMergeCandidates() {
       can_merge_this = false;
     }
   }
-  if (!can_merge_this) {
+
+  // If something prevents us from merging this node, and we're not in fallback
+  // mode, return empty set.
+  if (!can_merge_this && !fallback_mode_enabled) {
     return {};
+  }
+
+  // If fallback mode already detected a merge somewhere, we shouldn't still be
+  // traversing.
+  if (fallback_mode_enabled) {
+    TORCH_INTERNAL_ASSERT(
+        !neighbor_merged,
+        "Shouldn't still be traversing in fallback mode if a merge was found.");
   }
 
   std::vector<bool> can_merge(true, neighbors.size());
@@ -350,7 +406,8 @@ std::vector<ExprGroup*> ExprGroup::getMergeCandidates() {
 
   std::vector<ExprGroup*> merge_candidates;
   for (size_t i = 0; i < neighbors.size(); i++) {
-    if (can_merge[i]) {
+    if ((can_merge[i] && !fallback_mode_enabled) ||
+        (!can_merge[i] && fallback_mode_enabled)) {
       merge_candidates.push_back(neighbors[i]);
     }
   }
@@ -704,24 +761,26 @@ bool ExprSegmentationSorter::interIterUpdate() {
   }
 
   // If we couldn't lower compute at domain any further, and we haven't merged
-  // any new groups since the last time we were called, make sure we're done.
+  // any new groups after fallback_mode_enabled_ has been turned on, make sure
+  // we've finished successfully
   if (!lowered_ca_domain && n_groups_ == groups_.size()) {
     // Make sure none of the groups are still connected, as that would mean we
     // should have been able to merge them.
-
+    bool successfully_finished = std::all_of(
+        groups_.begin(), groups_.end(), [](std::unique_ptr<ExprGroup>& sg) {
+          return sg->producerEdges().empty() && sg->consumerEdges().empty();
+        });
+    if (successfully_finished) {
+      return false;
+    }
+    // If we didn't finish and we tried the fallback, throw.
     TORCH_INTERNAL_ASSERT(
-        std::all_of(
-            groups_.begin(),
-            groups_.end(),
-            [](std::unique_ptr<ExprGroup>& sg) {
-              return sg->producerEdges().empty() && sg->consumerEdges().empty();
-            }),
+        !fallback_mode_enabled_,
         "Couldn't succcessfully sort out the fusion expressions. ",
         "There are remaining connections of the heirarchical segmentation which should have been ",
         "flattened to a single ordered group, or disjoint ordered groups.");
-
-    // Successfully finished
-    return false;
+    // We didn't finish, but we haven't tried the fallback, try again with that.
+    fallback_mode_enabled_ = true;
   }
 
   n_groups_ = groups_.size();
@@ -773,6 +832,44 @@ bool ExprSegmentationSorter::supportedMerge(ExprGroup* sg1, ExprGroup* sg2) {
       domain1.back(), domain2.back());
 }
 
+bool ExprSegmentationSorter::testStillDag(ExprGroup* sg1, ExprGroup* sg2) {
+  std::deque<ExprGroup*> to_visit;
+  std::unordered_set<ExprGroup*> visited;
+  // Add consumers of sg1 if not sg2
+  for (auto sg1_consumer_edge : sg1->consumerEdges()) {
+    if (sg1_consumer_edge->to != sg2) {
+      to_visit.emplace_back(sg1_consumer_edge->to);
+    }
+  }
+
+  // Add consumers of sg2 if not sg1
+  for (auto sg2_consumer_edge : sg2->consumerEdges()) {
+    if (sg2_consumer_edge->to != sg1) {
+      to_visit.emplace_back(sg2_consumer_edge->to);
+    }
+  }
+
+  while (to_visit.size() > 0) {
+    auto group = to_visit.front();
+    // Arrived back at one of the original groups, merging these two groups
+    // would generate a cycle
+    if (group == sg1 || group == sg2) {
+      return false;
+    }
+    to_visit.pop_front();
+    if (visited.find(group) != visited.end()) {
+      continue;
+    }
+    visited.emplace(group);
+    for (auto consumer_edge : group->consumerEdges()) {
+      to_visit.emplace_back(consumer_edge->to);
+    }
+  }
+
+  // No cycles found, we're good.
+  return true;
+}
+
 void ExprSegmentationSorter::sort() {
   // Need this for initialization of the DAG that is processed
   std::unordered_map<Expr*, ExprGroup*> expr2group;
@@ -805,14 +902,59 @@ void ExprSegmentationSorter::sort() {
       def_group->addConsumerEdge(edges_.back().get());
     }
   }
-
   bool inter_iter_update = true;
   while (inter_iter_update) {
     // If we didn't do any update, stop traversal, we're done.
-    bool merged_nodes = true;
-    // Merge expressions in sorted order
-    while (merged_nodes) {
-      // Reset stateful traversal details in ExprGroups
+    if (!fallback_mode_enabled_) {
+      // Merge expressions in sorted order
+      bool merged_nodes = true;
+      while (merged_nodes) {
+        // Reset stateful traversal details in ExprGroups
+        resetTraversal();
+        resetLevels();
+
+        for (auto& group : groups_) {
+          if (group->payload()->merged) {
+            continue;
+          }
+          auto candidates = group->getMergeCandidates(fallback_mode_enabled_);
+          if (candidates.empty()) {
+            continue;
+          }
+
+          auto candidate_it = candidates.begin();
+          while (candidate_it != candidates.end() &&
+                 !supportedMerge(group.get(), *candidate_it)) {
+            candidate_it++;
+          }
+          if (candidate_it == candidates.end()) {
+            continue;
+          }
+
+          to_merge_.emplace(group.get());
+          to_merge_.emplace(*candidate_it);
+
+          group->payload()->merged = true;
+          group->payload()->merge_with = *candidate_it;
+
+          (*candidate_it)->payload()->merged = true;
+          (*candidate_it)->payload()->merge_with = group.get();
+        }
+
+        if (to_merge_.empty()) {
+          merged_nodes = false;
+        }
+
+        mergeNodes();
+
+        // Move compute at axes left
+        inter_iter_update = interIterUpdate();
+      }
+    } else {
+      // fallback_mode_enabled = true
+      // Reset stateful traversal details in ExprGroups as we'll exclude merge
+      // options that were already ruled out and therefore need traversal and
+      // levels reset.
       resetTraversal();
       resetLevels();
 
@@ -820,7 +962,9 @@ void ExprSegmentationSorter::sort() {
         if (group->payload()->merged) {
           continue;
         }
-        auto candidates = group->getMergeCandidates();
+        // Get merge candidates that weren't proven safe to merge with default
+        // algorithm.
+        auto candidates = group->getMergeCandidates(fallback_mode_enabled_);
         if (candidates.empty()) {
           continue;
         }
@@ -834,37 +978,49 @@ void ExprSegmentationSorter::sort() {
           continue;
         }
 
-        to_merge_.emplace(group.get());
-        to_merge_.emplace(*candidate_it);
+        if (testStillDag(group.get(), *candidate_it)) {
+          // Mark in same style as default algorithm for convenience even though
+          // we will only merge once with the fallback
+          to_merge_.emplace(group.get());
+          to_merge_.emplace(*candidate_it);
 
-        group->payload()->merged = true;
-        group->payload()->merge_with = *candidate_it;
+          group->payload()->merged = true;
+          group->payload()->merge_with = *candidate_it;
 
-        (*candidate_it)->payload()->merged = true;
-        (*candidate_it)->payload()->merge_with = group.get();
+          (*candidate_it)->payload()->merged = true;
+          (*candidate_it)->payload()->merge_with = group.get();
+          break;
+        }
       }
 
-      if (to_merge_.empty()) {
-        merged_nodes = false;
+      // If we can merge something, merge it, disable fallback, and bail
+      if (to_merge_.size() > 0) {
+        mergeNodes();
       }
-
-      mergeNodes();
 
       // Move compute at axes left
+      // If fallback didn't work, interIterUpdate will catch that we failed.
       inter_iter_update = interIterUpdate();
+      fallback_mode_enabled_ = false;
     }
   }
 }
 
 // Debug printing, disabled due to clang-tidy see above for declarations.
-//  std::ostream& operator<<(std::ostream& os, const ExprGroup*
-// group) {
+//  std::ostream& operator<<(std::ostream& os, ExprGroup* group) {
 //   os << "g{";
-//   for (size_t i = 0; i < group->exprs_.size(); i++) {
-//     os << group->exprs_[i]->name();
-//     if (i + 1 != group->exprs_.size())
+//   for (size_t i = 0; i < group->exprs().size(); i++) {
+//     os << group->exprs()[i]->name();
+//     if (i + 1 != group->exprs().size())
 //       os << ", ";
 //   }
+//   os << "} ca_ids {";
+//   for (size_t i = 0; i < group->payload()->ca_domains_.size(); i++) {
+//     os << group->payload()->ca_domains_[i];
+//     if (i + 1 != group->payload()->ca_domains_.size())
+//       os << ", ";
+//   }
+
 //   os << "}";
 //   return os;
 // }
