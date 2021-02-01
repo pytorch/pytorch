@@ -130,6 +130,10 @@ constexpr int64_t kBasicChannelPriority = 0;
 constexpr int64_t kCudaIpcChannelPriority = 300;
 #endif
 
+#if TENSORPIPE_HAS_CUDA_GDR_CHANNEL && defined(USE_CUDA_NOT_ROCM)
+constexpr int64_t kCudaGdrChannelPriority = 200;
+#endif
+
 #ifdef USE_CUDA_NOT_ROCM
 constexpr int64_t kCudaXthChannelPriority = 400;
 constexpr int64_t kCudaBasicChannelPriority = 100;
@@ -290,6 +294,30 @@ C10_REGISTER_CREATOR(
     TensorPipeCudaChannelRegistry,
     cuda_ipc,
     makeCudaIpcChannel);
+
+#endif
+
+#if TENSORPIPE_HAS_CUDA_GDR_CHANNEL && defined(USE_CUDA_NOT_ROCM)
+
+std::unique_ptr<CudaChannelRegistration> makeCudaGdrChannel() {
+  auto context = std::make_shared<tensorpipe::channel::cuda_gdr::Context>();
+  return std::make_unique<CudaChannelRegistration>(
+      CudaChannelRegistration{std::move(context), kCudaGdrChannelPriority});
+}
+
+// The cuda_gdr channel sends CUDA memory over InfiniBand using GPUDirect RDMA.
+// It directly registers the user-provided tensor with libibverbs, an operation
+// which is expensive the first time, but it then caches the registration in
+// order to amortize the cost and get low latency for subsequent transfers. A
+// ready-to-send/ready-to-receive handshake is still needed before the transfer
+// in order to ensure readiness and to agree on the device indices and thus the
+// queue pair to use. It automatically pairs each GPU to the "closest" NIC if
+// there are multiple of them (closest = longest prefix match in PCI tree).
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+C10_REGISTER_CREATOR(
+    TensorPipeCudaChannelRegistry,
+    cuda_gdr,
+    makeCudaGdrChannel);
 
 #endif
 
