@@ -347,11 +347,9 @@ class profile(object):
 
     Args:
         enabled (bool, optional): Setting this to False makes this context manager a no-op.
-            Default: ``True``.
 
         use_cuda (bool, optional): Enables timing of CUDA events as well using the cudaEvent API.
             Adds approximately 4us of overhead to each tensor operation.
-            Default: ``False``
 
         record_shapes (bool, optional): If shapes recording is set, information
             about input dimensions will be collected. This allows one to see which
@@ -365,18 +363,18 @@ class profile(object):
             collection.
 
         with_flops (bool, optional): If with_flops is set, the profiler will estimate
-        the FLOPS (floating pointer operations per second) value using the operator's input shape
-        and total CPU time. This allows one to estimate the hardware performance. Currently,
-        this option only works for the GEMM and CONV operator, default: ``False``
+            the FLOPS (floating pointer operations per second) value using the operator's input shape
+            and total CPU time. This allows one to estimate the hardware performance. Currently,
+            this option only works for the matrix multiplication and convolution functions.
 
-        profile_memory (bool, optional): Whether to report memory usage, default: ``False``
+        profile_memory (bool, optional): track tensor memory allocation/deallocation.
 
-        with_stack (bool, optional): record source information (file and line number) for the ops
+        with_stack (bool, optional): record source information (file and line number) for the ops.
 
-        use_kineto (bool, default False): experimental support for Kineto profiler
+        use_kineto (bool, optional): experimental, enable profiling with Kineto profiler.
 
-        use_cpu (default True) - whether to profile CPU events; setting to False requires
-            use_kineto=True and can be used to lower the overhead for GPU-only profiling
+        use_cpu (bool, optional): profile CPU events; setting to ``False`` requires
+            ``use_kineto=True`` and can be used to lower the overhead for GPU-only profiling.
 
     .. warning:
         Enabling memory profiling or source attribution incurs additional profiler
@@ -414,6 +412,7 @@ class profile(object):
     def __init__(
             self,
             enabled=True,
+            *,
             use_cuda=False,
             record_shapes=False,
             with_flops=False,
