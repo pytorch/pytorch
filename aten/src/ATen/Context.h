@@ -196,6 +196,9 @@ class TORCH_API Context {
   void setReleaseWeightsWhenPrepacking(bool e);
   bool releaseWeightsWhenPrepacking() const;
 
+  void setDisplayVmapFallbackWarnings(bool enabled);
+  bool areVmapFallbackWarningsEnabled() const;
+
  private:
   void initCUDAIfNeeded(DeviceType p) {
     if (p == DeviceType::CUDA) {
@@ -222,6 +225,7 @@ class TORCH_API Context {
   #else
   bool release_original_weights = false;
   #endif
+  bool display_vmap_fallback_warnings_ = false;
   c10::optional<at::QEngine> quantized_engine = c10::nullopt;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
   std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
