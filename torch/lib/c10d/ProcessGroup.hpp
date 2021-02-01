@@ -170,6 +170,10 @@ class ProcessGroup : public torch::CustomClassHolder {
     return size_;
   }
 
+  virtual const std::string getBackendName() const {
+    return "undefined";
+  }
+
   virtual c10::intrusive_ptr<ProcessGroup::Work> broadcast(
       std::vector<at::Tensor>& data,
       const BroadcastOptions& opts = BroadcastOptions()) = 0;
