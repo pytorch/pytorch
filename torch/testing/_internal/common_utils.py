@@ -1948,3 +1948,12 @@ dtype2prec_DONTUSE = {torch.float: 1e-5,
                       torch.double: 1e-5,
                       torch.half: 1e-2,
                       torch.bfloat16: 1e-1}
+
+
+def _wrap_maybe_warns(regex):
+    def decorator(fn):
+        def inner(self, *args, **kwargs):
+            with self.maybeWarnsRegex(UserWarning, regex):
+                fn(self, *args, **kwargs)
+        return inner
+    return decorator

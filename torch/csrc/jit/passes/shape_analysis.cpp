@@ -934,7 +934,7 @@ class ShapePropagator {
             "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
             "aten::mul(Tensor self, Tensor other) -> Tensor",
             "aten::div(Tensor self, Tensor other) -> Tensor",
-            "aten::div(Tensor self, Tensor other, str rounding_mode) -> Tensor",
+            "aten::div(Tensor self, Tensor other, *, str rounding_mode) -> Tensor",
         },
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types = gatherTensorTypes(node)) {
@@ -1017,7 +1017,7 @@ class ShapePropagator {
             "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor",
             "aten::mul(Tensor self, Scalar other) -> Tensor",
             "aten::div(Tensor self, Scalar other) -> Tensor",
-            "aten::div(Tensor self, Scalar other, str rounding_mode) -> Tensor",
+            "aten::div(Tensor self, Scalar other, *, str rounding_mode) -> Tensor",
         },
         [this](Node* node) -> type_vec_t {
           if (auto maybe_tensor_types = gatherTensorTypes(node)) {
@@ -1911,7 +1911,7 @@ class ShapePropagator {
     } else if (
         node->matches("aten::div(Tensor self, Tensor other) -> Tensor") ||
         node->matches(
-            "aten::div(Tensor self, Tensor other, str rounding_mode) -> Tensor")) {
+            "aten::div(Tensor self, Tensor other, *, str rounding_mode) -> Tensor")) {
       // "div" handle tensors of different shapes internally, so there's no need
       // to insert explicit expand nodes.
       // Note that this function could be merged to the one above , but "div" is
@@ -1932,7 +1932,7 @@ class ShapePropagator {
             "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor") ||
         node->matches("aten::div(Tensor self, Scalar other) -> Tensor") ||
         node->matches(
-            "aten::div(Tensor self, Scalar other, str rounding_mode) -> Tensor") ||
+            "aten::div(Tensor self, Scalar other, *, str rounding_mode) -> Tensor") ||
         node->matches("aten::mul(Tensor self, Scalar other) -> Tensor")) {
       auto first_scalar_type = (tensor_types)[0]->scalarType();
       auto second_scalar_type =
