@@ -71,9 +71,11 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
   # DO NOT install cmake here as it would install a version newer than 3.5, but
   # we want to pin to version 3.5.
+  SCIPY_VERSION=1.1.0
   if [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
     # Install llvm-10 as it is required to compile llvmlite from source
     conda_install numpy=1.19.2 pyyaml mkl mkl-include setuptools cffi future six llvmdev=10.0.0 -c conda-forge
+    SCIPY_VERSION=1.6.0
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
     conda_install numpy=1.18.5 pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0
@@ -107,7 +109,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
   # Pin coverage so we can use COVERAGE_RCFILE
   as_jenkins pip install --progress-bar off pytest \
-    scipy==1.1.0 \
+    scipy==$SCIPY_VERSION \
     scikit-image \
     librosa>=0.6.2 \
     psutil \
