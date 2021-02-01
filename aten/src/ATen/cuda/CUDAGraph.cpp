@@ -24,6 +24,11 @@ namespace cuda {
  *     ops properly.  Their graphs would yield invalid numerics on replay.
  */
 
+/**
+ * Note [Interaction with CUDA graph capture] in CUDACachingAllocator.cpp
+ * describes memory management for captures.
+ */
+
 CUDAGraph::CUDAGraph()
   // CUDAStreams may not be default-constructed.
   : capture_stream_(at::cuda::getCurrentCUDAStream()) {
