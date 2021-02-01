@@ -17,6 +17,7 @@ using at::ScalarType;
 using at::MemoryFormat;
 using at::Generator;
 using at::IntArrayRef;
+using at::ArrayRef;
 
 using namespace torch::autograd::utils;
 
