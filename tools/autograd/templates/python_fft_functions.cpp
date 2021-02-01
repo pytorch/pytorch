@@ -30,6 +30,7 @@ using at::Generator;
 using at::TensorList;
 using at::Dimname;
 using at::DimnameList;
+using at::ArrayRef;
 
 using torch::utils::check_out_type_matches;
 using namespace torch::autograd::utils;
