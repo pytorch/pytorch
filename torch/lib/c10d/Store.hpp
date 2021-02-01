@@ -28,10 +28,10 @@ class Store : public torch::CustomClassHolder {
       const std::string& key,
       const std::vector<uint8_t>& value) = 0;
 
-  virtual void compareAndSet(
+  virtual std::vector<uint8_t> compareAndSwap(
       const std::string& key,
-      const std::vector<uint8_t>& newValue,
-      const std::vector<uint8_t>& oldValue) {
+      const std::vector<uint8_t>& currentValue,
+      const std::vector<uint8_t>& newValue) {
           TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
       }
 

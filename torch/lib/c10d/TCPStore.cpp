@@ -16,7 +16,7 @@ namespace c10d {
 
 namespace {
 
-enum class QueryType : uint8_t { SET, COMPARE_AND_SET, GET, ADD, CHECK, WAIT, GETNUMKEYS, DELETE_KEY };
+enum class QueryType : uint8_t { SET, COMPARE_AND_SWAP, GET, ADD, CHECK, WAIT, GETNUMKEYS, DELETE_KEY };
 
 enum class CheckResponseType : uint8_t { READY, NOT_READY };
 
@@ -116,8 +116,8 @@ void TCPStoreDaemon::query(int socket) {
   if (qt == QueryType::SET) {
     setHandler(socket);
 
-  } else if (qt == QueryType::COMPARE_AND_SET) {
-    compareAndSetHandler(socket);
+  } else if (qt == QueryType::COMPARE_AND_SWAP) {
+    compareAndSwapHandler(socket);
 
   } else if (qt == QueryType::ADD) {
     addHandler(socket);
@@ -162,13 +162,17 @@ void TCPStoreDaemon::setHandler(int socket) {
   wakeupWaitingClients(key);
 }
 
-void TCPStoreDaemon::compareAndSetHandler(int socket) {
+void TCPStoreDaemon::compareAndSwapHandler(int socket) {
   std::string key = tcputil::recvString(socket);
-  std::vector<uint8_t> newData = tcputil::recvVector<uint8_t>(socket);
-  std::vector<uint8_t> oldData = tcputil::recvVector<uint8_t>(socket);
+  std::vector<uint8_t> currentValue = tcputil::recvVector<uint8_t>(socket);
+  std::vector<uint8_t> newValue = tcputil::recvVector<uint8_t>(socket);
 
-  if (tcpStore_.find(key) != tcpStore_.end() && oldData == tcpStore_.at(key)) {
-    tcpStore_[key] = newData;
+  // sets value to new value if the key exists and the existing value is the old value
+  if (tcpStore_.find(key) != tcpStore_.end() && tcpStore_.at(key) == currentValue) {
+    tcpStore_[key] = newValue;
+    tcputil::sendVector<uint8_t>(socket, newValue);
+  } else {
+    tcputil::sendVector<uint8_t>(socket, currentValue);
   }
 }
 
@@ -448,12 +452,13 @@ void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {
   tcputil::sendVector<uint8_t>(storeSocket_, data);
 }
 
-void TCPStore::compareAndSet(const std::string& key, const std::vector<uint8_t>& newData, const std::vector<uint8_t>& oldData) {
+std::vector<uint8_t> TCPStore::compareAndSwap(const std::string& key, const std::vector<uint8_t>& currentValue, const std::vector<uint8_t>& newValue) {
   std::string regKey = regularPrefix_ + key;
-  tcputil::sendValue<QueryType>(storeSocket_, QueryType::COMPARE_AND_SET);
+  tcputil::sendValue<QueryType>(storeSocket_, QueryType::COMPARE_AND_SWAP);
   tcputil::sendString(storeSocket_, regKey, true);
-  tcputil::sendVector<uint8_t>(storeSocket_, newData);
-  tcputil::sendVector<uint8_t>(storeSocket_, oldData);
+  tcputil::sendVector<uint8_t>(storeSocket_, currentValue);
+  tcputil::sendVector<uint8_t>(storeSocket_, newValue);
+  return tcputil::recvVector<uint8_t>(storeSocket_);
 }
 
 std::vector<uint8_t> TCPStore::get(const std::string& key) {

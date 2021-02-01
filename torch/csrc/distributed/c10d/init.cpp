@@ -413,14 +413,16 @@ Example::
     >>> store.get("first_key")
 )")
           .def(
-              "compare_and_set",
+              "compare_and_swap",
               [](::c10d::Store& store,
                  const std::string& key,
                  const std::string& new_value,
-                 const std::string& old_value) {
+                 const std::string& old_value) -> py::bytes {
                 std::vector<uint8_t> newValue_(new_value.begin(), new_value.end());
                 std::vector<uint8_t> oldValue_(old_value.begin(), old_value.end());
-                store.compareAndSet(key, newValue_, oldValue_);
+                auto value = store.compareAndSwap(key, newValue_, oldValue_);
+                return py::bytes(
+                    reinterpret_cast<char*>(value.data()), value.size());
               },
               py::call_guard<py::gil_scoped_release>(),
               R"(
@@ -438,7 +440,7 @@ Example::
     >>> from datetime import timedelta
     >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
     >>> store.set("first_key", "first_value")
-    >>> store.compare_and_set("first_key", "second_value", "first_value")
+    >>> store.compare_and_swap("first_key", "second_value", "first_value")
     >>> # Should return "second_value"
     >>> store.get("first_key")
 )")

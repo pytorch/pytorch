@@ -340,13 +340,13 @@ class TCPStoreTest(TestCase, StoreTestBase):
     def test_numkeys_delkeys(self):
         self._test_numkeys_delkeys(self._create_store())
 
-    def test_compare_and_set_keys(self):
+    def test_compare_and_swap(self):
         store = self._create_store()
         store.set("key0", "value0")
         self.assertEqual(b"value0", store.get("key0"))
-        store.compare_and_set("key0", "value0", "wrong_old_value")
+        store.compare_and_swap("key0", "wrong_old_value", "new_value0")
         self.assertEqual(b"value0", store.get("key0"))
-        store.compare_and_set("key0", "new_value0", "value0")
+        store.compare_and_swap("key0", "value0", "new_value0")
         self.assertEqual(b"new_value0", store.get("key0"))
 
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
