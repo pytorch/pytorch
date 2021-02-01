@@ -414,7 +414,7 @@ TEST(LiteInterpreterTest, BuiltinClass) {
   mobile::Module bc = _load_for_mobile(ss);
   auto res =
       bc.get_method("forward")(std::vector<IValue>{torch::zeros({3, 4})});
-  auto str = res.toStringRef();
+  const auto& str = res.toStringRef();
   std::string expected = "Hello! Your tensor has 12 elements!";
   AT_ASSERT(str == expected);
 }

@@ -12,7 +12,7 @@ namespace jit {
 char const* toString(OpCode op);
 namespace mobile {
 Function::Function(c10::QualifiedName name)
-    : name_(name), code_(std::make_shared<Code>()) {}
+    : name_(std::move(name)), code_(std::make_shared<Code>()) {}
 
 const c10::QualifiedName& Function::qualname() const {
   return name_;
@@ -38,7 +38,7 @@ bool Function::append_operator(
   code_->op_names_.emplace_back(name, overload_name);
   auto opname = code_->op_names_.back();
 
-  auto opname_c10 = opname;
+  const auto& opname_c10 = opname;
   std::function<void(Stack&)> fn;
 
   auto jit_op = findOperatorFor(opname);
@@ -53,7 +53,7 @@ bool Function::append_operator(
     }
   }
 
-  if (model_version == 0x3L &&
+  if (model_version == (int64_t)0x3L &&
       model_version < caffe2::serialize::kProducedBytecodeVersion &&
       opname == c10::OperatorName("aten::_convolution", "")) {
     // A default-value argument will be added in
