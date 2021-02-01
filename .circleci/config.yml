@@ -6620,6 +6620,9 @@ workflows:
           name: "docker-pytorch-linux-xenial-py3.6-gcc7"
           image_name: "pytorch-linux-xenial-py3.6-gcc7"
       - docker_build_job:
+          name: "docker-pytorch-linux-bionic-rocm3.9-py3.6"
+          image_name: "pytorch-linux-bionic-rocm3.9-py3.6"
+      - docker_build_job:
           name: "docker-pytorch-linux-bionic-rocm3.10-py3.6"
           image_name: "pytorch-linux-bionic-rocm3.10-py3.6"
       - docker_build_job:
