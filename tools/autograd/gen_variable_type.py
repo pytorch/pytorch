@@ -666,7 +666,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         input_base = 'input_base'
         replay_view_func = ''
         updated_unpacked_args: List[str] = []
-        known_view_arg_simple_types: List[str] = ['int64_t', 'c10::optional<int64_t>', 'bool', 'IntArrayRef']
+        known_view_arg_simple_types: List[str] = ['int64_t', 'c10::optional<int64_t>', 'bool', 'ArrayRef<int64_t>']
         for unpacked_binding in unpacked_bindings:
             arg, arg_type = unpacked_binding.name, unpacked_binding.type
             if arg == 'self_':
@@ -679,7 +679,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                                 'over by value, also add a test in pytorch/xla/test/test_operations.py where this code '
                                 'is exercised.')
 
-            if arg_type == 'IntArrayRef':
+            if arg_type == 'ArrayRef<int64_t>':
                 # It's not safe to close over IntArrayRef by value, since this is a
                 # reference type, so materialize a vector to close over by value
                 arg_vec = arg + '_vec'

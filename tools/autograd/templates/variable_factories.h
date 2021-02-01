@@ -50,6 +50,7 @@ inline at::Tensor tensor(detail::TensorDataContainer tensor_data_container, cons
 /// A generic deleter function.
 using Deleter = std::function<void(void*)>;
 using at::MemoryFormat;
+using at::Dimname;
 
 /// Exposes the given `data` as a `Tensor` without taking ownership of the
 /// original data. `sizes` should specify the shape of the tensor, `strides` the

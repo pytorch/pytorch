@@ -91,19 +91,18 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
         return OptionalCType(elem)
     elif isinstance(t, ListType):
-        # TODO: remove these special cases, ArrayRef fallthrough works fine
-        # NB: CType throws away ArrayRef structure because it is not currently
-        # relevant in translation.  When it becomes relevant, need to add back
-        if str(t.elem) == 'int':
-            return BaseCType("IntArrayRef", binds)
-        elif str(t.elem) == 'Tensor':
+        # NB: Tensor special case exists because we assume you have an (owning)
+        # array of tensors, not a non-owning array of tensor references.
+        # This is all a bit finely balanced, see
+        # https://fb.workplace.com/groups/894363187646754/permalink/1149276442155426/
+        # for more background
+        if str(t.elem) == 'Tensor':
             return BaseCType("TensorList", binds)
-        elif str(t.elem) == 'Dimname':
-            return BaseCType("DimnameList", binds)
         elif str(t.elem) == 'Tensor?':
             return ConstRefCType(BaseCType("c10::List<c10::optional<Tensor>>", binds))
         elem = argumenttype_type(t.elem, mutable=mutable, binds=binds)
-        # TODO: explicitly qualify namespace here
+        # NB: CType throws away ArrayRef structure because it is not currently
+        # relevant in translation.  When it becomes relevant, need to add back
         return BaseCType(f"ArrayRef<{elem.cpp_type()}>", binds)
     else:
         raise AssertionError(f"unrecognized type {repr(t)}")
