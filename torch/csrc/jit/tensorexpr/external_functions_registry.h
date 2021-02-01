@@ -46,7 +46,7 @@ getNNCFunctionRegistry();
 // To register a new external function in NNC one needs to create an instance of
 // this struct
 struct RegisterNNCExternalFunction {
-  RegisterNNCExternalFunction(std::string name, NNCExternalFunction fn) {
+  RegisterNNCExternalFunction(const std::string& name, NNCExternalFunction fn) {
     getNNCFunctionRegistry()[name] = fn;
   }
 };
