@@ -196,11 +196,18 @@ struct CompilerConfig {
 #ifdef _MSC_VER
   std::string cxx = "cl";
   const std::string openmp_flags = "/openmp";
+#elif defined(__APPLE__)
+  std::string cxx = "clang++";
+  const std::string openmp_flags = "";
 #else
   std::string cxx = "g++";
   const std::string openmp_flags = "-fopenmp";
 #endif
+#if defined(__APPLE__)
+  bool openmp = false;
+#else
   bool openmp = true;
+#endif
 };
 
 static CompilerConfig& getConfig() {
