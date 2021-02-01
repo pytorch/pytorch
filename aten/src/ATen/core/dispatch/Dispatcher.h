@@ -383,6 +383,11 @@ public:
     return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
   }
 
+  // Note: benchmarks showed that this function wasn't getting inlined during calls to at::empty
+  C10_ALWAYS_INLINE Return redispatch(DispatchKeySet currentDispatchKeySet, Args... args) const {
+    return c10::Dispatcher::singleton().redispatch<Return, Args...>(*this, currentDispatchKeySet, std::forward<Args>(args)...);
+  }
+
 private:
   explicit TypedOperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
   : OperatorHandle(std::move(operatorIterator)) {}
