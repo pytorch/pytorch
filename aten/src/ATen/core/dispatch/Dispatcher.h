@@ -80,7 +80,7 @@ public:
   // table.
   static Dispatcher& realSingleton();
 
-  static Dispatcher& singleton() {
+  C10_ALWAYS_INLINE static Dispatcher& singleton() {
     // Implemented inline so that steady-state code needn't incur
     // function-call overhead. We can't just inline `realSingleton`
     // because the function-local static would get duplicated across
@@ -359,7 +359,7 @@ public:
   TypedOperatorHandle(const TypedOperatorHandle&) = default;
   TypedOperatorHandle& operator=(const TypedOperatorHandle&) = default;
 
-  Return call(Args... args) const {
+  C10_ALWAYS_INLINE Return call(Args... args) const {
     return c10::Dispatcher::singleton().call<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 
