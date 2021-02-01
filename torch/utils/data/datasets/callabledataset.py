@@ -13,7 +13,7 @@ def default_fn(data):
 
 
 class CallableIterableDataset(IterableDataset[T_co]):
-    r""" :class:`CallablIterableeDataset`.
+    r""" :class:`CallableIterableDataset`.
 
     IterableDataset to run a function over each item from the source dataset.
     args:
