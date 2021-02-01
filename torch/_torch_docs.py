@@ -2724,7 +2724,7 @@ Keyword args:
         * ``"true"`` - default behavior. Performs no rounding and, if both :attr:`input` and
           :attr:`other` are integer types, promotes the inputs to the default scalar type.
           Equivalent to true division in Python (the ``/`` operator) and NumPy's ``np.true_divide``.
-        * ``"trunc"`` - rounds the results of the division down.
+        * ``"trunc"`` - rounds the results of the division towards zero.
           Equivalent to C-style integer division.
         * ``"floor"`` - rounds the results of the division down.
           Equivalent to floor division in Python (the ``//`` operator) and NumPy's ``np.floor_divide``.
@@ -6864,7 +6864,7 @@ with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
 If :attr:`some` is ``True``, then this function returns the thin (reduced) QR factorization.
 Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
 
-.. warning:: ``torch.qr`` is deprecated. Please use ``torch.linalg.`` :func:`~torch.linalg.qr`
+.. warning:: ``torch.qr`` is deprecated. Please use :func:`torch.linalg.qr`
              instead.
 
              **Differences with** ``torch.linalg.qr``:

@@ -655,11 +655,28 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
 MemoryPlanner::MemoryPlanner(
     StaticRuntime* runtime,
     std::unordered_map<Value*, std::vector<Value*>> should_share) {
+  // get input Value*
+  at::ArrayRef<Value*> inputs =
+      runtime->get_inference_module()->graph->inputs();
+  std::unordered_set<Value*> graph_input_values(inputs.begin(), inputs.end());
+
   // collect register indices of outputs of ops with out variant
   std::unordered_set<Value*> managed_values;
   std::unordered_set<IValue*> unmanaged_value_set;
   for (ProcessedNode& pnode : runtime->get_nodes()) {
-    if (pnode.has_out_variant()) {
+    bool should_manage = pnode.has_out_variant();
+    if (should_manage && isViewOp(pnode.get_node())) {
+      // outputs of view ops with inputs as the graph inputs shouldn't be
+      // managed by the MemoryPlanner. It may release the storage of the graph
+      // inputs.
+      for (Value* in : pnode.get_node()->inputs()) {
+        if (graph_input_values.count(in) > 0) {
+          should_manage = false;
+          break;
+        }
+      }
+    }
+    if (should_manage) {
       // Types are stored in the underlying TorchScript IR
       for (Value* out : pnode.get_node()->outputs()) {
         if (out->type()->cast<TensorType>()) {
