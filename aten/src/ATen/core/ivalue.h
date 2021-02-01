@@ -204,7 +204,11 @@ struct TORCH_API IValue final {
   }
 
   IValue& operator=(IValue const& rhs) & {
-    IValue(rhs).swap(*this);
+    if (&rhs == this) {
+      return *this;
+    }
+    destroy();
+    copyFrom(rhs);
     return *this;
   }
 
@@ -932,6 +936,19 @@ struct TORCH_API IValue final {
     tag = rhs.tag;
     is_intrusive_ptr = rhs.is_intrusive_ptr;
     rhs.clearToNone();
+  }
+
+  void copyFrom(const IValue& rhs) {
+    if (rhs.isTensor()) {
+      new(&payload.as_tensor) at::Tensor(rhs.payload.as_tensor);
+    } else {
+      payload.u = rhs.payload.u;
+    }
+    tag = rhs.tag;
+    is_intrusive_ptr = rhs.is_intrusive_ptr;
+    if (is_intrusive_ptr && payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton()) {
+      c10::raw::intrusive_ptr::incref(payload.u.as_intrusive_ptr);
+    }
   }
 
   void clearToNone() noexcept {
