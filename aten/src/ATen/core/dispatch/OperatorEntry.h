@@ -151,16 +151,9 @@ public:
   // Asserts that the given FuncType is correct for calling this operator in an unboxed way.
   template<class FuncType>
   void assertSignatureIsCorrect() {
-    TORCH_CHECK(!cpp_signature_.has_value() || (CppSignature::make<FuncType>() == cpp_signature_->signature),
-        "\nTried to access or call an operator with a wrong signature.\n",
-        "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
-        "    ", (schema_.has_value() ? schema_->debug : "unknown debug info"), "\n",
-        "  correct signature:  ", cpp_signature_->signature.name(), "\n",
-        "    ", cpp_signature_->debug, "\n",
-        "  accessed/called as: ", CppSignature::make<FuncType>().name(), "\n",
-        "This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
-        "Please make sure that the function signature matches the signature in the operator registration call."
-    );
+    if (C10_UNLIKELY(cpp_signature_.has_value() && (CppSignature::make<FuncType>() != cpp_signature_->signature))) {
+      reportSignatureError(CppSignature::make<FuncType>().name());
+    }
   }
 
   [[noreturn]] void reportError(DispatchKey dispatchKey) const;
@@ -243,6 +236,7 @@ private:
   // Whether this operator needs to be observed with RecordFunction
   const bool is_observed_;
 
+  [[noreturn]] void reportSignatureError(std::string name) const;
   const KernelFunction& computeDispatchTableEntry(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const;
   std::pair<const AnnotatedKernel&, const char*> computeDispatchTableEntryWithDebug(
     const c10::Dispatcher& dispatcher, DispatchKey dispatch_key
