@@ -237,14 +237,14 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
         vmap does not provide general autobatching or handle variable-length
         sequences out of the box.
     """
-    warnings.warn(
-        'torch.vmap is an experimental prototype that is subject to '
-        'change and/or deletion. Please use at your own risk. There may be '
-        'unexpected performance cliffs due to certain operators not being '
-        'implemented. To see detailed performance warnings please use '
-        '`torch._C._debug_only_display_vmap_fallback_warnings(True) '
-        'before the call to `vmap`.',
-        stacklevel=2)
+    # warnings.warn(
+    #     'torch.vmap is an experimental prototype that is subject to '
+    #     'change and/or deletion. Please use at your own risk. There may be '
+    #     'unexpected performance cliffs due to certain operators not being '
+    #     'implemented. To see detailed performance warnings please use '
+    #     '`torch._C._debug_only_display_vmap_fallback_warnings(True) '
+    #     'before the call to `vmap`.',
+    #     stacklevel=2)
 
     @functools.wraps(func)
     def wrapped(*args):

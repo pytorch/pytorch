@@ -3,6 +3,7 @@
 #include <ATen/BatchedFallback.h>
 #include <ATen/native/ResizeCommon.h>
 #include <ATen/ATen.h>
+#include <torch/csrc/autograd/variable.h>
 
 namespace at {
 
@@ -1013,25 +1014,19 @@ Tensor comparison_pointwise_batching_rule(const Tensor& self, const Tensor& othe
   return physical_args[0].getPhysicalToLogicalMap().apply(result);
 }
 
-// struct DynamicLayer {
-//   DynamicLayer(DispatchKey key, int64_t layerId): key_(key), layerId_(layerId) {}
-//   DispatchKey key_; 
-//   int64_t layerId_;
-// };
-// 
-// std::vector<DynamicLayer> dynamicLayerStack;
-// 
-// int64_t pushLayer(DispatchKey key) {
-//   auto layerId = 1 + dynamicLayerStack.size();
-//   dynamicLayerStack.emplace_back(key, layerId);
-//   return layerId;
-// }
-// 
-// DynamicLayer popLayer() {
-//   auto result = dynamicLayerStack.back();
-//   dynamicLayerStack.pop_back();
-//   return result;
-// }
+bool BatchedTensor_is_leaf(const Tensor& self) {
+  if (torch::autograd::impl::get_autograd_meta(self)) {
+    return torch::autograd::impl::get_autograd_meta(self)->grad_fn_ == nullptr;
+  } else {
+    return true;
+  }
+}
+
+Tensor& BatchedTensor_requires_grad_(Tensor& self, bool requires_grad) {
+  self.set_requires_grad(requires_grad);
+  return self;
+}
+
 
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
@@ -1054,7 +1049,11 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 //   m.impl("fill_.Scalar", fill_inplace_scalar_batching_rule);
 //   m.impl("fill_.Tensor", fill_inplace_tensor_batching_rule);
 //   m.impl("zero_", zero_inplace_batching_rule);
-// 
+
+  // autograd things...
+  m.impl("is_leaf", BatchedTensor_is_leaf);
+  m.impl("requires_grad_", BatchedTensor_requires_grad_);
+
   // view operations
   m.impl("as_strided", as_strided_batching_rule);
   m.impl("chunk", chunk_batching_rule);

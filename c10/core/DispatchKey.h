@@ -39,7 +39,7 @@ enum class DispatchKey : uint8_t {
   // this will get eliminated, but for now it's convenient)
   CatchAll = Undefined,
 
-  DynamicLayerFront,
+  DynamicLayerBack,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ BACKENDS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // A "backend" is colloquially used to refer to handlers for dispatch
@@ -270,6 +270,8 @@ enum class DispatchKey : uint8_t {
   // for a usage example
   TESTING_ONLY_GenericMode,
 
+  DynamicLayerFront,
+
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   NumDispatchKeys, // Sentinel, end of runtime keys.
 
@@ -302,8 +304,6 @@ enum class DispatchKey : uint8_t {
   PrivateUse1_PreAutograd = AutogradPrivateUse1,
   PrivateUse2_PreAutograd = AutogradPrivateUse2,
   PrivateUse3_PreAutograd = AutogradPrivateUse3,
-
-  DynamicLayerBack,
 };
 
 // Note [Private use DispatchKey]

@@ -6,6 +6,10 @@ const char* toString(DispatchKey t) {
   switch (t) {
     case DispatchKey::Undefined:
       return "Undefined";
+    case DispatchKey::DynamicLayerFront:
+      return "DynamicLayerFront";
+    case DispatchKey::DynamicLayerBack:
+      return "DynamicLayerBack";
 
     case DispatchKey::CPU:
       return "CPU";

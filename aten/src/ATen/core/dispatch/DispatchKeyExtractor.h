@@ -47,7 +47,8 @@ static inline DispatchKey dispatchTypeId(
   // it's a bit troublesome, because fastpath TLS access requires the type of
   // the TLS in question to be zero-initialized, so you don't actually win
   // anyting in that case.
-  return (((ks | local.included_ | always_included) - local.excluded_) & key_mask).highestPriorityTypeId();
+  auto result = (((ks | local.included_ | always_included) - local.excluded_) & key_mask).highestPriorityTypeId();
+  return result;
 }
 
 }

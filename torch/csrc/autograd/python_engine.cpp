@@ -180,12 +180,12 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
     THPUtils_assert(THPVariable_Check(_tensor), "element %d of tensors "
         "tuple is not a Tensor", i);
     auto& variable = ((THPVariable*)_tensor)->cdata;
-    TORCH_CHECK(!isBatchedTensor(variable),
-        "torch.autograd.grad(outputs, inputs, grad_outputs) called inside ",
-        "torch.vmap. We do not support the case where any outputs are ",
-        "vmapped tensors (output ", i, " is being vmapped over). Please "
-        "call autograd.grad() outside torch.vmap or file a bug report "
-        "with your use case.")
+    // TORCH_CHECK(!isBatchedTensor(variable),
+    //     "torch.autograd.grad(outputs, inputs, grad_outputs) called inside ",
+    //     "torch.vmap. We do not support the case where any outputs are ",
+    //     "vmapped tensors (output ", i, " is being vmapped over). Please "
+    //     "call autograd.grad() outside torch.vmap or file a bug report "
+    //     "with your use case.")
     auto gradient_edge = torch::autograd::impl::gradient_edge(variable);
     THPUtils_assert(gradient_edge.function,
         "element %d of tensors does not require grad and does not have a grad_fn", i);

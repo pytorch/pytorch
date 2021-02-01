@@ -1,4 +1,5 @@
 #include <ATen/VmapMode.h>
+#include <ATen/DynamicLayer.h>
 
 namespace at {
 namespace impl {
@@ -17,17 +18,23 @@ int64_t VmapMode::current_vmap_level() {
 
 int64_t VmapMode::increment_nesting() {
   VmapMode_current_vmap_level++;
-  if (VmapMode_current_vmap_level == 1) {
+
+  auto level = pushDynamicLayer(DispatchKey::Batched);
+  if (VmapMode_current_vmap_level >= 1) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::VmapMode, true);
   }
-  return VmapMode_current_vmap_level;
+  return level;
 }
 
 int64_t VmapMode::decrement_nesting() {
+  auto layer = popDynamicLayer();
+  TORCH_INTERNAL_ASSERT(layer.key() == DispatchKey::Batched);
+
   VmapMode_current_vmap_level--;
   if (VmapMode_current_vmap_level == 0) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::VmapMode, false);
   }
+  // TODO: this return value should never be used
   return VmapMode_current_vmap_level;
 }
 
