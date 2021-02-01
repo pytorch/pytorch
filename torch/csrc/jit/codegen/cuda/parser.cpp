@@ -551,8 +551,10 @@ class IrParser {
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             auto input = value_map[node->input(0)->unique()];
             auto train = constant_as<bool>(node->input(2));
+            TORCH_INTERNAL_ASSERT(
+                train.has_value(), "dropout needs constant `train` flag");
 
-            if (train) {
+            if (train.value()) {
               auto prob = value_map[node->input(1)->unique()];
               auto p1m = sub(new Double(1.), prob);
 
