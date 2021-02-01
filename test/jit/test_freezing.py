@@ -1563,6 +1563,48 @@ class TestFrozenOptimizations(JitTestCase):
                     self.assertEqual(out_eager.is_mkldnn, out_scripted.is_mkldnn)
                     self.assertEqual(to_dense(inp), to_dense(inp))
 
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_linear_to_mkldnn(self):
+        # use until github.com/pytorch/pytorch/pull/50856 land
+        class LinearMod(nn.Linear):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+            def forward(self, input):
+                return torch._C._nn.linear(input, self.weight, self.bias)
+
+        with set_default_dtype(torch.float):
+            # make sure mkldnn handles broadcast rules
+            inp_shapes = [[20], [20, 20], [1, 20, 20]]
+            for input_is_mkldnn, inp_shape in product([True, False], inp_shapes):
+                mod = LinearMod(20, 30).eval()
+                scripted_mod = torch.jit.script(mod)
+                inp = torch.rand(inp_shape)
+
+                self.run_pass("inline", scripted_mod.graph)
+                FileCheck().check("aten::linear").run(scripted_mod.graph)
+                # successfully no-ops with non-const inputs
+                self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+                FileCheck().check_not("ConvertToMKLDNN").run(scripted_mod.graph)
+
+                scripted_mod = torch.jit.freeze(scripted_mod)
+                self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+                FileCheck().check("ConvertToMKLDNN").check("aten::linear").check("ConvertFromMKLDNN").run(scripted_mod.graph)
+
+                if input_is_mkldnn:
+                    inp = inp.to_mkldnn()
+                    mod.weight = torch.nn.Parameter(mod.weight.to_mkldnn())
+                    mod.bias = mod.bias if mod.bias is None else torch.nn.Parameter(mod.bias.to_mkldnn())
+
+                for _ in range(2):
+                    # aten::equal not defined for mkldnn tensors
+                    def to_dense(inp):
+                        return inp.to_dense() if inp.is_mkldnn else inp
+
+                    out_eager, out_scripted = mod(inp), scripted_mod(inp)
+                    self.assertEqual(out_eager.is_mkldnn, out_scripted.is_mkldnn)
+                    self.assertEqual(to_dense(inp), to_dense(inp))
+
     @unittest.skipIf(torch._C.has_mkldnn, "Testing no mkldnn")
     def test_conv_to_mkldnn_no_mkldnn(self):
         # test no error when mkldnn not available
