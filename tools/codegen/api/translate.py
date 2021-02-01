@@ -50,7 +50,7 @@ def translate(
     *, method: bool = False
 ) -> List[Expr]:
 
-    binding_exprs: List[Expr]
+    binding_exprs: List[Expr] = []
     for b in bindings:
         if isinstance(b, Binding):
             binding_exprs.append(Expr(
@@ -60,7 +60,7 @@ def translate(
         else:
             binding_exprs.append(b)
 
-    goal_ctypes: List[CType]
+    goal_ctypes: List[CType] = []
     for g in goals:
         if isinstance(g, Binding):
             goal_ctypes.append(g.ctype)
