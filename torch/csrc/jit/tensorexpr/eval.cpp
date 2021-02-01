@@ -788,7 +788,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   case ScalarType::Name:                    \
     visit_intrinsics_helper<Type, Type>(v); \
     break;
-        AT_FORALL_SCALAR_TYPES(TYPE_CASE);
+        AT_FORALL_SCALAR_TYPES_AND(Bool, TYPE_CASE);
 #undef TYPE_CASE
         default:
           throw unsupported_dtype();
@@ -931,6 +931,10 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         return std::is_unsigned<TInput>::value ? v
                                                : std::abs(static_cast<X>(v));
       }
+      case kCeil:
+      case kFloor:
+        return v;
+
       default:
         throw std::runtime_error(
             "Invalid integral op_type: " + c10::to_string(op_type));
@@ -946,8 +950,33 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
     }
   }
+  // specialization for bool ops (just kCeil, kFloor and kIsNan currently)
+  template <
+      typename TReturn,
+      typename TInput,
+      typename std::enable_if<
+          std::is_same<TInput, std::vector<bool>::reference>::value,
+          int>::type = 0>
+  static TReturn compute_intrinsics(IntrinsicsOp op_type, TInput v) {
+    switch (op_type) {
+      case kCeil:
+      case kFloor:
+        return v;
+      case kIsNan:
+        return false;
+      default:
+        throw std::runtime_error(
+            "Invalid bool op_type: " + c10::to_string(op_type));
+    }
+  }
 
-  template <typename TReturn, typename TInput>
+  template <
+      typename TReturn,
+      typename TInput,
+      typename std::enable_if<
+          c10::guts::negation<
+              std::is_same<TInput, std::vector<bool>::reference>>::value,
+          int>::type = 0>
   TReturn compute_intrinsics(IntrinsicsOp op_type, TInput v1, TInput v2) {
     switch (op_type) {
       case kPow:
@@ -961,6 +990,16 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       default:
         throw std::runtime_error("Invalid op_type: " + c10::to_string(op_type));
     }
+  }
+  template <
+      typename TReturn,
+      typename TInput,
+      typename std::enable_if<
+          std::is_same<TInput, std::vector<bool>::reference>::value,
+          int>::type = 0>
+  TReturn compute_intrinsics(IntrinsicsOp op_type, TInput v1, TInput v2) {
+    throw std::runtime_error(
+        "Invalid bool op_type: " + c10::to_string(op_type));
   }
 
   Value value_;
