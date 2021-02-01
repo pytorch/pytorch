@@ -350,7 +350,6 @@ filegroup(
         "aten/src/ATen/cudnn/Handle.cpp",
         "aten/src/ATen/cudnn/Types.cpp",
         "aten/src/ATen/native/cuda/CUDAUnaryOps.cpp",
-        "aten/src/ATen/native/cuda/LegacyDefinitions.cpp",
         "aten/src/ATen/native/cuda/TensorShapeCUDA.cpp",
         "aten/src/ATen/native/cudnn/AffineGridGenerator.cpp",
         "aten/src/ATen/native/cudnn/BatchNorm.cpp",
