@@ -47,7 +47,7 @@ def make_sprite(label_img, save_path):
 def get_embedding_info(metadata, label_img, filesys, subdir, global_step, tag):
     info = EmbeddingInfo()
     info.tensor_name = "{}:{}".format(tag, str(global_step).zfill(5))
-    info.tensor_path = filesys.join(subdir, 'tensors.tsv')
+    info.tensor_path = filesys.join(subdir, 'tensors.npy')
     if metadata is not None:
         info.metadata_path = filesys.join(subdir, 'metadata.tsv')
     if label_img is not None:
@@ -62,9 +62,6 @@ def write_pbtxt(save_path, contents):
     fs.write(config_path, tf.compat.as_bytes(contents), binary_mode=True)
 
 
-def make_mat(matlist, save_path):
+def make_mat(mat, save_path):
     fs = tf.io.gfile.get_filesystem(save_path)
-    with tf.io.gfile.GFile(fs.join(save_path, 'tensors.tsv'), 'wb') as f:
-        for x in matlist:
-            x = [str(i.item()) for i in x]
-            f.write(tf.compat.as_bytes('\t'.join(x) + '\n'))
+    np.save(fs.join(save_path, 'tensors.npy'), matlist)
