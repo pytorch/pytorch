@@ -43,6 +43,10 @@ AT_FORALL_COMPLEX_TYPES(TENSOR)
 
 ${function_declarations}
 
+namespace redispatch {
+    ${function_redispatch_declarations}
+} // namespace redispatch
+
 // Special C++ only overloads for std()-like functions (See gh-40287)
 // These are needed because int -> bool conversion takes precedence over int -> IntArrayRef
 // So, for example std(0) would select the std(unbiased=False) overload
@@ -142,4 +146,4 @@ inline int64_t stride(const Tensor& tensor, int64_t dim) {
   return tensor.stride(dim);
 }
 
-}
+} // namespace at
