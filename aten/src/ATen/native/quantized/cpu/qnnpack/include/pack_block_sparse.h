@@ -12,7 +12,7 @@
 
 #include <qnnpack/math.h>
 
-typedef struct {
+typedef struct BCSRMatrix {
   std::vector<uint32_t> col_indices;
   std::vector<uint32_t> row_values;
   std::vector<uint8_t> values;
