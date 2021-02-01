@@ -34,4 +34,4 @@ class TestComplex(JitTestCase):
 
         loaded = self.getExportImportCopy(ComplexModule())
         self.assertEqual(loaded.a, 3 + 5j)
-        self.assertEqual(loaded.b, [2 + 3j, 3 + 4j, -3j, -4]
+        self.assertEqual(loaded.b, [2 + 3j, 3 + 4j, -3j, -4])
