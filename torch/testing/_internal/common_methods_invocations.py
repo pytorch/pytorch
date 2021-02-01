@@ -3031,9 +3031,6 @@ def method_tests():
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], Ellipsis]),), 'adv_index_sub_3'),
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
                                                              torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
-        ('__getitem__', torch.randn(S, S, S), ([torch.LongTensor([0, 2])]),
-            'tensor_list_alert_nondeterministic', (), [1],
-            [expectedAlertNondeterministic('index_backward CPU with list of index tensors', 'cpu')]),
         ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
         ('kron', (S, S), ((M, L),))
     ]
