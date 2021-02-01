@@ -807,6 +807,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("ofInts", &ListType::ofInts)
       .def_static("ofTensors", &ListType::ofTensors)
       .def_static("ofFloats", &ListType::ofFloats)
+      .def_static("ofComplexDoubles", &ListType::ofComplexDoubles)
       .def_static("ofBools", &ListType::ofBools)
       .def("getElementType", &ListType::getElementType);
   py::class_<DictType, Type, std::shared_ptr<DictType>>(m, "DictType")
