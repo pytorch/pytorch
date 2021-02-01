@@ -217,11 +217,11 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
-  pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc9)
+  pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7)
     CUDA_VERSION=10.2
     CUDNN_VERSION=7
     ANACONDA_PYTHON_VERSION=3.9
-    GCC_VERSION=9
+    GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
     VISION=yes
