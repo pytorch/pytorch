@@ -64,4 +64,4 @@ def write_pbtxt(save_path, contents):
 
 def make_mat(mat, save_path):
     fs = tf.io.gfile.get_filesystem(save_path)
-    np.save(fs.join(save_path, 'tensors.npy'), matlist)
+    np.save(fs.join(save_path, 'tensors.npy'), mat)
