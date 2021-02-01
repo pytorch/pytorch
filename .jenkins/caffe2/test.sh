@@ -159,7 +159,7 @@ pip install --user pytest-sugar
 # torchvision tests #
 #####################
 if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
-  # Check out torch/vision at Jun 11 2020 commit
+  # Check out torch/vision at Jan 19 2021 commit
   # This hash must match one in .jenkins/pytorch/test.sh
   pip install -q --user git+https://github.com/pytorch/vision.git@ae0d80b3c52dc98b3a9763bdb974c3ef7b6eb83d
   pip install -q --user ninja
