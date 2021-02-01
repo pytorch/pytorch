@@ -133,6 +133,7 @@ public:
   // Like call, but override the default DispatchKey calculation code,
   // instead dispatching straight to the provided DispatchKey
   template<class Return, class... Args>
+  C10_ALWAYS_INLINE
   Return callWithDispatchKey(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey dispatchKey, Args... args) const;
 
   template<class Return, class... Args>
@@ -362,7 +363,7 @@ public:
     return c10::Dispatcher::singleton().call<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 
-  Return callWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
+  C10_ALWAYS_INLINE Return callWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
     return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
   }
 
