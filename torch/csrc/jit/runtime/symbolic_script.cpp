@@ -805,6 +805,12 @@ const std::vector<std::string> functions = {
 
             return result, backward
 
+        def gelu(self):
+            result = torch.gelu(self)
+            def backward(grad_output):
+                return torch.gelu_backward(grad_output, self)
+            return result, backward
+
         # Share backward with threshold
         def relu(self):
             result = torch.relu(self)

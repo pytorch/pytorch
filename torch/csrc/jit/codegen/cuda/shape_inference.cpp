@@ -83,6 +83,7 @@ class NaiveTypePropagator {
       case aten::threshold:
       case aten::clamp:
       case aten::gelu:
+      case aten::gelu_backward:
       case aten::tanh: {
         TORCH_CHECK(
             hasTypeAndDim(node->input(0)->type()->cast<TensorType>()),

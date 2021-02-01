@@ -96,8 +96,7 @@ bool complyWith(
   // check a. if num_dimension check fails or scalar type check fails
   if (*guard_tensor_type->dim() != static_cast<size_t>(tensor.ndimension()) ||
       (guard_tensor_type->scalarType().has_value() &&
-       (guard_tensor_type->scalarType().value() != tensor.scalar_type())) ||
-      tensor.requires_grad()) {
+       (guard_tensor_type->scalarType().value() != tensor.scalar_type()))) {
     return false;
   }
 

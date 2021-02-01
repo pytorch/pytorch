@@ -342,6 +342,7 @@ _(aten, full_like) \
 _(aten, gather) \
 _(aten, gcd) \
 _(aten, gelu) \
+_(aten, gelu_backward) \
 _(aten, geometric) \
 _(aten, geqrf) \
 _(aten, get_device) \
