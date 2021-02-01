@@ -577,4 +577,17 @@ TEST(ProcessGroupGlooTest, testAlltoallCUDA) {
   }
 }
 
+TEST(ProcessGroupGlooTest, testBackendName) {
+  {
+    TemporaryFile file;
+    const auto size = 2;
+    auto tests = CollectiveTest::initialize(file.path, size);
+
+    for (auto i = 0; i < size; i++) {
+      EXPECT_EQ(
+        tests[i].getProcessGroup().getBackendName(), std::string(c10d::GLOO_BACKEND_NAME));
+    }
+  }
+}
+
 #endif
