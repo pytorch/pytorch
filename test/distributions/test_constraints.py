@@ -68,7 +68,7 @@ def test_biject_to(constraint_fn, args, is_cuda):
     assert torch.allclose(x, x2), "Error in biject_to({}) inverse".format(constraint)
 
     j = t.log_abs_det_jacobian(x, y)
-    assert j.shape == x.shape[:x.dim() - t.input_event_dim]
+    assert j.shape == x.shape[:x.dim() - t.domain.event_dim]
 
 
 @pytest.mark.parametrize('constraint_fn, args', [(c[0], c[1:]) for c in CONSTRAINTS])
