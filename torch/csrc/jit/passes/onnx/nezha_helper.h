@@ -12,6 +12,10 @@ void NeZha_TrySplitModule(
 std::vector<Module> NeZha_GetSplitModules(
     Module& module);
 
+void NeZha_TryUpdateModule(
+    Module& dst_module,
+    std::shared_ptr<Graph>& src_graph);
+
 } // namespace jit
 
 } // namespace torch

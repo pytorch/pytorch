@@ -189,7 +189,16 @@ with torch.no_grad():
     trace_m_1.eval()
     trace_results_1 = trace_m_1(x)
 
-    torch._C._jit_nezha_update_graph(trace_m_all.graph, trace_m_1.graph)
+    f = 'model_before.pt'
+    torch.jit.save(trace_m_all, f)
+    loaded_m_before = torch.jit.load(f)
+
+    torch._C._jit_nezha_update_graph(trace_m_all._c, trace_m_1.graph)
+
+    f = 'model_after.pt'
+    torch.jit.save(trace_m_all, f)
+    loaded_m_after = torch.jit.load(f)
+
 
     trace_m_2 = torch.jit.trace(NeuralNet_2nd(total_hidden_size, total_num_classes), trace_results_1)
     trace_m_2.load_state_dict(all_params, strict=False)
