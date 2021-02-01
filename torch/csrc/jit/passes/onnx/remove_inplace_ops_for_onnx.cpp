@@ -561,12 +561,18 @@ static void ImplicitCastForBinaryInplaceOps(Node* inplaceNode) {
       (inplaceNode->kind() == aten::sub_) ||
       (inplaceNode->kind() == aten::mul_) ||
       (inplaceNode->kind() == aten::div_)) {
-    auto newInputNode = inplaceNode->owningGraph()->create(aten::type_as, 1);
     auto orignalInputs = inplaceNode->inputs();
-    newInputNode->insertBefore(inplaceNode);
-    newInputNode->addInput(orignalInputs.at(1));
-    newInputNode->addInput(orignalInputs.at(0));
-    inplaceNode->replaceInput(1, newInputNode->outputs()[0]);
+    if (orignalInputs.at(0)
+            ->type()
+            ->cast<TensorType>()
+            ->scalarType()
+            .has_value()) {
+      auto newInputNode = inplaceNode->owningGraph()->create(aten::type_as, 1);
+      newInputNode->insertBefore(inplaceNode);
+      newInputNode->addInput(orignalInputs.at(1));
+      newInputNode->addInput(orignalInputs.at(0));
+      inplaceNode->replaceInput(1, newInputNode->outputs()[0]);
+    }
   }
 }
 
