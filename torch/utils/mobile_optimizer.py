@@ -44,7 +44,7 @@ def optimize_for_mobile(
     # mypy errors (i.e. List[AnyStr] = List[str])
     preserved_methods_str: List[str] = [str(method) for method in preserved_methods]
 
-    bundled_inputs_methods = ['get_all_bundled_inputs', 'get_num_bundled_inputs', 'run_on_bundled_input']
+    bundled_inputs_methods = _get_bundled_inputs_preserved_methods(script_module, preserved_methods_str)
     if all([hasattr(script_module, method) for method in bundled_inputs_methods]):
         preserved_methods_str = list(set(preserved_methods_str + bundled_inputs_methods))
 
@@ -109,3 +109,20 @@ def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
                               "operator.".format(op_name)})
 
     return lint_list
+
+def _get_bundled_inputs_preserved_methods(script_module: torch.jit.ScriptModule, preserved_methods: List[str]) -> List[str]:
+    bundled_inputs_methods = [
+        'get_all_bundled_inputs',
+        'get_num_bundled_inputs',
+        'run_on_bundled_input',
+    ]
+    if hasattr(script_module, 'get_bundled_inputs_functions_and_info'):
+        bundled_inputs_methods.append('get_bundled_inputs_functions_and_info')
+        all_info = script_module.get_bundled_inputs_functions_and_info()
+        for function_name in all_info:
+            if function_name not in preserved_methods:
+                bundled_inputs_methods.append(function_name)
+            bundled_inputs_methods.append("get_all_bundled_inputs_for_" + function_name)
+            bundled_inputs_methods.append("_bundled_inputs_deflated_" + function_name)
+
+    return bundled_inputs_methods
