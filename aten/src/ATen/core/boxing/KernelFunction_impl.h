@@ -24,6 +24,10 @@ inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorH
     func(opHandle, stack);
 }
 
+inline bool KernelFunction::isValidUnboxed() const {
+    return unboxed_kernel_func_ != nullptr;
+}
+
 template<KernelFunction::BoxedKernelFunction_withDispatchKeys* func>
 inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorHandle& opHandle, DispatchKeySet ks, Stack* stack) {
     // See Note [Plumbing Keys Through The Dispatcher 2] for details.
@@ -54,7 +58,7 @@ inline Return callUnboxedKernelFunction(void* unboxed_kernel_func, OperatorKerne
 }
 
 template<class Return, class... Args>
-inline Return KernelFunction::call(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const {
+C10_ALWAYS_INLINE Return KernelFunction::call(const OperatorHandle& opHandle, DispatchKeySet dispatchKeySet, Args... args) const {
     // note: Args above is intentionally not Args&&. We don't want perfect
     // forwarding, which would require Args to be deduced, but instead we
     // want callers to explicitly specify the Args.

@@ -238,12 +238,8 @@ at::${api_name}(${unpacked_args})""")
 CALL_DISPATCH_VIA_METHOD = CodeTemplate("""\
 ${var}.${api_name}(${unpacked_method_args})""")
 
-CALL_REDISPATCH_VIA_NAMESPACE = CodeTemplate("""\
+CALL_REDISPATCH = CodeTemplate("""\
 at::redispatch::${api_name}(${unpacked_args})""")
-
-CALL_REDISPATCH_VIA_METHOD = CodeTemplate("""\
-${var}._redispatch_${api_name}(${unpacked_method_args})""")
-
 # If the non-variable operation has return values, we use the `tmp` variable to hold the
 # values temporarily and pass the values to the return variables outside of the
 # `at::AutoNonVariableTypeMode` guard block.
@@ -680,20 +676,15 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                     unpacked_method_args=unpacked_args[1:])
         else:
             # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.
+            # Ops also always have a function variant of the redispatch API.
             # See Note [Plumbing Keys Through The Dispatcher] for details.
             dispatch_key_set = 'ks & c10::after_autograd_keyset'
-            if Variant.function in f.variants:
-                call = CALL_REDISPATCH_VIA_NAMESPACE.substitute(
-                    api_name=cpp.name(
-                        f.func,
-                        faithful_name_for_out_overloads=True,
-                    ),
-                    unpacked_args=[dispatch_key_set] + list(unpacked_args))
-            else:
-                call = CALL_REDISPATCH_VIA_METHOD.substitute(
-                    api_name=cpp.name(f.func),
-                    var=input_base,
-                    unpacked_method_args=[dispatch_key_set] + list(unpacked_args[1:]))
+            call = CALL_REDISPATCH.substitute(
+                api_name=cpp.name(
+                    f.func,
+                    faithful_name_for_out_overloads=True,
+                ),
+                unpacked_args=[dispatch_key_set] + list(unpacked_args))
         return call
 
     def emit_view_lambda(unpacked_bindings: List[Binding]) -> str:

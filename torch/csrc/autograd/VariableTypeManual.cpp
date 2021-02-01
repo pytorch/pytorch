@@ -5,6 +5,7 @@
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/autograd/utils/error_messages.h>
 #include <torch/csrc/autograd/autograd.h>
+#include <ATen/RedispatchFunctions.h>
 #include <ATen/TracerMode.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/library.h>
@@ -242,7 +243,7 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    self_._redispatch_copy_(ks & c10::after_autograd_keyset, src_, non_blocking);
+    at::redispatch::copy_(ks & c10::after_autograd_keyset, self_, src_, non_blocking);
   }
   increment_version(self);
   rebase_history(self , std::move(grad_fn));
@@ -278,7 +279,7 @@ Tensor& resize_(
   }
   {
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    self_._redispatch_resize_(ks & c10::after_autograd_keyset, size, optional_memory_format);
+    at::redispatch::resize_(ks & c10::after_autograd_keyset, self_, size, optional_memory_format);
   }
 
   if (self.fw_grad(/* level */ 0).defined()) {
