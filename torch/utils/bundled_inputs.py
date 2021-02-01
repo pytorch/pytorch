@@ -37,7 +37,7 @@ def augment_model_with_bundled_inputs(
         model,
         inputs={forward : inputs},
         _receive_inflate_expr=_receive_inflate_expr,
-        info={forward : info} if info is not None else None,
+        info={forward : info} if info else None,
     )
 
 
@@ -170,7 +170,7 @@ def augment_many_model_functions_with_bundled_inputs(
             """).format(name=function_name))
 
         # Add to the high level helper methods
-        inputs_info = repr(info[function]) if info is not None and function in info else '[]'
+        inputs_info = repr(info[function]) if info and function in info else '[]'
         get_bundled_inputs_functions_and_info_template += """
             temp_dict : Dict[str,List[str]] = {{}}
             info: List[str] = {info}
