@@ -1,8 +1,8 @@
 #include <torch/csrc/jit/tensorexpr/external_functions.h>
 
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
-#include <torch/torch.h>
 
 namespace torch {
 namespace jit {
@@ -30,13 +30,13 @@ std::vector<at::Tensor> constructTensors(
 
   std::vector<at::Tensor> tensors;
   for (size_t i = 0; i < buf_data_vec.size(); i++) {
-    auto options = torch::TensorOptions()
+    auto options = at::TensorOptions()
                        .dtype(buf_dtypes_vec[i])
-                       .layout(torch::kStrided)
-                       .device(torch::kCPU) // TODO: support GPUs too
+                       .layout(at::kStrided)
+                       .device(at::kCPU) // TODO: support GPUs too
                        .requires_grad(false);
     tensors.emplace_back(
-        torch::from_blob(buf_data_vec[i], buf_dims_vec[i], options));
+        at::from_blob(buf_data_vec[i], buf_dims_vec[i], options));
   }
   return tensors;
 }
