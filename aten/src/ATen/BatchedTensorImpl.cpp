@@ -17,6 +17,8 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   TORCH_INTERNAL_ASSERT(value_.defined());
   checkInvariants();
 
+  TORCH_INTERNAL_ASSERT(bdims_.size() == 1);
+
   const auto public_dims = value_.dim() - bdims_.size();
   const auto value_sizes = value_.sizes();
   const auto value_strides = value_.strides();
@@ -103,30 +105,37 @@ bool BatchedTensorImpl::has_storage() const {
 }
 
 Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
-  TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor));
-  auto tensor_dim = tensor.dim();
-  TORCH_CHECK(
-      tensor_dim <= kVmapMaxTensorDims,
-      "vmap only supports tensors of dimensionality up to ", kVmapMaxTensorDims,
-      "; got a tensor with dim ", tensor_dim);
-  TORCH_INTERNAL_ASSERT(
-      std::all_of(bdims.begin(), bdims.end(),
-          [](const BatchDim& bdim) { return bdim.level() < kVmapNumLevels; }),
-      "We only support up to ", kVmapNumLevels, " nested vmaps");
+  TORCH_INTERNAL_ASSERT(bdims.size() == 1);
+
+  // NB: temporarily disable 
+  // TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor));
+  // auto tensor_dim = tensor.dim();
+  // TORCH_CHECK(
+  //     tensor_dim <= kVmapMaxTensorDims,
+  //     "vmap only supports tensors of dimensionality up to ", kVmapMaxTensorDims,
+  //     "; got a tensor with dim ", tensor_dim);
+  // TORCH_INTERNAL_ASSERT(
+  //     std::all_of(bdims.begin(), bdims.end(),
+  //         [](const BatchDim& bdim) { return bdim.level() < kVmapNumLevels; }),
+  //     "We only support up to ", kVmapNumLevels, " nested vmaps");
   return at::detail::make_tensor<BatchedTensorImpl>(tensor, std::move(bdims));
 }
 
 Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim) {
-  const auto* batched = maybeGetBatchedImpl(tensor);
-  if (!batched) {
-    BatchDims bdims;
-    bdims.emplace_back(level, dim);
-    return at::detail::make_tensor<BatchedTensorImpl>(tensor, std::move(bdims));
-  }
-  BatchDims new_bdims(batched->bdims().begin(), batched->bdims().end());
-  auto actual_bdim = batched->actualDim(dim, /*wrap_dim=*/true);
-  new_bdims.emplace_back(level, actual_bdim);
-  return makeBatched(batched->value(), std::move(new_bdims));
+  BatchDims new_bdims = { { level, dim } };
+  TORCH_INTERNAL_ASSERT(new_bdims.size() == 1);
+  return makeBatched(tensor, std::move(new_bdims));
+
+  // const auto* batched = maybeGetBatchedImpl(tensor);
+  // if (!batched) {
+  //   BatchDims bdims;
+  //   bdims.emplace_back(level, dim);
+  //   return at::detail::make_tensor<BatchedTensorImpl>(tensor, std::move(bdims));
+  // }
+  // BatchDims new_bdims(batched->bdims().begin(), batched->bdims().end());
+  // auto actual_bdim = batched->actualDim(dim, /*wrap_dim=*/true);
+  // new_bdims.emplace_back(level, actual_bdim);
+  // return makeBatched(batched->value(), std::move(new_bdims));
 }
 
 bool inplaceIsVmapCompatible(const Tensor& self, const Tensor& other) {

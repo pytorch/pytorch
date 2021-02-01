@@ -46,6 +46,7 @@ static std::pair<Tensor,int64_t> remove_existing_batch_dim(
     TORCH_INTERNAL_ASSERT(bdims[0].level() == level);
     return std::make_pair(batched->value(), bdims[0].dim());
   }
+  TORCH_INTERNAL_ASSERT(false);
   BatchDims new_bdims;
   int64_t newly_exposed_physical_dim = -1;
   new_bdims.reserve(bdims.size() - 1);

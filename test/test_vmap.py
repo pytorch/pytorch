@@ -686,6 +686,7 @@ class TestVmapAPI(TestCase):
         result = vmap(vmap(vmap(op)))(x, y)
         self.assertEqual(x, outplace_op(x_orig, y.view(B0, B1, B2, 1)))
 
+    @unittest.expectedFailure
     def test_inplace_fallback_nary_different_levels(self):
         # NB: One day we will implement a batching rule for atan2_
         # If/when we do, this test should be replaced to test the fallback
@@ -1136,6 +1137,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
             # self._test_unary(lambda t: op(number, t), getter, device='cuda')
             # self._test_unary(lambda t: op(t, torch.tensor(number)), getter, device='cuda')
 
+    @unittest.expectedFailure
     def test_as_strided(self):
         def _test(sizes, strides, offset, tensor, lambd):
             result = vmap(lambda t: t.as_strided(sizes, strides, offset))(tensor)
@@ -1258,7 +1260,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(op, in_dims=(0, None)),
              (torch.rand(B1, 2, 3, 5), torch.rand(B0, 2, 5, 3)), in_dims=(None, 0))
 
-    @unittest.expectedFailure
     def test_cat(self):
         test = self._vmap_test
         B0, B1 = 5, 7
@@ -1815,7 +1816,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(lambda t: op(t, 1, 1)), (torch.rand(B1, 2, B0, 5),), in_dims=2)
         test(vmap(vmap(lambda t: op(t, 1, 1), in_dims=1)), (torch.rand(B1, 2, B0, B2, 5),), in_dims=2)
 
-    @unittest.expectedFailure
     def test_stack(self):
         test = self._vmap_test
         B0, B1 = 5, 7

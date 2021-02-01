@@ -1201,9 +1201,9 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 //   m.impl("bmm", bmm_batching_rule);
 //   m.impl("mm", mm_batching_rule);
 // 
-//   // cat/stack
-//   m.impl("cat", cat_batching_rule);
-//   m.impl("stack", stack_batching_rule);
+  // cat/stack
+  m.impl("cat", cat_batching_rule);
+  m.impl("stack", stack_batching_rule);
 // 
 //   // backward operators
 //   m.impl("select_backward", select_backward_batching_rule);

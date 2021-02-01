@@ -178,49 +178,42 @@ static Tensor alignBatchDimsAtFront(
 //    to `batch_sizes`
 VmapPhysicalViewVec
 MultiBatchVmapTransform::logicalToPhysical(TensorList logical_tensors) {
-  // Figure out all of the collective vmap levels in `logical_tensors`.
-  std::bitset<kVmapNumLevels> collective_levels;
+  // Figure out the highest vmap level
+  int64_t max_vmap_level = -1;
+  int64_t batch_size = -1;
   for (const auto& logical_tensor : logical_tensors) {
     auto* batched = maybeGetBatchedImpl(logical_tensor);
-    if (batched) {
-      collective_levels |= createVmapLevelsBitset(batched->bdims());
+    if (!batched) {
+      continue;
     }
-  }
-
-  // Populate physical_tensors.
-  // This contains a list of regular (non-Batched) Tensors where all of the
-  // batch dims have been moved to the front of the tensor. Any previously
-  // non-existing batch dims get added to the tensors as new dimensions of size 1.
-  std::vector<Tensor> physical_tensors;
-  int64_t num_batch_dims = collective_levels.count();
-  for (const auto& logical_tensor : logical_tensors) {
-    auto requested_example_dim = /*logical_dim*/logical_tensor.dim();
-    auto physical_tensor = alignBatchDimsAtFront(
-        logical_tensor, collective_levels, requested_example_dim);
-    physical_tensors.push_back(std::move(physical_tensor));
-  }
-
-  // Compute batch_sizes
-  VmapDimVector batch_sizes(num_batch_dims, 1);
-  for (const auto& physical_tensor : physical_tensors) {
-    auto physical_sizes = physical_tensor.sizes();
-    for (int64_t dim = 0; dim < num_batch_dims; dim++) {
-      if (physical_sizes[dim] != 1) {
-        batch_sizes[dim] = physical_sizes[dim];
-      }
+    int64_t candidate = batched->bdims().front().level();
+    if (candidate < max_vmap_level) {
+      continue;
     }
+    max_vmap_level = candidate;
+    auto bdim = batched->bdims().front().dim();
+    batch_size = batched->value().size(bdim);
   }
+  TORCH_INTERNAL_ASSERT(max_vmap_level > 0);
+  TORCH_INTERNAL_ASSERT(batch_size >= 0);
 
-  // Expand each physical_tensor so that it has batch sizes `batch_sizes`
+  std::bitset<kVmapNumLevels> levels;
+  levels[max_vmap_level] = 1;
+
+  // unsqueeze extra dim from all tensors and expand it
   VmapPhysicalViewVec result;
-  for (const auto& physical_tensor : physical_tensors) {
-    VmapDimVector expanded_size(batch_sizes.begin(), batch_sizes.end());
-    auto physical_sizes = physical_tensor.sizes();
-    expanded_size.insert(
-        expanded_size.end(),
-        physical_sizes.begin() + num_batch_dims,
-        physical_sizes.end());
-    result.emplace_back(physical_tensor.expand(expanded_size), collective_levels);
+  for (const auto& logical_tensor : logical_tensors) {
+    auto* batched = maybeGetBatchedImpl(logical_tensor);
+    if (batched && batched->bdims().front().level() == max_vmap_level) {
+      Tensor tensor = alignBatchDimsAtFront(logical_tensor, levels, logical_tensor.dim());
+      result.emplace_back(std::move(tensor), levels);
+      continue;
+    }
+    auto tensor = logical_tensor.unsqueeze(0);
+    std::vector<int64_t> expanded_shape = tensor.sizes().vec();
+    expanded_shape[0] = batch_size;
+    tensor = tensor.expand(expanded_shape);
+    result.emplace_back(std::move(tensor), levels);
   }
   return result;
 }
@@ -244,29 +237,45 @@ getLevelsAndLargestLogicalDim(TensorList logical_tensors) {
 }
 
 VmapPhysicalViewVec BroadcastingVmapTransform::logicalToPhysical(TensorList logical_tensors) {
-  TORCH_INTERNAL_ASSERT(
-      logical_tensors.size() == 2,
-      "This function has only been tested for two tensors. Please add more tests ",
-      "before removing this check ");
-
-  VmapPhysicalViewVec result;
+  // Figure out the highest vmap level
+  int64_t max_vmap_level = -1;
+  int64_t batch_size = -1;
+  for (const auto& logical_tensor : logical_tensors) {
+    auto* batched = maybeGetBatchedImpl(logical_tensor);
+    if (!batched) {
+      continue;
+    }
+    int64_t candidate = batched->bdims().front().level();
+    if (candidate < max_vmap_level) {
+      continue;
+    }
+    max_vmap_level = candidate;
+    auto bdim = batched->bdims().front().dim();
+    batch_size = batched->value().size(bdim);
+  }
+  TORCH_INTERNAL_ASSERT(max_vmap_level > 0);
+  TORCH_INTERNAL_ASSERT(batch_size >= 0);
 
   std::bitset<kVmapNumLevels> levels;
-  int64_t largest_logical_dim;
-  std::tie(levels, largest_logical_dim) = getLevelsAndLargestLogicalDim(logical_tensors);
+  levels[max_vmap_level] = 1;
 
-  for (const auto& tensor : logical_tensors) {
-    // NB: It's possible that we didn't actually need to align `tensor`.
-    // For example, when adding two tensors of size (B, 2), and (3, 2), where
-    // the first Tensor is a BatchedTensor with batch dim B and the second is
-    // a regular Tensor, we will return views of size (B, 1, 2) and (1, 3, 2).
-    // However, the view on the second tensor is unnecessary: broadcasting
-    // semantics allow for the addition of two tensors of size (B, 1, 2) and (3, 2)!
-    //
-    // If this unnecessary view is a problem, consider optimizing it away in
-    // the future. This may involve creating a new type of VmapPhysicalView
-    auto aligned = alignBatchDimsAtFront(tensor, levels, largest_logical_dim) ;
-    result.emplace_back(std::move(aligned), levels);
+  // figure out the example ndim
+  int64_t max_example_dim = -1;
+  for (const auto& logical_tensor : logical_tensors) {
+    max_example_dim = std::max(logical_tensor.dim(), max_example_dim);
+  }
+
+  // unsqueeze extra dim from all tensors and expand it
+  VmapPhysicalViewVec result;
+  for (const auto& logical_tensor : logical_tensors) {
+    auto* batched = maybeGetBatchedImpl(logical_tensor);
+    if (batched && batched->bdims().front().level() == max_vmap_level) {
+      Tensor tensor = alignBatchDimsAtFront(logical_tensor, levels, max_example_dim);
+      result.emplace_back(std::move(tensor), levels);
+      continue;
+    }
+    Tensor tensor = logical_tensor;
+    result.emplace_back(std::move(tensor), levels);
   }
   return result;
 }
