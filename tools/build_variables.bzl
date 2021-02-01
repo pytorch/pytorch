@@ -244,6 +244,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/tensorexpr/eval.cpp",
     "torch/csrc/jit/tensorexpr/expr.cpp",
     "torch/csrc/jit/tensorexpr/hash_provider.cpp",
+    "torch/csrc/jit/tensorexpr/intrinsic_symbols.cpp",
     "torch/csrc/jit/tensorexpr/ir.cpp",
     "torch/csrc/jit/tensorexpr/ir_mutator.cpp",
     "torch/csrc/jit/tensorexpr/ir_printer.cpp",
@@ -356,6 +357,7 @@ def libtorch_sources(gencode_pattern = ":generate-code[{}]"):
     return libtorch_generated_sources(gencode_pattern) + libtorch_core_sources + libtorch_distributed_sources + libtorch_extra_sources
 
 libtorch_cuda_core_sources = [
+    "torch/csrc/CudaIPCTypes.cpp",
     "torch/csrc/cuda/comm.cpp",
     "torch/csrc/jit/codegen/fuser/cuda/fused_kernel.cpp",
     "torch/csrc/autograd/profiler_cuda.cpp",
@@ -492,7 +494,6 @@ libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [
 ]
 
 libtorch_python_core_sources = [
-    "torch/csrc/CudaIPCTypes.cpp",
     "torch/csrc/DataLoader.cpp",
     "torch/csrc/Device.cpp",
     "torch/csrc/Dtype.cpp",

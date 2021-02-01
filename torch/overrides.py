@@ -25,7 +25,7 @@ import __future__
 import collections
 import functools
 import types
-from typing import Dict, Set, List, Any, Callable, Iterable, Tuple, Type
+from typing import Dict, Set, List, Any, Callable, Iterable, Type
 
 import torch
 from torch._C import (
@@ -50,7 +50,7 @@ def get_ignored_functions() -> Set[Callable]:
 
     Returns
     -------
-    Tuple[Callable]
+    Set[Callable]
         A tuple of functions that are publicly available in the torch API but cannot
         be overridden with ``__torch_function__``. Mostly this is because none of the
         arguments of these functions are tensors or tensor-likes.
@@ -184,6 +184,8 @@ def get_ignored_functions() -> Set[Callable]:
         torch.nn.functional.hardswish,
         torch.is_vulkan_available,
         torch.is_deterministic,
+        torch.are_deterministic_algorithms_enabled,
+        torch.use_deterministic_algorithms,
         torch.set_deterministic,
         torch.unify_type_list,
         torch.make_dual,
@@ -211,6 +213,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._make_subclass,
         Tensor.stride,
         Tensor.unflatten,
+        Tensor._reduce_ex_internal,
     }
 
 
@@ -388,7 +391,9 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.exp2: lambda input, out=None: -1,
         torch.expm1: lambda input, out=None: -1,
         torch.fake_quantize_per_channel_affine: lambda input, scale, zero_point, axis, quant_min, quant_max: -1,
+        torch.fake_quantize_per_channel_affine_cachemask: lambda input, scale, zero_point, axis, quant_min, quant_max: -1,
         torch.fake_quantize_per_tensor_affine: lambda input, scale, zero_point, quant_min, quant_max: -1,
+        torch.fake_quantize_per_tensor_affine_cachemask: lambda input, scale, zero_point, quant_min, quant_max: -1,
         torch.fbgemm_linear_fp16_weight: lambda input, packed_weight, bias: -1,
         torch.fbgemm_linear_fp16_weight_fp32_activation: lambda input, packed_weight, bias: -1,
         torch.fbgemm_linear_int8_weight: lambda input, weight, packed, col_offsets, weight_scale, weight_zero_point, bias: -1,
@@ -622,6 +627,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.fractional_max_pool3d_with_indices: (
             lambda input, kernel_size, output_size=None, output_ratio=None, return_indices=False,
             _random_samples=None: -1),
+        torch.nn.functional.gaussian_nll_loss: (lambda input, target, var, full=False, eps=1e-06, reduction='mean': -1),
         torch.nn.functional.gelu: lambda input: -1,
         torch.nn.functional.glu: lambda input, dim=-1: -1,
         torch.nn.functional.grid_sample: lambda input, grid, mode='bilinear', padding_mode='zeros', align_corners=None: -1,
@@ -772,7 +778,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.rot90: lambda input, k=1, dims=(0, 1): -1,
         torch.round: lambda input, out=None: -1,
         torch.row_stack: lambda tensors, out=None: -1,  # alias for torch.vstack
-        torch.rowwise_prune: (lambda weight, mask, compressed_indices_dtype: -1),
+        torch._rowwise_prune: (lambda weight, mask, compressed_indices_dtype: -1),
         torch.rrelu: lambda input, lower=1. / 8, upper=1. / 3, training=False, inplace=False: -1,
         torch.rsqrt: lambda input, out=None: -1,
         torch.rsub: lambda input, other, alpha=1: -1,
@@ -899,6 +905,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.device.__get__: lambda self: -1,
         Tensor.dtype.__get__: lambda self: -1,
         Tensor.is_cuda.__get__: lambda self: -1,
+        Tensor.is_xpu.__get__: lambda self: -1,
         Tensor.is_leaf.__get__: lambda self: -1,
         Tensor.is_meta.__get__: lambda self: -1,
         Tensor.is_mkldnn.__get__: lambda self: -1,
@@ -942,6 +949,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.copy_: lambda self, src, non_blocking=False: -1,
         Tensor.cpu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.cuda: lambda self, memory_format=torch.preserve_format: -1,
+        Tensor.xpu: lambda self, memory_format=torch.preserve_format: -1,
         Tensor.data_ptr: lambda self: -1,
         Tensor.dense_dim: lambda self: -1,
         Tensor.dim: lambda self: -1,
@@ -1121,7 +1129,7 @@ def _get_overloaded_args(relevant_args: Iterable[Any]) -> List[Any]:
     """
     # Runtime is O(num_arguments * num_unique_types)
     overloaded_types: Set[Type] = set()
-    overloaded_args: List[Tuple[int, Type]] = []
+    overloaded_args: List[Any] = []
     for arg in relevant_args:
         arg_type = type(arg)
         # We only collect arguments if they have a unique type, which ensures

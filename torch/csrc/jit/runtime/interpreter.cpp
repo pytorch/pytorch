@@ -790,9 +790,6 @@ struct CodeImpl {
     insertInstruction(PROFILE_OP, profile_function_table_.size());
     if (node->cast<ProfileOp>()) {
       profile_function_table_.push_back(node->cast<ProfileOp>()->getCallback());
-    } else if (node->cast<ProfileOptionalOp>()) {
-      profile_function_table_.push_back(
-          node->cast<ProfileOptionalOp>()->getCallback());
     } else if (node->cast<ProfileIValueOp>()) {
       profile_function_table_.push_back(
           node->cast<ProfileIValueOp>()->getCallback());
@@ -955,7 +952,6 @@ struct CodeImpl {
         emitBailOut(node);
         break;
       case prim::profile_ivalue:
-      case prim::profile_optional:
       case prim::profile:
         emitProfile(node);
         break;
