@@ -5,10 +5,12 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
+from torch.testing._internal.common_utils import set_default_dtype
 
 from torch.jit._recursive import wrap_cpp_module
 from typing import Any
 from itertools import product
+import unittest
 
 import io
 
@@ -1517,3 +1519,56 @@ class TestFrozenOptimizations(JitTestCase):
         # optimize_frozen_module should be run
         frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()))
         FileCheck().check_not("batch_norm").run(frozen_mod.graph)
+
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_conv_to_mkldnn(self):
+        with set_default_dtype(torch.float):
+            for input_is_mkldnn, module, trace in product([True, False], [nn.Conv2d, nn.Conv3d], [False, True]):
+                mod = module(3, 32, kernel_size=3, stride=2).eval()
+                inps = [4, 3, 4]
+                if module == nn.Conv2d:
+                    inps.append(inps[-1])
+                if module == nn.Conv3d:
+                    inps.append(inps[-1])
+                    inps.append(inps[-1])
+
+                inp = torch.rand(inps)
+                if trace:
+                    scripted_mod = torch.jit.script(mod)
+                else:
+                    scripted_mod = torch.jit.trace(mod, (inp,))
+
+                self.run_pass("inline", scripted_mod.graph)
+
+                FileCheck().check("conv").run(scripted_mod.graph)
+                # successfully no-ops with non-const inputs
+                self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+                FileCheck().check_not("ConvertToMKLDNN").run(scripted_mod.graph)
+
+                scripted_mod = torch.jit.freeze(scripted_mod)
+                self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+                FileCheck().check("ConvertToMKLDNN").check("aten::conv").check("ConvertFromMKLDNN").run(scripted_mod.graph)
+
+                if input_is_mkldnn:
+                    inp = inp.to_mkldnn()
+                    mod.weight = torch.nn.Parameter(mod.weight.to_mkldnn())
+                    mod.bias = mod.bias if mod.bias is None else torch.nn.Parameter(mod.bias.to_mkldnn())
+
+                for _ in range(2):
+                    # aten::equal not defined for mkldnn tensors
+                    def to_dense(inp):
+                        return inp.to_dense() if inp.is_mkldnn else inp
+
+                    out_eager, out_scripted = mod(inp), scripted_mod(inp)
+                    self.assertEqual(out_eager.is_mkldnn, out_scripted.is_mkldnn)
+                    self.assertEqual(to_dense(inp), to_dense(inp))
+
+    @unittest.skipIf(torch._C.has_mkldnn, "Testing no mkldnn")
+    def test_conv_to_mkldnn_no_mkldnn(self):
+        # test no error when mkldnn not available
+        with set_default_dtype(torch.float):
+            mod = torch.jit.script(nn.Conv2d(3, 32, kernel_size=3, stride=2).eval())
+            frozen = torch.jit.freeze(mod)
+            self.run_pass("convert_frozen_ops_to_mkldnn", frozen.graph)
+            inp = torch.rand([4, 3, 4, 4])
+            self.assertEqual(frozen(inp), mod(inp))

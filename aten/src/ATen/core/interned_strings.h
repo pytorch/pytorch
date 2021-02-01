@@ -31,6 +31,8 @@ namespace c10 {
   _(prim, ReductionSizes)            \
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
+  _(prim, ConvertToMKLDNN)           \
+  _(prim, ConstantMKLDNNTensor)      \
   _(prim, Drop)                      \
   _(prim, Eval)                      \
   _(prim, Expand) /* onnx */         \
