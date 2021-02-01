@@ -313,8 +313,8 @@ struct DDPLoggingData {
   int world_size;
   int rank;
   std::string module_name;
-  std::string device_ids;
-  std::string output_device;
+  std::vector<int> device_ids;
+  int output_device;
   bool broadcast_buffers;
   int bucket_cap_mb;
   bool find_unused_parameters;

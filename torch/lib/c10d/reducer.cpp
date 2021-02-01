@@ -1468,8 +1468,8 @@ void Reducer::ensure_prior_reduction_finished() {
 
 void Reducer::set_construction_logging_data(
   const std::string& module_name,
-  const std::string& device_ids,
-  const std::string& output_device,
+  const std::vector<int>& device_ids,
+  int output_device,
   bool broadcast_buffers
 ) {
   ddp_logging_data_->module_name = module_name;
