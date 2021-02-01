@@ -839,12 +839,8 @@ def sample_inputs_linalg_cholesky(op_info, device, dtype, requires_grad=False):
     """
     from torch.testing._internal.common_utils import random_hermitian_pd_matrix
 
-    # TODO: add 0 to 'ns'
-    # Currently tests fail most probably because of triangular_solve
-    # (used in backward) does not work well with empty inputs
-    # might be fixed with https://github.com/pytorch/pytorch/pull/50948
     batches = [(), (0, ), (2, ), (1, 1)]
-    ns = [5, ]
+    ns = [5, 0]
     out = []
     for batch, n in product(batches, ns):
         a = random_hermitian_pd_matrix(n, *batch, dtype=dtype, device=device)
@@ -1044,9 +1040,8 @@ def sample_inputs_linalg_qr(op_info, device, dtype, requires_grad=False):
     The input is generated as the itertools.product of 'batches' and 'ns'.
     """
     # TODO: add 0 to 'ns' and (0, ) to 'batches'
-    # Currently tests fail most probably because of triangular_solve
-    # (used in backward) does not work well with empty inputs
-    # might be fixed with https://github.com/pytorch/pytorch/pull/50948
+    # Currently tests fail most probably because of
+    # https://github.com/pytorch/pytorch/issues/50576
     batches = [(), (2, ), (1, 1)]
     ns = [2, 5]
     out = []
