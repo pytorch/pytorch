@@ -1505,15 +1505,14 @@ void Reducer::set_bucket_stats() {
     for (const auto& v : variables) {
       bucket_size += v.numel() * v.element_size();
     }
-    ddp_logging_data_->bucket_sizes += std::to_string(bucket_size);
-    ddp_logging_data_->bucket_sizes += ", ";
+    ddp_logging_data_->bucket_sizes.push_back(bucket_size);
   }
 }
 
 void Reducer::set_construction_logging_data(
   const std::string& module_name,
-  const std::string& device_ids,
-  const std::string& output_device,
+  const std::vector<int>& device_ids,
+  int output_device,
   bool broadcast_buffers
 ) {
 // Data that can be got during DistributedDataParallel construction time
