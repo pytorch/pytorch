@@ -3,6 +3,7 @@
 #include <sstream>
 #include <c10/util/complex.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/hash.h>
 #include <gtest/gtest.h>
 #include <unordered_map>
 
