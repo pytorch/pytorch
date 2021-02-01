@@ -769,6 +769,9 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &IntType::get);
   py::class_<FloatType, Type, std::shared_ptr<FloatType>>(m, "FloatType")
       .def_static("get", &FloatType::get);
+  py::class_<ComplexDoubleType, Type, std::shared_ptr<ComplexDoubleType>>(
+      m, "ComplexDoubleType")
+      .def_static("get", &ComplexDoubleType::get);
   py::class_<TensorType, Type, std::shared_ptr<TensorType>>(m, "TensorType")
       .def_static("get", &TensorType::get)
       .def_static("getInferred", &TensorType::getInferred);
@@ -804,6 +807,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("ofInts", &ListType::ofInts)
       .def_static("ofTensors", &ListType::ofTensors)
       .def_static("ofFloats", &ListType::ofFloats)
+      .def_static("ofComplexDoubles", &ListType::ofComplexDoubles)
       .def_static("ofBools", &ListType::ofBools)
       .def("getElementType", &ListType::getElementType);
   py::class_<DictType, Type, std::shared_ptr<DictType>>(m, "DictType")
@@ -866,6 +870,27 @@ void initPythonIRBindings(PyObject* module_) {
           names.emplace_back(fn.name());
         }
         return names;
+      });
+  using ::c10::InferredType;
+  py::class_<InferredType, std::shared_ptr<InferredType>>(m, "InferredType")
+      .def(py::init([](std::shared_ptr<Type> type) {
+        return std::make_shared<InferredType>(std::move(type));
+      }))
+      .def(py::init([](std::string reason) {
+        return std::make_shared<InferredType>(std::move(reason));
+      }))
+      .def(
+          "type",
+          [](const std::shared_ptr<InferredType>& self) {
+            return self->type();
+          })
+      .def(
+          "success",
+          [](const std::shared_ptr<InferredType>& self) {
+            return self->success();
+          })
+      .def("reason", [](const std::shared_ptr<InferredType>& self) {
+        return self->reason();
       });
 
   py::class_<Use>(m, "Use")

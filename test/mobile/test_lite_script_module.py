@@ -1,4 +1,3 @@
-import unittest
 import torch
 import torch.utils.bundled_inputs
 from torch.utils.mobile_optimizer import *
@@ -6,9 +5,10 @@ import io
 from typing import NamedTuple
 from collections import namedtuple
 
-from torch.jit.mobile import _load_for_lite_interpreter
+from torch.jit.mobile import _load_for_lite_interpreter, _export_operator_list
+from torch.testing._internal.common_utils import TestCase, run_tests
 
-class TestLiteScriptModule(unittest.TestCase):
+class TestLiteScriptModule(TestCase):
 
     def test_load_mobile_module(self):
         class MyTestModule(torch.nn.Module):
@@ -286,5 +286,47 @@ class TestLiteScriptModule(unittest.TestCase):
                                     r"use a combination of list\, dictionary\, and single types\.$"):
             script_module._save_to_buffer_for_lite_interpreter()
 
+    def test_module_export_operator_list(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.weight = torch.ones((20, 1, 5, 5))
+                self.bias = torch.ones(20)
+
+            def forward(self, input):
+                x1 = torch.zeros(2, 2)
+                x2 = torch.empty_like(torch.empty(2, 2))
+                x3 = torch._convolution(
+                    input,
+                    self.weight,
+                    self.bias,
+                    [1, 1],
+                    [0, 0],
+                    [1, 1],
+                    False,
+                    [0, 0],
+                    1,
+                    False,
+                    False,
+                    True,
+                    True,
+                )
+                return (x1, x2, x3)
+
+        m = torch.jit.script(Foo())
+
+        buffer = io.BytesIO(m._save_to_buffer_for_lite_interpreter())
+        buffer.seek(0)
+        mobile_module = _load_for_lite_interpreter(buffer)
+
+        expected_ops = {
+            "aten::_convolution",
+            "aten::empty.memory_format",
+            "aten::empty_like",
+            "aten::zeros",
+        }
+        actual_ops = _export_operator_list(mobile_module)
+        self.assertEqual(actual_ops, expected_ops)
+
 if __name__ == '__main__':
-    unittest.main()
+    run_tests()
