@@ -4499,12 +4499,6 @@ class TestTorchDeviceType(TestCase):
                     # in a separate test
                     return
 
-                # TODO: update test when masked scatter is supported for complex
-                # and cpu supports half
-                if (dt == torch.half and self.device_type == 'cpu') or dt.is_complex:
-                    self.assertRaises(RuntimeError, lambda: dest.masked_scatter_(mask, src))
-                    return
-
                 dest.masked_scatter_(mask, src)
                 j = 0
                 for i in range(num_dest):
