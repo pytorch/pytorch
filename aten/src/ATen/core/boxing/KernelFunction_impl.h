@@ -22,6 +22,10 @@ inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorH
     func(opHandle, stack);
 }
 
+inline bool KernelFunction::isValidUnboxed() const {
+    return unboxed_kernel_func_ != nullptr;
+}
+
 inline bool KernelFunction::isValid() const {
     return boxed_kernel_func_ != nullptr;
 }

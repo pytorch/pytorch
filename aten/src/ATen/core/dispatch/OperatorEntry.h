@@ -167,8 +167,16 @@ public:
 
   const KernelFunction& lookup(DispatchKey k) const {
     const auto& kernel = dispatchTable_[static_cast<uint8_t>(k)];
-    if (C10_UNLIKELY(!kernel.isValid())) {
-      reportError(k);
+    // A valid kernel *always* has a boxed kernel and *may* have an
+    // unboxed kernel. However, we typically do unboxed calls in at::
+    // APIs, where the kernel 1) will very likely be valid and 2)
+    // should have an unboxed kernel. Checking the unboxed kernel
+    // first will allow us to avoid touching the boxed kernel at all
+    // in the common case.
+    if (C10_UNLIKELY(!kernel.isValidUnboxed())) {
+      if (!kernel.isValid()) {
+        reportError(k);
+      }
     }
     return kernel;
   }
