@@ -56,7 +56,7 @@ namespace at {
  *
  * Example (see e.g. native/cuda/Dropout.cu):
  *
- * #include <ATen/cuda/CUDAGeneratorImpl.h>
+ * #include <ATen/CUDAGeneratorImpl.h>
  * #include <ATen/cuda/CUDAGraphsUtils.cuh>
  *
  * __global__ void kernel(..., PhiloxCudaState philox_args) {
