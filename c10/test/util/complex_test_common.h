@@ -170,9 +170,15 @@ TEST(TestConstructors, FromThrust) {
 #endif
 
 TEST(TestConstructors, UnorderedMap) {
-  std::unordered_map<c10::complex<double>, c10::complex<double>> m;
-  m[c10::complex<double>(2.5, 3)] = c10::complex<double>(2, -3.2);
-  m[c10::complex<double>(2, 0)] = c10::complex<double>(0, -3);
+  std::unordered_map<c10::complex<double>, c10::complex<double>, c10::hash<c10::complex<double>>> m;
+  auto key1 = c10::complex<double>(2.5, 3);
+  auto key2 = c10::complex<double>(2, 0);
+  auto val1 = c10::complex<double>(2, -3.2);
+  auto val2 = c10::complex<double>(0, -3);
+  m[key1] = val1;
+  m[key2] = val2;
+  ASSERT_EQ(m[key1], val1);
+  ASSERT_EQ(m[key2], val2);
 }
 
 }  // constructors
