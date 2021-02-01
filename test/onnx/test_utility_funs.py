@@ -869,6 +869,12 @@ TestUtilityFuns_opset13_new_jit_API = type(str("TestUtilityFuns_opset13_new_jit_
                                            (TestCase,),
                                            dict(TestUtilityFuns.__dict__, opset_version=13))
 
+# opset 13 tests
+TestUtilityFuns_opset13_new_jit_API = type(str("TestUtilityFuns_opset13_new_jit_API"),
+                                           (TestCase,),
+                                           dict(TestUtilityFuns.__dict__, opset_version=13,
+                                           use_new_jit_passes=True))
+
 
 if __name__ == '__main__':
     run_tests()
