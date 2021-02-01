@@ -320,11 +320,11 @@ Tensor& remainder_(Tensor& self, const Tensor& other) {
 
 Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
   TORCH_WARN_ONCE(
-    "floor_divide rounding will change in a future version of pytorch. "
-    "floor_divide currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
+    "floor_divide is deprecated, and will be removed in a future version of pytorch. "
+    "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "
     "This results in incorrect rounding for negative values.\n"
     "To keep the current behavior, use torch.div(a, b, rounding_mode='trunc'), "
-    "or for true floor division, use torch.div(a, b, rounding_mode='floor')."
+    "or for actual floor division, use torch.div(a, b, rounding_mode='floor')."
   );
   // FIXME: Not actually doing floor division (#43874)
   return div_trunc_out(self, other, result);
