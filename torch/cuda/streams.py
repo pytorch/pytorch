@@ -203,4 +203,8 @@ class Event(torch._C._CudaEventBase):
         else:
             return '<torch.cuda.Event uninitialized>'
 
-_Graph = torch._C._CudaGraphBase
+# We could give methods default arguments in the Pybind11 (torch/csrc/cuda/Graph.cpp)
+# but it's more readable to set default arguments here.
+class _Graph(torch._C._CudaGraphBase):
+    def capture_begin(self, pool=0):
+        super().capture_begin(pool)

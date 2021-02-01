@@ -710,6 +710,13 @@ class DeviceCachingAllocator {
     } else if (&pool == &large_blocks) {
       return StatType::LARGE_POOL;
     } else {
+      for (auto& gp : graph_pools) {
+        if (&pool == &gp.second.small_blocks) {
+          return StatType::SMALL_POOL;
+        } else if (&pool == &gp.second.large_blocks) {
+          return StatType::LARGE_POOL;
+        }
+      }
       AT_ERROR("get_stat_type_for_pool: invalid pool");
     }
   }
@@ -721,6 +728,13 @@ class DeviceCachingAllocator {
     } else if (block->pool == &large_blocks) {
       return remaining > kSmallSize;
     } else {
+      for (auto& gp : graph_pools) {
+        if (block->pool == &gp.second.small_blocks) {
+          return remaining >= kMinBlockSize;
+        } else if (block->pool == &gp.second.large_blocks) {
+          return remaining > kSmallSize;
+        }
+      }
       AT_ERROR("should_split: invalid pool");
     }
   }
