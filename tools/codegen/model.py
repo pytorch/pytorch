@@ -1,9 +1,12 @@
 import re
 
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable, Union
+from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable, Union, TypeVar
 from enum import Enum, auto
 import itertools
+import contextlib
+
+from tools.codegen.utils import *
 
 # A little trick from https://github.com/python/mypy/issues/6366
 # for getting mypy to do exhaustiveness checking
@@ -130,6 +133,27 @@ class UseC10Dispatcher(Enum):
     hacky_wrapper_for_legacy_signatures = 1
 
 STRUCTURED_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
+
+# Dispatch keys that "support all backends".  These codegen slightly differently
+# then backend specific keys.
+def is_generic_dispatch_key(dk: DispatchKey) -> bool:
+    return dk in {DispatchKey.DefaultBackend, DispatchKey.Math}
+
+# CUDA specific dispatch keys
+def is_cuda_dispatch_key(dk: DispatchKey) -> bool:
+    return dk in {
+        DispatchKey.CUDA,
+        DispatchKey.QuantizedCUDA,
+        DispatchKey.ComplexCUDA,
+        DispatchKey.SparseCUDA,
+        DispatchKey.AutogradCUDA,
+        DispatchKey.CUDATensorId,
+    }
+
+# Structured kernel generation is only supported for certain key types;
+# otherwise use old-style
+def is_structured_dispatch_key(dk: DispatchKey) -> bool:
+    return dk in STRUCTURED_DISPATCH_KEYS
 
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
