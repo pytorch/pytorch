@@ -339,6 +339,6 @@ void sum_kernel_impl(TensorIterator &iter) {
 
 }  // namespace (anonymous)
 
-REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
+// REGISTER_DISPATCH(sum_stub, &sum_kernel_impl);
 
 }}  // namespace at::native

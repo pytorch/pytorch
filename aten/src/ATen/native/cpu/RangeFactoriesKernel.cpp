@@ -77,7 +77,7 @@ static void linspace_kernel(TensorIterator& iter, Scalar scalar_start, Scalar sc
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(arange_stub, &arange_kernel);
-REGISTER_DISPATCH(linspace_stub, &linspace_kernel);
+// REGISTER_DISPATCH(arange_stub, &arange_kernel);
+// REGISTER_DISPATCH(linspace_stub, &linspace_kernel);
 
 }} // namespace at::native

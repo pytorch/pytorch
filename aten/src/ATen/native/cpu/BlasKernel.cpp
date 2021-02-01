@@ -192,6 +192,6 @@ void cpublas_gemm_impl(
 }}  // namespace cpublas::(anonymous)
 
 
-REGISTER_DISPATCH(cpublas::gemm_stub, &cpublas::cpublas_gemm_impl);
+// REGISTER_DISPATCH(cpublas::gemm_stub, &cpublas::cpublas_gemm_impl);
 
 }}  // namespace at::native

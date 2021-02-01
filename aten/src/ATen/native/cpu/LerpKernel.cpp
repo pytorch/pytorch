@@ -56,8 +56,8 @@ static void lerp_kernel_tensor(
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_kernel_scalar);
-REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_kernel_tensor);
+// REGISTER_DISPATCH(lerp_kernel_scalar_weight, &lerp_kernel_scalar);
+// REGISTER_DISPATCH(lerp_kernel_tensor_weight, &lerp_kernel_tensor);
 
 } // namespace native
 } // namespace at

@@ -283,11 +283,11 @@ void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
 
 } // anonymous namespace
 
-REGISTER_DISPATCH(index_stub, &index_kernel);
-REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
-REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel);
-REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel);
-REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel);
-REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel);
+// REGISTER_DISPATCH(index_stub, &index_kernel);
+// REGISTER_DISPATCH(index_put_stub, &index_put_kernel);
+// REGISTER_DISPATCH(masked_fill_stub, &masked_fill_kernel);
+// REGISTER_DISPATCH(masked_select_serial_stub, &masked_select_serial_kernel);
+// REGISTER_DISPATCH(masked_select_stub, &masked_select_kernel);
+// REGISTER_DISPATCH(masked_scatter_stub, &masked_scatter_kernel);
 
 }} // namespace at::native

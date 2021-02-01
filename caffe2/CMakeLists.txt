@@ -74,7 +74,10 @@ if(INTERN_BUILD_ATEN_OPS)
   add_dependencies(aten_op_header_gen __aten_op_header_gen)
 
   # Add source, includes, and libs to lists
-  list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
+  # list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
+  append_filelist("libtorch_lite_cmake_sources" Caffe2_CPU_SRCS)
+  append_filelist("libtorch_lite_cmake_sources" Caffe2_CPU_LITE_SRCS)
+
   list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_SRCS})
   list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
@@ -85,6 +88,8 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
   list(APPEND Caffe2_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS})
   list(APPEND Caffe2_CPU_INCLUDE ${ATen_CPU_INCLUDE})
+  append_filelist("libtorch_one_header" Caffe2_CPU_INCLUDE)
+
   list(APPEND Caffe2_GPU_INCLUDE ${ATen_CUDA_INCLUDE})
   list(APPEND Caffe2_HIP_INCLUDE ${ATen_HIP_INCLUDE})
   list(APPEND Caffe2_VULKAN_INCLUDE ${ATen_VULKAN_INCLUDE})
@@ -168,11 +173,16 @@ endif()
 
 # Debug messages - if you want to get a list of source files, enable the
 # following.
-if(FALSE)
+if(TRUE)
   message(STATUS "CPU sources: ")
   foreach(tmp ${Caffe2_CPU_SRCS})
     message(STATUS "  " ${tmp})
   endforeach()
+
+  # message(STATUS "CPU lite sources: ")
+  # foreach(tmp ${Caffe2_CPU_LITE_SRCS})
+  #   message(STATUS "  " ${tmp})
+  # endforeach()
 
   message(STATUS "GPU sources: ")
   foreach(tmp ${Caffe2_GPU_SRCS})
@@ -442,9 +452,12 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(TORCH_SRCS ${GENERATED_CXX_TORCH})
   list(APPEND TORCH_SRCS ${GENERATED_H_TORCH})
-  # append_filelist("libtorch_cmake_sources" TORCH_SRCS)
-  append_filelist("libtorch_lite_cmake_sources" TORCH_SRCS)
-
+  append_filelist("libtorch_cmake_sources" TORCH_SRCS)
+  # append_filelist("libtorch_lite_cmake_sources" TORCH_SRCS)
+  # message(STATUS "libtorch_lite_cmake_sources is: ")
+  foreach(tmp ${TORCH_SRCS})
+    message(STATUS "  " ${tmp})
+  endforeach()
   # Required workaround for LLVM 9 includes.
   if(NOT MSVC)
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS -Wno-noexcept-type)
@@ -657,6 +670,7 @@ if(HAVE_SOVERSION)
   set_target_properties(torch_cpu PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
+message(STATUS ${torch_cpu})
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
 if(USE_LLVM AND LLVM_FOUND)
