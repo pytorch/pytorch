@@ -104,7 +104,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Pin MyPy version because new errors are likely to appear with each release
   # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
   as_jenkins pip install --progress-bar off pytest \
-    scipy==1.1.0 \
+    scipy==1.6.0 \
     scikit-image \
     librosa>=0.6.2 \
     psutil \
