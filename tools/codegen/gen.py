@@ -19,6 +19,7 @@ import tools.codegen.api.cpp as cpp
 import tools.codegen.api.dispatcher as dispatcher
 import tools.codegen.api.native as native
 import tools.codegen.api.meta as meta
+import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 import tools.codegen.local as local
 from tools.codegen.selective_build.selector import SelectiveBuilder
@@ -392,33 +393,36 @@ struct {class_name} final : public {parent_class} {{
         def gen_one(f: NativeFunction) -> Optional[str]:
             assert not f.manual_kernel_registration
 
-            # TODO: put this into StructuredNativeFunctions itself
-            functional_func = g.out.func.signature()
-            functional_sig = DispatcherSignature.from_schema(functional_func)
-
-            # TODO: is it meta or wot?  Sort this out
-            functional_exprs = ', '.join(
-                e.expr for e in translate(functional_sig.arguments(), dispatcher.arguments(functional_func), method=False)
-            )
-
             if self.target is Target.REGISTRATION and not self.selector.is_native_function_selected(f):
                 return None
 
-            k = f.func.kind()
-            sig = NativeSignature(f.func, prefix="wrapper_")
-
-            # Unconditionally generate function version, never fallback binding.
-            # Some extra massaging would then be necessary in a hypothetical
-            # CPUTensor class
+            # Signature of the non-dispatched function we'll expose in a header
+            # (e.g., at::cpu::add).  We don't generate methods (TODO: do this
+            # when CPUTensor class is a thing); nor do we generate fallback
+            # bindings for manual_cpp_binding functions.
             cpp_sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=False)
-            # For now, don't generate faithful signature for simplicity
+            # TODO: generate faithful signatures too
             cpp_sig = cpp_sig_group.signature
+
+            # Signature of the wrapper function we'll register to the dispatcher
+            sig = NativeSignature(f.func, prefix="wrapper_")
 
             if self.target is Target.DECLARATION:
                 # namespace is handled by template
                 return f"TORCH_API {cpp_sig.decl()};\n"
 
             elif self.target is Target.DEFINITION:
+
+                k = f.func.kind()
+
+                # Construct the body of the wrapper function with signature sig
+                sig_body = []
+                # We'll use context to keep track of any variables we've brought
+                # into scope while generating code
+                context: List[Union[Binding, Expr]] = list(sig.arguments())
+
+                # Initialize the class corresponding to this structured
+                # operator; feeding it the output argument(s) if it is known
                 if self.dispatch_key == DispatchKey.Meta:
                     class_name = f"structured_{meta.name(g)}_meta_{k.name}"
                     parent_class = f"at::meta::{meta.name(g)}"
@@ -428,23 +432,56 @@ struct {class_name} final : public {parent_class} {{
 
                 if k is SchemaKind.functional:
                     assert len(f.func.returns) == 1, "multi-return not supported yet"
-                    out_expr = "op.outputs_[0]"
-                    ret_expr = "std::move(op.outputs_[0])"  # small optimization
-                    op_init = f"{class_name} op;"
+                    sig_body.append(f"{class_name} op;")
                 elif k is SchemaKind.inplace:
-                    out_expr = "self"
-                    ret_expr = "self"
-                    op_init = f"{class_name} op(self);"
+                    sig_body.append(f"{class_name} op(self);")
                 elif k is SchemaKind.out:
                     assert len(f.func.arguments.out) == 1, "multi-out structured not supported yet"
-                    out_expr = f.func.arguments.out[0].name
-                    ret_expr = out_expr
-                    op_init = f"{class_name} op({out_expr});"
+                    sig_body.append(f"{class_name} op({f.func.arguments.out[0].name});")
 
-                if self.dispatch_key == DispatchKey.Meta:
-                    impl_call = ""
-                else:
-                    impl_call = f"op.impl({functional_exprs}, {out_expr});"
+                # Translate the input native arguments into structured
+                # arguments for the meta call
+                meta_exprs = ', '.join(
+                    e.expr for e in translate(
+                        context,
+                        structured.meta_arguments(g),
+                        method=False
+                    )
+                )
+                sig_body.append(f"op.meta({meta_exprs});")
+
+                # After running meta, op.outputs_ is guaranteed to be valid;
+                # add it to the context
+                # TODO: handle multi-return
+                context.append(Expr(
+                    expr="op.outputs_[0]",
+                    type=structured.out_arguments(g)[0].ctype,
+                ))
+
+                # With the expanded context, do the impl call (if not a meta
+                # function)
+                if self.dispatch_key != DispatchKey.Meta:
+                    impl_exprs = ', '.join(
+                        e.expr for e in translate(
+                            context,
+                            structured.impl_arguments(g),
+                            method=False
+                        )
+                    )
+                    sig_body.append(f"op.impl({impl_exprs});")
+
+                # Destructively return the final tensors
+                if k is SchemaKind.functional:
+                    assert len(f.func.returns) == 1, "multi-return not supported yet"
+                    ret_expr = "std::move(op.outputs_[0])"  # small optimization
+                elif k is SchemaKind.inplace:
+                    ret_expr = "self"
+                elif k is SchemaKind.out:
+                    assert len(f.func.arguments.out) == 1, "multi-out structured not supported yet"
+                    ret_expr = f.func.arguments.out[0].name
+                sig_body.append(f"return {ret_expr};")
+
+                sig_body_str = "\n".join(sig_body)
 
                 # For an overview of what this template code looks like, see
                 # https://github.com/pytorch/rfcs/pull/9
@@ -459,10 +496,7 @@ namespace {{
 )}
 
 {sig.defn()} {{
-    {op_init}
-    op.meta({functional_exprs});
-    {impl_call}
-    return {ret_expr};
+    {sig_body_str}
 }}
 
 }} // anonymous namespace
@@ -711,7 +745,7 @@ def compute_native_function_declaration(g: Union[StructuredNativeFunctions, Nati
         meta_name = meta.name(g)
         rs = []
         seen: Set[Any] = set()
-        out_args = native.arguments(g.out.func)
+        out_args = structured.impl_arguments(g)
         for k, n in g.out.dispatch.items():
             if n in seen:
                 continue
@@ -759,11 +793,11 @@ struct TORCH_API structured_{n} : public at::meta::{meta_name} {{
 
         return rs
 
+# Generates MetaFunctions.h
 def compute_meta_function_declaration(g: StructuredNativeFunctions) -> str:
     with native_function_manager(g.out):
-        sig = g.signature()
         name = meta.name(g)
-        args = native.arguments(sig)
+        args = structured.meta_arguments(g)
         args_str = ', '.join(a.decl() for a in args)
         parent_class = g.out.structured_inherits
         if parent_class is None:

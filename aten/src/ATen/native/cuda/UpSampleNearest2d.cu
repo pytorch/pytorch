@@ -112,7 +112,7 @@ __global__ void upsample_nearest2d_backward_out_frame(
 }
 
 static void upsample_nearest2d_out_cuda_template(
-    Tensor& output,
+    const Tensor& output,
     const Tensor& input_,
     IntArrayRef output_size,
     c10::optional<double> scales_h,
@@ -213,7 +213,7 @@ static void upsample_nearest2d_out_cuda_template(
 }
 
 static void upsample_nearest2d_backward_out_cuda_template(
-    Tensor& grad_input,
+    const Tensor& grad_input,
     const Tensor& grad_output_,
     IntArrayRef output_size,
     IntArrayRef input_size,
