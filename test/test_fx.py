@@ -2,6 +2,7 @@ import builtins
 import contextlib
 import copy
 import functools
+import importlib.util
 import math
 import numbers
 import operator
@@ -16,6 +17,7 @@ from torch.multiprocessing import Process
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Tracer, Graph, wrap
 from torch.fx.experimental import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.nn.functional import relu6
 from copy import deepcopy
 
 from torch.fx.proxy import TraceError
@@ -77,6 +79,16 @@ def wrapper_fn(x):
 class Pair(NamedTuple):
     x : torch.Tensor
     y : torch.Tensor
+
+
+def load_fx_example(name):
+    spec = importlib.util.spec_from_file_location(
+        f"torch.fx.examples.{name}",
+        os.path.join(os.path.dirname(torch.fx.__file__), f"examples/{name}.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
 
 class TestFX(JitTestCase):
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
@@ -956,6 +968,33 @@ class TestFX(JitTestCase):
 
         # Test shape propogation and make sure results match actual
         self.assertEqual(output_shape, ref_out.shape)
+
+    def test_example_fx_profiler(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super(Foo, self).__init__()
+                self.a = torch.nn.Linear(8, 8)
+                self.b = torch.nn.Linear(8, 8)
+
+            def forward(self, x):
+                return relu6(self.b(relu6(self.a(x)))).add(1)
+
+        fx_profiler = load_fx_example("fx_profiler")
+        mod = symbolic_trace(Foo())
+        prof = fx_profiler.FXProfiler(mod)
+        prof.run(torch.randn(8))
+        self.assertEqual(set(prof.times.keys()), {'relu6', 'linear', 'add'})
+        self.assertIn('relu6', prof.summary())
+
+        prof = fx_profiler.BigramCounter(mod)
+        prof.run(torch.randn(8))
+        self.assertEqual(dict(prof.counts),
+                         {'add(relu6)': 1, 'linear()': 1,
+                          'relu6(linear)': 2, 'linear(relu6)': 1})
+        self.assertIn('relu6', prof.summary())
+
+
+
 
     def test_fn_type_annotations(self):
         class Foo(torch.nn.Module):
