@@ -563,8 +563,8 @@ static void ImplicitCastForBinaryInplaceOps(Node* inplaceNode) {
     auto newInputNode = inplaceNode->owningGraph()->create(aten::type_as, 1);
     auto orignalInputs = inplaceNode->inputs();
     newInputNode->insertBefore(inplaceNode);
-    newInputNode->addInput(orignalInputs[1]);
-    newInputNode->addInput(orignalInputs[0]);
+    newInputNode->addInput(orignalInputs.at(1));
+    newInputNode->addInput(orignalInputs.at(0));
     inplaceNode->replaceInput(1, newInputNode->outputs()[0]);
   }
 }
