@@ -53,7 +53,7 @@ class PowerSGDState(object):
         self,
         process_group,
         matrix_approximation_rank=1,
-        start_powerSGD_iter=2,
+        start_powerSGD_iter=10,
         use_error_feedback=True,
         warm_start=True,
         random_seed=0,
@@ -80,7 +80,11 @@ class PowerSGDState(object):
         # However, this means that the shape of input bucketized tensors is subject to change,
         # which will complicate the implementations of error feedback and warm-up.
         # Running vanilla allreduce in the first few iterations can avoid this complexity.
-        assert start_powerSGD_iter >= 1
+        if use_error_feedback or warm_start:
+            assert (
+                start_powerSGD_iter > 1
+            ), "If error feedback or warm-start is enabled, "
+            "PowerSGD can only be applied after the first two iterations in DDP."
         self.start_powerSGD_iter = start_powerSGD_iter
         # Error feedback is usually crucial for both for convergence and generalization,
         # because PowerSGD is a biased compressor,
