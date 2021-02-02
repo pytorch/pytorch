@@ -27,6 +27,7 @@ inline int64_t getTimeUs() {
 }
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
+std::string stacksToStr(const std::vector<std::string>& stacks);
 
 struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   using ProfilerThreadLocalState::ProfilerThreadLocalState;
@@ -119,6 +120,9 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
       } else {
         cpu_trace->activities[idx].inputDims = "[]";
       }
+      if (kineto_events_[idx].hasStack()) {
+        cpu_trace->activities[idx].callStack = stacksToStr(kineto_events_[idx].stack());
+      }
     }
   }
 
@@ -208,6 +212,17 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
     oss << "]";
   }
   oss << "]";
+  return oss.str();
+}
+
+std::string stacksToStr(const std::vector<std::string>& stacks) {
+  std::ostringstream oss;
+  for (auto idx = 0; idx < stacks.size(); ++idx) {
+    if (idx > 0) {
+      oss << ";";
+    }
+    oss << stacks[idx];
+  }
   return oss.str();
 }
 
