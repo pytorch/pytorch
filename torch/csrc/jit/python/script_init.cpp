@@ -51,7 +51,7 @@ namespace jit {
 using ::c10::Argument;
 using ::c10::FunctionSchema;
 
-using ResolutionCallback = std::function<py::function(std::string)>;
+using ResolutionCallback = std::function<py::object(std::string)>;
 using FunctionDefaults = std::unordered_map<std::string, py::object>;
 using ClassMethodDefaults = std::unordered_map<std::string, FunctionDefaults>;
 
@@ -636,6 +636,14 @@ py::list debugMakeNamedList(const T& list) {
   py::list result;
   for (auto elem : list) {
     result.append(py::cast(std::make_pair(elem.name, elem.value)));
+  }
+  return result;
+}
+template <typename T>
+py::set debugMakeSet(const T& list) {
+  py::set result;
+  for (const auto& elem : list) {
+    result.add(py::cast(elem));
   }
   return result;
 }
@@ -1544,6 +1552,9 @@ void initJitScriptBindings(PyObject* module) {
         }
         return _load_for_mobile(in, optional_device);
       });
+  m.def("_export_operator_list", [](torch::jit::mobile::Module& sm) {
+    return debugMakeSet(torch::jit::mobile::_export_operator_list(sm));
+  });
 
   m.def("_jit_set_emit_hooks", setEmitHooks);
   m.def("_jit_get_emit_hooks", getEmitHooks);
