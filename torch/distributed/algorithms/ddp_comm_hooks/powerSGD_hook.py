@@ -5,6 +5,8 @@ import numpy as np
 import torch
 import torch.distributed as dist
 
+from . import default_hooks as default
+
 
 def _orthogonalize(matrix, epsilon=1e-8):
     """
@@ -78,6 +80,7 @@ class PowerSGDState(object):
         # However, this means that the shape of input bucketized tensors is subject to change,
         # which will complicate the implementations of error feedback and warm-up.
         # Running vanilla allreduce in the first few iterations can avoid this complexity.
+        assert start_powerSGD_iter >= 1
         self.start_powerSGD_iter = start_powerSGD_iter
         # Error feedback is usually crucial for both for convergence and generalization,
         # because PowerSGD is a biased compressor,
@@ -126,7 +129,7 @@ class PowerSGDState(object):
 
         if self.iter == self.start_powerSGD_iter:
             logging.info(
-                "Starting to apply PowerSGD after {} iterations.".format(self.iter)
+                "Start to apply PowerSGD after {} iterations.".format(self.iter)
             )
 
 
@@ -151,6 +154,10 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         3.5) Computes each Q in Qs, which is approximately equal to M^TP;
         3.6) Allreduces Qs as a batch;
         3.7) Computes each M among all the high-rank tensors, which is approximately equal to PQ^T.
+
+    Note that this communication hook enforces vanilla allreduce for the first `state.start_powerSGD_iter` iterations.
+    This can not only allow the user to have a finer tuning over the tradeoff between speedup and accuracy,
+    but also help abstract away some complexity of the internal optimization of DDP for future communication hook developers.
 
     TODO(wayi@): The above procedure does two matmul+allreduce steps per iteration --
     one left multiplication and one right multiplication.
@@ -178,15 +185,8 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
 
     # Run vanilla allreduce in the first `start_powerSGD_iter` iterations.
     if state.iter < state.start_powerSGD_iter:
-        fut = dist.all_reduce(
-            input_tensor, group=group_to_use, async_op=True
-        ).get_future()
-
-        def div_callback(fut):
-            return [fut.value()[0].div_(world_size)]
-
         state.maybe_increase_iter(bucket)
-        return fut.then(div_callback)
+        return default._allreduce_fut(group_to_use, input_tensor)
 
     # Apply PowerSGD after `start_powerSGD_iter` iterations.
     device = input_tensor.device
@@ -197,13 +197,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     input_tensor_cp = None
     total_length = input_tensor.shape[0]
     if state.use_error_feedback:
-        # The buckets can be rebuilt during training.
-        # In this case, the error tensor shape will not be aligned with the input tensor,
-        # and the error will be re-initialized as zeros.
-        if (
-            bucket_index in state.error_dict
-            and state.error_dict[bucket_index].shape[0] == total_length
-        ):
+        if bucket_index in state.error_dict:
             input_tensor.add_(state.error_dict[bucket_index])
         else:
             logging.info(
@@ -211,7 +205,9 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
                     total_length
                 )
             )
-            state.error_dict[bucket_index] = torch.zeros(total_length, device=device)
+            state.error_dict[bucket_index] = torch.zeros(
+                total_length, device=device, dtype=dtype
+            )
 
         # Keep a copy of the input tensor,
         # so that we can compute the local error caused by compression later,
@@ -232,7 +228,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     rank1_tensors_memory = (
         torch.cat([tensor.view(-1) for tensor in rank1_tensors])
         if rank1_tensors
-        else torch.tensor([], device=device)
+        else torch.tensor([], device=device, dtype=dtype)
     )
 
     # Step II: Handle high-rank tensors.
@@ -250,15 +246,9 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         total_Ps_size += n * matrix_approximation_rank
         total_Qs_size += m * matrix_approximation_rank
     # If warm-start is enabled, reuse Ps and Qs from the previous iteration if possible.
-    # The memory spaces of Ps and Qs need to be (re)allocated at the beginning,
-    # as well as later whenever the buckets are rebuilt during training.
+    # The memory spaces of Ps and Qs need to be allocated in the first iteration when PowerSGD is applied.
     need_randomize_qs = False
-    if (
-        not state.warm_start
-        or bucket_index not in state.p_memory_dict
-        or state.p_memory_dict[bucket_index].shape[0] != total_Ps_size
-        or state.q_memory_dict[bucket_index].shape[0] != total_Qs_size
-    ):
+    if not state.warm_start or bucket_index not in state.p_memory_dict:
         need_randomize_qs = True
         # If warm-start is disabled, low-rank tensors will be initialized at every step.
         # Only log this if warm-start to avoid spamming.
@@ -297,7 +287,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         q_idx += m * matrix_approximation_rank
 
     # If warm-start is enabled, reuse Qs from the previous iteration if possible and skip filling random values.
-    # The exceptions are the first time and when the buckets are rebuilt.
+    # The exception is the first iteration when PowerSGD is applied.
     if not need_randomize_qs:
         for q in qs:
             _orthogonalize(q)
@@ -373,7 +363,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
             torch.cuda.synchronize(device)
 
         if state.use_error_feedback:
-            # memoize the local errors.
+            # Memorize the local errors.
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         if not state.warm_start:
             state.p_memory_dict.clear()
@@ -409,6 +399,10 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     7) Computes M, which is approximately equal to PQ^T.
     8) Truncates the input tensor to the original length.
 
+    Note that this communication hook enforces vanilla allreduce for the first `state.start_powerSGD_iter` iterations.
+    This can not only allow the user to have a finer tuning over the tradeoff between speedup and accuracy,
+    but also help abstract away some complexity of the internal optimization of DDP for future communication hook developers.
+
     TODO(wayi@): The above procedure does two matmul+allreduce steps per iteration --
     one left multiplication and one right multiplication.
     For warm-start, can take one such step at a time, and alternate between them.
@@ -432,6 +426,13 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
 
     # The input tensor is a flattened 1D tensor.
     input_tensor = bucket.get_tensors()[0]
+
+    # Run vanilla allreduce in the first `start_powerSGD_iter` iterations.
+    if state.iter < state.start_powerSGD_iter:
+        state.maybe_increase_iter(bucket)
+        return default._allreduce_fut(group_to_use, input_tensor)
+
+    # Apply PowerSGD after `start_powerSGD_iter` iterations.
     device = input_tensor.device
     total_length = input_tensor.shape[0]
 
@@ -445,13 +446,7 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     bucket_index = bucket.get_index()
     input_tensor_cp = None
     if state.use_error_feedback:
-        # The buckets can be rebuilt during training.
-        # In this case, the error tensor shape will not be aligned with the input tensor,
-        # and the error will be re-initialized as zeros.
-        if (
-            bucket_index in state.error_dict
-            and state.error_dict[bucket_index].shape[0] == padded_total_length
-        ):
+        if bucket_index in state.error_dict:
             input_tensor.add_(state.error_dict[bucket_index])
         else:
             logging.info(
@@ -460,7 +455,7 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
                 )
             )
             state.error_dict[bucket_index] = torch.zeros(
-                padded_total_length, device=device
+                padded_total_length, device=device, dtype=input_tensor.dtype
             )
 
         # Keep a copy of the input tensor,
@@ -470,14 +465,8 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     matrix = input_tensor.view(square_side_length, square_side_length)
 
     # Reuse P and Q from the previous iteration if possible.
-    # The memory spaces of P and Q need to be (re)allocated at the beginning,
-    # as well as later whenever the buckets are rebuilt during training.
-    if (
-        not state.warm_start
-        or bucket_index not in state.p_memory_dict
-        or state.p_memory_dict[bucket_index].shape
-        != (square_side_length, state.matrix_approximation_rank)
-    ):
+    # The memory spaces of P and Q need to be allocated in the first iteration when PowerSGD is applied.
+    if not state.warm_start or bucket_index not in state.p_memory_dict:
         # If warm-start is disabled, low-rank tensors will be initialized at every step.
         # Only log this if warm-start to avoid spamming.
         if state.warm_start:
@@ -554,7 +543,7 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         )
 
         if state.use_error_feedback:
-            # memoize the local errors.
+            # Memorize the local errors.
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         if torch.cuda.is_available():
             torch.cuda.synchronize(device)
@@ -562,6 +551,9 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
             state.p_memory_dict.clear()
             state.q_memory_dict.clear()
         ret = input_tensor.resize_(total_length)
+
+        state.maybe_increase_iter(bucket)
+
         return [ret]
 
     return allreduce_p_fut.then(compute_q).then(decompress)

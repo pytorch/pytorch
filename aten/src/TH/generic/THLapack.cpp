@@ -4,8 +4,6 @@
 
 TH_EXTERNC void dgels_(char *trans, int *m, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, double *work, int *lwork, int *info);
 TH_EXTERNC void sgels_(char *trans, int *m, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, float *work, int *lwork, int *info);
-TH_EXTERNC void dpotri_(char *uplo, int *n, double *a, int *lda, int *info);
-TH_EXTERNC void spotri_(char *uplo, int *n, float *a, int *lda, int *info);
 TH_EXTERNC void sgeqrf_(int *m, int *n, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
 TH_EXTERNC void dgeqrf_(int *m, int *n, double *a, int *lda, double *tau, double *work, int *lwork, int *info);
 TH_EXTERNC void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, float *work, int *lwork, int *info);
@@ -26,20 +24,6 @@ void THLapack_(gels)(char trans, int m, int n, int nrhs, scalar_t *a, int lda, s
 #endif
 #else
   THError("gels : Lapack library not found in compile time\n");
-#endif
-}
-
-/* Cholesky factorization based Matrix Inverse */
-void THLapack_(potri)(char uplo, int n, scalar_t *a, int lda, int *info)
-{
-#ifdef  USE_LAPACK
-#if defined(TH_REAL_IS_DOUBLE)
-  dpotri_(&uplo, &n, a, &lda, info);
-#else
-  spotri_(&uplo, &n, a, &lda, info);
-#endif
-#else
-  THError("potri: Lapack library not found in compile time\n");
 #endif
 }
 
