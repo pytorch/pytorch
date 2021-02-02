@@ -1,0 +1,437 @@
+.. _modules:
+
+Modules
+=======
+
+PyTorch uses modules to both build and represent neural networks. At a high level, the module abstraction
+provides the following benefits, which will be discussed in more detail throughout this note:
+
+* **Composable building blocks of stateful computation.**
+  PyTorch provides a robust library of modules and makes it easy to define new custom modules, allowing for
+  simple construction of complex, multi-layer neural networks.
+* **Tight integration with PyTorch's** `Autograd <https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html>`_
+  **system.** PyTorch makes it simple to specify learnable module parameters that can be optimized for a task.
+* **Access to a wide array of additional functionality out-of-the-box.**
+  PyTorch provides module serialization, easy transfer between CPU / GPU / TPU devices, pruning, quantization and
+  many other features designed to work with modules.
+
+This note is intended for users interested in understanding how modules are useful in constructing and optimizing
+neural networks. While it is intended as an overview, we also provide links throughout to more advanced tutorials
+for additional detail.
+
+.. contents:: :local:
+
+A Simple Custom Module
+----------------------
+
+To get started, let's look at a simple custom linear module, also known as a linear "layer". It is essentially a
+trimmed-down version of the :class:`~torch.nn.Linear` module, which applies an affine transformation to its input.
+
+.. code-block:: python
+
+   import torch
+   from torch import nn
+
+   class MyLinear(nn.Module):
+     def __init__(self, in_features, out_features):
+       super().__init__()
+       self.weight = nn.Parameter(torch.randn(in_features, out_features))
+       self.bias = nn.Parameter(torch.randn(out_features))
+
+     def forward(self, input):
+       return (input @ self.weight) + self.bias
+
+This simple module demonstrates the following fundamental characteristics of modules:
+
+* **It inherits from the base Module class.**
+  All modules should subclass :class:`~torch.nn.Module` for composability with other modules.
+* **It defines some "state" that is used in computation.**
+  Here, the state consists of randomly-initialized ``weight`` and ``bias`` tensors that define the affine
+  transformation. Because each of these is defined as a :class:`~torch.nn.parameter.Parameter`, the module
+  will automatically track them and return them from calls to :func:`~torch.nn.Module.parameters`. Parameters can be
+  considered the "learnable" aspects of the module's computation (more on this later). Note that modules
+  are not *required* to have state, and can also be stateless.
+* **It defines a forward() function that performs the computation.** For this affine transformation module, the input
+  is matrix-multiplied with the ``weight`` parameter (using the ``@`` short-hand notation) and added to the ``bias``
+  parameter to produce the output. More generally, the ``forward()`` implementation for a module can perform arbitrary
+  computation involving any number of inputs and outputs.
+
+This simple module demonstrates how modules package state and computation. Instances of this module can be
+constructed and called:
+
+.. code-block:: python
+
+   m = MyLinear(4, 3)
+   sample_input = torch.randn(4)
+   m(sample_input)
+   : tensor([-0.3037, -1.0413, -4.2057], grad_fn=<AddBackward0>)
+
+Note that the module itself is callable, and that calling it calls its ``forward()`` function.
+The full set of parameters registered by the module can be iterated through via a call to
+:func:`~torch.nn.Module.parameters` or :func:`~torch.nn.Module.named_parameters`,
+where the latter includes each parameter's name:
+
+.. code-block:: python
+
+   for parameter in m.named_parameters():
+     print(parameter)
+   : ('weight', Parameter containing:
+   tensor([[ 1.0597,  1.1796,  0.8247],
+           [-0.5080, -1.2635, -1.1045],
+           [ 0.0593,  0.2469, -1.4299],
+           [-0.4926, -0.5457,  0.4793]], requires_grad=True))
+   ('bias', Parameter containing:
+   tensor([ 0.3634,  0.2015, -0.8525], requires_grad=True))
+
+In general, the parameters registered by a module are aspects of the module's computation that should be
+"learned", often through optimization utilizing PyTorch's Autograd system. In a later section of this note,
+we provide a full example of doing exactly this. Before we get to that, let's first examine how modules can
+composed with one another.
+
+Modules as Building Blocks
+--------------------------
+
+Modules can contain other modules, making them useful building blocks for developing more complex functionality.
+The simplest way to do this is using the :class:`~torch.nn.Sequential` module. It allows us to chain together
+multiple modules:
+
+.. code-block:: python
+
+   net = nn.Sequential(
+     MyLinear(4, 3),
+     nn.ReLU(),
+     MyLinear(3, 1)
+   )
+
+   sample_input = torch.randn(4)
+   net(sample_input)
+   : tensor([-0.6749], grad_fn=<AddBackward0>)
+
+Note that :class:`~torch.nn.Sequential` automatically feeds the output of the first ``MyLinear`` module as input
+into the :class:`~torch.nn.ReLU`, and the output of that as input into the second ``MyLinear`` module. As
+shown, it is limited to linear chaining of modules.
+
+In general, it is recommended to define a custom module for anything beyond the simplest use cases, as this gives
+full flexibility on how submodules are used for a module's computation.
+
+For example, here's a simple neural network implemented as a custom module:
+
+.. code-block:: python
+
+   import torch.nn.functional as F
+
+   class Net(nn.Module):
+     def __init__(self):
+       super().__init__()
+       self.l0 = MyLinear(4, 3)
+       self.l1 = MyLinear(3, 1)
+     def forward(self, x):
+       x = self.l0(x)
+       x = F.relu(x)
+       x = self.l1(x)
+       return x
+
+This module is composed of two "children" or "submodules" (\ ``l0`` and ``l1``\ ) that define the layers of
+the neural network and are utilized for computation within the module's ``forward()`` method. Immediate
+children of a module can be iterated through via a call to :func:`~torch.nn.Module.children` or
+:func:`~torch.nn.Module.named_children`:
+
+.. code-block:: python
+
+   net = Net()
+   for child in net.named_children():
+     print(child)
+   : ('l0', MyLinear())
+   ('l1', MyLinear())
+
+To go deeper than just the immediate children, :func:`~torch.nn.Module.modules` and
+:func:`~torch.nn.Module.named_modules` *recursively* iterate through a module and its child modules:
+
+.. code-block:: python
+
+   class BigNet(nn.Module):
+     def __init__(self):
+       super().__init__()
+       self.l1 = MyLinear(5, 4)
+       self.net = Net()
+     def forward(self, x):
+       return self.net(self.l1(x))
+
+   big_net = BigNet()
+   for module in big_net.named_modules():
+     print(module)
+   : ('', BigNet(
+     (l1): MyLinear()
+     (net): Net(
+       (l0): MyLinear()
+       (l1): MyLinear()
+     )
+   ))
+   ('l1', MyLinear())
+   ('net', Net(
+     (l0): MyLinear()
+     (l1): MyLinear()
+   ))
+   ('net.l0', MyLinear())
+   ('net.l1', MyLinear())
+
+Sometimes, it's necessary for a module to dynamically define submodules.
+The :class:`~torch.nn.ModuleList` and :class:`~torch.nn.ModuleDict` modules are useful here; they
+register submodules from a list or dict:
+
+.. code-block:: python
+
+   class DynamicNet(nn.Module):
+     def __init__(self, num_layers):
+       super().__init__()
+       self.linears = nn.ModuleList(
+         [MyLinear(4, 4) for _ in range(num_layers)])
+       self.activations = nn.ModuleDict({
+         'relu': nn.ReLU(),
+         'lrelu': nn.LeakyReLU()
+       })
+       self.final = MyLinear(4, 1)
+     def forward(self, x, act):
+       for linear in self.linears:
+         x = linear(x)
+       x = self.activations[act](x)
+       x = self.final(x)
+       return x
+
+   dynamic_net = DynamicNet(3)
+   sample_input = torch.randn(4)
+   output = dynamic_net(sample_input, 'relu')
+
+For any given module, its parameters consist of its direct parameters as well as the parameters of all submodules.
+This means that calls to :func:`~torch.nn.Module.parameters` and :func:`~torch.nn.Module.named_parameters` will
+recursively include child parameters, allowing for convenient optimization of all parameters within the network:
+
+.. code-block:: python
+
+   for parameter in dynamic_net.named_parameters():
+     print(parameter)
+   : ('linears.0.weight', Parameter containing:
+   tensor([[-1.2051,  0.7601,  1.1065,  0.1963],
+           [ 3.0592,  0.4354,  1.6598,  0.9828],
+           [-0.4446,  0.4628,  0.8774,  1.6848],
+           [-0.1222,  1.5458,  1.1729,  1.4647]], requires_grad=True))
+   ('linears.0.bias', Parameter containing:
+   tensor([ 1.5310,  1.0609, -2.0940,  1.1266], requires_grad=True))
+   ('linears.1.weight', Parameter containing:
+   tensor([[ 2.1113, -0.0623, -1.0806,  0.3508],
+           [-0.0550,  1.5317,  1.1064, -0.5562],
+           [-0.4028, -0.6942,  1.5793, -1.0140],
+           [-0.0329,  0.1160, -1.7183, -1.0434]], requires_grad=True))
+   ('linears.1.bias', Parameter containing:
+   tensor([ 0.0361, -0.9768, -0.3889,  1.1613], requires_grad=True))
+   ('linears.2.weight', Parameter containing:
+   tensor([[-2.6340, -0.3887, -0.9979,  0.0767],
+           [-0.3526,  0.8756, -1.5847, -0.6016],
+           [-0.3269, -0.1608,  0.2897, -2.0829],
+           [ 2.6338,  0.9239,  0.6943, -1.5034]], requires_grad=True))
+   ('linears.2.bias', Parameter containing:
+   tensor([ 1.0268,  0.4489, -0.9403,  0.1571], requires_grad=True))
+   ('final.weight', Parameter containing:
+   tensor([[ 0.2509], [-0.5052], [ 0.3088], [-1.4951]], requires_grad=True))
+   ('final.bias', Parameter containing:
+   tensor([0.3381], requires_grad=True))
+
+It's also easy to move all parameters to a different device or change their precision using
+:func:`~torch.nn.Module.to`:
+
+.. code-block:: python
+
+   dynamic_net.to(device='cuda', dtype=torch.float64)
+   dynamic_net(torch.randn(5, device='cuda', dtype=torch.float64))
+   : tensor([6.5166], device='cuda:0', dtype=torch.float64, grad_fn=<AddBackward0>)
+
+The examples above demonstrate how modules can be composed to form complex neural networks. Neural networks are
+also modules themselves, and typically they are modules that contain other modules, which can, in turn, contain
+other modules. The unbounded composability of modules makes the module concept a powerful tool for defining and
+operating with neural networks. PyTorch also provides a large library of optimized modules within the
+:mod:`torch.nn` namespace for computation that is commonly found within neural networks, including pooling,
+convolutions, loss functions, etc.
+
+In the next section, we give a full example of training a neural network.
+
+For more information, check out:
+
+* Recursively :func:`~torch.nn.Module.apply` a function to a module and its submodules
+* Library of PyTorch-provided modules: `torch.nn <https://pytorch.org/docs/stable/nn.html>`_
+* Defining neural net modules: https://pytorch.org/tutorials/beginner/examples_nn/two_layer_net_module.html
+
+Neural Network Training with Modules
+------------------------------------
+
+As demonstrated in the previous section, it is straightforward to compose modules into arbitrarily complex structures.
+The full set of parameters in the network can then be easily optimized using optimizers present in
+:mod:`torch.optim`, as demonstrated in the following snippet:
+
+.. code-block:: python
+
+   # Create the network (from previous section) and optimizer
+   net = Net()
+   optimizer = torch.optim.SGD(net.parameters(), lr=1e-4, weight_decay=1e-2, momentum=0.9)
+
+   # Run a sample training loop that "teaches" the network
+   # to output the constant zero function
+   iters = 10000
+   for _ in range(iters):
+     input = torch.randn(4)
+     output = net(input)
+     loss = torch.abs(output)
+     net.zero_grad()
+     loss.backward()
+     optimizer.step()
+
+Note that this example is a simplification of the general training process, and it doesn't teach the network anything
+"useful". However, it does demonstrate using an optimizer to tune the parameters of the entire network for a particular
+task.
+
+After the above snippet has been run, note that the network's parameters have changed. In particular, examining the
+value of ``l1``\ 's ``weight`` parameter shows that its values are now much closer to 0 (as may be expected):
+
+.. code-block:: python
+
+   print(net.l1.weight)
+   : Parameter containing:
+   tensor([[-0.0013],
+           [ 0.0030],
+           [-0.0008]], requires_grad=True)
+
+In the above example, we demonstrated how to compose a neural network of child modules and easily train the learnable
+parameters with PyTorch-provided optimizers.
+
+For more information, check out:
+
+
+* Using optimizers: https://pytorch.org/tutorials/beginner/examples_nn/two_layer_net_optim.html.
+* Neural network training: https://pytorch.org/tutorials/beginner/blitz/neural_networks_tutorial.html
+* Introduction to Autograd: https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html
+
+Module State
+------------
+
+In the previous section, we demonstrated training a module's "parameters", or learnable aspects of computation.
+Now, if we want to save out the trained model, we can do so by saving its ``state_dict`` (i.e. "state dictionary"):
+
+.. code-block:: python
+
+   # Save the module
+   torch.save(net.state_dict(), 'net.pt')
+
+   ...
+
+   # Load the module later on
+   new_net = Net()
+   new_net.load_state_dict(torch.load('net.pt'))
+   : <All keys matched successfully>
+
+A module's ``state_dict`` contains state that affects its computation. This includes, but is not limited to, the
+module's parameters. For some modules, it may be useful to have state beyond parameters that affects module
+computation but is not learnable. For such cases, PyTorch provides the concept of "buffers", both "persistent"
+and "non-persistent". Following is an overview of the various types of state a module can have:
+
+
+* **Parameters**\ : learnable aspects of computation; contained within the ``state_dict``
+* **Buffers**\ : non-learnable aspects of computation
+
+  * **Persistent** buffers: contained within the ``state_dict`` (i.e. serialized when saving)
+  * **Non-persistent** buffers: not contained within the ``state_dict`` (i.e. left out of serialization)
+
+As a motivating example for the use of buffers, consider a simple module that maintains a running mean. We want
+the current value of the running mean to be considered part of the module's ``state_dict`` and serialized, but not
+learnable. This snippet shows how to use :func:`~torch.nn.Module.register_buffer` to accomplish this:
+
+.. code-block:: python
+
+   class RunningMean(nn.Module):
+     def __init__(self, num_features, momentum=0.9):
+       super().__init__()
+       self.momentum = momentum
+       self.register_buffer('mean', torch.zeros(num_features))
+     def forward(self, x):
+       self.mean = self.momentum * self.mean + (1.0 - self.momentum) * x
+       return self.mean
+
+Now, the current value of the running mean is considered part of the module's ``state_dict``
+and will be saved as part of the module when the module is serialized.
+
+.. code-block:: python
+
+   m = RunningMean(4)
+   for _ in range(10):
+     input = torch.randn(4)
+     m(input)
+
+   print(m.state_dict())
+   : OrderedDict([('mean', tensor([ 0.1041, -0.1113, -0.0647,  0.1515]))]))
+
+   # Serialized form will contain the 'mean' tensor
+   torch.save(m.state_dict(), 'mean.pt')
+
+   m_loaded = RunningMean(4)
+   m_loaded.load_state_dict(torch.load('mean.pt'))
+   assert(torch.all(m.mean == m_loaded.mean))
+
+As mentioned previously, buffers can be left out of the module's ``state_dict`` by marking them as non-persistent:
+
+.. code-block:: python
+
+   self.register_buffer('unserialized_thing', torch.randn(5), persistent=False)
+
+Both persistent and non-persistent buffers are included in model-wide device / dtype changes:
+
+.. code-block:: python
+
+   # Moves all module parameters and buffers to the specified device / dtype
+   m.to(device='cuda', dtype=torch.float64)
+
+Buffers of a module can be iterated over using :func:`~torch.nn.Module.buffers` or
+:func:`~torch.nn.Module.named_buffers`.
+
+For more information, check out:
+
+* Saving and loading: https://pytorch.org/tutorials/beginner/saving_loading_models.html
+* Serialization semantics: https://pytorch.org/docs/master/notes/serialization.html
+* What is a state dict? https://pytorch.org/tutorials/recipes/recipes/what_is_state_dict.html
+
+Module Hooks
+------------
+
+To ensure that simple modifications can be done easily, even for modules that you haven't written yourself,
+PyTorch provides two types of hooks for modules:
+
+* **Forward hooks** are called during the forward pass. They can be installed with
+  :func:`~torch.nn.Module.register_forward_pre_hook` and :func:`~torch.nn.Module.register_forward_hook`.
+  These hooks will be called respectively just before the forward function is called and just after it is called.
+* **Backward hooks** are called during the backward pass. They can be installed with
+  :func:`~torch.nn.Module.register_full_backward_hook`. These hooks will be called when the backward for this
+  Module has been computed and will allow the user to access the gradients for both the inputs and outputs.
+
+All hooks allow the user to return an updated value that will be used throughout the remaining computation.
+Thus, these hooks can be used to either execute arbitrary code along the regular module forward/backward or
+modify some inputs/outputs without having to change the module's ``forward`` function.
+
+PyTorch also provides a way to register these hooks on all existing modules at once by using the
+``register_module_XXX`` version. This can be very useful when building profiling or visualization tools that
+need to know about every single module that is used.
+
+For more information, check out:
+
+* Example usage of hooks:
+  https://pytorch.org/tutorials/beginner/former_torchies/nnft_tutorial.html#forward-and-backward-function-hooks
+
+Advanced Features
+-----------------
+
+PyTorch also provides several more advanced features that are designed to work with modules. All these functionalities
+are "inherited" when writing a new module. In-depth discussion of these features can be found in the links below.
+
+For more information, check out:
+
+* Profiling: https://pytorch.org/tutorials/beginner/profiler.html
+* Pruning: https://pytorch.org/tutorials/intermediate/pruning_tutorial.html
+* Quantization: https://pytorch.org/tutorials/recipes/quantization.html
+* Exporting modules to TorchScript (e.g. for usage from C++):
+  https://pytorch.org/tutorials/beginner/Intro_to_TorchScript_tutorial.html
