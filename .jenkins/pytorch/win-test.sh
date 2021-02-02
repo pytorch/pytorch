@@ -40,6 +40,10 @@ if [ -n "$CIRCLE_PULL_REQUEST" ]; then
   file_diff_from_base "$DETERMINE_FROM"
 fi
 
+if [[ "${CIRCLE_JOB}" == *11.1* ]]; then
+  export BUILD_SPLIT_CUDA=ON
+fi
+
 run_tests() {
     if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
         $SCRIPT_HELPERS_DIR/test_python_nn.bat "$DETERMINE_FROM"
