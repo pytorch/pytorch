@@ -1658,7 +1658,7 @@ void LLVMCodeGenImpl::visit(const ExternalCall* v) {
 
   // Generate the call itself
   std::string fname = v->func_name();
-  auto callee = module_->getOrInsertFunction(
+  FunctionCallee callee = module_->getOrInsertFunction(
       fname,
       llvm::FunctionType::get(
           llvm::Type::getVoidTy(getContext()), // return type
