@@ -1566,6 +1566,18 @@ class AbstractTestCases:
         def test_sobolengine_draw_scrambled(self):
             self.test_sobolengine_draw(scramble=True)
 
+        def test_sobolengine_first_point(self):
+            for dtype in (torch.float, torch.double):
+                engine = torch.quasirandom.SobolEngine(2, scramble=False)
+                sample = engine.draw(1, dtype=dtype)
+                self.assertTrue(torch.all(sample == 0))
+                self.assertEqual(sample.dtype, dtype)
+            for dtype in (torch.float, torch.double):
+                engine = torch.quasirandom.SobolEngine(2, scramble=True, seed=123456)
+                sample = engine.draw(1, dtype=dtype)
+                self.assertTrue(torch.all(sample != 0))
+                self.assertEqual(sample.dtype, dtype)
+
         def test_sobolengine_continuing(self, scramble: bool = False):
             ref_sample = self._sobol_reference_samples(scramble=scramble)
             engine = torch.quasirandom.SobolEngine(2, scramble=scramble, seed=123456)
