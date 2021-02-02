@@ -72,12 +72,7 @@ def process_function(f: NativeFunction) -> Optional[str]:
 
     return f"""\
 inline at::Tensor {name}({', '.join(formals)}) {{
-  at::Tensor tensor = ([&]() {{
-    at::AutoNonVariableTypeMode non_var_type_mode(true);
-    return at::{name}({', '.join(exprs)});
-  }})();
-  at::Tensor result =
-    autograd::make_variable(std::move(tensor), /*requires_grad=*/{requires_grad});
-  return result;
+  at::AutoNonVariableTypeMode non_var_type_mode(true);
+  return autograd::make_variable(at::{name}({', '.join(exprs)}), /*requires_grad=*/{requires_grad});
 }}
 """
