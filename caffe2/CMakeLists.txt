@@ -75,8 +75,6 @@ if(INTERN_BUILD_ATEN_OPS)
 
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
-  # append_filelist("libtorch_lite_cmake_sources" Caffe2_CPU_SRCS)
-  # append_filelist("libtorch_lite_cmake_sources" Caffe2_CPU_LITE_SRCS)
 
   list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_SRCS})
   list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY})
@@ -88,7 +86,6 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
   list(APPEND Caffe2_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS})
   list(APPEND Caffe2_CPU_INCLUDE ${ATen_CPU_INCLUDE})
-  # append_filelist("libtorch_one_header" Caffe2_CPU_INCLUDE)
 
   list(APPEND Caffe2_GPU_INCLUDE ${ATen_CUDA_INCLUDE})
   list(APPEND Caffe2_HIP_INCLUDE ${ATen_HIP_INCLUDE})
@@ -178,11 +175,6 @@ if(TRUE)
   foreach(tmp ${Caffe2_CPU_SRCS})
     message(STATUS "  " ${tmp})
   endforeach()
-
-  # message(STATUS "CPU lite sources: ")
-  # foreach(tmp ${Caffe2_CPU_LITE_SRCS})
-  #   message(STATUS "  " ${tmp})
-  # endforeach()
 
   message(STATUS "GPU sources: ")
   foreach(tmp ${Caffe2_GPU_SRCS})
@@ -452,12 +444,13 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(TORCH_SRCS ${GENERATED_CXX_TORCH})
   list(APPEND TORCH_SRCS ${GENERATED_H_TORCH})
-  append_filelist("libtorch_cmake_sources" TORCH_SRCS)
-  # append_filelist("libtorch_lite_cmake_sources" TORCH_SRCS)
+  # append_filelist("libtorch_cmake_sources" TORCH_SRCS)
+  append_filelist("libtorch_lite_cmake_sources" TORCH_SRCS)
   message(STATUS "Interpreter sources: ")
   foreach(tmp ${TORCH_SRCS})
     message(STATUS "  " ${tmp})
   endforeach()
+
   # Required workaround for LLVM 9 includes.
   if(NOT MSVC)
     set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/tensorexpr/llvm_jit.cpp PROPERTIES COMPILE_FLAGS -Wno-noexcept-type)
@@ -498,26 +491,26 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
 
   if(NOT INTERN_BUILD_MOBILE)
-    list(APPEND TORCH_SRCS
-      ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/serialization/onnx.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/serialization/export.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
-      ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
-    )
-    # Disable legacy import of building without Caffe2 support
-    if(BUILD_CAFFE2)
-      list(APPEND TORCH_SRCS
-        ${TORCH_SRC_DIR}/csrc/jit/serialization/import_legacy.cpp
-      )
-    else()
-      set_source_files_properties(
-        ${TORCH_SRC_DIR}/csrc/jit/serialization/import.cpp
-        PROPERTIES COMPILE_FLAGS "-DC10_DISABLE_LEGACY_IMPORT"
-      )
-    endif()
+    # list(APPEND TORCH_SRCS
+    #   ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+    #   ${TORCH_SRC_DIR}/csrc/jit/serialization/onnx.cpp
+    #   ${TORCH_SRC_DIR}/csrc/jit/serialization/export.cpp
+    #   ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
+    #   ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
+    #   ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
+    #   ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
+    # )
+    # # Disable legacy import of building without Caffe2 support
+    # if(BUILD_CAFFE2)
+    #   list(APPEND TORCH_SRCS
+    #     ${TORCH_SRC_DIR}/csrc/jit/serialization/import_legacy.cpp
+    #   )
+    # else()
+    #   set_source_files_properties(
+    #     ${TORCH_SRC_DIR}/csrc/jit/serialization/import.cpp
+    #     PROPERTIES COMPILE_FLAGS "-DC10_DISABLE_LEGACY_IMPORT"
+    #   )
+    # endif()
     if(USE_DISTRIBUTED AND NOT WIN32)
       append_filelist("libtorch_distributed_sources" TORCH_SRCS)
     endif()
@@ -695,6 +688,7 @@ file(WRITE ${DUMMY_EMPTY_FILE} ${DUMMY_FILE_CONTENT})
 # Wrapper library for people who link against torch and expect both CPU and CUDA support
 # Contains "torch_cpu" and "torch_cuda"
 add_library(torch ${DUMMY_EMPTY_FILE})
+
 if(HAVE_SOVERSION)
   set_target_properties(torch PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -1324,6 +1318,9 @@ if(BUILD_MOBILE_TEST)
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
   endforeach()
 endif()
+
+add_executable(lite_interpreter_demo ${TORCH_ROOT}/test/cpp/demos/main.cpp)
+target_link_libraries(lite_interpreter_demo torch_library)
 
 # ---[ Test binaries.
 if(BUILD_TEST)
