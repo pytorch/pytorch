@@ -140,13 +140,11 @@ class profile(object):
         if activities:
             self.activities = activities
         else:
+            self.activities = set([ProfilerActivity.CPU])
             if use_gpu is not None:
                 warn("use_gpu is deprecated, use activities argument instead")
-                self.activities = set([ProfilerActivity.CPU])
                 if use_gpu:
                     self.activities.add(ProfilerActivity.CUDA)
-            else:
-                activities = set([ProfilerActivity.CPU])
 
         if schedule:
             self.schedule = schedule
