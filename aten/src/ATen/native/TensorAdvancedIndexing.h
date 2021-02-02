@@ -14,6 +14,7 @@ namespace at { namespace native {
 enum class SCATTER_GATHER_OP: uint8_t {REDUCE_ADD, REDUCE_MULTIPLY};
 
 using index_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides);
+using index_fill_fn = void(*)(TensorIterator & iter, int64_t dim, int64_t self_dim_size, int64_t self_dim_stride, Scalar source);
 using index_put_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides, bool accumulate);
 using index_put_accum_fn = void(*)(Tensor &, const c10::List<c10::optional<Tensor>> &, const Tensor &, bool unsafe);
 using masked_fill_fn = void(*)(TensorIterator &, Scalar scalar);
@@ -30,6 +31,7 @@ using scatter_scalar_reduce_fn = void(*)(Tensor& self, const int64_t dim, const 
                                          Scalar& value, const SCATTER_GATHER_OP& reduce);
 
 DECLARE_DISPATCH(index_fn, index_stub);
+DECLARE_DISPATCH(index_fill_fn, index_fill_stub);
 DECLARE_DISPATCH(index_put_fn, index_put_stub);
 DECLARE_DISPATCH(index_put_accum_fn, index_put_accum_stub);
 DECLARE_DISPATCH(masked_fill_fn, masked_fill_stub);
