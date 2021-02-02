@@ -47,6 +47,9 @@ class _ConvNd(Module):
                      'out_channels', 'kernel_size']
     __annotations__ = {'bias': Optional[torch.Tensor]}
 
+    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tensor:
+        ...
+
     _in_channels: int
     out_channels: int
     kernel_size: Tuple[int, ...]
