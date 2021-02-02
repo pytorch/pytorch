@@ -20,6 +20,8 @@
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Target/TargetMachine.h>
 
+#include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
+
 #include <c10/util/Half.h>
 
 #include <algorithm>
@@ -80,6 +82,11 @@ static void registerIntrinsics(
     intrinsics.insert(sym.symbol);
   }
   assertSuccess(JD.define(absoluteSymbols(symbols)));
+
+  for (const auto& kv : getNNCFunctionRegistry()) {
+    assertSuccess(
+        JD.define(absoluteSymbols({entry(kv.first.c_str(), kv.second)})));
+  }
 }
 
 namespace llvm {
