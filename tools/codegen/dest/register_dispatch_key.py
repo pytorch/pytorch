@@ -59,126 +59,6 @@ class RegisterDispatchKey:
         else:
             assert_never(f)
 
-    def gen_structured_class_set_output(self, k: SchemaKind, parent_class: str, generate_super: bool) -> str:
-        if generate_super:
-            set_output_super = f"{parent_class}::set_output(output_idx, sizes, strides, options, names);"
-        else:
-            set_output_super = ""
-        return f"""
-void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
-                TensorOptions options, DimnameList names) override {{
-    {self.gen_structured_class_set_output_body(k)}
-    if (!names.empty()) namedinference::propagate_names(outputs_[output_idx], names);
-    // super must happen after, so that downstream can use maybe_get_output
-    // to retrieve the output
-    {set_output_super}
-}}
-"""
-
-    def gen_structured_class_set_output_body(self, k: SchemaKind) -> str:
-        if self.dispatch_key == DispatchKey.CUDA:
-            maybe_set_guard = """
-auto current_device = guard_.current_device();
-if (C10_UNLIKELY(current_device.has_value())) {
-  TORCH_INTERNAL_ASSERT(*current_device == options.device(),
-    "structured kernels don't support multi-device outputs");
-} else {
-  guard_.set_device(options.device());
-}
-"""
-        else:
-            maybe_set_guard = ''
-
-        if k is SchemaKind.functional:
-            if self.dispatch_key == DispatchKey.Meta:
-                return """
-if (strides.empty()) {
-    outputs_[output_idx] = at::empty_meta(sizes, options);
-} else {
-    TORCH_INTERNAL_ASSERT(0, "not implemented yet");
-}
-"""
-            else:
-                expanded_topts = "optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), " \
-                    "options.device_opt(), options.pinned_memory_opt()"
-                if self.dispatch_key == DispatchKey.CPU:
-                    empty_impl = "at::native::empty_cpu"
-                    empty_strided_impl = "at::native::empty_strided_cpu"
-                elif self.dispatch_key == DispatchKey.CUDA:
-                    empty_impl = "at::native::empty_cuda"
-                    empty_strided_impl = "at::native::empty_strided_cuda"
-                else:
-                    raise AssertionError("unsupported dispatch key")
-                return f"""
-{maybe_set_guard}
-if (strides.empty()) {{
-    outputs_[output_idx] = {empty_impl}(sizes, {expanded_topts}, options.memory_format_opt());
-}} else {{
-    outputs_[output_idx] = {empty_strided_impl}(sizes, strides, {expanded_topts});
-}}
-"""
-        elif k is SchemaKind.inplace:
-            return maybe_set_guard
-        elif k is SchemaKind.out:
-            return f"""
-{maybe_set_guard}
-at::native::resize_output(outputs_[output_idx], sizes);
-if (!strides.empty()) {{
-    TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
-    at::native::as_strided_(outputs_[output_idx], sizes, strides);
-}} else if (options.memory_format_opt().has_value()) {{
-    outputs_[output_idx].get().unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
-}}
-"""
-        else:
-            assert_never(k)
-
-    # returns the definition of a ctor, as well as how to construct
-    # this class to a variable named op
-    def gen_structured_class_ctor(self, k: SchemaKind, class_name: str) -> str:
-        if k is SchemaKind.functional:
-            return ""
-        elif k is SchemaKind.inplace:
-            # TODO: Make sure out argument is guaranteed to be self
-            return f"{class_name}(Tensor& self) : outputs_{{std::ref(self)}} {{}}"
-        elif k is SchemaKind.out:
-            # TODO: Stop hardcoding out here
-            return f"{class_name}(Tensor& out) : outputs_{{std::ref(out)}} {{}}"
-        else:
-            assert_never(k)
-
-    def gen_structured_class(
-        self, f: NativeFunction, k: SchemaKind, *, class_name: str, parent_class: str, generate_super: bool
-    ) -> str:
-        if k is SchemaKind.functional:
-            assert len(f.func.returns) == 1, "multi-return not supported yet"
-            output_type = "Tensor"
-        elif k is SchemaKind.inplace:
-            output_type = "std::reference_wrapper<Tensor>"
-        elif k is SchemaKind.out:
-            assert len(f.func.arguments.out) == 1, "multi-out structured not supported yet"
-            output_type = "std::reference_wrapper<Tensor>"
-
-        if self.dispatch_key == DispatchKey.CUDA:
-            if self.rocm:
-                guard_field = 'c10::hip::OptionalHIPGuardMasqueradingAsCUDA guard_;'
-            else:
-                guard_field = 'c10::cuda::OptionalCUDAGuard guard_;'
-        else:
-            guard_field = ''
-
-        return f"""
-struct {class_name} final : public {parent_class} {{
-    {self.gen_structured_class_ctor(k, class_name)}
-    {self.gen_structured_class_set_output(k, parent_class, generate_super)}
-    const Tensor& maybe_get_output(int64_t output_idx) override {{
-        return outputs_[output_idx];
-    }}
-    std::array<{output_type}, {len(f.func.returns)}> outputs_;
-    {guard_field}
-}};
-"""
-
     def gen_structured(self, g: StructuredNativeFunctions) -> List[str]:
         if self.dispatch_key == DispatchKey.Meta:
             assert self.dispatch_key not in g.out.dispatch, \
@@ -189,150 +69,14 @@ struct {class_name} final : public {parent_class} {{
         elif self.dispatch_key not in g.out.dispatch:
             return []
 
-        # Inner helper function to close over g
-        # TODO: This function has a lot of similarity with gen_unstructured.  If
-        # you edit this, you may need to also edit gen_unstructured.
-        @with_native_function
-        def gen_one(f: NativeFunction) -> Optional[str]:
-            assert not f.manual_kernel_registration
-
-            if self.target is Target.REGISTRATION and not self.selector.is_native_function_selected(f):
-                return None
-
-            # Signature of the non-dispatched function we'll expose in a header
-            # (e.g., at::cpu::add).  We don't generate methods (TODO: do this
-            # when CPUTensor class is a thing); nor do we generate fallback
-            # bindings for manual_cpp_binding functions.
-            cpp_sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=False)
-
-            # Signature of the wrapper function we'll register to the dispatcher
-            sig = NativeSignature(f.func, prefix="wrapper_")
-
-            if self.target is Target.DECLARATION:
-                # namespace is handled by template
-                result = f"TORCH_API {cpp_sig_group.signature.decl()};\n"
-                if cpp_sig_group.faithful_signature is not None:
-                    result += f"TORCH_API {cpp_sig_group.faithful_signature.decl()};\n"
-                return result
-
-            elif self.target is Target.DEFINITION:
-
-                k = f.func.kind()
-
-                # Construct the body of the wrapper function with signature sig
-                sig_body = []
-                # We'll use context to keep track of any variables we've brought
-                # into scope while generating code
-                context: List[Union[Binding, Expr]] = list(sig.arguments())
-
-                # Initialize the class corresponding to this structured
-                # operator; feeding it the output argument(s) if it is known
-                if self.dispatch_key == DispatchKey.Meta:
-                    class_name = f"structured_{meta.name(g)}_meta_{k.name}"
-                    parent_class = f"at::meta::{meta.name(g)}"
-                else:
-                    class_name = f"structured_{g.out.dispatch[self.dispatch_key]}_{k.name}"
-                    parent_class = f"at::native::structured_{g.out.dispatch[self.dispatch_key]}"
-
-                if k is SchemaKind.functional:
-                    assert len(f.func.returns) == 1, "multi-return not supported yet"
-                    sig_body.append(f"{class_name} op;")
-                elif k is SchemaKind.inplace:
-                    sig_body.append(f"{class_name} op(self);")
-                elif k is SchemaKind.out:
-                    assert len(f.func.arguments.out) == 1, "multi-out structured not supported yet"
-                    sig_body.append(f"{class_name} op({f.func.arguments.out[0].name});")
-
-                # Translate the input native arguments into structured
-                # arguments for the meta call
-                meta_exprs = ', '.join(
-                    e.expr for e in translate(
-                        context,
-                        structured.meta_arguments(g),
-                        method=False
-                    )
-                )
-                sig_body.append(f"op.meta({meta_exprs});")
-
-                # After running meta, op.outputs_ is guaranteed to be valid;
-                # add it to the context
-                # TODO: handle multi-return
-                context.append(Expr(
-                    expr="op.outputs_[0]",
-                    type=structured.out_arguments(g)[0].ctype,
-                ))
-
-                # With the expanded context, do the impl call (if not a meta
-                # function)
-                if self.dispatch_key != DispatchKey.Meta:
-                    impl_exprs = ', '.join(
-                        e.expr for e in translate(
-                            context,
-                            structured.impl_arguments(g),
-                            method=False
-                        )
-                    )
-                    sig_body.append(f"op.impl({impl_exprs});")
-
-                # Destructively return the final tensors
-                if k is SchemaKind.functional:
-                    assert len(f.func.returns) == 1, "multi-return not supported yet"
-                    ret_expr = "std::move(op.outputs_[0])"  # small optimization
-                elif k is SchemaKind.inplace:
-                    ret_expr = "self"
-                elif k is SchemaKind.out:
-                    assert len(f.func.arguments.out) == 1, "multi-out structured not supported yet"
-                    ret_expr = f.func.arguments.out[0].name
-                sig_body.append(f"return {ret_expr};")
-
-                sig_body_str = "\n".join(sig_body)
-
-                # For an overview of what this template code looks like, see
-                # https://github.com/pytorch/rfcs/pull/9
-                sig_defn = f"""\
-{self.gen_structured_class(
-    f, k,
-    class_name=class_name,
-    parent_class=parent_class,
-    generate_super=g.out.structured_inherits is not None
-)}
-
-{sig.defn()} {{
-    {sig_body_str}
-}}
-"""
-
-                def generate_defn(cpp_sig: CppSignature) -> str:
-                    return f"""
-{cpp_sig.defn()} {{
-    return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
-}}
-"""
-                cpp_defns = generate_defn(cpp_sig_group.signature)
-                if cpp_sig_group.faithful_signature is not None:
-                    cpp_defns += generate_defn(cpp_sig_group.faithful_signature)
-
-                return f"""
-namespace {{
-{sig_defn}
-}} // anonymous namespace
-
-namespace {self.dispatch_key.lower()} {{
-{cpp_defns}
-}} // namespace {self.dispatch_key.lower()}
-"""
-
-            elif self.target is Target.REGISTRATION:
-                dispatcher_sig = DispatcherSignature.from_schema(f.func)
-
-                assert local.use_c10_dispatcher() is UseC10Dispatcher.full
-                return f'm.impl("{f.func.name}", TORCH_FN({sig.name()}));'
-            else:
-                assert_never(self.target)
-                # Silence mypy's "Missing return statement" error
-                return None
-
-        return list(mapMaybe(gen_one, g.functions()))
+        structured_gen = StructuredRegisterDispatchKey(
+            self.dispatch_key,
+            self.target,
+            self.selector,
+            self.rocm,
+            g
+        )
+        return list(mapMaybe(structured_gen.gen_one, g.functions()))
 
     @method_with_native_function
     def gen_unstructured(self, f: NativeFunction) -> Optional[str]:
@@ -434,3 +178,273 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
                 return f'm.impl("{f.func.name}",\n{payload});\n'
         else:
             assert_never(self.target)
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#
+#                           STRUCTURED
+#
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+
+@dataclass(frozen=True)
+class StructuredRegisterDispatchKey(RegisterDispatchKey):
+    g: StructuredNativeFunctions
+
+    def gen_class_set_output(self, k: SchemaKind, parent_class: str, generate_super: bool) -> str:
+        if generate_super:
+            set_output_super = f"{parent_class}::set_output(output_idx, sizes, strides, options, names);"
+        else:
+            set_output_super = ""
+        return f"""
+void set_output(int64_t output_idx, IntArrayRef sizes, IntArrayRef strides,
+                TensorOptions options, DimnameList names) override {{
+    {self.gen_class_set_output_body(k)}
+    if (!names.empty()) namedinference::propagate_names(outputs_[output_idx], names);
+    // super must happen after, so that downstream can use maybe_get_output
+    // to retrieve the output
+    {set_output_super}
+}}
+"""
+
+    def gen_class_set_output_body(self, k: SchemaKind) -> str:
+        if self.dispatch_key == DispatchKey.CUDA:
+            maybe_set_guard = """
+auto current_device = guard_.current_device();
+if (C10_UNLIKELY(current_device.has_value())) {
+  TORCH_INTERNAL_ASSERT(*current_device == options.device(),
+    "structured kernels don't support multi-device outputs");
+} else {
+  guard_.set_device(options.device());
+}
+"""
+        else:
+            maybe_set_guard = ''
+
+        if k is SchemaKind.functional:
+            if self.dispatch_key == DispatchKey.Meta:
+                return """
+if (strides.empty()) {
+    outputs_[output_idx] = at::empty_meta(sizes, options);
+} else {
+    TORCH_INTERNAL_ASSERT(0, "not implemented yet");
+}
+"""
+            else:
+                expanded_topts = "optTypeMetaToScalarType(options.dtype_opt()), options.layout_opt(), " \
+                    "options.device_opt(), options.pinned_memory_opt()"
+                if self.dispatch_key == DispatchKey.CPU:
+                    empty_impl = "at::native::empty_cpu"
+                    empty_strided_impl = "at::native::empty_strided_cpu"
+                elif self.dispatch_key == DispatchKey.CUDA:
+                    empty_impl = "at::native::empty_cuda"
+                    empty_strided_impl = "at::native::empty_strided_cuda"
+                else:
+                    raise AssertionError("unsupported dispatch key")
+                return f"""
+{maybe_set_guard}
+if (strides.empty()) {{
+    outputs_[output_idx] = {empty_impl}(sizes, {expanded_topts}, options.memory_format_opt());
+}} else {{
+    outputs_[output_idx] = {empty_strided_impl}(sizes, strides, {expanded_topts});
+}}
+"""
+        elif k is SchemaKind.inplace:
+            return maybe_set_guard
+        elif k is SchemaKind.out:
+            return f"""
+{maybe_set_guard}
+at::native::resize_output(outputs_[output_idx], sizes);
+if (!strides.empty()) {{
+    TORCH_INTERNAL_ASSERT(!options.memory_format_opt().has_value());
+    at::native::as_strided_(outputs_[output_idx], sizes, strides);
+}} else if (options.memory_format_opt().has_value()) {{
+    outputs_[output_idx].get().unsafeGetTensorImpl()->empty_tensor_restride(*options.memory_format_opt());
+}}
+"""
+        else:
+            assert_never(k)
+
+    # returns the definition of a ctor, as well as how to construct
+    # this class to a variable named op
+    def gen_class_ctor(self, k: SchemaKind, class_name: str) -> str:
+        if k is SchemaKind.functional:
+            return ""
+        elif k is SchemaKind.inplace:
+            # TODO: Make sure out argument is guaranteed to be self
+            return f"{class_name}(Tensor& self) : outputs_{{std::ref(self)}} {{}}"
+        elif k is SchemaKind.out:
+            # TODO: Stop hardcoding out here
+            return f"{class_name}(Tensor& out) : outputs_{{std::ref(out)}} {{}}"
+        else:
+            assert_never(k)
+
+    def gen_class(
+        self, f: NativeFunction, k: SchemaKind, *, class_name: str, parent_class: str, generate_super: bool
+    ) -> str:
+        if k is SchemaKind.functional:
+            assert len(f.func.returns) == 1, "multi-return not supported yet"
+            output_type = "Tensor"
+        elif k is SchemaKind.inplace:
+            output_type = "std::reference_wrapper<Tensor>"
+        elif k is SchemaKind.out:
+            assert len(f.func.arguments.out) == 1, "multi-out structured not supported yet"
+            output_type = "std::reference_wrapper<Tensor>"
+
+        if self.dispatch_key == DispatchKey.CUDA:
+            if self.rocm:
+                guard_field = 'c10::hip::OptionalHIPGuardMasqueradingAsCUDA guard_;'
+            else:
+                guard_field = 'c10::cuda::OptionalCUDAGuard guard_;'
+        else:
+            guard_field = ''
+
+        return f"""
+struct {class_name} final : public {parent_class} {{
+    {self.gen_class_ctor(k, class_name)}
+    {self.gen_class_set_output(k, parent_class, generate_super)}
+    const Tensor& maybe_get_output(int64_t output_idx) override {{
+        return outputs_[output_idx];
+    }}
+    std::array<{output_type}, {len(f.func.returns)}> outputs_;
+    {guard_field}
+}};
+"""
+
+    @method_with_native_function
+    def gen_one(self, f: NativeFunction) -> Optional[str]:
+        assert not f.manual_kernel_registration
+
+        if self.target is Target.REGISTRATION and not self.selector.is_native_function_selected(f):
+            return None
+
+        # Signature of the non-dispatched function we'll expose in a header
+        # (e.g., at::cpu::add).  We don't generate methods (TODO: do this
+        # when CPUTensor class is a thing); nor do we generate fallback
+        # bindings for manual_cpp_binding functions.
+        cpp_sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=False)
+
+        # Signature of the wrapper function we'll register to the dispatcher
+        sig = NativeSignature(f.func, prefix="wrapper_")
+
+        if self.target is Target.DECLARATION:
+            result = f"TORCH_API {cpp_sig_group.signature.decl()};\n"
+            if cpp_sig_group.faithful_signature is not None:
+                result += f"TORCH_API {cpp_sig_group.faithful_signature.decl()};\n"
+            return result
+
+        elif self.target is Target.DEFINITION:
+
+            k = f.func.kind()
+
+            # Construct the body of the wrapper function with signature sig
+            sig_body = []
+            # We'll use context to keep track of any variables we've brought
+            # into scope while generating code
+            context: List[Union[Binding, Expr]] = list(sig.arguments())
+
+            # Initialize the class corresponding to this structured
+            # operator; feeding it the output argument(s) if it is known
+            if self.dispatch_key == DispatchKey.Meta:
+                class_name = f"structured_{meta.name(self.g)}_meta_{k.name}"
+                parent_class = f"at::meta::{meta.name(self.g)}"
+            else:
+                class_name = f"structured_{self.g.out.dispatch[self.dispatch_key]}_{k.name}"
+                parent_class = f"at::native::structured_{self.g.out.dispatch[self.dispatch_key]}"
+
+            if k is SchemaKind.functional:
+                assert len(f.func.returns) == 1, "multi-return not supported yet"
+                sig_body.append(f"{class_name} op;")
+            elif k is SchemaKind.inplace:
+                sig_body.append(f"{class_name} op(self);")
+            elif k is SchemaKind.out:
+                assert len(f.func.arguments.out) == 1, "multi-out structured not supported yet"
+                sig_body.append(f"{class_name} op({f.func.arguments.out[0].name});")
+
+            # Translate the input native arguments into structured
+            # arguments for the meta call
+            meta_exprs = ', '.join(
+                e.expr for e in translate(
+                    context,
+                    structured.meta_arguments(self.g),
+                    method=False
+                )
+            )
+            sig_body.append(f"op.meta({meta_exprs});")
+
+            # After running meta, op.outputs_ is guaranteed to be valid;
+            # add it to the context
+            # TODO: handle multi-return
+            context.append(Expr(
+                expr="op.outputs_[0]",
+                type=structured.out_arguments(self.g)[0].ctype,
+            ))
+
+            # With the expanded context, do the impl call (if not a meta
+            # function)
+            if self.dispatch_key != DispatchKey.Meta:
+                impl_exprs = ', '.join(
+                    e.expr for e in translate(
+                        context,
+                        structured.impl_arguments(self.g),
+                        method=False
+                    )
+                )
+                sig_body.append(f"op.impl({impl_exprs});")
+
+            # Destructively return the final tensors
+            if k is SchemaKind.functional:
+                assert len(f.func.returns) == 1, "multi-return not supported yet"
+                ret_expr = "std::move(op.outputs_[0])"  # small optimization
+            elif k is SchemaKind.inplace:
+                ret_expr = "self"
+            elif k is SchemaKind.out:
+                assert len(f.func.arguments.out) == 1, "multi-out structured not supported yet"
+                ret_expr = f.func.arguments.out[0].name
+            sig_body.append(f"return {ret_expr};")
+
+            sig_body_str = "\n".join(sig_body)
+
+            # For an overview of what this template code looks like, see
+            # https://github.com/pytorch/rfcs/pull/9
+            sig_defn = f"""\
+{self.gen_class(
+f, k,
+class_name=class_name,
+parent_class=parent_class,
+generate_super=self.g.out.structured_inherits is not None
+)}
+
+{sig.defn()} {{
+{sig_body_str}
+}}
+"""
+
+            def generate_defn(cpp_sig: CppSignature) -> str:
+                return f"""
+{cpp_sig.defn()} {{
+return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
+}}
+"""
+            cpp_defns = generate_defn(cpp_sig_group.signature)
+            if cpp_sig_group.faithful_signature is not None:
+                cpp_defns += generate_defn(cpp_sig_group.faithful_signature)
+
+            return f"""
+namespace {{
+{sig_defn}
+}} // anonymous namespace
+
+namespace {self.dispatch_key.lower()} {{
+{cpp_defns}
+}} // namespace {self.dispatch_key.lower()}
+"""
+
+        elif self.target is Target.REGISTRATION:
+            dispatcher_sig = DispatcherSignature.from_schema(f.func)
+
+            assert local.use_c10_dispatcher() is UseC10Dispatcher.full
+            return f'm.impl("{f.func.name}", TORCH_FN({sig.name()}));'
+        else:
+            assert_never(self.target)
+            # Silence mypy's "Missing return statement" error
+            return None
