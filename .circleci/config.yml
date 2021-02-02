@@ -7453,8 +7453,8 @@ workflows:
           vc_year: "2019"
       - pytorch_windows_build:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11.1"
-          name: pytorch_windows_vs2019_py36_cuda11.1_build
+          cuda_version: "11.2"
+          name: pytorch_windows_vs2019_py36_cuda11.2_build
           python_version: "3.6"
           use_cuda: "1"
           vc_product: Community
@@ -7462,7 +7462,7 @@ workflows:
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11.1"
+          cuda_version: "11.2"
           executor: windows-with-nvidia-gpu
           filters:
             branches:
@@ -7470,10 +7470,10 @@ workflows:
                 - master
                 - /ci-all\/.*/
                 - /release\/.*/
-          name: pytorch_windows_vs2019_py36_cuda11.1_test1
+          name: pytorch_windows_vs2019_py36_cuda11.2_test1
           python_version: "3.6"
           requires:
-            - pytorch_windows_vs2019_py36_cuda11.1_build
+            - pytorch_windows_vs2019_py36_cuda11.2_build
           test_name: pytorch-windows-test1
           use_cuda: "1"
           vc_product: Community
@@ -7481,7 +7481,7 @@ workflows:
           vc_year: "2019"
       - pytorch_windows_test:
           build_environment: pytorch-win-vs2019-cuda11-cudnn8-py3
-          cuda_version: "11.1"
+          cuda_version: "11.2"
           executor: windows-with-nvidia-gpu
           filters:
             branches:
@@ -7489,10 +7489,10 @@ workflows:
                 - master
                 - /ci-all\/.*/
                 - /release\/.*/
-          name: pytorch_windows_vs2019_py36_cuda11.1_test2
+          name: pytorch_windows_vs2019_py36_cuda11.2_test2
           python_version: "3.6"
           requires:
-            - pytorch_windows_vs2019_py36_cuda11.1_build
+            - pytorch_windows_vs2019_py36_cuda11.2_build
           test_name: pytorch-windows-test2
           use_cuda: "1"
           vc_product: Community
