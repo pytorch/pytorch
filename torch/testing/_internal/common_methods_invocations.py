@@ -2121,14 +2121,7 @@ if TEST_SCIPY:
                dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                test_inplace_grad=False,
                supports_tensor_out=False,
-               # Reference: https://github.com/pytorch/pytorch/issues/50381
-               test_complex_grad=False,
-               sample_inputs_func=sample_inputs_trace,
-               skips=(
-                   SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                            dtypes=[torch.complex64, torch.complex128]),
-                   SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                            dtypes=[torch.complex64, torch.complex128]))),
+               sample_inputs_func=sample_inputs_trace)
     ]
     op_db = op_db + op_db_scipy_reference
 
