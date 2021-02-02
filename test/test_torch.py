@@ -6024,30 +6024,14 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             max_val = torch._aminmax(t, dim=0)[1]
         # Test _aminmax() with a multi-element tensor
-<<<<<<< HEAD
-<<<<<<< HEAD
         x = torch.tensor([(1 + 1j), (2 + 3j)], device=device, dtype=dtype)
-=======
-        x = torch.tensor([(1 + 1j),(2 + 3j)], device=device, dtype=dtype)
->>>>>>> 6d4200d353... Delete trailing spaces in comment
-=======
-        x = torch.tensor([(1 + 1j), (2 + 3j)], device=device, dtype=dtype)
->>>>>>> bfed8e0749... Remove whitespace from empty line
         with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             min_val, max_val = torch._aminmax(x)
         with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             min_val = torch._aminmax(x, dim=0)[0]
         with self.assertRaisesRegex(RuntimeError, '(.*not support.*)|(.*not implemented.*)'):
             max_val = torch._aminmax(x, dim=0)[1]
-<<<<<<< HEAD
-<<<<<<< HEAD
 
-=======
-    
->>>>>>> bfed8e0749... Remove whitespace from empty line
-=======
-
->>>>>>> d849f83530... Remove extra whitespace
         # Tests clamp variants with complex inputs
         # Note: whether PyTorch should support clamp on complex
         # tensors is an open question.
