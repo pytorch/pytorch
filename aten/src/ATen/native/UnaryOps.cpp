@@ -38,17 +38,42 @@ static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub
 }
 
 template <typename Stub>
-static inline Tensor& unary_op_impl_float_out(Tensor& result, const Tensor& self, Stub& stub, ScalarType dtype = ScalarType::Undefined) {
-  auto iter = TensorIterator::unary_float_op(result, self, dtype);
+static inline Tensor& unary_op_impl_float_out(Tensor& result, const Tensor& self, Stub& stub) {
+  auto iter = TensorIterator::unary_float_op(result, self);
   stub(iter.device_type(), iter);
   iter.cast_outputs();
   return result;
 }
 
 template <typename Stub>
-Tensor unary_op_impl_float(const Tensor& self, Stub& stub, ScalarType dtype = ScalarType::Undefined) {
+static inline Tensor unary_op_impl_float(const Tensor& self, Stub& stub) {
   Tensor result;
-  auto iter = TensorIterator::unary_float_op(result, self, dtype);
+  auto iter = TensorIterator::unary_float_op(result, self);
+  stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+// Helper for slow-path with more functionality support
+// on an Unary Operator.
+template <typename Stub>
+static inline Tensor& unary_op_impl_float_out_slow(
+    Tensor& result,
+    const Tensor& self,
+    Stub& stub,
+    ScalarType dtype = ScalarType::Undefined) {
+  auto iter = TensorIterator::unary_float_op_slow(result, self, dtype);
+  stub(iter.device_type(), iter);
+  iter.cast_outputs();
+  return result;
+}
+
+template <typename Stub>
+static inline Tensor unary_op_impl_float_slow(
+    const Tensor& self,
+    Stub& stub,
+    ScalarType dtype = ScalarType::Undefined) {
+  Tensor result;
+  auto iter = TensorIterator::unary_float_op_slow(result, self, dtype);
   stub(iter.device_type(), iter);
   return iter.output();
 }
@@ -350,13 +375,13 @@ Tensor& sin_out(Tensor& result, const Tensor& self) {
   return unary_op_impl_float_out(result, self, sin_stub);
 }
 Tensor& sin_dtype_out(const Tensor& self, ScalarType dtype, Tensor& result) {
-  return unary_op_impl_float_out(result, self, sin_stub, dtype);
+  return unary_op_impl_float_out_slow(result, self, sin_stub, dtype);
 }
 Tensor sin(const Tensor& self) {
   return unary_op_impl_float(self, sin_stub);
 }
 Tensor sin_dtype(const Tensor& self, ScalarType dtype) {
-  return unary_op_impl_float(self, sin_stub, dtype);
+  return unary_op_impl_float_slow(self, sin_stub, dtype);
 }
 Tensor& sin_(Tensor& self) { return at::sin_out(self, self); }
 
