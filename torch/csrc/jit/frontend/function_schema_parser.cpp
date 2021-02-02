@@ -257,7 +257,7 @@ struct SchemaParser {
         break;
       }
       case TypeKind::ListType: {
-        auto elem_kind = arg_type->cast<ListType>()->getElementType();
+        auto elem_kind = arg_type->castRaw<ListType>()->getElementType();
         if (L.cur().kind == TK_IDENT) {
           return parseTensorDefault(range);
         } else if (arg_N && L.cur().kind != '[') {
