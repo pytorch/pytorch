@@ -1929,8 +1929,11 @@ Tensor lu_solve(const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivo
 }
 
 Tensor& lu_solve_out(Tensor& result, const Tensor& self, const Tensor& LU_data, const Tensor& LU_pivots) {
+  checkSameDevice("lu_solve", result, self);
+  checkLinalgCompatibleDtype("lu_solve", result, self);
   Tensor result_tmp = at::lu_solve(self, LU_data, LU_pivots);
-  result.resize_as_(result_tmp).copy_(result_tmp);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
   return result;
 }
 
