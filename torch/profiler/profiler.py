@@ -146,7 +146,7 @@ class profile(object):
                 if use_gpu:
                     self.activities.add(ProfilerActivity.CUDA)
             else:
-                raise RuntimeError("Profiler activities are not specified")
+                activities = set([ProfilerActivity.CPU])
 
         if schedule:
             self.schedule = schedule
