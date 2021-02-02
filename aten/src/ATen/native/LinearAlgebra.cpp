@@ -101,14 +101,12 @@ std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 std::tuple<Tensor&, Tensor&> linalg_slogdet_out(const Tensor& input, Tensor& sign, Tensor& logabsdet) {
-  TORCH_CHECK(sign.scalar_type() == input.scalar_type(),
-    "sign dtype ", sign.scalar_type(), " does not match input dtype ", input.scalar_type());
+  checkSameDevice("linalg_slogdet", sign, input, "sign");
+  checkSameDevice("linalg_slogdet", logabsdet, input, "logabsdet");
+  checkLinalgCompatibleDtype("linalg_slogdet", sign, input, "sign");
   ScalarType real_dtype = toValueType(typeMetaToScalarType(input.dtype()));
-  TORCH_CHECK(logabsdet.scalar_type() == real_dtype,
+  TORCH_CHECK(at::isFloatingType(logabsdet.scalar_type()),
     "logabsdet dtype ", logabsdet.scalar_type(), " does not match the expected dtype ", real_dtype);
-  TORCH_CHECK(sign.device() == input.device() && logabsdet.device() == input.device(),
-              "Expected sign, logabsdet and input to be on the same device, but found sign on ",
-              sign.device(), ", logabsdet on ", logabsdet.device(), " and input on ", input.device(), " instead.");
 
   Tensor sign_tmp, logabsdet_tmp;
   std::tie(sign_tmp, logabsdet_tmp) = at::linalg_slogdet(input);

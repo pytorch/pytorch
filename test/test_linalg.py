@@ -5642,7 +5642,7 @@ else:
         # dtypes should match
         sign_out = torch.empty_like(a).to(torch.int)
         logabsdet_out = torch.empty_like(a).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "sign dtype Int does not match input dtype"):
+        with self.assertRaisesRegex(RuntimeError, "got sign with dtype Int and input with dtype"):
             torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
 
         sign_out = torch.empty(0, device=device, dtype=dtype)
@@ -5654,7 +5654,7 @@ else:
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             sign_out = torch.empty(0, device=wrong_device, dtype=dtype)
             logabsdet_out = torch.empty(0, device=wrong_device, dtype=real_dtype)
-            with self.assertRaisesRegex(RuntimeError, "Expected sign, logabsdet and input to be on the same device"):
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
 
     @slowTest
