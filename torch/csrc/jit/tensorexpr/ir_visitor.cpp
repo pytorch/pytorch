@@ -120,6 +120,16 @@ void IRVisitor::visit(const AtomicAdd* v) {
 
 void IRVisitor::visit(const SyncThreads* v) {}
 
+void IRVisitor::visit(const ExternalCall* v) {
+  v->buf()->accept(this);
+  for (const Buf* buf_arg : v->buf_args()) {
+    buf_arg->accept(this);
+  }
+  for (const Expr* arg : v->args()) {
+    arg->accept(this);
+  }
+}
+
 void IRVisitor::visit(const Block* v) {
   for (Stmt* s : *v) {
     s->accept(this);
