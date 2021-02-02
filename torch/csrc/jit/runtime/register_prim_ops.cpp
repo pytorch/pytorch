@@ -988,6 +988,22 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::type.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
+         [](Stack* stack) {
+           bool non_blocking;
+           bool copy;
+           pop(stack, non_blocking, copy);
+           c10::optional<at::ScalarType> scalarType =
+               pop(stack).toOptional<at::ScalarType>();
+           c10::optional<c10::Device> device = c10::nullopt;
+           at::Tensor self = pop(stack).toTensor();
+           push(
+               stack,
+               to_dispatch(self, device, scalarType, non_blocking, copy));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::is_cuda(Tensor a) -> bool"),
          [](Stack* stack) {
            at::Tensor a;
