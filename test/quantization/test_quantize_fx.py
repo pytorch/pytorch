@@ -2838,8 +2838,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
         qgraph_script = torch.jit.script(qgraph)
         # print('quantized and scripted:', qgraph_script.graph)
 
-        import copy
-        qgraph_input = copy.deepcopy(input_value)
         qgraph_out = qgraph(input_value)
         qgraph_script = qgraph_script(input_value)
 
@@ -2882,7 +2880,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
             qeager.eval()
 
             # print('ref after quantization:', qeager)
-            qeager_input = copy.deepcopy(input_value)
             qeager_out = qeager(input_value)
             qeager_script = torch.jit.script(qeager)
             qscript_out = qeager_script(input_value)
