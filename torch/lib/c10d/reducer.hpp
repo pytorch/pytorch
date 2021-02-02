@@ -113,8 +113,8 @@ class Reducer {
   // construction time.
   void set_construction_logging_data(
       const std::string& module_name,
-      const std::string& device_ids,
-      const std::string&  output_device,
+      const std::vector<int>& device_ids,
+      int output_device,
       bool broadcast_buffers);
   void set_rebuilt_bucket_stats();
   void set_unused_parameter_stats();
@@ -217,7 +217,7 @@ class Reducer {
 
   void set_env_variables();
   void set_parameter_stats();
-  std::string get_bucket_stats();
+  std::vector<int> get_bucket_sizes();
 
   // A bucket replica represents [1..N] gradients to be reduced,
   // with the same dtype, on the same device.

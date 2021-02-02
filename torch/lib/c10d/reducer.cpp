@@ -1526,24 +1526,23 @@ void Reducer::set_parameter_stats() {
   }
 }
 
-std::string Reducer::get_bucket_stats() {
-  std::string bucket_sizes = "";
+std::vector<int> Reducer::get_bucket_sizes() {
+  std::vector<int> bucket_sizes;
   for (const auto& bucket : buckets_) {
     const auto& variables = bucket.replicas[0].variables;
     int bucket_size = 0;
     for (const auto& v : variables) {
       bucket_size += v.numel() * v.element_size();
     }
-    bucket_sizes += std::to_string(bucket_size);
-    bucket_sizes += ", ";
+    bucket_sizes.push_back(bucket_size);
   }
   return bucket_sizes;
 }
 
 void Reducer::set_construction_logging_data(
   const std::string& module_name,
-  const std::string& device_ids,
-  const std::string& output_device,
+  const std::vector<int>& device_ids,
+  int output_device,
   bool broadcast_buffers
 ) {
 // Data that can be got during DistributedDataParallel construction time
@@ -1553,7 +1552,7 @@ void Reducer::set_construction_logging_data(
   ddp_logging_data_->iteration = 0;
   ddp_logging_data_->dtype = std::string(replicas_[0][0].dtype().name());
 
-  ddp_logging_data_->bucket_sizes = get_bucket_stats();
+  ddp_logging_data_->bucket_sizes = get_bucket_sizes();
 
   set_parameter_stats();
   set_env_variables();
@@ -1580,7 +1579,7 @@ void Reducer::set_unused_parameter_stats() {
 
 void Reducer::set_rebuilt_bucket_stats() {
   ddp_logging_data_->has_rebuilt_buckets = has_rebuilt_bucket_;
-  ddp_logging_data_->rebuilt_bucket_sizes = get_bucket_stats();
+  ddp_logging_data_->rebuilt_bucket_sizes = get_bucket_sizes();
 }
 
 void Reducer::set_avg_forward_compute_time() {
