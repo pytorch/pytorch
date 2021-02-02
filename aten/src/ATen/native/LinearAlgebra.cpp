@@ -193,7 +193,8 @@ Tensor pinverse(const Tensor& self, double rcond) {
 }
 
 Tensor& linalg_matrix_rank_out(Tensor& result, const Tensor& self, optional<double> tol, bool hermitian) {
-  TORCH_CHECK(result.scalar_type() == ScalarType::Long,
+  checkSameDevice("linalg_matrix_rank", result, self);
+  TORCH_CHECK(isIntegralType(result.scalar_type(), /*includeBool=*/false),
     "result dtype ", result.scalar_type(), " does not match the expected dtype ", ScalarType::Long);
 
   // Matrices or batch of matrices are allowed
