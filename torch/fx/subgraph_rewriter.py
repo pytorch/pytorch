@@ -2,6 +2,7 @@ from torch.fx import Graph, GraphModule, Node, symbolic_trace
 
 import copy
 from typing import Callable, Dict, List, NamedTuple, Set
+from itertools import permutations
 
 class Match(NamedTuple):
     # Node from which the match was found
@@ -15,6 +16,7 @@ class SubgraphMatcher:
         if len(pattern.nodes) == 0:
             raise ValueError("SubgraphMatcher cannot be initialized with an "
                              "empty pattern")
+        # `self.pattern_anchor` is the output Node in `pattern`
         self.pattern_anchor = next(iter(reversed(pattern.nodes)))
         # Maps nodes in the pattern subgraph to nodes in the larger graph
         self.nodes_map: Dict[Node, Node] = {}
@@ -32,6 +34,7 @@ class SubgraphMatcher:
 
     # Compare the pattern node `pn` against the graph node `gn`
     def _match_nodes(self, pn : Node, gn : Node) -> bool:
+
         # Check if we've already matched these nodes in the current
         # traversal
         if pn in self.nodes_map:
@@ -60,6 +63,20 @@ class SubgraphMatcher:
             return False
         match_found = all(self._match_nodes(pn_, gn_) for pn_, gn_
                           in zip(pn.all_input_nodes, gn.all_input_nodes))
+        match_found = False
+        if pn.op == "output":
+            # This covers the case in which the original graph Node that
+            # matched to the pattern subgraph's output has more than
+            # one input Node
+            for perm in list(permutations(gn.all_input_nodes)):
+                match_found = all(self._match_nodes(pn_, gn_) for pn_, gn_
+                                  in zip(pn.all_input_nodes, perm))
+                if match_found:
+                    break
+        else:
+            match_found = (len(pn.all_input_nodes) == len(gn.all_input_nodes)
+                           and all(self._match_nodes(pn_, gn_) for pn_, gn_
+                                   in zip(pn.all_input_nodes, gn.all_input_nodes)))
         if not match_found:
             self.nodes_map.pop(pn)
             return False
@@ -67,17 +84,30 @@ class SubgraphMatcher:
         return True
 
 
-def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable) -> None:
+def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable) -> List[Match]:
     """
     Matches all possible non-overlapping sets of operators and their
     data dependencies (``pattern``) in the Graph of a GraphModule
     (``gm``), then replaces each of these matched subgraphs with another
     subgraph (``replacement``).
 
-    Args:
+    Parameters:
         ``gm``: The GraphModule that wraps the Graph to operate on
         ``pattern``: The subgraph to match in ``gm`` for replacement
         ``replacement``: The subgraph to replace ``pattern`` with
+
+    Returns:
+        List[Match]: A list of ``Match`` objects representing the places
+        in the original graph that ``pattern`` was matched to. The list
+        is empty if there are no matches. ``Match`` is defined as:
+
+        .. code-block:: python
+
+            class Match(NamedTuple):
+                # Node from which the match was found
+                anchor: Node
+                # Maps nodes in the pattern subgraph to nodes in the larger graph
+                nodes_map: Dict[Node, Node]
 
     Examples:
 
@@ -212,7 +242,7 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
     # as part of a pattern match
     replaced_nodes: Set[Node] = set()
 
-    # Return TRUE if one of the nodes in the current match has already
+    # Return True if one of the nodes in the current match has already
     # been used as part of another match
     def overlaps_with_prev_match(match : Match) -> bool:
         for n in match.nodes_map.values():
@@ -283,3 +313,5 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
     # Update the passed-in GraphModule to reflect the new state of
     # `original_graph`
     gm.recompile()
+
+    return matches
