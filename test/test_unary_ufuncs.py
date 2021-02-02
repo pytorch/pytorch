@@ -1677,8 +1677,6 @@ _types_no_half = [
 
 # TODO: all these should be replaced with OpInfos
 torch_op_tests = [
-    _TorchMathTestMeta('floor'),
-    _TorchMathTestMeta('ceil'),
     _TorchMathTestMeta('frac', reffn='fmod', refargs=lambda x: (x.numpy(), 1)),
     _TorchMathTestMeta('trunc'),
     _TorchMathTestMeta('round'),
