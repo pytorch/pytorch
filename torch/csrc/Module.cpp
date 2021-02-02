@@ -459,17 +459,17 @@ PyObject *THPModule_deterministicCuDNN(PyObject *_unused, PyObject *noargs)
   else Py_RETURN_FALSE;
 }
 
-PyObject *THPModule_setDeterministic(PyObject *_unused, PyObject *arg)
+PyObject *THPModule_setDeterministicAlgorithms(PyObject *_unused, PyObject *arg)
 {
-  THPUtils_assert(PyBool_Check(arg), "set_deterministic expects a bool, "
-          "but got %s", THPUtils_typename(arg));
-  at::globalContext().setDeterministic(arg == Py_True);
+  THPUtils_assert(PyBool_Check(arg), "use_deterministic_algorithms expects a "
+          "bool, but got %s", THPUtils_typename(arg));
+  at::globalContext().setDeterministicAlgorithms(arg == Py_True);
   Py_RETURN_NONE;
 }
 
-PyObject *THPModule_deterministic(PyObject *_unused, PyObject *noargs)
+PyObject *THPModule_deterministicAlgorithms(PyObject *_unused, PyObject *noargs)
 {
-  if (at::globalContext().deterministic()) Py_RETURN_TRUE;
+  if (at::globalContext().deterministicAlgorithms()) Py_RETURN_TRUE;
   else Py_RETURN_FALSE;
 }
 
@@ -598,6 +598,25 @@ static PyObject * THPModule_vmapmode_decrement_nesting(PyObject* _unused, PyObje
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPModule_set_display_vmap_fallback_warnings_mode(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(PyBool_Check(arg), "enabled must be a bool, "
+          "but got %s", THPUtils_typename(arg));
+  at::globalContext().setDisplayVmapFallbackWarnings(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPModule_are_vmap_fallback_warnings_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (at::globalContext().areVmapFallbackWarningsEnabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 //NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays, modernize-avoid-c-arrays)
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  THPModule_initExtension,   METH_O,       nullptr},
@@ -634,12 +653,14 @@ static PyMethodDef TorchMethods[] = {
   {"_set_cudnn_deterministic", THPModule_setDeterministicCuDNN, METH_O,  nullptr},
   {"_get_cudnn_workspace_limit_mib", THPModule_cuDNNWorkspaceLimitMiB, METH_NOARGS,     nullptr},
   {"_set_cudnn_workspace_limit_mib", THPModule_setCuDNNWorkspaceLimitMiB, METH_O,  nullptr},
-  {"_get_deterministic", THPModule_deterministic, METH_NOARGS,     nullptr},
-  {"_set_deterministic", THPModule_setDeterministic, METH_O,  nullptr},
+  {"_get_deterministic_algorithms", THPModule_deterministicAlgorithms, METH_NOARGS,     nullptr},
+  {"_set_deterministic_algorithms", THPModule_setDeterministicAlgorithms, METH_O,  nullptr},
   {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS,     nullptr},
   {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O,  nullptr},
   {"_vmapmode_increment_nesting", THPModule_vmapmode_increment_nesting, METH_NOARGS, nullptr},
   {"_vmapmode_decrement_nesting", THPModule_vmapmode_decrement_nesting, METH_NOARGS, nullptr},
+  {"_debug_only_display_vmap_fallback_warnings", THPModule_set_display_vmap_fallback_warnings_mode, METH_O, nullptr},
+  {"_debug_only_are_vmap_fallback_warnings_enabled", THPModule_are_vmap_fallback_warnings_enabled, METH_NOARGS, nullptr},
   {"_to_dlpack",      THPModule_toDLPack,          METH_O,       nullptr},
   {"_from_dlpack",    THPModule_fromDLPack,        METH_O,       nullptr},
   {"set_flush_denormal", THPModule_setFlushDenormal, METH_O,     nullptr},
@@ -713,6 +734,8 @@ extern "C"
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
+TORCH_API PyObject* initModule();
+// separate decl and defn for msvc error C2491
 PyObject* initModule() {
   HANDLE_TH_ERRORS
   at::internal::lazy_init_num_threads();

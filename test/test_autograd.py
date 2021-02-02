@@ -22,18 +22,19 @@ torch.set_default_dtype(torch.double)
 
 from torch import nn
 from torch._six import inf, nan, istuple
-from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import (profile, format_time, EventList,
                                      FunctionEvent, FunctionEventAvg,
                                      record_function, emit_nvtx)
 import torch.autograd.functional as autogradF
 from torch.utils.checkpoint import checkpoint
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoLapack,
                                                   suppress_warnings, slowTest,
                                                   load_tests, random_symmetric_matrix,
                                                   IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck,
-                                                  TemporaryFileName, TEST_WITH_ROCM)
+                                                  TemporaryFileName, TEST_WITH_ROCM,
+                                                  gradcheck, gradgradcheck)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
@@ -72,10 +73,6 @@ load_tests = load_tests
 import pickle
 
 PRECISION = 1e-4
-
-# See #49409, we should remove these if we end up with a global gradcheck setting
-gradcheck = partial(gradcheck, check_batched_grad=True)
-gradgradcheck = partial(gradgradcheck, check_batched_grad=True)
 
 
 @contextlib.contextmanager
@@ -2216,10 +2213,10 @@ class TestAutograd(TestCase):
 
         x = torch.tensor(2).double().requires_grad_()
 
-        self.assertTrue(torch.autograd.gradcheck(double, x))
-        self.assertTrue(torch.autograd.gradgradcheck(double, x))
-        self.assertTrue(torch.autograd.gradcheck(double2, x))
-        self.assertTrue(torch.autograd.gradgradcheck(double2, x))
+        self.assertTrue(gradcheck(double, x))
+        self.assertTrue(gradgradcheck(double, x))
+        self.assertTrue(gradcheck(double2, x))
+        self.assertTrue(gradgradcheck(double2, x))
 
         y = double(x)
         torch.autograd.grad(y, x, create_graph=True)
@@ -2857,29 +2854,6 @@ class TestAutograd(TestCase):
             run_symeig_test(3, (9, 9), largest=largest)
             run_symeig_test(3, (2, 9, 9), largest=largest)
             run_symeig_test(3, (2, 2, 9, 9), largest=largest)
-
-    @skipIfNoLapack
-    def test_cholesky_inverse(self):
-        def _test_with_size(upper, dims):
-            # We require to create a Cholesky factor which requires that the diagonal elements are positive.
-            # Initializing too small values for the diagonal elements could cause issues when being perturbed
-            # to obtain the numerical Jacobian, thereby leading to inconsistent gradcheck
-            A = torch.randn(*dims)
-            A.diagonal().uniform_(0.1, 5.0)
-            A.requires_grad_()
-
-            def func(A, upper):
-                if upper:
-                    root = A.triu()
-                else:
-                    root = A.tril()
-                return torch.cholesky_inverse(root, upper)
-
-            gradcheck(func, [A, upper])
-            gradgradcheck(func, [A, upper])
-
-        for upper, dims in product([True, False], [(3, 3), (5, 5)]):
-            _test_with_size(upper, dims)
 
     def test_gradcheck_fail_when_no_differentiable_outputs_and_num_grad_not_zero(self):
         def autograd_fn(input):
@@ -4899,6 +4873,10 @@ for shape in [(1,), ()]:
         self.assertFalse(out.dtype.is_floating_point)
         self.assertFalse(out.requires_grad)
 
+        val = torch.empty(5).requires_grad_()
+        out = val.count_nonzero()
+        self.assertFalse(out.requires_grad)
+
         def assert_only_first_requires_grad(res):
             if not isinstance(res, tuple):
                 res = (res,)
@@ -5029,7 +5007,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'mul',
                 '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'fill_', 'sub',
-                'mean', 'inverse', 'triangular_solve', 'solve', 'addcmul',
+                'mean', 'inverse', 'solve', 'addcmul',
                 'addcdiv', 'linalg.tensorinv', 'matrix_exp', 'qr',
                 'narrow', 'swapaxes', 'swapdims', 'tensor_split', 'tile',
                 'baddbmm', 'addbmm', 'addmv'] + separate_complex_tests
@@ -5680,7 +5658,43 @@ class TestAutogradFunctional(TestCase):
         gradcheck(foo, inputs + v)
         gradgradcheck(foo, inputs + v)
 
-    def test_jacobian_err_check(self):
+    def _test_construct_standard_basis_for(self, inputs):
+        numels = tuple(tensor.numel() for tensor in inputs)
+        results = autogradF._construct_standard_basis_for(inputs, numels)
+        for result, inp in zip(results, inputs):
+            self.assertEqual(result.dtype, inp.dtype)
+            self.assertEqual(result.device, inp.device)
+        results = torch.cat([result.to(device='cpu', dtype=torch.float)
+                             for result in results], dim=1)
+        expected = torch.eye(results[0].shape[0], dtype=torch.float)
+        self.assertEqual(results, expected)
+
+    def test_construct_standard_basis_for(self):
+        test_cases = [
+            (torch.randn(2, 3),),
+            (torch.randn(1),),
+            (torch.randn([]),),
+            (torch.randn(1), torch.randn([]), torch.randn([])),
+            (torch.randn(2), torch.randn(3), torch.randn([])),
+            (torch.randn(2), torch.randn([]), torch.randn(3)),
+            (torch.randn(2, 3), torch.randn(3), torch.randn(3, 4, 2)),
+            (torch.randn(2, dtype=torch.float64), torch.randn(3, dtype=torch.float32)),
+        ]
+
+        for inputs in test_cases:
+            self._test_construct_standard_basis_for(inputs)
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_construct_standard_basis_for_cuda(self):
+        test_cases = [
+            (torch.randn(2), torch.randn(3, device='cuda')),
+            (torch.randn(3, device='cuda'), torch.randn(2)),
+        ]
+
+        for inputs in test_cases:
+            self._test_construct_standard_basis_for(inputs)
+
+    def _test_jacobian_err_check(self, vectorize):
         def foo(a):
             return 3 * a.narrow(0, 0, 3)
 
@@ -5689,12 +5703,12 @@ class TestAutogradFunctional(TestCase):
 
         inp = torch.rand(4)
         with self.assertRaisesRegex(TypeError, "The inputs given to jacobian must be either a Tensor"):
-            res = autogradF.jacobian(foo, (inp, 2))
+            res = autogradF.jacobian(foo, (inp, 2), vectorize=vectorize)
 
         with self.assertRaisesRegex(TypeError, "The outputs of the user-provided function given to jacobian must"):
-            res = autogradF.jacobian(bar, inp)
+            res = autogradF.jacobian(bar, inp, vectorize=vectorize)
 
-        res = autogradF.jacobian(foo, inp)
+        res = autogradF.jacobian(foo, inp, vectorize=vectorize)
         self._assert_interleaved_struct(res, foo(inp), inp)
 
         def foo(a, b):
@@ -5702,8 +5716,14 @@ class TestAutogradFunctional(TestCase):
 
         inp = (torch.rand(4), torch.rand(5))
 
-        res = autogradF.jacobian(foo, inp)
+        res = autogradF.jacobian(foo, inp, vectorize=vectorize)
         self._assert_interleaved_struct(res, foo(*inp), inp)
+
+    def test_jacobian_err_check(self):
+        return self._test_jacobian_err_check(vectorize=False)
+
+    def test_jacobian_err_check_vectorize(self):
+        return self._test_jacobian_err_check(vectorize=True)
 
     def test_jacobian_err_check_strict(self):
         def foo(a):
@@ -5737,12 +5757,20 @@ class TestAutogradFunctional(TestCase):
         self._assert_interleaved_struct(res, inp, inp)
         self.assertEqual(res, torch.eye(4))
 
-    def test_jacobian_output(self):
+    def test_jacobian_err_check_strict_vectorize(self):
+        def foo(x):
+            return x
+
+        inp = torch.rand(4)
+        with self.assertRaisesRegex(RuntimeError, "not supported together"):
+            res = autogradF.jacobian(foo, inp, strict=True, vectorize=True)
+
+    def _test_jacobian_output(self, vectorize):
         def exp_reducer(x):
             return x.exp().sum(dim=1)
 
         inputs = torch.rand(4, 4)
-        res = autogradF.jacobian(exp_reducer, inputs)
+        res = autogradF.jacobian(exp_reducer, inputs, vectorize=vectorize)
         self._assert_interleaved_struct(res, exp_reducer(inputs), inputs)
         self.assertIsNone(res.grad_fn)
 
@@ -5750,7 +5778,7 @@ class TestAutogradFunctional(TestCase):
             return x.clone()
 
         inputs = torch.rand(4)
-        res = autogradF.jacobian(identity, inputs)
+        res = autogradF.jacobian(identity, inputs, vectorize=vectorize)
         self._assert_interleaved_struct(res, identity(inputs), inputs)
         self.assertIsNone(res.grad_fn)
         self.assertEqual(res, torch.eye(4))
@@ -5759,51 +5787,63 @@ class TestAutogradFunctional(TestCase):
             return (x + y.exp()).sum(dim=1)
 
         inputs = (torch.rand(4, 4), torch.rand(4, 4))
-        res = autogradF.jacobian(add_exp_reducer, inputs)
+        res = autogradF.jacobian(add_exp_reducer, inputs, vectorize=vectorize)
         self._assert_interleaved_struct(res, add_exp_reducer(*inputs), inputs)
         self.assertIsNone(res[0].grad_fn)
         self.assertIsNone(res[1].grad_fn)
 
-    def test_jacobian_scalar(self):
+    def test_jacobian_output(self):
+        self._test_jacobian_output(vectorize=False)
+
+    def test_jacobian_output_vectorize(self):
+        self._test_jacobian_output(vectorize=True)
+
+    def _test_jacobian_scalar(self, vectorize):
         def reducer(x):
             return x.sum()
         inputs = torch.rand(4, 4)
-        res = autogradF.jacobian(reducer, inputs)
+        res = autogradF.jacobian(reducer, inputs, vectorize=vectorize)
         self._assert_same_struct(res, inputs)
 
         def expander(x):
             return x.unsqueeze(0).repeat(4)
         inputs = torch.rand([])
-        res = autogradF.jacobian(expander, inputs)
+        res = autogradF.jacobian(expander, inputs, vectorize=vectorize)
         self._assert_same_struct(res, torch.zeros(4))
 
-    def test_jacobian_create_graph(self):
+    def test_jacobian_scalar(self):
+        self._test_jacobian_scalar(vectorize=False)
+
+    def test_jacobian_scalar_vectorize(self):
+        self._test_jacobian_scalar(vectorize=True)
+
+    def _test_jacobian_create_graph(self, vectorize):
         def exp_reducer(x):
             return x.exp().sum(dim=1)
 
         inputs = torch.rand(4, 4, requires_grad=True)
-        res = autogradF.jacobian(exp_reducer, inputs, create_graph=True)
+        res = autogradF.jacobian(exp_reducer, inputs, create_graph=True, vectorize=vectorize)
         self._assert_interleaved_struct(res, exp_reducer(inputs), inputs)
         self.assertIsNotNone(res.grad_fn)
 
-        gradcheck(lambda inp: autogradF.jacobian(exp_reducer, inp, create_graph=True), inputs)
-        gradgradcheck(lambda inp: autogradF.jacobian(exp_reducer, inp, create_graph=True), inputs)
+        gradcheck(lambda inp: autogradF.jacobian(exp_reducer, inp, create_graph=True, vectorize=vectorize), inputs)
+        gradgradcheck(lambda inp: autogradF.jacobian(exp_reducer, inp, create_graph=True, vectorize=vectorize), inputs)
 
         def add_exp_reducer(x, y):
             return (x + y).exp().sum(dim=1)
 
         inputs = (torch.rand(4, 4, requires_grad=True), torch.rand(4, 4, requires_grad=True))
-        res = autogradF.jacobian(add_exp_reducer, inputs, create_graph=True)
+        res = autogradF.jacobian(add_exp_reducer, inputs, create_graph=True, vectorize=vectorize)
         self._assert_interleaved_struct(res, add_exp_reducer(*inputs), inputs)
         self.assertIsNotNone(res[0].grad_fn)
         self.assertIsNotNone(res[1].grad_fn)
 
-        gradcheck(lambda *inp: autogradF.jacobian(add_exp_reducer, inp, create_graph=True), inputs)
-        gradgradcheck(lambda *inp: autogradF.jacobian(add_exp_reducer, inp, create_graph=True), inputs)
+        gradcheck(lambda *inp: autogradF.jacobian(add_exp_reducer, inp, create_graph=True, vectorize=vectorize), inputs)
+        gradgradcheck(lambda *inp: autogradF.jacobian(add_exp_reducer, inp, create_graph=True, vectorize=vectorize), inputs)
 
         def foo(x, y):
             x = x.cos()
-            val, jac = autogradF.jacobian(add_exp_reducer, (x, y), create_graph=True)
+            val, jac = autogradF.jacobian(add_exp_reducer, (x, y), create_graph=True, vectorize=vectorize)
 
             res = val[0].exp().sum() + val[1].exp().sum() + jac[0].exp().sum()
             res = res + jac[1].exp().sum() + x.exp().sum() + y.exp().sum()
@@ -5812,7 +5852,128 @@ class TestAutogradFunctional(TestCase):
         gradcheck(foo, inputs)
         gradgradcheck(foo, inputs)
 
-    def test_hessian_err_check(self):
+    def test_jacobian_create_graph(self):
+        self._test_jacobian_create_graph(vectorize=False)
+
+    def test_jacobian_create_graph_vectorize(self):
+        self._test_jacobian_create_graph(vectorize=True)
+
+    def _check_jacobian_vectorize_correctness(self, f, inputs):
+        expected = autogradF.jacobian(f, inputs, vectorize=False)
+        result = autogradF.jacobian(f, inputs, vectorize=True)
+        self.assertEqual(result, expected)
+
+    def test_jacobian_vectorize_correctness_simple(self):
+        def f(x):
+            return 3 * x ** 2
+
+        x = torch.randn(2, 3, 5)
+        self._check_jacobian_vectorize_correctness(f, x)
+
+    def test_jacobian_vectorize_correctness_multi_input(self):
+        def f(x, y):
+            return (x.cos() * x) @ y.sin()
+
+        x = torch.randn(2, 3)
+        y = torch.randn(3, 5)
+        self._check_jacobian_vectorize_correctness(f, (x, y))
+
+    def test_jacobian_vectorize_correctness_multi_input_multi_output(self):
+        def f(x, y):
+            return (x * x) @ y, x @ (x.sum(1) * y), y.sum()
+
+        x = torch.randn(5, 3)
+        y = torch.randn(3, 5)
+        self._check_jacobian_vectorize_correctness(f, (x, y))
+
+    def test_jacobian_vectorize_correctness_unrelated_outputs(self):
+        def f(x, y):
+            return x, y, x, y
+
+        x = torch.randn(2)
+        y = torch.randn(3)
+        self._check_jacobian_vectorize_correctness(f, (x, y))
+
+    def test_jacobian_vectorize_correctness_zero_dim(self):
+        # zero-dim output
+        def f(x, y):
+            return x.sum(), y.sum(), x * y
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        self._check_jacobian_vectorize_correctness(f, (x, y))
+
+        # zero-dim input
+        def g(x):
+            return torch.stack([x, x, x])
+
+        x = torch.randn([])
+        self._check_jacobian_vectorize_correctness(g, x)
+
+        # Mixed zero-dim input / zero-dim output
+        def h(x, y):
+            return y.sum(), x * y
+
+        x = torch.randn([])
+        y = torch.randn(1)
+        self._check_jacobian_vectorize_correctness(h, (x, y))
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_jacobian_vectorize_correctness_different_devices(self):
+        def f(x, y):
+            return x * y, (x * y).cuda()
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        self._check_jacobian_vectorize_correctness(f, (x, y))
+
+    def test_jacobian_vectorize_correctness_different_dtype(self):
+        def f(x, y):
+            return (x * y).float(), (x * y).double()
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        self._check_jacobian_vectorize_correctness(f, (x, y))
+
+    def _check_hessian_vectorize_correctness(self, f, inputs):
+        expected = autogradF.hessian(f, inputs, vectorize=False)
+        result = autogradF.hessian(f, inputs, vectorize=True)
+        self.assertEqual(result, expected)
+
+    def test_hessian_vectorize_correctness_simple(self):
+        def f(x):
+            return (3 * x ** 2).sum()
+
+        x = torch.randn(2, 3, 5)
+        self._check_hessian_vectorize_correctness(f, x)
+
+    def test_hessian_vectorize_correctness_multi_input(self):
+        def f(x, y, z):
+            return ((x.relu() * x) @ y.sin() @ z).sum()
+
+        x = torch.randn(2, 3)
+        y = torch.randn(3, 5)
+        z = torch.randn(5, 5)
+        self._check_hessian_vectorize_correctness(f, (x, y, z))
+
+    def test_hessian_vectorize_correctness_unrelated_outputs(self):
+        # output unrelated to one input
+        def f(x, y):
+            return (x ** 2).sum()
+
+        x = torch.randn(2)
+        y = torch.randn(3)
+        self._check_hessian_vectorize_correctness(f, (x, y))
+
+        # output unrelated to all inputs
+        def f(x, y):
+            return torch.randn([])
+
+        x = torch.randn(2)
+        y = torch.randn(3)
+        self._check_hessian_vectorize_correctness(f, (x, y))
+
+    def _test_hessian_err_check(self, vectorize):
         def foo(a):
             return 3 * a.narrow(0, 0, 3).exp().sum()
 
@@ -5827,19 +5988,19 @@ class TestAutogradFunctional(TestCase):
 
         inp = torch.rand(4)
         with self.assertRaisesRegex(TypeError, "The inputs given to hessian must be either a Tensor"):
-            res = autogradF.hessian(foo, (inp, 2))
+            res = autogradF.hessian(foo, (inp, 2), vectorize=vectorize)
 
         with self.assertRaisesRegex(TypeError, "The outputs of the user-provided function given to hessian must"):
-            res = autogradF.hessian(bar, inp)
+            res = autogradF.hessian(bar, inp, vectorize=vectorize)
 
         err_msg_out = "The Tensor returned by the function given to hessian should contain a single element"
         with self.assertRaisesRegex(RuntimeError, err_msg_out):
-            res = autogradF.hessian(bar2, inp)
+            res = autogradF.hessian(bar2, inp, vectorize=vectorize)
 
         with self.assertRaisesRegex(RuntimeError, "The function given to hessian should return a single Tensor"):
-            res = autogradF.hessian(bar3, inp)
+            res = autogradF.hessian(bar3, inp, vectorize=vectorize)
 
-        res = autogradF.hessian(foo, inp)
+        res = autogradF.hessian(foo, inp, vectorize=vectorize)
         self._assert_interleaved_struct(res, inp, inp)
 
         def foo(a, b):
@@ -5847,8 +6008,14 @@ class TestAutogradFunctional(TestCase):
 
         inp = (torch.rand(4), torch.rand(5))
 
-        res = autogradF.hessian(foo, inp)
+        res = autogradF.hessian(foo, inp, vectorize=vectorize)
         self._assert_interleaved_struct(res, inp, inp)
+
+    def test_hessian_err_check(self):
+        self._test_hessian_err_check(vectorize=False)
+
+    def test_hessian_err_check_vectorize(self):
+        self._test_hessian_err_check(vectorize=True)
 
     def test_hessian_err_check_strict(self):
         def foo(a):
@@ -5881,12 +6048,20 @@ class TestAutogradFunctional(TestCase):
         self._assert_interleaved_struct(res, inp, inp)
         self.assertEqual(res.abs().sum(), 0.)
 
-    def test_hessian_output(self):
+    def test_hessian_err_check_strict_vectorize(self):
+        def foo(x):
+            return (x ** 3).sum()
+
+        inp = torch.rand(4)
+        with self.assertRaisesRegex(RuntimeError, "not supported together"):
+            res = autogradF.hessian(foo, inp, strict=True, vectorize=True)
+
+    def _test_hessian_output(self, vectorize):
         def pow_reducer(x):
             return x.pow(3).sum()
 
         inputs = torch.rand(2, 2)
-        res = autogradF.hessian(pow_reducer, inputs)
+        res = autogradF.hessian(pow_reducer, inputs, vectorize=vectorize)
         self._assert_interleaved_struct(res, inputs, inputs)
         self.assertIsNone(res.grad_fn)
 
@@ -5894,47 +6069,59 @@ class TestAutogradFunctional(TestCase):
             return (x + y).pow(3).sum()
 
         inputs = (torch.rand(2, 2), torch.rand(2, 2))
-        res = autogradF.hessian(add_pow_reducer, inputs)
+        res = autogradF.hessian(add_pow_reducer, inputs, vectorize=vectorize)
         self._assert_interleaved_struct(res, inputs, inputs)
         self.assertIsNone(res[0][0].grad_fn)
         self.assertIsNone(res[0][1].grad_fn)
         self.assertIsNone(res[1][0].grad_fn)
         self.assertIsNone(res[1][1].grad_fn)
 
-    def test_hessian_scalar(self):
+    def test_hessian_output(self):
+        self._test_hessian_output(vectorize=False)
+
+    def test_hessian_output_vectorize(self):
+        self._test_hessian_output(vectorize=True)
+
+    def _test_hessian_scalar(self, vectorize):
         def reducer(x):
             return x.sum()
         inputs = torch.rand(4, 4)
-        res = autogradF.hessian(reducer, inputs)
+        res = autogradF.hessian(reducer, inputs, vectorize=vectorize)
         self._assert_interleaved_struct(res, inputs, inputs)
 
         inputs = torch.rand([])
-        res = autogradF.hessian(reducer, inputs)
+        res = autogradF.hessian(reducer, inputs, vectorize=vectorize)
         self._assert_same_struct(res, inputs)
 
         def bad_reducer(x):
             return x.sum().view(1, 1, 1)
         inputs = torch.rand(4, 4)
-        res = autogradF.hessian(bad_reducer, inputs)
+        res = autogradF.hessian(bad_reducer, inputs, vectorize=vectorize)
         self._assert_interleaved_struct(res, inputs, inputs)
 
-    def test_hessian_create_graph(self):
+    def test_hessian_scalar(self):
+        return self._test_hessian_scalar(vectorize=False)
+
+    def test_hessian_scalar_vectorize(self):
+        return self._test_hessian_scalar(vectorize=True)
+
+    def _test_hessian_create_graph(self, vectorize):
         def pow_reducer(x):
             return x.pow(3).sum()
 
         inputs = torch.rand(2, 2, requires_grad=True)
-        res = autogradF.hessian(pow_reducer, inputs, create_graph=True)
+        res = autogradF.hessian(pow_reducer, inputs, create_graph=True, vectorize=vectorize)
         self._assert_interleaved_struct(res, inputs, inputs)
         self.assertIsNotNone(res.grad_fn)
 
-        gradcheck(lambda inp: autogradF.hessian(pow_reducer, inp, create_graph=True), inputs)
-        gradgradcheck(lambda inp: autogradF.hessian(pow_reducer, inp, create_graph=True), inputs)
+        gradcheck(lambda inp: autogradF.hessian(pow_reducer, inp, create_graph=True, vectorize=vectorize), inputs)
+        gradgradcheck(lambda inp: autogradF.hessian(pow_reducer, inp, create_graph=True, vectorize=vectorize), inputs)
 
         def add_pow_reducer(x, y):
             return (x + y).pow(3).sum()
 
         inputs = (torch.rand(2, 2, requires_grad=True), torch.rand(2, 2, requires_grad=True))
-        res = autogradF.hessian(add_pow_reducer, inputs, create_graph=True)
+        res = autogradF.hessian(add_pow_reducer, inputs, create_graph=True, vectorize=vectorize)
         self._assert_interleaved_struct(res, inputs, inputs)
         self.assertIsNotNone(res[0][0].grad_fn)
         self.assertIsNotNone(res[0][1].grad_fn)
@@ -5944,12 +6131,12 @@ class TestAutogradFunctional(TestCase):
         def flatten(inp):
             return tuple(el_lvl2 for el_lvl1 in inp for el_lvl2 in el_lvl1)
 
-        gradcheck(lambda *inp: flatten(autogradF.hessian(add_pow_reducer, inp, create_graph=True)), inputs)
-        gradgradcheck(lambda *inp: flatten(autogradF.hessian(add_pow_reducer, inp, create_graph=True)), inputs)
+        gradcheck(lambda *inp: flatten(autogradF.hessian(add_pow_reducer, inp, create_graph=True, vectorize=vectorize)), inputs)
+        gradgradcheck(lambda *inp: flatten(autogradF.hessian(add_pow_reducer, inp, create_graph=True, vectorize=vectorize)), inputs)
 
         def foo(x, y):
             x = x.cos()
-            val, hess = autogradF.hessian(add_pow_reducer, (x, y), create_graph=True)
+            val, hess = autogradF.hessian(add_pow_reducer, (x, y), create_graph=True, vectorize=vectorize)
 
             res = val[0].cos().sum() + val[1].cos().sum() + hess[0].cos().sum()
             res = res + hess[1].cos().sum() + x.cos().sum() + y.cos().sum()
@@ -5957,6 +6144,12 @@ class TestAutogradFunctional(TestCase):
 
         gradcheck(foo, inputs)
         gradgradcheck(foo, inputs)
+
+    def test_hessian_create_graph(self):
+        self._test_hessian_create_graph(vectorize=False)
+
+    def test_hessian_create_graph_vectorize(self):
+        self._test_hessian_create_graph(vectorize=True)
 
     def test_vhp_err_check(self):
         def foo(a):
@@ -6868,15 +7061,13 @@ class TestAutogradDeviceType(TestCase):
             self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
     def _test_rnn_mod(self, mod, inp):
-        from functools import partial
-
         def flatten_out(mod, inp):
             out = mod(inp)
             return tuple([t if isinstance(t, torch.Tensor) else tt for t in out for tt in t])
         gradcheckfunc = partial(flatten_out, mod)
         with torch.backends.cudnn.flags(enabled=False):
-            torch.autograd.gradcheck(gradcheckfunc, inp)
-            torch.autograd.gradgradcheck(gradcheckfunc, inp)
+            gradcheck(gradcheckfunc, inp, check_batched_grad=False)
+            gradgradcheck(gradcheckfunc, inp, check_batched_grad=False)
 
         if inp.is_cuda and not TEST_WITH_ROCM:
             # Assert that we have good error message around unsupported CuDNN double backward
@@ -7135,6 +7326,19 @@ class TestAutogradDeviceType(TestCase):
         x.sum().backward()
         self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1]])
 
+    def test_inplace_view_then_no_grad(self, device):
+        # Perform an in-place operation on a view of a non-leaf variable.
+        a = torch.ones(3, 1, device=device, requires_grad=True)
+        b = a * 2
+        c = b.view_as(b)
+        c[0][0] = 3
+
+        # Force a graph update with grad disabled.
+        with torch.no_grad():
+            c.grad_fn
+
+        c.sum().backward()
+
     def test_inplace_view_gradcheck(self, device):
         # gradcheck modifications to views
         a = torch.randn(4, 4, device=device, requires_grad=True)
@@ -7156,6 +7360,20 @@ class TestAutogradDeviceType(TestCase):
         v1 = x.unbind()
         with self.assertRaises(RuntimeError):
             v1[0].mul_(2)
+
+    def test_inplace_view_of_multiple_output_view(self, device):
+        a = torch.rand(10, device=device, requires_grad=True).clone()
+        b = a.unbind(0)
+        c = b[0].view_as(b[0])
+        with self.assertRaises(RuntimeError):
+            c.mul_(2)
+
+    def test_inplace_multiple_output_view_of_view(self, device):
+        a = torch.rand(10, device=device, requires_grad=True).clone()
+        b = a.view_as(a)
+        c = b.unbind(0)
+        with self.assertRaises(RuntimeError):
+            c[0].mul_(2)
 
     def test_inplace_view_makes_base_require_grad(self, device):
         # in-place modification to view makes base require grad

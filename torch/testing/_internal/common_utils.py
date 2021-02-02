@@ -52,8 +52,6 @@ from torch._six import string_classes
 import torch.backends.cudnn
 import torch.backends.mkl
 from enum import Enum
-from torch.autograd import gradcheck
-from torch.autograd.gradcheck import gradgradcheck
 
 torch.backends.disable_global_flags()
 
@@ -382,7 +380,7 @@ if TEST_NUMPY:
 
     # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
     numpy_to_torch_dtype_dict = {
-        np.bool       : torch.bool,
+        np.bool_      : torch.bool,
         np.uint8      : torch.uint8,
         np.int8       : torch.int8,
         np.int16      : torch.int16,
@@ -429,15 +427,15 @@ class DeterministicGuard:
         self.deterministic = deterministic
 
     def __enter__(self):
-        self.deterministic_restore = torch.is_deterministic()
-        torch.set_deterministic(self.deterministic)
+        self.deterministic_restore = torch.are_deterministic_algorithms_enabled()
+        torch.use_deterministic_algorithms(self.deterministic)
 
     def __exit__(self, exception_type, exception_value, traceback):
-        torch.set_deterministic(self.deterministic_restore)
+        torch.use_deterministic_algorithms(self.deterministic_restore)
 
-# This decorator can be used for API tests that call torch.set_deterministic().
-# When the test is finished, it will restore the previous deterministic flag
-# setting.
+# This decorator can be used for API tests that call
+# torch.use_deterministic_algorithms().  When the test is finished, it will
+# restore the previous deterministic flag setting.
 #
 # If CUDA >= 10.2, this will set the environment variable
 # CUBLAS_WORKSPACE_CONFIG=:4096:8 so that the error associated with that
@@ -467,7 +465,7 @@ class DeterministicGuard:
 def wrapDeterministicFlagAPITest(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        with DeterministicGuard(torch.is_deterministic()):
+        with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
             class CuBLASConfigGuard:
                 cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
 
@@ -1894,11 +1892,42 @@ class BytesIOContext(io.BytesIO):
     def __exit__(self, *args):
         pass
 
-def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
+
+def gradcheck(fn, inputs, **kwargs):
+    # Wrapper around gradcheck that enables certain keys by default.
+    # Use this testing-internal gradcheck instead of autograd.gradcheck so that new features like vmap and
+    # forward-mode AD are tested by default. We create this wrapper because we'd like to keep new checks
+    # to be disabled to default for the public-facing api to avoid breaking user code.
+    #
+    # All PyTorch devs doing testing should use this wrapper instead of autograd.gradcheck.
+    keys_enabled_by_default = (
+        "check_batched_grad",)
+
+    for key in keys_enabled_by_default:
+        kwargs[key] = kwargs.get(key, True)
+
+    return torch.autograd.gradcheck(fn, inputs, **kwargs)
+
+
+def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
+    # Wrapper around gradgradcheck that enables certain keys by default
+    # See gradcheck above for an explanation of why we need something like this.
+    #
+    # All PyTorch devs doing testing should use this wrapper instead of autograd.gradgradcheck
+    keys_enabled_by_default = (
+        "check_batched_grad",)
+
+    for key in keys_enabled_by_default:
+        kwargs[key] = kwargs.get(key, True)
+
+    return torch.autograd.gradgradcheck(fn, inputs, grad_outputs, **kwargs)
+
+
+def _assertGradAndGradgradChecks(test_case, apply_fn, inputs, **kwargs):
     # call assert function rather than returning a bool since it's nicer
     # if we get whether this failed on the gradcheck or the gradgradcheck.
-    test_case.assertTrue(gradcheck(apply_fn, inputs))
-    test_case.assertTrue(gradgradcheck(apply_fn, inputs))
+    test_case.assertTrue(gradcheck(apply_fn, inputs, **kwargs))
+    test_case.assertTrue(gradgradcheck(apply_fn, inputs, **kwargs))
 
 
 @contextmanager

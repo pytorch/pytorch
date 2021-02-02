@@ -1,6 +1,8 @@
-from typing import List, Callable, Dict, Optional, Any, Union
+from typing import List, Callable, Dict, Optional, Any, Union, BinaryIO
+from types import ModuleType
 import builtins
 import importlib
+import inspect
 import linecache
 from torch.serialization import _load
 import pickle
@@ -8,6 +10,7 @@ import torch
 import _compat_pickle  # type: ignore
 import types
 import os.path
+from pathlib import Path
 
 from ._importlib import _normalize_line_endings, _resolve_name, _sanity_check, _calc___package__, \
     _normalize_path
@@ -33,14 +36,14 @@ class PackageImporter:
     """
     modules : Dict[str, Optional[types.ModuleType]]
 
-    def __init__(self, filename: Union[str, torch._C.PyTorchFileReader],
+    def __init__(self, file_or_buffer: Union[str, torch._C.PyTorchFileReader, Path, BinaryIO],
                  module_allowed: Callable[[str], bool] = lambda module_name: True):
-        """Open `filename` for importing. This checks that the imported package only requires modules
+        """Open `file_or_buffer` for importing. This checks that the imported package only requires modules
         allowed by `module_allowed`
 
         Args:
-            filename (str): archive to load. Can also be a directory of the unzipped files in the archive
-                for easy debugging and editing.
+            file_or_buffer: a file-like object (has to implement :meth:`read`, :meth:`readline`, :meth:`tell`, and :meth:`seek`),
+                or a string or os.PathLike object containing a file name.
             module_allowed (Callable[[str], bool], optional): A method to determine if a externally provided module
                 should be allowed. Can be used to ensure packages loaded do not depend on modules that the server
                 does not support. Defaults to allowing anything.
@@ -49,15 +52,18 @@ class PackageImporter:
             ImportError: If the package will use a disallowed module.
         """
         self.zip_reader : Any
-        if isinstance(filename, torch._C.PyTorchFileReader):
+        if isinstance(file_or_buffer, torch._C.PyTorchFileReader):
             self.filename = '<pytorch_file_reader>'
-            self.zip_reader = filename
-        else:
-            self.filename = filename
+            self.zip_reader = file_or_buffer
+        elif isinstance(file_or_buffer, (Path, str)):
+            self.filename = str(file_or_buffer)
             if not os.path.isdir(self.filename):
                 self.zip_reader = torch._C.PyTorchFileReader(self.filename)
             else:
                 self.zip_reader = MockZipReader(self.filename)
+        else:
+            self.filename = '<binary>'
+            self.zip_reader = torch._C.PyTorchFileReader(file_or_buffer)
 
         self.root = _PackageNode(None)
         self.modules = {}
@@ -65,7 +71,7 @@ class PackageImporter:
 
         for extern_module in self.extern_modules:
             if not module_allowed(extern_module):
-                raise ImportError(f"package '{filename}' needs the external module '{extern_module}' "
+                raise ImportError(f"package '{file_or_buffer}' needs the external module '{extern_module}' "
                                   f"but that module has been disallowed")
             self._add_extern(extern_module)
 
@@ -163,6 +169,10 @@ class PackageImporter:
         ns['__file__'] = mangled_filename
         ns['__cached__'] = None
         ns['__builtins__'] = self.patched_builtins
+
+        # Add this module to our private global registry. It should be unique due to mangling.
+        assert module.__name__ not in _package_imported_modules
+        _package_imported_modules[module.__name__] = module
 
         # pre-emptively install on the parent to prevent IMPORT_FROM from trying to
         # access sys.modules
@@ -425,3 +435,16 @@ class _ModuleNode(_PathNode):
 
 class _ExternNode(_PathNode):
     pass
+
+# A private global registry of all modules that have been package-imported.
+_package_imported_modules: Dict[str, ModuleType] = {}
+
+# `inspect` by default only looks in `sys.modules` to find source files for classes.
+# Patch it to check our private registry of package-imported modules as well.
+_orig_getfile = inspect.getfile
+def patched_getfile(object):
+    if inspect.isclass(object):
+        if object.__module__ in _package_imported_modules:
+            return _package_imported_modules[object.__module__].__file__
+    return _orig_getfile(object)
+inspect.getfile = patched_getfile

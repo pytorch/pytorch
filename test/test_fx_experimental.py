@@ -11,7 +11,7 @@ from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.fx.experimental.subgraph_creation_example import split_module
+from torch.fx.passes.split_module import split_module
 from torch.fx.experimental.partitioner_utils import (
     NodeLatency,
     get_partition_to_latency_mapping,
@@ -80,31 +80,33 @@ class TestFXExperimental(JitTestCase):
             node.shape = a.shape
             node.dtype = a.dtype
 
-        agm1 = graph_manipulation.AcceleratedGraphModule(traced)
-        agm2 = graph_manipulation.AcceleratedGraphModule(module_with_submodules)
-        assert len(agm1.weights) == 4
-        assert len(agm2.weights) == 4
-        assert len(agm1.serialized_graph["nodes"]) == 10
-        assert len(agm1.serialized_graph["weights"]) == 4
-        assert len(agm1.serialized_graph["modules"]) == 0
-        assert len(agm2.serialized_graph["nodes"]) == 6
-        assert len(agm2.serialized_graph["weights"]) == 4
-        assert len(agm2.serialized_graph["modules"]) == 1
-        assert agm1.serialized_graph["weights"]["linear.weight"]["shape"] == "[4, 4]"
+        weights1 = {}
+        weights2 = {}
+        serialized_graph1 = graph_manipulation.serialize_module(traced, weights1)
+        serialized_graph2 = graph_manipulation.serialize_module(module_with_submodules, weights2)
+        assert len(weights1) == 4
+        assert len(weights2) == 4
+        assert len(serialized_graph1["nodes"]) == 10
+        assert len(serialized_graph1["weights"]) == 4
+        assert len(serialized_graph1["modules"]) == 0
+        assert len(serialized_graph2["nodes"]) == 6
+        assert len(serialized_graph2["weights"]) == 4
+        assert len(serialized_graph2["modules"]) == 1
+        assert serialized_graph1["weights"]["linear.weight"]["shape"] == "[4, 4]"
         assert (
-            agm1.serialized_graph["weights"]["linear.weight"]["dtype"]
+            serialized_graph1["weights"]["linear.weight"]["dtype"]
             == "torch.float32"
         )
         assert (
-            agm1.serialized_graph["weights"]["linear.weight"]["is_quantized"] is False
+            serialized_graph1["weights"]["linear.weight"]["is_quantized"] is False
         )
-        assert agm1.serialized_graph["nodes"][0]["shape"] == "[4]"
-        assert agm1.serialized_graph["nodes"][0]["dtype"] == "torch.float32"
-        assert agm1.serialized_graph["nodes"][0]["target"] == "a"
-        assert agm1.serialized_graph["nodes"][0]["op_code"] == "placeholder"
-        assert agm1.serialized_graph["nodes"][0]["name"] == "a"
-        assert agm1.serialized_graph["nodes"][6]["args"][0]["name"] == "add_2"
-        assert agm1.serialized_graph["nodes"][6]["args"][0]["is_node"] is True
+        assert serialized_graph1["nodes"][0]["shape"] == "[4]"
+        assert serialized_graph1["nodes"][0]["dtype"] == "torch.float32"
+        assert serialized_graph1["nodes"][0]["target"] == "a"
+        assert serialized_graph1["nodes"][0]["op_code"] == "placeholder"
+        assert serialized_graph1["nodes"][0]["name"] == "a"
+        assert serialized_graph1["nodes"][6]["args"][0]["name"] == "add_2"
+        assert serialized_graph1["nodes"][6]["args"][0]["is_node"] is True
 
         # Test quantization info serialization.
         x = torch.tensor([[-1.0, 0.0], [1.0, 2.0]])

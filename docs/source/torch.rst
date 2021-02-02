@@ -340,6 +340,7 @@ Pointwise Ops
     rsqrt
     sigmoid
     sign
+    sgn
     signbit
     sin
     sinc
@@ -557,7 +558,7 @@ Utilities
     result_type
     can_cast
     promote_types
-    set_deterministic
-    is_deterministic
+    use_deterministic_algorithms
+    are_deterministic_algorithms_enabled
     vmap
     _assert

@@ -1721,6 +1721,10 @@ of each of the individual matrices. Similarly, when :attr:`upper` is ``False``, 
 tensor will be composed of lower-triangular Cholesky factors of each of the individual
 matrices.
 
+.. note:: :func:`torch.linalg.cholesky` should be used over ``torch.cholesky`` when possible.
+          Note however that :func:`torch.linalg.cholesky` does not yet support the :attr:`upper`
+          parameter and instead always returns the lower triangular matrix.
+
 Args:
     input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
                 batch dimensions consisting of symmetric positive-definite matrices.
@@ -6846,7 +6850,7 @@ with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
 If :attr:`some` is ``True``, then this function returns the thin (reduced) QR factorization.
 Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
 
-.. warning:: ``torch.qr`` is deprecated. Please use ``torch.linalg.`` :func:`~torch.linalg.qr`
+.. warning:: ``torch.qr`` is deprecated. Please use :func:`torch.linalg.qr`
              instead.
 
              **Differences with** ``torch.linalg.qr``:
@@ -8312,53 +8316,52 @@ add_docstr(torch.svd,
 svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 Computes the singular value decomposition of either a matrix or batch of
-matrices :attr:`input`." The singular value decomposition is represented as a
-namedtuple ``(U, S, V)``, such that :math:`input = U \mathbin{@} diag(S) \times
-V^T`, where :math:`V^T` is the transpose of ``V``. If :attr:`input` is a batch
-of tensors, then ``U``, ``S``, and ``V`` are also batched with the same batch
-dimensions as :attr:`input`.
+matrices :attr:`input`. The singular value decomposition is represented as a
+namedtuple (`U,S,V`), such that
+:attr:`input` = `U` diag(`S`) `Vᴴ`,
+where `Vᴴ` is the transpose of `V` for the real-valued inputs,
+or the conjugate transpose of `V` for the complex-valued inputs.
+If :attr:`input` is a batch of tensors, then `U`, `S`, and `V` are also
+batched with the same batch dimensions as :attr:`input`.
 
 If :attr:`some` is ``True`` (default), the method returns the reduced singular
 value decomposition i.e., if the last two dimensions of :attr:`input` are
-``m`` and ``n``, then the returned `U` and `V` matrices will contain only
-:math:`min(n, m)` orthonormal columns.
+`m` and `n`, then the returned `U` and `V` matrices will contain only
+min(`n, m`) orthonormal columns.
 
 If :attr:`compute_uv` is ``False``, the returned `U` and `V` will be
-zero-filled matrices of shape :math:`(m \times m)` and :math:`(n \times n)`
+zero-filled matrices of shape `(m × m)` and `(n × n)`
 respectively, and the same device as :attr:`input`. The :attr:`some`
-argument has no effect when :attr:`compute_uv` is False.
+argument has no effect when :attr:`compute_uv` is ``False``.
 
-The dtypes of ``U`` and ``V`` are the same as :attr:`input`'s. ``S`` will
+Supports input of float, double, cfloat and cdouble data types.
+The dtypes of `U` and `V` are the same as :attr:`input`'s. `S` will
 always be real-valued, even if :attr:`input` is complex.
 
-.. warning:: ``torch.svd`` is deprecated. Please use ``torch.linalg.``
-             :func:`~torch.linalg.svd` instead, which is similar to NumPy's
+.. warning:: :func:`torch.svd` is deprecated. Please use
+             :func:`torch.linalg.svd` instead, which is similar to NumPy's
              ``numpy.linalg.svd``.
 
-.. note:: **Differences with** ``torch.linalg.`` :func:`~torch.linalg.svd`:
+.. note:: Differences with :func:`torch.linalg.svd`:
 
-             * :attr:`some` is the opposite of ``torch.linalg.``
-               :func:`~torch.linalg.svd`'s :attr:`full_matricies`. Note that
+             * :attr:`some` is the opposite of
+               :func:`torch.linalg.svd`'s :attr:`full_matricies`. Note that
                default value for both is ``True``, so the default behavior is
                effectively the opposite.
 
-             * it returns ``V``, whereas ``torch.linalg.``
-               :func:`~torch.linalg.svd` returns ``Vh``. The result is that
-               when using ``svd`` you need to manually transpose
-               ``V`` in order to reconstruct the original matrix.
+             * :func:`torch.svd` returns `V`, whereas :func:`torch.linalg.svd` returns `Vᴴ`.
 
-             * If :attr:`compute_uv=False`, it returns zero-filled tensors for
-               ``U`` and ``Vh``, whereas :meth:`~torch.linalg.svd` returns
+             * If :attr:`compute_uv=False`, :func:`torch.svd` returns zero-filled tensors for
+               ``U`` and ``Vh``, whereas :func:`torch.linalg.svd` returns
                empty tensors.
-
-Supports real-valued and complex-valued input.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
           then the singular values of each matrix in the batch is returned in descending order.
 
 .. note:: The implementation of SVD on CPU uses the LAPACK routine `?gesdd` (a divide-and-conquer
-          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the MAGMA routine
-          `gesdd` as well.
+          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the cuSOLVER routines
+          `gesvdj` and `gesvdjBatched` on CUDA 10.1.243 and later, and uses the MAGMA routine `gesdd`
+          on earlier versions of CUDA.
 
 .. note:: The returned matrix `U` will be transposed, i.e. with strides
           :code:`U.contiguous().transpose(-2, -1).stride()`.
@@ -8372,15 +8375,19 @@ Supports real-valued and complex-valued input.
 
 .. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is True.
 
-
 .. note:: With the complex-valued input the backward operation works correctly only
           for gauge invariant loss functions. Please look at `Gauge problem in AD`_ for more details.
 
+.. note:: Since `U` and `V` of an SVD is not unique, each vector can be multiplied by
+          an arbitrary phase factor :math:`e^{i \phi}` while the SVD result is still correct.
+          Different platforms, like Numpy, or inputs on different device types, may produce different
+          `U` and `V` tensors.
+
 Args:
-    input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more
-                    batch dimensions consisting of :math:`m \times n` matrices.
+    input (Tensor): the input tensor of size `(*, m, n)` where `*` is zero or more
+                    batch dimensions consisting of `(m × n)` matrices.
     some (bool, optional): controls whether to compute the reduced or full decomposition, and
-                           consequently the shape of returned ``U`` and ``V``. Defaults to True.
+                           consequently the shape of returned `U` and `V`. Defaults to True.
     compute_uv (bool, optional): option whether to compute `U` and `V` or not. Defaults to True.
 
 Keyword args:
@@ -9637,11 +9644,12 @@ Example::
     tensor([ 0.1815, -0.8917, -0.3031])
 """)
 
-add_docstr(torch.slogdet,
-           r"""
+add_docstr(torch.slogdet, r"""
 slogdet(input) -> (Tensor, Tensor)
 
 Calculates the sign and log absolute value of the determinant(s) of a square matrix or batches of square matrices.
+
+.. note:: :func:`torch.slogdet` is deprecated. Please use :func:`torch.linalg.slogdet` instead.
 
 .. note::
     If ``input`` has zero determinant, this returns ``(0, -inf)``.
