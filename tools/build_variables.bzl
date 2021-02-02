@@ -328,13 +328,6 @@ jit_sources_full = [
 
 libtorch_core_jit_sources = sorted(jit_sources_full)
 
-caffe2_serialize = [
-    "caffe2/serialize/file_adapter.cc",
-    "caffe2/serialize/inline_container.cc",
-    "caffe2/serialize/istream_adapter.cc",
-    "caffe2/serialize/read_adapter_interface.cc",
-]
-
 torch_mobile_core = [
     "torch/csrc/jit/mobile/function.cpp",
     "torch/csrc/jit/mobile/import.cpp",
@@ -342,7 +335,6 @@ torch_mobile_core = [
     "torch/csrc/jit/mobile/module.cpp",
 ]
 
-# libtorch_lite_cmake_sources = sorted(libtorch_header_list + aten_cpu_source_list + aten_native_source_list + torch_mobile_core)
 libtorch_lite_cmake_sources = sorted(core_sources_common + torch_mobile_core)
 
 libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
