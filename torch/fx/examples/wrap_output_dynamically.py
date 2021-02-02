@@ -5,7 +5,7 @@ from torch.fx import Proxy, GraphModule, Node, symbolic_trace
 from enum import Enum, auto
 
 '''
-Wrap Graph output dynamically
+Wrap Graph Output Dynamically
 
 The following code demonstrates how change an existing Graph based on
 parameters specified at runtime. We'll let the user specify an
