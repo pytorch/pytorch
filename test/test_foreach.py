@@ -6,7 +6,8 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, skipCUDAIfRocm, ops)
 from torch._six import inf, nan
 from torch.testing._internal.common_methods_invocations import \
-    (foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db, foreach_min_max_op_db)
+    (foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db, 
+     foreach_min_max_op_db, foreach_binary_op_tensor_list_db)
 
 N_values = [20] if not TEST_WITH_SLOW else [30, 300]
 
@@ -206,17 +207,18 @@ class TestForeach(TestCase):
     # In case of an exeption, check if torch reference function throws as well.
     # In case of add/sub, also test alphas
     @skipCUDAIfRocm
-    @ops(foreach_binary_op_db)
-    def test_binary_ops_tensor_list(self, device, dtype, op):
+    @ops(foreach_binary_op_tensor_list_db)
+    def test_binary_ops_tensor_list(self, device, dtypes, op):
         # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-        dtype = torch.float32 if (self.device_type == 'cuda' and 
-                                  (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
+        dtype1 = torch.float32 if (self.device_type == 'cuda' and 
+                                   (dtypes[0] is torch.float16 or dtypes[0] is torch.bfloat16)) else dtypes[0]
+        dtype2 = dtypes[1]
 
         for N in N_values:
             foreach_exeption = False
             torch_exeption = False
-            tensors1 = op.sample_inputs(device, dtype, N)
-            tensors2 = op.sample_inputs(device, dtype, N)
+            tensors1 = op.sample_inputs(device, dtype1, N)
+            tensors2 = op.sample_inputs(device, dtype2, N)
             method = op.get_method()
             alpha = 2
 
@@ -237,11 +239,11 @@ class TestForeach(TestCase):
             self.assertEqual(foreach_exeption, torch_exeption)
 
             if not torch_exeption:
-                if (dtype is torch.float16 or dtype is torch.bfloat16) and TEST_WITH_ROCM:
-                    self.assertEqual(ref_res, fe_res, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
+                if (dtype1 is torch.float16 or dtype1 is torch.bfloat16) and TEST_WITH_ROCM:
+                    self.assertEqual(ref_res, fe_res, atol=1.e-3, rtol=self.dtype_precisions[dtype1][0])
 
                     if op.supports_alpha_param: 
-                        self.assertEqual(ref_res_alpha, fe_res_alpha, atol=1.e-3, rtol=self.dtype_precisions[dtype][0])
+                        self.assertEqual(ref_res_alpha, fe_res_alpha, atol=1.e-3, rtol=self.dtype_precisions[dtype1][0])
                 else:
                     self.assertEqual(ref_res, fe_res)
 
@@ -249,15 +251,16 @@ class TestForeach(TestCase):
                         self.assertEqual(ref_res_alpha, fe_res_alpha)
 
     @skipCUDAIfRocm
-    @ops(foreach_binary_op_db)
-    def test_binary_ops_tensor_list_inplace(self, device, dtype, op):
+    @ops(foreach_binary_op_tensor_list_db)
+    def test_binary_ops_tensor_list_inplace(self, device, dtypes, op):
         # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
-        dtype = torch.float32 if (self.device_type == 'cuda' and 
-                                  (dtype is torch.float16 or dtype is torch.bfloat16)) else dtype
+        dtype1 = torch.float32 if (self.device_type == 'cuda' and 
+                                   (dtypes[0] is torch.float16 or dtypes[0] is torch.bfloat16)) else dtypes[0]
+        dtype2 = dtypes[1]
 
         for N in N_values:
-            tensors1 = op.sample_inputs(device, dtype, N)
-            tensors2 = op.sample_inputs(device, dtype, N)
+            tensors1 = op.sample_inputs(device, dtype1, N)
+            tensors2 = op.sample_inputs(device, dtype2, N)
             tensors1_copy = [t1.clone() for t1 in tensors1]
             tensors2_copy = [t2.clone() for t2 in tensors2]
             inplace = op.get_inplace()
@@ -364,7 +367,8 @@ class TestForeach(TestCase):
                 method(tensors, tensors1, tensors2, [2 for _ in range(N)])
 
     @ops(foreach_min_max_op_db)
-    def test_min_max(self, device, dtype, op):
+    def test_min_max(self, device, dtypes, op):
+        dtype = dtypes[0]
         for N in N_values:
             # Mimics cuda kernel dtype flow.  With fp16/bf16 input, runs in fp32 and casts output back to fp16/bf16.
             control_dtype = torch.float32 if (self.device_type == 'cuda' and
@@ -396,17 +400,17 @@ class TestForeach(TestCase):
     def test_min_max_inf_nan(self, device, dtype, op):
         method = op.get_method()
         a = [
-            torch.tensor([float('inf')], device=device, dtype=dtype),
-            torch.tensor([-float('inf')], device=device, dtype=dtype),
-            torch.tensor([float('nan')], device=device, dtype=dtype),
-            torch.tensor([float('nan')], device=device, dtype=dtype),
+            torch.tensor([float('inf')], device=device, dtype=dtype[0]),
+            torch.tensor([-float('inf')], device=device, dtype=dtype[0]),
+            torch.tensor([float('nan')], device=device, dtype=dtype[0]),
+            torch.tensor([float('nan')], device=device, dtype=dtype[0]),
         ]
 
         b = [
-            torch.tensor([-float('inf')], device=device, dtype=dtype),
-            torch.tensor([float('inf')], device=device, dtype=dtype),
-            torch.tensor([float('inf')], device=device, dtype=dtype),
-            torch.tensor([float('nan')], device=device, dtype=dtype)
+            torch.tensor([-float('inf')], device=device, dtype=dtype[0]),
+            torch.tensor([float('inf')], device=device, dtype=dtype[0]),
+            torch.tensor([float('inf')], device=device, dtype=dtype[0]),
+            torch.tensor([float('nan')], device=device, dtype=dtype[0])
         ]
 
         expected = [op.ref(a1, b1) for a1, b1 in zip(a, b)]
@@ -414,17 +418,17 @@ class TestForeach(TestCase):
         self.assertEqual(res, expected)
 
         a = [
-            torch.tensor([inf], device=device, dtype=dtype),
-            torch.tensor([-inf], device=device, dtype=dtype),
-            torch.tensor([nan], device=device, dtype=dtype),
-            torch.tensor([nan], device=device, dtype=dtype)
+            torch.tensor([inf], device=device, dtype=dtype[0]),
+            torch.tensor([-inf], device=device, dtype=dtype[0]),
+            torch.tensor([nan], device=device, dtype=dtype[0]),
+            torch.tensor([nan], device=device, dtype=dtype[0])
         ]
 
         b = [
-            torch.tensor([-inf], device=device, dtype=dtype),
-            torch.tensor([inf], device=device, dtype=dtype),
-            torch.tensor([inf], device=device, dtype=dtype),
-            torch.tensor([nan], device=device, dtype=dtype)
+            torch.tensor([-inf], device=device, dtype=dtype[0]),
+            torch.tensor([inf], device=device, dtype=dtype[0]),
+            torch.tensor([inf], device=device, dtype=dtype[0]),
+            torch.tensor([nan], device=device, dtype=dtype[0])
         ]
 
         expected = [op.ref(a1, b1) for a1, b1 in zip(a, b)]
