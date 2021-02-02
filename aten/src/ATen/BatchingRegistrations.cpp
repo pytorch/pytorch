@@ -1092,14 +1092,14 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 //   m.impl("clamp_max", clamp_max_batching_rule);
 // 
 //   // unary pointwise, out-of-place, no additional arguments.
-// #define UNARY_POINTWISE(op) m.impl(#op, \
-//     unwrap_and_call<Tensor (*)(const Tensor&), at::op>);
+#define UNARY_POINTWISE(op) m.impl(#op, \
+    unwrap_and_call<Tensor (*)(const Tensor&), at::op>);
 //   UNARY_POINTWISE(abs);
 //   UNARY_POINTWISE(acos);
 //   UNARY_POINTWISE(asin);
 //   UNARY_POINTWISE(atan);
 //   UNARY_POINTWISE(ceil);
-//   UNARY_POINTWISE(cos);
+  UNARY_POINTWISE(cos);
 //   UNARY_POINTWISE(cosh);
 //   UNARY_POINTWISE(_conj);
 //   UNARY_POINTWISE(digamma);
@@ -1119,13 +1119,13 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
 //   UNARY_POINTWISE(rsqrt);
 //   UNARY_POINTWISE(sigmoid);
 //   UNARY_POINTWISE(sign);
-//   UNARY_POINTWISE(sin);
+  UNARY_POINTWISE(sin);
 //   UNARY_POINTWISE(sinh);
 //   UNARY_POINTWISE(sqrt);
 //   UNARY_POINTWISE(tan);
 //   UNARY_POINTWISE(tanh);
 //   UNARY_POINTWISE(trunc);
-// #undef UNARY_POINTWISE
+#undef UNARY_POINTWISE
 // #define TO_BATCHING_RULE(name, ...) \
 //   { \
 //     using to_type = Tensor(Tensor::*)(__VA_ARGS__) const; \

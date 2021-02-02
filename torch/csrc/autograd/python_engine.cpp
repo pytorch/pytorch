@@ -219,12 +219,12 @@ PyObject *THPEngine_run_backward(PyObject *self, PyObject *args, PyObject *kwarg
       THPUtils_assert(THPVariable_Check(input),
           "all inputs have to be Tensors, but got %s", THPUtils_typename(input));
       THPVariable *input_var = (THPVariable*)input;
-      TORCH_CHECK(!isBatchedTensor(input_var->cdata),
-          "torch.autograd.grad(outputs, inputs, grad_outputs) called inside ",
-          "torch.vmap. We do not support the case where any inputs are ",
-          "vmapped tensors (input ", i, " is being vmapped over). Please "
-          "call autograd.grad() outside torch.vmap or file a bug report "
-          "with your use case.")
+      // TORCH_CHECK(!isBatchedTensor(input_var->cdata),
+      //     "torch.autograd.grad(outputs, inputs, grad_outputs) called inside ",
+      //     "torch.vmap. We do not support the case where any inputs are ",
+      //     "vmapped tensors (input ", i, " is being vmapped over). Please "
+      //     "call autograd.grad() outside torch.vmap or file a bug report "
+      //     "with your use case.")
       const auto output_nr = input_var->cdata.output_nr();
       auto grad_fn = input_var->cdata.grad_fn();
       if (!grad_fn) {

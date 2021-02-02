@@ -4,6 +4,7 @@
 #ifndef _MSC_VER
 #include <sys/socket.h>
 #endif
+#include <ATen/DynamicLayer.h>
 
 #include <unordered_map>
 #include <cstdlib>
@@ -579,6 +580,19 @@ static PyObject * THPModule_vmapmode_decrement_nesting(PyObject* _unused, PyObje
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPModule_grad_increment_nesting(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packInt64(at::pushDynamicLayer(at::DispatchKey::Autograd));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPModule_grad_decrement_nesting(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  return THPUtils_packInt64(at::popDynamicLayer().layerId());
+  END_HANDLE_TH_ERRORS
+}
+
+
 static PyObject * THPModule_set_display_vmap_fallback_warnings_mode(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   THPUtils_assert(PyBool_Check(arg), "enabled must be a bool, "
@@ -638,6 +652,8 @@ static PyMethodDef TorchMethods[] = {
   {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O,  nullptr},
   {"_vmapmode_increment_nesting", THPModule_vmapmode_increment_nesting, METH_NOARGS, nullptr},
   {"_vmapmode_decrement_nesting", THPModule_vmapmode_decrement_nesting, METH_NOARGS, nullptr},
+  {"_grad_increment_nesting", THPModule_grad_increment_nesting, METH_NOARGS, nullptr},
+  {"_grad_decrement_nesting", THPModule_grad_decrement_nesting, METH_NOARGS, nullptr},
   {"_debug_only_display_vmap_fallback_warnings", THPModule_set_display_vmap_fallback_warnings_mode, METH_O, nullptr},
   {"_debug_only_are_vmap_fallback_warnings_enabled", THPModule_are_vmap_fallback_warnings_enabled, METH_NOARGS, nullptr},
   {"_to_dlpack",      THPModule_toDLPack,          METH_O,       nullptr},

@@ -5,6 +5,58 @@
 
 namespace at {
 
+/**
+ * Return a TensorImpl that is a shallow-copy of this TensorImpl.
+ *
+ * For usage of `version_counter` and `allow_tensor_metadata_change`,
+ * see NOTE [ TensorImpl Shallow-Copying ].
+ */
+c10::intrusive_ptr<TensorImpl> BatchedTensorImpl::shallow_copy_and_detach(
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) const {
+  Tensor v = value();
+  BatchDims b(bdims().begin(), bdims().end());
+  auto impl = c10::make_intrusive<BatchedTensorImpl>(v, b);
+  copy_tensor_metadata(
+    /*src_impl=*/this,
+    /*dest_impl=*/impl.get(),
+    /*version_counter=*/version_counter,
+    /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+  impl->refresh_numel();
+  return impl;
+}
+
+/**
+ * Return a TensorImpl that is a shallow-copy of this TensorImpl.
+ *
+ * For usage of `version_counter` and `allow_tensor_metadata_change`,
+ * see NOTE [ TensorImpl Shallow-Copying ].
+ */
+c10::intrusive_ptr<TensorImpl> BatchedTensorImpl::shallow_copy_and_detach(
+    c10::VariableVersion&& version_counter,
+    bool allow_tensor_metadata_change) const {
+  Tensor v = value();
+  BatchDims b(bdims().begin(), bdims().end());
+  auto impl = c10::make_intrusive<BatchedTensorImpl>(v, b);
+  copy_tensor_metadata(
+    /*src_impl=*/this,
+    /*dest_impl=*/impl.get(),
+    /*version_counter=*/std::move(version_counter),
+    /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
+  impl->refresh_numel();
+  return impl;
+}
+
+/**
+ * Shallow-copies data from another TensorImpl into this TensorImpl.
+ *
+ * For why this function doesn't check this TensorImpl's `allow_tensor_metadata_change_`,
+ * see NOTE [ TensorImpl Shallow-Copying ].
+ */
+void BatchedTensorImpl::shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) {
+  TORCH_INTERNAL_ASSERT(false);
+}
+
 BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   : TensorImpl(
       c10::DispatchKeySet(DispatchKey::Batched),
@@ -101,7 +153,9 @@ void BatchedTensorImpl::set_storage_offset(int64_t storage_offset) {
   TORCH_INTERNAL_ASSERT(false, "Can't set_storage_offset for BatchedTensorImpl");
 }
 bool BatchedTensorImpl::has_storage() const {
-  TORCH_INTERNAL_ASSERT(false, "Can't query has_storage for BatchedTensorImpl");
+  // TODO: what are the implications of this?
+  return false;
+  // TORCH_INTERNAL_ASSERT(false, "Can't query has_storage for BatchedTensorImpl");
 }
 
 Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {

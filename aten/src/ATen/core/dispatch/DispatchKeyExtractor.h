@@ -48,6 +48,7 @@ static inline DispatchKey dispatchTypeId(
   // the TLS in question to be zero-initialized, so you don't actually win
   // anyting in that case.
   auto result = (((ks | local.included_ | always_included) - local.excluded_) & key_mask).highestPriorityTypeId();
+  // std::cout << "Dispatched on " << result << std::endl;
   return result;
 }
 
