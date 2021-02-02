@@ -59,9 +59,10 @@ replace ``torch.add`` with ``torch.mul``.
         traced.lint() # Does some checks to make sure the graph is well-formed.
         traced.recompile() # regenerates the python code that corresponds to the graph.
 
-We can also do more involved graph rewrites, such as appending a ReLU
-after a node. To aid in these transformations, FX also has utility
-functions for transforming the graph. You can find more in :class:`Graph`.
+We can also do more involved graph rewrites, such as deleting or appending
+nodes. after a node. To aid in these transformations, FX has utility
+functions for transforming the graph that can be found in :class:`Graph`. An
+example of using these APIs to append a relu can be found below.
 
 ::
 
@@ -76,10 +77,10 @@ fusion! <https://github.com/pytorch/pytorch/blob/ec86cec20a8a2312a2295d7bc8be6e8
 For simple transformations that only consist of substitutions, you can also
 make use of the `subgraph rewriter. <https://github.com/pytorch/pytorch/blob/master/torch/fx/subgraph_rewriter.py>`__
 
-In general, writing your transformation through graph manipulation is a
-good fit if you need to make a few small changes or if you need a global
-view of your graph. However, if you need to entirely rewrite your graph, you may want to look at
-constructing your graph with Proxies (i.e. retracing).
+In general, writing your transformation through graph manipulation is a good
+fit if you need to make a few small changes or if you need to match multiple
+nodes at once. However, if you need to entirely rewrite your graph, you may
+want to look at constructing your graph with Proxies (i.e. retracing).
 
 Examples
 ~~~~~~~~
@@ -111,6 +112,7 @@ the graph.
 
 ::
 
+    # Note that this decomposition rule can be read as regular Python
     def relu_decomposition(x):
         return (x > 0)*x
 
@@ -123,6 +125,9 @@ the graph.
         env = {}
         for node in model.graph.nodes:
             if node.op == 'call_function' and node.target in decomposition_rules:
+                # By wrapping the arguments with proxies, we can dispatch to
+                # the appropriate decomposition rule and add it to the graph by
+                # symbolically tracing it.
                 proxy_args = [fx.Proxy(env[x.name]) if isinstance(x, fx.Node) else x for x in node.args]
                 new_node = decomposition_rules[node.target](*proxy_args).node
                 env[node.name] = new_node
@@ -149,10 +154,13 @@ looping over the FX graph and modifying it, you can write an interpreter
 on top of the FX graph! As the FX IR is quite simple, it’s easy to
 reimplement an interpreter that also captures your desired attributes.
 
-This example `Shape Propagation
-pass <https://github.com/pytorch/pytorch/blob/master/torch/fx/experimental/shape_prop.py#L7>`__
-reinterprets the FX symbolic graph with example inputs while annotating
-the graph with the shapes.
+As this pattern is quite useful, we we can also use an abstraction of this pattern
+-- the `Interpreter
+<https://github.com/pytorch/pytorch/blob/master/torch/fx/interpreter.py>`__.
+You can see an example using this for `shape propagation
+<https://github.com/pytorch/pytorch/blob/master/torch/fx/passes/shape_prop.py>`__
+, which reinterprets the FX graph with example inputs while annotating the
+graph with the shapes.
 
 Reinterpreting the FX graph is generally most useful when you want
 runtime information that FX typically doesn’t capture (due to being a
