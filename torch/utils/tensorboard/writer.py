@@ -822,7 +822,7 @@ class SummaryWriter(object):
         if not hasattr(self, "_projector_config"):
             self._projector_config = ProjectorConfig()
         embedding_info = get_embedding_info(
-            metadata, label_img, fs, subdir, global_step, tag)
+            metadata, label_img, fs, subdir, global_step, tag, mat.shape)
         self._projector_config.embeddings.extend([embedding_info])
 
         from google.protobuf import text_format  # type: ignore
