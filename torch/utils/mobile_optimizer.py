@@ -88,8 +88,8 @@ def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
     lint_list = []
 
     if not hasattr(script_module, "_generate_bundled_inputs_for_forward"):
-        lint_list.append({"name": LintCode.BUNDLED_INPUT.name, "message": "No bundled input for forward, please add bundled inputs before "
-                          "saving the module using torch.utils.bundled_inputs.augment_model_with_bundled_inputs."})
+        lint_list.append({"name": LintCode.BUNDLED_INPUT.name, "message": "No bundled input for forward, please add bundled inputs "
+                          "before saving the module using torch.utils.bundled_inputs.augment_model_with_bundled_inputs."})
 
     for name, param in script_module.named_parameters():
         if param.requires_grad:
