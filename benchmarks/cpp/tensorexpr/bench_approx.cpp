@@ -10,6 +10,13 @@
 using namespace torch::jit;
 using namespace torch::jit::tensorexpr;
 
+void optimizeSleef(tensorexpr::LoopNest* ln, tensorexpr::Tensor* target) {
+  auto loops = ln->getLoopStmtsFor(target);
+  For *outer, *inner, *tail;
+  ln->splitWithTail(loops[0], 8, &outer, &inner, &tail);
+  ln->vectorize(inner);
+}
+
 void optimizePointwise(tensorexpr::LoopNest* ln, tensorexpr::Tensor* target) {
   std::vector<For*> loops = ln->getLoopStmtsFor(target);
   For *outer, *inner, *tail;
@@ -30,7 +37,7 @@ static void log_nnc_sleef(benchmark::State& state) {
       });
   LoopNest ln({B});
   ln.prepareForCodegen();
-  optimizePointwise(&ln, B);
+  optimizeSleef(&ln, B);
   Stmt* s = ln.root_stmt();
   s = torch::jit::tensorexpr::IRSimplifier::simplify(s);
   std::vector<CodeGen::BufferArg> args;
