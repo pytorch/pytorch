@@ -450,14 +450,6 @@ class RemoteModuleTest(RpcAgentTestFixture):
                 remote_module.named_modules()
 
             with self.assertRaisesRegex(
-                ValueError, r"Method ``train`` not supported for RemoteModule"
-            ):
-                remote_module.train()
-            with self.assertRaisesRegex(
-                ValueError, r"Method ``eval`` not supported for RemoteModule"
-            ):
-                remote_module.eval()
-            with self.assertRaisesRegex(
                 ValueError, r"Method ``requires_grad_`` not supported for RemoteModule"
             ):
                 remote_module.requires_grad_()
