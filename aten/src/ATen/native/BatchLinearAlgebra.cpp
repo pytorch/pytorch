@@ -1090,10 +1090,16 @@ std::tuple<Tensor, Tensor> triangular_solve(const Tensor& self, const Tensor& A,
 
 std::tuple<Tensor&, Tensor&> triangular_solve_out(Tensor& result, Tensor& clone_A, const Tensor& self, const Tensor& A,
                                                   bool upper, bool transpose, bool unitriangular) {
+  checkSameDevice("triangular_solve", result, self);
+  checkLinalgCompatibleDtype("triangular_solve", result, self);
+  checkSameDevice("triangular_solve", clone_A, self, "clone_A");
+  checkLinalgCompatibleDtype("triangular_solve", clone_A, self, "clone_A");
   Tensor result_tmp, clone_A_tmp;
   std::tie(result_tmp, clone_A_tmp) = at::_triangular_solve_helper(self, A, upper, transpose, unitriangular);
-  result.resize_as_(result_tmp).copy_(result_tmp);
-  clone_A.resize_as_(clone_A_tmp).copy_(clone_A_tmp);
+  at::native::resize_output(result, result_tmp.sizes());
+  at::native::resize_output(clone_A, clone_A_tmp.sizes());
+  result.copy_(result_tmp);
+  clone_A.copy_(clone_A_tmp);
   return std::tuple<Tensor&, Tensor&>(result, clone_A);
 }
 

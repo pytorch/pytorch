@@ -3582,6 +3582,46 @@ class TestLinalg(TestCase):
         with self.assertRaisesRegex(RuntimeError, err_str):
             torch.triangular_solve(b, A)
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_triangular_solve_out_errors_and_warnings(self, device, dtype):
+        # dtypes should match
+        a = torch.eye(2, dtype=dtype, device=device)
+        b = torch.randn(2, 1, dtype=dtype, device=device)
+        out = torch.empty_like(b).to(torch.int)
+        clone_a = torch.empty_like(a)
+        with self.assertRaisesRegex(RuntimeError, "got result with dtype Int"):
+            torch.triangular_solve(b, a, out=(out, clone_a))
+
+        out = torch.empty_like(b)
+        clone_a = clone_a.to(torch.int)
+        with self.assertRaisesRegex(RuntimeError, "got clone_A with dtype Int"):
+            torch.triangular_solve(b, a, out=(out, clone_a))
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, dtype=dtype, device=wrong_device)
+            clone_a = torch.empty_like(a)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.triangular_solve(b, a, out=(out, clone_a))
+            out = torch.empty(0, dtype=dtype, device=device)
+            clone_a = torch.empty_like(a).to(wrong_device)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.triangular_solve(b, a, out=(out, clone_a))
+
+        # if out tensor with wrong shape is passed a warning is given
+        with warnings.catch_warnings(record=True) as w:
+            out = torch.empty(1, dtype=dtype, device=device)
+            clone_a = torch.empty(1, dtype=dtype, device=device)
+            # Trigger warning
+            torch.triangular_solve(b, a, out=(out, clone_a))
+            # Check warning occurs
+            self.assertEqual(len(w), 2)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+            self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
+
     def check_single_matmul(self, x, y, shape):
         a = np.array(x, copy=False)
         b = np.array(y, copy=False)
