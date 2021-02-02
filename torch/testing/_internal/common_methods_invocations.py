@@ -1122,7 +1122,7 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad):
     if dtype is torch.uint8:
         min_max_vals = ((2, 5), (3, 7))
     else:
-        min_max_vals = ((0.0, 1.0), (-1.0, 1.0))
+        min_max_vals = ((0, 1), (-1, 1))
     return [SampleInput(tensor, args=vals) for tensor, vals in product(tensors, min_max_vals)]
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad):
