@@ -1756,7 +1756,9 @@ def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tens
     else:
         output = input.matmul(weight.t())
         if bias is not None:
-            output += bias
+            # NB: to replace autograd graph history, storage_offset is needed.
+            # Unfortunately BatchedTensor doesn't have storage_offset.
+            output = output + bias
         ret = output
     return ret
 
