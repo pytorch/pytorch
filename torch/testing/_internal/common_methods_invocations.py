@@ -395,11 +395,6 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
             ords = vector_ords if is_vector_norm else matrix_ords
 
             for ord in ords:
-                # TODO: remove this check when `max` is implemented for
-                #       float16 and bfloat16. Issue:
-                #       https://github.com/pytorch/pytorch/issues/50790
-                if is_vector_norm and is_dtype_half and ord in [inf, -inf]:
-                    continue
 
                 inputs.append(SampleInput(
                     make_tensor(
@@ -658,6 +653,79 @@ def sample_inputs_index_fill(op_info, device, dtype, requires_grad):
             samples.append(SampleInput((tensor, d, idx, fill_val)))
             samples.append(SampleInput((tensor, d, -idx - 1, fill_val)))
             samples.append(SampleInput((tensor, d, idx_nonctg, fill_val)))
+    return samples
+
+def sample_inputs_max_min(op_info, device, dtype, requires_grad):
+    samples = []
+    samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),))
+    samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                                           args=(1, True,),))
+    samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                                           args=(1,),))
+    samples.append(SampleInput(make_tensor((), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                                           args=(0,),))
+    samples.append(SampleInput(make_tensor((), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                                           args=(0, True,),))
+    samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                                           args=(),))
+    samples.append(SampleInput(make_tensor((), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                                           args=(),))
+    samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                                           args=(make_tensor((S, S, S), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),),))
+    samples.append(SampleInput(make_tensor((S,), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                                           args=(make_tensor((S, S, S), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),),))
+    samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                                           args=(make_tensor((S,), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),),))
+    samples.append(SampleInput(make_tensor((S, 1, S), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                                           args=(make_tensor((S, S), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),),))
+    samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                                           args=(make_tensor((), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),),))
+    samples.append(SampleInput(make_tensor((), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                                           args=(make_tensor((S, S, S), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),),))
+    samples.append(SampleInput(make_tensor((), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),
+                                           args=(make_tensor((), device, dtype,
+                                           low=None, high=None,
+                                           requires_grad=requires_grad),),))
     return samples
 
 def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
@@ -1682,6 +1750,24 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_masked_select,
            test_inplace_grad=False,
            supports_tensor_out=True),
+    OpInfo('min',
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           test_inplace_grad=False,
+           assert_autodiffed=True,
+           safe_casts_outputs=True,
+           sample_inputs_func=sample_inputs_max_min,
+           supports_tensor_out=True),
+    OpInfo('max',
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           test_inplace_grad=False,
+           assert_autodiffed=True,
+           safe_casts_outputs=True,
+           sample_inputs_func=sample_inputs_max_min,
+           supports_tensor_out=True),
     UnaryUfuncInfo('neg',
                    ref=np.negative,
                    skip_bfloat16_grad=True,
@@ -2564,32 +2650,6 @@ def method_tests():
         ('lerp', (), ((), 0.4), 'scalar', (True,)),
         ('lerp', (S, S, S), ((), 0.4), 'scalar_broadcast_rhs', (True,)),
         ('lerp', (), ((S, S, S), 0.4), 'scalar_broadcast_lhs', (True,)),
-        ('max', (S, S, S), NO_ARGS),
-        ('max', (S, S, S), (1,), 'dim', (), [0]),
-        ('max', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
-        ('max', (), NO_ARGS, 'scalar'),
-        ('max', (), (0,), 'scalar_dim', (), [0]),
-        ('max', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
-        ('max', (S, S, S), ((S, S, S),), 'elementwise', (True,)),
-        ('max', (S, S, S), ((S,),), 'elementwise_broadcast_rhs', (True,)),
-        ('max', (S,), ((S, S, S),), 'elementwise_broadcast_lhs', (True,)),
-        ('max', (S, 1, S), ((S, S),), 'elementwise_broadcast_all', (True,)),
-        ('max', (), ((),), 'scalar_elementwise', (True,)),
-        ('max', (S, S, S), ((),), 'scalar_elementwise_broadcast_rhs', (True,)),
-        ('max', (), ((S, S, S),), 'scalar_elementwise_broadcast_lhs', (True,)),
-        ('min', (S, S, S), NO_ARGS, ),
-        ('min', (S, S, S), (1,), 'dim', (), [0]),
-        ('min', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
-        ('min', (), NO_ARGS, 'scalar'),
-        ('min', (), (0,), 'scalar_dim', (), [0]),
-        ('min', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
-        ('min', (S, S, S), ((S, S, S),), 'elementwise', (True,)),
-        ('min', (S, S, S), ((S,),), 'elementwise_broadcast_rhs', (True,)),
-        ('min', (S,), ((S, S, S),), 'elementwise_broadcast_lhs', (True,)),
-        ('min', (S, 1, S), ((S, S),), 'elementwise_broadcast_all', (True,)),
-        ('min', (), ((),), 'scalar_elementwise', (True,)),
-        ('min', (S, S, S), ((),), 'scalar_elementwise_broadcast_rhs', (True,)),
-        ('min', (), ((S, S, S),), 'scalar_elementwise_broadcast_lhs', (True,)),
         ('amax', (S, S, S), NO_ARGS),
         ('amax', (S, S, S), (1,), 'dim'),
         ('amax', (S, S, S), ([1, 2],), 'multiple_dim'),
