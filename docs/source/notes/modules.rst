@@ -3,29 +3,28 @@
 Modules
 =======
 
-PyTorch uses modules to both build and represent neural networks. At a high level, the module abstraction
-provides the following benefits, which will be discussed in more detail throughout this note:
+PyTorch uses modules to both build and represent neural networks. Modules are:
 
 * **Composable building blocks of stateful computation.**
   PyTorch provides a robust library of modules and makes it easy to define new custom modules, allowing for
   simple construction of complex, multi-layer neural networks.
-* **Tight integration with PyTorch's** `Autograd <https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html>`_
-  **system.** PyTorch makes it simple to specify learnable module parameters that can be optimized for a task.
-* **Access to a wide array of additional functionality out-of-the-box.**
-  PyTorch provides module serialization, easy transfer between CPU / GPU / TPU devices, pruning, quantization and
-  many other features designed to work with modules.
+* **Tightly integrated with PyTorch's**
+  `autograd <https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html>`_
+  **system.** Modules make it simple to specify learnable parameters for PyTorch's optimizers to update.
+* **Easy to work with and transform.** Modules are straightforward to save and restore, transfer between
+  CPU / GPU / TPU devices, prune, quantize, and more.
 
-This note is intended for users interested in understanding how modules are useful in constructing and optimizing
-neural networks. While it is intended as an overview, we also provide links throughout to more advanced tutorials
-for additional detail.
+This note describes modules, and is intended for all PyTorch users. Since modules are so fundamental to PyTorch,
+many topics in this note are elaborated on in other notes or tutorials, and links to many of those documents
+are provided here as well.
 
 .. contents:: :local:
 
 A Simple Custom Module
 ----------------------
 
-To get started, let's look at a simple custom linear module, also known as a linear "layer". It is essentially a
-trimmed-down version of the :class:`~torch.nn.Linear` module, which applies an affine transformation to its input.
+To get started, let's look at a simpler, custom version of PyTorch's :class:`~torch.nn.Linear` module.
+This module applies an affine transformation to its input.
 
 .. code-block:: python
 
@@ -41,7 +40,7 @@ trimmed-down version of the :class:`~torch.nn.Linear` module, which applies an a
      def forward(self, input):
        return (input @ self.weight) + self.bias
 
-This simple module demonstrates the following fundamental characteristics of modules:
+This simple module has the following fundamental characteristics of modules:
 
 * **It inherits from the base Module class.**
   All modules should subclass :class:`~torch.nn.Module` for composability with other modules.
@@ -84,9 +83,8 @@ where the latter includes each parameter's name:
    tensor([ 0.3634,  0.2015, -0.8525], requires_grad=True))
 
 In general, the parameters registered by a module are aspects of the module's computation that should be
-"learned", often through optimization utilizing PyTorch's Autograd system. In a later section of this note,
-we provide a full example of doing exactly this. Before we get to that, let's first examine how modules can
-composed with one another.
+"learned". A later section of this note shows how to update these parameters using one of PyTorch's optimizers.
+Before we get to that, however, let's first examine how modules can be composed with one another.
 
 Modules as Building Blocks
 --------------------------
@@ -245,7 +243,7 @@ It's also easy to move all parameters to a different device or change their prec
    dynamic_net(torch.randn(5, device='cuda', dtype=torch.float64))
    : tensor([6.5166], device='cuda:0', dtype=torch.float64, grad_fn=<AddBackward0>)
 
-The examples above demonstrate how modules can be composed to form complex neural networks. Neural networks are
+These examples show how modules can be composed to form complex neural networks. Neural networks are
 also modules themselves, and typically they are modules that contain other modules, which can, in turn, contain
 other modules. The unbounded composability of modules makes the module concept a powerful tool for defining and
 operating with neural networks. PyTorch also provides a large library of optimized modules within the
@@ -263,9 +261,8 @@ For more information, check out:
 Neural Network Training with Modules
 ------------------------------------
 
-As demonstrated in the previous section, it is straightforward to compose modules into arbitrarily complex structures.
-The full set of parameters in the network can then be easily optimized using optimizers present in
-:mod:`torch.optim`, as demonstrated in the following snippet:
+Once a network is built, it has to be trained, and its parameters can be easily optimized with one of PyTorch’s
+optimizers from :mod:`torch.optim`:
 
 .. code-block:: python
 
@@ -284,9 +281,19 @@ The full set of parameters in the network can then be easily optimized using opt
      loss.backward()
      optimizer.step()
 
-Note that this example is a simplification of the general training process, and it doesn't teach the network anything
-"useful". However, it does demonstrate using an optimizer to tune the parameters of the entire network for a particular
-task.
+In this simplified example, the network simply learns to output zero, which is not very interesting, but the
+key parts of training are present:
+
+* A network is created.
+* An optimizer (in this case, a stochastic gradient descent optimizer) is created, and the network’s
+  parameters are associated with it.
+* A training loop...
+    * acquires an input,
+    * runs the network,
+    * computes a loss,
+    * zeros the network’s parameters’ gradients,
+    * calls loss.backward() to update the parameters’ gradients,
+    * calls optimizer.step() to apply the gradients to the parameters.
 
 After the above snippet has been run, note that the network's parameters have changed. In particular, examining the
 value of ``l1``\ 's ``weight`` parameter shows that its values are now much closer to 0 (as may be expected):
@@ -299,15 +306,11 @@ value of ``l1``\ 's ``weight`` parameter shows that its values are now much clos
            [ 0.0030],
            [-0.0008]], requires_grad=True)
 
-In the above example, we demonstrated how to compose a neural network of child modules and easily train the learnable
-parameters with PyTorch-provided optimizers.
-
-For more information, check out:
-
+Training neural networks can often be tricky. For more information, check out:
 
 * Using optimizers: https://pytorch.org/tutorials/beginner/examples_nn/two_layer_net_optim.html.
 * Neural network training: https://pytorch.org/tutorials/beginner/blitz/neural_networks_tutorial.html
-* Introduction to Autograd: https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html
+* Introduction to autograd: https://pytorch.org/tutorials/beginner/blitz/autograd_tutorial.html
 
 Module State
 ------------
@@ -331,7 +334,6 @@ A module's ``state_dict`` contains state that affects its computation. This incl
 module's parameters. For some modules, it may be useful to have state beyond parameters that affects module
 computation but is not learnable. For such cases, PyTorch provides the concept of "buffers", both "persistent"
 and "non-persistent". Following is an overview of the various types of state a module can have:
-
 
 * **Parameters**\ : learnable aspects of computation; contained within the ``state_dict``
 * **Buffers**\ : non-learnable aspects of computation
