@@ -28,7 +28,7 @@ class BatchIterDataPipe(IterDataPipe[List[T_co]]):
                  drop_last: bool = False,
                  ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
-        super(BatchIterDataPipe, self).__init__()
+        super().__init__()
         self.datapipe = datapipe
         self.batch_size = batch_size
         self.drop_last = drop_last
@@ -87,7 +87,7 @@ class BucketBatchIterDataPipe(IterDataPipe[List[T_co]]):
                  sort_key: Optional[Callable] = None,
                  ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
-        super(BucketBatchIterDataPipe, self).__init__()
+        super().__init__()
         self.datapipe = datapipe
         self.batch_size = batch_size
         self.drop_last = drop_last

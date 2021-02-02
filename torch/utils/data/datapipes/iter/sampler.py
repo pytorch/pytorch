@@ -24,6 +24,7 @@ class SamplerIterDataPipe(IterDataPipe[T_co]):
                  ) -> None:
         assert isinstance(datapipe, Sized), \
             "Sampler class requires input datapipe implemented `__len__`"
+        super().__init__()
         self.datapipe = datapipe
         # https://github.com/python/mypy/pull/9629 will solve
         self.sampler = sampler(data_source=self.datapipe, **kwargs)  # type: ignore

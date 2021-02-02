@@ -29,7 +29,7 @@ class CallableIterDataPipe(IterDataPipe[T_co]):
                  fn: Callable = default_fn,
                  **kwargs,
                  ) -> None:
-        super(CallableIterDataPipe, self).__init__()
+        super().__init__()
         self.datapipe = datapipe
         if fn.__name__ == '<lambda>':
             warnings.warn("Lambda function is not supported for pickle, "
@@ -89,4 +89,4 @@ class CollateIterDataPipe(CallableIterDataPipe):
                  collate_fn: Callable = _utils.collate.default_collate,
                  **kwargs,
                  ) -> None:
-        super(CollateIterDataPipe, self).__init__(datapipe, *args, fn=collate_fn, **kwargs)
+        super().__init__(datapipe, *args, fn=collate_fn, **kwargs)
