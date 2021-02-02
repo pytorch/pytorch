@@ -149,11 +149,17 @@ void raw_cudnn_convolution_forward_out(
       .setOperationGraph(opGraph)
       .setHeurMode(CUDNN_HEUR_MODE_INSTANT)
       .build();
+  auto fallback = cudnn_frontend::EngineFallbackListBuilder()
+                    .setOperationGraph(opGraph)
+                    .setOperation(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR)
+                    .build();
 
   auto& engine_configs = heuristics.getEngineConfig(heuristics.getEngineConfigCount());
+  auto& fallback_list = fallback.getFallbackList();
 
   cudnn_frontend::EngineConfigList filtered_configs;
   filterEngineConfigs(engine_configs, filtered_configs, deterministic, allow_tf32, input.scalar_type());
+  filterEngineConfigs(fallback_list, filtered_configs, deterministic, allow_tf32, input.scalar_type());
 
   for (auto &cfg : filtered_configs) {
     try {
