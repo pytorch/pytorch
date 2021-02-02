@@ -203,7 +203,7 @@ TEST(VulkanAPITest, addmm) {
   constexpr float alpha = 2.1f;
   constexpr float beta = 103.24;
 
-  const auto bias_cpu = at::zeros({179, 163}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::rand({179, 163}, at::device(at::kCPU).dtype(at::kFloat));
   const auto m1_cpu = at::rand({179, 67}, at::device(at::kCPU).dtype(at::kFloat));
   const auto m2_cpu = at::rand({67, 163}, at::device(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::addmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
@@ -227,7 +227,7 @@ TEST(VulkanAPITest, addmm_expand) {
   constexpr float alpha = 2.1f;
   constexpr float beta = 103.24;
 
-  const auto bias_cpu = at::zeros({1000}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::rand({1000}, at::device(at::kCPU).dtype(at::kFloat));
   const auto m1_cpu = at::rand({1, 1280}, at::device(at::kCPU).dtype(at::kFloat));
   const auto m2_cpu = at::rand({1280, 1000}, at::device(at::kCPU).dtype(at::kFloat));
   const auto out_cpu = at::addmm(bias_cpu, m1_cpu, m2_cpu, beta, alpha);
