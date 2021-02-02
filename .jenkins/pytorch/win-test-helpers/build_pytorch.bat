@@ -110,6 +110,11 @@ if "%REBUILD%" == "" (
     aws s3 cp "s3://ossci-windows/Restore PyTorch Environment.lnk" "C:\Users\circleci\Desktop\Restore PyTorch Environment.lnk"
   )
 )
+:: tests if BUILD_ENVIRONMENT contains cuda11 as a substring
+if not x%BUILD_ENVIRONMENT:cuda11=%==x%BUILD_ENVIRONMENT% (
+   :: temporarily disabled
+   :: set BUILD_SPLIT_CUDA=ON
+)
 
 python setup.py install --cmake && sccache --show-stats && (
   if "%BUILD_ENVIRONMENT%"=="" (
@@ -118,4 +123,3 @@ python setup.py install --cmake && sccache --show-stats && (
     7z a %TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\torch %CONDA_PARENT_DIR%\Miniconda3\Lib\site-packages\caffe2 && copy /Y "%TMP_DIR_WIN%\%IMAGE_COMMIT_TAG%.7z" "%PYTORCH_FINAL_PACKAGE_DIR%\"
   )
 )
-
