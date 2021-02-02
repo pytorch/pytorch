@@ -243,7 +243,6 @@ core_sources_full_mobile = [
     "torch/csrc/jit/tensorexpr/codegen.cpp",
     "torch/csrc/jit/tensorexpr/eval.cpp",
     "torch/csrc/jit/tensorexpr/expr.cpp",
-    "torch/csrc/jit/tensorexpr/external_functions.cpp",
     "torch/csrc/jit/tensorexpr/external_functions_registry.cpp",
     "torch/csrc/jit/tensorexpr/hash_provider.cpp",
     "torch/csrc/jit/tensorexpr/intrinsic_symbols.cpp",
@@ -274,6 +273,7 @@ core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/runtime/static/impl.cpp",
     "torch/csrc/jit/runtime/static/ops.cpp",
     "torch/csrc/jit/runtime/static/passes.cpp",
+    "torch/csrc/jit/tensorexpr/external_functions.cpp",
 ]
 
 libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_trainer_sources)
