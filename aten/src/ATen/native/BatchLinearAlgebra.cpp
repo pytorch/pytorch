@@ -1598,11 +1598,21 @@ std::tuple<Tensor, Tensor> symeig(const Tensor& self, bool eigenvectors, bool up
 }
 
 std::tuple<Tensor&, Tensor&> symeig_out(Tensor& vals, Tensor& vecs, const Tensor& self, bool eigenvectors, bool upper) {
-  squareCheckInputs(self);
+  checkSameDevice("symeig", vals, self, "eigenvalues");
+  checkSameDevice("symeig", vecs, self, "eigenvectors");
+  checkLinalgCompatibleDtype("symeig", vecs, self, "eigenvectors");
+  // eigenvalues are always real-valued here
+  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
+  TORCH_CHECK(at::isFloatingType(vals.scalar_type()),
+    "eigenvalues dtype ", vals.scalar_type(), " does not match self dtype ", real_dtype);
+
   Tensor vals_tmp, vecs_tmp;
   std::tie(vals_tmp, vecs_tmp) = at::_symeig_helper(self, eigenvectors, upper);
-  vals.resize_as_(vals_tmp).copy_(vals_tmp);
-  vecs.resize_as_(vecs_tmp).copy_(vecs_tmp);
+
+  at::native::resize_output(vals, vals_tmp.sizes());
+  at::native::resize_output(vecs, vecs_tmp.sizes());
+  vals.copy_(vals_tmp);
+  vecs.copy_(vecs_tmp);
   return std::tuple<Tensor&, Tensor&>(vals, vecs);
 }
 
