@@ -750,9 +750,16 @@ class TestLinalg(TestCase):
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
         # dtypes should match
-        out = torch.empty_like(t).to(torch.int)
+        out = torch.empty(0, dtype=torch.int, device=device)
         with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
             torch.linalg.eigvalsh(t, out=out)
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, device=wrong_device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.linalg.eigvalsh(t, out=out)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

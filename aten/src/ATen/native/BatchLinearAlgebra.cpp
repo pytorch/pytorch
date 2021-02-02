@@ -1497,8 +1497,9 @@ Tensor linalg_eigvalsh(const Tensor& self, std::string uplo) {
 // TODO: it's possible to make the _out variant to be a primal function and implement linalg_eigvalsh on top of _out
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 Tensor& linalg_eigvalsh_out(Tensor& result, const Tensor& self, std::string uplo) {
+  checkSameDevice("linalg_eigvalsh", result, self);
   ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
-  TORCH_CHECK(result.scalar_type() == real_dtype,
+  TORCH_CHECK(at::isFloatingType(result.scalar_type()),
     "result dtype ", result.scalar_type(), " does not match self dtype ", real_dtype);
 
   Tensor result_tmp = at::linalg_eigvalsh(self, uplo);
