@@ -83,7 +83,7 @@ class SobolEngine(object):
         """
         if self.num_generated == 0:
             if n == 1:
-                result = self._first_point
+                result = self._first_point.to(dtype)
             else:
                 result, self.quasi = torch._sobol_engine_draw(
                     self.quasi, n - 1, self.sobolstate, self.dimension, self.num_generated, dtype=dtype,

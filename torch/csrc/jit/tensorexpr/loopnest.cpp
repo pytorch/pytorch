@@ -153,6 +153,41 @@ class Vectorizer : public IRMutator {
     });
   }
 
+  const Expr* mutate(const And* v) override {
+    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+    return try_vectorize(v, inputs, [&]() {
+      return ExprHandle(inputs[0]) & ExprHandle(inputs[1]);
+    });
+  }
+
+  const Expr* mutate(const Or* v) override {
+    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+    return try_vectorize(v, inputs, [&]() {
+      return ExprHandle(inputs[0]) | ExprHandle(inputs[1]);
+    });
+  }
+
+  const Expr* mutate(const Xor* v) override {
+    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+    return try_vectorize(v, inputs, [&]() {
+      return ExprHandle(inputs[0]) ^ ExprHandle(inputs[1]);
+    });
+  }
+
+  const Expr* mutate(const Lshift* v) override {
+    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+    return try_vectorize(v, inputs, [&]() {
+      return ExprHandle(inputs[0]) << ExprHandle(inputs[1]);
+    });
+  }
+
+  const Expr* mutate(const Rshift* v) override {
+    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+    return try_vectorize(v, inputs, [&]() {
+      return ExprHandle(inputs[0]) >> ExprHandle(inputs[1]);
+    });
+  }
+
   const Expr* mutate(const Max* v) override {
     std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
     return try_vectorize(v, inputs, [&]() {
