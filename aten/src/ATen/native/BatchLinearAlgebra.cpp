@@ -1635,6 +1635,8 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   int info;
   auto m = self.size(-2);
   auto n = self.size(-1);
+  auto lda = std::max<int64_t>(1, m);
+  auto ldvt = std::max<int64_t>(1, n);
   auto mn = std::min(m, n);
   Tensor iwork = at::empty({8 * mn}, at::kInt);
   auto iwork_data = iwork.data_ptr<int>();
@@ -1653,7 +1655,7 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
   // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   int lwork = -1;
   scalar_t wkopt;
-  lapackSvd<scalar_t, value_t>(jobz, m, n, self_data, m, S_data, U_data, m, VT_data, n, &wkopt, lwork, rwork_data, iwork_data, &info);
+  lapackSvd<scalar_t, value_t>(jobz, m, n, self_data, lda, S_data, U_data, lda, VT_data, ldvt, &wkopt, lwork, rwork_data, iwork_data, &info);
   lwork = static_cast<int>(real_impl<scalar_t, value_t>(wkopt));
   Tensor work = at::empty({lwork}, self.options());
   auto work_data = work.data_ptr<scalar_t>();
@@ -1665,8 +1667,8 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
     scalar_t* VT_working_ptr = &VT_data[i * VT_stride];
 
     // Compute S, U (optionally) and VT (optionally)
-    lapackSvd<scalar_t, value_t>(jobz, m, n, self_working_ptr, m,
-                        S_working_ptr, U_working_ptr, m, VT_working_ptr, n, work_data, lwork, rwork_data, iwork_data, &info);
+    lapackSvd<scalar_t, value_t>(jobz, m, n, self_working_ptr, lda,
+                        S_working_ptr, U_working_ptr, lda, VT_working_ptr, ldvt, work_data, lwork, rwork_data, iwork_data, &info);
     infos[i] = info;
     if (info != 0) {
       return;
@@ -1685,31 +1687,27 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cpu(const Tensor& self, bool some
   Tensor U_working_copy, S_working_copy, VT_working_copy;
   std::tie(U_working_copy, S_working_copy, VT_working_copy) = _create_U_S_VT(self, some, compute_uv);
 
-  if (self.numel() > 0) {
-    auto self_working_copy = cloneBatchedColumnMajor(self);
+  auto self_working_copy = cloneBatchedColumnMajor(self);
 
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cpu", [&]{
-      apply_svd<scalar_t>(self_working_copy, U_working_copy, S_working_copy, VT_working_copy, jobz, infos);
-    });
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cpu", [&]{
+    apply_svd<scalar_t>(self_working_copy, U_working_copy, S_working_copy, VT_working_copy, jobz, infos);
+  });
 
-    if (self.dim() > 2) {
-      batchCheckErrors(infos, "svd_cpu");
-    } else {
-      singleCheckErrors(infos[0], "svd_cpu");
-    }
-
-    if (compute_uv) {
-      if (some) {
-        VT_working_copy = VT_working_copy.narrow(-2, 0, k);
-      }
-    } else {
-      VT_working_copy.zero_();
-      U_working_copy.zero_();
-    }
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "svd_cpu");
   } else {
-    U_working_copy.zero_();
-    VT_working_copy.zero_();
+    singleCheckErrors(infos[0], "svd_cpu");
   }
+
+  if (!compute_uv) {
+    VT_working_copy.zero_();
+    U_working_copy.zero_();
+  }
+
+  if (some) {
+    VT_working_copy = VT_working_copy.narrow(-2, 0, k);
+  }
+
   // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
   // Note that the 'apply_svd' routine returns VT = V^T (for real inputs) or VT = V^H (for complex inputs), not V.
   VT_working_copy = VT_working_copy.conj();

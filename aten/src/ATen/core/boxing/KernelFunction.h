@@ -53,6 +53,9 @@ public:
 
   KernelFunction();
 
+  // Fast path for dispatch to allow not touching the boxed kernel in
+  // the common case where unboxed is available.
+  bool isValidUnboxed() const;
   bool isValid() const;
   bool isFallthrough() const;
 
