@@ -1829,6 +1829,12 @@ static void svd_resize_and_copy(const char *name, const Tensor& src, Tensor &dst
 
 std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(Tensor& U, Tensor& S, Tensor& VT,
                                                      const Tensor& self, bool full_matrices, bool compute_uv) {
+  checkLinalgCompatibleDtype("svd", U, self, "U");
+  checkLinalgCompatibleDtype("svd", VT, self, "VT");
+  // singular values are always real-valued here
+  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
+  TORCH_CHECK(at::isFloatingType(S.scalar_type()),
+    "S dtype ", S.scalar_type(), " does not match self dtype ", real_dtype);
   Tensor U_tmp, S_tmp, VT_tmp;
   std::tie(U_tmp, S_tmp, VT_tmp) = at::linalg_svd(self, full_matrices, compute_uv);
   svd_resize_and_copy("U", U_tmp, U);
