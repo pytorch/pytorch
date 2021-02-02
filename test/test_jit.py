@@ -1276,22 +1276,14 @@ graph(%Ra, %Rb):
         FileCheck().run(input_str, graph)
 
     def test_script_tensor_type(self):
-        def foo1(x):
-            return x.type(torch.int8)
-
-        def foo2(x):
-            return x.type(torch.float32)
-
-        def foo3(x):
-            return x.type(torch.float64)
-
-        scr1 = torch.jit.script(foo1)
-        scr2 = torch.jit.script(foo2)
-        scr3 = torch.jit.script(foo3)
+        def foo(x, t: torch.dtype):
+            return x.type(t)
+        scr = torch.jit.script(foo)
         x = torch.rand(3, 4)
-        self.assertEqual(scr1(x), foo1(x))
-        self.assertEqual(scr2(x), foo2(x))
-        self.assertEqual(scr3(x), foo3(x))
+        for t in [torch.int8, torch.float64, torch.float32, \
+                    torch.bfloat16, torch.complex64, torch.complex128, torch.bool]:
+            self.assertEqual(scr(x, t), foo(x, t))
+
 
     def test_shape_analysis_masked_select(self):
         input_str = """graph(%0 : Float(),
