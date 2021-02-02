@@ -73,8 +73,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # we want to pin to version 3.5.
   SCIPY_VERSION=1.1.0
   if [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
-    # Install llvm-10 as it is required to compile llvmlite from source
-    conda_install numpy=1.19.2 pyyaml mkl mkl-include setuptools cffi future six llvmdev=10.0.0 -c conda-forge
+    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
+    conda_install numpy=1.19.2 pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0 -c conda-forge
     SCIPY_VERSION=1.6.0
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
@@ -111,9 +111,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   as_jenkins pip install --progress-bar off pytest \
     scipy==$SCIPY_VERSION \
     scikit-image \
-    librosa>=0.6.2 \
     psutil \
-    llvmlite \
     unittest-xml-reporting \
     boto3==1.16.34 \
     coverage==5.5 \
@@ -121,10 +119,12 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     mypy==0.812 \
     tb-nightly
 
-  # Install numba and mypy only on python-3.8 or below
+  # Install numba only on python-3.8 or below
   # For numba issue see https://github.com/pytorch/pytorch/issues/51511
   if [[ $(python -c "import sys; print(int(sys.version_info < (3, 9)))") == "1" ]]; then
-    as_jenkins pip install --progress-bar off numba
+    as_jenkins pip install --progress-bar off numba librosa>=0.6.2
+  else
+    as_jenkins pip install --progress-bar off numba==0.49.0 librosa>=0.6.2
   fi
 
   # Update scikit-learn to a python-3.8 compatible version
