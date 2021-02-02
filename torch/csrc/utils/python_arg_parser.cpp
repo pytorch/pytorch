@@ -423,7 +423,7 @@ bool is_float_or_complex_list(PyObject* obj) {
   return true;
 }
 
-static bool is_int_list(PyObject* obj) {
+static bool is_int_list(PyObject* obj, int broadcast_size) {
   if (PyTuple_Check(obj) || PyList_Check(obj)) {
     if (PySequence_Size(obj) == 0) {
       return true;
@@ -435,7 +435,7 @@ static bool is_int_list(PyObject* obj) {
     return (THPVariable_Check(item.ptr()) || THPUtils_checkIndex(item.ptr()));
   }
   // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single int
-  return size > 0 && THPUtils_checkLong(obj);
+  return broadcast_size > 0 && THPUtils_checkLong(obj);
 }
 
 // argnum is needed for raising the TypeError, it's used in the error message.
@@ -485,7 +485,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
     case ParameterType::TENSOR_LIST: {
       return is_tensor_list_and_append_overloaded(obj, &overloaded_args, argnum, true /* throw_error */);
     }
-    case ParameterType::INT_LIST: return is_int_list(obj);
+    case ParameterType::INT_LIST: return is_int_list(obj, size);
     case ParameterType::FLOAT_LIST: return is_float_or_complex_list(obj);
     case ParameterType::GENERATOR: return THPGenerator_Check(obj);
     case ParameterType::BOOL: return PyBool_Check(obj);
