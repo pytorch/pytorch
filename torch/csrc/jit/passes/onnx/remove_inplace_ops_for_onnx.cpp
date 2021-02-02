@@ -534,48 +534,6 @@ static void PrepareListAppendAndInsertForONNX(Block* b) {
   }
 }
 
-// Handles special case of binary inplace ops, where the first input node
-// has a lower type precedence than the second input node. When the
-// inplace node is converted to a regular op, this information is lost and
-// the resulting type is based on type precedence, just like regular ops.
-// To avoid this loss of information, we add a cast node before the input
-// node with the higher data type precedence, so that both the input types
-// are the same.
-// An example scenario would be:
-// Before:
-// graph(%0 : Float),
-//        %1 : Half):
-//   %4 : Float = onnx::Cast[to=1](%1)
-//   %5 : Float = onnx::Add(%4, %0)
-//   ...
-// After:
-// graph(%0 : Float),
-//        %1 : Half):
-//   %4 : Half = onnx::Cast[to=10](%0)
-//   %5 : Half = onnx::Add(%1, %4)
-//   ...
-
-static void ImplicitCastForBinaryInplaceOps(Node* inplaceNode) {
-  // Check type if inplace operation is a binary node
-  if ((inplaceNode->kind() == aten::add_) ||
-      (inplaceNode->kind() == aten::sub_) ||
-      (inplaceNode->kind() == aten::mul_) ||
-      (inplaceNode->kind() == aten::div_)) {
-    auto orignalInputs = inplaceNode->inputs();
-    if (orignalInputs.at(0)
-            ->type()
-            ->cast<TensorType>()
-            ->scalarType()
-            .has_value()) {
-      auto newInputNode = inplaceNode->owningGraph()->create(aten::type_as, 1);
-      newInputNode->insertBefore(inplaceNode);
-      newInputNode->addInput(orignalInputs.at(1));
-      newInputNode->addInput(orignalInputs.at(0));
-      inplaceNode->replaceInput(1, newInputNode->outputs()[0]);
-    }
-  }
-}
-
 // Remove Mutation pass does not handle mutation on block inputs.
 // To fix this, insert a clone node following the graph input:
 // Example for graph input node %0:
@@ -603,7 +561,6 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
       if (!mr.inplaceOpVariant(node)) {
         continue;
       }
-      ImplicitCastForBinaryInplaceOps(node);
 
       auto it = std::find(node->inputs().begin(), node->inputs().end(), input);
 
@@ -642,6 +599,53 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
 
 } // namespace
 
+// Handles special case of binary inplace ops, where the first input node
+// has a lower type precedence than the second input node. When the
+// inplace node is converted to a regular op, this information is lost and
+// the resulting type is based on type precedence, just like regular ops.
+// To avoid this loss of information, we add a cast node before the input
+// node with the higher data type precedence, so that both the input types
+// are the same.
+// An example scenario would be:
+// Before:
+// graph(%0 : Float),
+//        %1 : Half):
+//   %4 : Float = onnx::Cast[to=1](%1)
+//   %5 : Float = onnx::Add(%4, %0)
+//   ...
+// After:
+// graph(%0 : Float),
+//        %1 : Half):
+//   %4 : Half = onnx::Cast[to=10](%0)
+//   %5 : Half = onnx::Add(%1, %4)
+//   ...
+
+void ImplicitCastForBinaryInplaceOps(Block* b) {
+  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
+    for (auto* child_block : it->blocks()) {
+      ImplicitCastForBinaryInplaceOps(child_block);
+    }
+
+    // Check type if inplace operation is a binary node
+    if ((it->kind() == aten::add_) || (it->kind() == aten::sub_) ||
+        (it->kind() == aten::mul_) || (it->kind() == aten::div_)) {
+      auto orignalInputs = it->inputs();
+      TensorTypePtr firstInp_tensor =
+          orignalInputs.at(0)->type()->cast<TensorType>();
+      TensorTypePtr secondInp_tensor =
+          orignalInputs.at(1)->type()->cast<TensorType>();
+      if ((firstInp_tensor) && (secondInp_tensor) &&
+          (firstInp_tensor->scalarType().has_value())) {
+        auto newInputNode = it->owningGraph()->create(aten::type_as, 1);
+        newInputNode->insertBefore(*it);
+        newInputNode->addInput(orignalInputs.at(1));
+        newInputNode->addInput(orignalInputs.at(0));
+        it->replaceInput(1, newInputNode->outputs().at(0));
+      }
+    }
+  }
+}
+
 void PrepareInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
   PrepareCopyForONNX(graph->block());
   PrepareIndexPutForONNX(graph->block());
@@ -651,6 +655,7 @@ void PrepareInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
 
 void RemoveInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
   MutationRemover mr(graph);
+  ImplicitCastForBinaryInplaceOps(graph->block());
   PrepareForRemoveMutations(mr, graph->block());
   RemoveTensorMutation(graph);
   RemoveListMutation(graph);

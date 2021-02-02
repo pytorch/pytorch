@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 
 namespace torch {
@@ -77,6 +78,7 @@ void RemoveInplaceOps(Block* block) {
 } // namespace
 
 void RemoveInplaceOps(const std::shared_ptr<Graph>& graph) {
+  ImplicitCastForBinaryInplaceOps(graph->block());
   RemoveInplaceOps(graph->block());
 }
 } // namespace jit
