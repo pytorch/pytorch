@@ -1981,13 +1981,10 @@ Tensor linalg_cond(const Tensor& self, optional<Scalar> opt_ord) {
 }
 
 Tensor& linalg_cond_out(Tensor& result, const Tensor& self, optional<Scalar> opt_ord) {
-  // If ord == None or ord == ±2 then SVD is used to compute the condition number
-  // the result is always real-valued, for other cases it is complex-valued for the complex-valued input.
-  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
-  Scalar ord = opt_ord.has_value() ? opt_ord.value() : 2;
-
-  TORCH_CHECK(result.scalar_type() == real_dtype,
-    "result dtype ", result.scalar_type(), " does not match the expected dtype ", real_dtype);
+  checkSameDevice("linalg_cond", result, self);
+  ScalarType real_type = toValueType(typeMetaToScalarType(self.dtype()));
+  TORCH_CHECK(isFloatingType(result.scalar_type()),
+    "result dtype ", result.scalar_type(), " does not match the expected dtype ", real_type);
 
   Tensor result_tmp = at::linalg_cond(self, opt_ord);
   at::native::resize_output(result, result_tmp.sizes());
@@ -2017,8 +2014,9 @@ Tensor linalg_cond(const Tensor& self, std::string ord) {
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 Tensor& linalg_cond_out(Tensor& result, const Tensor& self, std::string ord) {
+  checkSameDevice("linalg_cond", result, self);
   ScalarType real_type = toValueType(self.scalar_type());
-  TORCH_CHECK(result.scalar_type() == real_type,
+  TORCH_CHECK(isFloatingType(result.scalar_type()),
     "result dtype ", result.scalar_type(), " does not match the expected dtype ", real_type);
 
   Tensor result_tmp = at::linalg_cond(self, ord);
