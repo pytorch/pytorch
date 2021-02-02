@@ -738,6 +738,7 @@ struct TORCH_API DictType : public Type {
       case TypeKind::IntType:
       case TypeKind::BoolType:
       case TypeKind::FloatType:
+      case TypeKind::ComplexDoubleType:
       case TypeKind::StringType:
       case TypeKind::TensorType:
         return DictTypePtr(new DictType(key, value));
@@ -745,7 +746,7 @@ struct TORCH_API DictType : public Type {
         AT_ERROR(
             "Cannot create dict for key type '",
             key->str(),
-            "', only int, float, Tensor and string keys are supported");
+            "', only int, float, complex, Tensor and string keys are supported");
     }
   }
 
