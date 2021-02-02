@@ -558,4 +558,10 @@ API Reference
 
 .. autoclass:: torch.fx.Proxy
 
+.. autoclass:: torch.fx.Interpreter
+  :members:
+
+.. autoclass:: torch.fx.Transformer
+  :members:
+
 .. autofunction:: torch.fx.replace_pattern

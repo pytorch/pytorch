@@ -620,6 +620,27 @@ def sample_inputs_index_select(op_info, device, dtype, requires_grad):
                         0, torch.tensor(0, dtype=torch.int64, device=device))),
             )
 
+def sample_inputs_index_fill(op_info, device, dtype, requires_grad):
+    samples = []
+    t = make_tensor((S, S, S), device, dtype,
+                    low=None, high=None,
+                    requires_grad=requires_grad)
+    fill_val = torch.tensor(-1 + 1j if t.is_complex() else -1)
+    # non-contiguous input
+    t01 = t.transpose(0, 1)
+    t02 = t.transpose(0, 2)
+    t12 = t.transpose(1, 2)
+    idx = index_variable(1, S, device=device)
+    # non-contiguous index
+    idx_nonctg = torch.empty_strided((S,), (2,), device=device, dtype=torch.int64)
+    idx_nonctg.copy_(idx)
+    for d in range(t.dim()):
+        for tensor in [t, t01, t02, t12]:
+            samples.append(SampleInput((tensor, d, idx, fill_val)))
+            samples.append(SampleInput((tensor, d, -idx - 1, fill_val)))
+            samples.append(SampleInput((tensor, d, idx_nonctg, fill_val)))
+    return samples
+
 def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((4, 3, 2, 1), device, dtype,
                                      low=None, high=None,
@@ -1271,6 +1292,12 @@ op_db: List[OpInfo] = [
            supports_tensor_out=False,
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_broadcast_to),
+    UnaryUfuncInfo('ceil',
+                   ref=np.ceil,
+                   dtypes=floating_types_and(torch.half),
+                   dtypesIfCPU=floating_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.half),
+                   assert_autodiffed=True),
     TriangularOpInfo('cholesky_inverse',
                      op=torch.cholesky_inverse,
                      dtypes=floating_and_complex_types(),
@@ -1426,6 +1453,12 @@ op_db: List[OpInfo] = [
                      supports_tensor_out=True,
                      check_batched_gradgrad=False,
                      test_inplace_grad=False,),
+    UnaryUfuncInfo('floor',
+                   ref=np.floor,
+                   dtypes=floating_types_and(torch.half),
+                   dtypesIfCPU=floating_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.half),
+                   assert_autodiffed=True),
     OpInfo('flip',
            op=torch.flip,
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -1846,6 +1879,11 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
            sample_inputs_func=sample_inputs_gather),
+    OpInfo('index_fill',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           test_inplace_grad=False,
+           supports_tensor_out=False,
+           sample_inputs_func=sample_inputs_index_fill),
     OpInfo('index_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            test_inplace_grad=False,
@@ -2390,10 +2428,6 @@ def method_tests():
         ('sgn', (), NO_ARGS, 'scalar'),
         ('trunc', (S, S, S), NO_ARGS, '', (True,)),
         ('trunc', (), NO_ARGS, 'scalar', (True,)),
-        ('floor', (S, S, S), NO_ARGS, '', (True,)),
-        ('floor', (), NO_ARGS, 'scalar', (True,)),
-        ('ceil', (S, S, S), NO_ARGS, '', (True,)),
-        ('ceil', (), NO_ARGS, 'scalar', (True,)),
         ('rad2deg', (S, S, S), NO_ARGS),
         ('deg2rad', (S, S, S), NO_ARGS),
         # Removing the 'rsqrt' entries leads to failure in
