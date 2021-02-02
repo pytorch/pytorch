@@ -54,7 +54,6 @@ class MinTerm;
 class ReduceOp;
 class AtomicAdd;
 class SyncThreads;
-class ExternalCall;
 
 class TORCH_API IRMutator {
  public:
@@ -108,7 +107,6 @@ class TORCH_API IRMutator {
   virtual Stmt* mutate(const Store* v);
   virtual Stmt* mutate(const AtomicAdd* v);
   virtual Stmt* mutate(const SyncThreads* v);
-  virtual Stmt* mutate(const ExternalCall* v);
 
   virtual Stmt* mutate(const Allocate* v);
   virtual Stmt* mutate(const Free* v);
