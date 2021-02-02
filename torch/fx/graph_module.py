@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.overrides
 from torch.nn.modules.module import _addindent
-from torch.package import PackageImporter
+from torch.package import PackageImporter, PackageExporter, ImporterProxy
 import linecache
 from typing import Type, Dict, List, Any, Union, Optional
 from .graph import Graph
@@ -37,24 +37,28 @@ def patched_getline(*args, **kwargs):
 linecache.getlines = patched_getline
 
 
-def _forward_from_src(src: str, current_importer: Optional[PackageImporter]):
+def _forward_from_src(src: str, importer: Optional[PackageImporter]):
     # If you add more globals here, remember to add their names to fx.graph._shadows_builtin_name!
     gbls: Dict[str, Any] = {'inf': math.inf, 'nan': math.nan, 'NoneType' : type(None)}
-    if current_importer is not None:
-        gbls['__loader__'] = current_importer
-        gbls['__builtins__'] = current_importer.patched_builtins
+    if importer is not None:
+        gbls['__loader__'] = importer
+        gbls['__builtins__'] = importer.patched_builtins
 
     exec_with_source(src, gbls)
     return gbls['forward']
 
 
-def deserialize_graphmodule(body : dict) -> torch.nn.Module:
+def deserialize_graphmodule(_importer: Union[ImporterProxy, PackageImporter], body: dict) -> torch.nn.Module:
     """
     Deserialize a GraphModule given the dictionary of the original module,
     using the code to reconstruct the graph. We delete the actual graph before
     saving the dictionary so that changes to the in-memory graph format do not
     get serialized.
     """
+    importer: Optional[PackageImporter] = None
+    if isinstance(_importer, PackageImporter):
+        importer = _importer
+
     # We create a dummy class here because symbolic_trace pulls the forward()
     # function off of the class, rather than the instance
     class CodeOnlyModule(torch.nn.Module):
@@ -62,14 +66,12 @@ def deserialize_graphmodule(body : dict) -> torch.nn.Module:
             super().__init__()
             self.__dict__ = body
 
-    current_importer = torch.package.importer.get_current_importer()
-
     try:
-        CodeOnlyModule.forward = _forward_from_src(body['_code'], current_importer)
+        CodeOnlyModule.forward = _forward_from_src(body['_code'], importer)
     except KeyError:
         # BC: attribute name was changed from `code` to `_code` to facilitate
         # making `code` into a property and adding a docstring to it
-        CodeOnlyModule.forward = _forward_from_src(body['code'], current_importer)
+        CodeOnlyModule.forward = _forward_from_src(body['code'], importer)
 
     from .symbolic_trace import Tracer
 
@@ -80,9 +82,7 @@ def deserialize_graphmodule(body : dict) -> torch.nn.Module:
             return True
 
     com = CodeOnlyModule(body)
-    ret = GraphModule(com, KeepModules().trace(com))
-    ret.importer = current_importer
-    return ret
+    return GraphModule(com, KeepModules().trace(com), _importer=importer)
 
 # copy an attribute value with qualified name 'target' from 'from_module' to 'to_module'
 # This installs empty Modules where none exist yet if they are subpaths of target
@@ -150,7 +150,11 @@ class GraphModule(torch.nn.Module):
             pass
         return super().__new__(GraphModuleImpl)
 
-    def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph, class_name: str = 'GraphModule'):
+    def __init__(self,
+                 root: Union[torch.nn.Module, Dict[str, Any]],
+                 graph: Graph,
+                 class_name: str = 'GraphModule',
+                 _importer: Optional[PackageImporter] = None):
         """
         Construct a GraphModule.
 
@@ -167,14 +171,14 @@ class GraphModule(torch.nn.Module):
 
             graph (Graph): ``graph`` contains the nodes this GraphModule should use for code generation
 
-            name (str): ``name`` denotes the name of this GraphModule for debugging purposes. If it's unset, all
+            class_name (str): ``name`` denotes the name of this GraphModule for debugging purposes. If it's unset, all
                 error messages will report as originating from ``GraphModule``. It may be helpful to set this
                 to ``root``'s original name or a name that makes sense within the context of your transform.
 
         """
         super().__init__()
         self.__class__.__name__ = class_name
-        self.importer: Optional[PackageImporter] = None
+        self._importer: Optional[PackageImporter] = _importer
         if isinstance(root, torch.nn.Module):
             if hasattr(root, 'training'):
                 self.training = root.training
@@ -305,7 +309,7 @@ class {module_name}(torch.nn.Module):
         """
         self._code = self._graph.python_code(root_module='self')
         cls = type(self)
-        cls.forward = _forward_from_src(self._code, self.importer)
+        cls.forward = _forward_from_src(self._code, self._importer)
 
         cls_call = cls.__call__
 
@@ -321,6 +325,26 @@ class {module_name}(torch.nn.Module):
                 sys.excepthook = old_excepthook
         cls.__call__ = wrapped_call
 
+    def __torch_package_persist__(self, exporter: PackageExporter):
+        # HACK: Here we take advantage of the fact that `persistent_id` is
+        # called on every object in pickle.save() to add a side-effect to
+        # GraphModule pickling.
+        #
+        # GraphModule needs to register its dependencies in PackageExporter, so
+        # do it here.
+        for import_ in self._graph._imports:
+            if isinstance(import_, tuple):
+                # Of the form 'from base import attr'
+                base, _attr = import_
+                exporter.require_module_if_not_provided(base)
+            else:
+                # Of the form 'import import_'
+                exporter.require_module_if_not_provided(import_)
+
+        # Return `None` so that the pickler continues on and pickles
+        # `GraphModule` as normal after this.
+        return None
+
     def __reduce__(self):
         """
         Serialization of GraphModule. We serialize only the generated code, not
@@ -329,20 +353,9 @@ class {module_name}(torch.nn.Module):
         On the deserialization side, we symbolically trace through the generated
         code to regenerate the underlying ``Graph``
         """
-        current_exporter = torch.package.exporter.get_current_exporter()
-        if current_exporter is not None:
-            for import_ in self._graph._imports:
-                if isinstance(import_, tuple):
-                    # Of the form 'from base import attr'
-                    base, attr = import_
-                    current_exporter.require_module_if_not_provided(base)
-                else:
-                    # Of the form 'import import_'
-                    current_exporter.require_module_if_not_provided(import_)
-
         dict_without_graph = self.__dict__.copy()
         del dict_without_graph['_graph']
-        return (deserialize_graphmodule, (dict_without_graph,))
+        return (deserialize_graphmodule, (ImporterProxy(), dict_without_graph,))
 
     # because __reduce__ is defined for serialization,
     # we need to define deepcopy otherwise it will call __reduce__

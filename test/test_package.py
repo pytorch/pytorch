@@ -616,8 +616,5 @@ class ManglingTest(TestCase):
         self.assertTrue(packaged_dependency is not package_a.subpackage)
 
 
-
-
-
 if __name__ == '__main__':
     run_tests()

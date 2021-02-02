@@ -2,7 +2,6 @@ import torch
 from torch.serialization import normalize_storage_type, location_tag
 import io
 import pickletools
-from contextlib import contextmanager
 from .find_file_dependencies import find_files_source_depends_on
 from ._custom_import_pickler import create_custom_import_pickler, import_module_from_importers
 from ._importlib import _normalize_path
@@ -270,35 +269,34 @@ node [shape=box];
             obj (Any): The object to save, must be picklable.
             dependencies (bool, optional): If True, we scan the source for dependencies (see :ref:`Dependencies`).
         """
-        with _set_current_exporter(self):
-            filename = self._filename(package, resource)
-            # Write the pickle data for `obj`
-            data_buf = io.BytesIO()
-            pickler = create_custom_import_pickler(data_buf, self.importers)
-            pickler.persistent_id = self._persistent_id
-            pickler.dump(obj)
-            data_value = data_buf.getvalue()
+        filename = self._filename(package, resource)
+        # Write the pickle data for `obj`
+        data_buf = io.BytesIO()
+        pickler = create_custom_import_pickler(data_buf, self.importers)
+        pickler.persistent_id = self._persistent_id
+        pickler.dump(obj)
+        data_value = data_buf.getvalue()
 
-            if dependencies:
-                all_dependencies = []
-                for opcode, arg, pos in pickletools.genops(data_value):
-                    if opcode.name == 'GLOBAL':  # a global reference
-                        assert isinstance(arg, str)
-                        module, field = arg.split(' ')
-                        if module not in all_dependencies:
-                            all_dependencies.append(module)
+        if dependencies:
+            all_dependencies = []
+            for opcode, arg, pos in pickletools.genops(data_value):
+                if opcode.name == 'GLOBAL':  # a global reference
+                    assert isinstance(arg, str)
+                    module, field = arg.split(' ')
+                    if module not in all_dependencies:
+                        all_dependencies.append(module)
 
-                for dep in all_dependencies:
-                    self.debug_deps.append((package + '.' + resource, dep))
+            for dep in all_dependencies:
+                self.debug_deps.append((package + '.' + resource, dep))
 
-                if self.verbose:
-                    dep_string = ''.join(f'  {dep}\n' for dep in all_dependencies)
-                    print(f"{resource} depends on:\n{dep_string}\n")
+            if self.verbose:
+                dep_string = ''.join(f'  {dep}\n' for dep in all_dependencies)
+                print(f"{resource} depends on:\n{dep_string}\n")
 
-                for module_name in all_dependencies:
-                    self.require_module_if_not_provided(module_name)
+            for module_name in all_dependencies:
+                self.require_module_if_not_provided(module_name)
 
-            self._write(filename, data_value)
+        self._write(filename, data_value)
 
     def save_text(self, package: str, resource: str, text: str):
         """Save text data to the package
@@ -386,11 +384,6 @@ node [shape=box];
         return qualified_name in self.provided
 
     def _persistent_id(self, obj):
-        # FIXME: the docs say that persistent_id should only return a string
-        # but torch store returns tuples. This works only in the binary protocol
-        # see
-        # https://docs.python.org/2/library/pickle.html#pickling-and-unpickling-external-objects
-        # https://github.com/python/cpython/blob/master/Lib/pickle.py#L527-L537
         if torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
             obj_key = str(obj._cdata)
@@ -402,6 +395,11 @@ node [shape=box];
                     obj_key,
                     location,
                     obj.size())
+        elif isinstance(obj, ImporterProxy):
+            return ('package-importer', )
+        if hasattr(obj, '__torch_package_persist__'):
+            return obj.__torch_package_persist__(self)
+
         return None
 
     def __enter__(self):
@@ -522,20 +520,26 @@ class _GlobGroup:
         return re.compile(result)
 
 
-_current_exporter: Optional[PackageExporter] = None
+class ImporterProxy():
+    """An object that represents the current PackageImporter during the import process.
 
+    When pickled by PackageExporter and then unpickled by PackageImporter,
+    this class will come back as the PackageImporter instance doing the
+    unpickling. This can be used as an argument to __reduce__() to access the
+    current importer in the reduction function.
 
-def get_current_exporter() -> Optional[PackageExporter]:
-    global _current_exporter
-    return _current_exporter
+    e.g.
 
+    class Foo:
+        def __reduce__(self):
+            return my_function, (ImporterProxy(),)
 
-@contextmanager
-def _set_current_exporter(exporter):
-    global _current_exporter
-    assert _current_exporter is None
-    _current_exporter = exporter
-    try:
-        yield _current_exporter
-    finally:
-        _current_exporter = None
+    def my_function(importer: Union[PackageImporter, ImporterProxy]):
+        if isinstance(importer, PackageImporter):
+            # This object is being loaded from a PackageImporter.
+            # Now you can do something with that importer.
+        else:
+            # This object is being unpickled by the default unpickler.
+            # `importer` is just be a regular ImporterProxy.
+    """
+    pass

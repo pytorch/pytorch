@@ -1,11 +1,11 @@
 from typing import List, Callable, Dict, Optional, Any, Union, BinaryIO
 import builtins
-from contextlib import contextmanager
 import importlib
+import io
 import linecache
-from torch.serialization import _load
 import pickle
 import torch
+from torch.serialization import _get_restore_location, _maybe_decode_ascii
 import _compat_pickle  # type: ignore
 import types
 import os.path
@@ -83,6 +83,7 @@ class PackageImporter:
         self.modules['resources'] = self  # type: ignore
 
         self._mangler = PackageMangler()
+        self._loaded_storages: Dict[str, Any] = {}
 
         # used for torch.serialization._load
         self.Unpickler = lambda *args, **kwargs: _UnpicklerWrapper(self, *args, **kwargs)
@@ -130,6 +131,13 @@ class PackageImporter:
         data = self.load_binary(package, resource)
         return data.decode(encoding, errors)
 
+    def _load_tensor(self, data_type, size, key, location, restore_location):
+        name = f'data/{key}'
+        dtype = data_type(0).dtype
+
+        storage = self.zip_reader.get_storage_from_record(name, size, dtype).storage()
+        self._loaded_storages[key] = restore_location(storage, location)
+
     def load_pickle(self, package: str, resource: str, map_location=None) -> Any:
         """Unpickles the resource from the package, loading any modules that are needed to construct the objects
         using :meth:`import_module`
@@ -143,8 +151,33 @@ class PackageImporter:
             Any: the unpickled object.
         """
         pickle_file = self._zipfile_path(package, resource)
-        with _set_current_importer(self):
-            return _load(self.zip_reader, map_location, self, pickle_file=pickle_file)
+        restore_location = _get_restore_location(map_location)
+
+        def persistent_load(saved_id):
+            assert isinstance(saved_id, tuple)
+            typename = _maybe_decode_ascii(saved_id[0])
+            data = saved_id[1:]
+
+            if typename == 'storage':
+                data_type, key, location, size = data
+                if key not in self._loaded_storages:
+                    self._load_tensor(data_type, size, key, _maybe_decode_ascii(location), restore_location)
+                storage = self._loaded_storages[key]
+                return storage
+            elif typename == 'package-importer':
+                return self
+            else:
+                f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
+
+        # Load the data (which may in turn use `persistent_load` to load tensors)
+        data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
+        unpickler = self.Unpickler(data_file)
+        unpickler.persistent_load = persistent_load
+        result = unpickler.load()
+
+        torch._utils._validate_loaded_sparse_tensors()
+
+        return result
 
     def id(self):
         """
@@ -431,22 +464,3 @@ class _ModuleNode(_PathNode):
 
 class _ExternNode(_PathNode):
     pass
-
-
-_current_importer: Optional[PackageImporter] = None
-
-
-def get_current_importer() -> Optional[PackageImporter]:
-    global _current_importer
-    return _current_importer
-
-
-@contextmanager
-def _set_current_importer(importer):
-    global _current_importer
-    assert _current_importer is None
-    _current_importer = importer
-    try:
-        yield _current_importer
-    finally:
-        _current_importer = None

@@ -1,7 +1,7 @@
 from .node import Node, Argument, Target, map_arg
 
 from typing import Callable, Any, List, Dict, Optional, Tuple, Set, Union
-from torch.package._mangling import demangle
+from torch.package._mangling import demangle as _demangle
 import builtins
 import torch
 import types
@@ -650,23 +650,8 @@ class Graph:
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
 
-        # demangled name -> original name
-        # This is to detect collisions.
-        demangled_names: Dict[str, str] = {}
-
         def type_repr(o : Any):
-            mangled_typename = _type_repr(o)
-            # NOTE: 'o' may have been retrieved from a torch.package, which means its typename will be mangled,
-            # e.g. '<torch_package_0>.foo.bar'. Demangle it, and additionally detect any potential collisions,
-            # like with an already existing 'foo.bar'. See torch/package/mangling.md for more information.
-            typename = demangle(mangled_typename)
-            if typename not in demangled_names:
-                demangled_names[typename] = mangled_typename
-            if demangled_names[typename] != mangled_typename:
-                raise RuntimeError("Encountered ambiguous types: "
-                                   f"'{mangled_typename}' and '{demangled_names[typename]}'.\n"
-                                   "This happens if you traced a module that contains "
-                                   "both code that you defined and code from a torch.package.")
+            typename = _type_repr(o)
 
             # Common case: this is a regular module name like 'foo.bar.baz'
             if all(x.isidentifier() for x in typename.split('.')):
@@ -679,7 +664,6 @@ class Graph:
                 # make sure we have torch.Tensor
                 type_repr(sub_type)
             return typename
-
 
         # Run through reverse nodes and record the first instance of a use
         # of a given node. This represents the *last* use of the node in the
@@ -771,8 +755,30 @@ class Graph:
             emit_node(node)
             delete_unused_values(node)
 
-        # repr() for inf and nan floating point values aren't parseable by
-        # python as literals. Explicitly import the names from the ``math`` module.
+        # Handle imports
+        #
+        # First, demangle qualified names. Types may have been retrieved from a
+        # torch.package, which means its typename will be mangled, e.g.
+        # '<torch_package_0>.foo.bar'. Demangle it, and additionally detect any
+        # potential collisions, like with an already existing 'foo.bar'. See
+        # torch/package/mangling.md for more information.
+
+        # demangled name -> original name
+        # This is to detect collisions.
+        demangled_names: Dict[str, str] = {}
+
+        def demangle(name):
+            demangled = _demangle(name)
+            if name not in demangled_names:
+                demangled_names[demangled] = name
+            if demangled_names[demangled] != name:
+                raise RuntimeError("Encountered ambiguous types: "
+                                   f"'{name}' and '{demangled_names[name]}'.\n"
+                                   "This happens if you traced a module that contains "
+                                   "both code that you defined and code from a torch.package.")
+            return demangled
+
+        qualnames_used = {demangle(name) for name in qualnames_used}
         self._imports = set()
         for qualname in qualnames_used:
             import_ = _get_import(qualname)
@@ -793,6 +799,7 @@ class Graph:
 {import_block}
 def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
 {code}"""
+
         return fn_code
 
     def __str__(self) -> str:
