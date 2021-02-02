@@ -887,8 +887,8 @@ Tensor linalg_cholesky(const Tensor &self) {
 }
 
 Tensor& linalg_cholesky_out(Tensor &result, const Tensor &self) {
-  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+  checkSameDevice("linalg_cholesky", result, self);
+  checkLinalgCompatibleDtype("linalg_cholesky", result, self);
   Tensor result_tmp = at::linalg_cholesky(self);
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);

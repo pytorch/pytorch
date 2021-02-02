@@ -210,8 +210,15 @@ class TestLinalg(TestCase):
 
         # dtypes should match
         out = torch.empty_like(A).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
+        with self.assertRaisesRegex(RuntimeError, "got result with dtype Int and input with dtype"):
             torch.linalg.cholesky(A, out=out)
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out = torch.empty(0, device=wrong_device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "Expected result and input tensors to be on the same device"):
+                torch.linalg.cholesky(A, out=out)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
