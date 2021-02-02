@@ -809,9 +809,11 @@ Tensor cholesky_solve(const Tensor& self, const Tensor& A, bool upper) {
 }
 
 Tensor& cholesky_solve_out(Tensor& result, const Tensor& self, const Tensor& A, bool upper) {
-  Tensor result_tmp;
-  result_tmp = at::cholesky_solve(self, A, upper);
-  result.resize_as_(result_tmp).copy_(result_tmp);
+  checkSameDevice("cholesky_solve", result, self);
+  checkLinalgCompatibleDtype("cholesky_solve", result, self);
+  Tensor result_tmp = at::cholesky_solve(self, A, upper);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
   return result;
 }
 
