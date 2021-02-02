@@ -1601,7 +1601,7 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
       } break;
     }
   } else if (v->dtype().is_integral() && v->op_type() == kAbs) {
-    // abs is only intrinsic defined for integer inputs in pytorch eager
+    // abs is one of 3 intrinsic defined for integer inputs in pytorch eager
     v->params().front()->accept(this);
     if (!v->dtype().is_signed()) {
       return;
@@ -1612,11 +1612,15 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
     auto icmp = irb_.CreateICmpSGT(value_, zero);
     value_ = irb_.CreateSelect(icmp, value_, neg_value);
     return;
+  } else if (v->dtype().is_integral() && (v->op_type() == kCeil || v->op_type() == kFloor)) {
+    // ceil and floor are no-ops for integer inputs
+    v->params().front()->accept(this);
+    return;
   } else {
     TORCH_INTERNAL_ASSERT(
         false,
         v,
-        "Unimplemented lowering:",
+        "Unimplemented lowering: ",
         v->op_type(),
         " for input of dtype",
         v->dtype().scalar_dtype());
