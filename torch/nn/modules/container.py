@@ -31,6 +31,7 @@ class Sequential(Module):
     r"""A sequential container.
     Modules will be added to it in the order they are passed in the constructor.
     Alternatively, an ordered dict of modules can also be passed in.
+    You can also use **kwargs to pass in modules, since Python 3.6 **kwargs are order preserving.
 
     To make it easier to understand, here is a small example::
 
@@ -49,6 +50,14 @@ class Sequential(Module):
                   ('conv2', nn.Conv2d(20,64,5)),
                   ('relu2', nn.ReLU())
                 ]))
+
+        # Example of using Sequential with **kwargs
+        model = nn.Sequential(
+            conv1=nn.Conv2d(1, 20, 5),
+            relu1=nn.ReLU(),
+            conv2=nn.Con2d(20,64,5),
+            relu2=nn.ReLU(),
+        )
     """
 
     @overload
@@ -59,9 +68,16 @@ class Sequential(Module):
     def __init__(self, arg: 'OrderedDict[str, Module]') -> None:
         ...
 
-    def __init__(self, *args):
+    @overload
+    def __init__(self, **kwargs) -> None:
+        ...
+
+    def __init__(self, *args, **kwargs):
         super(Sequential, self).__init__()
-        if len(args) == 1 and isinstance(args[0], OrderedDict):
+        if len(args) == 0 and len(kwargs) > 0:
+            for key, module in kwargs.items():
+                self.add_module(key, module)
+        elif len(args) == 1 and isinstance(args[0], OrderedDict):
             for key, module in args[0].items():
                 self.add_module(key, module)
         else:
