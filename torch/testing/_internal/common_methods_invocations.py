@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import \
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
-     torch_to_numpy_dtype_dict, slowTest)
+     torch_to_numpy_dtype_dict, slowTest, TEST_WITH_ASAN)
 
 from distutils.version import LooseVersion
 
@@ -95,6 +95,20 @@ class SampleInput(object):
 
         return f'SampleInput({", ".join(a for a in arguments if a is not None)})'
 
+class AliasInfo(object):
+    """Class holds alias information. For example, torch.abs ->
+    torch.absolute, torch.Tensor.absolute, torch.Tensor.absolute_
+    """
+
+    def __init__(self, alias_name):
+        self.name = alias_name
+        self.op = _getattr_qual(torch, alias_name)
+        self.method_variant = getattr(torch.Tensor, alias_name, None)
+        self.inplace_variant = getattr(torch.Tensor, alias_name + "_", None)
+
+    def __call__(self, *args, **kwargs):
+        return self.op(*args, **kwargs)
+
 
 _NOTHING = object()  # Unique value to distinguish default from anything else
 
@@ -145,6 +159,7 @@ class OpInfo(object):
                  safe_casts_outputs=False,  # whether op allows safe casting when writing to out arguments
                  sample_inputs_func=None,  # function to generate sample inputs
                  aten_name=None,  # name of the corresponding aten:: operator
+                 aliases=None,  # iterable of aliases, e.g. ("absolute",) for torch.abs
                  variant_test_name='',  # additional string to include in the test name
                  supports_sparse=False,  # supported for sparse
                  check_batched_grad=True,  # check batched grad when doing gradcheck
@@ -192,6 +207,10 @@ class OpInfo(object):
         self.supports_sparse = supports_sparse
         self.check_batched_grad = check_batched_grad
         self.check_batched_gradgrad = check_batched_gradgrad
+
+        self.aliases = ()  # type: ignore
+        if aliases is not None:
+            self.aliases = tuple(AliasInfo(a) for a in aliases)  # type: ignore
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
@@ -1162,8 +1181,37 @@ def sample_inputs_masked_select(op_info, device, dtype, requires_grad):
 
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
+    UnaryUfuncInfo('abs',
+                   aliases=('absolute', ),
+                   ref=np.abs,
+                   dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       # Reference: https://github.com/pytorch/pytorch/issues/49224
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.int8], active_if=TEST_WITH_ASAN),
+                       SkipInfo('TestUnaryUfuncs', 'test_variant_consistency',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       # TODO: Fix test_out_arg_all_dtypes as torch.empty_like(expected_output) where expected_output=op(input)
+                       # We can break the logic of the loop over all possible types but it is OK.
+                       # https://github.com/pytorch/pytorch/blob/master/test/test_unary_ufuncs.py#L440-L449
+                       SkipInfo('TestUnaryUfuncs', 'test_out_arg_all_dtypes',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestCommon', 'test_variant_consistency_eager',
+                                dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestCommon', 'test_variant_consistency_jit',
+                                dtypes=[torch.cfloat, torch.cdouble, torch.bfloat16]),
+                       SkipInfo('TestCommon', 'test_jit_alias_remapping',
+                                dtypes=[torch.cfloat, torch.cdouble, torch.bfloat16]),
+                   ),
+                   test_inplace_grad=False,
+                   assert_autodiffed=True),
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
     UnaryUfuncInfo('acos',
+                   aliases=('arccos', ),
                    ref=np.arccos,
                    domain=(-1, 1),
                    handles_complex_extremals=False,
@@ -1240,6 +1288,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_addr),
 
     UnaryUfuncInfo('asin',
+                   aliases=('arcsin', ),
                    ref=np.arcsin,
                    domain=(-1, 1),
                    supports_sparse=True,
@@ -2438,8 +2487,6 @@ def method_tests():
         ('view_as_real', (S, S, S), NO_ARGS, 'complex'),
         ('view_as_complex', (S, S, 2), NO_ARGS),
         ('complex', (S, S, S), ((S, S, S),), ''),
-        ('abs', (S, S, S), NO_ARGS, '', (True,)),
-        ('abs', (), NO_ARGS, 'scalar', (True,)),
         ('clamp', (S, S, S), (0, 1), '', (True,)),
         ('clamp', (S, S, S), (None, 0.5), 'min', (True,)),
         ('clamp', (S, S, S), (0.5, None), 'max', (True,)),
