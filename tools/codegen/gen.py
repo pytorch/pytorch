@@ -1377,17 +1377,21 @@ def main() -> None:
     cpu_fm.write('Functions.h', lambda: {
         'function_declarations': list(mapMaybe(
             ComputeFunction(Target.DECLARATION, is_redispatching_fn=False), native_functions)),
-    })
-    cpu_fm.write('Functions.cpp', lambda: {
-        'function_definitions': list(mapMaybe(
-            ComputeFunction(Target.DEFINITION, is_redispatching_fn=False), native_functions)),
-    })
-    cpu_fm.write('RedispatchFunctions.h', lambda: {
         'function_redispatch_declarations': list(mapMaybe(
             ComputeFunction(Target.DECLARATION, is_redispatching_fn=True), native_functions)),
         'function_redispatch_definitions': list(mapMaybe(
             ComputeFunction(Target.DEFINITION, is_redispatching_fn=True), native_functions)),
     })
+    cpu_fm.write('Functions.cpp', lambda: {
+        'function_definitions': list(mapMaybe(
+            ComputeFunction(Target.DEFINITION, is_redispatching_fn=False), native_functions)),
+    })
+    # cpu_fm.write('RedispatchFunctions.h', lambda: {
+        # 'function_redispatch_declarations': list(mapMaybe(
+            # ComputeFunction(Target.DECLARATION, is_redispatching_fn=True), native_functions)),
+        # 'function_redispatch_definitions': list(mapMaybe(
+            # ComputeFunction(Target.DEFINITION, is_redispatching_fn=True), native_functions)),
+    # })
     core_fm.write('TensorBody.h', lambda: {
         'tensor_method_declarations': list(mapMaybe(ComputeTensorMethod(Target.DECLARATION), native_functions)),
     })

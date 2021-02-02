@@ -149,14 +149,11 @@ struct BoxedKernelWrapper {
   // template parameters in the expression, e.g. FuncType here. However, since
   // `sizeof(FuncType) != sizeof(FuncType)` is always false, this has the same
   // effect.
-
-  static_assert(can_box<IntArrayRef>::value, "FAIL2. can't box IntArrayRef");
-  static_assert(can_box<c10::optional<MemoryFormat>>::value, "FAIL2. can't box c10::optional<MemoryFormat>");
-  static_assert(can_box<const at::Tensor &>::value, "FAIL2. can't box const Tensor &");
-  static_assert(can_box<bool>::value, "FAIL2. can't box bool");
-
-  static_assert(can_box_all<IntArrayRef, c10::optional<MemoryFormat>>::value, "FAIL2. can't box IntArrayRef and c10::optional<MemoryFormat>");
-  static_assert(can_box_all<const at::Tensor &, bool>::value, "FAIL2. can't box const Tensor & and bool");
+  static_assert(sizeof(FuncType) != sizeof(FuncType),
+     "Function signature contains one or more unsupported parameter and/or return types. "
+     "Look for a nearby error like "
+     "\"'call' is not a member of 'c10::impl::BoxedKernelWrapper<(your function type), void>'\" "
+     "- (your function type) is the unsupported signature.");
 };
 
 //
@@ -207,14 +204,6 @@ struct BoxedKernelWrapper<
 // Because of this, the generated BoxedKernelWrapper specializations simply
 // return the in-place argument.
 //
-
-  static_assert(can_box<IntArrayRef>::value, "FAIL. can't box IntArrayRef");
-  static_assert(can_box<c10::optional<MemoryFormat>>::value, "FAIL. can't box c10::optional<MemoryFormat>");
-  static_assert(can_box<const at::Tensor &>::value, "FAIL. can't box const Tensor &");
-  static_assert(can_box<bool>::value, "FAIL. can't box bool");
-
-  static_assert(can_box_all<IntArrayRef, c10::optional<MemoryFormat>>::value, "FAIL. can't box IntArrayRef and c10::optional<MemoryFormat>");
-  static_assert(can_box_all<const at::Tensor &, bool>::value, "FAIL. can't box const Tensor & and bool");
 
 template <class... OtherArgs>
 struct BoxedKernelWrapper<
