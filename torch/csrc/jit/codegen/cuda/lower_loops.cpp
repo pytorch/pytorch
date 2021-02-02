@@ -91,7 +91,7 @@ void LoopNestGenerator::handle(const Expr* expr) {
   if (!ir_utils::isTVOp(expr)) {
     // Close all the loops, scalar operations cannot be inside for loops based
     // on expr sorting.
-    for (size_t i = 0; i < for_loops_.size(); i++) {
+    while (!for_loops_.empty()) {
       closeFor();
     }
     pushFront(gpu_lower->lowerExpr(expr));
