@@ -1,10 +1,9 @@
 import re
 
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable, Union, TypeVar
+from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable, Union
 from enum import Enum, auto
 import itertools
-import contextlib
 
 from tools.codegen.utils import *
 

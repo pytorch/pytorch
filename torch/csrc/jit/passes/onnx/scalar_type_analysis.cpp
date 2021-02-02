@@ -133,7 +133,7 @@ static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
 
   auto get_scalar_type =
       [](const Value* input) -> c10::optional<at::ScalarType> {
-    if (auto tensor_type = input->type()->cast<TensorType>()) {
+    if (auto* tensor_type = input->type()->castRaw<TensorType>()) {
       return tensor_type->scalarType();
     }
     return c10::nullopt;
