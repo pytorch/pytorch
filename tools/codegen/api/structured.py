@@ -9,12 +9,6 @@ from typing import Union, List
 # This is similar to native API, but a number of historical problems with native
 # API have been fixed.
 
-def name(func: FunctionSchema) -> str:
-    name = str(func.name.name)
-    if func.name.overload_name:
-        name += f'_{func.name.overload_name}'
-    return name
-
 # Translation of types occuring in JIT arguments to a C++ argument type.
 # NB: For now, mutable doesn't do anything; but it could if we make
 # some more nominal types
@@ -59,7 +53,10 @@ def argumenttype_type(t: Type, *, mutable: bool, binds: ArgName) -> CType:
 def argument_type(a: Argument, *, binds: ArgName) -> CType:
     return argumenttype_type(a.type, mutable=a.is_write, binds=binds)
 
-# returns_type intentionally omitted
+# returns_type intentionally omitted, because structured kernels never "return";
+# instead, they always indirectly report their outputs (in the case of a meta
+# function, by calling set_output; in the case of an impl function, by writing
+# directly into the provided out argument).
 
 # Structured kernels are never defaulted
 def argument(a: Union[Argument, SelfArgument, TensorOptionsArguments]) -> List[Binding]:
