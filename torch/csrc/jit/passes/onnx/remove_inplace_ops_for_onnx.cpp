@@ -387,14 +387,9 @@ void RegisterInplaceNodeInIfBlocks(
   if (initial_node->kind() != prim::If)
     return;
 
-  for (auto block_output : outer_block->outputs()) {
-    if (block_output->debugName() == new_inplace_node->debugName())
-      return;
-  }
-
   auto next_node = initial_node;
-
   new_inplace_node->setDebugName("_output_" + output_name);
+
   outer_block->registerOutput(new_inplace_node);
   // Block has a new output. Add the output for the prim::If node.
   if (next_node->outputs().size() < outer_block->outputs().size())
@@ -457,7 +452,8 @@ void RegisterInplaceNodeInLoopBlocks(
 
   while (nullptr != next_block->owningNode()) {
     outer_block = next_block;
-    outer_block->registerOutput(next_node->output(0));
+    outer_block->registerOutput(
+        next_node->outputs().at(next_node->outputs().size() - 1));
     next_node = outer_block->owningNode();
     next_node->addOutput()->setType(new_inplace_node->type());
     next_block = next_node->owningBlock();
@@ -479,14 +475,17 @@ void RegisterInplaceNodeInLoopBlocks(
 
   // Update inplace node inputs inside the inner most block.
   auto prev_data = block_node->input(0);
+  while (prev_data->node()->kind() == aten::index_put) {
+    prev_data = prev_data->node()->inputs().at(0);
+  }
   for (auto node : block_node->owningBlock()->nodes()) {
     size_t idx = 0;
     for (auto inputs_ : node->inputs()) {
       if (inputs_ == prev_data) {
         node->replaceInput(idx, next_data);
-        idx++;
         break;
       }
+      idx++;
     }
   }
 
@@ -502,20 +501,34 @@ void RegisterInplaceNodeInBlocks(
     Node* block_node,
     Block* outer_block,
     Node* next_node) {
-  auto cur_node = next_node;
 
+  // Check if the value is already registered in the block
+  bool registered = false;
+  while (orig_data->node()->kind() == aten::index_put) {
+    orig_data = orig_data->node()->inputs().at(0);
+  }
+  for (auto use : orig_data->uses()) {
+    if ((use.user->owningBlock() == outer_block) &&
+        (use.user->isAfter(new_inplace_node->node()))) {
+      size_t idx = 0;
+      for (auto input_ : use.user->inputs()) {
+        if (input_ == orig_data) {
+          use.user->replaceInput(idx, new_inplace_node);
+          registered = true;
+        }
+        idx++;
+      }
+    }
+  }
+
+  if (registered)
+    return;
+
+  auto cur_node = next_node;
   while (nullptr != cur_node) {
     if (cur_node->kind() != prim::Loop && cur_node->kind() != prim::If)
       return;
     cur_node = cur_node->owningBlock()->owningNode();
-  }
-
-  for (auto block_input : outer_block->inputs()) {
-    if (block_input->debugName() ==
-        orig_data->debugName()) { // TODO: enable more than one mutation.
-      AT_ERROR(
-          "More than one inplace mutation per object in a subblock are not supported.");
-    }
   }
 
   for (auto block_output : outer_block->outputs()) {
@@ -524,7 +537,6 @@ void RegisterInplaceNodeInBlocks(
   }
 
   // Register inplace node outputs through the blocks.
-
   RegisterInplaceNodeInLoopBlocks(
       orig_data, new_inplace_node, block_node, outer_block, next_node);
 
@@ -594,6 +606,7 @@ void SquashSliceAndSelect(Node* index_put_node) {
   const auto list_indices =
       graph->insertNode(graph->createList(OptionalType::ofTensor(), indices))
           ->output();
+
   auto new_index_put = graph->insert(
       aten::index_put,
       {orig_data,
@@ -967,14 +980,13 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
       trackAndRegisterAttributesInBlocks(
           n, graph, module_, allAttrValues, setAttrValues, nextSetAttrValues);
     } else if (
-        mr.inplaceOpVariant(n) &&
-        n->kind() != aten::copy_) { // TODO: create a list of all excluded ops
+        mr.inplaceOpVariant(n) || n->kind() == aten::append ||
+        n->kind() == aten::pop) { // TODO: create a list of all included ops
       auto orig_data = n->inputs().at(0);
       auto block_ = n->owningBlock();
       if (block_->owningNode())
         RegisterInplaceNodeInBlocks(
             orig_data, n->output(), n, block_, block_->owningNode());
-
     } else { // for prim::If and prim::Loop nodes with blocks.
       for (Block* sub_block : n->blocks()) {
         std::unordered_map<std::string, Value*> map_ =
@@ -1019,10 +1031,10 @@ void RemoveInplaceOpsForONNX(
     Module* model = nullptr) {
   MutationRemover mr(graph);
   PrepareForRemoveMutations(mr, graph->block());
-  RemoveTensorMutation(graph);
-  RemoveListMutation(graph);
   if (model)
     RegisterInplaceOpAsBlockOutputs(mr, model, graph);
+  RemoveTensorMutation(graph);
+  RemoveListMutation(graph);
 }
 
 } // namespace jit

@@ -72,7 +72,6 @@ def run_ort(ort_sess, input):
 
     ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
     ort_outs = ort_sess.run(None, ort_inputs)
-
     return inline_flatten_list(ort_outs, [])
 
 
@@ -1779,7 +1778,15 @@ class TestONNXRuntime(unittest.TestCase):
             bias = torch.ones((ngram, sequence_length), device=device, dtype=dtype) * float("-inf")
             for stream_idx in range(ngram):
                 for i in range(sequence_length):
+                    bias = bias * 2
                     bias[stream_idx, i] = 5
+                    bias = bias * 5
+                    bias[0, 0] = 5
+
+            for stream_idx in range(ngram):
+                for i in range(sequence_length):
+                    bias[stream_idx, i] = 5
+                    bias[0, i] = 5
             return bias
 
         class ScriptModel(torch.nn.Module):
@@ -3848,8 +3855,8 @@ class TestONNXRuntime(unittest.TestCase):
                 res3 = []
                 res4 = []
                 for i in range(len(arr)):
-                    res = res.append(arr[i].sum(0, False))
-                    res1 = res1.append(arr[-1 - i].sum(0, False))
+                    res.append(arr[i].sum(0, False))
+                    res1.append(arr[-1 - i].sum(0, False))
                     res2 += 1
                     res3 = res3 + [arr[i].sum(0, False)]
                     res4 += [arr[-1 - i].sum(0, False)]
@@ -4073,7 +4080,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(2, 3, 4)
         self.run_test(Arithmetic(), (x, y))
 
-    @disableScriptTest()
+    @disableScriptTest()  # Sort with dynamic dim not supported in ONNX
     def test_sort(self):
         class SortModel(torch.nn.Module):
             def forward(self, x):
@@ -4086,7 +4093,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(SortModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @disableScriptTest()
+    @disableScriptTest()  # Sort with dynamic dim not supported in ONNX
     def test_sort_ascending(self):
         class SortModel(torch.nn.Module):
             def forward(self, x):
@@ -6351,17 +6358,19 @@ class TestONNXRuntime(unittest.TestCase):
                 self.conv.weight = torch.nn.Parameter(torch.zeros(3, 10))
                 self.conv.bias = torch.nn.Parameter(torch.zeros(3, 10, 3))
 
-            def set_cell_anchors(self, anchors):
+            def set_cell_anchors(self, anchors, boxes):
                 self.conv.weight = torch.ones(3, 10)
                 if self.conv.bias is not None:
                     self.conv.bias = torch.randn(3, 10, 3)
                     self.conv.weight = anchors + self.conv.weight
+                    boxes[:] = torch.randn(2, 3)
 
-            def forward(self, anchors) -> torch.Tensor:
-                self.set_cell_anchors(anchors)
+            def forward(self, anchors) -> Tuple[torch.Tensor, torch.Tensor]:
+                boxes = torch.ones(2, 2, 3)
+                self.set_cell_anchors(anchors, boxes)
                 if self.conv.bias is not None:
-                    return self.conv.weight
-                return anchors
+                    return self.conv.weight, boxes
+                return anchors, boxes
 
         model = torch.jit.script(MyModule())
         anchors = torch.rand(3, 10)
@@ -6415,6 +6424,7 @@ class TestONNXRuntime(unittest.TestCase):
             if prev_state.size(0) == 0:
                 state[:] = torch.zeros(batch_size, hidden_size, spatial_size_0, spatial_size_1) + state[:]
                 state_copy[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 2
+                state_copy[:] = torch.zeros(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 2
             else:
                 state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 4
             return state, state_copy
@@ -6468,6 +6478,119 @@ class TestONNXRuntime(unittest.TestCase):
         random_data = torch.rand((1, 5, 30, 30))
         empty_tensor = torch.tensor([], dtype=torch.float).view(0, 0, 0, 0, 0)
         self.run_test(model, (random_data, empty_tensor))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_if_3(self):
+        @torch.jit.script
+        def check_init(input_data, hidden_size, prev_state):
+            # type: (torch.Tensor, int, torch.Tensor) -> torch.Tensor
+            batch_size = input_data.size(0)
+            spatial_size_0 = input_data.size(2)
+            spatial_size_1 = input_data.size(3)
+            # generate empty prev_state, if None is provided
+            state_size = (2, batch_size, hidden_size, spatial_size_0, spatial_size_1)
+            state = torch.zeros(state_size, device=input_data.device)
+            if prev_state.size(0) < 2:
+                state = state * 3
+                if prev_state.size(0) == 0:
+                    state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 3
+                else:
+                    state = state + 2
+
+            return state
+
+        class Example(torch.nn.Module):
+            def __init__(self, hidden_size):
+                super().__init__()
+                self.hidden_size = hidden_size
+
+            def forward(self, input_data, prev_state):
+                prev_state = check_init(input_data, self.hidden_size, prev_state)
+                return prev_state
+
+        model = Example(4)
+        random_data = torch.rand((1, 5, 4, 4))
+        empty_tensor = torch.tensor([], dtype=torch.float).view(0, 0, 0, 0, 0)
+        self.run_test(model, (random_data, empty_tensor))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_index_put_if_4(self):
+        @torch.jit.script
+        def check_init(input_data, hidden_size, prev_state):
+            # type: (torch.Tensor, int, torch.Tensor) -> torch.Tensor
+            batch_size = input_data.size(0)
+            spatial_size_0 = input_data.size(2)
+            spatial_size_1 = input_data.size(3)
+            # generate empty prev_state, if None is provided
+            state_size = (2, batch_size, hidden_size, spatial_size_0, spatial_size_1)
+            state = torch.zeros(state_size, device=input_data.device)
+            if prev_state.size(0) == 0:
+                state = state + 3
+                state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 3
+                state = state + 3
+                state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 4
+            else:
+                state = state + 2
+            return state
+
+        class Example(torch.nn.Module):
+            def __init__(self, hidden_size):
+                super().__init__()
+                self.hidden_size = hidden_size
+
+            def forward(self, input_data, prev_state):
+                prev_state = check_init(input_data, self.hidden_size, prev_state)
+                return prev_state
+
+        model = Example(4)
+        random_data = torch.rand((1, 5, 4, 4))
+        empty_tensor = torch.tensor([], dtype=torch.float).view(0, 0, 0, 0, 0)
+        self.run_test(model, (random_data, empty_tensor))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_list_append_2(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                for i in range(x.size(0)):
+                    res.append(torch.matmul(x[i], y))
+                return res
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(16, 3, 4)
+        y = torch.randn(4, 5)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_list_append_nested_2(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                for i in range(x.size(0)):
+                    for j in range(x.size(1)):
+                        res.append(torch.matmul(x[i][j], y))
+                return res
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(4, 4, 3, 4)
+        y = torch.randn(4, 5)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_list_pop(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                for i in range(x.size(0)):
+                    res.append(torch.matmul(x[i], y))
+                for i in range(x.size(0)):
+                    res.pop()
+                return res
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(16, 3, 4)
+        y = torch.randn(4, 5)
+        self.run_test(model, (x, y))
 
 
 def make_test(name, base, layer, bidirectional, initial_state,
