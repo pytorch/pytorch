@@ -59,7 +59,6 @@
 /// ```
 
 #include <c10/core/DispatchKey.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/op_whitelist.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #if defined(EXPOSE_C2_OPS) || !defined(CAFFE2_IS_XPLAT_BUILD)
@@ -116,19 +115,6 @@ public:
     , debug_()
     {}
 
-  /// This static factory lets you create CppFunctions that (1) don't have boxing
-  /// wrappers (because we don't support it yet) and (2) don't have schema
-  /// inference (because some ops don't support it).
-  template <typename Func>
-  static CppFunction makeUnboxedOnly(Func* f) {
-    // TODO: Eliminate the necessity for this function entirely.
-    return CppFunction(
-      c10::KernelFunction::makeFromUnboxedOnlyRuntimeFunction(f),
-      /* cpp_signature */ c10::impl::CppSignature::make<Func>(),
-      /* schema */ nullptr
-    );
-  }
-
   /// This creates a fallthrough function.  Fallthrough functions
   /// immediately redispatch to the next available dispatch key,
   /// but are implemented more efficiently than a hand written
@@ -168,6 +154,22 @@ public:
       /* cpp_signature */ c10::nullopt, // not known for boxed functions
       /* schema */ nullptr
     );
+  }
+
+  /// Create a function from an unboxed kernel function.
+  /// This is typically used to register common operators.
+  template<typename FuncPtr, std::enable_if_t<c10::guts::is_function_type<FuncPtr>::value, std::nullptr_t> = nullptr>
+  static CppFunction makeFromUnboxedFunction(FuncPtr* f) {
+    return CppFunction(f);
+  }
+
+  /// Create a function from a compile time unboxed kernel function pointer.
+  /// This is typically used to register common operators.
+  /// Compile time function pointers can be used to allow the compiler
+  /// to optimize (e.g. inline) calls to it.
+  template<typename FuncPtr, std::enable_if_t<c10::is_compile_time_function_pointer<FuncPtr>::value, std::nullptr_t> = nullptr>
+  static CppFunction makeFromUnboxedFunction(FuncPtr f) {
+    return CppFunction(f);
   }
 
   CppFunction&& debug(std::string d) && {
@@ -496,20 +498,10 @@ public:
     return impl(name, dispatch(std::forward<Dispatch>(key), std::forward<Func>(raw_f)));
   }
 
-  /// \private
-  ///
-  /// Convenience overload for unboxed only kernels; kernels whose type
-  /// signatures are not supported by our template based metaprogramming
-  /// system.  These are currently quite common but will be eventually
-  /// eliminated.
-  ///
-  /// This is equivalent to calling CppFunction::makeUnboxedOnly() on
-  /// the function, but this name for the function makes it easy to grep for.
   template <typename Name, typename Func>
   Library& impl_UNBOXED(Name name, Func* raw_f) & {
-    // TODO: Remove this overload once the makeUnboxedOnly incidence rate
-    // goes way down
-    return impl(name, CppFunction::makeUnboxedOnly(raw_f));
+    static_assert(c10::guts::false_t<Func>(), ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
+    return *this;
   }
 
   // These overloads cover cases when a SelectiveStr (see Note [Selective build])
@@ -531,7 +523,10 @@ public:
   template <typename Dispatch, typename Func>
   Library& impl(detail::SelectiveStr<false>, Dispatch&& key, Func&& raw_f) & { return *this; }
   template <typename Func>
-  Library& impl_UNBOXED(detail::SelectiveStr<false> name, Func* raw_f) & { return *this; }
+  Library& impl_UNBOXED(detail::SelectiveStr<false> name, Func* raw_f) & {
+    static_assert(c10::guts::false_t<Func>(), ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
+    return *this;
+  }
 
   template <typename Func>
   Library& impl(detail::SelectiveStr<true> name, Func&& raw_f) & {
@@ -543,7 +538,8 @@ public:
   }
   template <typename Func>
   Library& impl_UNBOXED(detail::SelectiveStr<true> name, Func* raw_f) & {
-    return impl(name.operator const char*(), CppFunction::makeUnboxedOnly(raw_f));
+    static_assert(c10::guts::false_t<Func>(), ".impl_UNBOXED(...) was removed. Please use .impl(...) instead.");
+    return *this;
   }
 
   /// Register a fallback implementation for all operators which will be used

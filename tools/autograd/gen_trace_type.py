@@ -117,13 +117,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
             else:
                 return [ADD_TRACE_INPUT.substitute(name=name, input=name)]
 
-    args: List[Union[Argument, TensorOptionsArguments]] = []
-    if f.use_c10_dispatcher.dispatcher_uses_new_style():
-        args = list(f.func.schema_order_arguments())
-    else:
-        sig_group = CppSignatureGroup.from_native_function(f, method=False)
-        args = [cpp_args.argument for cpp_args in sig_group.signature.arguments()
-                if not isinstance(cpp_args.argument, SelfArgument)]
+    args: List[Union[Argument, TensorOptionsArguments]] = list(f.func.schema_order_arguments())
 
     if f.func.is_out_fn():
         # *_out functions take the result as a separate argument, but we don't want to
@@ -131,12 +125,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
         # So first, we need to remove the out argument from the list of arguments to trace.
         # TODO: byte-for-byte compatible with old codegen behavior - it's incorrect to assume
         # there is only one output argument.
-        if f.use_c10_dispatcher.dispatcher_uses_new_style():
-            # for c10-full ops, the out argument is in the end
-            args = args[:-1]
-        else:
-            # for legacy ops, the out argument is in the beginning.
-            args = args[1:]
+        args = args[:-1]
 
     trace_inputs = itertools.chain.from_iterable(dispatch_trace_input(arg) for arg in args)
 
@@ -374,14 +363,10 @@ def method_definition(f: NativeFunction) -> Optional[str]:
     if cpp.name(f.func) in MANUAL_TRACER:
         return None
 
-    if f.use_c10_dispatcher.dispatcher_uses_new_style():
-        formals = ', '.join(
-            f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
-            for a in f.func.schema_order_arguments()
-        )
-    else:
-        sig_group = CppSignatureGroup.from_native_function(f, method=False)
-        formals = ', '.join(f'{a.type} {a.name}' for a in sig_group.signature.arguments())
+    formals = ', '.join(
+        f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
+        for a in f.func.schema_order_arguments()
+    )
 
     return METHOD_DEFINITION.substitute(
         return_type=cpp.returns_type(f.func.returns),
@@ -396,27 +381,16 @@ m.impl("${name}",
 );
 """)
 
-UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
-m.impl_UNBOXED("${name}", &${class_type}::${type_wrapper_name});
-""")
-
 @with_native_function
 def method_registration(f: NativeFunction) -> Optional[str]:
     if cpp.name(f.func) in MANUAL_TRACER:
         return None
 
-    if f.use_c10_dispatcher.dispatcher_uses_new_style():
-        return WRAPPER_REGISTRATION.substitute(
-            name=f.func.name,
-            type_wrapper_name=type_wrapper_name(f),
-            class_type='TraceType',
-        )
-    else:
-        return UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
-            name=f.func.name,
-            type_wrapper_name=type_wrapper_name(f),
-            class_type='TraceType',
-        )
+    return WRAPPER_REGISTRATION.substitute(
+        name=f.func.name,
+        type_wrapper_name=type_wrapper_name(f),
+        class_type='TraceType',
+    )
 
 def gen_trace_type_shard(
     fm: FileManager, native_functions: Sequence[NativeFunction], suffix: str

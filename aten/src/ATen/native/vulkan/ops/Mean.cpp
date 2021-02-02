@@ -58,11 +58,11 @@ Tensor mean(
     v_input.options(),
   };
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    if (v_input.has_image()) {
-      const struct {
+    if C10_LIKELY(v_input.has_image()) {
+      const struct Block final {
         uvec3 extents;
         int32_t range;
         ivec2 iextents;
@@ -105,14 +105,11 @@ Tensor mean(
       TORCH_CHECK(false, "Not implemented!");
     }
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
-  api::Command::Buffer output_unpack_buffer = context->command().pool.allocate();
-  output_unpack_buffer.begin();
+  api::Command::Buffer& output_unpack_buffer = command_pool.stream();
   vTensor v_output = unpack_image1x1(v_output_packed, output_sizes, context, output_unpack_buffer);
-  output_unpack_buffer.end();
-  output_unpack_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, output_unpack_buffer);
 
   return convert(v_output);
 }

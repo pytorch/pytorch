@@ -72,18 +72,25 @@ DONT_REQUIRE_DERIVATIVE = {
 GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     't', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
     'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
-    'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
-    'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_', 'eq_',
-    'ne_', 'add', '__radd__', 'sum', '_conj', 'sin', 'cos', 'mul', 'sinc', 'sinh',
-    'cosh', '__rmul__', 'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
+    'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril',
+    'triu', 'chunk', 'zero_', 'eq_', 'ne_', 'add', '__radd__', 'sum',
+    '_conj', 'sin', 'cos', 'mul', 'sinc', 'sinh', 'cosh', '__rmul__',
+    'sgn', 'asin', 'acos', 'sub', 'div', 'cat', 'view_as_complex',
     'neg', 'complex', 'select', '_s_where', 'as_strided', 'slice', 'constant_pad_nd',
     'unbind', 'split', 'split_with_sizes', 'unsafe_split', 'split_with_sizes_backward',
     'dot', 'vdot', 'cholesky', 'triangular_solve', 'mm', '_unsafe_view', 'mv', 'ger',
     'bmm', 'diagonal', 'alias', 'atan', 'log', 'log10', 'log1p', 'log2', 'reciprocal',
-    'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'take', 'fill_',
+    'tan', 'pow', 'rsqrt', 'tanh', 'tanh_backward', 'asinh', 'acosh', 'atanh', 'take', 'fill_',
     'exp', 'nonzero', 'mean', 'inverse', 'solve', 'linalg_cholesky', 'addcmul', 'addcdiv',
-    'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', 'svd', '_fft_c2c', '_fft_r2c',
-    'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_'
+    'matrix_exp', 'linalg_eigh', 'cholesky_solve', 'linalg_qr', '_svd_helper', '_fft_c2c', '_fft_r2c',
+    'linalg_solve', 'sqrt', 'stack', 'gather', 'index_select', 'index_add_', 'linalg_inv',
+    'l1_loss_backward', 'baddbmm', 'addbmm', 'addmm', 'addmv', 'addr',
+    'constant_pad_nd', 'reflection_pad1d', 'reflection_pad2d',
+    'reflection_pad1d_backward', 'reflection_pad2d_backward',
+    'replication_pad1d', 'replication_pad2d', 'replication_pad3d',
+    'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
+    'masked_scatter', 'masked_select',
+    'index_fill',
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
@@ -191,19 +198,6 @@ ${return_type} ${type_wrapper_name}(${formals}) {
 }
 """)
 
-# NOTE[UnboxedOnly] Many of our codegen templates currently exist twice, once
-# in an _UNBOXEDONLY_ variant and once without _UNBOXEDONLY_. This is because
-# ops that are `use_c10_dispatcher: full` need different c++ code than ops
-# that aren't `use_c10_dispatcher: full` yet. The _UNBOXEDONLY_ variants
-# are for ops that aren't `use_c10_dispatcher: full` yet and those code templates
-# can be deleted once all ops are `use_c10_dispatcher: full`.
-# If you update one of the templates, you likely also have to update the other.
-
-# See NOTE[UnboxedOnly]
-UNBOXEDONLY_WRAPPER_REGISTRATION = CodeTemplate("""\
-m.impl_UNBOXED("${unqual_operator_name_with_overload}", &${class_type}::${type_wrapper_name});
-""")
-
 WRAPPER_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        TORCH_FN(${class_type}::${type_wrapper_name})
@@ -268,7 +262,7 @@ auto ${val} = ${arg}.value_or(${default});
 """)
 
 SETUP_REPLAY_VIEW_IF_NOT_SUPPORT_AS_STRIDED_OR_VIEW_WITH_METADATA_CHANGE = CodeTemplate("""\
-c10::optional<std::function<at::Tensor(const at::Tensor&)>> func=c10::nullopt;
+std::function<at::Tensor(const at::Tensor&)> func=nullptr;
 if (${is_view_with_metadata_change} || !self.unsafeGetTensorImpl()->support_as_strided()) {
   ${replay_view_func}
 }
@@ -349,30 +343,18 @@ def gen_variable_type(
 
 @with_native_function
 def gen_formals(f: NativeFunction) -> str:
-    if f.use_c10_dispatcher.dispatcher_uses_new_style():
-        formals = ', '.join(
-            f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
-            for a in f.func.schema_order_arguments()
-        )
-    else:
-        sig_group = CppSignatureGroup.from_native_function(f, method=False)
-        formals = ', '.join(f'{a.type} {a.name}' for a in sig_group.signature.arguments())
-    return formals
+    return ', '.join(
+        f'{cpp.argument_type(a, binds="__placeholder__").cpp_type()} {a.name}'
+        for a in f.func.schema_order_arguments()
+    )
 
 @with_native_function
 def gen_wrapper_registration(f: NativeFunction) -> str:
-    if f.use_c10_dispatcher.dispatcher_uses_new_style():
-        return WRAPPER_REGISTRATION.substitute(
-            unqual_operator_name_with_overload=f.func.name,
-            type_wrapper_name=type_wrapper_name(f),
-            class_type='VariableType',
-        )
-    else:
-        return UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
-            unqual_operator_name_with_overload=f.func.name,
-            type_wrapper_name=type_wrapper_name(f),
-            class_type='VariableType',
-        )
+    return WRAPPER_REGISTRATION.substitute(
+        unqual_operator_name_with_overload=f.func.name,
+        type_wrapper_name=type_wrapper_name(f),
+        class_type='VariableType',
+    )
 
 def gen_variable_type_shard(
     fm: FileManager,
@@ -669,7 +651,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             call = CALL_DISPATCH_VIA_NAMESPACE.substitute(
                 api_name=cpp.name(
                     f.func,
-                    faithful_name_for_out_overloads=f.use_c10_dispatcher.dispatcher_uses_new_style(),
+                    faithful_name_for_out_overloads=True,
                 ),
                 unpacked_args=unpacked_args)
         else:
@@ -887,16 +869,12 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
     body: List[str] = []
     unpacked_bindings: List[Binding] = []
 
-    if f.use_c10_dispatcher.dispatcher_uses_new_style():
-        bindings = [r for a in f.func.schema_order_arguments()
-                    for r in cpp.argument(a,
-                                          method=False,
-                                          cpp_no_default_args=set(),
-                                          faithful=False,
-                                          has_tensor_options=False)]
-    else:
-        sig_group = CppSignatureGroup.from_native_function(f, method=False)
-        bindings = list(sig_group.signature.arguments())
+    bindings = [r for a in f.func.schema_order_arguments()
+                for r in cpp.argument(a,
+                                      method=False,
+                                      cpp_no_default_args=set(),
+                                      faithful=False,
+                                      has_tensor_options=False)]
 
     for i, binding in enumerate(bindings):
         assert not isinstance(binding.argument, SelfArgument)

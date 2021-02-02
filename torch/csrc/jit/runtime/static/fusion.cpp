@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/static/fusion.h>
+
 #include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>

@@ -11,11 +11,14 @@ namespace {
 using namespace api::utils;
 
 vTensor pack_weights(
-  api::Resource::Pool& pool,
-  const Tensor& weight_arg) {
+    api::Resource::Pool& pool,
+    const Tensor& weight_arg) {
   if (weight_arg.is_vulkan()) {
     return convert(weight_arg);
   }
+
+  api::Context* const context = api::context();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
 
   const Tensor weight = weight_arg.contiguous();
   const IntArrayRef w_sizes = weight.sizes();
@@ -31,7 +34,7 @@ vTensor pack_weights(
   const int64_t dst_plane_sz = dst_kw_sz * dst_kh_sz;
 
   vTensor v_weight{
-      api::context(),
+      context,
       &pool,
       {
         4,
@@ -42,7 +45,7 @@ vTensor pack_weights(
   };
 
   using Future = vTensor::Future<float, vTensor::Access::Write>;
-  Future v_weight_future = v_weight.host<float, vTensor::Access::Write>();
+  Future v_weight_future = v_weight.host<float, vTensor::Access::Write>(command_buffer);
   Future::Payload v_weight_payload = v_weight_future.wait();
 
   float* const dst_weight_ptr = v_weight_payload.get();
@@ -70,6 +73,9 @@ vTensor pack_biases(
     return convert(*bias_arg);
   }
 
+  api::Context* const context = api::context();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();
+
   using Future = vTensor::Future<float, vTensor::Access::Write>;
   if (bias_arg) {
     const Tensor bias = bias_arg->contiguous();
@@ -93,7 +99,7 @@ vTensor pack_biases(
     const int64_t dst_plane_sz = dst_kw_sz * dst_kh_sz;
 
     vTensor v_bias{
-        api::context(),
+        context,
         &pool,
         {
           4,
@@ -103,7 +109,7 @@ vTensor pack_biases(
         bias_arg->options(),
     };
 
-    Future v_bias_future = v_bias.host<float, vTensor::Access::Write>();
+    Future v_bias_future = v_bias.host<float, vTensor::Access::Write>(command_buffer);
     Future::Payload v_bias_payload = v_bias_future.wait();
 
     float* const dst_bias_ptr = v_bias_payload.get();
@@ -129,7 +135,7 @@ vTensor pack_biases(
         {1},
         weight_arg.options(),
     };
-    Future v_bias_future = v_bias.host<float, vTensor::Access::Write>();
+    Future v_bias_future = v_bias.host<float, vTensor::Access::Write>(command_buffer);
     Future::Payload v_bias_payload = v_bias_future.wait();
     memset(
         v_bias_payload.get(),
@@ -285,14 +291,13 @@ Tensor LinearOpContext::run(
       input.options(),
   };
 
-  api::Command::Buffer input_pack_buffer = context->command().pool.allocate();
-  input_pack_buffer.begin();
-  vTensor v_input_packed = pack_image2d_h2w2(v_input, context, input_pack_buffer);
-  input_pack_buffer.end();
-  input_pack_buffer.submit(context->gpu().queue);
+  api::Command::Pool& command_pool = context->command().pool;
 
-  api::Command::Buffer command_buffer = context->command().pool.allocate();
-  command_buffer.begin();
+  api::Command::Buffer& input_pack_buffer = command_pool.stream();
+  vTensor v_input_packed = pack_image2d_h2w2(v_input, context, input_pack_buffer);
+  command_pool.submit(context->gpu().queue, input_pack_buffer);
+
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
     if (v_input.has_image() &&
         packed_.v_weight.has_image() &&
@@ -395,14 +400,11 @@ Tensor LinearOpContext::run(
       TORCH_CHECK(false, "Not implemented!");
     }
   }
-  command_buffer.end();
-  command_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, command_buffer);
 
-  api::Command::Buffer output_unpack_buffer = context->command().pool.allocate();
-  output_unpack_buffer.begin();
+  api::Command::Buffer& output_unpack_buffer = command_pool.stream();
   vTensor v_output = unpack_image2d_h2w2(v_output_packed, output_sizes, context, output_unpack_buffer);
-  output_unpack_buffer.end();
-  output_unpack_buffer.submit(context->gpu().queue);
+  command_pool.submit(context->gpu().queue, output_unpack_buffer);
 
   return convert(v_output);
 }

@@ -62,6 +62,7 @@ vTensor pack_image2d_h2w2(vTensor v_src, api::Context* context, api::Command::Bu
       vTensor::Stage::Compute,
       vTensor::Access::Write),
     v_src.buffer(
+      command_buffer,
       vTensor::Stage::Compute,
       vTensor::Access::Read),
     context->resource().pool.uniform(block).object);
@@ -109,6 +110,7 @@ vTensor unpack_image2d_h2w2(vTensor v_src, c10::SmallVector<int64_t, 4u> output_
       vTensor::Stage::Compute,
       vTensor::Access::Read),
     v_src_unpacked.buffer(
+      command_buffer,
       vTensor::Stage::Compute,
       vTensor::Access::Write),
     context->resource().pool.uniform(block).object);
@@ -144,6 +146,7 @@ vTensor unpack_image1x1(vTensor v_src, c10::SmallVector<int64_t, 4u> output_size
       vTensor::Stage::Compute,
       vTensor::Access::Read),
     v_src_unpacked.buffer(
+      command_buffer,
       vTensor::Stage::Compute,
       vTensor::Access::Write),
     context->resource().pool.uniform(block).object);

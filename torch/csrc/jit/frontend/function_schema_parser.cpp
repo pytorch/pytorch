@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
+
 #include <ATen/core/Reduction.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
@@ -256,7 +257,7 @@ struct SchemaParser {
         break;
       }
       case TypeKind::ListType: {
-        auto elem_kind = arg_type->cast<ListType>()->getElementType();
+        auto elem_kind = arg_type->castRaw<ListType>()->getElementType();
         if (L.cur().kind == TK_IDENT) {
           return parseTensorDefault(range);
         } else if (arg_N && L.cur().kind != '[') {
