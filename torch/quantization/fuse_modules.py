@@ -3,7 +3,7 @@ import copy
 
 import torch.nn as nn
 
-from .fuser_method_mappings import get_fuser_method
+from .fuser_method_mappings import get_fuser_method, get_fuser_module_index
 # for backward compatiblity
 from .fuser_method_mappings import fuse_conv_bn  # noqa: F401
 from .fuser_method_mappings import fuse_conv_bn_relu  # noqa: F40
@@ -80,7 +80,7 @@ def _fuse_modules(model, modules_to_fuse, fuser_func=fuse_known_modules, fuse_cu
     for i, item in enumerate(modules_to_fuse):
         _set_module(model, item, new_mod_list[i])
 
-def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
+def fuse_modules(model, modules_to_fuse=None, inplace=False, fuser_func=fuse_known_modules, fuse_custom_config_dict=None):
     r"""Fuses a list of modules into a single module
 
     Fuses only the following sequence of modules:
@@ -98,6 +98,7 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
         model: Model containing the modules to be fused
         modules_to_fuse: list of list of module names to fuse. Can also be a list
                          of strings if there is only a single list of modules to fuse.
+                         Can also be left with default None type, which will fuse all possible modules.
         inplace: bool specifying if fusion happens in place on the model, by default
                  a new model is returned
         fuser_func: Function that takes in a list of modules and outputs a list of fused modules
@@ -136,6 +137,22 @@ def fuse_modules(model, modules_to_fuse, inplace=False, fuser_func=fuse_known_mo
     """
     if not inplace:
         model = copy.deepcopy(model)
+
+    if modules_to_fuse is None:
+        module_names = []
+        module_types = []
+        for name, m in model.named_modules():
+            module_names.append(name)
+            module_types.append(type(m))
+        
+        if fuse_custom_config_dict is None:
+            fuse_custom_config_dict = {}
+        additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
+        module_idxs = get_fuser_module_index(module_types, additional_fuser_method_mapping)
+        modules_to_fuse = [module_names[mi[0]:mi[1]] for mi in module_idxs]
+
+        if not modules_to_fuse:
+            return model
 
     if all(isinstance(module_element, str) for module_element in modules_to_fuse):
         # Handle case of modules_to_fuse being a list

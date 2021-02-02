@@ -119,6 +119,30 @@ DEFAULT_OP_LIST_TO_FUSER_METHOD : Dict[Tuple, Union[nn.Sequential, Callable]] = 
     (nn.BatchNorm3d, nn.ReLU): nni.BNReLU3d,
 }
 
+def get_fuser_module_index(mod_list, additional_fuser_method_mapping=None):
+    rc = []
+    all_mappings = get_combined_dict(DEFAULT_OP_LIST_TO_FUSER_METHOD,
+                                     additional_fuser_method_mapping)
+    keys = sorted(list(all_mappings.keys()), key=lambda x: len(x), reverse=True)
+    mod2fused_list = [list(x) for x in keys]
+    #for every FUSER_METHOD
+    for mod2fused in mod2fused_list:
+        if len(mod2fused) > len(mod_list):
+            continue
+        #get to-fuse-module's index in mod_list
+        mod2fused_idx = [(i, i+len(mod2fused)) for i in range(len(mod_list) - len(mod2fused) + 1) if mod_list[i:i+len(mod2fused)] == mod2fused]
+        if not mod2fused_idx:
+            continue
+
+        for idx in mod2fused_idx:
+            start,end = idx
+            #set to None to avoid matching again
+            mod_list[start: end] = [None] * len(mod2fused)
+
+        rc.extend(mod2fused_idx)
+
+    return rc
+
 def get_fuser_method(op_list, additional_fuser_method_mapping=None):
     ''' Get fuser method for the given list of module types,
     return None if fuser method does not exist
