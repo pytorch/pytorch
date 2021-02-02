@@ -11690,6 +11690,44 @@ TEST(NVFuserTest, FusionMultipleGridReductions_CUDA) {
   ASSERT_ANY_THROW(fe.compileFusion(&fusion));
 }
 
+TEST(NVFuserTest, FusionIssue633_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const int dx = 10;
+  const int dy = 11;
+  const int dz = 12;
+
+  auto tv0 = makeConcreteTensor({dx, dy, dz});
+  fusion.addInput(tv0);
+  auto tv1 = makeConcreteTensor({dx, dy, 1});
+  fusion.addInput(tv1);
+  auto tv2 = add(tv0, tv1);
+  fusion.addOutput(tv2);
+
+  tv2->merge(1);
+  tv2->merge(0);
+  tv2->split(-1, 128);
+
+  tv2->axis(0)->parallelize(ParallelType::BIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({dx, dy, dz}, options);
+  at::Tensor t1 = at::randn({dx, dy, 1}, options);
+  std::vector<IValue> aten_inputs = {t0, t1};
+
+  auto cg_outputs = fe.runFusion(aten_inputs);
+
+  auto aten_output = t0 + t1;
+
+  testValidate(
+      &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 

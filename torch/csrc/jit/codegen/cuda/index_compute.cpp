@@ -466,17 +466,7 @@ IndexCompute IndexCompute::updateIndexCompute(
       updated_index_map[new_id] = index_map_.at(prev_id);
     }
 
-    if (!prev_id->isBroadcast() && new_id->isBroadcast()) {
-      updated_extent_map[new_id] = getExtent(prev_id);
-    }
-
-    if (extent_map_.find(prev_id) != extent_map_.end()) {
-      updated_extent_map[new_id] = extent_map_.at(prev_id);
-    } else {
-      if (prev_id->isReduction() && !new_id->isReduction()) {
-        updated_extent_map[new_id] = getExtent(prev_id);
-      }
-    }
+    updated_extent_map[new_id] = getExtent(prev_id);
 
     if (zero_merged_in_.find(prev_id) != zero_merged_in_.end()) {
       updated_zero_merged_in.emplace(new_id);
