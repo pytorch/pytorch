@@ -353,7 +353,7 @@ public:
     c10::Dispatcher::singleton().redispatchBoxed(*this, ks, stack);
   }
 
-//private:
+private:
   explicit OperatorHandle(std::list<Dispatcher::OperatorDef>::iterator operatorIterator)
   : operatorIterator_(std::move(operatorIterator)) {}
   friend class Dispatcher;
@@ -388,7 +388,6 @@ public:
     return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
   }
 
-  // Note: benchmarks showed that this function wasn't getting inlined during calls to at::empty
   C10_ALWAYS_INLINE Return redispatch(DispatchKeySet currentDispatchKeySet, Args... args) const {
     return c10::Dispatcher::singleton().redispatch<Return, Args...>(*this, currentDispatchKeySet, std::forward<Args>(args)...);
   }
@@ -459,7 +458,6 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
 }
 
 template<class Return, class... Args>
-// Note: benchmarks showed that this function wasn't getting inlined during calls to at::empty
 C10_ALWAYS_INLINE Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   auto dispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
