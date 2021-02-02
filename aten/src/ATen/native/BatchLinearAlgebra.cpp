@@ -873,10 +873,11 @@ Tensor cholesky(const Tensor &self, bool upper) {
 }
 
 Tensor& cholesky_out(Tensor &result, const Tensor &self, bool upper) {
-  if (self.size(-1) == 0) {
-    return result.resize_as_(self);
-  }
-  result.copy_(native::cholesky(self, upper));
+  checkSameDevice("cholesky", result, self);
+  checkLinalgCompatibleDtype("cholesky", result, self);
+  Tensor result_tmp = at::cholesky(self, upper);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
   return result;
 }
 
