@@ -2693,6 +2693,9 @@ def cross_entropy(
             reduce=reduce,
             reduction=reduction,
         )
+    if input.dim() == 1 and target.dim() == 0:
+        input = input.unsqueeze(0)
+        target = target.unsqueeze(0)
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     return nll_loss(log_softmax(input, 1), target, weight, None, ignore_index, None, reduction)

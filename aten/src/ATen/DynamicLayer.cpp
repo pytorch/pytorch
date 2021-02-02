@@ -5,14 +5,16 @@
 
 namespace at {
 
-std::vector<DynamicLayer> dynamicLayerStack;
+// Initial autograd layer, because autograd is always "on"
+std::vector<DynamicLayer> dynamicLayerStack = { DynamicLayer(DispatchKey::Autograd, 1) };
 
 int64_t pushDynamicLayer(DispatchKey key) {
+  TORCH_INTERNAL_ASSERT(key != DispatchKey::Undefined);
   auto layerId = 1 + dynamicLayerStack.size();
   dynamicLayerStack.emplace_back(key, layerId);
 
-  if (layerId == 1) {
-    std::cout << "DynamicLayer on" << std::endl;
+  if (layerId == 2) {
+    // std::cout << "DynamicLayer on" << std::endl;
     c10::impl::tls_set_dispatch_key_included(DispatchKey::DynamicLayerFront, true);
     c10::impl::tls_set_dispatch_key_included(DispatchKey::DynamicLayerBack, true);
   }
@@ -21,11 +23,13 @@ int64_t pushDynamicLayer(DispatchKey key) {
 }
 
 DynamicLayer popDynamicLayer() {
+  TORCH_INTERNAL_ASSERT(dynamicLayerStack.size() > 0);
   auto result = dynamicLayerStack.back();
+  TORCH_INTERNAL_ASSERT(result.key() != DispatchKey::Undefined);
   dynamicLayerStack.pop_back();
 
   if (dynamicLayerStack.size() == 0) {
-    std::cout << "DynamicLayer off" << std::endl;
+    // std::cout << "DynamicLayer off" << std::endl;
     c10::impl::tls_set_dispatch_key_included(DispatchKey::DynamicLayerFront, false);
     c10::impl::tls_set_dispatch_key_included(DispatchKey::DynamicLayerBack, false);
   }
@@ -35,7 +39,7 @@ DynamicLayer popDynamicLayer() {
 
 void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   if (dynamicLayerStack.size() == 0) {
-    std::cout << "dynamicLayerFrontFallback " << op.operator_name() << " start terminal" << std::endl;
+    // std::cout << "dynamicLayerFrontFallback " << op.operator_name() << " start terminal" << std::endl;
     DispatchKeySet exclude;
     exclude = exclude.add(DispatchKey::DynamicLayerFront);
     exclude = exclude.add(DispatchKey::Batched);
@@ -47,7 +51,7 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
 
     c10::impl::ExcludeDispatchKeyGuard guard(exclude);
     op.callBoxed(stack);
-    std::cout << "dynamicLayerFrontFallback " << op.operator_name() << " end terminal" << std::endl;
+    // std::cout << "dynamicLayerFrontFallback " << op.operator_name() << " end terminal" << std::endl;
     return;
   }
 
@@ -57,7 +61,7 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
   exclude = exclude.remove(DispatchKey::DynamicLayerBack);
   // NB: Alias dispatch key doesn't work in exclude set :(
   if (layer.key() == DispatchKey::Autograd) {
-    std::cout << "enabling some autograd keys..." << std::endl;
+    // std::cout << "enabling some autograd keys..." << std::endl;
     exclude = exclude.remove(DispatchKey::Autograd);
     exclude = exclude.remove(DispatchKey::AutogradOther);
     exclude = exclude.remove(DispatchKey::AutogradCPU);
@@ -71,7 +75,7 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
   // keyset.set_excluded(exclude);
   // c10::impl::_force_tls_local_dispatch_key_set(keyset);
 
-  std::cout << "dynamicLayerFrontFallback " << op.operator_name() << " " << layer.key() << " " << dynamicLayerStack.size() << std::endl;
+  // std::cout << "dynamicLayerFrontFallback " << op.operator_name() << " " << layer.key() << " " << dynamicLayerStack.size() << std::endl;
 
   // Re-dispatch
   op.callBoxed(stack);
@@ -83,13 +87,23 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
   // c10::impl::tls_set_dispatch_key_included(DispatchKey::DynamicLayerBack, true);
 }
 
-void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  std::cout << "dynamicLayerBackFallback" << std::endl;
+struct WithoutTop {
+  WithoutTop(): layer_(popDynamicLayer()) {}
+  ~WithoutTop() {
+    pushDynamicLayer(layer_.key()); 
+  }
 
-  // pop the top layer..
-  auto handledLayer = popDynamicLayer();
+  DynamicLayer layer_;
+};
+
+void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  // std::cout << "dynamicLayerBackFallback" << std::endl;
+
+  // pop the top layer. Put it back on dtor.
+  WithoutTop guard;
 
   // "reset exclude set"
+  // TODO: Still a problem with composabiilty and AutoNonVariableTypeGuard.
   auto keyset = c10::impl::PODLocalDispatchKeySet();
   c10::impl::_force_tls_local_dispatch_key_set(keyset);
   c10::impl::tls_set_dispatch_key_included(DispatchKey::DynamicLayerFront, true);
@@ -97,9 +111,6 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
 
   // Re-dispatch
   op.callBoxed(stack);
-
-  // push the top layer back
-  pushDynamicLayer(handledLayer.key());
 }
 
 TORCH_LIBRARY_IMPL(_, DynamicLayerFront, m) {

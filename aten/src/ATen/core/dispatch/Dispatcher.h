@@ -422,7 +422,7 @@ inline Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, A
       DispatchKeySet::FULL,
       args...
     );
-  std::cout << dispatchKey << " " << op.operator_name() << std::endl;
+  // std::cout << dispatchKey << " " << op.operator_name() << std::endl;
   return callWithDispatchKey<Return, Args...>(op, dispatchKey, args...);
 }
 
@@ -436,7 +436,7 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
     );
   // do not use RecordFunction on redispatch
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
-  std::cout << dispatchKey << " " << op.operator_name() << std::endl;
+  // std::cout << dispatchKey << " " << op.operator_name() << std::endl;
   return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
@@ -444,7 +444,7 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorIterator_->op;
   auto dispatchKey = entry.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
-  std::cout << dispatchKey << " " << op.operator_name() << std::endl;
+  // std::cout << dispatchKey << " " << op.operator_name() << std::endl;
   const auto& kernel = entry.lookup(dispatchKey);
 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
