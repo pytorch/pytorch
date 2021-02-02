@@ -272,8 +272,7 @@ optimizers from :mod:`torch.optim`:
 
    # Run a sample training loop that "teaches" the network
    # to output the constant zero function
-   iters = 10000
-   for _ in range(iters):
+   for _ in range(10000):
      input = torch.randn(4)
      output = net(input)
      loss = torch.abs(output)
@@ -418,11 +417,6 @@ modify some inputs/outputs without having to change the module's ``forward`` fun
 PyTorch also provides a way to register these hooks on all existing modules at once by using the
 ``register_module_XXX`` version. This can be very useful when building profiling or visualization tools that
 need to know about every single module that is used.
-
-For more information, check out:
-
-* Example usage of hooks:
-  https://pytorch.org/tutorials/beginner/former_torchies/nnft_tutorial.html#forward-and-backward-function-hooks
 
 Advanced Features
 -----------------
