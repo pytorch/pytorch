@@ -675,10 +675,11 @@ Tensor inverse(const Tensor &self) {
 }
 
 Tensor& inverse_out(Tensor &result, const Tensor &self) {
-  if (self.size(-1) == 0) {
-    return result.resize_as_(self);
-  }
-  result.copy_(native::inverse(self));
+  checkSameDevice("inverse", result, self);
+  checkLinalgCompatibleDtype("inverse", result, self);
+  Tensor result_tmp = at::inverse(self);
+  at::native::resize_output(result, result_tmp.sizes());
+  result.copy_(result_tmp);
   return result;
 }
 
