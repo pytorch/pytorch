@@ -1,4 +1,7 @@
-from torch.fx import Graph, GraphModule, Node, symbolic_trace
+from .graph_module import GraphModule
+from .graph import Graph
+from .node import Node
+from .symbolic_trace import symbolic_trace
 
 import copy
 from typing import Callable, Dict, List, NamedTuple, Set
