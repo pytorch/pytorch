@@ -26,6 +26,12 @@ struct DefaultArgs : torch::CustomClassHolder {
     x = scale * x + add;
     return x;
   }
+  int64_t divide(c10::optional<int64_t> factor) {
+    if (factor) {
+      x = x / *factor;
+    }
+    return x;
+  }
 };
 
 struct Foo : torch::CustomClassHolder {
@@ -227,7 +233,12 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
           "scale_add",
           &DefaultArgs::scale_add,
           "",
-          {torch::arg("add"), torch::arg("scale") = 1});
+          {torch::arg("add"), torch::arg("scale") = 1})
+      .def(
+          "divide",
+          &DefaultArgs::divide,
+          "",
+          {torch::arg("factor") = torch::arg::none()});
 
   m.class_<Foo>("_Foo")
       .def(torch::init<int64_t, int64_t>())

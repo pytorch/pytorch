@@ -23,6 +23,15 @@ namespace torch {
 ///     static auto register_foo = torch::class_<Foo>("myclasses", "Foo")
 ///       .def("myMethod", &Foo::myMethod, {torch::arg("name") = name});
 struct arg {
+  // Static method for representing a default value of None. This is meant to
+  // be used like so:
+  //     torch::arg("name") = torch::arg::none
+  // and is identical to:
+  //     torch::arg("name") = IValue()
+  static c10::IValue none() {
+    return c10::IValue();
+  }
+
   // Explicit constructor.
   explicit arg(std::string name) : name_(std::move(name)), value_set_(false) {}
   // Assignment operator. This enables the pybind-like syntax of
@@ -36,7 +45,7 @@ struct arg {
   // The name of the argument. This is copied to the schema; argument
   // names cannot be extracted from the C++ declaration.
   std::string name_;
-  // IValue's default constructor makes it None, which not distinguishable from
+  // IValue's default constructor makes it None, which is not distinguishable from
   // an actual, user-provided default value that is None. This boolean
   // helps distinguish between the two cases.
   bool value_set_;
@@ -325,6 +334,7 @@ class class_ {
 
       new_args.emplace_back(old_args[0]);
       for (size_t i = 0; i < default_args_v.size(); ++i) {
+        // Skip self.
         auto& arg = old_args[i+1];
         new_args.emplace_back(c10::Argument(
             std::move(default_args_v[i].name_),
