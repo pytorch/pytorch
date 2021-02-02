@@ -1770,13 +1770,25 @@ std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& self, bool some, bool compu
 
 std::tuple<Tensor&, Tensor&, Tensor&> svd_out(Tensor& U, Tensor& S, Tensor& V,
                                               const Tensor& self, bool some, bool compute_uv) {
-  TORCH_CHECK(self.dim() >= 2,
-              "svd input should have at least 2 dimensions, but has ", self.dim(), " dimensions instead");
+  checkSameDevice("svd", U, self, "U");
+  checkSameDevice("svd", S, self, "S");
+  checkSameDevice("svd", V, self, "V");
+  checkLinalgCompatibleDtype("svd", U, self, "U");
+  checkLinalgCompatibleDtype("svd", V, self, "V");
+  // singular values are always real-valued here
+  ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
+  TORCH_CHECK(at::isFloatingType(S.scalar_type()),
+    "S dtype ", S.scalar_type(), " does not match self dtype ", real_dtype);
+
   Tensor U_tmp, S_tmp, V_tmp;
   std::tie(U_tmp, S_tmp, V_tmp) = at::_svd_helper(self, some, compute_uv);
-  U.resize_as_(U_tmp).copy_(U_tmp);
-  S.resize_as_(S_tmp).copy_(S_tmp);
-  V.resize_as_(V_tmp).copy_(V_tmp);
+
+  at::native::resize_output(U, U_tmp.sizes());
+  at::native::resize_output(S, S_tmp.sizes());
+  at::native::resize_output(V, V_tmp.sizes());
+  U.copy_(U_tmp);
+  S.copy_(S_tmp);
+  V.copy_(V_tmp);
   return std::tuple<Tensor&, Tensor&, Tensor&>(U, S, V);
 }
 
