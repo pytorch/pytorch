@@ -107,18 +107,22 @@ void ImplicitCastForBinaryInplaceOps(Block* b) {
     if ((it->kind() == aten::add_) || (it->kind() == aten::sub_) ||
         (it->kind() == aten::mul_) || (it->kind() == aten::div_)) {
       auto orignalInputs = it->inputs();
+      if (orignalInputs.at(0) == orignalInputs.at(1)) {
+        continue;
+      }
       TensorTypePtr firstInp_tensor =
           orignalInputs.at(0)->type()->cast<TensorType>();
       TensorTypePtr secondInp_tensor =
           orignalInputs.at(1)->type()->cast<TensorType>();
-      if ((firstInp_tensor) && (secondInp_tensor) &&
-          (firstInp_tensor->scalarType().has_value())) {
-        auto newInputNode = it->owningGraph()->create(aten::type_as, 1);
-        newInputNode->insertBefore(*it);
-        newInputNode->addInput(orignalInputs.at(1));
-        newInputNode->addInput(orignalInputs.at(0));
-        it->replaceInput(1, newInputNode->outputs().at(0));
+      if (!(firstInp_tensor) || !(secondInp_tensor) ||
+          !(firstInp_tensor->scalarType().has_value())) {
+        continue;
       }
+      auto newInputNode = it->owningGraph()->create(aten::type_as, 1);
+      newInputNode->insertBefore(*it);
+      newInputNode->addInput(orignalInputs.at(1));
+      newInputNode->addInput(orignalInputs.at(0));
+      it->replaceInput(1, newInputNode->outputs().at(0));
     }
   }
 }
