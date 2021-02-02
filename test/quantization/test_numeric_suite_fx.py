@@ -49,10 +49,10 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             if node.op == "call_module":
                 self.assertFalse(is_activation_post_process(modules[node.target]))
 
-    @override_qengines
     def compare_and_validate_model_weights_results_fx(
         self, prepared_float_model, q_model, expected_weight_dict_keys
     ):
+
         weight_dict = compare_weights_fx(
             prepared_float_model.state_dict(), q_model.state_dict()
         )
@@ -155,7 +155,6 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         )
 
     # TODO: Add submodule and functional test cases for compare_model_stub_fx
-    @override_qengines
     def compare_and_validate_model_stub_results_fx(
         self,
         prepared_float_model,
@@ -168,7 +167,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             prepared_float_model, q_model, module_swap_list, *data
         )
 
-        self.assertTrue(ob_dict.keys() == expected_ob_dict_keys)
+        self.assertTrue(expected_ob_dict_keys == ob_dict.keys())
         self.assertEqual(len(ob_dict), 1)
 
         for k, v in ob_dict.items():
@@ -231,6 +230,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         module_swap_list = [nn.Linear]
 
         expected_ob_dict_keys = {"fc1.stats"}
+
         self.compare_and_validate_model_stub_results_fx(
             prepared_float_model,
             q_model,
@@ -298,7 +298,6 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             lstm_hidden,
         )
 
-    @override_qengines
     def compare_and_validate_model_outputs_results_fx(
         self, prepared_float_model, q_model, expected_act_compare_dict_keys, *data
     ):
