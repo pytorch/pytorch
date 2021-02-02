@@ -2,6 +2,7 @@
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 #include <c10/util/intrusive_ptr.h>
+#include <ATen/core/Dict.h>
 
 namespace c10 {
 
@@ -77,6 +78,18 @@ TEST(IValueTest, Basic) {
   ASSERT_EQ(complex_tuple.toTuple()->elements()[1], foo1);
 }
 
+TEST(IValueTest, ComplexDict) {
+  typedef c10::complex<double> c_type;
+  c10::Dict<c_type, c_type> m;
+  auto num1 = c_type(2.3, -3.5);
+  auto num2 = c_type(0, 5);
+  m.insert(num1, 2 * num1);
+  m.insert(num2, 2 * num2);
+  IValue dict(std::move(m));
+  auto m_ = dict.toGenericDict();
+  ASSERT_EQ(m_.at(num1), 2 * num1);
+  ASSERT_EQ(m_.at(num2), 2 * num2);
+}
 static std::array<IValue, 5> makeSampleIValues() {
   return { at::rand({3, 4}), "hello", 42, true, 1.5 };
 }
