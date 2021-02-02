@@ -236,6 +236,9 @@ class BytecodeDeserializer final {
       ExtraFilesMap& extra_files);
   std::unordered_map<std::string, std::string> deserializeMetadata(
       c10::optional<at::Device> device);
+  void deserialize_only_extra(
+      c10::optional<at::Device> device,
+      ExtraFilesMap& extra_files);
 
  private:
   c10::IValue readArchive(
@@ -261,7 +264,7 @@ std::unordered_map<std::string, std::string> BytecodeDeserializer::
   return readMobileMetadata(mcu);
 }
 
-mobile::Module BytecodeDeserializer::deserialize(
+void BytecodeDeserializer::deserialize_only_extra(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
   device_ = device;
@@ -275,6 +278,12 @@ mobile::Module BytecodeDeserializer::deserialize(
           std::string(static_cast<char*>(meta_ptr.get()), meta_size);
     }
   }
+}
+
+mobile::Module BytecodeDeserializer::deserialize(
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files) {
+  deserialize_only_extra(device, extra_files);
   return deserialize(device);
 }
 
@@ -507,6 +516,21 @@ mobile::Module _load_for_mobile(
       TORCH_RETHROW(error);
     }
   }
+}
+
+void _load_extra_only_for_mobile(
+    const std::string& filename,
+    c10::optional<at::Device> device,
+    ExtraFilesMap& extra_files) {
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  auto observer = torch::observerConfig().getModuleObserver();
+  auto instance_key = std::rand();
+  if (observer) {
+    observer->onEnterLoadModel(instance_key);
+  }
+  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+  BytecodeDeserializer deserializer(std::move(reader));
+  deserializer.deserialize_only_extra(device, extra_files);
 }
 
 } // namespace jit

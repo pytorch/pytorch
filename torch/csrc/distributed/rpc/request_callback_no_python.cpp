@@ -345,13 +345,12 @@ void RequestCallbackNoPython::processForwardAutogradReq(
     const std::shared_ptr<JitFuture>& responseFuture) const {
   auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
 
-    // Need to reverse the device map for the backward pass of distributed
-    // autograd.
-    std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> reverseDeviceMap;
-    for (const auto& mapEntry : rpcWithAutograd.deviceMap()) {
-      reverseDeviceMap.insert({mapEntry.second, mapEntry.first});
-    }
-
+  // Need to reverse the device map for the backward pass of distributed
+  // autograd.
+  std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> reverseDeviceMap;
+  for (const auto& mapEntry : rpcWithAutograd.deviceMap()) {
+    reverseDeviceMap.insert({mapEntry.second, mapEntry.first});
+  }
 
   // Attach 'recv' autograd function.
   auto autogradContext = addRecvRpcBackward(
