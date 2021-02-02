@@ -3964,7 +3964,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
-    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedMinOpsetVersion(13)
     def test_list_append_nested(self):
         class ListModel(torch.nn.Module):
             def forward(self, x, y):
@@ -3994,7 +3994,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
-    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedMinOpsetVersion(13)
     def test_list_pop_nested(self):
         class ListModel(torch.nn.Module):
             def forward(self, x, y):
@@ -4026,7 +4026,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
-    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedMinOpsetVersion(13)
     def test_list_del_nested(self):
         class ListModel(torch.nn.Module):
             def forward(self, x, y):
