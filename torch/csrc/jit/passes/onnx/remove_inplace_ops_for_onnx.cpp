@@ -1029,6 +1029,7 @@ void RemoveInplaceOpsForONNX(
     const std::shared_ptr<Graph>& graph,
     Module* model = nullptr) {
   MutationRemover mr(graph);
+  ImplicitCastForBinaryInplaceOps(graph->block());
   PrepareForRemoveMutations(mr, graph->block());
   RemoveTensorMutation(graph);
   RemoveListMutation(graph);

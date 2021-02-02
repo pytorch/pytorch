@@ -4247,6 +4247,20 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(2, 3, 4)
         self.run_test(Arithmetic(), (x, y))
 
+    def test_inplace_arithmetic_half(self):
+        class InplaceAddModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x.add_(y)
+
+        class InplaceMulModel(torch.nn.Module):
+            def forward(self, x, y):
+                return x.mul_(y)
+
+        x = torch.randn(2, 2, dtype=torch.half)
+        y = torch.randn(2, 2, dtype=torch.float)
+        self.run_test(InplaceAddModel(), (x, y), rtol=1e-2, atol=1e-2)
+        self.run_test(InplaceMulModel(), (x, y), rtol=1e-2, atol=1e-2)
+
     @disableScriptTest()
     def test_sort(self):
         class SortModel(torch.nn.Module):
