@@ -885,6 +885,16 @@ class TestJit(JitTestCase):
         for m, inp in inputs:
             self.checkModule(m, (inp,))
 
+    def test_optional_inputs(self):
+        @torch.jit.script
+        def test_inputs(t, n: Optional[int]):
+            return torch.fft.fftn(t, n)
+
+        A = torch.rand(2,3)
+        expected = torch.fft.fftn(A, 3)
+        output = test_inputs(A, 3)
+        self.assertEqual(expected, output)
+
     def test_script_autograd_grad(self):
         def test_simple_grad(x, y):
             # type: (Tensor, Tensor) -> List[Optional[Tensor]]
