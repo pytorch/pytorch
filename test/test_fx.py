@@ -15,7 +15,7 @@ from pathlib import Path
 from torch.multiprocessing import Process
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, Interpreter, Tracer, Transformer, Graph, wrap
 from torch.fx.node import Target
-from torch.fx.experimental import shape_prop
+from torch.fx.passes import shape_prop
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from copy import deepcopy
 
@@ -1165,6 +1165,18 @@ class TestFX(JitTestCase):
                                               type_expr=List[float])
         output : torch.fx.Node = graph.output(b)
         self.assertTrue('typing.List[float]' in str(graph))
+
+    def test_ellipsis(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                return x + y[:, 1:10, ...]
+
+        traced = symbolic_trace(M())
+        x, y = torch.rand(5, 9, 3, 4), torch.rand(5, 15, 3, 4)
+        self.assertEqual(traced(x, y), x + y[:, 1:10, ...])
 
     def test_inf_nan(self):
         class FooMod(torch.nn.Module):
