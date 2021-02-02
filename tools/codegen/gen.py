@@ -629,15 +629,13 @@ class ComputeFunction:
             if self.is_redispatching_fn:
                 dispatcher_exprs_str = ', '.join(['dispatchKeySet'] + [a.expr for a in dispatcher_exprs])
                 dispatcher_call = 'redispatch'
-                inline = 'inline '
             else:
                 dispatcher_exprs_str = ', '.join(a.expr for a in dispatcher_exprs)
                 dispatcher_call = 'call'
-                inline = ''
 
             return f"""
 // aten::{f.func}
-{inline}{sig.defn(is_redispatching_fn=self.is_redispatching_fn)} {{
+{sig.defn(is_redispatching_fn=self.is_redispatching_fn)} {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
         .typed<{dispatcher_sig.type()}>();
@@ -1379,19 +1377,13 @@ def main() -> None:
             ComputeFunction(Target.DECLARATION, is_redispatching_fn=False), native_functions)),
         'function_redispatch_declarations': list(mapMaybe(
             ComputeFunction(Target.DECLARATION, is_redispatching_fn=True), native_functions)),
-        'function_redispatch_definitions': list(mapMaybe(
-            ComputeFunction(Target.DEFINITION, is_redispatching_fn=True), native_functions)),
     })
     cpu_fm.write('Functions.cpp', lambda: {
         'function_definitions': list(mapMaybe(
             ComputeFunction(Target.DEFINITION, is_redispatching_fn=False), native_functions)),
+        'function_redispatch_definitions': list(mapMaybe(
+            ComputeFunction(Target.DEFINITION, is_redispatching_fn=True), native_functions)),
     })
-    # cpu_fm.write('RedispatchFunctions.h', lambda: {
-        # 'function_redispatch_declarations': list(mapMaybe(
-            # ComputeFunction(Target.DECLARATION, is_redispatching_fn=True), native_functions)),
-        # 'function_redispatch_definitions': list(mapMaybe(
-            # ComputeFunction(Target.DEFINITION, is_redispatching_fn=True), native_functions)),
-    # })
     core_fm.write('TensorBody.h', lambda: {
         'tensor_method_declarations': list(mapMaybe(ComputeTensorMethod(Target.DECLARATION), native_functions)),
     })
