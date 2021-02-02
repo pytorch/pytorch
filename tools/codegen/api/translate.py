@@ -47,11 +47,20 @@ class UnsatError(RuntimeError):
 #
 # TODO: Don't need full Binding for goals, CType will do
 # TODO: Don't need full Binding for bindings, list of Expr will do
-def translate(bindings: Sequence[Binding], goals: Sequence[Binding], *, method: bool = False) -> List[Expr]:
+def translate(
+    bindings: Sequence[Binding], goals: Sequence[Binding], *,
+    method: bool = False, skip_possibly_redundant_memory_format: bool = False
+) -> List[Expr]:
     # Add all the bindings to the context
     ctx: Dict[CType, str] = {}
     for b in bindings:
         ctx[b.ctype] = b.name
+
+        # handle `const c10::optional<Tensor> &` -> `const Tensor &`
+        t = b.ctype
+        if isinstance(t, ConstRefCType) and isinstance(t.elem, OptionalCType) and \
+           isinstance(t.elem.elem, BaseCType) and t.elem.elem.type == 'Tensor':
+            ctx[ConstRefCType(BaseCType("Tensor", b.name))] = f'({b.name}.has_value() ? *{b.name} : at::Tensor())'
 
     # Add implicit bindings if the generated code is inside a Tensor method
     if method:
@@ -109,6 +118,8 @@ Check this module for more information.
             memory_format = direct_solve(
                 OptionalCType(BaseCType("MemoryFormat", SpecialArgName.possibly_redundant_memory_format))
             )
+            if skip_possibly_redundant_memory_format:
+                return memory_format
             try:
                 options = direct_solve(options_ctype)
                 return f"c10::impl::check_tensor_options_and_extract_memory_format({options}, {memory_format})"

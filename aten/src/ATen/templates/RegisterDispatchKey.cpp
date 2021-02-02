@@ -37,6 +37,8 @@ $legacy_th_headers
 
 namespace at {
 
+namespace ${dispatch_namespace} {
+
 ${dispatch_definitions}
 
 // NB: TORCH_LIBRARY_IMPL must be in an anonymous namespace to avoid
@@ -49,5 +51,7 @@ TORCH_LIBRARY_IMPL(aten, ${DispatchKey}, m) {
 }
 
 } // anonymous namespace
+
+} // namespace ${dispatch_namespace}
 
 } // namespace at
