@@ -491,10 +491,18 @@ std::tuple<Tensor,Tensor> solve(const Tensor& self, const Tensor& A) {
 }
 
 std::tuple<Tensor&,Tensor&> solve_out(Tensor& solution, Tensor& lu, const Tensor& self, const Tensor& A) {
+  checkSameDevice("solve", solution, self, "solution");
+  checkSameDevice("solve", lu, self, "lu");
+  checkLinalgCompatibleDtype("solve", solution, self, "solution");
+  checkLinalgCompatibleDtype("solve", lu, self, "lu");
+
   Tensor solution_tmp, lu_tmp;
   std::tie(solution_tmp, lu_tmp) = at::_solve_helper(self, A);
-  solution.resize_as_(solution_tmp).copy_(solution_tmp);
-  lu.resize_as_(lu_tmp).copy_(lu_tmp);
+
+  at::native::resize_output(solution, solution_tmp.sizes());
+  at::native::resize_output(lu, lu_tmp.sizes());
+  solution.copy_(solution_tmp);
+  lu.copy_(lu_tmp);
   return std::tuple<Tensor&, Tensor&>(solution, lu);
 }
 
