@@ -183,7 +183,6 @@ def gen_binary_nnc(op):
             A, B = args
 
             def index_or_broadcast(shape, *args):
-                # assert(len(args) == len(shape))
                 out = []
                 for idx, arg in enumerate(args):
                     if idx >= len(shape): continue
@@ -312,7 +311,6 @@ lowering_functions[torch.bmm] = bmm_lower
 lowering_functions[torch.mm] = mm_lower
 
 
-
 def lower_function(name, op, shape_env, nnc_args, args):
     inp_shapes = fx.node.map_aggregate(args, lambda arg: shape_env[arg.name] if isinstance(arg, fx.Node) else None)
     return lowering_functions[op](name, shape_env[name][0], inp_shapes, nnc_args)
@@ -395,31 +393,16 @@ class DeepAndWide(torch.nn.Module):
         fc1 = torch.addmm(self.fc_b, inp, t1)
         return fc1
 
-from jax import jit
-import jax.numpy as jnp
-import jax.lax as lax
-def jax_fn(mu, sigma, fc_w, fc_b, ad_emb_packed, user_emb, wide):
-    wide_offset = wide + mu
-    wide_normalized = wide_offset + sigma
-    wide_preproc = jnp.clip(wide_normalized, 0., 10.)
-    user_emb_t = jnp.transpose(user_emb, (0, 2, 1))
-    dp_unflatten = lax.batch_matmul(ad_emb_packed, user_emb_t)
-    dp = dp_unflatten.reshape(dp_unflatten.shape[0], -1)
-    inp = jnp.concatenate([dp, wide_preproc], 1)
-    t1 = jnp.transpose(fc_w, (1,0))
-    fc1 = fc_b + inp @ t1
-    return fc1
-
 
 
 with kernel_arena_scope():
     with torch.no_grad():
-        num_features = 100000
+        num_features = 100
         mod = DeepAndWide(num_features)
 
         # Phabricate sample inputs
         batch_size = 1
-        embedding_size = 100000
+        embedding_size = 100
         ad_emb_packed = torch.randn(batch_size, 1, embedding_size)
         user_emb = torch.randn(batch_size, 1, embedding_size)
         wide = torch.randn(batch_size, num_features)
