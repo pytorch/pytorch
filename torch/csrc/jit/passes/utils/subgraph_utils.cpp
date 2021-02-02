@@ -52,6 +52,12 @@ struct ValueMapper {
         subgraph_num_outputs_, num_outputs - subgraph_num_outputs_);
     for (Value* v : new_outputs) {
       auto maybe_last_use = firstOrLastUse(v, /*find_first*/ false);
+      if (!maybe_last_use) {
+        if (AliasDb::isMutableType(v->type())) {
+          db.createValue(v);
+        }
+        continue;
+      }
       // if it doesnt have a use it shouldnt have been added as output
       TORCH_INTERNAL_ASSERT(maybe_last_use);
       const Use last_use = *maybe_last_use;
@@ -283,14 +289,14 @@ void mergeNodeIntoSubgraph(
       // enable more optimizations
       if (auto value = toIValue(input)) {
         auto nv = subgraph->insertConstant(*value);
-        nv->setType(input->type()); // Need to retain type information on Nones
+        nv->copyMetadata(input);
         inputsMap[input] = nv;
       } else {
         // The common case: this is a regular input, so just register it with
         // the group node and inner subgraph
         subgraphNode->addInput(input);
         auto inputToGraph = subgraph->addInput();
-        inputToGraph->setType(input->type());
+        inputToGraph->copyMetadata(input);
         inputsMap[input] = inputToGraph;
       }
     }

@@ -304,6 +304,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::BroadcastingChunk,
       prim::ConvertToMKLDNN,
       prim::ConstantMKLDNNTensor,
+      prim::MKLDNNGroup,
       prim::fork,
       prim::CreateObject,
       prim::AutogradAdd,

@@ -557,6 +557,7 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeGradOf(node);
     // TODO: think more about TensorExpr alias correctness
     case prim::TensorExprGroup:
+    case prim::MKLDNNGroup:
     case prim::StaticSubgraph:
     case prim::Constant:
     case prim::AutogradZero:

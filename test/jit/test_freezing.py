@@ -1605,6 +1605,59 @@ class TestFrozenOptimizations(JitTestCase):
                     self.assertEqual(out_eager.is_mkldnn, out_scripted.is_mkldnn)
                     self.assertEqual(to_dense(inp), to_dense(inp))
 
+    @unittest.skipIf(not torch._C.has_mkldnn, "MKL-DNN build is disabled")
+    def test_collapse_adjacent_conversions(self):
+        # use until github.com/pytorch/pytorch/pull/50856 land
+        class LinearMod(nn.Linear):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+            def forward(self, input):
+                return torch._C._nn.linear(input, self.weight, self.bias)
+
+        with set_default_dtype(torch.float):
+            mod = nn.Sequential(LinearMod(20, 20), LinearMod(20, 20)).eval()
+            scripted_mod = torch.jit.script(mod)
+            scripted_mod = torch.jit.freeze(scripted_mod)
+            self.run_pass("convert_frozen_ops_to_mkldnn", scripted_mod.graph)
+            FileCheck().check("ConvertToMKLDNN").check("aten::linear").check("aten::linear").check("ConvertFrom").run(scripted_mod.graph)
+            FileCheck().check_count("ConvertTo", 1, exactly=True).run(scripted_mod.graph)
+
+            inp = torch.rand([20, 20])
+            self.assertEqual(scripted_mod(inp), mod(inp))
+
+            for module in mod:
+                module.weight = torch.nn.Parameter(module.weight.to_mkldnn())
+                module.bias = module.bias if module.bias is None else torch.nn.Parameter(module.bias.to_mkldnn())
+
+            out_eager = mod(inp.to_mkldnn())
+            out_scripted = scripted_mod(inp.to_mkldnn())
+
+            self.assertEqual(out_eager.is_mkldnn, out_scripted.is_mkldnn)
+            self.assertEqual(out_eager.to_dense(), out_scripted.to_dense())
+
+            # testing unsupported behavior
+            class Add(nn.Module):
+                def __init__(self, tensor):
+                    super().__init__()
+                    self.tensor = tensor
+
+                def forward(self, x):
+                    return x + self.tensor
+
+            def test_unsupported(module, preserved_attrs=None):
+                mod = torch.jit.freeze(torch.jit.script(module.eval()), preserved_attrs)
+                self.run_pass("convert_frozen_ops_to_mkldnn", mod.graph)
+                FileCheck().check("ConvertTo").check("linear").check("ConvertFrom").check("aten::add").run(mod.graph)
+
+            lin = LinearMod(20, 20)
+            # Scalar-Tensor not supported
+            test_unsupported(nn.Sequential(lin, Add(.5)))
+            # # 0-dim not supported
+            test_unsupported(nn.Sequential(lin, Add(torch.tensor(.5))))
+            # tensor of unknown dtype (getAttr node here) not supported
+            test_unsupported(nn.Sequential(lin, Add(torch.tensor([20]))), ['1'])
+
     @unittest.skipIf(torch._C.has_mkldnn, "Testing no mkldnn")
     def test_conv_to_mkldnn_no_mkldnn(self):
         # test no error when mkldnn not available
