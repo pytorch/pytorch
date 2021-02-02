@@ -90,7 +90,7 @@ TESTS = [
     'test_type_promotion',
     'test_jit_disabled',
     'test_function_schema',
-    'test_op_aliases.py',
+    'test_op_aliases',
     'test_overrides',
     'test_jit_fuser_te',
     'test_tensorexpr',
