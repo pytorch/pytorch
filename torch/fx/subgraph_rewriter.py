@@ -306,24 +306,24 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
             # was created before `replacement_subgraph` was spliced in,
             # so we know that, if a Node is in `match.nodes_map.values`,
             # it must have come from the original graph
-            for n in subgraph_output.args:
-                if n.op != "placeholder" and n in match.nodes_map.values():
+            for n in subgraph_output.all_input_nodes:
+                if (n.op != "placeholder"
+                        and n in match.nodes_map.values()):
                     subgraph_output = n
                     break
             assert subgraph_output.op != "output"
-            subgraph_output.replace_all_uses_with(copied_output)
         # CASE 2: The pattern subgraph match extends to the end of the
         # original graph, so we need to change the current graph's
         # output Node to reflect the insertion of the replacement graph.
         # We'll keep the current output Node, but update its args and
         # `_input_nodes` as necessary
         else:
-            subgraph_output.args = ([copied_output])
-            if type(copied_output) == Node:
+            subgraph_output.args = ((copied_output,))
+            if isinstance(copied_output, Node):
                 subgraph_output._input_nodes = {copied_output: None}
-            else:
-                subgraph_output._input_nodes = {n: None for n in [*copied_output]}
-            subgraph_output.replace_all_uses_with(copied_output)
+
+        assert isinstance(copied_output, Node)
+        subgraph_output.replace_all_uses_with(copied_output)
 
         # Erase the `pattern` nodes
         for node in reversed(original_graph.nodes):
