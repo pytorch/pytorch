@@ -61,8 +61,7 @@ replace ``torch.add`` with ``torch.mul``.
 
 We can also do more involved graph rewrites, such as appending a ReLU
 after a node. To aid in these transformations, FX also has utility
-functions for transforming the graph. You can find more in the FX documentation.
-TODO: Add link to the FX documentation.
+functions for transforming the graph. You can find more in :class:`Graph`.
 
 ::
 
@@ -124,8 +123,7 @@ the graph.
         env = {}
         for node in model.graph.nodes:
             if node.op == 'call_function' and node.target in decomposition_rules:
-                tracer = fx.proxy.Tracer(new_graph)
-                proxy_args = [fx.Proxy(env[x.name], tracer=tracer) if isinstance(x, fx.Node) else x for x in node.args]
+                proxy_args = [fx.Proxy(env[x.name]) if isinstance(x, fx.Node) else x for x in node.args]
                 new_node = decomposition_rules[node.target](*proxy_args).node
                 env[node.name] = new_node
             else:
@@ -140,7 +138,7 @@ this can often improve readability and maintainability of the rules.
 
 TODO: Example transformations (need to be included first)
 
-FX Transforms That Don’t Return A Module
+The Interpreter Pattern
 ----------------------------------------
 
 In addition to FX passes that take in a module and return a module,
