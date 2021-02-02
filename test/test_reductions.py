@@ -1870,14 +1870,14 @@ class TestReductions(TestCase):
             interpolations = ('linear', 'lower', 'higher', 'midpoint', 'nearest')
             for interpolation, dim in product(interpolations,
                                               [None] + list(range(a.ndim))):
-                result = torch_op(a, q, dim, keepdim, interpolation=interpolation)
+                result = torch_op(a, q, interpolation=interpolation, dim=dim, keepdim=keepdim)
                 expected = numpy_op(a.cpu().numpy(), q.cpu().numpy(), dim,
                                     interpolation=interpolation, keepdims=keepdim)
                 self.assertEqual(result.cpu(), torch.from_numpy(np.array(expected)).type(result.type()))
 
                 # Test out variation
                 out = torch.empty_like(result)
-                torch_op(a, q, dim, keepdim, interpolation=interpolation, out=out)
+                torch_op(a, q, interpolation=interpolation, dim=dim, keepdim=keepdim, out=out)
                 self.assertEqual(out.cpu(), result.cpu())
 
     def test_quantile_backward(self, device):

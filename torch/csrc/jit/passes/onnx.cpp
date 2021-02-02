@@ -117,7 +117,7 @@ void preprocessCaffe2Ops(Block* block) {
           it->s_(Symbol::attr(arg.name()), constant_node->s(attr::value));
         } else if (type->kind() == TypeKind::ListType) {
           const auto& list_node = origin_input->node();
-          const auto& elem_type = type->cast<ListType>()->getElementType();
+          const auto& elem_type = type->castRaw<ListType>()->getElementType();
           AT_ASSERT(
               list_node->kind() == prim::ListConstruct ||
               list_node->kind() == prim::Constant);

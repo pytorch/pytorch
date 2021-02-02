@@ -116,9 +116,9 @@ void quantile_impl(
     Tensor& out,
     const Tensor& self,
     const Tensor& q,
+    const QUANTILE_INTERPOLATION_MODE& interpolation,
     const optional<int64_t> _dim,
     const bool keepdim,
-    const QUANTILE_INTERPOLATION_MODE& interpolation,
     const bool ignore_nan) {
   int64_t dim = at::maybe_wrap_dim(_dim.value_or(0), self.dim());
 
@@ -456,17 +456,8 @@ Tensor& quantile_out(
     const Tensor& q,
     optional<int64_t> _dim,
     bool keepdim,
-    const std::string interpolation,
     Tensor& out) {
-  quantile_impl(
-      out,
-      self,
-      q,
-      _dim,
-      keepdim,
-      get_quantile_interpolation_mode(interpolation),
-      /*ignore_nan=*/false);
-  return out;
+  return at::quantile_out(out, self, q, "linear", _dim, keepdim);
 }
 
 Tensor& quantile_out(
@@ -474,7 +465,84 @@ Tensor& quantile_out(
     double q,
     optional<int64_t> _dim,
     bool keepdim,
+    Tensor& out) {
+  return at::quantile_out(out, self, q, "linear", _dim, keepdim);
+}
+
+Tensor quantile(
+    const Tensor& self,
+    const Tensor& q,
+    optional<int64_t> _dim,
+    bool keepdim) {
+  return at::quantile(self, q, "linear", _dim, keepdim);
+}
+
+Tensor quantile(
+    const Tensor& self,
+    double q,
+    optional<int64_t> _dim,
+    bool keepdim) {
+  return at::quantile(self, q, "linear", _dim, keepdim);
+}
+
+Tensor& nanquantile_out(
+    const Tensor& self,
+    const Tensor& q,
+    optional<int64_t> _dim,
+    bool keepdim,
+    Tensor& out) {
+  return at::nanquantile_out(out, self, q, "linear", _dim, keepdim);
+}
+
+Tensor& nanquantile_out(
+    const Tensor& self,
+    double q,
+    optional<int64_t> _dim,
+    bool keepdim,
+    Tensor& out) {
+  return at::nanquantile_out(out, self, q, "linear", _dim, keepdim);
+}
+
+Tensor nanquantile(
+    const Tensor& self,
+    const Tensor& q,
+    optional<int64_t> _dim,
+    bool keepdim) {
+  return at::nanquantile(self, q, "linear", _dim, keepdim);
+}
+
+Tensor nanquantile(
+    const Tensor& self,
+    double q,
+    optional<int64_t> _dim,
+    bool keepdim) {
+  return at::nanquantile(self, q, "linear", _dim, keepdim);
+}
+
+Tensor& quantile_out(
+    const Tensor& self,
+    const Tensor& q,
     const std::string interpolation,
+    optional<int64_t> _dim,
+    bool keepdim,
+    Tensor& out) {
+  quantile_impl(
+      out,
+      self,
+      q,
+      get_quantile_interpolation_mode(interpolation),
+      _dim,
+      keepdim,
+      /*ignore_nan=*/false);
+  return out;
+}
+
+Tensor& quantile_out(
+    const Tensor& self,
+    double q,
+    const std::string interpolation,
+    optional<int64_t> _dim,
+    bool keepdim,
     Tensor& out) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
@@ -482,25 +550,25 @@ Tensor& quantile_out(
       out,
       self,
       at::scalar_tensor(q, self.options()),
+      interpolation,
       _dim,
-      keepdim,
-      interpolation);
+      keepdim);
 }
 
 Tensor quantile(
     const Tensor& self,
     const Tensor& q,
+    const std::string interpolation,
     optional<int64_t> _dim,
-    bool keepdim,
-    const std::string interpolation) {
+    bool keepdim) {
   Tensor out = at::empty({0}, self.options());
   quantile_impl(
       out,
       self,
       q,
+      get_quantile_interpolation_mode(interpolation),
       _dim,
       keepdim,
-      get_quantile_interpolation_mode(interpolation),
       /*ignore_nan=*/false);
   return out;
 }
@@ -508,29 +576,29 @@ Tensor quantile(
 Tensor quantile(
     const Tensor& self,
     double q,
+    const std::string interpolation,
     optional<int64_t> _dim,
-    bool keepdim,
-    const std::string interpolation) {
+    bool keepdim) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::quantile(
-      self, at::scalar_tensor(q, self.options()), _dim, keepdim, interpolation);
+      self, at::scalar_tensor(q, self.options()), interpolation, _dim, keepdim);
 }
 
 Tensor& nanquantile_out(
     const Tensor& self,
     const Tensor& q,
+    const std::string interpolation,
     optional<int64_t> _dim,
     bool keepdim,
-    const std::string interpolation,
     Tensor& out) {
   quantile_impl(
       out,
       self,
       q,
+      get_quantile_interpolation_mode(interpolation),
       _dim,
       keepdim,
-      get_quantile_interpolation_mode(interpolation),
       /*ignore_nan=*/true);
   return out;
 }
@@ -538,9 +606,9 @@ Tensor& nanquantile_out(
 Tensor& nanquantile_out(
     const Tensor& self,
     double q,
+    const std::string interpolation,
     optional<int64_t> _dim,
     bool keepdim,
-    const std::string interpolation,
     Tensor& out) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
@@ -548,25 +616,25 @@ Tensor& nanquantile_out(
       out,
       self,
       at::scalar_tensor(q, self.options()),
+      interpolation,
       _dim,
-      keepdim,
-      interpolation);
+      keepdim);
 }
 
 Tensor nanquantile(
     const Tensor& self,
     const Tensor& q,
+    const std::string interpolation,
     optional<int64_t> _dim,
-    bool keepdim,
-    const std::string interpolation) {
+    bool keepdim) {
   Tensor out = at::empty({0}, self.options());
   quantile_impl(
       out,
       self,
       q,
+      get_quantile_interpolation_mode(interpolation),
       _dim,
       keepdim,
-      get_quantile_interpolation_mode(interpolation),
       /*ignore_nan=*/true);
   return out;
 }
@@ -574,13 +642,13 @@ Tensor nanquantile(
 Tensor nanquantile(
     const Tensor& self,
     double q,
+    const std::string interpolation,
     optional<int64_t> _dim,
-    bool keepdim,
-    const std::string interpolation) {
+    bool keepdim) {
   TORCH_CHECK(
       q >= 0 && q <= 1, "quantile() q must be in the range [0, 1] but got ", q);
   return at::nanquantile(
-      self, at::scalar_tensor(q, self.options()), _dim, keepdim, interpolation);
+      self, at::scalar_tensor(q, self.options()), interpolation, _dim, keepdim);
 }
 
 std::tuple<Tensor&, Tensor&> kthvalue_out_cpu(
@@ -798,6 +866,11 @@ Tensor& msort_out(Tensor& values, const Tensor& self) {
 Tensor msort(const Tensor& self) {
   return std::get<0>(at::sort(self, 0, false));
 }
+
+Tensor argsort(const Tensor & self, int64_t dim, bool descending) {
+  return std::get<1>(at::sort(self, dim, descending));
+}
+
 
 } // namespace native
 } // namespace at
