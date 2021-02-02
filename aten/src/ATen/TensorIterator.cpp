@@ -265,9 +265,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
   //   - determines if there are different dtypes and attempts
   //       to quickly acquire a common dtype
   Device common_device = kCPU;
-  common_dtype_ = ScalarType::Undefined;
-  auto is_common_dtype_specified =
-      config.specified_common_dtype != ScalarType::Undefined;
+  common_dtype_ = config.specified_common_dtype;
 
   // NB: despite output_dtype's generic sounding name, it only is
   // used in a nontrivial way if check_all_same_dtype is true
@@ -351,19 +349,19 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     return;
   }
 
-  if (is_common_dtype_specified) {
-    common_dtype_ = config.specified_common_dtype;
-  } else {
-    // Computes a common dtype, if needed
-    if (has_different_input_dtypes && config.promote_inputs_to_common_dtype_) {
+  // Computes a common dtype, if needed
+  if (has_different_input_dtypes && config.promote_inputs_to_common_dtype_) {
+    if (config.specified_common_dtype == ScalarType::Undefined) {
       common_dtype_ = compute_common_dtype();
     }
-    // Promotes common dtype to the default float scalar type, if needed
-    if (config.promote_integer_inputs_to_float_ &&
-        c10::isIntegralType(common_dtype_, /*include_bool=*/true) &&
-        !is_common_dtype_specified) {
-      common_dtype_ = c10::typeMetaToScalarType(c10::get_default_dtype());
-    }
+  }
+
+  // Promotes common dtype to the default float scalar type, if needed
+  if (config.promote_integer_inputs_to_float_ &&
+      c10::isIntegralType(common_dtype_, /*include_bool=*/true)) {
+    TORCH_CHECK(config.specified_common_dtype == ScalarType::Undefined,
+            "Specified integral dtype for an operator which does not support that")
+    common_dtype_ = c10::typeMetaToScalarType(c10::get_default_dtype());
   }
 
   // Reviews operands (2/2)
@@ -409,7 +407,7 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
     }
 
     // Checks safe casting for inputs if common_dtype was specified by user.
-    if (is_common_dtype_specified && !op.is_output && op.current_dtype != common_dtype_) {
+    if (config.specified_common_dtype != ScalarType::Undefined && !op.is_output && op.current_dtype != common_dtype_) {
       TORCH_CHECK(canCast(op.current_dtype, common_dtype_),
                   "input type ", op.current_dtype, " can't be cast to the "
                   "desired common type ", common_dtype_);
