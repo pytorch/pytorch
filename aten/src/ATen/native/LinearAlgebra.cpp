@@ -2074,8 +2074,8 @@ Tensor linalg_tensorinv(const Tensor& self, int64_t ind) {
 
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 Tensor& linalg_tensorinv_out(Tensor& result, const Tensor& self, int64_t ind) {
-  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+  checkSameDevice("tensorinv", result, self);
+  checkLinalgCompatibleDtype("tensorinv", result, self);
 
   Tensor result_tmp = at::linalg_tensorinv(self, ind);
   at::native::resize_output(result, result_tmp.sizes());

@@ -2849,7 +2849,7 @@ class TestLinalg(TestCase):
 
             # dtypes should match
             out = torch.empty_like(a).to(torch.int)
-            with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match self dtype"):
+            with self.assertRaisesRegex(RuntimeError, "got result with dtype Int and input with dtype"):
                 torch.linalg.tensorinv(a, ind=ind, out=out)
 
         # test for invalid shape
