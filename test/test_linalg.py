@@ -2372,7 +2372,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_inv_errors(self, device, dtype):
+    def test_inv_errors_and_warnings(self, device, dtype):
         # inv expects batches of square matrices as input
         a = torch.randn(2, 3, 4, 3, dtype=dtype, device=device)
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
@@ -2393,23 +2393,28 @@ class TestLinalg(TestCase):
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
             run_test_singular_input(*params)
 
-        # if non-empty out tensor with wrong shape is passed an error is thrown
-        a = torch.randn(2, 3, 3, device=device, dtype=dtype)
-        out = torch.empty(1, device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, "does not match input shape"):
-            torch.linalg.inv(a, out=out)
-
         # dtypes should match
+        a = torch.eye(2, dtype=dtype, device=device)
         out = torch.empty_like(a).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match input dtype"):
+        with self.assertRaisesRegex(RuntimeError, "got result with dtype Int"):
             torch.linalg.inv(a, out=out)
 
         # device should match
         if torch.cuda.is_available():
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             out = torch.empty(0, device=wrong_device, dtype=dtype)
-            with self.assertRaisesRegex(RuntimeError, "does not match input device"):
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.inv(a, out=out)
+
+        # if out tensor with wrong shape is passed a warning is given
+        with warnings.catch_warnings(record=True) as w:
+            a = torch.eye(2, dtype=dtype, device=device)
+            out = torch.empty(1, dtype=dtype, device=device)
+            # Trigger warning
+            torch.linalg.inv(a, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
     def solve_test_helper(self, A_dims, b_dims, device, dtype):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value

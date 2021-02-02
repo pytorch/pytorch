@@ -688,41 +688,60 @@ Tensor& _linalg_inv_out_helper_cpu(Tensor &result, Tensor& infos_lu, Tensor& inf
 // Computes the inverse matrix of 'input', it is is saved to 'result' in-place
 // LAPACK/MAGMA/cuSOLVER error codes are saved in 'infos' tensors, they are not checked here
 static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& infos_getri, const Tensor& input) {
-  squareCheckInputs(input);
+  TORCH_INTERNAL_ASSERT(input.dim() >= 2);
+  TORCH_INTERNAL_ASSERT(input.size(-1) == input.size(-2));
+
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == input.scalar_type());
+  TORCH_INTERNAL_ASSERT(result.device() == input.device());
+
   TORCH_INTERNAL_ASSERT(infos_lu.scalar_type() == kInt);
   TORCH_INTERNAL_ASSERT(infos_getri.scalar_type() == kInt);
-  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
-  TORCH_CHECK(result.device() == input.device(),
-    "result device ", result.device(), " does not match input device ", input.device());
 
   // if result has no elements we can modify it
   if (result.numel() == 0) {
     at::native::resize_as_(result, input.transpose(-2, -1), MemoryFormat::Contiguous);
     result.transpose_(-2, -1);
-  } else {
-    // Resize messes up the strides and we expect strictly column major order, so let's not use at::native::resize_output
-    TORCH_CHECK(result.sizes().equals(input.sizes()),
-    "result shape ", result.sizes(), " does not match input shape ", input.sizes());
   }
 
-  TORCH_CHECK(result.transpose(-2, -1).is_contiguous(), "result tensor must be in batched column major order (Fortran contiguous).");
+  TORCH_CHECK(result.sizes().equals(input.sizes()),
+    "result shape ", result.sizes(), " does not match input shape ", input.sizes());
+
+  // result tensor must be in batched column major order (Fortran contiguous)
+  TORCH_INTERNAL_ASSERT(result.transpose(-2, -1).is_contiguous());
+
+  // _linalg_inv_out_helper_ (apply_inverse) performs calculations in-place and result must be a copy of input
   result.copy_(input);
 
-  at::native::resize_output(infos_lu, {std::max<int64_t>(1, batchCount(input))});
-  at::native::resize_output(infos_getri, {std::max<int64_t>(1, batchCount(input))});
-  infos_lu.fill_(0);
-  infos_getri.fill_(0);
-
+  // TODO: Replace this helper with DECLARE/DEFINE_DISPATCH
   result = at::_linalg_inv_out_helper_(result, infos_lu, infos_getri);
   return result;
 }
 
 // Computes the inverse matrix of 'input', it is is saved to 'result' in-place
 Tensor& linalg_inv_out(Tensor &result, const Tensor &input) {
-  auto infos_lu = at::empty({0}, input.options().dtype(kInt));
-  auto infos_getri = at::empty({0}, input.options().dtype(kInt));
-  result = linalg_inv_out_info(result, infos_lu, infos_getri, input);
+  squareCheckInputs(input);
+  checkSameDevice("linalg_inv", result, input);
+  checkLinalgCompatibleDtype("linalg_inv", result, input);
+
+  auto infos_lu = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
+  auto infos_getri = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt));
+
+  bool result_input_same_type = (result.scalar_type() == input.scalar_type());
+  bool is_batched_column_major = false;
+  if (result.dim() >= 2) {
+    is_batched_column_major = result.transpose(-2, -1).is_contiguous();
+  }
+
+  // if result is not empty and not in batched column major format or does not have the same dtype as input
+  // we have to allocate a temporary tensor
+  if ((result.numel() != 0 && !is_batched_column_major) || !result_input_same_type) {
+    Tensor result_tmp = at::empty({0}, input.options());
+    result_tmp = linalg_inv_out_info(result_tmp, infos_lu, infos_getri, input);
+    at::native::resize_output(result, result_tmp.sizes());
+    result.copy_(result_tmp);
+  } else {  // use result's storage directly
+    result = linalg_inv_out_info(result, infos_lu, infos_getri, input);
+  }
 
   // Now check LAPACK/MAGMA/cuSOLVER error codes
   if (result.dim() > 2) {
