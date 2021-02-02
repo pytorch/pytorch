@@ -17,7 +17,7 @@ from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
 from .hipify.hipify_python import get_hip_file_path, GeneratedFileCleaner
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from setuptools.command.build_ext import build_ext
 from pkg_resources import packaging  # type: ignore
@@ -883,12 +883,10 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
     if IS_HIP_EXTENSION:
         build_dir = os.getcwd()
-        if not include_dirs:
-            include_dirs = ['*']
         hipify_result = hipify_python.hipify(
             project_directory=build_dir,
             output_directory=build_dir,
-            includes=[os.path.join(os.path.relpath(include_dir, build_dir), '*') for include_dir in include_dirs],
+            includes=[os.path.join(os.path.relpath(include_dir, build_dir), '*') for include_dir in include_dirs] if include_dirs else ['*'],
             extra_files=[os.path.abspath(s) for s in sources],
             show_detailed=True,
             is_pytorch_extension=True,
@@ -980,7 +978,7 @@ def library_paths(cuda: bool = False) -> List[str]:
 
 
 def load(name,
-         sources: List[str],
+         sources: Union[str, List[str]],
          extra_cflags=None,
          extra_cuda_cflags=None,
          extra_ldflags=None,

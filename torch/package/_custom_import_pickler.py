@@ -1,7 +1,8 @@
-from pickle import Pickler, _Pickler, _getattribute, whichmodule, _extension_registry, _compat_pickle  # type: ignore
+from pickle import Pickler, whichmodule, _Pickler, _getattribute, _extension_registry, _compat_pickle  # type: ignore
 from pickle import GLOBAL, STACK_GLOBAL, EXT1, EXT2, EXT4, PicklingError
 from types import FunctionType
 from struct import pack
+from ._mangling import demangle, is_mangled, get_mangle_prefix
 import importlib
 
 
@@ -24,7 +25,11 @@ class CustomImportPickler(_Pickler):
         if name is None:
             name = obj.__name__
 
-        module_name = whichmodule(obj, name)
+        orig_module_name = whichmodule(obj, name)
+        # CHANGED: demangle the module name before importing. If this obj came
+        # out of a PackageImporter, `__module__` will be mangled. See
+        # mangling.md for details.
+        module_name = demangle(orig_module_name)
         try:
             # CHANGED: self.import_module rather than
             # __import__
@@ -36,9 +41,44 @@ class CustomImportPickler(_Pickler):
                 (obj, module_name, name)) from None
         else:
             if obj2 is not obj:
-                raise PicklingError(
-                    "Can't pickle %r: it's not the same object as %s.%s" %
-                    (obj, module_name, name))
+                # CHANGED: More specific error message in the case of mangling.
+                obj_module_name = getattr(obj, "__module__", orig_module_name)
+                obj2_module_name = getattr(obj2, "__module__", orig_module_name)
+
+                msg = f"Can't pickle {obj}: it's not the same object as {obj2_module_name}.{name}."
+
+                is_obj_mangled = is_mangled(obj_module_name)
+                is_obj2_mangled = is_mangled(obj2_module_name)
+
+                if is_obj_mangled or is_obj2_mangled:
+                    obj_location = (
+                        get_mangle_prefix(obj_module_name)
+                        if is_obj_mangled
+                        else "the current Python environment"
+                    )
+                    obj2_location = (
+                        get_mangle_prefix(obj2_module_name)
+                        if is_obj2_mangled
+                        else "the current Python environment"
+                    )
+
+                    obj_importer_name = (
+                        f"the importer for {get_mangle_prefix(obj_module_name)}"
+                        if is_obj_mangled
+                        else "'importlib.import_module'"
+                    )
+                    obj2_importer_name = (
+                        f"the importer for {get_mangle_prefix(obj2_module_name)}"
+                        if is_obj2_mangled
+                        else "'importlib.import_module'"
+                    )
+
+                    msg += (f"\n\nThe object being pickled is from '{orig_module_name}', "
+                            f"which is coming from {obj_location}."
+                            f"\nHowever, when we import '{orig_module_name}', it's coming from {obj2_location}."
+                            "\nTo fix this, make sure 'PackageExporter.importers' lists "
+                            f"{obj_importer_name} before {obj2_importer_name}")
+                raise PicklingError(msg)
 
         if self.proto >= 2:
             code = _extension_registry.get((module_name, name))
