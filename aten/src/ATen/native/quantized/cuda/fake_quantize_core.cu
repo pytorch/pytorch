@@ -113,6 +113,9 @@ void fake_quant_per_channel_cachemask_cuda(
 }
 
 void _fake_quantize_grad_learnable_channel_kernel_cuda(TensorIterator &iter_x, TensorIterator &iter_scale, TensorIterator &iter_zero_point, int64_t quant_min, int64_t quant_max, float grad_factor) {
+  // TODO(future, optional): use three gpu_kernel calls instead of one gpu_kernel_multiple_outputs
+  // because current gpu_kernel_multiple_outputs gives incorrect results on CUDA11
+  // change to use gpu_kernel_multiple_outputs for efficiency when it get fixed
   // write x.grad
   gpu_kernel(iter_x,
     [=] GPU_LAMBDA (float x_input, float dy_input, float scale_input, float zero_point_input) -> float {

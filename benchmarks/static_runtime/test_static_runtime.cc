@@ -59,6 +59,15 @@ void testStaticRuntime(
   script::Module module("module");
   module.define(jit_script);
 
+  std::vector<IValue> args_tensors, args_copy;
+  for (const auto& ival : args) {
+    if (ival.isTensor()) {
+      args_tensors.emplace_back(ival);
+      const at::Tensor& t = ival.toTensor();
+      args_copy.emplace_back(t.clone());
+    }
+  }
+
   auto expect = module.forward(args);
 
   StaticRuntime runtime(module);
@@ -72,6 +81,8 @@ void testStaticRuntime(
   } else {
     EXPECT_TRUE(expect.toTensor().equal(actual.toTensor()));
   }
+  // make sure inputs were not modified
+  compareTensorLists(args_tensors, args_copy);
 }
 } // namespace
 
