@@ -22,6 +22,10 @@ inline void KernelFunction::make_boxed_function(OperatorKernel*, const OperatorH
     func(opHandle, stack);
 }
 
+inline bool KernelFunction::isValidUnboxed() const {
+    return unboxed_kernel_func_ != nullptr;
+}
+
 inline bool KernelFunction::isValid() const {
     return boxed_kernel_func_ != nullptr;
 }
@@ -46,7 +50,7 @@ inline Return callUnboxedKernelFunction(void* unboxed_kernel_func, OperatorKerne
 }
 
 template<class Return, class... Args>
-inline Return KernelFunction::call(const OperatorHandle& opHandle, Args... args) const {
+C10_ALWAYS_INLINE Return KernelFunction::call(const OperatorHandle& opHandle, Args... args) const {
     // note: Args above is intentionally not Args&&. We don't want perfect
     // forwarding, which would require Args to be deduced, but instead we
     // want callers to explicitly specify the Args.
