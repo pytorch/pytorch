@@ -59,6 +59,10 @@ def _param_rrefs(module_rref, recurse):
     return ret
 
 
+def _train(module_rref, mode):
+    module_rref.local_value().train(mode)
+
+
 def _raise_not_supported(name):
     raise ValueError("Method ``{}`` not supported for RemoteModule".format(name))
 
@@ -306,10 +310,8 @@ class _RemoteModule(nn.Module):
         _raise_not_supported(self.named_modules.__name__)
 
     def train(self: T, mode: bool = True) -> T:  # type: ignore[return]
-        _raise_not_supported(self.train.__name__)
-
-    def eval(self: T) -> T:  # type: ignore[return]
-        _raise_not_supported(self.eval.__name__)
+        rpc.rpc_sync(self.on, _train, args=(self.module_rref, mode))
+        return self
 
     def requires_grad_(self: T, requires_grad: bool = True) -> T:  # type: ignore[return]
         _raise_not_supported(self.requires_grad_.__name__)
