@@ -353,6 +353,7 @@ namespace c10 {
 namespace detail {
 
 [[noreturn]] C10_API void torchCheckFail(const char *func, const char *file, uint32_t line, const std::string& msg);
+[[noreturn]] C10_API void torchCheckFail(const char *func, const char *file, uint32_t line, const char* msg);
 
 } // namespace detail
 } // namespace 10

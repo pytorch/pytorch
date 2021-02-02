@@ -287,6 +287,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'init_num_threads': ['def init_num_threads() -> None: ...'],
         'get_num_interop_threads': ['def get_num_interop_threads() -> _int: ...'],
         'set_num_interop_threads': ['def set_num_interop_threads(num: _int) -> None: ...'],
+        'enable_global_memory_reporting': ['def enable_global_memory_reporting(enable: _bool) -> None: ...'],
         # These functions are explicitly disabled by
         # SKIP_PYTHON_BINDINGS because they are hand bound.
         # Correspondingly, we must hand-write their signatures.

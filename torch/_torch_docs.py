@@ -1721,6 +1721,10 @@ of each of the individual matrices. Similarly, when :attr:`upper` is ``False``, 
 tensor will be composed of lower-triangular Cholesky factors of each of the individual
 matrices.
 
+.. note:: :func:`torch.linalg.cholesky` should be used over ``torch.cholesky`` when possible.
+          Note however that :func:`torch.linalg.cholesky` does not yet support the :attr:`upper`
+          parameter and instead always returns the lower triangular matrix.
+
 Args:
     input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
                 batch dimensions consisting of symmetric positive-definite matrices.
@@ -5108,10 +5112,10 @@ Example::
 add_docstr(torch.fmax, r"""
 fmax(input, other, *, out=None) -> Tensor
 
-Computes the element-wise maximum of :attr:`input` and :attr:`other`. 
+Computes the element-wise maximum of :attr:`input` and :attr:`other`.
 
-This is like :func:`torch.maximum` except it handles NaNs differently: 
-if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the maximum. 
+This is like :func:`torch.maximum` except it handles NaNs differently:
+if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the maximum.
 Only if both elements are NaN is NaN propagated.
 
 This function is a wrapper around C++'s ``std::fmax`` and is similar to NumPy's ``fmax`` function.
@@ -5583,10 +5587,10 @@ Example::
 add_docstr(torch.fmin, r"""
 fmin(input, other, *, out=None) -> Tensor
 
-Computes the element-wise minimum of :attr:`input` and :attr:`other`. 
+Computes the element-wise minimum of :attr:`input` and :attr:`other`.
 
-This is like :func:`torch.minimum` except it handles NaNs differently: 
-if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the minimum. 
+This is like :func:`torch.minimum` except it handles NaNs differently:
+if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the minimum.
 Only if both elements are NaN is NaN propagated.
 
 This function is a wrapper around C++'s ``std::fmin`` and is similar to NumPy's ``fmin`` function.
@@ -7582,6 +7586,23 @@ Sets the number of threads used for interop parallelism
 .. warning::
     Can only be called once and before any inter-op parallel work
     is started (e.g. JIT execution).
+""")
+
+add_docstr(torch.enable_global_memory_reporting, r"""
+enable_global_memory_reporting(bool)
+
+Allows profiler to track memory of tensors which lifetime partially
+overlaps with profiling scope.
+
+Example::
+
+    torch.enable_global_memory_reporting(True)
+    x = torch.rand(10, 10)
+    with profile(activities=[ProfilerActivity.CPU], profile_memory=True) as prof:
+        # use enable_global_memory_reporting to track the deallocation of x
+        del x
+        ...
+    torch.enable_global_memory_reporting(False)
 """)
 
 add_docstr(torch.sigmoid, r"""

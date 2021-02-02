@@ -39,8 +39,9 @@ namespace {
 std::atomic<bool> global_memory_reporting_ {false};
 }
 void enableGlobalMemoryReporting(bool enable) {
-  global_memory_reporting_ = true;
+  global_memory_reporting_ = enable;
 }
+
 bool memoryProfilingEnabled() {
   if (global_memory_reporting_) {
     return true;

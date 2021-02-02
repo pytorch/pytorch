@@ -257,46 +257,43 @@ class TestProfiler(TestCase):
                 ]
             )
 
-        if kineto_available():
-            torch.enable_global_memory_reporting(True)
-            # check top-level memory events and
-            # partial overlap of tensor lifetime and profiler
-            x = torch.rand(10, 10)
-            y = None
-            if torch.cuda.is_available():
-                y = torch.rand(10, 10).cuda()
-            with profile(
-                    # mem events are CPU events
-                    activities=[ProfilerActivity.CPU],
-                    profile_memory=True) as prof:
-                del x
-                if torch.cuda.is_available():
-                    del y
-                gc.collect()
-                x = torch.rand(10, 10)
+        # check top-level memory events and
+        # partial overlap of tensor lifetime and profiler
+        torch.enable_global_memory_reporting(True)
+        x = torch.rand(10, 10)
+        y = None
+        if torch.cuda.is_available():
+            y = torch.rand(10, 10).cuda()
+        # mem events are CPU events
+        with _profile(profile_memory=True, use_kineto=kineto_available()) as prof:
             del x
-            stats = prof.key_averages(group_by_input_shape=True)
-            print(stats.table(sort_by="cpu_memory_usage", row_limit=-1))
+            if torch.cuda.is_available():
+                del y
+            gc.collect()
+            x = torch.rand(10, 10)
+        del x
+        stats = prof.key_averages(group_by_input_shape=True)
+        print(stats.table(sort_by="cpu_memory_usage", row_limit=-1))
+        check_metrics(
+            stats,
+            "cpu_memory_usage",
+            allocs=[
+                "aten::rand",
+                "aten::empty"
+            ],
+            deallocs=[
+                "[memory]"
+            ]
+        )
+        if torch.cuda.is_available():
             check_metrics(
                 stats,
-                "cpu_memory_usage",
-                allocs=[
-                    "aten::rand",
-                    "aten::empty"
-                ],
+                "cuda_memory_usage",
                 deallocs=[
                     "[memory]"
                 ]
             )
-            if torch.cuda.is_available():
-                check_metrics(
-                    stats,
-                    "cuda_memory_usage",
-                    deallocs=[
-                        "[memory]"
-                    ]
-                )
-            torch.enable_global_memory_reporting(False)
+        torch.enable_global_memory_reporting(False)
 
     def test_high_level_trace(self):
         """Checks that python side high level events are recorded.
