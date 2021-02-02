@@ -353,6 +353,20 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
   if (has_different_input_dtypes && config.promote_inputs_to_common_dtype_) {
     if (config.specified_common_dtype == ScalarType::Undefined) {
       common_dtype_ = compute_common_dtype();
+    } else {
+      for (auto& op : operands_) {
+        // Checks safe casting for inputs if common_dtype was specified by user.
+        if (config.specified_common_dtype != ScalarType::Undefined &&
+            !op.is_output && op.current_dtype != common_dtype_) {
+          TORCH_CHECK(
+              canCast(op.current_dtype, common_dtype_),
+              "input type ",
+              op.current_dtype,
+              " can't be cast to the "
+              "desired common type ",
+              common_dtype_);
+        }
+      }
     }
   }
 
@@ -404,13 +418,6 @@ void TensorIteratorBase::compute_types(const TensorIteratorConfig& config) {
       TORCH_CHECK(canCast(common_dtype_, op.current_dtype),
                   "result type ", common_dtype_, " can't be cast to the "
                   "desired output type ", op.current_dtype);
-    }
-
-    // Checks safe casting for inputs if common_dtype was specified by user.
-    if (config.specified_common_dtype != ScalarType::Undefined && !op.is_output && op.current_dtype != common_dtype_) {
-      TORCH_CHECK(canCast(op.current_dtype, common_dtype_),
-                  "input type ", op.current_dtype, " can't be cast to the "
-                  "desired common type ", common_dtype_);
     }
 
     // Creates temporaries for CPU operations, if needed and requested
