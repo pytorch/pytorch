@@ -4,6 +4,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/native/Resize.h>
 
 namespace at { namespace native {
 
@@ -32,9 +33,13 @@ Tensor& pow_out(Tensor& result, const Tensor& base, Scalar exp) {
            result.scalar_type());
 
   if (exp.equal(0.0)) {
-    result.resize_as_(base).fill_(1);
+    resize_output(result, base.sizes());
+    result.fill_(1);
+    namedinference::propagate_names(result, base);
   } else if (exp.equal(1.0)) {
-    result.resize_as_(base).copy_(base);
+    resize_output(result, base.sizes());
+    result.copy_(base);
+    namedinference::propagate_names(result, base);
   } else {
     auto iter = TensorIterator::unary_op(result, base.to(common_dtype));
     pow_tensor_scalar_stub(iter.device_type(), iter, exp);
@@ -44,9 +49,13 @@ Tensor& pow_out(Tensor& result, const Tensor& base, Scalar exp) {
 
 Tensor& pow_out(Tensor& result, Scalar base, const Tensor& exp) {
   if (base.isComplex() && base.toComplexDouble() == 1.0) {
-    result.resize_as_(exp).fill_(1);
+    resize_output(result, exp.sizes());
+    result.fill_(1);
+    namedinference::propagate_names(result, exp);
   } else if (!base.isComplex() && base.toDouble() == 1.0) {
-    result.resize_as_(exp).fill_(1);
+    resize_output(result, exp.sizes());
+    result.fill_(1);
+    namedinference::propagate_names(result, exp);
   } else {
     native::pow_out(result, c10::scalar_to_tensor(base, exp.device()), exp);
   }

@@ -3,7 +3,8 @@ from torch.fx import symbolic_trace
 import operator
 
 """
-How to replace one op with another
+How to Replace One Op With Another
+
 1. Iterate through all Nodes in your GraphModule's Graph.
 2. Determine if the current Node should be replaced. (Suggested: match
 on the Node's ``target`` attribute).
@@ -23,9 +24,8 @@ addition with a bitwise AND.
 
 To examine how the Graph evolves during op replacement, add the
 statement `print(traced.graph)` after the line you want to inspect.
-Alternatively, see the Nodes in a tabular format by adding
-`from inspect_utils import print_IR` to the top of this file and calling
-`print_IR(traced.graph)`.
+Alternatively, call `traced.graph.print_tabular()` to see the IR in a
+tabular format.
 """
 
 # Sample module

@@ -425,11 +425,11 @@ void FuseAddMM(Block* block) {
 
             // Attempts to find a matrix with a defined scalar type to type as
             auto* type_as_mat = mat1;
-            if (!type_as_mat->type()->expect<TensorType>()->scalarType()) {
+            if (!type_as_mat->type()->expectRef<TensorType>().scalarType()) {
               type_as_mat = mat2;
             }
             auto mat_scalar_type =
-                type_as_mat->type()->expect<TensorType>()->scalarType();
+                type_as_mat->type()->expectRef<TensorType>().scalarType();
 
             // we can't use type_as if we don't know the target type (mm), the
             // bias needs to be coerced to

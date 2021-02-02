@@ -21,23 +21,24 @@ Each decomposition has the form:
 
 where :math:`L` is a lower-triangular matrix and :math:`L^H` is the conjugate transpose of :math:`L`,
 which is just a transpose for the case of real-valued input matrices.
-In code it translates to ``input = L @ L.t()` if :attr:`input` is real-valued and
+In code it translates to ``input = L @ L.t()`` if :attr:`input` is real-valued and
 ``input = L @ L.conj().t()`` if :attr:`input` is complex-valued.
 The batch of :math:`L` matrices is returned.
 
 Supports real-valued and complex-valued inputs.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: LAPACK's `potrf` is used for CPU inputs, and MAGMA's `potrf` is used for CUDA inputs.
 
 .. note:: If :attr:`input` is not a Hermitian positive-definite matrix, or if it's a batch of matrices
           and one or more of them is not a Hermitian positive-definite matrix, then a RuntimeError will be thrown.
           If :attr:`input` is a batch of matrices, then the error message will include the batch index
           of the first matrix that is not Hermitian positive-definite.
 
-.. warning:: This function always checks whether :attr:`input` is a Hermitian positive-definite matrix
-             using `info` argument to LAPACK/MAGMA call. For CUDA this causes cross-device memory synchronization.
-
 Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` consisting of Hermitian positive-definite
-                    :math:`n \times n` matrices, where `*` is zero or more batch dimensions.
+                    :math:`n \times n` matrices, where :math:`*` is zero or more batch dimensions.
 
 Keyword args:
     out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
@@ -145,6 +146,50 @@ det = _add_docstr(_linalg.linalg_det, r"""
 linalg.det(input) -> Tensor
 
 Alias of :func:`torch.det`.
+""")
+
+slogdet = _add_docstr(_linalg.linalg_slogdet, r"""
+linalg.slogdet(input, *, out=None) -> (Tensor, Tensor)
+
+Calculates the sign and natural logarithm of the absolute value of a square matrix's determinant,
+or of the absolute values of the determinants of a batch of square matrices :attr:`input`.
+The determinant can be computed with ``sign * exp(logabsdet)``.
+
+Supports input of float, double, cfloat and cdouble datatypes.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: The determinant is computed using LU factorization. LAPACK's `getrf` is used for CPU inputs,
+          and MAGMA's `getrf` is used for CUDA inputs.
+
+.. note:: For matrices that have zero determinant, this returns ``(0, -inf)``.
+          If :attr:`input` is batched then the entries in the result tensors corresponding to matrices with
+          the zero determinant have sign 0 and the natural logarithm of the absolute value of the determinant -inf.
+
+Args:
+    input (Tensor): the input matrix of size :math:`(n, n)` or the batch of matrices of size :math:`(*, n, n)`
+                    where :math:`*` is one or more batch dimensions.
+
+Keyword args:
+    out (tuple, optional): tuple of two tensors to write the output to.
+
+Returns:
+    A namedtuple (sign, logabsdet) containing the sign of the determinant and the natural logarithm
+    of the absolute value of determinant, respectively.
+
+Example::
+
+    >>> A = torch.randn(3, 3)
+    >>> A
+    tensor([[ 0.0032, -0.2239, -1.1219],
+            [-0.6690,  0.1161,  0.4053],
+            [-1.6218, -0.9273, -0.0082]])
+    >>> torch.linalg.det(A)
+    tensor(-0.7576)
+    >>> torch.linalg.logdet(A)
+    tensor(nan)
+    >>> torch.linalg.slogdet(A)
+    torch.return_types.linalg_slogdet(sign=tensor(-1.), logabsdet=tensor(-0.2776))
 """)
 
 eigh = _add_docstr(_linalg.linalg_eigh, r"""
@@ -490,8 +535,9 @@ always be real-valued, even if :attr:`input` is complex.
           then the singular values of each matrix in the batch is returned in descending order.
 
 .. note:: The implementation of SVD on CPU uses the LAPACK routine `?gesdd` (a divide-and-conquer
-          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the MAGMA routine
-          `gesdd` as well.
+          algorithm) instead of `?gesvd` for speed. Analogously, the SVD on GPU uses the cuSOLVER routines
+          `gesvdj` and `gesvdjBatched` on CUDA 10.1.243 and later, and uses the MAGMA routine `gesdd`
+          on earlier versions of CUDA.
 
 .. note:: The returned matrix `U` will be transposed, i.e. with strides
           :code:`U.contiguous().transpose(-2, -1).stride()`.
@@ -505,6 +551,10 @@ always be real-valued, even if :attr:`input` is complex.
 
 .. note:: The `S` tensor can only be used to compute gradients if :attr:`compute_uv` is True.
 
+.. note:: Since `U` and `V` of an SVD is not unique, each vector can be multiplied by
+          an arbitrary phase factor :math:`e^{i \phi}` while the SVD result is still correct.
+          Different platforms, like Numpy, or inputs on different device types, may produce different
+          `U` and `V` tensors.
 
 Args:
     input (Tensor): the input tensor of size :math:`(*, m, n)` where `*` is zero or more

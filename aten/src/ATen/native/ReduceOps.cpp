@@ -502,9 +502,12 @@ static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim
 // see https://github.com/pytorch/pytorch/pull/47305,
 Tensor trace_cpu(const Tensor& self) {
   Tensor result;
+  // Returns the ScalarType of the self tensor if the tensor is non integral type
+  // In the case, self is an integer type tensor, at::kLong is return since promote_integers
+  // is set to true
   ScalarType dtype = get_dtype(result, self, c10::nullopt, true);
   result = at::empty({}, self.options().dtype(dtype));
-  AT_DISPATCH_ALL_TYPES(self.scalar_type(), "trace", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(self.scalar_type(), "trace", [&] {
     using accscalar_t = at::acc_type<scalar_t, false>;
     accscalar_t sum = 0;
     const auto* t_data = self.data_ptr<scalar_t>();
@@ -521,12 +524,11 @@ Tensor trace_cpu(const Tensor& self) {
       sum += t_data[i * (t_stride_0 + t_stride_1)];
     }
 
-    // all integer types get promoted to kLong
-    if (result.scalar_type() == at::kLong) {
-      *result.data_ptr<int64_t>() = sum;
-    } else {
-      *result.data_ptr<scalar_t>() = sum;
-    }
+    c10::guts::if_constexpr<std::is_integral<accscalar_t>::value>(
+      // all integer types get promoted to kLong
+      [&] (auto _) { *result.data_ptr<int64_t>() = _(sum); },  // then-case, invalid for non-integral types
+      [&] (auto _) { *result.data_ptr<scalar_t>() = _(sum); }  // else-case, invalid for integral types
+    );
   });
 
   return result;
@@ -843,7 +845,7 @@ Tensor any(const Tensor& self) {
               "any only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided || self.layout() == Layout::Sparse,
               "any only supports strided AND sparse layout, got: ", self.layout());
-  
+
   // Refer [all, any : uint8 compatibility]
   Tensor result;
   ScalarType out_dtype;

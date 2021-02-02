@@ -190,14 +190,15 @@ C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 // Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
 // NB: keys in this set also get associated with Math
 constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
-  DispatchKey::AutogradCPU,
-  DispatchKey::AutogradCUDA,
-  DispatchKey::AutogradXLA,
-  DispatchKey::AutogradNestedTensor,
-  DispatchKey::AutogradPrivateUse1,
-  DispatchKey::AutogradPrivateUse2,
-  DispatchKey::AutogradPrivateUse3,
-  DispatchKey::AutogradOther,
+    DispatchKey::AutogradCPU,
+    DispatchKey::AutogradCUDA,
+    DispatchKey::AutogradXLA,
+    DispatchKey::AutogradNestedTensor,
+    DispatchKey::AutogradXPU,
+    DispatchKey::AutogradPrivateUse1,
+    DispatchKey::AutogradPrivateUse2,
+    DispatchKey::AutogradPrivateUse3,
+    DispatchKey::AutogradOther,
 });
 
 // backend dispatch keys that map to DispatchKey::AutogradOther

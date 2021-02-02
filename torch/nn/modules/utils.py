@@ -1,7 +1,8 @@
-from typing import List
 
 from torch._six import container_abcs
+
 from itertools import repeat
+from typing import List
 
 
 def _ntuple(n):

@@ -7,7 +7,7 @@ namespace torch {
 namespace jit {
 
 using SROperator = std::function<void(ProcessedNode*)>;
-using SROpFunctor = std::function<SROperator(Node* n)>;
+using SROpFunctor = SROperator (*)(Node* n);
 struct SROperatorFunctor {
   virtual SROperator Generate(Node*) {
     std::function<void(ProcessedNode*)> out;
@@ -44,13 +44,37 @@ C10_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 #define REGISTER_OPERATOR_FUNCTOR(name, id, ...) \
   REGISTER_OPERATOR_FUNCTOR_OPT(name, id, true, true, __VA_ARGS__)
 
+#define REGISTER_VIEW_OPERATOR_FUNCTOR(name, id, ...)        \
+  struct SROperatorFunctor_##id : public SROperatorFunctor { \
+    const SROpFunctor fn = __VA_ARGS__;                      \
+    SROperator Generate(Node* n) override {                  \
+      return fn(n);                                          \
+    }                                                        \
+  };                                                         \
+  C10_REGISTER_CLASS(SRViewOperatorRegistry, name, SROperatorFunctor_##id);
+
+C10_DECLARE_REGISTRY(SRViewOperatorRegistry, SROperatorFunctor);
+
 inline at::Tensor create_empty_from(const at::Tensor& t) {
   return at::empty({0}, t.options());
 }
 
+inline bool checkResizedDataPtr(at::Tensor& t) {
+  auto const prev_data_ptr = t.data_ptr();
+  t.resize_({0});
+  return prev_data_ptr == t.data_ptr();
+}
+
+inline void fastResizeToZero(at::Tensor& t) {
+  t.unsafeGetTensorImpl()->set_sizes_contiguous({0});
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(checkResizedDataPtr(t));
+}
+
 bool canRunOutOfPlace(Node* n);
+bool canReuseInputsOutputs(Node* n);
 bool canReuseInputs(Node* n);
 bool canReuseOutputs(Node* n);
+bool isViewOp(Node* n);
 
 std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n);
 

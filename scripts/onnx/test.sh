@@ -56,7 +56,9 @@ pytest "${args[@]}" \
   --ignore "$top_dir/test/onnx/test_custom_ops.py" \
   --ignore "$top_dir/test/onnx/test_models_onnxruntime.py" \
   --ignore "$top_dir/test/onnx/test_utility_funs.py" \
+  --ignore "$top_dir/test/onnx/test_pytorch_onnx_caffe2.py" \
   --ignore "$top_dir/test/onnx/test_pytorch_onnx_shape_inference.py" \
+  --ignore "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime_cuda.py" \
   "${test_paths[@]}"
 
 # onnxruntime only support py3
@@ -68,11 +70,12 @@ if [[ "$BUILD_ENVIRONMENT" == *ort_test1* ]]; then
     "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime" \
     "$top_dir/test/onnx/test_custom_ops.py" \
     "$top_dir/test/onnx/test_models_onnxruntime.py" \
-    "$top_dir/test/onnx/test_utility_funs.py"
+    "$top_dir/test/onnx/test_utility_funs.py" \
+    "$top_dir/test/onnx/test_pytorch_onnx_caffe2.py"
 fi
 if [[ "$BUILD_ENVIRONMENT" == *ort_test2* ]]; then
   # Update the loop for new opsets
-  for i in $(seq 10 12); do
+  for i in $(seq 10 13); do
     pytest "${args[@]}" \
       "$top_dir/test/onnx/test_pytorch_onnx_onnxruntime.py::TestONNXRuntime_opset$i"
   done
