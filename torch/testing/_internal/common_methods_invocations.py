@@ -1125,6 +1125,23 @@ def sample_inputs_clamp(op_info, device, dtype, requires_grad):
         min_max_vals = ((0, 1), (-1, 1))
     return [SampleInput(tensor, args=vals) for tensor, vals in product(tensors, min_max_vals)]
 
+def sample_inputs_diag(op_info, device, dtype, requires_grad):
+    vec_sample = SampleInput(make_tensor((M, ), device, dtype, low=None, high=None, requires_grad=requires_grad))
+
+    tensors = (
+        make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((3, 5), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((5, 3), device, dtype, low=None, high=None, requires_grad=requires_grad),
+    )
+
+    args = ((), (2,), (-2,), (1,), (2,))
+
+    samples = []
+    for tensor, arg in product(tensors, args):
+        samples.append(SampleInput(tensor, args=arg))
+
+    return samples + [vec_sample]
+
 def sample_inputs_logit(op_info, device, dtype, requires_grad):
     low, high = op_info.domain
 
@@ -1460,6 +1477,12 @@ op_db: List[OpInfo] = [
                    ),
                    assert_autodiffed=True,
                    safe_casts_outputs=True),
+    OpInfo('diag',
+           dtypes=all_types_and_complex_and(torch.bool),
+           dtypesIfCPU=all_types_and_complex_and(torch.bool),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+           sample_inputs_func=sample_inputs_diag,
+           test_inplace_grad=False),
     SpectralFuncInfo('fft.fft',
                      aten_name='fft_fft',
                      ref=np.fft.fft,
@@ -2892,16 +2915,6 @@ def method_tests():
         ('dist', (), ((), 4), 'scalar_4'),
         ('dist', (S, S, S), ((), 4), 'scalar_4_broadcast_rhs'),
         ('dist', (), ((S, S, S), 4), 'scalar_4_broadcast_lhs'),
-        ('diag', (M, M), NO_ARGS, '2d'),
-        ('diag', (3, 5), NO_ARGS, '2d_wide'),
-        ('diag', (3, 5), (2,), '2d_wide_pos'),
-        ('diag', (3, 5), (-2,), '2d_wide_neg'),
-        ('diag', (5, 3), NO_ARGS, '2d_tall'),
-        ('diag', (5, 3), (2,), '2d_tall_pos'),
-        ('diag', (5, 3), (-2,), '2d_tall_neg'),
-        ('diag', (M,), NO_ARGS, '1d'),
-        ('diag', (M, M), (1,), '2d_1'),
-        ('diag', (M, M), (2,), '2d_2'),
         ('diag_embed', (S, S), NO_ARGS),
         ('diagonal', (M, M), NO_ARGS, '2d'),
         ('diagonal', (3, 5), NO_ARGS, '2d_wide'),
