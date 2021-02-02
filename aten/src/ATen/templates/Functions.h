@@ -15,7 +15,6 @@
 #include <ATen/Context.h>
 #include <ATen/TracerMode.h>
 #include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 
 namespace at {
 
@@ -46,10 +45,6 @@ ${function_declarations}
 
 namespace redispatch {
     ${function_redispatch_declarations}
-
-    // One goal of the redispatch API is to improve perf for redispatching kernels.
-    // In that vein, we're allowing the API to be inlined
-    ${function_redispatch_definitions}
 } // namespace redispatch
 
 // Special C++ only overloads for std()-like functions (See gh-40287)
