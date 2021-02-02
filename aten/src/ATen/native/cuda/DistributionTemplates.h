@@ -69,9 +69,9 @@ __global__ void distribution_elementwise_grid_stride_kernel(int numel,
   auto seeds = at::cuda::philox::unpack(philox_args);
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   curandStatePhilox4_32_10_t state;
-  curand_init(std::get<0>(seeds),
+  curand_init(seeds.seed(),
               idx,
-              std::get<1>(seeds),
+              seeds.offset(),
               &state);
 
   int rounded_size = ((numel - 1)/(blockDim.x * gridDim.x * unroll_factor)+1) *
@@ -195,9 +195,9 @@ __global__ void distribution_binary_elementwise_kernel(
   int remaining = std::min<int>(numel - base_index, BLOCK_WORK_SIZE);
 
   curandStatePhilox4_32_10_t state;
-  curand_init(std::get<0>(seeds),
+  curand_init(seeds.seed(),
               blockIdx.x * blockDim.x + threadIdx.x,
-              std::get<1>(seeds),
+              seeds.offset(),
               &state);
 
   // load data into registers
@@ -586,9 +586,9 @@ void bernoulli_tensor_cuda_kernel(
           const prob_t& p1, const prob_t& p2, const prob_t& p3, const prob_t& p4) {
         auto seeds = at::cuda::philox::unpack(philox_args);
         curandStatePhilox4_32_10_t state;
-        curand_init(std::get<0>(seeds),
+        curand_init(seeds.seed(),
                     blockIdx.x * blockDim.x + threadIdx.x,
-                    std::get<1>(seeds),
+                    seeds.offset(),
                     &state);
 
         // See Note [Register spilling in curand call for CUDA < 10]
