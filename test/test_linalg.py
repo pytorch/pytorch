@@ -606,10 +606,28 @@ class TestLinalg(TestCase):
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
         # dtypes should match
-        out_w = torch.empty_like(a).to(torch.int)
-        out_v = torch.empty_like(a)
-        with self.assertRaisesRegex(RuntimeError, "dtype Int does not match self dtype"):
+        out_w = torch.empty(0, dtype=real_dtype, device=device)
+        out_v = torch.empty(0, dtype=torch.int, device=device)
+        with self.assertRaisesRegex(RuntimeError, "got eigenvectors with dtype Int and input with dtype"):
             torch.linalg.eigh(a, out=(out_w, out_v))
+
+        # eigenvalues should be real-valued
+        out_w = torch.empty_like(a).to(torch.complex128)
+        out_v = torch.empty_like(a)
+        with self.assertRaisesRegex(RuntimeError, "dtype ComplexDouble does not match self dtype"):
+            torch.linalg.eigh(a, out=(out_w, out_v))
+
+        # device should match
+        if torch.cuda.is_available():
+            wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
+            out_w = torch.empty(0, device=wrong_device, dtype=dtype)
+            out_v = torch.empty(0, device=device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.linalg.eigh(a, out=(out_w, out_v))
+            out_w = torch.empty(0, device=device, dtype=dtype)
+            out_v = torch.empty(0, device=wrong_device, dtype=dtype)
+            with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
+                torch.linalg.eigh(a, out=(out_w, out_v))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

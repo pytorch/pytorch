@@ -1466,10 +1466,13 @@ std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& self, std::string uplo) {
 // TODO: it's possible to make the _out variant to be a primal function and implement linalg_eigh on top of _out
 // TODO: implement _out variant avoiding copy and using already allocated storage directly
 std::tuple<Tensor&, Tensor&> linalg_eigh_out(Tensor& eigvals, Tensor& eigvecs, const Tensor& self, std::string uplo) {
-  TORCH_CHECK(eigvecs.scalar_type() == self.scalar_type(),
-    "eigvecs dtype ", eigvecs.scalar_type(), " does not match self dtype ", self.scalar_type());
+  checkSameDevice("linalg_eigh", eigvecs, self, "eigenvectors");
+  checkSameDevice("linalg_eigh", eigvals, self, "eigenvalues");
+  checkLinalgCompatibleDtype("linalg_eigh", eigvecs, self, "eigenvectors");
+
+  // eigenvalues are always real-valued here
   ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
-  TORCH_CHECK(eigvals.scalar_type() == real_dtype,
+  TORCH_CHECK(at::isFloatingType(eigvals.scalar_type()),
     "eigvals dtype ", eigvals.scalar_type(), " does not match self dtype ", real_dtype);
 
   Tensor eigvals_tmp, eigvecs_tmp;
