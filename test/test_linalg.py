@@ -2380,14 +2380,14 @@ class TestLinalg(TestCase):
 
         # dtypes of out and input should match
         out = torch.empty_like(a).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "dtype Int does not match the expected dtype"):
+        with self.assertRaisesRegex(RuntimeError, "got result with dtype Int and input with dtype"):
             torch.linalg.pinv(a, out=out)
 
         if torch.cuda.is_available():
             # device of out and input should match
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             out = torch.empty_like(a).to(wrong_device)
-            with self.assertRaisesRegex(RuntimeError, "Expected result and input to be on the same device"):
+            with self.assertRaisesRegex(RuntimeError, "Expected result and input tensors to be on the same device"):
                 torch.linalg.pinv(a, out=out)
 
             # device of rcond and input should match
