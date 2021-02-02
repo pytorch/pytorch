@@ -440,7 +440,7 @@ def is_deterministic():
 # Define Storage and Tensor classes
 ################################################################################
 
-from .tensor import Tensor
+from ._tensor import Tensor
 from .storage import _StorageBase
 
 
