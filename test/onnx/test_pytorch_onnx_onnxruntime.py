@@ -4324,6 +4324,13 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 2, 4, requires_grad=True)
         self.run_test(UnfoldModel(), x)
 
+        class UnfoldModel(torch.nn.Module):
+            def forward(self, x):
+                return x.unfold(dimension=2, size=x.shape[1], step=1)
+
+        x = torch.randn(4, 2, 4, requires_grad=True)
+        self.run_test(UnfoldModel(), x)
+
     def test_prelu(self):
         class PReluModel(torch.nn.Module):
             def __init__(self):
