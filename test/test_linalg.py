@@ -2443,10 +2443,7 @@ class TestLinalg(TestCase):
             self.assertEqual(x, expected)
 
             # Check out= variant
-            if rhs == ():
-                out = torch.empty_like(x.unsqueeze(-1))
-            else:
-                out = torch.empty_like(x)
+            out = torch.empty_like(x)
             ans = torch.linalg.solve(A, b, out=out)
             self.assertEqual(ans, out)
             self.assertEqual(x, out)
@@ -2481,7 +2478,7 @@ class TestLinalg(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_solve_errors(self, device, dtype):
+    def test_solve_errors_and_warnings(self, device, dtype):
         # solve expects batches of square matrices as input
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
             a = torch.randn(2, 3, 4, 3, dtype=dtype, device=device)
@@ -2505,20 +2502,16 @@ class TestLinalg(TestCase):
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
             run_test_singular_input(*params)
 
-        # if out is non-empty then it should have correct sizes
-        with self.assertRaisesRegex(RuntimeError, r'does not match broadcasted other shape'):
-            out = torch.empty(1, dtype=dtype, device=device)
-            A = torch.eye(3, dtype=dtype, device=device)
-            b = torch.randn(3, 1, dtype=dtype, device=device)
-            torch.linalg.solve(A, b, out=out)
-
-        # if out is non-empty then it should also be Fortran contiguous
-        with self.assertRaisesRegex(RuntimeError, r'tensor must be in batched column major'):
-            out = torch.zeros(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
-            self.assertFalse(out.is_contiguous())
+        # if out tensor with wrong shape is passed a warning is given
+        with warnings.catch_warnings(record=True) as w:
             A = torch.eye(2, dtype=dtype, device=device).reshape((1, 2, 2)).repeat(2, 1, 1)
             b = torch.randn(2, 2, 2, dtype=dtype, device=device)
+            out = torch.zeros(1, dtype=dtype, device=device)
+            # Trigger warning
             torch.linalg.solve(A, b, out=out)
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
