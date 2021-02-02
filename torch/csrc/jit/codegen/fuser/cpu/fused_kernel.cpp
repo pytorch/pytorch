@@ -196,17 +196,19 @@ struct CompilerConfig {
 #ifdef _MSC_VER
   std::string cxx = "cl";
   const std::string openmp_flags = "/openmp";
-#elif defined(__APPLE__)
+#elif defined(__clang__)
   std::string cxx = "clang++";
-  const std::string openmp_flags = "";
+  const std::string openmp_flags = "-fopenmp";
 #else
   std::string cxx = "g++";
   const std::string openmp_flags = "-fopenmp";
 #endif
-#if defined(__APPLE__)
-  bool openmp = false;
-#else
+// Set openmp to true only if PyTorch is compiled with OpenMP support
+// OpenMP is typically not availabel on MacOS platform
+#if defined(_OPENMP)
   bool openmp = true;
+#else
+  bool openmp = false;
 #endif
 };
 
