@@ -1301,11 +1301,8 @@ Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
               "orgqr: Expected input and tau to be on the same device, but found input on ",
               input.device(), " and tau on ", tau.device(), " instead.");
 
-  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
-    "orgqr: result dtype ", result.scalar_type(), " does not match the expected dtype ", input.scalar_type());
-  TORCH_CHECK(result.device() == input.device(),
-              "orgqr: Expected result and input to be on the same device, but found result on ",
-              result.device(), " and input on ", input.device(), " instead.");
+  checkSameDevice("orgqr", result, input);
+  checkLinalgCompatibleDtype("orgqr", result, input);
 
   // TODO: uncomment the following when passing incorrectly sized 'result' is not allowed
   // if (result.numel() != 0) {
@@ -1319,8 +1316,21 @@ Tensor& orgqr_out(const Tensor& input, const Tensor& tau, Tensor& result) {
   // This should be changed if cuSOLVER would be used
   auto infos = at::empty({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt).device(kCPU));
 
-  // if result is not empty and not in batched column major format we have to allocate a temporary tensor
-  if (result.numel() != 0 && !result.transpose(-2, -1).is_contiguous()) {
+  bool result_input_same_type = (result.scalar_type() == input.scalar_type());
+  bool result_equal_expected_shape = result.sizes().equals(input.sizes());
+  bool is_batched_column_major = false;
+  if (result.dim() >= 2) {
+    is_batched_column_major = result.transpose(-2, -1).is_contiguous();
+  }
+
+  // if result is not empty and not in batched column major format or does not have the same dtype as input
+  // we have to allocate a temporary tensor
+  // if result is not empty and not in batched column major format
+  bool copy_needed = (result.numel() != 0 && !is_batched_column_major);
+  copy_needed |= !result_input_same_type;  // or result does not have the same dtype as input
+  copy_needed |= !result_equal_expected_shape; // or result does not have the expected shape
+  // we have to allocate a temporary tensor
+  if (copy_needed) {
     Tensor result_tmp = at::empty({0}, input.options());
     result_tmp = orgqr_out_info(input, tau, result_tmp, infos);
     at::native::resize_output(result, result_tmp.sizes());

@@ -4082,7 +4082,7 @@ class TestLinalg(TestCase):
 
         # dtypes should match
         out = torch.empty_like(reflectors).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "result dtype Int does not match the expected dtype"):
+        with self.assertRaisesRegex(RuntimeError, "got result with dtype Int and input with dtype"):
             torch.orgqr(reflectors, tau, out=out)
 
         with self.assertRaisesRegex(RuntimeError, "tau dtype Int does not match input dtype"):
