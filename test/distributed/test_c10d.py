@@ -3826,6 +3826,22 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     def test_ddp_comm_hook_allreduce_hook_nccl_grad_is_view(self):
         self._test_ddp_comm_hook_allreduce_hook_nccl(gradient_as_bucket_view=True)
 
+    def test_invalid_powerSGD_state(self):
+        for start_powerSGD_iter, use_error_feedback, warm_start in product([0, 1], [True, False], [True, False]):
+            if not use_error_feedback and not warm_start:
+                continue
+            with self.assertRaisesRegex(
+                    ValueError,
+                    "Expect `start_powerSGD_iter` > 1 if `use_error_feedback` or `warm_start` is enabled, "
+                    "because PowerSGD can only be applied after the first two iterations in DDP."):
+                state = powerSGD.PowerSGDState(
+                    process_group=None,
+                    matrix_approximation_rank=1,
+                    start_powerSGD_iter=start_powerSGD_iter,
+                    use_error_feedback=use_error_feedback,
+                    warm_start=warm_start,
+                )
+
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_default_ddp_comm_hooks_nccl_is_view(self):

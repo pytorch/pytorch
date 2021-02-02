@@ -180,46 +180,6 @@ void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int ac
   THLongTensor_free(index);
 }
 
-void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, scalar_t val)
-{
-  at::NoNamesGuard guard;
-
-  ptrdiff_t i, numel;
-  THTensor *tSlice;
-  int64_t *index_data;
-
-  dim = at::maybe_wrap_dim(dim, tensor);
-  numel = THLongTensor_nElement(index);
-  THArgCheck(THTensor_nDimensionLegacyNoScalars(index) == 1, 3, "Index is supposed to be a vector");
-  THArgCheck(dim < THTensor_nDimensionLegacyNoScalars(tensor), 4,"Indexing dim %d is out of bounds of tensor", dim);
-  at::assert_no_overlap(tensor, index);
-  if (at::has_internal_overlap(tensor) == at::MemOverlap::YES) {
-    TORCH_WARN(
-      "Use of index_fill_ on expanded tensors is deprecated. "
-      "Please clone() the tensor before performing this operation. "
-      "This also applies to advanced indexing e.g. tensor[mask] = scalar");
-  }
-
-  index = THLongTensor_newContiguous(index);
-  index_data = THLongTensor_data(index);
-
-  for (i=0; i<numel; i++)
-  {
-    if (tensor->dim() > 1)
-    {
-      tSlice = THTensor_(new)();
-      THTensor_(select)(tSlice, tensor,dim,index_data[i]);
-      THTensor_wrap(tSlice).fill_(val);
-      c10::raw::intrusive_ptr::decref(tSlice);
-    }
-    else
-    {
-      THTensor_(set1d)(tensor, index_data[i], val);
-    }
-  }
-  THLongTensor_free(index);
-}
-
 #endif
 
 #endif
