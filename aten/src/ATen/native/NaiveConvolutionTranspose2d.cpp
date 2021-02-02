@@ -197,7 +197,9 @@ void slow_conv_transposed2d_channels_last(
   });
 
   if (skip_col2im) {
-    output.add_(bias.unsqueeze(-1).unsqueeze(-1));
+    if (bias.defined()) {
+      output.add_(bias.unsqueeze(-1).unsqueeze(-1));
+    }
   } else {
     // Init output with bias or zero, before accumulation in col2im
     if (bias.defined()) {
@@ -348,7 +350,9 @@ void slow_conv_transpose2d_out_cpu_template(
       });
 
       if (skip_col2im) {
-        output_n.add_(bias_.unsqueeze(-1).unsqueeze(-1));
+        if (bias_.defined()) {
+          output_n.add_(bias_.unsqueeze(-1).unsqueeze(-1));
+        }
       } else {
         // Init output with bias or zero, before accumulation in col2im
         if (bias_.defined()) {
