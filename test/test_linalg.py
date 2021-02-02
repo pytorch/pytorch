@@ -5890,14 +5890,14 @@ else:
 
         # dtypes should match
         out = torch.empty_like(a).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "dtype Int does not match input dtype"):
+        with self.assertRaisesRegex(RuntimeError, "got result with dtype Int and input with dtype"):
             torch.cholesky_inverse(a, out=out)
 
         # device should match
         if torch.cuda.is_available():
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             out = torch.empty(0, device=wrong_device, dtype=dtype)
-            with self.assertRaisesRegex(RuntimeError, "does not match input device"):
+            with self.assertRaisesRegex(RuntimeError, "Expected result and input tensors to be on the same device"):
                 torch.cholesky_inverse(a, out=out)
 
         # cholesky_inverse raises an error for invalid inputs on CPU

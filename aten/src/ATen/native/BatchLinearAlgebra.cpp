@@ -933,16 +933,21 @@ Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& i
 
 Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
   squareCheckInputs(input);
-  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match input dtype ", input.scalar_type());
-  TORCH_CHECK(result.device() == input.device(),
-    "result device ", result.device(), " does not match input device ", input.device());
+  checkSameDevice("cholesky_inverse", result, input);
+  checkLinalgCompatibleDtype("cholesky_inverse", result, input);
 
   // MAGMA requires 'infos' to reside in CPU memory, therefore we create 'infos' only on CPU for now.
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, input.options().dtype(kInt).device(kCPU));
 
-  // if result is not empty and not in batched column major format we have to allocate a temporary tensor
-  if (result.numel() != 0 && !result.transpose(-2, -1).is_contiguous()) {
+  bool result_input_same_type = (result.scalar_type() == input.scalar_type());
+  bool is_batched_column_major = false;
+  if (result.dim() >= 2) {
+    is_batched_column_major = result.transpose(-2, -1).is_contiguous();
+  }
+
+  // if result is not empty and not in batched column major format or does not have the same dtype as input
+  // we have to allocate a temporary tensor
+  if ((result.numel() != 0 && !is_batched_column_major) || !result_input_same_type) {
     Tensor result_tmp = at::empty({0}, input.options());
     result_tmp = cholesky_inverse_out_info(result_tmp, infos, input, upper);
     at::native::resize_output(result, result_tmp.sizes());
