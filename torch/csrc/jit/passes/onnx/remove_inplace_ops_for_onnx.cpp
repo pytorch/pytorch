@@ -616,57 +616,41 @@ void SquashSliceAndSelect(Node* index_put_node) {
       orig_data, new_index_put, block_node, outer_block, next_node);
 }
 
-void PrepareCopyForONNX(Block* block) {
-  auto it = block->nodes().begin();
-  while (it != block->nodes().end()) {
-    auto node = *it;
-    ++it;
-    for (auto block : node->blocks()) {
-      PrepareCopyForONNX(block);
-    }
-
-    if (node->kind() == aten::copy_) {
-      // aten::copy_ can be viewed as a special case of index_put, where the
-      // tensor indices input is empty.
-      // Remove aten::copy_, and replace it with index_put.
-      // 1. create an empty listConstruct node as indices input for index_put.
-      // 2. create index_put node.
-
-      // Tracing aten::copy_ broadcasts the rhs values.
-      // 3. Apply broadcasting for scripting.
-      WithInsertPoint guard(node);
-      auto graph = node->owningGraph();
-      auto dummy_list =
-          graph->insertNode(graph->createList(OptionalType::ofTensor(), {}))
-              ->output();
-
-      auto expanded_value =
-          graph->insert(aten::expand_as, {node->input(1), node->input(0)});
-      expanded_value->node()->setSourceRange(node->sourceRange());
-      expanded_value->copyMetadata(node->input(1));
-
-      auto index_put = graph->insert(
-          aten::index_put,
-          {node->input(0), dummy_list, expanded_value, node->input(2)});
-      index_put->node()->setSourceRange(node->sourceRange());
-      index_put->copyMetadata(node->output());
-      node->output()->replaceAllUsesWith(index_put);
-    }
+void PrepareIndexPutForONNX(Node* node) {
+  if (node->kind() == aten::index_put || node->kind() == aten::index_put_) {
+    SquashSliceAndSelect(node);
   }
 }
 
-void PrepareIndexPutForONNX(Block* block) {
-  auto it = block->nodes().begin();
-  while (it != block->nodes().end()) {
-    auto node = *it;
-    ++it;
-    for (auto block : node->blocks()) {
-      PrepareIndexPutForONNX(block);
-    }
+void PrepareCopyForONNX(Node* node) {
+  if (node->kind() == aten::copy_) {
+    // aten::copy_ can be viewed as a special case of index_put, where the
+    // tensor indices input is empty.
+    // Remove aten::copy_, and replace it with index_put.
+    // 1. create an empty listConstruct node as indices input for index_put.
+    // 2. create index_put node.
 
-    if (node->kind() == aten::index_put || node->kind() == aten::index_put_) {
-      SquashSliceAndSelect(node);
-    }
+    // Tracing aten::copy_ broadcasts the rhs values.
+    // 3. Apply broadcasting for scripting.
+    WithInsertPoint guard(node);
+    auto graph = node->owningGraph();
+    auto dummy_list =
+        graph->insertNode(graph->createList(OptionalType::ofTensor(), {}))
+            ->output();
+
+    auto expanded_value =
+        graph->insert(aten::expand_as, {node->input(1), node->input(0)});
+    expanded_value->node()->setSourceRange(node->sourceRange());
+    expanded_value->copyMetadata(node->input(1));
+
+    auto index_put = graph->insert(
+        aten::index_put,
+        {node->input(0), dummy_list, expanded_value, node->input(2)});
+    index_put->node()->setSourceRange(node->sourceRange());
+    index_put->copyMetadata(node->output());
+    node->output()->replaceAllUsesWith(index_put);
+
+    PrepareIndexPutForONNX(index_put->node());
   }
 }
 
@@ -675,42 +659,71 @@ void PrepareIndexPutForONNX(Block* block) {
 // aten::pop. Then it makes the original aten::pop operator return the updated
 // tensor list, and replaces all later uses of that tensor list with this new
 // output.
-static void PrepareListPopForONNX(Block* b) {
-  for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
-    for (auto* child_block : it->blocks()) {
-      PrepareListPopForONNX(child_block);
-    }
+static void PrepareListPopForONNX(Node* n) {
+  if (n->kind() == aten::pop) {
+    //   %ten : Tensor = aten::pop(%seq, %pos)
+    // Convert to
+    //   %ten : Tensor = aten::__getitem__(%seq, %pos)
+    //   %new_seq : Tensor[] = aten::pop(%seq, %pos)
+    // And replace all uses of %seq afterwards with %new_seq
+    Node* getitem_node =
+        n->owningGraph()->create(aten::__getitem__, {n->inputs()});
+    getitem_node->output()->copyMetadata(n->output());
+    getitem_node->insertBefore(n);
+    n->output()->replaceAllUsesWith(getitem_node->output());
 
-    if (it->kind() == aten::pop) {
-      //   %ten : Tensor = aten::pop(%seq, %pos)
-      // Convert to
-      //   %ten : Tensor = aten::__getitem__(%seq, %pos)
-      //   %new_seq : Tensor[] = aten::pop(%seq, %pos)
-      // And replace all uses of %seq afterwards with %new_seq
-      Node* getitem_node =
-          b->owningGraph()->create(aten::__getitem__, {it->inputs()});
-      getitem_node->output()->copyMetadata(it->output());
-      getitem_node->insertBefore(*it);
-      it->output()->replaceAllUsesWith(getitem_node->output());
-
-      it->output()->copyMetadata(it->inputs()[0]);
-      it->inputs()[0]->replaceAllUsesAfterNodeWith(*it, it->output());
-    }
+    n->output()->copyMetadata(n->inputs()[0]);
+    n->inputs()[0]->replaceAllUsesAfterNodeWith(n, n->output());
   }
 }
 
-static void PrepareListAppendAndInsertForONNX(Block* b) {
+static void PrepareListDeleteForONNX(Node* n) {
+  if (n->kind() == aten::Delete) {
+    n->addOutput();
+    n->output()->setType(n->input(0)->type());
+    n->input(0)->replaceAllUsesAfterNodeWith(n, n->output());
+  }
+}
+
+static void PrepareListAppendAndInsertForONNX(Node* n) {
+  if (n->kind() == aten::insert || n->kind() == aten::append) {
+    if (n->outputs().size() == 0) {
+      n->addOutput();
+      n->output()->copyMetadata(n->inputs()[0]);
+    }
+    n->inputs()[0]->replaceAllUsesAfterNodeWith(n, n->output());
+  }
+}
+
+static void PrepareInplaceOpsForONNX(Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
-      PrepareListPopForONNX(child_block);
+      PrepareInplaceOpsForONNX(child_block);
     }
 
-    if (it->kind() == aten::insert || it->kind() == aten::append) {
-      if (it->outputs().size() == 0) {
-        it->addOutput();
-        it->output()->copyMetadata(it->inputs()[0]);
+    switch (it->kind()) {
+      case aten::copy_: {
+        PrepareCopyForONNX(*it);
+        break;
       }
-      it->inputs()[0]->replaceAllUsesAfterNodeWith(*it, it->output());
+      case aten::index_put:
+      case aten::index_put_: {
+        PrepareIndexPutForONNX(*it);
+        break;
+      }
+      case aten::pop: {
+        PrepareListPopForONNX(*it);
+        break;
+      }
+      case aten::insert:
+      case aten::append: {
+        PrepareListAppendAndInsertForONNX(*it);
+        break;
+      }
+      case aten::Delete: {
+        PrepareListDeleteForONNX(*it);
+        break;
+      }
     }
   }
 }
@@ -1009,10 +1022,7 @@ void RegisterInplaceOpAsBlockOutputs(
 } // namespace
 
 void PrepareInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
-  PrepareCopyForONNX(graph->block());
-  PrepareIndexPutForONNX(graph->block());
-  PrepareListPopForONNX(graph->block());
-  PrepareListAppendAndInsertForONNX(graph->block());
+  PrepareInplaceOpsForONNX(graph->block());
 }
 
 void RemoveInplaceOpsForONNX(
