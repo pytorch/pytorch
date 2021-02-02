@@ -1575,7 +1575,7 @@ inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const c10::TypePt
 
 inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
   auto result = tryScalarTypeFromJitType(type);
-  AT_ASSERTM(
+  TORCH_CHECK(
       result,
       "Add new condition, expected Float, Complex, Int, or Bool but got",
       type->str());
