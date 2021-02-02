@@ -114,7 +114,8 @@ at::Tensor& embedding_lookup_fallback_impl(
 }
 
 template <typename IndexType, typename OffsetType>
-at::Tensor embedding_bag_4bit_impl(
+at::Tensor& embedding_bag_4bit_impl(
+    at::Tensor& output,
     const at::Tensor& weight,
     const at::Tensor& indices,
     const at::Tensor& offsets,
@@ -171,7 +172,7 @@ at::Tensor embedding_bag_4bit_impl(
   }
 
   const std::vector<int64_t> shape = {output_size, D};
-  auto output = at::empty(shape, weight.options().dtype(at::kFloat));
+  output.resize_(shape);
   auto* output_data = output.data_ptr<float>();
 
   const int64_t block_size = D;
@@ -490,7 +491,8 @@ at::Tensor& embedding_bag_byte_helper(
       is_embedding_op);
 }
 
-at::Tensor embedding_bag_4bit_helper(
+at::Tensor& embedding_bag_4bit_helper(
+    at::Tensor& output,
     const at::Tensor& weight,
     const at::Tensor& indices,
     const c10::optional<at::Tensor>& offsets_in,
@@ -539,6 +541,7 @@ at::Tensor embedding_bag_4bit_helper(
   // need to cast, which can be additional performance overhead
   if (indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kInt) {
     return embedding_bag_4bit_impl<int, int>(
+        output,
         weight,
         indices,
         offsets,
@@ -549,6 +552,7 @@ at::Tensor embedding_bag_4bit_helper(
   } else if (
       indices.scalar_type() == at::kInt && offsets.scalar_type() == at::kLong) {
     return embedding_bag_4bit_impl<int, int64_t>(
+        output,
         weight,
         indices,
         offsets,
@@ -559,6 +563,7 @@ at::Tensor embedding_bag_4bit_helper(
   } else if (
       indices.scalar_type() == at::kLong && offsets.scalar_type() == at::kInt) {
     return embedding_bag_4bit_impl<int64_t, int>(
+        output,
         weight,
         indices,
         offsets,
@@ -568,6 +573,7 @@ at::Tensor embedding_bag_4bit_helper(
         include_last_offset);
   }
   return embedding_bag_4bit_impl<int64_t, int64_t>(
+      output,
       weight,
       indices,
       offsets,
@@ -615,16 +621,18 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_4bit(
         " instead")
   }
 
+  auto output = at::empty({0}, packed_w.options().dtype(at::kFloat));
   return embedding_bag_4bit_helper(
-      packed_w,
-      indices,
-      offsets_in,
-      pruned_weights,
-      per_sample_weights_.has_value()
-          ? per_sample_weights_.value().to(at::kFloat)
-          : per_sample_weights_,
-      compressed_indices_mapping,
-      include_last_offset);
+    output,
+    packed_w,
+    indices,
+    offsets_in,
+    pruned_weights,
+    per_sample_weights_.has_value()
+        ? per_sample_weights_.value().to(at::kFloat)
+        : per_sample_weights_,
+    compressed_indices_mapping,
+    include_last_offset);
 }
 
 namespace at {
@@ -680,6 +688,39 @@ Tensor embedding_bag_byte_rowwise_offsets(
   return output;
 }
 
+Tensor& embedding_bag_4bit_rowwise_offsets_out(
+    Tensor& output,
+    const Tensor& weight,
+    const Tensor& indices,
+    const c10::optional<Tensor>& offsets_in,
+    const bool /* scale_grad_by_freq */,
+    const int64_t /* mode */,
+    bool pruned_weights,
+    const c10::optional<Tensor>& per_sample_weights_,
+    const c10::optional<Tensor>& compressed_indices_mapping,
+    bool include_last_offset) {
+
+  if (per_sample_weights_.has_value()) {
+    TORCH_CHECK(
+        (per_sample_weights_.value().scalar_type() == at::kFloat ||
+         per_sample_weights_.value().scalar_type() == at::kHalf),
+        "Expect fp32 or fp16 weights, but found",
+        per_sample_weights_.value().scalar_type(),
+        " instead")
+  }
+  return embedding_bag_4bit_helper(
+      output,
+      weight,
+      indices,
+      offsets_in,
+      pruned_weights,
+      per_sample_weights_.has_value()
+          ? per_sample_weights_.value().to(at::kFloat)
+          : per_sample_weights_,
+      compressed_indices_mapping,
+      include_last_offset);
+}
+
 Tensor embedding_bag_4bit_rowwise_offsets(
     const Tensor& weight,
     const Tensor& indices,
@@ -690,25 +731,21 @@ Tensor embedding_bag_4bit_rowwise_offsets(
     const c10::optional<Tensor>& per_sample_weights_,
     const c10::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
-  if (per_sample_weights_.has_value()) {
-    TORCH_CHECK(
-        (per_sample_weights_.value().scalar_type() == at::kFloat ||
-         per_sample_weights_.value().scalar_type() == at::kHalf),
-        "Expect fp32 or fp16 weights, but found",
-        per_sample_weights_.value().scalar_type(),
-        " instead")
-  }
 
-  return embedding_bag_4bit_helper(
-      weight,
-      indices,
-      offsets_in,
-      pruned_weights,
-      per_sample_weights_.has_value()
-          ? per_sample_weights_.value().to(at::kFloat)
-          : per_sample_weights_,
-      compressed_indices_mapping,
-      include_last_offset);
+  auto output = at::empty({0}, weight.options().dtype(at::kFloat));
+  embedding_bag_4bit_rowwise_offsets_out(
+    output,
+    weight,
+    indices,
+    offsets_in,
+    false, // unused scale_grad_by_freq
+    0, // unused mode
+    pruned_weights,
+    per_sample_weights_,
+    compressed_indices_mapping,
+    include_last_offset
+  );
+  return output;
 }
 
 template <int bit_rate>

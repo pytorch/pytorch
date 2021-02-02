@@ -44,6 +44,13 @@ class UnsatError(RuntimeError):
 #   }
 #
 # and you need to generate "exprs".
+#
+# Typically, a list of Bindings is convenient to get (you usually call something
+# like arguments() to get them); but technically you only need less information:
+# for 'bindings' an (un-ordered) list of Exprs is sufficient; similarly, for
+# 'goals', an (ordered) list of CType goals is sufficient.  If you are doing
+# something more complicated, e.g., tracking the set of bindings in a context,
+# you may find using these smaller types more convenient.
 def translate(
     bindings: Sequence[Union[Expr, Binding]],
     goals: Sequence[Union[CType, Binding]],
