@@ -190,6 +190,53 @@ class TestLiteScriptModule(TestCase):
         mobile_module_result = mobile_module.forward(*bundled_inputs[0])
         torch.testing.assert_allclose(script_module_result, mobile_module_result)
 
+    def test_method_calls_with_optional_arg(self):
+        class A(torch.nn.Module):
+            def __init__(self):
+                super(A, self).__init__()
+
+            # opt arg in script-to-script invocation
+            def forward(self, x, two: int = 2):
+                return x + two
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super(B, self).__init__()
+                self.A0 = A()
+
+            # opt arg in Python-to-script invocation
+            def forward(self, x, one: int = 1):
+                return self.A0(x) + one
+
+        script_module = torch.jit.script(B())
+        buffer = io.BytesIO(
+            script_module._save_to_buffer_for_lite_interpreter()
+        )
+        mobile_module = _load_for_lite_interpreter(buffer)
+
+        input = torch.tensor([5])
+        script_module_forward_result = script_module.forward(input)
+        mobile_module_forward_result = mobile_module.forward(input)
+        torch.testing.assert_allclose(
+            script_module_forward_result,
+            mobile_module_forward_result
+        )
+
+        # change ref only
+        script_module_forward_result = script_module.forward(input, 2)
+        self.assertFalse(
+            (script_module_forward_result == mobile_module_forward_result)
+            .all()
+            .item()
+        )
+
+        # now both match again
+        mobile_module_forward_result = mobile_module.forward(input, 2)
+        torch.testing.assert_allclose(
+            script_module_forward_result,
+            mobile_module_forward_result
+        )
+
     def test_unsupported_createobject(self):
         class Foo():
             def __init__(self):
