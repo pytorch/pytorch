@@ -241,6 +241,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/tensorexpr/bounds_overlap.cpp",
     "torch/csrc/jit/tensorexpr/mem_dependency_checker.cpp",
     "torch/csrc/jit/tensorexpr/codegen.cpp",
+    "torch/csrc/jit/tensorexpr/cpp_codegen.cpp",
     "torch/csrc/jit/tensorexpr/eval.cpp",
     "torch/csrc/jit/tensorexpr/expr.cpp",
     "torch/csrc/jit/tensorexpr/hash_provider.cpp",
