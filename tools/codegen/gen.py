@@ -861,8 +861,15 @@ def main() -> None:
                 '#include <ATen/LegacyTHFunctionsCUDA.h>' if dispatch_key == DispatchKey.CUDA else
                 '',
             'DispatchKey': dispatch_key,
-            'dispatch_definitions': list(concatMap(
-                dest.RegisterDispatchKey(dispatch_key, Target.DEFINITION, selector, rocm=options.rocm),
+            'dispatch_namespace': dispatch_key.lower(),
+            'dispatch_namespaced_definitions': list(concatMap(
+                dest.RegisterDispatchKey(
+                    dispatch_key, Target.NAMESPACED_DEFINITION, selector, rocm=options.rocm),
+                grouped_native_functions
+            )),
+            'dispatch_anonymous_definitions': list(concatMap(
+                dest.RegisterDispatchKey(
+                    dispatch_key, Target.ANONYMOUS_DEFINITION, selector, rocm=options.rocm),
                 grouped_native_functions
             )),
             'dispatch_registrations': list(concatMap(
@@ -874,8 +881,9 @@ def main() -> None:
         if dispatch_key in functions_keys:
             fm.write_with_template(f'{dispatch_key}Functions.h', 'DispatchKeyFunctions.h', lambda: {
                 'dispatch_namespace': dispatch_key.lower(),
-                'dispatch_declarations': list(concatMap(
-                    dest.RegisterDispatchKey(dispatch_key, Target.DECLARATION, selector, rocm=options.rocm),
+                'dispatch_namespaced_declarations': list(concatMap(
+                    dest.RegisterDispatchKey(
+                        dispatch_key, Target.NAMESPACED_DECLARATION, selector, rocm=options.rocm),
                     grouped_native_functions
                 )),
             })

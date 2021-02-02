@@ -8,7 +8,22 @@ import textwrap
 # and declaration (for example, the function signature is the same), so
 # we organize them into one function that takes a Target to say which
 # code we want.
-Target = Enum('Target', ('DEFINITION', 'DECLARATION', 'REGISTRATION'))
+#
+# This is an OPEN enum (we may add more cases to it in the future), so be sure
+# to explicitly specify with Union[Literal[Target.XXX]] what targets are valid
+# for your use.
+Target = Enum('Target', (
+    # top level namespace (not including at)
+    'DEFINITION',
+    'DECLARATION',
+    # TORCH_LIBRARY(...) { ... }
+    'REGISTRATION',
+    # namespace { ... }
+    'ANONYMOUS_DEFINITION',
+    # namespace cpu { ... }
+    'NAMESPACED_DEFINITION',
+    'NAMESPACED_DECLARATION',
+))
 
 # Matches "foo" in "foo, bar" but not "foobar". Used to search for the
 # occurrence of a parameter in the derivative formula

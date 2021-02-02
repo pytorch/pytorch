@@ -37,8 +37,9 @@ class RegisterDispatchKey:
     dispatch_key: DispatchKey
 
     target: Union[
-        Literal[Target.DEFINITION],
-        Literal[Target.DECLARATION],
+        Literal[Target.ANONYMOUS_DEFINITION],
+        Literal[Target.NAMESPACED_DEFINITION],
+        Literal[Target.NAMESPACED_DECLARATION],
         Literal[Target.REGISTRATION]
     ]
 
@@ -93,9 +94,13 @@ class RegisterDispatchKey:
         args = native.arguments(f.func)
         args_str = ', '.join(a.defn() for a in args)
 
-        if self.target is Target.DECLARATION:
+        if self.target is Target.NAMESPACED_DECLARATION:
+            # TODO: implement at::cpu:: bindings for non-structured functions
             return ''
-        elif self.target is Target.DEFINITION:
+        elif self.target is Target.NAMESPACED_DEFINITION:
+            # TODO: implement at::cpu:: bindings for non-structured functions
+            return ''
+        elif self.target is Target.ANONYMOUS_DEFINITION:
             impl_name = f"at::native::{f.dispatch[self.dispatch_key]}"
 
             args_exprs_str = ', '.join(a.name for a in args)
@@ -326,13 +331,25 @@ struct {class_name} final : public {parent_class} {{
         # Signature of the wrapper function we'll register to the dispatcher
         sig = NativeSignature(f.func, prefix="wrapper_")
 
-        if self.target is Target.DECLARATION:
+        if self.target is Target.NAMESPACED_DECLARATION:
             result = f"TORCH_API {cpp_sig_group.signature.decl()};\n"
             if cpp_sig_group.faithful_signature is not None:
                 result += f"TORCH_API {cpp_sig_group.faithful_signature.decl()};\n"
             return result
 
-        elif self.target is Target.DEFINITION:
+        elif self.target is Target.NAMESPACED_DEFINITION:
+            def generate_defn(cpp_sig: CppSignature) -> str:
+                return f"""
+{cpp_sig.defn()} {{
+return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
+}}
+"""
+            result = generate_defn(cpp_sig_group.signature)
+            if cpp_sig_group.faithful_signature is not None:
+                result += generate_defn(cpp_sig_group.faithful_signature)
+            return result
+
+        elif self.target is Target.ANONYMOUS_DEFINITION:
 
             k = f.func.kind()
 
@@ -406,7 +423,7 @@ struct {class_name} final : public {parent_class} {{
 
             # For an overview of what this template code looks like, see
             # https://github.com/pytorch/rfcs/pull/9
-            sig_defn = f"""\
+            return f"""\
 {self.gen_class(
 f, k,
 class_name=class_name,
@@ -417,26 +434,6 @@ generate_super=self.g.out.structured_inherits is not None
 {sig.defn()} {{
 {sig_body_str}
 }}
-"""
-
-            def generate_defn(cpp_sig: CppSignature) -> str:
-                return f"""
-{cpp_sig.defn()} {{
-return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
-}}
-"""
-            cpp_defns = generate_defn(cpp_sig_group.signature)
-            if cpp_sig_group.faithful_signature is not None:
-                cpp_defns += generate_defn(cpp_sig_group.faithful_signature)
-
-            return f"""
-namespace {{
-{sig_defn}
-}} // anonymous namespace
-
-namespace {self.dispatch_key.lower()} {{
-{cpp_defns}
-}} // namespace {self.dispatch_key.lower()}
 """
 
         elif self.target is Target.REGISTRATION:
