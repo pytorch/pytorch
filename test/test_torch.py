@@ -4315,15 +4315,15 @@ class TestTorchDeviceType(TestCase):
         test_func(self, device, 'method')
         test_func(self, device, 'method inplace')
 
-    def test_index_fill(self, device):
-        for dt in torch.testing.get_all_dtypes():
-            if dt == torch.half or dt == torch.bfloat16 or dt.is_complex:
-                continue
-
-            x = torch.tensor([[1, 2], [4, 5]], dtype=dt, device=device)
-            index = torch.tensor([0], device=device)
-            x.index_fill_(1, index, 0)
-            self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dt, device=device))
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_index_fill(self, device, dtype):
+        x = torch.tensor([[1, 2], [4, 5]], dtype=dtype, device=device)
+        index = torch.tensor([0], device=device)
+        x.index_fill_(1, index, 0)
+        self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dtype, device=device))
+        if not x.is_complex():
+            with self.assertRaisesRegex(RuntimeError, r"Scalar"):
+                x.index_fill_(1, index, 1 + 1j)
 
     def test_index_select(self, device):
         for dtype in [torch.int, torch.long]:
