@@ -319,6 +319,7 @@ Tensor& remainder_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
+	TORCH_CHECK(false, "floor_divide called");
   TORCH_WARN_ONCE(
     "floor_divide is deprecated, and will be removed in a future version of pytorch. "
     "It currently rounds toward 0 (like the 'trunc' function NOT 'floor'). "

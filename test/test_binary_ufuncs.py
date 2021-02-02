@@ -342,7 +342,8 @@ class TestBinaryUfuncs(TestCase):
             actual = torch.divide(a, b, rounding_mode=rounding_mode)
             self.assertEqual(actual, expect)
 
-    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_complex=False))
+    @dtypes(*torch.testing.get_all_dtypes(
+        include_bool=False, include_complex=False, include_bfloat16=False))
     def test_div_rounding_numpy(self, device, dtype):
         info = (torch.finfo(dtype) if dtype.is_floating_point
                 else torch.iinfo(dtype))
