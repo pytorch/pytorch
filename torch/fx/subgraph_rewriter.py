@@ -16,6 +16,10 @@ class SubgraphMatcher:
             raise ValueError("SubgraphMatcher cannot be initialized with an "
                              "empty pattern")
         self.pattern_anchor = next(iter(reversed(pattern.nodes)))
+        # Ensure that there is only a single output value in the pattern
+        # since we don't support multiple outputs
+        assert len(self.pattern_anchor.all_input_nodes) == 1, \
+            "Pattern matching on multiple outputs is not supported"
         # Maps nodes in the pattern subgraph to nodes in the larger graph
         self.nodes_map: Dict[Node, Node] = {}
 
@@ -190,8 +194,23 @@ def replace_pattern(gm : GraphModule, pattern : Callable, replacement : Callable
                 lookup: Dict[Node, Node] = {v : k for k, v
                                             in nodes_map.items()}
                 for n in lookup.keys():
-                    if n.op == "placeholder" or lookup[n].op == "output":
+
+                    # Nodes that can "leak"...
+
+                    # Placeholders (by definition)
+                    if n.op == "placeholder":
                         continue
+                    # Pattern output (acts as a container)
+                    if lookup[n].op == "output":
+                        continue
+                    # Result contained by pattern output (what we'll
+                    # hook in to the new Graph, thus what we'll
+                    # potentially use in other areas of the Graph as
+                    # an input Node)
+                    if (len(lookup[n].users) == 1
+                            and list(lookup[n].users.keys())[0].op == "output"):
+                        continue
+
                     for user in n.users:
                         # If this node has users that were not in
                         # `lookup`, then it must leak out of the

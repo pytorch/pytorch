@@ -1721,6 +1721,10 @@ of each of the individual matrices. Similarly, when :attr:`upper` is ``False``, 
 tensor will be composed of lower-triangular Cholesky factors of each of the individual
 matrices.
 
+.. note:: :func:`torch.linalg.cholesky` should be used over ``torch.cholesky`` when possible.
+          Note however that :func:`torch.linalg.cholesky` does not yet support the :attr:`upper`
+          parameter and instead always returns the lower triangular matrix.
+
 Args:
     input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
                 batch dimensions consisting of symmetric positive-definite matrices.
@@ -9640,11 +9644,12 @@ Example::
     tensor([ 0.1815, -0.8917, -0.3031])
 """)
 
-add_docstr(torch.slogdet,
-           r"""
+add_docstr(torch.slogdet, r"""
 slogdet(input) -> (Tensor, Tensor)
 
 Calculates the sign and log absolute value of the determinant(s) of a square matrix or batches of square matrices.
+
+.. note:: :func:`torch.slogdet` is deprecated. Please use :func:`torch.linalg.slogdet` instead.
 
 .. note::
     If ``input`` has zero determinant, this returns ``(0, -inf)``.
