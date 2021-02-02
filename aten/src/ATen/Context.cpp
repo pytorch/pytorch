@@ -138,6 +138,14 @@ void Context::setAllowTF32CuBLAS(bool b) {
   allow_tf32_cublas = b;
 }
 
+c10::optional<int64_t> Context::cuDNNWorkspaceLimitMiB() const {
+  return cudnn_workspace_limit_mib;
+}
+
+void Context::setCuDNNWorkspaceLimitMiB(c10::optional<int64_t> value) {
+  cudnn_workspace_limit_mib = value;
+}
+
 bool Context::hasMKL() const {
 #if AT_MKL_ENABLED()
   return true;

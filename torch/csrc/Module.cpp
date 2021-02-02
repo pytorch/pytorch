@@ -507,6 +507,25 @@ PyObject *THPModule_allowTF32CuBLAS(PyObject *_unused, PyObject *noargs)
   else Py_RETURN_FALSE;
 }
 
+PyObject *THPModule_setCuDNNWorkspaceLimitMiB(PyObject *_unused, PyObject *arg)
+{
+  if (arg == Py_None) {
+    at::globalContext().setCuDNNWorkspaceLimitMiB(c10::nullopt);
+  } else {
+    at::globalContext().setCuDNNWorkspaceLimitMiB(THPUtils_unpackLong(arg));
+  }
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_cuDNNWorkspaceLimitMiB(PyObject *_unused, PyObject *noargs)
+{
+  auto v = at::globalContext().cuDNNWorkspaceLimitMiB();
+  if (v.has_value()) {
+    return THPUtils_packLong(v.value());
+  }
+  Py_RETURN_NONE;
+}
+
 PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
   THPUtils_assert(PyBool_Check(arg), "flush_denormal expects a bool, "
           "but got %s", THPUtils_typename(arg));
@@ -613,6 +632,8 @@ static PyMethodDef TorchMethods[] = {
   {"_set_cudnn_benchmark", THPModule_setBenchmarkCuDNN, METH_O,  nullptr},
   {"_get_cudnn_deterministic", THPModule_deterministicCuDNN, METH_NOARGS,     nullptr},
   {"_set_cudnn_deterministic", THPModule_setDeterministicCuDNN, METH_O,  nullptr},
+  {"_get_cudnn_workspace_limit_mib", THPModule_cuDNNWorkspaceLimitMiB, METH_NOARGS,     nullptr},
+  {"_set_cudnn_workspace_limit_mib", THPModule_setCuDNNWorkspaceLimitMiB, METH_O,  nullptr},
   {"_get_deterministic", THPModule_deterministic, METH_NOARGS,     nullptr},
   {"_set_deterministic", THPModule_setDeterministic, METH_O,  nullptr},
   {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS,     nullptr},

@@ -59,6 +59,10 @@ constexpr size_t operator "" _TiB(unsigned long long n) {
   return size_t(n) * 1024 * 1024 * 1024 * 1024;
 }
 
+constexpr size_t operator "" _MiB(unsigned long long n) {
+  return size_t(n) * 1024 * 1024;
+}
+
 namespace at { namespace native {
 
 // TODO: Go through all the checking code again and make sure
@@ -100,10 +104,15 @@ BenchmarkCache<cudnnConvolutionBwdFilterAlgoPerf_t> bwd_filter_algos;
 // tensor instead.
 struct Workspace {
   Workspace(size_t size) : size(size), data(NULL) {
-    // Sometimes cuDNN returns a workspace size > 2^63, this could makes the allocation of
-    // workspace fail with some 64bit indexing error instead of an OOM error. In such case,
-    // we manually fail with OOM.
-    TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
+    auto limit = at::globalContext().cuDNNWorkspaceLimitMiB();
+    if (!limit.has_value()) {
+      // Sometimes cuDNN returns a workspace size > 2^63, this could makes the allocation of
+      // workspace fail with some 64bit indexing error instead of an OOM error. In such case,
+      // we manually fail with OOM.
+      TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
+    } else {
+      TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < limit.value() * 1_MiB, "Not enough memory for workspace!");
+    }
     data = THCudaMalloc(globalContext().lazyInitCUDA(), size);
   }
   Workspace(const Workspace&) = delete;
@@ -497,10 +506,15 @@ public:
 };
 
 inline Tensor allocate_workspace(size_t size, const Tensor &other) {
-  // Sometimes cuDNN returns a workspace size > 2^63, this could makes the allocation of
-  // workspace fail with some 64bit indexing error instead of an OOM error. In such case,
-  // we manually fail with OOM.
-  TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
+  auto limit = at::globalContext().cuDNNWorkspaceLimitMiB();
+  if (!limit.has_value()) {
+    // Sometimes cuDNN returns a workspace size > 2^63, this could makes the allocation of
+    // workspace fail with some 64bit indexing error instead of an OOM error. In such case,
+    // we manually fail with OOM.
+    TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < 1_TiB, "Not enough memory for workspace!");
+  } else {
+    TORCH_CHECK_WITH(CUDAOutOfMemoryError, size < limit.value() * 1_MiB, "Not enough memory for workspace!");
+  }
   return at::empty({static_cast<int64_t>(size)}, other.options().dtype(kByte));
 }
 

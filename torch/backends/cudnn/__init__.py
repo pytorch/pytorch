@@ -124,6 +124,7 @@ class CudnnModule(PropModule):
     deterministic = ContextProp(torch._C._get_cudnn_deterministic, torch._C._set_cudnn_deterministic)
     benchmark = ContextProp(torch._C._get_cudnn_benchmark, torch._C._set_cudnn_benchmark)
     allow_tf32 = ContextProp(torch._C._get_cudnn_allow_tf32, torch._C._set_cudnn_allow_tf32)
+    workspace_limit_mib = ContextProp(torch._C._get_cudnn_workspace_limit_mib, torch._C._set_cudnn_workspace_limit_mib)
 
 # This is the sys.modules replacement trick, see
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273

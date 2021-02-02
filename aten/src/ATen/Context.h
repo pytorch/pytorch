@@ -184,6 +184,10 @@ class TORCH_API Context {
   void setAllowTF32CuDNN(bool);
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool);
+
+  c10::optional<int64_t> cuDNNWorkspaceLimitMiB() const;
+  void setCuDNNWorkspaceLimitMiB(c10::optional<int64_t>);
+
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
   const std::vector<at::QEngine>& supportedQEngines() const;
@@ -215,6 +219,7 @@ class TORCH_API Context {
   bool allow_tf32_cudnn = true;
   bool allow_tf32_cublas = true;
   bool enabled_mkldnn = true;
+  c10::optional<int64_t> cudnn_workspace_limit_mib = c10::nullopt;
   #ifdef C10_MOBILE
   bool release_original_weights = true;
   #else
