@@ -27,8 +27,12 @@ elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
 fi
 
 EXTRA_CONDA_FLAGS=""
+NUMPY_PIN=""
 if [[ "\$python_nodot" = *39* ]]; then
   EXTRA_CONDA_FLAGS="-c=conda-forge"
+  # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
+  # we set a lower boundary here just to be safe
+  NUMPY_PIN=">=1.20"
 fi
 
 # Install the package
@@ -45,7 +49,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     # namely CONDA_MKL_INTERFACE_LAYER_BACKUP from libblas so let's just ignore unbound variables when
     # it comes to the conda installation commands
     set +u
-    retry conda install \${EXTRA_CONDA_FLAGS} -yq future numpy protobuf six
+    retry conda install \${EXTRA_CONDA_FLAGS} -yq future "numpy\${NUMPY_PIN}" protobuf six
     retry conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
       retry conda install \${EXTRA_CONDA_FLAGS} -y cpuonly -c pytorch
