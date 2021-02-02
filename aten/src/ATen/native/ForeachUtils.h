@@ -92,24 +92,26 @@ bool check_fast_path_restrictions(
       }
     }
 
-    for (int j=0; j < tensorLists.size(); j++) {
-      for (int i=0; i < tensorLists[j].size(); i++) {
-        if (scalarList.size() == 1) {
-          if (will_promote_tensor(tensorLists[j][i], scalarList[0])) {
-            return false;
-          }
-        } else if (scalarList.size() > 1) {
-          // Complex scalar list is not supported due to the limit for kernel launch argument (4KB)
-          if (scalarList[i].isComplex()) {
-            return false;
-          }
+    // For all j, tensorList[j][0] have the same shape and dtype. (this was a precondition
+    // checked by `check_foreach_api_restrictions`). This means we only need to check if
+    // {tensorList[0][0], tensorList[0][1], tensorList[0][2], ...} do type promotion with scalarLIst.
+    for (int i=0; i < tensorLists[0].size(); i++) {
+      if (scalarList.size() == 1) {
+        if (will_promote_tensor(tensorLists[0][i], scalarList[0])) {
+          return false;
+        }
+      } else if (scalarList.size() > 1) {
+        // Complex scalar list is not supported.
+        if (scalarList[i].isComplex()) {
+          return false;
+        }
 
-          if (will_promote_tensor(tensorLists[j][i], scalarList[i])) {
-            return false;
-          }
+        if (will_promote_tensor(tensorLists[0][i], scalarList[i])) {
+          return false;
         }
       }
     }
+
     return true;
 }
 
