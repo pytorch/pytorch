@@ -1,8 +1,6 @@
 import math
 import statistics
-from collections import defaultdict
-from typing import (DefaultDict, Dict, Iterable, List, Optional, Set, Tuple,
-                    TypeVar)
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from typing_extensions import TypedDict
 
@@ -62,6 +60,11 @@ class SuiteDiff(TypedDict):
     cases: List[CaseDiff]
 
 
+class RegressionAnalysis(TypedDict):
+    diffs: List[SuiteDiff]
+    delta: Stat
+
+
 def case_status(case: Case) -> Status:
     for k in {'errored', 'failed', 'skipped'}:
         if case[k]:  # type: ignore
@@ -102,6 +105,14 @@ def list_stat(l: List[float]) -> Stat:
         'center': statistics.mean(l),
         'spread': statistics.stdev(l) if len(l) > 1 else None
     }
+
+
+def zero_stat() -> Stat:
+    return {'center': 0, 'spread': 0}
+
+
+def recenter(was: Stat, now: float) -> Stat:
+    return {'center': now - was['center'], 'spread': was['spread']}
 
 
 def sum_normals(stats: Iterable[Stat]) -> Stat:
@@ -157,38 +168,11 @@ def matching_test_times(
     return times
 
 
-T = TypeVar('T')
-
-
-def safe_union(sets: List[Set[T]]) -> Set[T]:
-    """
-    Return the union of sets.
-    """
-    return set.union(*(sets or [set()]))
-
-
-def safe_intersection(sets: List[Set[T]]) -> Set[T]:
-    """
-    Return the intersection of sets, or the empty set if no sets.
-    """
-    return set.intersection(*(sets or [set()]))
-
-
-def is_anomaly(was: Stat, now: float, threshold: int) -> bool:
-    center = was['center']
-    spread = was['spread'] or 0
-    distance = abs(now - center)
-    # guard against tiny values because they introduce a lot of noise
-    cutoff = max(0.5 * center, threshold * spread)
-    return bool(spread > 0.01 and distance > cutoff)
-
-
-def find_anomalies(
+def analyze(
     *,
     head_report: SimplerReport,
     base_reports: Dict[Commit, List[SimplerReport]],
-    stdev_threshold: int,
-) -> List[SuiteDiff]:
+) -> RegressionAnalysis:
     # most recent master ancestor with at least one S3 report
     base_sha = next(sha for sha, reports in base_reports.items() if reports)
 
@@ -200,13 +184,15 @@ def find_anomalies(
     modified_suites: List[SuiteDiff] = []
     added_suites: List[SuiteDiff] = []
 
+    all_stats: List[Stat] = []
+
     for suite_name in sorted(all_suites):
         case_diffs: List[CaseDiff] = []
         head_suite = head_report.get(suite_name)
-        base_cases = dict(sorted(safe_intersection([
+        base_cases: Dict[str, Status] = dict(sorted(set.intersection(*[
             {(n, s) for n, (_, s) in report.get(suite_name, {}).items()}
             for report in base_reports[base_sha]
-        ])))
+        ] or [set()])))
         case_stats: Dict[str, Stat] = {}
         if head_suite:
             now = sum(case[0] for case in head_suite.values())
@@ -220,6 +206,7 @@ def find_anomalies(
                         case_status,
                     ))
                     if case_name not in head_suite:
+                        all_stats.append(recenter(case_stats[case_name], 0))
                         removed_cases.append({
                             'margin': '-',
                             'name': case_name,
@@ -232,9 +219,9 @@ def find_anomalies(
                     head_case = head_suite[head_case_name]
                     if head_case_name in base_cases:
                         stat = case_stats[head_case_name]
-                        head_seconds, head_status = head_case
+                        all_stats.append(recenter(stat, head_case[0]))
                         base_status = base_cases[head_case_name]
-                        if head_status != base_status or is_anomaly(stat, head_seconds, stdev_threshold):
+                        if head_case[1] != base_status:
                             modified_cases.append({
                                 'margin': '!',
                                 'name': head_case_name,
@@ -242,6 +229,7 @@ def find_anomalies(
                                 'now': head_case,
                             })
                     else:
+                        all_stats.append(recenter(zero_stat(), head_case[0]))
                         added_cases.append({
                             'margin': '+',
                             'name': head_case_name,
@@ -261,6 +249,7 @@ def find_anomalies(
             else:
                 for head_case_name in sorted(head_suite):
                     head_case = head_suite[head_case_name]
+                    all_stats.append(recenter(zero_stat(), head_case[0]))
                     case_diffs.append({
                         'margin': ' ',
                         'name': head_case_name,
@@ -282,6 +271,7 @@ def find_anomalies(
                     case_name,
                     case_status,
                 ))
+                all_stats.append(recenter(case_stats[case_name], 0))
                 case_diffs.append({
                     'margin': ' ',
                     'name': case_name,
@@ -296,7 +286,10 @@ def find_anomalies(
                 'cases': case_diffs,
             })
 
-    return removed_suites + modified_suites + added_suites
+    return {
+        'diffs': removed_suites + modified_suites + added_suites,
+        'delta': sum_normals(all_stats),
+    }
 
 
 def case_diff_lines(diff: CaseDiff) -> List[str]:
@@ -344,20 +337,8 @@ def display_suite_diff(diff: SuiteDiff) -> str:
     return unlines([''] + [f'{diff["margin"]} {l}'.rstrip() for l in lines] + [''])
 
 
-def anomalies(
-    head_report: Report,
-    base_reports: Dict[Commit, List[Report]],
-    stdev_threshold: int,
-) -> str:
-    simpler_head = simplify(head_report)
-    simpler_base: Dict[Commit, List[SimplerReport]] = {}
-    for commit, reports in base_reports.items():
-        simpler_base[commit] = [simplify(r) for r in reports]
-    return ''.join(map(display_suite_diff, find_anomalies(
-        head_report=simpler_head,
-        base_reports=simpler_base,
-        stdev_threshold=stdev_threshold,
-    )))
+def anomalies(diffs: List[SuiteDiff]) -> str:
+    return ''.join(map(display_suite_diff, diffs))
 
 
 def graph(
@@ -415,38 +396,42 @@ def graph(
     return unlines(lines)
 
 
-def summary(
-    head_report: Report,
-    base_reports: Dict[Commit, List[Report]],
-    stdev_threshold: int,
-) -> str:
-    lines = []
-
-    times = [o['total_seconds'] for runs in base_reports.values() for o in runs]
-    total_mean = statistics.mean(times)
-    total_stdev = statistics.stdev(times)
-    lines.append(f'Prior average total time: {total_mean:8.2f}s ± {total_stdev:.2f}s')
-    lines.append(f'Current       total time: {head_report["total_seconds"]:8.2f}s')
-    stdevs_bigger = (head_report['total_seconds'] - total_mean) / total_stdev
-    stdevs_abs = abs(stdevs_bigger)
-    stdevs_floor = math.floor(stdevs_abs)
-    stdevs_ceil = math.ceil(stdevs_abs)
-    if stdevs_abs < stdev_threshold:
-        icon, verb, prep, amount = '🟢', 'maintains', 'within', stdevs_ceil
+def summary(delta: Stat, stdev_threshold: int) -> str:
+    center = delta['center']
+    spread = delta['spread']
+    displayed = display_stat(
+        {'center': abs(center), 'spread': spread},
+        ((1, 2), (1, 2)),
+    ).rstrip()
+    if center < 0:
+        sign = '-'
+    elif center > 0:
+        sign = '+'
     else:
-        prep, amount = 'by at least', stdevs_floor
-        if stdevs_bigger < 0:
+        sign = ' '
+    lines = [f'Estimated total change in test time: {sign}{displayed}']
+
+    if spread:
+        stdevs_bigger = center / spread
+        stdevs_abs = abs(stdevs_bigger)
+        stdevs_floor = math.floor(stdevs_abs)
+        stdevs_ceil = math.ceil(stdevs_abs)
+        if stdevs_abs < stdev_threshold:
+            icon, verb, prep, amount = '🟢', 'maintains', 'within', stdevs_ceil
+        else:
+            prep, amount = 'by at least', stdevs_floor
+            if stdevs_bigger < 0:
+                icon, verb = '🟣', 'reduces'
+            else:
+                icon, verb = '🔴', 'increases'
+        plural = '' if amount == 1 else 's'
+        lines.append(f'{icon} this commit {verb} total test job time {prep} {amount} standard deviation{plural}')
+    else:
+        if center < 0:
             icon, verb = '🟣', 'reduces'
         else:
             icon, verb = '🔴', 'increases'
-    plural = '' if amount == 1 else 's'
-    lines.append(f'{icon} this commit {verb} total test job time {prep} {amount} standard deviation{plural}')
-
-    all_runs = [head_report] + [run for runs in base_reports.values() for run in runs]
-    all_tests: DefaultDict[str, Set[str]] = defaultdict(set)
-    for run in all_runs:
-        for name, suite in run['suites'].items():
-            all_tests[name] |= {case['name'] for case in suite['cases']}
+        lines.append(f'{icon} this commit {verb} total test job time')
 
     return unlines(lines)
 
@@ -472,17 +457,22 @@ def regression_info(
     master commits, from newest to oldest (so the merge-base is
     list(base_reports)[0]).
     """
+    simpler_head = simplify(head_report)
+    simpler_base: Dict[Commit, List[SimplerReport]] = {}
+    for commit, reports in base_reports.items():
+        simpler_base[commit] = [simplify(r) for r in reports]
+    analysis = analyze(
+        head_report=simpler_head,
+        base_reports=simpler_base,
+    )
+
     return '\n'.join([
         unlines([
             'Following output is to check for test time regressions:',
             f'    job: {job_name}',
             f'    commit: {head_sha}',
         ]),
-        anomalies(
-            head_report=head_report,
-            base_reports=base_reports,
-            stdev_threshold=stdev_threshold,
-        ),
+        anomalies(analysis['diffs']),
         graph(
             head_sha=head_sha,
             head_seconds=head_report['total_seconds'],
@@ -495,8 +485,7 @@ def regression_info(
             other_ancestors=other_ancestors,
         ),
         summary(
-            head_report=head_report,
-            base_reports=base_reports,
+            analysis['delta'],
             stdev_threshold=stdev_threshold,
         ),
     ])
