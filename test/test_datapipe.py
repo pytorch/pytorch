@@ -1,5 +1,7 @@
+import os
 import tempfile
 import warnings
+import tarfile
 
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 
@@ -85,6 +87,36 @@ class TestIterableDataPipeBasic(TestCase):
             self.assertTrue(rec[0] in self.temp_files)
             self.assertTrue(rec[1].read() == open(rec[0], 'rb').read())
         self.assertEqual(count, len(self.temp_files))
+
+
+    def test_readfilesfromtar_iterable_datapipe(self):
+        temp_dir = self.temp_dir.name
+        temp_tarfile_pathname = os.path.join(temp_dir, "test_tar.tar")
+        with tarfile.open(temp_tarfile_pathname, "w:gz") as tar:
+            tar.add(self.temp_files[0])
+            tar.add(self.temp_files[1])
+            tar.add(self.temp_files[2])
+        datapipe1 = dp.iter.ListDirFiles(temp_dir, '*.tar')
+        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
+        datapipe3 = dp.iter.ReadFilesFromTar(datapipe2)
+        # read extracted files before reaching the end of the tarfile
+        count = 0
+        for rec, temp_file in zip(datapipe3, self.temp_files):
+            count = count + 1
+            self.assertEqual(os.path.basename(rec[0]), os.path.basename(temp_file))
+            self.assertEqual(rec[1].read(), open(temp_file, 'rb').read())
+        self.assertEqual(count, len(self.temp_files))
+        # read extracted files after reaching the end of the tarfile
+        count = 0
+        data_refs = []
+        for rec in datapipe3:
+            count = count + 1
+            data_refs.append(rec)
+        self.assertEqual(count, len(self.temp_files))
+        for i in range(0, count):
+            self.assertEqual(os.path.basename(data_refs[i][0]), os.path.basename(self.temp_files[i]))
+            self.assertEqual(data_refs[i][1].read(), open(self.temp_files[i], 'rb').read())
+
 
 if __name__ == '__main__':
     run_tests()
