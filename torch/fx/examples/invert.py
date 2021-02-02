@@ -20,14 +20,18 @@ for a, b in inverses:
 
 # The general strategy is that we walk the graph backwards, transforming each
 # node into its inverse. To do so, we swap the outputs and inputs of the
-# functions, and then we look up its inverse in `invert_mapping`
+# functions, and then we look up its inverse in `invert_mapping`. Note that
+# this transform assumes that all operations take in only one input and return
+# one output.
 def invert(model: torch.nn.Module) -> torch.nn.Module:
     fx_model = fx.symbolic_trace(model)
     new_graph = fx.Graph()  # As we're building up a new graph
     env = {}
     for node in reversed(fx_model.graph.nodes):
         if node.op == 'call_function':
-            # This creates a node in the new graph with the inverse function, and passes `env[node.name]` (i.e. the previous output node) as input.
+            # This creates a node in the new graph with the inverse function,
+            # and passes `env[node.name]` (i.e. the previous output node) as
+            # input.
             new_node = new_graph.call_function(invert_mapping[node.target], (env[node.name],))
             env[node.args[0].name] = new_node
         elif node.op == 'output':
@@ -38,7 +42,7 @@ def invert(model: torch.nn.Module) -> torch.nn.Module:
             # We turn the input placeholder into an output
             new_graph.output(env[node.name])
         else:
-            raise RuntimeError("NYI")
+            raise RuntimeError("Not implemented")
 
     new_graph.lint()
     return fx.GraphModule(fx_model, new_graph)
