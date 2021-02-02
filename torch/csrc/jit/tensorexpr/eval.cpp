@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/eval.h>
 
+#include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
@@ -672,6 +674,56 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       default:
         throw unsupported_dtype();
     }
+  }
+
+  void visit(const ExternalCall* v) override {
+    auto& func_registry = getNNCFunctionRegistry();
+    if (!func_registry.count(v->func_name())) {
+      throw unimplemented_lowering(v);
+    }
+
+    std::vector<const Buf*> bufs(v->buf_args());
+    bufs.insert(bufs.begin(), v->buf());
+
+    std::vector<void*> buf_ptrs;
+    std::vector<int64_t> buf_ranks;
+    std::vector<int64_t> buf_dims;
+    std::vector<int8_t> buf_dtypes;
+    std::vector<int64_t> extra_args;
+
+    for (const Buf* b : bufs) {
+      const Var* base_node = b->base_handle();
+      auto iter = buffer_mapping_.find(base_node);
+      if (iter == buffer_mapping_.end()) {
+        throw malformed_input("could not find buf", v);
+      }
+
+      buf_ptrs.push_back(iter->second);
+      buf_ranks.push_back(b->dims().size());
+      buf_dtypes.push_back((int8_t)b->dtype().scalar_type());
+      for (const Expr* dim_expr : b->dims()) {
+        dim_expr->accept(this);
+        buf_dims.push_back(value().as<int>());
+      }
+    }
+    for (const Expr* a : v->args()) {
+      a->accept(this);
+      if (value().dtype() != kLong) {
+        throw malformed_input(
+            "extra_args in ExternalCalls must have int64 dtype", v);
+      }
+      extra_args.push_back(value().as<int64_t>());
+    }
+
+    auto fn_ptr = func_registry.at(v->func_name());
+    (*fn_ptr)(
+        bufs.size(),
+        buf_ptrs.data(),
+        buf_ranks.data(),
+        buf_dims.data(),
+        buf_dtypes.data(),
+        extra_args.size(),
+        extra_args.data());
   }
 
   TORCH_API void visit(const BaseCallNode* v) override {
