@@ -501,8 +501,6 @@ void RegisterInplaceNodeInBlocks(
     Node* block_node,
     Block* outer_block,
     Node* next_node) {
-  auto cur_node = next_node;
-
   // Check if the value is already registered in the block
   bool registered = false;
   while (orig_data->node()->kind() == aten::index_put) {
