@@ -113,7 +113,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     scikit-image \
     librosa>=0.6.2 \
     psutil \
-    numba \
     llvmlite \
     unittest-xml-reporting \
     boto3==1.16.34 \
@@ -121,6 +120,12 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     hypothesis==4.53.2 \
     mypy==0.812 \
     tb-nightly
+
+  # Install numba and mypy only on python-3.8 or below
+  # For numba issue see https://github.com/pytorch/pytorch/issues/51511
+  if [[ $(python -c "import sys; print(int(sys.version_info < (3, 9)))") == "1" ]]; then
+    as_jenkins pip install --progress-bar off numba
+  fi
 
   # Update scikit-learn to a python-3.8 compatible version
   if [[ $(python -c "import sys; print(int(sys.version_info >= (3, 8)))") == "1" ]]; then
