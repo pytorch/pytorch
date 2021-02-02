@@ -712,6 +712,7 @@ struct TORCH_API ListType
   static ListTypePtr ofTensors();
   static ListTypePtr ofInts();
   static ListTypePtr ofFloats();
+  static ListTypePtr ofComplexDoubles();
   static ListTypePtr ofBools();
   static ListTypePtr ofStrings();
 
@@ -737,6 +738,7 @@ struct TORCH_API DictType : public Type {
       case TypeKind::IntType:
       case TypeKind::BoolType:
       case TypeKind::FloatType:
+      case TypeKind::ComplexDoubleType:
       case TypeKind::StringType:
       case TypeKind::TensorType:
         return DictTypePtr(new DictType(key, value));
@@ -744,7 +746,7 @@ struct TORCH_API DictType : public Type {
         AT_ERROR(
             "Cannot create dict for key type '",
             key->str(),
-            "', only int, float, Tensor and string keys are supported");
+            "', only int, float, complex, Tensor and string keys are supported");
     }
   }
 
@@ -973,7 +975,7 @@ struct TORCH_API TupleType : public NamedType {
     }
 
     const auto& l_elements = elements();
-    const auto& r_elements = rhs.cast<TupleType>()->elements();
+    const auto& r_elements = rhs.castRaw<TupleType>()->elements();
     if (l_elements.size() != r_elements.size())
       return false;
     for (size_t i = 0; i < l_elements.size(); ++i) {
@@ -1645,6 +1647,12 @@ template <>
 struct getTypePtr_<double> final {
   static TypePtr call() {
     return FloatType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::complex<double>> final {
+  static TypePtr call() {
+    return ComplexDoubleType::get();
   }
 };
 template <>
@@ -2428,6 +2436,11 @@ private:
 inline bool IValue::isDoubleList() const {
   // note: avoids calling type() to avoid extra referencing counting for the returned type.
   return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == FloatType::Kind;
+}
+
+inline bool IValue::isComplexDoubleList() const {
+  // note: avoids calling type() to avoid extra referencing counting for the returned type.
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == ComplexDoubleType::Kind;
 }
 
 inline bool IValue::isTensorList() const {

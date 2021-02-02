@@ -1517,102 +1517,144 @@ class AbstractTestCases:
         def test_invalid_generator_raises(self):
             self.assertRaises(RuntimeError, lambda: torch.Generator('opengl'))
 
-        def test_sobolengine_unscrambled_lowdim(self):
-            engine_1d = torch.quasirandom.SobolEngine(1)
-            expected_1d = torch.tensor([0.5, 0.75, 0.25, 0.375, 0.875, 0.625, 0.125, 0.1875, 0.6875, 0.9375])
-            actual_1d = engine_1d.draw(10)
-            self.assertEqual(actual_1d.view(-1), expected_1d)
-            self.assertEqual(actual_1d.size(), torch.Size([10, 1]))
+        def _sobol_reference_samples(self, scramble: bool) -> torch.Tensor:
+            if not scramble:
+                # theoretical values from Joe Kuo 2010
+                return torch.tensor(
+                    [
+                        [0., 0.],
+                        [0.5, 0.5],
+                        [0.75, 0.25],
+                        [0.25, 0.75],
+                        [0.375, 0.375],
+                        [0.875, 0.875],
+                        [0.625, 0.125],
+                        [0.125, 0.625],
+                    ],
+                )
+            else:
+                # theoretical values unknown: convergence properties checked
+                return torch.tensor(
+                    [
+                        [0.50860737, 0.29320504],
+                        [0.07116939, 0.89594537],
+                        [0.49354145, 0.11524881],
+                        [0.93097717, 0.70244044],
+                        [0.87266153, 0.23887917],
+                        [0.31021884, 0.57600391],
+                        [0.13687253, 0.42054182],
+                        [0.69931293, 0.77336788],
+                    ],
+                )
 
-            # Test out kwarg
-            engine_1d.reset()
-            actual_1d_out = torch.Tensor().float()
-            engine_1d.draw(10, out=actual_1d_out)
-            self.assertEqual(actual_1d.view(-1), expected_1d)
+        def test_sobolengine_bounds(self, scramble: bool = False):
+            engine = torch.quasirandom.SobolEngine(100, scramble=scramble, seed=123456)
+            sample = engine.draw(512)
+            self.assertTrue(torch.all(sample >= 0))
+            self.assertTrue(torch.all(sample <= 1))
 
-            engine_3d = torch.quasirandom.SobolEngine(3)
-            expected_3d = torch.tensor([0.5, 0.75, 0.25, 0.625, 0.125, 0.375, 0.875, 0.3125, 0.8125, 0.5625])
-            actual_3d = engine_3d.draw(10)
-            self.assertEqual(actual_3d[:, 2], expected_3d)
-            self.assertEqual(actual_3d[:, 0], expected_1d)
-            self.assertEqual(actual_3d.size(), torch.Size([10, 3]))
+        def test_sobolengine_bounds_scrambled(self):
+            self.test_sobolengine_bounds(scramble=True)
 
-            engine_3d = torch.quasirandom.SobolEngine(3)
-            draws = torch.cat([engine_3d.draw() for _ in range(0, 10)])
-            self.assertEqual(draws, actual_3d)
+        def test_sobolengine_draw(self, scramble: bool = False):
+            ref_sample = self._sobol_reference_samples(scramble=scramble)
+            engine = torch.quasirandom.SobolEngine(2, scramble=scramble, seed=123456)
+            sample = engine.draw(n=len(ref_sample))
+            self.assertEqual(sample, ref_sample)
+            self.assertEqual(engine.num_generated, len(ref_sample))
 
-            engine_3d = torch.quasirandom.SobolEngine(3).fast_forward(5)
-            draws = engine_3d.draw(5)
-            self.assertEqual(draws, actual_3d[5:])
-            engine_3d.reset()
-            self.assertEqual(engine_3d.draw(3), actual_3d[:3])
-            engine_3d.fast_forward(2)
-            self.assertEqual(engine_3d.draw(5), actual_3d[5:])
+        def test_sobolengine_draw_scrambled(self):
+            self.test_sobolengine_draw(scramble=True)
 
-        def test_sobolengine_unscrambled_highdim(self):
-            from collections import Counter
-            engine = torch.quasirandom.SobolEngine(1111)
-            count1 = dict(Counter(engine.draw().view(-1).tolist()))
-            count2 = dict(Counter(engine.draw().view(-1).tolist()))
-            count3 = dict(Counter(engine.draw().view(-1).tolist()))
-            self.assertTrue(count1 == {0.5: 1111})
-            self.assertTrue(count2 == {0.25: 580, 0.75: 531})
-            self.assertTrue(count3 == {0.25: 531, 0.75: 580})
+        def test_sobolengine_continuing(self, scramble: bool = False):
+            ref_sample = self._sobol_reference_samples(scramble=scramble)
+            engine = torch.quasirandom.SobolEngine(2, scramble=scramble, seed=123456)
+            n_half = len(ref_sample) // 2
+            _ = engine.draw(n=n_half)
+            sample = engine.draw(n=n_half)
+            torch.testing.assert_allclose(sample, ref_sample[n_half:])
 
-            engine = torch.quasirandom.SobolEngine(1111)
-            draws = engine.draw(1000)
-            self.assertTrue(torch.all(draws <= 1))
-            self.assertTrue(torch.all(draws >= 0))
+        def test_sobolengine_continuing_scrambled(self):
+            self.test_sobolengine_continuing(scramble=True)
 
-        def test_sobolengine_scrambled_lowdim(self):
-            engine_1d = torch.quasirandom.SobolEngine(1, scramble=True, seed=1729)
-            expected_1d = [0.16478512, 0.43221009, 0.84261382, 0.99750268, 0.27460563,
-                           0.01084163, 0.73373985, 0.65039611, 0.12329865, 0.35587373]
-            actual_1d = engine_1d.draw(10)
-            self.assertEqual(actual_1d.flatten(), torch.tensor(expected_1d), atol=1e-5, rtol=0)
-            self.assertEqual(actual_1d.size(), torch.Size([10, 1]))
-            # make sure random seed if chosen if none is provided
-            engine_1d_a = torch.quasirandom.SobolEngine(1, scramble=True)
-            engine_1d_b = torch.quasirandom.SobolEngine(1, scramble=True)
-            self.assertNotEqual(engine_1d_a.draw(2), engine_1d_b.draw(2))
+        def test_sobolengine_reset(self, scramble: bool = False):
+            ref_sample = self._sobol_reference_samples(scramble=scramble)
+            engine = torch.quasirandom.SobolEngine(2, scramble=scramble, seed=123456)
+            _ = engine.draw(n=len(ref_sample) // 2)
+            engine.reset()
+            self.assertEqual(engine.num_generated, 0)
+            sample = engine.draw(n=len(ref_sample))
+            torch.testing.assert_allclose(sample, ref_sample)
 
-            engine_3d = torch.quasirandom.SobolEngine(3, scramble=True, seed=1729)
-            expected_3d = [0.32642800, 0.17881306, 0.68837059, 0.46492538, 0.91789097,
-                           0.58075899, 0.03642474, 0.68229187, 0.20051685, 0.30083340]
-            actual_3d = engine_3d.draw(10)
-            self.assertEqual(actual_3d[:, 2], torch.tensor(expected_3d))
-            self.assertEqual(actual_3d.size(), torch.Size([10, 3]))
+        def test_sobolengine_reset_scrambled(self):
+            self.test_sobolengine_reset(scramble=True)
 
-            engine_3d = torch.quasirandom.SobolEngine(3, scramble=True, seed=1729)
-            draws = torch.cat([engine_3d.draw() for _ in range(0, 10)])
-            self.assertEqual(draws, actual_3d)
+        def test_sobolengine_fast_forward(self, scramble: bool = False):
+            ref_sample = self._sobol_reference_samples(scramble=scramble)
+            engine = torch.quasirandom.SobolEngine(2, scramble=scramble, seed=123456)
+            engine.fast_forward(4)
+            sample = engine.draw(n=4)
+            torch.testing.assert_allclose(sample, ref_sample[4:])
+            # alternate fast forwarding with sampling
+            engine.reset()
+            even_draws = []
+            for i in range(8):
+                if i % 2 == 0:
+                    even_draws.append(engine.draw())
+                else:
+                    engine.fast_forward(1)
+            torch.testing.assert_allclose(
+                ref_sample[[i for i in range(8) if i % 2 == 0]],
+                np.concatenate(even_draws),
+            )
 
-            engine_3d = torch.quasirandom.SobolEngine(3, scramble=True, seed=1729)
-            engine_3d.fast_forward(5)
-            draws = engine_3d.draw(5)
-            self.assertEqual(draws, actual_3d[5:])
-            engine_3d.reset()
-            self.assertEqual(engine_3d.draw(3), actual_3d[:3])
-            engine_3d.fast_forward(2)
-            self.assertEqual(engine_3d.draw(5), actual_3d[5:])
+        def test_sobolengine_fast_forward_scrambled(self):
+            self.test_sobolengine_fast_forward(scramble=True)
 
-        def test_sobolengine_scrambled_lowdim_default_rng(self):
-            expected_1d = [0.039826, 0.484409, 0.953192, 0.799275, 0.267996]
-            torch.manual_seed(123456)
-            engine_1d = torch.quasirandom.SobolEngine(1, scramble=True)
-            actual_1d = engine_1d.draw(5)
-            self.assertEqual(actual_1d[:, 0], expected_1d)
-            torch.manual_seed(123456)
-            expected_3d = [0.133490, 0.480183, 0.855304, 0.970967, 0.345844]
-            engine_3d = torch.quasirandom.SobolEngine(3, scramble=True)
-            actual_3d = engine_3d.draw(5)
-            self.assertEqual(actual_3d[:, 0], expected_3d)
+        def test_sobolengine_distribution(self, scramble=False):
+            d = 50
+            engine = torch.quasirandom.SobolEngine(d, scramble=scramble, seed=123456)
+            sample = engine.draw(1024)
+            torch.testing.assert_allclose(
+                torch.mean(sample, dim=0), torch.full((d,), 0.5), atol=2, rtol=2
+            )
+            torch.testing.assert_allclose(
+                np.percentile(sample, 25, axis=0), np.repeat(0.25, d), atol=2, rtol=2
+            )
+            torch.testing.assert_allclose(
+                np.percentile(sample, 75, axis=0), np.repeat(0.75, d), atol=2, rtol=2
+            )
 
-        def test_sobolengine_scrambled_highdim(self):
-            engine = torch.quasirandom.SobolEngine(1111, scramble=True)
-            draws = engine.draw(1000)
-            self.assertTrue(torch.all(draws <= 1))
-            self.assertTrue(torch.all(draws >= 0))
+        def test_sobolengine_distribution_scrambled(self):
+            self.test_sobolengine_distribution(scramble=True)
+
+        def test_sobolengine_draw_base2(self, scramble=False):
+            ref_sample = self._sobol_reference_samples(scramble=scramble)
+            engine = torch.quasirandom.SobolEngine(2, scramble=scramble, seed=123456)
+            sample = engine.draw_base2(2)
+            self.assertEqual(ref_sample[:4], sample)
+            # resampling still having N=2**n
+            sample = engine.draw_base2(2)
+            self.assertEqual(ref_sample[4:8], sample)
+
+        def test_sobolengine_draw_base2_scrambled(self):
+            self.test_sobolengine_draw_base2(scramble=True)
+
+        def test_sobolengine_raise(self):
+            maxdim = torch.quasirandom.SobolEngine.MAXDIM
+            with self.assertRaises(ValueError):
+                torch.quasirandom.SobolEngine(maxdim + 1)
+
+        def test_sobolengine_high_dim(self):
+            engine = torch.quasirandom.SobolEngine(1111, scramble=False, seed=123456)
+            samples1 = engine.draw()
+            vals1, counts1 = torch.unique(samples1, return_counts=True)
+            samples2 = engine.draw()
+            vals2, counts2 = torch.unique(samples2, return_counts=True)
+            self.assertEqual(vals1.item(), 0.0)
+            self.assertEqual(counts1.item(), 1111)
+            self.assertEqual(vals2.item(), 0.5)
+            self.assertEqual(counts1.item(), 1111)
 
         def test_parsing_int64(self):
             # accepts integer arguments
@@ -4273,15 +4315,15 @@ class TestTorchDeviceType(TestCase):
         test_func(self, device, 'method')
         test_func(self, device, 'method inplace')
 
-    def test_index_fill(self, device):
-        for dt in torch.testing.get_all_dtypes():
-            if dt == torch.half or dt == torch.bfloat16 or dt.is_complex:
-                continue
-
-            x = torch.tensor([[1, 2], [4, 5]], dtype=dt, device=device)
-            index = torch.tensor([0], device=device)
-            x.index_fill_(1, index, 0)
-            self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dt, device=device))
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_index_fill(self, device, dtype):
+        x = torch.tensor([[1, 2], [4, 5]], dtype=dtype, device=device)
+        index = torch.tensor([0], device=device)
+        x.index_fill_(1, index, 0)
+        self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dtype, device=device))
+        if not x.is_complex():
+            with self.assertRaisesRegex(RuntimeError, r"Scalar"):
+                x.index_fill_(1, index, 1 + 1j)
 
     def test_index_select(self, device):
         for dtype in [torch.int, torch.long]:
@@ -4497,12 +4539,6 @@ class TestTorchDeviceType(TestCase):
                 if dt == torch.bool:
                     # torch.bool is a special case and is being tested
                     # in a separate test
-                    return
-
-                # TODO: update test when masked scatter is supported for complex
-                # and cpu supports half
-                if (dt == torch.half and self.device_type == 'cpu') or dt.is_complex:
-                    self.assertRaises(RuntimeError, lambda: dest.masked_scatter_(mask, src))
                     return
 
                 dest.masked_scatter_(mask, src)
@@ -6844,17 +6880,11 @@ tensor_op_tests = [
         1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
     ('eig', 'with_eigvec', _new_t((10, 10)), lambda t, d: [True],
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, onlyOnCPUAndCUDA]),
-    ('abs', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5,
-        torch.testing.get_all_dtypes(include_complex=False, include_bool=False), [torch.bfloat16]),
     ('sign', '', _small_3d, lambda t, d: []),
-    ('logit', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('rad2deg', '', _small_3d, lambda t, d: [], 1e-1, 1e-0, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('deg2rad', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
-    ('floor', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('frac', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('round', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('trunc', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('ceil', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
 ]
 
 # Creates and decorates a generic test and adds it to the class.
