@@ -346,79 +346,6 @@ Tensor & _th_put_(Tensor & self, const Tensor & index, const Tensor & source, bo
     }
     return self;
 }
-Tensor & _th_index_fill_(Tensor & self, int64_t dim, const Tensor & index, Scalar value) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-
-    switch (dispatch_scalar_type) {
-        case ScalarType::Bool: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_fill_", false, DeviceType::CUDA, ScalarType::Long);
-            auto value_ = value.toBool();
-            THCudaBoolTensor_indexFill(globalContext().getTHCState(), self_, dim, index_, value_);
-            break;
-        }
-        case ScalarType::Byte: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_fill_", false, DeviceType::CUDA, ScalarType::Long);
-            auto value_ = value.toByte();
-            THCudaByteTensor_indexFill(globalContext().getTHCState(), self_, dim, index_, value_);
-            break;
-        }
-        case ScalarType::Char: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_fill_", false, DeviceType::CUDA, ScalarType::Long);
-            auto value_ = value.toChar();
-            THCudaCharTensor_indexFill(globalContext().getTHCState(), self_, dim, index_, value_);
-            break;
-        }
-        case ScalarType::Double: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_fill_", false, DeviceType::CUDA, ScalarType::Long);
-            auto value_ = value.toDouble();
-            THCudaDoubleTensor_indexFill(globalContext().getTHCState(), self_, dim, index_, value_);
-            break;
-        }
-        case ScalarType::Float: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_fill_", false, DeviceType::CUDA, ScalarType::Long);
-            auto value_ = value.toFloat();
-            THCudaTensor_indexFill(globalContext().getTHCState(), self_, dim, index_, value_);
-            break;
-        }
-        case ScalarType::Int: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_fill_", false, DeviceType::CUDA, ScalarType::Long);
-            auto value_ = value.toInt();
-            THCudaIntTensor_indexFill(globalContext().getTHCState(), self_, dim, index_, value_);
-            break;
-        }
-        case ScalarType::Long: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_fill_", false, DeviceType::CUDA, ScalarType::Long);
-            auto value_ = value.toLong();
-            THCudaLongTensor_indexFill(globalContext().getTHCState(), self_, dim, index_, value_);
-            break;
-        }
-        case ScalarType::Short: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_fill_", false, DeviceType::CUDA, ScalarType::Long);
-            auto value_ = value.toShort();
-            THCudaShortTensor_indexFill(globalContext().getTHCState(), self_, dim, index_, value_);
-            break;
-        }
-        case ScalarType::Half: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_index_fill_", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto index_ = checked_dense_tensor_unwrap(index, "index", 3, "_th_index_fill_", false, DeviceType::CUDA, ScalarType::Long);
-            auto value_ = value.toHalf();
-            THCudaHalfTensor_indexFill(globalContext().getTHCState(), self_, dim, index_, value_);
-            break;
-        }
-        default:
-            AT_ERROR("_th_index_fill_ not supported on CUDAType for ", dispatch_scalar_type);
-    }
-    return self;
-}
 std::tuple<Tensor &,Tensor &> _th_mode_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool keepdim) {
     // DeviceGuard omitted
     auto dispatch_scalar_type = infer_scalar_type(self);
@@ -1061,49 +988,6 @@ std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A) {
             AT_ERROR("_th_gels not supported on CUDAType for ", dispatch_scalar_type);
     }
     return std::tuple<Tensor, Tensor>(res1, res2);
-}
-Tensor & _th_potri_out(Tensor & output, const Tensor & self, bool upper) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-
-    switch (dispatch_scalar_type) {
-        case ScalarType::Double: {
-            auto output_ = checked_dense_tensor_unwrap(output, "output", 0, "_th_potri_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_potri_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaDoubleTensor_potri(globalContext().getTHCState(), output_, self_, upper);
-            break;
-        }
-        case ScalarType::Float: {
-            auto output_ = checked_dense_tensor_unwrap(output, "output", 0, "_th_potri_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_potri_out", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaTensor_potri(globalContext().getTHCState(), output_, self_, upper);
-            break;
-        }
-        default:
-            AT_ERROR("_th_potri_out not supported on CUDAType for ", dispatch_scalar_type);
-    }
-    return output;
-}
-Tensor _th_potri(const Tensor & self, bool upper) {
-    // DeviceGuard omitted
-    auto dispatch_scalar_type = infer_scalar_type(self);
-    auto output_ = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(c10::Storage(c10::Storage::use_byte_size_t(), 0, allocator(), true),DispatchKey::CUDA, scalarTypeToTypeMeta(dispatch_scalar_type)).release();
-    auto output = Tensor(c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl>::reclaim(output_));
-    switch (dispatch_scalar_type) {
-        case ScalarType::Double: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_potri", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaDoubleTensor_potri(globalContext().getTHCState(), output_, self_, upper);
-            break;
-        }
-        case ScalarType::Float: {
-            auto self_ = checked_dense_tensor_unwrap(self, "self", 1, "_th_potri", false, DeviceType::CUDA, dispatch_scalar_type);
-            THCudaTensor_potri(globalContext().getTHCState(), output_, self_, upper);
-            break;
-        }
-        default:
-            AT_ERROR("_th_potri not supported on CUDAType for ", dispatch_scalar_type);
-    }
-    return output;
 }
 std::tuple<Tensor &,Tensor &> _th_geqrf_out(Tensor & res1, Tensor & res2, const Tensor & self) {
     // DeviceGuard omitted
