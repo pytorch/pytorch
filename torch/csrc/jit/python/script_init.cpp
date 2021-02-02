@@ -639,6 +639,14 @@ py::list debugMakeNamedList(const T& list) {
   }
   return result;
 }
+template <typename T>
+py::set debugMakeSet(const T& list) {
+  py::set result;
+  for (const auto& elem : list) {
+    result.add(py::cast(elem));
+  }
+  return result;
+}
 
 static py::dict _jit_debug_module_iterators(Module& module) {
   py::dict result;
@@ -1544,6 +1552,9 @@ void initJitScriptBindings(PyObject* module) {
         }
         return _load_for_mobile(in, optional_device);
       });
+  m.def("_export_operator_list", [](torch::jit::mobile::Module& sm) {
+    return debugMakeSet(torch::jit::mobile::_export_operator_list(sm));
+  });
 
   m.def("_jit_set_emit_hooks", setEmitHooks);
   m.def("_jit_get_emit_hooks", getEmitHooks);

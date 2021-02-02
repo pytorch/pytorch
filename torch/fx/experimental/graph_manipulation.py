@@ -1,7 +1,7 @@
 from typing import Dict, List, NamedTuple, Any
 
 import torch
-from torch.fx.experimental.shape_prop import ShapeProp
+from torch.fx.passes.shape_prop import ShapeProp
 from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.graph import Graph, get_qualified_name
 from torch.fx.graph_module import GraphModule
