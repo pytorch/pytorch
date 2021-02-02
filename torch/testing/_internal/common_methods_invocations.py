@@ -1095,6 +1095,27 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad):
     )
     return [SampleInput(tensor) for tensor in tensors]
 
+def sample_inputs_logit(op_info, device, dtype, requires_grad):
+    low, high = op_info.domain
+
+    # Note: Operator is very sensitive at points near the
+    # start and end of domain and leads to NaN for float16
+    # if domain_eps is 1e-5.
+    domain_eps = op_info._domain_eps if dtype != torch.float16 else 3e-2
+
+    low = low + domain_eps
+    high = high - domain_eps
+
+    samples = (
+        SampleInput(make_tensor((S, S, S), device, dtype, low=low, high=high, requires_grad=requires_grad)),
+        SampleInput(make_tensor((S, S, S), device, dtype, low=low,
+                                high=high, requires_grad=requires_grad), args=(0.2,)),
+        SampleInput(make_tensor((), device, dtype, low=low, high=high, requires_grad=requires_grad)),
+        SampleInput(make_tensor((), device, dtype, low=low,
+                                high=high, requires_grad=requires_grad), args=(0.2,)),
+    )
+
+    return samples
 
 def sample_inputs_masked_scatter(op_info, device, dtype, requires_grad):
     samples = (
@@ -1595,6 +1616,12 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   assert_autodiffed=True,),
+    UnaryUfuncInfo('round',
+                   ref=np.round,
+                   dtypes=floating_types_and(torch.half),
+                   dtypesIfCPU=floating_types_and(torch.bfloat16),
+                   dtypesIfCUDA=floating_types_and(torch.half),
                    assert_autodiffed=True,),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
@@ -2108,6 +2135,15 @@ if TEST_SCIPY:
                                     dtypes=[torch.bfloat16]),
                        ),
                        safe_casts_outputs=True),
+        UnaryUfuncInfo('logit',
+                       ref=scipy.special.logit,
+                       domain=(0, 1),
+                       decorators=(precisionOverride({torch.bfloat16: 5e-1,
+                                                      torch.float16: 5e-1}),),
+                       dtypes=floating_types_and(torch.half),
+                       dtypesIfCPU=floating_types_and(torch.bfloat16),
+                       dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+                       sample_inputs_func=sample_inputs_logit),
         OpInfo('xlogy',
                dtypes=all_types_and(torch.bool),
                dtypesIfCPU=all_types_and(torch.bool, torch.half, torch.bfloat16),
@@ -2387,10 +2423,6 @@ def method_tests():
         ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
         ('expand', (), (1, 3, 2), 'scalar_to_dims', (False,)),
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
-        ('logit', torch.randn(S, S, S).clamp(0.1, 0.9).requires_grad_(True), NO_ARGS, ''),
-        ('logit', torch.randn(S, S, S).clamp(0.1, 0.9).requires_grad_(True), (0.2,), 'eps'),
-        ('logit', uniform_scalar().clamp(0.1, 0.9).requires_grad_(True), NO_ARGS, 'scalar'),
-        ('logit', uniform_scalar().clamp(0.1, 0.9).requires_grad_(True), (0.2,), 'scalar_eps'),
         ('conj', (S, S, S), NO_ARGS),
         ('copysign', (S, S, S), ((S, S, S),), '', (False,)),
         ('copysign', (S, S, S), ((S, S),), 'broadcast_rhs', (False,)),
@@ -2420,8 +2452,6 @@ def method_tests():
         ('atan2', (S, S, S), ((S,),), 'broadcast_rhs'),
         ('atan2', (S,), ((S, S, S),), 'broadcast_lhs'),
         ('atan2', (S, 1, S), ((S, S),), 'broadcast_all'),
-        ('round', (S, S, S), NO_ARGS, '', (True,)),
-        ('round', (), NO_ARGS, 'scalar', (True,)),
         ('sign', (S, S, S), NO_ARGS),
         ('sign', (), NO_ARGS, 'scalar'),
         ('sgn', (S, S, S), NO_ARGS),
