@@ -113,7 +113,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         if (!w.value.isList()) {
           break;
         }
-        auto elem_type = w.static_type->cast<ListType>()->getElementType();
+        auto elem_type = w.static_type->castRaw<ListType>()->getElementType();
         auto lst = w.value.toList();
         lst.unsafeSetElementType(elem_type);
         for (const IValue item : lst) {

@@ -1,6 +1,16 @@
 #pragma once
 
-#include <ATen/core/ivalue.h>
+#include <atomic>
+#include <condition_variable>
+#include <exception>
+#include <functional>
+#include <mutex>
+#include <string>
+#include <vector>
+
+#include <c10/util/Logging.h>
+#include <c10/util/Optional.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace torch {
 
