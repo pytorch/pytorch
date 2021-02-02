@@ -2123,8 +2123,8 @@ Tensor linalg_tensorsolve(const Tensor& self, const Tensor& other, optional<IntA
 }
 
 Tensor& linalg_tensorsolve_out(Tensor& result, const Tensor& self, const Tensor& other, optional<IntArrayRef> dims) {
-  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
-    "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+  checkSameDevice("tensorsolve", result, self);
+  checkLinalgCompatibleDtype("tensorsolve", result, self);
 
   Tensor result_tmp = at::linalg_tensorsolve(self, other, dims);
   at::native::resize_output(result, result_tmp.sizes());
