@@ -322,9 +322,9 @@ struct DDPLoggingData {
   // Parameter's data type
   std::string dtype = "";
   // Total parameters size (Bytes)
-  int parameter_size = -1;
+  int total_parameter_size_bytes = -1;
   // The number of parameter tensors
-  int num_parameters = -1;
+  int num_parameter_tensors = -1;
   // A list of bucket sizes (Bytes) calculated during construction time
   std::vector<int> bucket_sizes = std::vector<int>();
 
@@ -343,7 +343,7 @@ struct DDPLoggingData {
 
   // DistributedDataParallel constructor input parameters
   bool broadcast_buffers = false;
-  int bucket_cap_mb = -1;
+  float bucket_cap_mb = -1.0;
   bool find_unused_parameters = false;
   bool gradient_as_bucket_view = false;
 

@@ -1490,11 +1490,10 @@ void Reducer::set_env_variables() {
 }
 
 void Reducer::set_parameter_stats() {
-  ddp_logging_data_->num_parameters = 0;
-  ddp_logging_data_->parameter_size = 0;
+  ddp_logging_data_->num_parameter_tensors = replicas_[0].size();
+  ddp_logging_data_->total_parameter_size_bytes = 0;
   for (const auto& t : replicas_[0]) {
-    ddp_logging_data_->num_parameters++;
-    ddp_logging_data_->parameter_size += t.numel() * t.element_size();
+    ddp_logging_data_->total_parameter_size_bytes += t.numel() * t.element_size();
   }
 }
 
@@ -1530,7 +1529,7 @@ void Reducer::set_construction_logging_data(
   ddp_logging_data_->device_ids = device_ids;
   ddp_logging_data_->output_device = output_device;
   ddp_logging_data_->broadcast_buffers = broadcast_buffers;
-  ddp_logging_data_->bucket_cap_mb = bucket_bytes_cap_ / (1024 * 1024);
+  ddp_logging_data_->bucket_cap_mb = (float)bucket_bytes_cap_ / (1024 * 1024);
   ddp_logging_data_->find_unused_parameters = find_unused_parameters_;
   ddp_logging_data_->gradient_as_bucket_view = gradient_as_bucket_view_;
   ddp_logging_data_->backend_name = process_group_->getBackendName();
