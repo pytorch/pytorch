@@ -47,8 +47,8 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             if node.op == "call_module":
                 self.assertFalse(is_activation_post_process(modules[node.target]))
 
-    # TODO: merge with eager mode compare_and_validate_results
-    @override_qengines
+
+
     def compare_and_validate_model_weights_results_fx(
         self, float_model, q_model, expected_weight_dict_keys
     ):
@@ -60,7 +60,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         for k, v in weight_dict.items():
             self.assertTrue(v["float"].shape == v["quantized"].shape)
 
-    # TODO: merge with compare_weights_linear_static_fx
+
     @override_qengines
     def test_compare_weights_conv_static_fx(self):
         r"""Compare the weights of float and static quantized conv layer"""
@@ -132,8 +132,6 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             backup_prepared_model, q_model, expected_weight_dict_keys
         )
 
-    # TODO: merge with eager mode compare_and_validate_results
-    @override_qengines
     def compare_and_validate_model_stub_results_fx(
         self, float_model, q_model, module_swap_list, data, expected_ob_dict_keys
     ):
@@ -147,7 +145,7 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
             for i, val in enumerate(v["quantized"]):
                 self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
-    # TODO : merge with compare_model_stub_linear_static_fx
+
     @override_qengines
     def test_compare_model_stub_conv_static_fx(self):
         r"""Compare the output of static quantized conv layer and its float shadow module"""
