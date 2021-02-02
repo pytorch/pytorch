@@ -1786,27 +1786,30 @@ class TestLinalg(TestCase):
 
             # test non-contiguous
             x = torch.randn(*dims, dtype=dtype, device=device)
-            n_dim = len(dims)
-            # Reverse the batch dimensions and the matrix dimensions and then concat them
-            x = x.permute(tuple(range(n_dim - 3, -1, -1)) + (n_dim - 1, n_dim - 2))
-            assert not x.is_contiguous(), "x is intentionally non-contiguous"
-            resu, ress, resv = torch.svd(x, some=some, compute_uv=compute_uv)
-            if compute_uv:
-                if some:
-                    x_recon = torch.matmul(resu, torch.matmul(ress.diag_embed(), resv.transpose(-2, -1)))
-                    self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
+            if x.numel() > 0:
+                n_dim = len(dims)
+                # Reverse the batch dimensions and the matrix dimensions and then concat them
+                x = x.permute(tuple(range(n_dim - 3, -1, -1)) + (n_dim - 1, n_dim - 2))
+                assert not x.is_contiguous(), "x is intentionally non-contiguous"
+                resu, ress, resv = torch.svd(x, some=some, compute_uv=compute_uv)
+                if compute_uv:
+                    if some:
+                        x_recon = torch.matmul(resu, torch.matmul(ress.diag_embed(), resv.transpose(-2, -1)))
+                        self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
+                    else:
+                        narrow_u = resu[..., :min(*dims[-2:])]
+                        narrow_v = resv[..., :min(*dims[-2:])]
+                        x_recon = torch.matmul(narrow_u, torch.matmul(ress.diag_embed(), narrow_v.transpose(-2, -1)))
+                        self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
                 else:
-                    narrow_u = resu[..., :min(*dims[-2:])]
-                    narrow_v = resv[..., :min(*dims[-2:])]
-                    x_recon = torch.matmul(narrow_u, torch.matmul(ress.diag_embed(), narrow_v.transpose(-2, -1)))
-                    self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
-            else:
-                _, singvals, _ = torch.svd(x, compute_uv=True)
-                self.assertEqual(singvals, ress, msg='Singular values mismatch')
-                self.assertEqual(resu, torch.zeros_like(resu), msg='U not zero')
-                self.assertEqual(resv, torch.zeros_like(resv), msg='V not zero')
+                    _, singvals, _ = torch.svd(x, compute_uv=True)
+                    self.assertEqual(singvals, ress, msg='Singular values mismatch')
+                    self.assertEqual(resu, torch.zeros_like(resu), msg='U not zero')
+                    self.assertEqual(resv, torch.zeros_like(resv), msg='V not zero')
 
-        shapes = [(3, 3), (5, 3, 3), (7, 5, 3, 3),  # square matrices
+        shapes = [(0, 0), (5, 0), (0, 5),  # empty matrices
+                  (0, 0, 0), (0, 5, 5), (0, 5, 3),  # zero batch dimension
+                  (3, 3), (5, 3, 3), (7, 5, 3, 3),  # square matrices
                   (7, 3), (5, 7, 3), (7, 5, 7, 3),  # fat matrices
                   (3, 7), (5, 3, 7), (7, 5, 3, 7)]  # thin matrices
         for dims, some, compute_uv in product(shapes, [True, False], [True, False]):
