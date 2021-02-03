@@ -292,7 +292,8 @@ class _RemoteModule(nn.Module):
             "Method ``parameters`` not supported for RemoteModule. Please use ``remote_parameters`` instead."
         )
 
-    @property
+    # nn.Module defines training as a boolean
+    @property  # type: ignore[override]
     def training(self):
         if hasattr(self, 'on'):
             return rpc.rpc_sync(self.on, _training, args=(self.module_rref,))
