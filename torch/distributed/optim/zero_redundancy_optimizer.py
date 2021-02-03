@@ -13,7 +13,6 @@ import torch.distributed as dist
 from torch.nn import Parameter
 from torch._six import container_abcs
 from torch.optim import Optimizer
-import io
 
 __all__ = ["ZeroRedundancyOptimizer"]
 
@@ -373,7 +372,7 @@ class ZeroRedundancyOptimizer(Optimizer):
 
                 # Only add this state to the sharded optimizer if it owns this param
                 for pg in self.optim.param_groups:
-                    if id(param) in [id(p) for p in pg["params"]]:
+                    if id(param) in map(lambda x: id(x), pg["params"]):
                         self.optim.state[param] = _recursive_copy_to_device(
                             value, non_blocking=True, device=param.device
                         )
