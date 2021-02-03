@@ -1,3 +1,4 @@
+import torch
 import torch.autograd.profiler as prof
 from torch.autograd import ProfilerActivity
 
@@ -56,7 +57,8 @@ class profile(object):
     Args:
 
     - ``activities`` - list of activity groups (CPU, CUDA) to use in profiling, supported values:
-      ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``
+      ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``;
+      default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA;
     - ``schedule`` - callable that takes step (int) as a single parameter and returns
       ``ProfilerAction`` value that specifies the profiler action to perform at each step;
     - ``on_trace_ready`` - callable that is called at each step when ``schedule`` returns ``ProfilerAction.RECORD_AND_SAVE``
@@ -138,13 +140,22 @@ class profile(object):
             # deprecated:
             use_gpu: Optional[bool] = None):
         if activities:
-            self.activities = activities
+            self.activities = set(activities)
         else:
             self.activities = set([ProfilerActivity.CPU])
-            if use_gpu is not None:
-                warn("use_gpu is deprecated, use activities argument instead")
-                if use_gpu:
-                    self.activities.add(ProfilerActivity.CUDA)
+            if torch.cuda.is_available():
+                self.activities.add(ProfilerActivity.CUDA)
+
+        if use_gpu is not None:
+            warn("use_gpu is deprecated, use activities argument instead")
+            if use_gpu:
+                self.activities.add(ProfilerActivity.CUDA)
+            elif ProfilerActivity.CUDA in self.activities:
+                self.activities.remove(ProfilerActivity.CUDA)
+
+        assert len(self.activities) > 0, "No profiler activities specified"
+        assert (ProfilerActivity.CUDA not in self.activities) or torch.cuda.is_available(), \
+            "CUDA activity specified, but CUDA is not available"
 
         if schedule:
             self.schedule = schedule
