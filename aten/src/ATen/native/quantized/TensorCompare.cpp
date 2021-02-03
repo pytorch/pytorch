@@ -20,11 +20,11 @@ Tensor min_quantized_cpu(const Tensor& self) {
 
 // TODO: move to TensorMath.cpp
 
-std::tuple<Tensor, Tensor> sort_quantized_cpu(
+std::tuple<Tensor, Tensor> sort_quantized_cpu_stable(
     const Tensor& self,
+    c10::optional<bool> stable,
     int64_t dim,
-    bool descending,
-    bool stable) {
+    bool descending) {
   Tensor sort_int;
   Tensor sort_indicies;
   // TODO: enable stable once signatures are added
@@ -40,7 +40,7 @@ std::tuple<Tensor, Tensor> sort_quantized_cpu(
     const Tensor& self,
     int64_t dim,
     bool descending) {
-  return sort_quantized_cpu(self, dim, descending, /*stable=*/false);
+  return sort_quantized_cpu_stable(self, /*stable=*/false, dim, descending);
 }
 
 } // namespace native

@@ -682,13 +682,13 @@ Tensor nanmedian_cpu(const Tensor& self) {
   return median_impl(self, /*ignore_nan=*/true);
 }
 
-std::tuple<Tensor&, Tensor&> sort_out_cpu(
+std::tuple<Tensor&, Tensor&> sort_out_cpu_stable(
     Tensor& values,
     Tensor& indices,
     const Tensor& self,
+    c10::optional<bool> stable,
     int64_t dim,
-    bool descending,
-    bool stable) {
+    bool descending) {
   values.resize_(self.sizes()).copy_(self);
   indices.resize_(self.sizes());
 
@@ -698,7 +698,7 @@ std::tuple<Tensor&, Tensor&> sort_out_cpu(
     return std::forward_as_tuple(values, indices);
   }
 
-  sort_stub(kCPU, values, indices, dim, descending, stable);
+  sort_stub(kCPU, values, indices, dim, descending, stable.value());
 
   return std::forward_as_tuple(values, indices);
 }
@@ -709,24 +709,24 @@ std::tuple<Tensor&, Tensor&> sort_out_cpu(
     const Tensor& self,
     int64_t dim,
     bool descending) {
-  return sort_out_cpu(values, indices, self, dim, descending, /*stable=*/false);
+  return sort_out_cpu_stable(values, indices, self, /*stable=*/false, dim, descending);
 }
 
-std::tuple<Tensor, Tensor> sort_cpu(
+std::tuple<Tensor, Tensor> sort_cpu_stable(
     const Tensor& self,
+    c10::optional<bool> stable,
     int64_t dim,
-    bool descending,
-    bool stable) {
+    bool descending) {
   Tensor values = at::empty({0}, self.options());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
-  return sort_out_cpu(values, indices, self, dim, descending, stable);
+  return sort_out_cpu_stable(values, indices, self, stable, dim, descending);
 }
 
 std::tuple<Tensor, Tensor> sort_cpu(
     const Tensor& self,
     int64_t dim,
     bool descending) {
-  return sort_cpu(self, dim, descending, /*stable=*/false);
+  return sort_cpu_stable(self, /*stable=*/false, dim, descending);
 }
 
 Tensor& msort_out(Tensor& values, const Tensor& self) {
