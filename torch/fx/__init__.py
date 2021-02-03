@@ -17,8 +17,8 @@ demonstration of these components in action:
             self.param = torch.nn.Parameter(torch.rand(3, 4))
             self.linear = torch.nn.Linear(4, 5)
 
-    def forward(self, x):
-        return self.linear(x + self.param).clamp(min=0.0, max=1.0)
+        def forward(self, x):
+            return self.linear(x + self.param).clamp(min=0.0, max=1.0)
 
     module = MyModule()
 
@@ -48,38 +48,42 @@ demonstration of these components in action:
         return clamp_1
     """
 
-The **symbolic tracer** performs “abstract interpretation” of the Python
-code. It feeds fake values, called Proxies, through the code. Operations
-on theses Proxies are recorded. More information about symbolic tracing
-can be found in the
+    # Generated forward is runnable
+    symbolic_traced(torch.rand(3, 4))
+
+The **symbolic tracer** performs
+`symbolic execution <https://en.wikipedia.org/wiki/Symbolic_execution>`__
+of the Python code. It feeds fake values, called Proxies, through the code.
+Operations on theses Proxies are recorded. More information about symbolic
+tracing can be found in the
 `symbolic\_trace <https://pytorch.org/docs/master/fx.html#torch.fx.symbolic_trace>`__
 and `Tracer <https://pytorch.org/docs/master/fx.html#torch.fx.Tracer>`__
 documentation.
 
-The **intermediate representation** is the container for the operations
-that were recorded during symbolic tracing. It consists of a list of
-Nodes that represent function inputs, callsites (to functions, methods,
-or ``nn.Module`` instances), and return values. More information about
-the IR can be found in the documentation for
+The **intermediate representation (IR)** contains a description of the
+operations that were recorded during symbolic tracing. It consists of
+a list of Nodes that represent function inputs, callsites (to functions,
+methods, or ``nn.Module`` instances), and return values. More information
+about the IR can be found in the documentation for
 `Graph <https://pytorch.org/docs/master/fx.html#torch.fx.Graph>`__. The
 IR is the format on which transformations are applied.
 
-**Python code generation** is what makes FX a Python-to-Python (or
-Module-to-Module) transformation toolkit. For each Graph IR, we can
-create valid Python code matching the Graph’s semantics. This
+**Python code generation** takes the IR and produces valid Python code that
+matches the program semantics represented in the IR. This
 functionality is wrapped up in
 `GraphModule <https://pytorch.org/docs/master/fx.html#torch.fx.GraphModule>`__,
 which is an ``nn.Module`` instance that holds a ``Graph`` as well as a
 ``forward`` method generated from the Graph.
 
-Taken together, this pipeline of components (symbolic tracing →
-intermediate representation → transforms → Python code generation)
+Taken together, this pipeline of components (symbolic tracing ->
+intermediate representation -> transforms -> Python code generation)
 constitutes the Python-to-Python transformation pipeline of FX. In
 addition, these components can be used separately. For example,
 symbolic tracing can be used in isolation to capture a form of
-the code for analysis (and not transformation) purposes. Code
-generation can be used for programmatically generating models, for
-example from a config file. There are many uses for FX!
+the code for analysis (and not transformation) purposes. Also, code
+generation can be used independently for programmatically generating
+models, for example from a config file. There are many possible uses
+for FX!
 '''
 
 from .graph_module import GraphModule

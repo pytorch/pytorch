@@ -12,17 +12,31 @@ Overview
 Writing Transformations
 -----------------------
 
-What is a FX transform? Essentially, it's a function that looks like this.
+What is an FX transform? Essentially, it's a function that looks like this.
 
 ::
 
-    def transform(m: nn.Module) -> nn.Module:
-        fx_model: GraphModule = fx.symbolice_trace(m)
-        new_model = ...
-        return new_model
+    import torch
+    import torch.fx
 
-Your transform will take in an :class:`torch.nn.Module`, convert it into a
-:class:`GraphModule` with :meth:``symbolic_trace``, and return a new
+    def transform(m: nn.Module,
+                  tracer_class : type = torch.fx.Tracer) -> torch.nn.Module:
+        # Step 1: Acquire a graph representing the code in `m`
+
+        # NOTE: torch.fx.symbolic_trace is a wrapper around a call to
+        # fx.Tracer.trace and constructing a GraphModule. We'll
+        # split that out in our transform to allow the caller to
+        # customize tracing behavior.
+        graph : torch.fx.Graph = tracer_class().trace(m)
+
+        # Step 2: Modify this graph or create a new one
+        graph = ...
+
+        # Step 3: Construct a Module to return
+        return torch.fx.GraphModule(m, graph)
+
+Your transform will take in an :class:`torch.nn.Module`, acquire a :class:`Graph`
+from it, do some modifications, and return a new
 ``nn.Module``. You should think of the ``nn.Module`` that your FX transform
 returns as identical to a regular ``nn.Module`` -- you can pass it to another
 FX transform, you can pass it to TorchScript, or you can
@@ -48,28 +62,36 @@ replace ``torch.add`` with ``torch.mul``.
         def forward(self, x, y):
             return torch.add(x, y)
 
-    def transform(m: nn.Module) -> nn.Module:
-        fx_model: GraphModule = fx.symbolic_trace(m)
-        # FX represents its graph as an ordered list of nodes, so we can iterate through them.
-        for node in fx_model.graph.nodes:
-            # Checks if we're calling a function (i.e: torch.add)
+    def transform(m: nn.Module, tracer_class : type = fx.Tracer) -> nn.Module:
+        graph : fx.Graph = tracer_class().trace(m)
+        # FX represents its graph as an ordered list of
+        # nodes, so we can iterate through them.
+        for node in graph.nodes:
+            # Checks if we're calling a function (i.e:
+            # torch.add)
             if node.op == 'call_function':
-                # The target attribute is the function that call_function calls.
+                # The target attribute is the function
+                # that call_function calls.
                 if node.target == torch.add:
                     node.target = torch.mul
 
-        traced.lint() # Does some checks to make sure the graph is well-formed.
-        traced.recompile() # regenerates the python code that corresponds to the graph.
+        graph.lint() # Does some checks to make sure the
+                      # graph is well-formed.
+
+        return fx.GraphModule(m, graph)
+
 
 We can also do more involved graph rewrites, such as deleting or appending
-nodes. after a node. To aid in these transformations, FX has utility
+nodes after a node. To aid in these transformations, FX has utility
 functions for transforming the graph that can be found in :class:`Graph`. An
 example of using these APIs to append a relu can be found below.
 
 ::
 
-    with traced.graph.inserting_after(node): # Specifies the insertion point
-        new_node = traced.graph.call_function(torch.relu, args=(node,)) # builds a new relu node
+    with traced.graph.inserting_after(node): # Specifies the
+                                             # insertion point
+        new_node = traced.graph.call_function(
+            torch.relu, args=(node,)) # builds a new relu node
         node.replace_all_uses_with(new_node)
 
 This approach is also a good fit for graph optimizations such as
@@ -121,11 +143,11 @@ the graph.
     decomposition_rules = {}
     decomposition_rules[F.relu] = relu_decomposition
 
-    def decompose(model: torch.nn.Module) -> torch.nn.Module:
-        model = fx.symbolic_trace(model)
+    def decompose(model: torch.nn.Module, tracer_class : type = fx.Tracer) -> torch.nn.Module:
+        graph : fx.Graph = tracer_class().trace(model)
         new_graph = fx.Graph()
         env = {}
-        for node in model.graph.nodes:
+        for node in graph.nodes:
             if node.op == 'call_function' and node.target in decomposition_rules:
                 # By wrapping the arguments with proxies, we can dispatch to
                 # the appropriate decomposition rule and add it to the graph by
@@ -160,8 +182,8 @@ As this pattern is quite useful, we we can also use an abstraction of this patte
 -- the `Interpreter
 <https://github.com/pytorch/pytorch/blob/master/torch/fx/interpreter.py>`__.
 You can see an example using this for `shape propagation
-<https://github.com/pytorch/pytorch/blob/master/torch/fx/passes/shape_prop.py>`__
-, which reinterprets the FX graph with example inputs while annotating the
+<https://github.com/pytorch/pytorch/blob/master/torch/fx/passes/shape_prop.py>`__,
+which reinterprets the FX graph with example inputs while annotating the
 graph with the shapes.
 
 Reinterpreting the FX graph is generally most useful when you want
@@ -187,7 +209,7 @@ Introduction
 ^^^^^^^^^^^^^^^^
 
 After symbolically tracing an ``nn.Module`` and performing some number
-of transformations on the resulting GraphModule, we'll want to verify
+of transformations on the resulting :class:`GraphModule`, we'll want to verify
 that the proper semantics were preserved after those transforms. If they
 weren't, we may need to do some debugging. The key is to work
 backwards: first, check the results of the generated module, then debug
@@ -200,7 +222,7 @@ If you’re not familiar with debuggers, please see the auxiliary section
 Debugging the Generated Code
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Because FX generates the ``forward()`` function on GraphModules, using
+Because FX generates the ``forward()`` function on :class:`GraphModule`\s, using
 traditional debugging techniques like ``print`` statements or ``pdb`` is
 not as straightfoward. Luckily, we have several techniques we can use
 for debugging the generated code.
@@ -213,17 +235,29 @@ into it manually using ``pdb`` when the forward pass is invoked.
 
 ::
 
-    def my_pass(in: torch.nn.Module) -> torch.nn.Module:
-        traced = torch.fx.symbolic_trace(in)
+    import torch
+    import torch.fx
+    import torchvision.models as models
+
+    def my_pass(inp: torch.nn.Module, tracer_class : type = fx.Tracer) -> torch.nn.Module:
+        graph = tracer_class().trace(inp)
         # Transformation logic here
-        return traced
+        # <...>
+
+        # Return new Module
+        return fx.GraphModule(inp, graph)
+
+    my_module = models.resnet18()
+    my_module_transformed = my_pass(my_module)
+
+    input_value = torch.randn(5, 3, 224, 224)
 
     # When this line is executed at runtime, we will be dropped into an
     # interactive `pdb` prompt. We can use the `step` or `s` command to
     # step into the execution of the next line
     import pdb; pdb.set_trace()
 
-    my_pass(my_module)
+    my_module_transformed(input_value)
 
 .. _Print the Generated Code:
 
@@ -239,6 +273,8 @@ your code and examine it from there.
     # Assume that `traced` is a GraphModule that has undergone some
     # number of transforms
 
+    # Copy this code for later
+    print(traced)
     # Print the code generated from symbolic tracing. This outputs:
     """
     def forward(self, y):
@@ -246,8 +282,6 @@ your code and examine it from there.
         add_1 = x + y;  x = y = None
         return add_1
     """
-    # Copy this code for later
-    print(traced)
 
     # Subclass the original Module
     class SubclassM(M):
@@ -255,7 +289,7 @@ your code and examine it from there.
             super().__init__()
 
         # Paste the generated `forward` function (the one we printed and
-        # copied on line 22) here
+        # copied above) here
         def forward(self, y):
             x = self.x
             add_1 = x + y;  x = y = None
@@ -291,7 +325,7 @@ Debugging the Transformation
 Now that we've identified that a transformation is creating incorrect
 code, it's time to debug the transformation itself. First, we'll check
 the :ref:`Limitations of Symbolic Tracing` section in the documentation.
-Once we verify that ``symbolic_trace`` is working as expected, the goal
+Once we verify that tracing is working as expected, the goal
 becomes figuring out what went wrong during our ``GraphModule``
 transformation. There may be a quick answer in
 :ref:`Writing Transformations`, but, if not, there are several ways to
@@ -313,24 +347,27 @@ examine our traced module:
     # sake of brevity.
     traced = symbolic_trace(m)
 
-    # Print the code produced by tracing the module. The generated `forward`
-    # function is:
+    # Print the code produced by tracing the module.
+    print(traced)
+    # The generated `forward` function is:
     """
     def forward(self, x, y):
         add_1 = x + y;  x = y = None
         return add_1
     """
-    print(traced)
 
-    # Print the internal Graph. This representation returns:
+    # Print the internal Graph.
+    print(traced.graph)
+    # This print-out returns:
     """
     graph(x, y):
         %add_1 : [#users=1] = call_function[target=<built-in function add>](args = (%x, %y), kwargs = {})
         return add_1
     """
-    print(traced.graph)
 
-    # Print a tabular representation of the internal Graph. This gives us:
+    # Print a tabular representation of the internal Graph.
+    traced.graph.print_tabular()
+    # This gives us:
     """
     opcode         name    target                   args      kwargs
     -------------  ------  -----------------------  --------  --------
@@ -338,10 +375,9 @@ examine our traced module:
     placeholder    y       y                        ()        {}
     call_function  add_1   <built-in function add>  (x, y)    {}
     """
-    traced.graph.print_tabular()
 
 Using the utility functions above, we can compare our traced Module
-before and after we've apply our transformations. Sometimes, a
+before and after we've applied our transformations. Sometimes, a
 simple visual comparison is enough to trace down a bug. If it's still
 not clear what's going wrong, a debugger like ``pdb`` can be a good
 next step.
@@ -351,26 +387,22 @@ Going off of the example above, consider the following code:
 ::
 
     # Sample user-defined function
-    def transform_graph(gm: GraphModule) -> None:
-
+    def transform_graph(module: torch.nn.Module, tracer_class : type = fx.Tracer) -> torch.nn.Module:
         # Get the Graph from our traced Module
-        g = gm.graph
+        g = tracer_class().trace(module)
 
         """
         Transformations on `g` go here
         """
 
-        # Recompile the GraphModule. This must be called after editing
-        # the Graph `g`, otherwise the generated code will still reflect
-        # the old Graph before any transforms
-        gm.recompile()
+        return fx.GraphModule(module, g)
 
     # Transform the Graph
-    transform_graph(traced)
+    transformed = transform_graph(traced)
 
     # Print the new code after our transforms. Check to see if it was
     # what we expected
-    print(traced)
+    print(transformed)
 
 Using the above example, let’s say that the call to ``print(traced)``
 showed us that there was an error in our transforms. We want to find
@@ -424,9 +456,9 @@ FX uses a system of **symbolic tracing** (a.k.a `symbolic
 execution <https://en.wikipedia.org/wiki/Symbolic_execution>`__)
 to capture the semantics of programs in a transformable/analyzable form.
 The system is **tracing** in that it executes the program (really an
-``nn.Module`` or function) to gather this information. It is
+``nn.Module`` or function) to record operations. It is
 **symbolic** in that the data flowing through the program during this
-execution is not real data, but rather symbols (“Proxy” in FX parlance).
+execution is not real data, but rather symbols (:class:`Proxy` in FX parlance).
 
 Although symbolic tracing works for most neural net code, it has some
 limitations.
@@ -536,10 +568,10 @@ symbolic tracing:
 
         fx.symbolic_trace(f) # Fails!
 
-        def g(flag):
+        def wrapper(flag):
             return lambda x: f(x, flag)
 
-        new_f = g(flag=True)
+        new_f = wrapper(flag=True)
         fx.symbolic_trace(new_f)
 
 In the case of truly dynamic control flow, the sections of the program
@@ -560,6 +592,8 @@ them in symbolic tracing. For example:
 
 ::
 
+    import torch
+    import torch.fx
     from math import sqrt
 
     def normalize(x):
