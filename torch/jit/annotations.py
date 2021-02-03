@@ -8,7 +8,7 @@ from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optio
 from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore
 from ._state import _get_script_class
 
-from torch._C import TensorType, TupleType, FloatType, IntType, ComplexDoubleType, \
+from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
     DeviceObjType, StreamObjType, FutureType, EnumType
 
@@ -306,7 +306,7 @@ def try_ann_to_type(ann, loc):
     if ann is float:
         return FloatType.get()
     if ann is complex:
-        return ComplexDoubleType.get()
+        return ComplexType.get()
     if ann is int:
         return IntType.get()
     if ann is str:
@@ -366,7 +366,7 @@ __all__ = [
     'TensorType',
     'TupleType',
     'FloatType',
-    'ComplexDoubleType',
+    'ComplexType',
     'IntType',
     'ListType',
     'StringType',

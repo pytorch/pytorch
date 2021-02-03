@@ -8488,7 +8488,7 @@ If :attr:`upper` is ``False``, then lower triangular portion is used.
 .. note:: Prefer using :func:`torch.linalg.eigh` instead of ``torch.symeig`` with
           ``eigenvectors=True``, or :func:`torch.linalg.eigvalsh` instead of
           ``torch.symeig`` with ``eigenvectors=False``.
-           
+
           **Differences with** :func:`torch.linalg.eigh` and :func:`torch.linalg.eigvalsh`:
 
           * the :attr:`upper` parameter was replaced by the :attr:`UPLO` parameter.
