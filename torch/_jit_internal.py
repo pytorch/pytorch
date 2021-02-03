@@ -904,7 +904,7 @@ def _qualified_name(obj):
     elif isinstance(obj, enum.Enum):
         name = obj.name
     else:
-        raise RuntimeError("Could not get name of python class object")
+        raise RuntimeError("Could not get name of python object")
 
 
     if name == '<lambda>':

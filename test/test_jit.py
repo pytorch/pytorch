@@ -92,6 +92,7 @@ from itertools import product
 from textwrap import dedent
 from typing import List, Dict, NamedTuple, Optional, Tuple, Union
 import copy
+import enum
 import functools
 import inspect
 import io
@@ -2906,6 +2907,87 @@ class TestScript(JitTestCase):
         sb.setx(456)
         self.assertEqual(sb.getx(), 456)
         self.assertEqual(sb.ignored_getx(), 456)
+
+    # Tests that unsupported torch.jit.script targets throw a meaningful error.
+    def test_unsupported_script_target_error(self):
+        class JitClass:
+            def __init__(self):
+                pass
+
+        unsupported_targets = [
+            JitClass(),          # Instance of class
+            [1, 2, 3],
+            "constant_string",
+            torch
+        ]
+
+        for t in unsupported_targets:
+            with self.assertRaisesRegex(RuntimeError, "Unsupported torch.jit.script target"):
+                torch.jit.script(t)
+
+    # Tests that instances of TorchScript builtin classes are tolerated
+    # (passed through) in `torch.jit.script` calls.
+    def test_script_tolerate_builtin_class_instances(self):
+        # Tensor
+        t = torch.ones(1)
+        torch.jit.script(t)
+
+        # torch.device
+        d = torch.device("cpu")
+        torch.jit.script(d)
+
+        # torch.dtype
+        dtype = torch.int8
+        torch.jit.script(dtype)
+
+        # enum.Enum
+        class Color(enum.Enum):
+            RED = 1
+            GREEN = 2
+
+        make_global(Color)
+        torch.jit.script(Color.RED)
+
+    @unittest.skipIf(not RUN_CUDA, "Requires CUDA")
+    def test_script_stream_instances(self):
+        # torch.Stream
+        s = torch.cuda.default_stream()
+        torch.jit.script(s)
+
+    # Tests that TorchScript builtin classes and their subclasses are tolerated
+    # (passed through) in `torch.jit.script` calls.
+    def test_script_tolerate_builtin_class_subclasses(self):
+        # Tensor and subclass
+        class TensorSubClass(torch.Tensor):
+            def __init__(self):
+                super(self).__init__()
+
+        make_global(TensorSubClass)
+        torch.jit.script(TensorSubClass)
+        torch.jit.script(torch.Tensor)
+
+        # torch.device
+        torch.jit.script(torch.device)
+
+        # torch.Stream and subclasses
+        class StreamSubClass(torch.Stream):
+            def __init__(self):
+                super(self).__init__()
+
+        make_global(StreamSubClass)
+        torch.jit.script(StreamSubClass)
+        torch.jit.script(torch.Stream)
+
+        # torch.dtype
+        torch.jit.script(torch.dtype)
+
+        # enum.Enum
+        class Color(enum.Enum):
+            RED = 1
+            GREEN = 2
+
+        make_global(Color)
+        torch.jit.script(Color)
 
     def test_set_attribute_through_optional(self):
         class A(torch.nn.Module):

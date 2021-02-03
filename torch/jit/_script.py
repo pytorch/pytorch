@@ -787,6 +787,22 @@ def call_prepare_scriptable_func(obj):
     memo: Dict[int, torch.nn.Module] = {}
     return call_prepare_scriptable_func_impl(obj, memo)
 
+# Some classes are supported by TorchScript natively and are usable in scripted
+# code without needing explicit compilation.
+def is_class_exempt_from_scripting(cls):
+    exempt_classes = [
+        torch.Tensor,
+        torch.device,
+        torch.Stream,
+        torch.dtype,
+        enum.Enum,
+    ]
+    for exempt_class in exempt_classes:
+        if issubclass(cls, exempt_class):
+            return True
+
+    return False
+
 def script(obj, optimize=None, _frames_up=0, _rcb=None):
     r"""
     Scripting a function or ``nn.Module`` will inspect the source code, compile
@@ -948,7 +964,6 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             obj, torch.jit._recursive.infer_methods_to_compile
         )
 
-    qualified_name = _qualified_name(obj)
     if inspect.isclass(obj):
         # If this type is a `nn.Module` subclass, they probably meant to pass
         # an instance instead of a Module
@@ -959,9 +974,8 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
                 " pass an instance instead".format(obj)
             )
 
-        # Enums are automatically usable in TorchScript, explicitly scripting
-        # is not necessary, but not harmful either.
-        if issubclass(obj, enum.Enum):
+        # Check if class is exempt from compilation.
+        if is_class_exempt_from_scripting(obj):
             return obj
 
         if not _is_new_style_class(obj):
@@ -976,9 +990,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
             )
         if _rcb is None:
             _rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
+        qualified_name = _qualified_name(obj)
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
-    else:
+
+    if inspect.isfunction(obj):
         # this is a decorated fn, and we need to the underlying fn and its rcb
         if hasattr(obj, "__script_if_tracing_wrapper"):
             obj = obj.__original_fn
@@ -989,8 +1005,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         if maybe_already_compiled_fn:
             return maybe_already_compiled_fn
         ast = get_jit_def(obj, obj.__name__)
+
         if _rcb is None:
             _rcb = _jit_internal.createResolutionCallbackFromClosure(obj)
+
+        qualified_name = _qualified_name(obj)
         fn = torch._C._jit_script_compile(
             qualified_name, ast, _rcb, get_default_args(obj)
         )
@@ -999,6 +1018,15 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         _set_jit_function_cache(obj, fn)
         return fn
 
+    cls = type(obj)
+    if is_class_exempt_from_scripting(cls):
+        return obj
+
+    raise RuntimeError(
+        "Unsupported torch.jit.script target: \"{}\", "
+        "only classes, functions and "
+        "instances of 'nn.Module' are allowed.".format(obj)
+    )
 
 # overloads are registered in _jit_internal and compiled here so that _overload
 # can be used in nn/functional.py without an import cycle
