@@ -265,7 +265,7 @@ std::unique_ptr<CpuChannelRegistration> makeMultiplexedUvChannel() {
     contexts.push_back(std::move(context));
     listeners.push_back(contexts.back()->listen(address));
   }
-  auto context = std::make_shared<tensorpipe::channel::mpt::Context>(
+  auto context = tensorpipe::channel::mpt::create(
       std::move(contexts), std::move(listeners));
   return std::make_unique<CpuChannelRegistration>(CpuChannelRegistration{
       std::move(context), kMultiplexedUvChannelPriority});
@@ -340,7 +340,7 @@ C10_REGISTER_CREATOR(
     makeCudaXthChannel);
 
 std::unique_ptr<CudaChannelRegistration> makeCudaBasicChannel() {
-  auto context = std::make_shared<tensorpipe::channel::cuda_basic::Context>(
+  auto context = tensorpipe::channel::cuda_basic::create(
       tensorpipe::channel::basic::create());
   return std::make_unique<CudaChannelRegistration>(
       CudaChannelRegistration{std::move(context), kCudaBasicChannelPriority});
