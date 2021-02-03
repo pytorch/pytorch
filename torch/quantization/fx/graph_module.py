@@ -62,7 +62,7 @@ class QuantizedGraphModule(GraphModule):
         super()._save_to_state_dict(destination, prefix, keep_vars)
         for attr_name in dir(self):
             if "_packed_weight" in attr_name and \
-               isinstance(getattr(self, attr_name), torch._C.ScriptObject):
+               isinstance(getattr(self, attr_name), torch._C.ScriptObject):  # type: ignore
                 packed_weight = getattr(self, attr_name)
                 destination[prefix + attr_name] = packed_weight
 
@@ -70,7 +70,7 @@ class QuantizedGraphModule(GraphModule):
                               missing_keys, unexpected_keys, error_msgs):
         attrs_to_pop = []
         for attr_name in state_dict:
-            if "_packed_weight" in attr_name and isinstance(state_dict[attr_name], torch._C.ScriptObject):
+            if "_packed_weight" in attr_name and isinstance(state_dict[attr_name], torch._C.ScriptObject):  # type: ignore
                 setattr(self, attr_name, state_dict[attr_name])
                 attrs_to_pop.append(attr_name)
 

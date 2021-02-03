@@ -1546,15 +1546,15 @@ class TestQuantizeFx(QuantizationTestCase):
         # ensure it is scriptable
         scripted = torch.jit.script(m)
         scripted_keys = scripted.state_dict().keys()
-        self.assertTrue(scripted_keys == keys, "Expected the scripted model to preserve the state_dict")
-        assert hasattr(m, "mods1_0_input_scale_0")
-        assert hasattr(m, "mods1_0_input_zero_point_0")
-        assert hasattr(m, "mods1_0_scale_0")
-        assert hasattr(m, "mods1_0_zero_point_0")
-        assert hasattr(m, "mods1_1_scale_0")
-        assert hasattr(m, "mods1_1_zero_point_0")
-        assert hasattr(m, "mods2_scale_0")
-        assert hasattr(m, "mods2_zero_point_0")
+        setattr(scripted, "mods1_0_packed_weight_0", m.state_dict()["mods1_0_packed_weight_0"])
+        non_packed_weight_keys = [key for key in keys if "_packed_weight" not in key]
+        self.assertTrue(set(scripted_keys) == set(non_packed_weight_keys), "Expected the scripted model to preserve the state_dict for non-packed weight attributes")
+        for attr_name in [
+                "mods1_0_input_scale_0", "mods1_0_input_zero_point_0",
+                "mods1_0_scale_0", "mods1_0_zero_point_0",
+                "mods1_1_scale_0", "mods1_1_zero_point_0",
+                "mods2_scale_0", "mods2_zero_point_0"]:
+            self.assertTrue(hasattr(m, attr_name))
 
     @skipIfNoFBGEMM
     def test_packed_weight_fused_op(self):
