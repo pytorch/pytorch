@@ -112,8 +112,7 @@ if "%REBUILD%" == "" (
 )
 :: tests if BUILD_ENVIRONMENT contains cuda11 as a substring
 if not x%BUILD_ENVIRONMENT:cuda11=%==x%BUILD_ENVIRONMENT% (
-   :: temporarily disabled
-   :: set BUILD_SPLIT_CUDA=ON
+   set BUILD_SPLIT_CUDA=ON
 )
 
 python setup.py install --cmake && sccache --show-stats && (

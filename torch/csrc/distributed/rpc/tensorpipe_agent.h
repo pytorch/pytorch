@@ -35,9 +35,6 @@ class Pipe;
 
 namespace transport {
 class Context;
-namespace uv {
-class Context;
-} // namespace uv
 } // namespace transport
 
 namespace channel {
