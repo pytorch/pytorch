@@ -238,6 +238,8 @@ set(PYTORCH_QNNPACK_X86_SSE2_UKERNELS
   src/q8gemm/4x4c2-dq-sse2.c
   src/q8gemm/4x4c2-sse2.c
   src/q8gemm_sparse/8x4c1x4-dq-sse2.c
+  src/q8gemm_sparse/8x4c1x4-dq-packedA-sse2.c
+  src/q8gemm_sparse/8x4-packA-sse2.c
   src/q8vadd/sse2.c
   src/u8clamp/sse2.c
   src/u8maxpool/16x9p8q-sse2.c

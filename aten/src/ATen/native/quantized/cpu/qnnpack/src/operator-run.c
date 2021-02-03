@@ -115,6 +115,78 @@ static void compute_q8gemm_sparse_dq(
       &context->quantization_params);
 }
 
+struct q8gemm_prepackA_sparse_dq_context {
+  size_t k;
+  const uint8_t* a;
+  size_t a_stride;
+  uint8_t* a_packed;
+  size_t a_packed_stride;
+  size_t log2_mr;
+  const uint32_t* kernel_col_indices;
+  const uint32_t* kernel_row_values;
+  const uint8_t* kernel_values;
+  const float* bias;
+  float* c;  // can be float or uint8)t
+  size_t c_stride;
+  struct pytorch_qnnp_conv_dynamic_quantization_params quantization_params;
+  const pytorch_q8gemm_dq_sparse_packedA_ukernel_function ukernel;
+  const pytorch_q8gemm_sparse_packA_ukernel_function prepack_ukernel;
+};
+
+static void compute_q8gemm_prepack_a_sparse(
+    const struct q8gemm_prepackA_sparse_dq_context context[RESTRICT_STATIC 1],
+    size_t group_index, /* ignored */
+    size_t pixel_index, /* ignored */
+    size_t mr_block_start,
+    size_t nr_block_start,
+    size_t group_range /* always 1 */,
+    size_t pixel_range,
+    size_t mr_block_size,
+    size_t nr_block_size) {
+  const uint8_t* restrict a = context->a;
+  const size_t a_stride = context->a_stride;
+  const size_t mr_packed_block_start =
+    ((mr_block_start >> context->log2_mr) * context->a_packed_stride);
+
+  context->prepack_ukernel(
+      mr_block_size,
+      context->k,
+      a + mr_block_start * a_stride,
+      a_stride,
+      context->a_packed + mr_packed_block_start);
+}
+
+static void compute_q8gemm_prepacked_sparse_dq(
+    const struct q8gemm_prepackA_sparse_dq_context context[RESTRICT_STATIC 1],
+    size_t group_index, /* ignored */
+    size_t pixel_index, /* ignored */
+    size_t mr_block_start,
+    size_t nr_block_start,
+    size_t group_range /* always 1 */,
+    size_t pixel_range,
+    size_t mr_block_size,
+    size_t nr_block_size) {
+  const uint8_t* restrict a_packed = context->a_packed;
+  const size_t mr_packed_block_start =
+    ((mr_block_start >> context->log2_mr) * context->a_packed_stride);
+  float* restrict c = (float*)context->c;
+  const size_t c_stride = context->c_stride;
+
+  size_t output_channel_index = nr_block_start;
+  context->ukernel(
+      mr_block_size,
+      nr_block_size,
+      a_packed + mr_packed_block_start,
+      context->kernel_values,
+      context->kernel_row_values + nr_block_start,
+      context->kernel_col_indices,
+      context->bias + nr_block_start,
+      c + mr_block_start * c_stride + nr_block_start,
+      c_stride,
+      output_channel_index,
+      &context->quantization_params);
+}
+
 struct q8sum_rows_context {
   const uint8_t* a;
   size_t groups;
@@ -896,8 +968,8 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
       const size_t batch_size = op->batch_size;
       const size_t groups = op->groups;
       const size_t group_output_channels = op->group_output_channels;
-      const uint32_t mr = pytorch_qnnp_params.q8conv.mr;
-      const uint32_t nr = pytorch_qnnp_params.q8conv.nr;
+      const uint32_t mr = pytorch_qnnp_params.q8gemm_sparse.mr;
+      const uint32_t nr = pytorch_qnnp_params.q8gemm_sparse.nr;
 
       const size_t output_size = op->output_height * op->output_width;
       struct q8gemm_sparse_dq_context q8gemm_sparse_dq_context = {
@@ -917,6 +989,72 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
           threadpool,
           (pthreadpool_function_4d_tiled_t)compute_q8gemm_sparse_dq,
           &q8gemm_sparse_dq_context,
+          groups,
+          batch_size * output_size,
+          output_size,
+          group_output_channels,
+          1,
+          output_size,
+          mr,
+          nr);
+      break;
+    }
+    case pytorch_qnnp_ukernel_type_gemm_prepackA_sparse_dq: {
+      const size_t batch_size = op->batch_size;
+      const size_t groups = op->groups;
+      const size_t group_input_channels = op->group_input_channels;
+      const size_t group_output_channels = op->group_output_channels;
+      const uint32_t mr = pytorch_qnnp_params.q8gemm_sparse.mr;
+      const uint32_t log2_mr = pytorch_qnnp_params.q8gemm_sparse.log2_mr;
+      const uint32_t nr = pytorch_qnnp_params.q8gemm_sparse.nr;
+      const uint32_t kr = pytorch_qnnp_params.q8gemm_sparse.kr;
+      const size_t output_size = op->output_height * op->output_width;
+      const size_t k_stride = (group_input_channels + (kr - 1)) & -kr;
+      const size_t m_stride = (output_size + (mr - 1)) & -mr;
+      op->prepacked_a =
+        (uint8_t*)realloc((void*)op->prepacked_a, k_stride * m_stride);
+
+      struct q8gemm_prepackA_sparse_dq_context
+        q8gemm_prepack_sparse_dq_context = {
+          .k = group_input_channels,
+          .a = op->input,
+          .a_stride = op->input_pixel_stride,
+          .a_packed = op->prepacked_a,
+          .a_packed_stride = k_stride * mr,
+          .log2_mr = log2_mr,
+          .kernel_col_indices = op->sparse_matrix.col_indices,
+          .kernel_row_values = op->sparse_matrix.row_values,
+          .kernel_values = op->sparse_matrix.values,
+          .bias = (const float*)op->bias,
+          .c = (float*)op->output,
+          .c_stride = op->output_pixel_stride,
+          .quantization_params = op->dynamic_conv_quantization_params,
+          .ukernel = pytorch_qnnp_params.q8gemm_sparse.packedA_gemm_dq,
+          .prepack_ukernel = pytorch_qnnp_params.q8gemm_sparse.packA,
+      };
+
+      if (groups != 1 || batch_size != 1) {
+        pytorch_qnnp_log_error("pytorch_qnnp_ukernel_type_gemm_prepackA_sparse_dq "
+            "works with group size = 1, batch_size = 1.\n");
+      }
+
+      pthreadpool_compute_4d_tiled(
+          threadpool,
+          (pthreadpool_function_4d_tiled_t)compute_q8gemm_prepack_a_sparse,
+          &q8gemm_prepack_sparse_dq_context,
+          1,
+          1,
+          output_size,
+          1,
+          1,
+          1,
+          mr,
+          1);
+
+      pthreadpool_compute_4d_tiled(
+          threadpool,
+          (pthreadpool_function_4d_tiled_t)compute_q8gemm_prepacked_sparse_dq,
+          &q8gemm_prepack_sparse_dq_context,
           groups,
           batch_size * output_size,
           output_size,
