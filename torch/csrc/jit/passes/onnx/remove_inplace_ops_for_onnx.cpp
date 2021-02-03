@@ -278,19 +278,27 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
   return indices;
 }
 
-void addDummyCloneBlockOutput(Block* b, Value* orig_data) {
+Node* addDummyCloneToBlock(Block* b, Value* orig_data) {
   auto graph = b->owningGraph();
-  auto newNode = graph->create(aten::clone, /*num_outputs =*/1);
-  newNode->addInput(orig_data);
 
-  auto* noneNode = graph->create(prim::Constant);
-  noneNode->output()->setType(NoneType::get());
-  newNode->addInput(noneNode->output());
-  newNode->output()->setType(orig_data->type());
+  Node* newNode = nullptr;
+  if (orig_data->type()->kind() == TypeKind::ListType) {
+    newNode = graph->create(aten::list, /*num_outputs =*/1);
+    newNode->addInput(orig_data);
+    newNode->output()->setType(orig_data->type());
+    b->prependNode(newNode);
+  } else if (orig_data->type()->kind() == TypeKind::TensorType) {
+    newNode = graph->create(aten::clone, /*num_outputs =*/1);
+    newNode->addInput(orig_data);
+    auto* noneNode = graph->create(prim::Constant);
+    noneNode->output()->setType(NoneType::get());
+    newNode->addInput(noneNode->output());
+    newNode->output()->setType(orig_data->type());
+    b->prependNode(newNode);
+    noneNode->insertBefore(newNode);
+  } // TODO: Handle float/int attributes
 
-  newNode->insertBefore(b->return_node());
-  noneNode->insertBefore(newNode);
-  b->registerOutput(newNode->output());
+  return newNode;
 }
 
 // Check If then/else blocks to match the number of outputs.
@@ -307,25 +315,22 @@ Value* MatchIfBlocksOutputForValue(
 
   for (size_t i = 0; i < output_size - 1; i++) {
     if (outer_block->outputs().at(i)->debugNameBase() ==
-        origOutput->debugNameBase()) {
-      outer_block->owningNode()
-          ->outputs()
-          .at(output_size - 1)
-          ->replaceAllUsesWith(outer_block->owningNode()->outputs().at(i));
-      outer_block->owningNode()->eraseOutput(output_size - 1);
+        origOutput->debugNameBase()) { // Check debug names
       outer_block->replaceOutput(i, outer_block->outputs().at(output_size - 1));
       outer_block->eraseOutput(output_size - 1);
+      outer_block->owningNode()->eraseOutput(output_size - 1);
       return outer_block->owningNode()->outputs().at(i);
     }
   }
 
   for (Block* b : outer_block->owningNode()->blocks()) {
     if (b->outputs().size() < output_size) {
-      addDummyCloneBlockOutput(b, orig_data);
+      auto clone_node = addDummyCloneToBlock(b, orig_data);
+      b->registerOutput(clone_node->output());
       b->outputs()
           .at(b->outputs().size() - 1)
-          ->copyMetadata(outer_block->outputs().at(output_size - 1));
-      return outer_block->owningNode()->outputs().at(output_size - 1);
+          ->copyMetadata(
+              outer_block->outputs().at(output_size - 1)); // Copy debug names
     }
   }
   return outer_block->owningNode()->outputs().at(output_size - 1);
@@ -397,10 +402,6 @@ void RegisterInplaceNodeInIfBlocks(
 
   auto next_block = next_node->owningBlock();
   while (nullptr != next_block->owningNode()) {
-    for (auto block_output : next_block->outputs()) {
-      if (block_output->debugName() == block_output->debugName())
-        return;
-    }
     next_block->registerOutput(next_node->output(0));
     next_node = next_block->owningNode();
     // Block has a new output. Add the output for the prim::If node.
@@ -457,7 +458,9 @@ void RegisterInplaceNodeInLoopBlocks(
     next_node = outer_block->owningNode();
     next_node->addOutput()->setType(new_inplace_node->type());
     next_block = next_node->owningBlock();
-    node_list.emplace_back(std::make_pair(outer_block, next_node));
+    if (next_node->kind() ==
+        prim::Loop) // Do not register input if nested in If block
+      node_list.emplace_back(std::make_pair(outer_block, next_node));
   }
 
   // Register inplace node inputs through the blocks.
@@ -529,14 +532,6 @@ void RegisterInplaceNodeInBlocks(
     cur_node = cur_node->owningBlock()->owningNode();
   }
 
-  for (auto block_input : outer_block->inputs()) {
-    if (block_input->debugName() ==
-        orig_data->debugName()) { // TODO: enable more than one mutation.
-      AT_ERROR(
-          "More than one inplace mutation per object in a subblock are not supported.");
-    }
-  }
-
   // Register inplace node outputs through the blocks.
   RegisterInplaceNodeInLoopBlocks(
       orig_data, new_inplace_node, block_node, outer_block, next_node);
@@ -548,7 +543,10 @@ void RegisterInplaceNodeInBlocks(
       next_node,
       orig_data->debugName());
 
-  MatchIfBlocksOutputForValue(orig_data, outer_block, new_inplace_node);
+  while (nullptr != outer_block->owningNode()) {
+    MatchIfBlocksOutputForValue(orig_data, outer_block, new_inplace_node);
+    outer_block = outer_block->owningNode()->owningBlock();
+  }
 }
 
 // Trace back all the slice & select nodes associated with the index_put node,
@@ -682,20 +680,20 @@ static void PrepareListPopForONNX(Node* n) {
     // And replace all uses of %seq afterwards with %new_seq
     Node* getitem_node =
         n->owningGraph()->create(aten::__getitem__, {n->inputs()});
-    getitem_node->output()->copyMetadata(n->output());
+    getitem_node->output()->setType(n->output()->type());
     getitem_node->insertBefore(n);
-    n->output()->replaceAllUsesWith(getitem_node->output());
+    //    n->output()->replaceAllUsesWith(getitem_node->output());
 
-    n->output()->copyMetadata(n->inputs()[0]);
-    n->inputs()[0]->replaceAllUsesAfterNodeWith(n, n->output());
+    n->output()->setType(n->inputs().at(0)->type());
+    n->inputs().at(0)->replaceAllUsesAfterNodeWith(n, n->output());
   }
 }
 
 static void PrepareListDeleteForONNX(Node* n) {
   if (n->kind() == aten::Delete) {
     n->addOutput();
-    n->output()->setType(n->input(0)->type());
-    n->input(0)->replaceAllUsesAfterNodeWith(n, n->output());
+    n->output()->setType(n->inputs().at(0)->type());
+    n->inputs().at(0)->replaceAllUsesAfterNodeWith(n, n->output());
   }
 }
 
@@ -703,9 +701,9 @@ static void PrepareListAppendAndInsertForONNX(Node* n) {
   if (n->kind() == aten::insert || n->kind() == aten::append) {
     if (n->outputs().size() == 0) {
       n->addOutput();
-      n->output()->copyMetadata(n->inputs()[0]);
+      n->output()->setType(n->inputs().at(0)->type());
     }
-    n->inputs()[0]->replaceAllUsesAfterNodeWith(n, n->output());
+    n->inputs().at(0)->replaceAllUsesAfterNodeWith(n, n->output());
   }
 }
 
@@ -769,35 +767,14 @@ static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
       if (!mr.inplaceOpVariant(node)) {
         continue;
       }
-
       auto it = std::find(node->inputs().begin(), node->inputs().end(), input);
-
       if (it != node->inputs().end()) {
         int index = std::distance(node->inputs().begin(), it);
-
         std::cerr
             << "Warning: ONNX Preprocess - Removing mutation on block inputs. "
             << "This changes graph semantics." << std::endl;
 
-        Node* newNode = nullptr;
-        if (input->type()->kind() == TypeKind::ListType) {
-          // Create an aten::list to clone the list in graph inputs
-          newNode = node->owningGraph()->create(aten::list, 1);
-          newNode->output()->setType(input->type());
-          newNode->addInput(input);
-          b->prependNode(newNode);
-        } else {
-          // Create an aten::clone to clone the tensor in graph inputs
-          newNode = node->owningGraph()->create(aten::clone, 1);
-          newNode->output()->setType(input->type());
-          newNode->addInput(input);
-
-          auto* noneNode = node->owningGraph()->create(prim::Constant);
-          noneNode->output()->setType(NoneType::get());
-          newNode->addInput(noneNode->output());
-          b->prependNode(newNode);
-          noneNode->insertBefore(newNode);
-        }
+        Node* newNode = addDummyCloneToBlock(b, input);
         TORCH_INTERNAL_ASSERT(nullptr != newNode);
         node->replaceInput(index, newNode->output());
         input->replaceAllUsesAfterNodeWith(node, newNode->output());
@@ -995,8 +972,10 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
       trackAndRegisterAttributesInBlocks(
           n, graph, module_, allAttrValues, setAttrValues, nextSetAttrValues);
     } else if (
-        mr.inplaceOpVariant(n) || n->kind() == aten::append ||
-        n->kind() == aten::pop) { // TODO: create a list of all included ops
+        (mr.inplaceOpVariant(n) || n->kind() == aten::append ||
+         n->kind() == aten::insert || n->kind() == aten::pop) &&
+        n->kind() != aten::copy_) { // TODO: create a list of all excluded ops
+
       auto orig_data = n->inputs().at(0);
       auto block_ = n->owningBlock();
       if (block_->owningNode())

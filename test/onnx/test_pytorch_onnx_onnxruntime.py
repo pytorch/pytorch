@@ -6577,7 +6577,7 @@ class TestONNXRuntime(unittest.TestCase):
                 if self.conv.bias is not None:
                     self.conv.bias = torch.randn(3, 10, 3)
                     self.conv.weight = anchors + self.conv.weight
-                    boxes[:] = torch.randn(2, 3)
+                    boxes[:] = torch.zeros(2, 3)
 
             def forward(self, anchors) -> Tuple[torch.Tensor, torch.Tensor]:
                 boxes = torch.ones(2, 2, 3)
@@ -6670,8 +6670,9 @@ class TestONNXRuntime(unittest.TestCase):
             state = torch.zeros(state_size, device=input_data.device)
             state_copy = torch.zeros(state_size, device=input_data.device)
             if prev_state.size(0) == 0:
-                state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 3
-                state_copy[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * 2
+                for i in range(2):
+                    state[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * i
+                    state_copy[:] = torch.ones(batch_size, hidden_size, spatial_size_0, spatial_size_1) * i
             elif prev_state.size(0) == 1:
                 s = state[:]
                 state[:] = prev_state + s
@@ -6762,7 +6763,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (random_data, empty_tensor))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    def test_list_append_2(self):
+    def test_list_append_in_block(self):
         class ListModel(torch.nn.Module):
             def forward(self, x, y):
                 res = []
@@ -6776,7 +6777,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(13)
-    def test_list_append_nested_2(self):
+    def test_list_append_in_nested_block(self):
         class ListModel(torch.nn.Module):
             def forward(self, x, y):
                 res = []
@@ -6791,7 +6792,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    def test_list_pop(self):
+    def test_list_pop_in_block(self):
         class ListModel(torch.nn.Module):
             def forward(self, x, y):
                 res = []
