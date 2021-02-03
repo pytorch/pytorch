@@ -10,12 +10,12 @@ namespace torch {
 namespace jit {
 
 void OptimizeFrozenGraph(std::shared_ptr<Graph>& graph) {
+  removeDropout(graph);
   // run a couple times to capture Conv -> Mul -> Add etc
   for (size_t i = 0; i < 2; i++) {
     FoldFrozenConvBatchnorm(graph);
     FoldFrozenConvAddOrSub(graph);
     FoldFrozenConvMulOrDiv(graph);
-    removeDropout(graph);
   }
 }
 
