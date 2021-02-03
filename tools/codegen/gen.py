@@ -401,15 +401,16 @@ struct {class_name} final : public {parent_class} {{
             # when CPUTensor class is a thing); nor do we generate fallback
             # bindings for manual_cpp_binding functions.
             cpp_sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=False)
-            # TODO: generate faithful signatures too
-            cpp_sig = cpp_sig_group.signature
 
             # Signature of the wrapper function we'll register to the dispatcher
             sig = NativeSignature(f.func, prefix="wrapper_")
 
             if self.target is Target.DECLARATION:
                 # namespace is handled by template
-                return f"TORCH_API {cpp_sig.decl()};\n"
+                result = f"TORCH_API {cpp_sig_group.signature.decl()};\n"
+                if cpp_sig_group.faithful_signature is not None:
+                    result += f"TORCH_API {cpp_sig_group.faithful_signature.decl()};\n"
+                return result
 
             elif self.target is Target.DEFINITION:
 
@@ -485,9 +486,7 @@ struct {class_name} final : public {parent_class} {{
 
                 # For an overview of what this template code looks like, see
                 # https://github.com/pytorch/rfcs/pull/9
-                return f"""\
-namespace {{
-
+                sig_defn = f"""\
 {self.gen_structured_class(
     f, k,
     class_name=class_name,
@@ -498,13 +497,25 @@ namespace {{
 {sig.defn()} {{
     {sig_body_str}
 }}
+"""
 
-}} // anonymous namespace
-
-namespace {self.dispatch_key.lower()} {{
+                def generate_defn(cpp_sig: CppSignature) -> str:
+                    return f"""
 {cpp_sig.defn()} {{
     return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
 }}
+"""
+                cpp_defns = generate_defn(cpp_sig_group.signature)
+                if cpp_sig_group.faithful_signature is not None:
+                    cpp_defns += generate_defn(cpp_sig_group.faithful_signature)
+
+                return f"""
+namespace {{
+{sig_defn}
+}} // anonymous namespace
+
+namespace {self.dispatch_key.lower()} {{
+{cpp_defns}
 }} // namespace {self.dispatch_key.lower()}
 """
 
