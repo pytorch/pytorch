@@ -23,6 +23,8 @@ void ambiguous_autogradother_kernel(OperatorKernel*, const OperatorHandle& op, S
   TORCH_INTERNAL_ASSERT(0,
     op.operator_name(), " has kernels registered to both Math and a backend mapped to AutogradOther. "
     "This makes the backend kernel unreachable (see Note [Ambiguity in AutogradOther kernel]). "
+    "If you only want to run inference instead of training, add `at::AutoNonVariableTypeMode guard(true);` "
+    "before model.forward().\n"
     "If it's intended to override Math kernel behavior, please open an issue to request a dedicated "
     "Autograd dispatch key for the backend.", "\nCanonical state\n~~~~~~~~~~~\n", op.dumpState(), "\n\n");
 }
