@@ -4,6 +4,7 @@ import torch.overrides
 from torch.nn.modules.module import _addindent
 import linecache
 from typing import Type, Dict, List, Any, Union, Optional
+from types import TracebackType
 from .graph import Graph
 import copy
 import sys
@@ -191,6 +192,10 @@ class GraphModule(torch.nn.Module):
                 _assign_attr(root[target_to_copy], self, target_to_copy)
         else:
             raise RuntimeError('Unsupported type ' + str(root) + ' passed for root!')
+
+        # Used in GraphModule.recompile
+        self._cls_call = None
+
         self.graph = graph
 
     # TorchScript breaks trying to compile the graph setter because of the
@@ -296,18 +301,64 @@ class {module_name}(torch.nn.Module):
         cls = type(self)
         cls.forward = _forward_from_src(self._code)
 
-        cls_call = cls.__call__
+        # If we're calling `recompile` on a GraphModule that has already
+        # been recompiled, `cls.__call__` would be `wrapped_call`.
+        # We don't want to wrap `wrapped_call` again (as this would
+        # ultimately lead to O(num_recompiles) "unwrappings" later), so
+        # we use the instance attribute `_cls_call` to store the
+        # original implementation of `__call__`
+        if not self._cls_call:
+            self._cls_call = cls.__call__
 
         def print_full_traceback(exctype, value, tb):
             traceback.print_exception(exctype, value, tb)
+
+        # Previously, if an error occurred when valid
+        # symbolically-traced code was run with an invalid input, the
+        # user would see the source of the error as coming from
+        # `File "<eval_with_key_N">`, where N is the number of times
+        # `recompile` had been called on the GraphModule. We use this
+        # function to generate a more informative error message. We
+        # return the traceback itself, a message explaining that the
+        # error occurred in a traced Module's generated forward
+        # function, and five lines of context surrounding the faulty
+        # faulty line
+        def generate_error_message(tb: TracebackType) -> str:
+            # auxiliary variables (for readability)
+            frame_summary = traceback.extract_tb(tb)[-1]
+            err_lineno = frame_summary.lineno
+            err_line_len = len(frame_summary.line)
+            all_src_lines = list(_eval_cache.values())[-1]
+
+            # constiuent substrings of the error message
+            tb_repr = traceback.format_exc()
+            custom_msg = ("Call to “exec” using an FX-traced Module, "
+                f"line {err_lineno} of the traced Module’s "
+                "generated forward function:\n")
+            up_to_and_incl_err = "".join(all_src_lines[err_lineno - 2 : err_lineno + 1])
+            marker = "~" * err_line_len + "~~~ <--- HERE"
+            after_err = "".join(all_src_lines[err_lineno+1:err_lineno+2])
+
+            # joined message
+            return "".join([tb_repr, custom_msg, up_to_and_incl_err, marker, after_err])
 
         def wrapped_call(self, *args, **kwargs):
             old_excepthook = sys.excepthook
             try:
                 sys.excepthook = print_full_traceback
-                return cls_call(self, *args, **kwargs)
+                return self._cls_call(self, *args, **kwargs)
+            except Exception as e:
+                if "eval_with_key" in traceback.format_exc():
+                    print(generate_error_message(e.__traceback__),
+                          file = sys.stderr)
+                    # Elide the real traceback since we've already
+                    # printed our message to stderr
+                    raise e.with_traceback(None)
+                else:
+                    raise e
             finally:
                 sys.excepthook = old_excepthook
+
         cls.__call__ = wrapped_call
 
     def __reduce__(self):
