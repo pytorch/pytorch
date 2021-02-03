@@ -105,7 +105,7 @@ class FunctionCounts(object):
 
         This can be used to regularize function names (e.g. stripping irrelevant
         parts of the file path), coalesce entries by mapping multiple functions
-        to the same name, etc.
+        to the same name (in which case the counts are added together), etc.
         """
         counts: DefaultDict[str, int] = collections.defaultdict(int)
         for c, fn in self._data:
@@ -114,7 +114,7 @@ class FunctionCounts(object):
         return self._from_dict(counts, self.inclusive)
 
     def filter(self, filter_fn: Callable[[str], bool]) -> "FunctionCounts":
-        """Keep only the elements where `filter_fn` returns True."""
+        """Keep only the elements where `filter_fn` applied to function name returns True."""
         return FunctionCounts(tuple(i for i in self if filter_fn(i.function)), self.inclusive)
 
     def sum(self) -> int:
@@ -190,13 +190,13 @@ class CallgrindStats(object):
         """Returns detailed function counts.
 
         Conceptually, the FunctionCounts returned can be thought of as a tuple
-        of (count, path_and_function_name).
+        of (count, path_and_function_name) tuples.
 
         `inclusive` matches the semantics of callgrind. If True, the counts
         include instructions executed by children. `inclusive=True` is useful
         for identifying hot spots in code; `inclusive=False` is useful for
-        identifying reducing noise when diffing counts from two different
-        runs. (See CallgrindStats.delta(...) for more details)
+        reducing noise when diffing counts from two different runs. (See
+        CallgrindStats.delta(...) for more details)
         """
         if inclusive:
             return self.stmt_inclusive_stats - self.baseline_inclusive_stats
