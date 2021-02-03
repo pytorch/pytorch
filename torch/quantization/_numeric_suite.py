@@ -332,13 +332,13 @@ def prepare_model_with_stubs(
 
         # Insert shadow module only if the module is not of the same type as
         # the floating point module
-        if type(float_mod) in module_swap_list and not is_identical_module_type(mod, float_mod):
+        if type(float_mod) in module_swap_list and not _is_identical_module_type(mod, float_mod):
             reassign[name] = Shadow(mod, float_mod, Logger)
 
     for key, value in reassign.items():
         q_module._modules[key] = value
 
-def is_identical_module_type(mod1, mod2):
+def _is_identical_module_type(mod1, mod2):
     # Compare if two modules have the same dtype
     mod1_module_types = [type(mod) for mod in mod1.modules()]
     mod2_module_types = [type(mod) for mod in mod2.modules()]

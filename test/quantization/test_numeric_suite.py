@@ -35,7 +35,7 @@ class SubModule(torch.nn.Module):
     def __init__(self):
         super(SubModule, self).__init__()
         self.qconfig = default_qconfig
-        self.mod1 = torch.nn.Conv2d(3, 3, 3, bias=False).to(dtype=torch.float) #nn.Identity()
+        self.mod1 = torch.nn.Conv2d(3, 3, 3, bias=False).to(dtype=torch.float)
         self.mod2 = nn.ReLU()
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
