@@ -1359,7 +1359,7 @@ function(print_target_properties tgt)
 endfunction(print_target_properties)
 
 add_executable(lite_interpreter_demo ${TORCH_ROOT}/test/cpp/demos/main.cpp)
-target_link_libraries(lite_interpreter_demo torch_cpu_library)
+target_link_libraries(lite_interpreter_demo torch_library)
 print_target_properties(torch)
 print_target_properties(lite_interpreter_demo)
 print_target_properties(torch_cpu)

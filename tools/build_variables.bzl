@@ -336,7 +336,7 @@ torch_mobile_core = [
     "torch/csrc/jit/mobile/observer.cpp",
 ]
 
-libtorch_lite_cmake_sources = sorted(core_sources_common + torch_mobile_core)
+libtorch_lite_cmake_sources = sorted(core_trainer_sources + core_sources_common + torch_mobile_core)
 
 libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
 
