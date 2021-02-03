@@ -45,7 +45,7 @@ static void upsample_trilinear3d_out_cpu_template(
       output_width);
 
   output.resize_({nbatch, channels, output_depth, output_height, output_width}, input.suggest_memory_format());
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       input_depth > 0 && input_height > 0 && input_width > 0 &&
       output_depth > 0 && output_height > 0 && output_width > 0);
   upsample_trilinear3d_kernel(kCPU, output, input, align_corners, scales_d, scales_h, scales_w);

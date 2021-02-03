@@ -41,7 +41,7 @@ static void upsample_bilinear2d_out_cpu_template(
 
   output.resize_({nbatch, channels, output_height, output_width}, input.suggest_memory_format());
 
-  AT_ASSERT(
+  TORCH_INTERNAL_ASSERT(
       input_height > 0 && input_width > 0 && output_height > 0 &&
       output_width > 0);
 

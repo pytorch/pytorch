@@ -35,7 +35,7 @@ static void upsample_linear1d_out_cpu_template(
       output_width);
 
   output.resize_({nbatch, channels, output_width});
-  AT_ASSERT(input_width > 0 && output_width > 0);
+  TORCH_INTERNAL_ASSERT(input_width > 0 && output_width > 0);
   upsample_linear1d_kernel(kCPU, output, input, align_corners, scales);
 }
 
