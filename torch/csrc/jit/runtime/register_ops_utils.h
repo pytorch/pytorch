@@ -320,6 +320,8 @@ void listSelect(Stack* stack);
 
 void listLen(Stack* stack);
 
+void listBool(Stack* stack);
+
 template <typename T>
 void listEq(Stack* stack) {
   c10::List<T> b = pop(stack).to<c10::List<T>>();

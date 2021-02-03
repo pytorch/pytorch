@@ -347,6 +347,12 @@ void listLen(Stack* stack) {
   push(stack, size);
 }
 
+void listBool(Stack* stack) {
+  c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
+
+  push(stack, !a.empty());
+}
+
 void listList(Stack* stack) {
   c10::List<IValue> a = pop(stack).to<c10::List<IValue>>();
   push(stack, a.copy());
