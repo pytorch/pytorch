@@ -2489,6 +2489,16 @@ class TestFrontend(JitTestCase):
 
 
 class TestScript(JitTestCase):
+
+    # Tests that calling torch.jit.script repeated on function is allowed.
+    def test_repeated_script_on_function(self):
+        @torch.jit.script
+        @torch.jit.script
+        def fn(x):
+            return x
+
+        torch.jit.script(torch.jit.script(fn))
+
     def test_pretty_print_function(self):
         @torch.jit.script
         def foo(x):
