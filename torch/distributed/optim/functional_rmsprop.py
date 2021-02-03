@@ -86,14 +86,14 @@ class _FunctionalRMSprop(object):
                 state['step'] += 1
 
         with torch.no_grad():
-            F.rmsprop(params,
-                      grads,
-                      square_avgs,
-                      grad_avgs,
-                      momentum_buffer_list,
-                      lr,
-                      alpha,
-                      eps,
-                      weight_decay,
-                      momentum,
-                      self.centered)
+            F._rmsprop(params,
+                       grads,
+                       square_avgs,
+                       grad_avgs,
+                       momentum_buffer_list,
+                       lr,
+                       alpha,
+                       eps,
+                       weight_decay,
+                       momentum,
+                       self.centered)

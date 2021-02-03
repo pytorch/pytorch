@@ -298,7 +298,13 @@ void BytecodeDeserializer::parseMethods(
     for (const auto& t : types_list) {
       c10::QualifiedName qn(t.toStringRef());
       if (classPrefix.isPrefixOf(qn)) {
-        function->append_type(getCustomClass(qn.qualifiedName()));
+        auto classType = getCustomClass(qn.qualifiedName());
+        TORCH_CHECK(
+            classType,
+            "The implementation of class ",
+            qn.qualifiedName(),
+            " cannot be found.");
+        function->append_type(classType);
       } else {
         function->append_type(c10::parseType(t.toStringRef()));
       }
