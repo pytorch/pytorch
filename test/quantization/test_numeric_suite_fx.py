@@ -217,29 +217,19 @@ class TestGraphModeNumericSuite(QuantizationTestCase):
         )
 
 class TestFXGraphMatcher(QuantizationTestCase):
+    # TODO(future PR): more tests
 
     def test_conv_mod_fp32_prepared_vs_int8(self):
         m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        mp(torch.randn(4, 1, 4, 4))
-
-        # TODO(before land): investigate whether we can prevent this copy
-        # without the copy, convert_fx modifies the modules of prepared model inplace
-        # ideally, we should not require copying Tensors, for improved performance
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = get_matching_node_pairs(mp, mq)
 
-        # expected length
-        self.assertTrue(len(results) == 1)
-
-        # expected type
-        # TODO(before land): generalize and move to utils
-        node_a, node_b = results[0]
-        node_a_target = getattr(mp, node_a.target)
-        node_b_target = getattr(mq, node_b.target)
-        self.assertTrue(node_a_target is m[0])
-        self.assertTrue(isinstance(node_b_target, nnq.Conv2d))
+        expected_types = {'0': (nn.Conv2d, nnq.Conv2d)}
+        self.assert_types_for_matched_node_pairs(results, expected_types, mp, mq)
 
     def test_linear_func_fp32_prepared_vs_int8(self):
         class M(nn.Module):
@@ -253,23 +243,14 @@ class TestFXGraphMatcher(QuantizationTestCase):
 
         m = M().eval()
         mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
-        mp(torch.randn(1, 1))
-
-        # TODO(before land): investigate whether we can prevent this copy
-        # without the copy, convert_fx modifies the modules of prepared model inplace
-        # ideally, we should not require copying Tensors, for improved performance
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
         mp_copy = copy.deepcopy(mp)
         mq = convert_fx(mp_copy)
         results = get_matching_node_pairs(mp, mq)
 
-        # expected length
-        self.assertTrue(len(results) == 1)
-
-        # expected type
-        # TODO(before land): generalize and move to utils
-        node_a, node_b = results[0]
-        self.assertTrue(node_a.target is F.linear)
-        self.assertTrue(node_b.target is toq.linear)
+        expected_types = {'linear_1': (F.linear, toq.linear)}
+        self.assert_types_for_matched_node_pairs(results, expected_types, mp, mq)
 
     def test_matching_failure_node_count(self):
         # verify that matching graphs with matching node types but
@@ -289,31 +270,3 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mp2 = prepare_fx(m2, {'': torch.quantization.default_qconfig})
         with self.assertRaises(GraphMatchingException) as ex:
             results = get_matching_node_pairs(mp1, mp2)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
