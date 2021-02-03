@@ -581,7 +581,7 @@ class DeviceCachingAllocator {
     }
   }
 
-  // CUDAGraph interactions (see Note [Interaction with CUDA graph capture])
+  // See Note [Interaction with CUDA graph capture]
 
   // Called by CUDAGraph::capture_begin
   void notifyCaptureBegin(CUDACaptureid_t graph_id, CUDACaptureid_t mempool_id) {

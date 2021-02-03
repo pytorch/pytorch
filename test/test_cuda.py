@@ -2908,70 +2908,47 @@ t2.start()
         s1 = torch.cuda.Stream()
 
         with torch.cuda.stream(s1):
-            a = torch.zeros((1000,), device="cuda")
-            a += 1
+            a = torch.full((1000,), 1, device="cuda")
             g = torch.cuda._Graph()
             g.capture_begin()
-            a += 1
+            b = a
+            for _ in range(10):
+                b = b + 1
             g.capture_end()
         torch.cuda.current_stream().wait_stream(s1)
 
         g.replay()
-        g.replay()
 
-        self.assertTrue(a.sum().item() == 3000.)
+        self.assertTrue(b.sum().item() == 11000.)
 
     @unittest.skipIf((not TEST_CUDA) or
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_rng_functional(self):
-        # The caching allocator isn't yet graph-safe.
-        # In this test, graphed regions try to ensure allocator safety by
-        # stashing references to all temporaries.  This is why we use _fused_dropout
-        # instead of a public dropout API:  _fused_dropout returns the mask temporary
-        # as well as the output, so we can stash references to both.
-        #
-        # TODO:
-        # Switch to public dropout API when the allocator is made graph-safe.
-        ops_with_kwargs = ((torch._fused_dropout, {"p": 0.1}),
+        ops_with_kwargs = ((torch.nn.functional.dropout, {"p": 0.1}),
                            (torch.nn.functional.rrelu, {"training": True}),)
         size = 10000
 
         def run(op, kwargs):
             a = torch.randn((size,), device="cuda", dtype=torch.float)
 
-            torch.cuda.manual_seed(5)
-
             # Control
+            torch.cuda.manual_seed(5)
             eager_out = a
             for _ in range(6):
-                out = op(eager_out, **kwargs)
-                # _fused_dropout returns a tuple, rrelu returns a bare tensor.
-                eager_out = out[0] if isinstance(out, tuple) else out
+                eager_out = op(eager_out, **kwargs)
 
             graph_in = a.clone()
             stream = torch.cuda.Stream()
             stream.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(stream):
-                # warms up allocator so no mallocs occur in capture
-                refs = ()
-                graph_out = graph_in
-                for _ in range(3):
-                    out = op(graph_out, **kwargs)
-                    refs += tuple(out)
-                    graph_out = out[0] if isinstance(out, tuple) else out
-                del out, refs, graph_out
-
                 torch.cuda.manual_seed(5)
 
-                refs = ()
                 g = torch.cuda._Graph()
                 g.capture_begin()
                 graph_out = graph_in
                 for _ in range(2):
-                    out = op(graph_out, **kwargs)
-                    refs += tuple(out)
-                    graph_out = out[0] if isinstance(out, tuple) else out
+                    graph_out = op(graph_out, **kwargs)
                 g.capture_end()
             torch.cuda.current_stream().wait_stream(stream)
 
@@ -2981,7 +2958,7 @@ t2.start()
             # replay() reads from graph_in and writes to graph_out.
             g.replay()
             out = op(graph_out, **kwargs)
-            out = op(out[0], **kwargs)[0] if isinstance(out, tuple) else op(out, **kwargs)
+            out = op(out, **kwargs)
             graph_in.copy_(out)
             g.replay()
 
@@ -3003,19 +2980,14 @@ t2.start()
                      TEST_WITH_ROCM or
                      int(torch.version.cuda.split(".")[0]) < 11, "CUDA >= 11.0 required for graphs")
     def test_graph_rng_distributions(self):
-        # The caching allocator isn't yet graph-safe.
-        # In this test, all ops maintain static references to inputs and outputs
-        # that persist across replay(), so they should be safe to test with graphs,
-        # EXCEPT for multinomial which is a complicated compound op.
-        #
-        # TODO:
-        # Uncomment multinomial when the allocator is made graph-safe.
         size = 10000
         input = torch.rand((size,), device="cuda", dtype=torch.float)
         alloc = torch.empty((size,), device="cuda", dtype=torch.float)
 
         # Torch ops to test with sample args (tuple) and kwargs (dict)
         torch_with_args = (("bernoulli", (input.clone(),), {}),
+                           # multinomial uses some uncapturable CUDA calls.
+                           # TODO: reenable multinomial tests if/when the implementation is capturable.
                            # ("multinomial", (input.clone(), size, True), {}),
                            # ("multinomial", (input.clone(), size // 2, False), {}),
                            ("normal", (input.clone() + 1, input.clone()), {}),
