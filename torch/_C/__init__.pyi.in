@@ -486,7 +486,6 @@ def get_num_thread() -> _int: ...  # THPModule_getNumThreads
 def set_num_threads(nthreads: _int) -> None: ...  # THPModule_setNumThreads
 def get_num_interop_threads() -> _int: ...  # THPModule_getNumInteropThreads
 def set_num_interop_threads(nthreads: _int) -> None: ...  # THPModule_setNumInteropThreads
-def enable_global_memory_reporting(arg: _bool) -> None: ... # THPModule_enableGlobalMemoryReporting
 def _get_cudnn_enabled() -> _bool: ...  # THPModule_userEnabledCuDNN
 def _set_cudnn_enabled(arg: _bool) -> None: ...  # THPModule_setUserEnabledCuDNN
 def _get_mkldnn_enabled() -> _bool: ...  # THPModule_userEnabledMkldnn

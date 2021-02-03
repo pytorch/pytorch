@@ -1,6 +1,7 @@
 import collections
 import gc
 import io
+import os
 import unittest
 
 import torch
@@ -9,7 +10,7 @@ import torch.optim
 import torch.utils.data
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, TEST_WITH_ASAN, IS_WINDOWS, TemporaryFileName)
+    TestCase, run_tests, TEST_WITH_ASAN, IS_WINDOWS, TemporaryFileName, TemporaryDirectoryName)
 from torch.autograd.profiler import profile as _profile
 from torch.profiler import (
     kineto_available, profile, record_function, DeviceType, ProfilerActivity
@@ -257,21 +258,14 @@ class TestProfiler(TestCase):
                 ]
             )
 
-        # check top-level memory events and
-        # partial overlap of tensor lifetime and profiler
-        torch.enable_global_memory_reporting(True)
-        x = torch.rand(10, 10)
-        y = None
-        if torch.cuda.is_available():
-            y = torch.rand(10, 10).cuda()
-        # mem events are CPU events
+        # check top-level memory events
         with _profile(profile_memory=True, use_kineto=kineto_available()) as prof:
+            x = torch.rand(10, 10)
             del x
             if torch.cuda.is_available():
+                y = torch.rand(10, 10).cuda()
                 del y
             gc.collect()
-            x = torch.rand(10, 10)
-        del x
         stats = prof.key_averages(group_by_input_shape=True)
         print(stats.table(sort_by="cpu_memory_usage", row_limit=-1))
         check_metrics(
@@ -293,7 +287,6 @@ class TestProfiler(TestCase):
                     "[memory]"
                 ]
             )
-        torch.enable_global_memory_reporting(False)
 
     def test_high_level_trace(self):
         """Checks that python side high level events are recorded.
@@ -432,7 +425,7 @@ class TestProfiler(TestCase):
 
         self.assertEqual(called_num[0], 2)
 
-        # case without enable_pred
+        # case without schedule
         with profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
@@ -463,6 +456,37 @@ class TestProfiler(TestCase):
                 except ValueError:
                     pass
                 assert is_int, "Invalid stacks record"
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_tensorboard_trace_handler(self):
+        with _profile(use_cuda=True, use_kineto=True):
+            self.payload()
+
+        with TemporaryDirectoryName() as dname:
+            with profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA],
+                schedule=torch.profiler.schedule(
+                    wait=1,
+                    warmup=1,
+                    active=2),
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(dname)
+            ) as p:
+                for _ in range(8):
+                    self.payload()
+                    p.step()
+
+            self.assertTrue(os.path.exists(dname))
+            file_num = 0
+            for file_name in os.listdir(dname):
+                parts = file_name.split('.')
+                self.assertTrue(len(parts) > 4)
+                self.assertTrue(parts[-4].isdigit() and int(parts[-4]) > 0, "Wrong tracing file name pattern")
+                self.assertEqual(parts[-3:], ['pt', 'trace', 'json'])
+                file_num += 1
+            self.assertEqual(file_num, 2)
 
 
 if __name__ == '__main__':

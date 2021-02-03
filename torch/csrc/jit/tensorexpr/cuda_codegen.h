@@ -171,8 +171,6 @@ class CudaPrinter : public IRPrinter {
   void visit(const Free* v) override;
   void visit(const Let* v) override;
 
-  void visit(const ExternalCall* v) override;
-
   const Var* rand_func() const {
     return rand_func_;
   }
