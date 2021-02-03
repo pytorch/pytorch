@@ -82,7 +82,7 @@ fit if you need to make a few small changes or if you need to match multiple
 nodes at once. However, if you need to entirely rewrite your graph, you may
 want to look at constructing your graph with Proxies (i.e. retracing).
 
-Examples
+Graph Manipulation Examples
 ~~~~~~~~
 
 -  `Replace one
