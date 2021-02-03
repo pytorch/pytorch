@@ -1,13 +1,17 @@
+import operator
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.quantized as nnq
+import torch.nn.qat as nnqat
+import torch.nn.intrinsic.qat as nniqat
 toq = torch.ops.quantized
 
 from torch.fx import GraphModule
 from torch.fx.graph import Graph, Node
 
-from typing import Dict, Tuple, List, Optional, Set, Callable
+from typing import Dict, Tuple, List, Optional, Set, Callable, Any
 
 # TODO(before land): delete this
 def _print_node(node: Optional[Node]) -> None:
@@ -24,20 +28,46 @@ def _get_output_nodes(g: Graph) -> List[Node]:
 def get_type_a_related_to_b() -> Set[Tuple[Callable, Callable]]:
     # TODO(future PR): allow customizations
     # TODO(future PR): reuse existing quantization mappings
-    type_a_related_to_b: Set[Tuple[Callable, Callable]] = set([
+    # TODO(future PR): add the rest of modules and ops here
+    sets_of_related_ops: List[Set[Callable]] = [
+        # conv modules
+        set([
+            nn.Conv2d,
+            nnq.Conv2d,
+            nnqat.Conv2d,
+            # Note: matching weights may not work with nniqat.ConvBn2d directly
+            # leaving that as a problem for a future PR to solve.
+            nniqat.ConvBn2d,
+        ]),
+        # linear modules
+        set([
+            nn.Linear,
+            nnq.Linear,
+            nnqat.Linear,
+        ]),
+        # linear functionals
+        set([
+            F.linear,
+            toq.linear,
+        ]),
+        # add
+        set([
+            torch.add,
+            toq.add,
+            operator.add,  # x + y
+        ]),
+    ]
 
-        # conv related ops
-        (nn.Conv2d, nnq.Conv2d,),
-        # TODO(future PR): add all the other flavors of conv
-        # (1d, 3d, qat modules, fused modules, fq, etc)
+    type_a_related_to_b: Set[Tuple[Callable, Callable]] = set()
 
-        # linear related ops
-        (F.linear, toq.linear,),
+    for s in sets_of_related_ops:
+        s_list = list(s)
+        # add every bidirectional pair
+        for idx_0 in range(0, len(s_list) - 1):
+            for idx_1 in range(idx_0 + 1, len(s_list)):
+                type_a_related_to_b.add((s_list[idx_0], s_list[idx_1]))
+                type_a_related_to_b.add((s_list[idx_1], s_list[idx_0]))
 
-        # TODO(future PR): other ops
-    ])
-    # make the mapping bidirectional
-    type_a_related_to_b.update(set((b, a) for a, b in type_a_related_to_b))
     return type_a_related_to_b
 
 def get_non_matchable_functions() -> Set[Callable]:
@@ -56,7 +86,18 @@ def get_non_matchable_modules() -> Set[Callable]:
     # TODO(future PR): allow customizations
     return set([
         torch.quantization.ObserverBase,
+        torch.quantization.FakeQuantizeBase,
     ])
+
+def _getattr_from_fqn(gm: GraphModule, fqn: str) -> Any:
+    """
+    Given a gm and a fqn such as "foo.bar.baz", returns gm.foo.bar.baz.
+    """
+    fqn_parts = fqn.split(".")
+    cur_val = gm
+    for part in fqn_parts:
+        cur_val = getattr(cur_val, part)
+    return cur_val
 
 class _NSGraphMatchableNodesIterator:
     """
@@ -111,7 +152,8 @@ class _NSGraphMatchableNodesIterator:
             return not (node.target in self.non_matchable_functions)
         elif node.op == 'call_module':
             assert isinstance(node.target, str)
-            target_mod = getattr(self.gm, node.target)
+            # target_mod = getattr(self.gm, node.target)
+            target_mod = _getattr_from_fqn(self.gm, node.target)
             return not \
                 any(isinstance(target_mod, t)  # type: ignore
                     for t in self.non_matchable_modules)
@@ -137,14 +179,20 @@ def _node_a_related_to_b(
         return False
 
     if node_a.op == 'call_function':
+        if node_a.target == node_b.target:
+            # nodes with equivalent targets always match (i.e. F.linear and F.linear)
+            return True
         key = (node_a.target, node_b.target)
         return key in type_a_related_to_b
     elif node_a.op == 'call_module':
         # for call_module, we need to look up the modules to do the type check
         assert isinstance(node_a.target, str)
-        mod_a = getattr(gm_a, node_a.target)
+        mod_a = _getattr_from_fqn(gm_a, node_a.target)
         assert isinstance(node_b.target, str)
-        mod_b = getattr(gm_b, node_b.target)
+        mod_b = _getattr_from_fqn(gm_b, node_b.target)
+        # modules with equivalent types always match (i.e. nn.Conv2d and nn.Conv2d)
+        if type(mod_a) == type(mod_b):
+            return True
         key = (type(mod_a), type(mod_b))
         return key in type_a_related_to_b
     return False
@@ -159,6 +207,15 @@ def _get_name_for_node_pair(
     # for now, use node name.
     # TODO(future PR): find a better solution
     return node_b.name
+
+def _get_node_target_type(node: Node, gm: GraphModule) -> Optional[Callable]:
+    if node.op == 'call_function':
+        return node.target  # type: ignore
+    elif node.op == 'call_module':
+        assert isinstance(node.target, str)
+        mod = _getattr_from_fqn(gm, node.target)
+        return type(mod)
+    return None
 
 def get_matching_node_pairs(
     gm_a: GraphModule,
@@ -223,13 +280,27 @@ def get_matching_node_pairs(
         except StopIteration:
             pass
 
+        # TODO(before land): remove
+        if False:
+            print('a')
+            _print_node(cur_node_a)
+            print('b')
+            _print_node(cur_node_b)
+
+        # look up types of a and b for useful error messages
+        type_a, type_b = None, None
+        if cur_node_a is not None:
+            type_a = _get_node_target_type(cur_node_a, gm_a)
+        if cur_node_b is not None:
+            type_b = _get_node_target_type(cur_node_b, gm_b)
+
         # check for results and determine what to do next
         if cur_node_a is not None and cur_node_b is not None:
             # both nodes were fetched, check for relatedness
             if not _node_a_related_to_b(cur_node_a, cur_node_b,
                                         gm_a, gm_b, type_a_related_to_b):
-                raise GraphMatchingException(
-                    "%s and %s are not related" % (cur_node_a, cur_node_b))
+                msg = f"({cur_node_a}, {type_a}) and ({cur_node_b}, {type_b}) are not related"
+                raise GraphMatchingException(msg)
             key_name = _get_name_for_node_pair(cur_node_a, cur_node_b)
             results[key_name] = (cur_node_a, cur_node_b)
             continue
@@ -238,8 +309,7 @@ def get_matching_node_pairs(
             break
         else:
             # only one node was fetched, no match possible, throw error
-            raise GraphMatchingException(
-                "Matchable nodes count mismatch: cur_node_a is %s and cur_node_b is %s" %
-                (cur_node_a, cur_node_b))
+            msg = f"Matchable nodes count mismatch: ({cur_node_a}, {type_a}) and ({cur_node_b}, {type_b})"
+            raise GraphMatchingException(msg)
 
     return results
