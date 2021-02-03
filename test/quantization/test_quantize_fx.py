@@ -1596,7 +1596,8 @@ class TestQuantizeFx(QuantizationTestCase):
         """ Make sure packed params appear in state_dict
         """
 
-        class M(torch.nn.Module):
+        # test linear packed weight
+        class M1(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.w = torch.rand(4, 30)
@@ -1605,13 +1606,33 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, x):
                 return F.linear(x, self.w, self.b)
 
-        m = M().eval()
+        m = M1().eval()
         qconfig_dict = {"": default_qconfig}
         m = prepare_fx(m, qconfig_dict)
         m = convert_fx(m)
-        print(m)
-        print(type(m))
-        print(m.state_dict())
+        state_dict = m.state_dict()
+        self.assertTrue("_packed_weight_0" in state_dict)
+
+        # test conv packed weight
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.rand(3, 3, 3, 3)
+                self.b = torch.rand(3)
+                self.stride = (1, 1)
+                self.padding = (0, 0)
+                self.dilation = (1, 1)
+                self.groups = 1
+
+            def forward(self, x):
+                return F.conv2d(x, self.w, self.b, self.stride, self.padding, self.dilation, self.groups)
+
+        m = M2().eval()
+        qconfig_dict = {"": default_qconfig}
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m)
+        state_dict = m.state_dict()
+        self.assertTrue("_packed_weight_0" in state_dict)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):

@@ -955,7 +955,7 @@ class Quantizer:
             else:
                 # copy other nodes
                 env[node.name] = folded_graph.node_copy(node, load_arg)
-        quantized = GraphModule(quantized_root, folded_graph)
+        quantized = QuantizedGraphModule(quantized_root, folded_graph)
         return quantized
 
     def convert(self, model: GraphModule, debug: bool = False,
