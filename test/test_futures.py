@@ -32,6 +32,16 @@ class TestFuture(TestCase):
         with self.assertRaisesRegex(ValueError, "Intentional"):
             f.value()  # type: ignore
 
+        def cb(fut):
+            fut.value()  # type: ignore
+
+        f = Future()
+        f.set_exception(value_error)  # type: ignore
+
+        with self.assertRaisesRegex(RuntimeError, "Got the following error"):
+            cb_fut = f.then(cb)
+            cb_fut.wait()
+
     def test_set_exception_multithreading(self) -> None:
         # Ensure errors can propagate when one thread waits on future result
         # and the other sets it with an error.
@@ -44,6 +54,20 @@ class TestFuture(TestCase):
 
         f = Future[T]()
         t = threading.Thread(target=wait_future, args=(f, ))
+        t.start()
+        f.set_exception(value_error)  # type: ignore
+        t.join()
+
+        def cb(fut):
+            fut.value()  # type: ignore
+
+        def then_future(f):
+            fut = f.then(cb)
+            with self.assertRaisesRegex(RuntimeError, "Got the following error"):
+                fut.wait()
+
+        f = Future[T]()
+        t = threading.Thread(target=then_future, args=(f, ))
         t.start()
         f.set_exception(value_error)  # type: ignore
         t.join()
