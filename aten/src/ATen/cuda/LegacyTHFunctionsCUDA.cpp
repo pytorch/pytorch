@@ -533,6 +533,9 @@ std::tuple<Tensor &,Tensor &> _th_sort_out(Tensor & values, Tensor & indices, co
     }
     return std::tuple<Tensor &, Tensor &>(values, indices);
 }
+std::tuple<Tensor &,Tensor &> _th_sort_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t dim, bool descending) {
+  return _th_sort_out(values, indices, self, dim, descending, /*stable=*/false);
+}
 std::tuple<Tensor,Tensor> _th_sort(const Tensor & self, int64_t dim, bool descending, bool stable) {
     // DeviceGuard omitted
 
@@ -588,6 +591,9 @@ std::tuple<Tensor,Tensor> _th_sort(const Tensor & self, int64_t dim, bool descen
             AT_ERROR("_th_sort not supported on CUDAType for ", dispatch_scalar_type);
     }
     return std::tuple<Tensor, Tensor>(values, indices);
+}
+std::tuple<Tensor,Tensor> _th_sort(const Tensor & self, int64_t dim, bool descending) {
+  return _th_sort(self, dim, descending, /*stable=*/false);
 }
 std::tuple<Tensor &,Tensor &> _th_topk_out(Tensor & values, Tensor & indices, const Tensor & self, int64_t k, int64_t dim, bool largest, bool sorted) {
     // DeviceGuard omitted

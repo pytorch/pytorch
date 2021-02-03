@@ -27,12 +27,20 @@ std::tuple<Tensor, Tensor> sort_quantized_cpu(
     bool stable) {
   Tensor sort_int;
   Tensor sort_indicies;
+  // TODO: enable stable once signatures are added
   std::tie(sort_int, sort_indicies) =
-      at::sort(self.int_repr(), dim, descending, stable);
+      at::sort(self.int_repr(), dim, descending);
   return std::forward_as_tuple(
       at::_make_per_tensor_quantized_tensor(
           sort_int, self.q_scale(), self.q_zero_point()),
       sort_indicies);
+}
+
+std::tuple<Tensor, Tensor> sort_quantized_cpu(
+    const Tensor& self,
+    int64_t dim,
+    bool descending) {
+  return sort_quantized_cpu(self, dim, descending, /*stable=*/false);
 }
 
 } // namespace native
