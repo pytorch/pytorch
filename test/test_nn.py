@@ -3440,24 +3440,6 @@ class TestNN(NNTestCase):
         self.assertTrue(a.ne(torch.arange(1, 7, dtype=a.dtype).view(2, 3)).all())
         self.assertTrue(a.norm(p=opts["norm_type"], dim=1).le(opts["max_norm"]).all())
 
-    def test_fractional_max_pool2d(self):
-        x = torch.randn(1, 2, 7, 7, requires_grad=True)
-        samples = x.new(1, 2, 2).uniform_()
-
-        def func(x):
-            return F.fractional_max_pool2d(
-                x, (2, 2), output_size=(3, 3), _random_samples=samples)
-
-        self.assertEqual(func(x).shape, (1, 2, 3, 3))
-        gradcheck(func, [x])
-        gradgradcheck(func, [x])
-
-        x = torch.randn(2, 7, 7, requires_grad=True)
-        samples = x.new(2, 2).uniform_()
-        self.assertEqual(func(x).shape, (2, 3, 3))
-        gradcheck(func, [x])
-        gradgradcheck(func, [x])
-
     def test_AlphaDropout(self):
         # generate random tensor with zero mean and unit std
         input = torch.randn(5000)
@@ -13356,6 +13338,49 @@ class TestNNDeviceType(NNTestCase):
                                                      padding_mode=padding_mode, align_corners=False)
             self.assertEqual(sample, torch.zeros([1, 1, 1, 2], device=device, dtype=dtype))
 
+    @onlyOnCPUAndCUDA
+    def test_fractional_max_pool2d(self, device):
+        x = torch.randn(1, 2, 7, 7, requires_grad=True, device=device)
+        samples = x.new(1, 2, 2).uniform_()
+
+        def func(x):
+            return F.fractional_max_pool2d(
+                x, (2, 2), output_size=(3, 3), _random_samples=samples)
+
+        self.assertEqual(func(x).shape, (1, 2, 3, 3))
+        gradcheck(func, [x])
+        gradgradcheck(func, [x])
+
+        if self.device_type != 'cuda':
+            x = torch.randn(2, 7, 7, requires_grad=True, device=device)
+            samples = x.new(2, 2).uniform_()
+            self.assertEqual(func(x).shape, (2, 3, 3))
+            gradcheck(func, [x])
+            gradgradcheck(func, [x])
+
+        with self.assertRaises(RuntimeError):
+            # Incorrect kernel_size
+            F.fractional_max_pool2d(x, (), output_size=(3, 3), _random_samples=samples)
+
+        with self.assertRaises(RuntimeError):
+            # Incorrect kernel_size
+            F.fractional_max_pool2d(x, (1, ), output_size=(3, 3), _random_samples=samples)
+
+        with self.assertRaises(RuntimeError):
+            # Incorrect output_size
+            F.fractional_max_pool2d(x, (2, 2), output_size=(9, 3), _random_samples=samples)
+
+        with self.assertRaises(RuntimeError):
+            # Incorrect output_size
+            F.fractional_max_pool2d(x, (2, 2), output_size=(3, 9), _random_samples=samples)
+
+        with self.assertRaises(RuntimeError):
+            # Incorrect output_size
+            F.fractional_max_pool2d(x, (2, 2), output_size=(3, ), _random_samples=samples)
+
+        with self.assertRaises(RuntimeError):
+            # Incorrect output_size
+            F.fractional_max_pool2d(x, (2, 2), output_size=(), _random_samples=samples)
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
