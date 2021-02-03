@@ -325,7 +325,7 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
   TORCH_CHECK(totalElements <= srcSize, "source nElements must be == mask `1` elements");
 
 
-#if CUDA_VERSION >= 1120
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11020
   // FIXME: there appears to be a bug in Thrust (CUDA 11.2) for mixed
   // iterator prefix sums? Convert `mask` to the same datatype as what
   // we're accumulating the prefix sum in (int64_t) to get around it
