@@ -364,6 +364,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.diag: lambda input, diagonal=0, out=None: -1,
         torch.diag_embed: lambda input, diagonal=0, out=None: -1,
         torch.diagflat: lambda input, offset=0: -1,
+        torch.diff: lambda input, n=1, dim=-1, prepend=None, append=None, out=None: -1,
         torch.diagonal: lambda input, offset=0, dim1=0, dim2=1: -1,
         torch.digamma: lambda input, out=None: -1,
         torch.dist: lambda input, other, p=2: -1,

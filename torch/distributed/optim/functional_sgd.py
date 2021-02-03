@@ -70,14 +70,14 @@ class _FunctionalSGD(object):
                     momentum_buffer_list.append(state['momentum_buffer'])
 
         with torch.no_grad():
-            F.sgd(params,
-                  grads,
-                  momentum_buffer_list,
-                  weight_decay,
-                  momentum,
-                  lr,
-                  dampening,
-                  self.nesterov)
+            F._sgd(params,
+                   grads,
+                   momentum_buffer_list,
+                   weight_decay,
+                   momentum,
+                   lr,
+                   dampening,
+                   self.nesterov)
 
         # update momentum_buffers in state
         for i, p in enumerate(params):
