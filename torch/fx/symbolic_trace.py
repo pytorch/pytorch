@@ -52,7 +52,7 @@ class Tracer(TracerBase):
     """
     ``Tracer`` is the class that implements the symbolic tracing functionality
     of ``torch.fx.symbolic_trace``. A call to ``symbolic_trace(m)`` is equivalent
-    to ``Tracer().trace(m)``.
+    to ``Tracer().trace(m).graph``.
 
     Tracer can be subclassed to override various behaviors of the tracing
     process. The different behaviors that can be overridden are described
