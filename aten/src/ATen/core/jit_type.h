@@ -738,6 +738,7 @@ struct TORCH_API DictType : public Type {
       case TypeKind::IntType:
       case TypeKind::BoolType:
       case TypeKind::FloatType:
+      case TypeKind::ComplexType:
       case TypeKind::StringType:
       case TypeKind::TensorType:
         return DictTypePtr(new DictType(key, value));
@@ -745,7 +746,7 @@ struct TORCH_API DictType : public Type {
         AT_ERROR(
             "Cannot create dict for key type '",
             key->str(),
-            "', only int, float, Tensor and string keys are supported");
+            "', only int, float, complex, Tensor and string keys are supported");
     }
   }
 
@@ -974,7 +975,7 @@ struct TORCH_API TupleType : public NamedType {
     }
 
     const auto& l_elements = elements();
-    const auto& r_elements = rhs.cast<TupleType>()->elements();
+    const auto& r_elements = rhs.castRaw<TupleType>()->elements();
     if (l_elements.size() != r_elements.size())
       return false;
     for (size_t i = 0; i < l_elements.size(); ++i) {

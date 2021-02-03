@@ -2,13 +2,12 @@ import os
 import sys
 
 import torch
-from torch.nn import functional as F
 from torch.testing import FileCheck
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase, freeze_rng_state
+from torch.testing._internal.jit_utils import JitTestCase
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -16,26 +15,6 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestRemoveMutation(JitTestCase):
-    def test_lower_linear(self):
-        # linear is one of main use cases of removing mutation so add test so it doesnt regress
-        @torch.jit.script
-        def foo(x):
-            return F.linear(x, torch.randn(20, 20), torch.randn(20))
-
-        self.run_pass('inline', foo.graph)
-        self.run_pass('peephole', foo.graph)
-        self.run_pass('constant_propagation', foo.graph)
-        FileCheck().check("aten::add_").run(foo.graph)
-        input = torch.randn(20, 20)
-        with freeze_rng_state():
-            out1 = foo(input)
-
-        self.run_pass('remove_mutation', foo.graph)
-        FileCheck().check_not("aten::add_").run(foo.graph)
-        with freeze_rng_state():
-            out2 = foo(input)
-        self.assertEqual(out1, out2)
-
     def test_aten_inplace(self):
         def test_not_new_alias(x):
             y = x[0]

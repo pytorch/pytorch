@@ -74,7 +74,12 @@ which is an ``nn.Module`` instance that holds a ``Graph`` as well as a
 
 Taken together, this pipeline of components (symbolic tracing →
 intermediate representation → transforms → Python code generation)
-constitutes the Python-to-Python transformation pipeline of FX.
+constitutes the Python-to-Python transformation pipeline of FX. In
+addition, these components can be used separately. For example,
+symbolic tracing can be used in isolation to capture a form of
+the code for analysis (and not transformation) purposes. Code
+generation can be used for programmatically generating models, for
+example from a config file. There are many uses for FX!
 '''
 
 from .graph_module import GraphModule
@@ -82,3 +87,4 @@ from .symbolic_trace import symbolic_trace, Tracer, wrap
 from .graph import Graph
 from .node import Node, map_arg
 from .proxy import Proxy
+from .interpreter import Interpreter as Interpreter, Transformer as Transformer

@@ -3120,6 +3120,16 @@ def foo(x):
     def test_device_type_cuda(self):
         self._test_device_type('cuda')
 
+    def test_string_device_implicit_conversion(self):
+        @torch.jit.script
+        def fn(x: torch.device):
+            return x
+
+        self.assertEqual(fn("cpu"), torch.device("cpu"))
+
+        with self.assertRaisesRegex(RuntimeError, "Expected one of"):
+            fn("invalid_device")
+
     def test_eval_python(self):
         def _test(m):
             self.assertTrue(m(torch.ones(2, 2)))
@@ -10618,6 +10628,59 @@ dedent """
         if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
             FileCheck().check("Double(*, *, requires_grad=0, device=cpu)") \
                        .check_not("Float(*, *, requires_grad=0, device=cpu)").run(randint.graph_for())
+
+    def test_linear_grad(self):
+        with enable_profiling_mode_for_profiling_tests():
+            def t(x: torch.Tensor, w: torch.Tensor, b: Optional[torch.Tensor]):
+                return torch.nn.functional.linear(x, w, b)
+
+            x_init = torch.randn(4, 2)
+            w_init = torch.randn(3, 2)
+            b_init = torch.randn(3)
+            grad = torch.randn(4, 3)
+
+            with disable_autodiff_subgraph_inlining():
+                # script module
+                jit_t = torch.jit.script(t)
+
+                x = x_init.detach().requires_grad_()
+                w = w_init.detach().requires_grad_()
+                b = b_init.detach().requires_grad_()
+                x_ref = x_init.detach().requires_grad_()
+                w_ref = w_init.detach().requires_grad_()
+                b_ref = b_init.detach().requires_grad_()
+
+                # profiling/optimization runs
+                jit_o = jit_t(x, w, b)
+                jit_o.backward(grad)
+                jit_o = jit_t(x, w, b)
+                jit_o.backward(grad)
+
+                x.grad.zero_()
+                w.grad.zero_()
+                b.grad.zero_()
+                jit_o = jit_t(x, w, b)
+                jit_o.backward(grad)
+                o = t(x_ref, w_ref, b_ref)
+                o.backward(grad)
+
+                self.assertEqual(jit_o, o)
+                self.assertEqual(x.grad, x_ref.grad)
+                self.assertEqual(w.grad, w_ref.grad)
+                self.assertEqual(b.grad, b_ref.grad)
+
+                x.grad.zero_()
+                w.grad.zero_()
+                x_ref.grad.zero_()
+                w_ref.grad.zero_()
+                jit_o = jit_t(x, w, None)
+                jit_o.backward(grad)
+                o = t(x_ref, w_ref, None)
+                o.backward(grad)
+
+                self.assertEqual(jit_o, o)
+                self.assertEqual(x.grad, x_ref.grad)
+                self.assertEqual(w.grad, w_ref.grad)
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "the profiling version of test_rand")
     def test_rand_profiling(self):
