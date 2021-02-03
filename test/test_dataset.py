@@ -1,3 +1,4 @@
+import pickle
 import tempfile
 import warnings
 
@@ -5,8 +6,9 @@ import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests)
 from torch.utils.data import IterableDataset, RandomSampler
 from torch.utils.data.datasets import \
-    (CollateIterableDataset, BatchIterableDataset, ListDirFilesIterableDataset,
-     LoadFilesFromDiskIterableDataset, SamplerIterableDataset)
+    (CallableIterableDataset, CollateIterableDataset, BatchIterableDataset,
+     ListDirFilesIterableDataset, LoadFilesFromDiskIterableDataset, SamplerIterableDataset)
+from typing import List, Tuple, Dict, Any, Type
 
 
 def create_temp_dir_and_files():
@@ -74,28 +76,73 @@ class IterDatasetWithLen(IterableDataset):
         return self.length
 
 
+def _fake_fn(self, data, *args, **kwargs):
+    return data
+
+
 class TestFunctionalIterableDataset(TestCase):
+
+    def test_picklable(self):
+        arr = range(10)
+        picklable_datasets: List[Tuple[Type[IterableDataset], IterableDataset, List, Dict[str, Any]]] = [
+            (CallableIterableDataset, IterDatasetWithLen(arr), [], {}),
+            (CallableIterableDataset, IterDatasetWithLen(arr), [0], {'fn': _fake_fn, 'test': True}),
+            (CollateIterableDataset, IterDatasetWithLen(arr), [], {}),
+            (CollateIterableDataset, IterDatasetWithLen(arr), [0], {'collate_fn': _fake_fn, 'test': True}),
+        ]
+        for ds, d, args, kargs in picklable_datasets:
+            p = pickle.dumps(ds(d, *args, **kargs))  # type: ignore
+
+        unpicklable_datasets: List[Tuple[Type[IterableDataset], IterableDataset, List, Dict[str, Any]]] = [
+            (CallableIterableDataset, IterDatasetWithLen(arr), [], {'fn': lambda x: x}),
+            (CollateIterableDataset, IterDatasetWithLen(arr), [], {'collate_fn': lambda x: x}),
+        ]
+        for ds, d, args, kargs in unpicklable_datasets:
+            with self.assertRaises(AttributeError):
+                p = pickle.dumps(ds(d, *args, **kargs))  # type: ignore
+
+    def test_callable_dataset(self):
+        arr = range(10)
+        ds = IterDatasetWithLen(arr)
+        ds_nl = IterDatasetWithoutLen(arr)
+
+        def fn(item, dtype=torch.float, *, sum=False):
+            data = torch.tensor(item, dtype=dtype)
+            return data if not sum else data.sum()
+
+        callable_ds = CallableIterableDataset(ds, fn=fn)  # type: ignore
+        self.assertEqual(len(ds), len(callable_ds))
+        for x, y in zip(callable_ds, ds):
+            self.assertEqual(x, torch.tensor(y, dtype=torch.float))
+
+        callable_ds = CallableIterableDataset(ds, torch.int, fn=fn, sum=True)  # type: ignore
+        self.assertEqual(len(ds), len(callable_ds))
+        for x, y in zip(callable_ds, ds):
+            self.assertEqual(x, torch.tensor(y, dtype=torch.int).sum())
+
+        callable_ds_nl = CallableIterableDataset(ds_nl)  # type: ignore
+        with self.assertRaises(NotImplementedError):
+            len(callable_ds_nl)
+        for x, y in zip(callable_ds_nl, ds_nl):
+            self.assertEqual(x, torch.tensor(y, dtype=torch.float))
+
     def test_collate_dataset(self):
         arrs = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
-        ds_len = IterDatasetWithLen(arrs)
-        ds_nolen = IterDatasetWithoutLen(arrs)
+        ds = IterDatasetWithLen(arrs)
+        ds_nl = IterDatasetWithoutLen(arrs)
 
         def _collate_fn(batch):
             return torch.tensor(sum(batch), dtype=torch.float)
 
-        collate_ds = CollateIterableDataset(ds_len, collate_fn=_collate_fn)
-        self.assertEqual(len(ds_len), len(collate_ds))
-        ds_iter = iter(ds_len)
-        for x in collate_ds:
-            y = next(ds_iter)
+        collate_ds = CollateIterableDataset(ds, collate_fn=_collate_fn)
+        self.assertEqual(len(ds), len(collate_ds))
+        for x, y in zip(collate_ds, ds):
             self.assertEqual(x, torch.tensor(sum(y), dtype=torch.float))
 
-        collate_ds_nolen = CollateIterableDataset(ds_nolen)  # type: ignore
+        collate_ds_nl = CollateIterableDataset(ds_nl)  # type: ignore
         with self.assertRaises(NotImplementedError):
-            len(collate_ds_nolen)
-        ds_nolen_iter = iter(ds_nolen)
-        for x in collate_ds_nolen:
-            y = next(ds_nolen_iter)
+            len(collate_ds_nl)
+        for x, y in zip(collate_ds_nl, ds_nl):
             self.assertEqual(x, torch.tensor(y))
 
     def test_batch_dataset(self):
