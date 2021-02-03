@@ -3,7 +3,7 @@ from typing_extensions import Protocol
 import warnings
 
 import torch
-from ..parameter import UninitializedParameter, UninitializedBuffer
+from ..parameter import UninitializedParameter, UninitializedBuffer, UninitializedMixin
 
 
 class _LazyProtocol(Protocol):
@@ -208,10 +208,10 @@ class LazyModuleMixin:
             key = prefix + name
             if key in state_dict and param is not None:
                 input_param = state_dict[key]
-                if isinstance(param, (UninitializedParameter, UninitializedBuffer)):
+                if isinstance(param, UninitializedMixin):
                     # The current parameter is not initialized but the one being loaded one is
                     # create a new parameter based on the uninitialized one
-                    if not isinstance(input_param, (UninitializedParameter, UninitializedBuffer)):
+                    if not isinstance(input_param, UninitializedMixin):
                         with torch.no_grad():
                             param.materialize(input_param.shape)
 
@@ -230,7 +230,7 @@ class LazyModuleMixin:
         params = self._parameters.values()
         buffers = self._buffers.values()
         for param in itertools.chain(params, buffers):
-            if isinstance(param, (UninitializedParameter, UninitializedBuffer)):
+            if isinstance(param, UninitializedMixin):
                 return True
         return False
 
