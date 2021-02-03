@@ -3,7 +3,7 @@ from torch.fx import Proxy, Graph, GraphModule
 
 
 '''
-How to create a Graph using Proxy objects instead of tracing
+How to Create a Graph Using Proxy Objects Instead of Tracing
 
 It's possible to directly create a Proxy object around a raw Node. This
 can be used to create a Graph independently of symbolic tracing.
