@@ -7,18 +7,31 @@ from torch.fx import Proxy
 import torch.fx
 from torch.fx.passes.shape_prop import ShapeProp
 
+# Vmap
+# ---------------
+# `vmap` (short for vectorizing map) is a function transformation that takes in
+# a model that operates on single examples and returns a model that operates on
+# multiple examples. For example, if our model `M` originally takes in tensors
+# of shape (H, W) and returns a scalar, then `vmap(M)` should take in tensors
+# of shape `(B, H, W)` and return a vector. This procedure is also often called
+# "batching" a model.
+#
+# How is this feat accomplished? One observation is that to "batch" a model, it
+# suffices to batch each individual operation. In other words, given an
+# operation that works on the current shape, how do we make it work on another
+# batch dimension? This leads us to batching rules.
+#
 # Batching Rules
 # ---------------
-# Giving a full overview of how vmap is implemented is outside the scope of
-# this example, but we will provide a brief description of batching rules. The
-# general idea behind a batching rule is that given the input arguments were
-# originally meant to operate upon a non-batched version, what do we do
-# when one of the inputs now has a batch dimension?
-# One simple example to illustrate this is `torch.movedim(x, from_dim,
-# to_dim)`, which moves a dimension from `from_dim` to `to_dim`. For example,
-# if `x.shape = (1,2,3,4)`, then torch.movedim(x, 0, 2) would result in a shape
-# of `(2,3,1,4)`.
-# However, let's say that we introduce a batch dimension, so `x.shape =
+# A batching rule for a function `f` takes in the function `f` (that operates
+# on unbatched values), a batched argument `x`, and performs the necessary
+# transformations to apply `f` to `x`.
+#
+# One simple example is `torch.movedim(x, from_dim, to_dim)`, which moves a
+# dimension from `from_dim` to `to_dim`. For example, if `x.shape = (1,2,3,4)`,
+# then torch.movedim(x, 0, 2) would result in a shape of `(2,3,1,4)`.
+#
+# However, let's say that we introduce a batch dimension - `x.shape =
 # (B,1,2,3,4)`. Now, we can't simply execute the same `torch.movedim(x,0,2)`,
 # as there is an extra batch dimension in the front. Instead, we must execute
 # `torch.movedim(x,1,3)`. This procedure (and some other stuff to make sure the
