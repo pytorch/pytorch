@@ -1,6 +1,7 @@
 import collections
 import gc
 import io
+import os
 import unittest
 
 import torch
@@ -9,7 +10,7 @@ import torch.optim
 import torch.utils.data
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, TEST_WITH_ASAN, IS_WINDOWS, TemporaryFileName)
+    TestCase, run_tests, TEST_WITH_ASAN, IS_WINDOWS, TemporaryFileName, TemporaryDirectoryName)
 from torch.autograd.profiler import profile as _profile
 from torch.profiler import profile, kineto_available, DeviceType, ProfilerActivity
 
@@ -299,7 +300,7 @@ class TestProfiler(TestCase):
 
         self.assertEqual(called_num[0], 2)
 
-        # case without enable_pred
+        # case without schedule
         with profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
@@ -330,6 +331,37 @@ class TestProfiler(TestCase):
                 except ValueError:
                     pass
                 assert is_int, "Invalid stacks record"
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_tensorboard_trace_handler(self):
+        with _profile(use_cuda=True, use_kineto=True):
+            self.payload()
+
+        with TemporaryDirectoryName() as dname:
+            with profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA],
+                schedule=torch.profiler.schedule(
+                    wait=1,
+                    warmup=1,
+                    active=2),
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(dname)
+            ) as p:
+                for _ in range(8):
+                    self.payload()
+                    p.step()
+
+            self.assertTrue(os.path.exists(dname))
+            file_num = 0
+            for file_name in os.listdir(dname):
+                parts = file_name.split('.')
+                self.assertTrue(len(parts) > 4)
+                self.assertTrue(parts[-4].isdigit() and int(parts[-4]) > 0, "Wrong tracing file name pattern")
+                self.assertEqual(parts[-3:], ['pt', 'trace', 'json'])
+                file_num += 1
+            self.assertEqual(file_num, 2)
 
 
 if __name__ == '__main__':
