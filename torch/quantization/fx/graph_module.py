@@ -52,3 +52,12 @@ def mark_observed_standalone_module(module: GraphModule) -> GraphModule:
 
 def is_observed_standalone_module(module: Any) -> bool:
     return isinstance(module, ObservedStandaloneGraphModule)
+
+
+class QuantizedGraphModule(GraphModule):
+    def __init__(self, root: Union[torch.nn.Module, Dict[str, Any]], graph: Graph):
+        super().__init__(root, graph)
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super()._save_to_state_dict(destination, prefix, keep_vars)
+        print("save to statedict:", dir(self))

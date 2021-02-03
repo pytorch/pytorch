@@ -40,11 +40,12 @@ from .pattern_utils import (
     Pattern,
 )
 
-from .observed_module import (
+from .graph_module import (
     mark_observed_module,
     is_observed_module,
     mark_observed_standalone_module,
     is_observed_standalone_module,
+    QuantizedGraphModule,
 )
 
 from .quantization_patterns import *
@@ -903,7 +904,7 @@ class Quantizer:
 
         # removes qconfig and activation_post_process modules
         _remove_qconfig(model)
-        model = GraphModule(model, act_post_process_removed_graph)
+        model = QuantizedGraphModule(model, act_post_process_removed_graph)
         return model
 
     # Trace back from the weight node util we hit getattr, reconstruct the

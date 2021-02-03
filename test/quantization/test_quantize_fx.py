@@ -1592,6 +1592,27 @@ class TestQuantizeFx(QuantizationTestCase):
         assert hasattr(m, "mods1_1_packed_weight_0")
         assert hasattr(m, "mods2_packed_weight_0")
 
+    def test_state_dict(self):
+        """ Make sure packed params appear in state_dict
+        """
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.rand(4, 30)
+                self.b = torch.rand(4)
+
+            def forward(self, x):
+                return F.linear(x, self.w, self.b)
+
+        m = M().eval()
+        qconfig_dict = {"": default_qconfig}
+        m = prepare_fx(m, qconfig_dict)
+        m = convert_fx(m)
+        print(m)
+        print(type(m))
+        print(m.state_dict())
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
