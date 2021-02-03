@@ -165,6 +165,10 @@ class Logger(nn.Module):
     def __init__(self):
         super(Logger, self).__init__()
         self.stats = {}
+        # We only insert observer if the op is quantized with static quantization,
+        # which is identified by activation_observer.dtype == quint8.  This is needed
+        # when attaching Logger as observer for FX mode
+        self.dtype = torch.quint8
 
     def forward(self, x):
         pass
@@ -328,11 +332,18 @@ def prepare_model_with_stubs(
 
         # Insert shadow module only if the module is not of the same type as
         # the floating point module
-        if type(float_mod) in module_swap_list and type(mod) is not type(float_mod):
+        if type(float_mod) in module_swap_list and not is_identical_module_type(mod, float_mod):
             reassign[name] = Shadow(mod, float_mod, Logger)
 
     for key, value in reassign.items():
         q_module._modules[key] = value
+
+def is_identical_module_type(mod1, mod2):
+    # Compare if two modules have the same dtype
+    mod1_module_types = [type(mod) for mod in mod1.modules()]
+    mod2_module_types = [type(mod) for mod in mod2.modules()]
+    return mod1_module_types == mod2_module_types
+
 
 
 def compare_model_stub(
