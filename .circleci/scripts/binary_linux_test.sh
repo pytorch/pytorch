@@ -50,11 +50,9 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     # it comes to the conda installation commands
     set +u
     retry conda install \${EXTRA_CONDA_FLAGS} -yq future "numpy\${NUMPY_PIN}" protobuf six
-    retry conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
       retry conda install -c pytorch -y cpuonly
-    fi
-    if [[ "$DESIRED_CUDA" != 'cpu' ]]; then
+    else
       # DESIRED_CUDA is in format cu90 or cu102
       if [[ "${#DESIRED_CUDA}" == 4 ]]; then
         cu_ver="${DESIRED_CUDA:2:1}.${DESIRED_CUDA:3}"
@@ -63,6 +61,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       fi
       retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "cudatoolkit=\${cu_ver}"
     fi
+    retry conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
   )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   pip install "\$pkg"
