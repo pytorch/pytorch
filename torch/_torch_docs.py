@@ -4956,9 +4956,8 @@ Example::
     tensor([ 1.2252,  0.5002,  0.6248,  2.0139])
 """.format(**common_args))
 
-add_docstr(torch.matrix_rank,
-           r"""
-matrix_rank(input, tol=None, symmetric=False) -> Tensor
+add_docstr(torch.matrix_rank, r"""
+matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor
 
 Returns the numerical rank of a 2-D tensor. The method to compute the
 matrix rank is done using SVD by default. If :attr:`symmetric` is ``True``,
@@ -4971,11 +4970,17 @@ specified, :attr:`tol` is set to ``S.max() * max(S.size()) * eps`` where `S` is 
 singular values (or the eigenvalues when :attr:`symmetric` is ``True``), and ``eps``
 is the epsilon value for the datatype of :attr:`input`.
 
+.. note:: :func:`torch.matrix_rank` is deprecated. Please use :func:`torch.linalg.matrix_rank` instead.
+          The parameter :attr:`symmetric` was renamed in :func:`torch.linalg.matrix_rank` to ``hermitian``.
+
 Args:
     input (Tensor): the input 2-D tensor
     tol (float, optional): the tolerance value. Default: ``None``
     symmetric(bool, optional): indicates whether :attr:`input` is symmetric.
                                Default: ``False``
+
+Keyword args:
+    {out}
 
 Example::
 
@@ -4986,7 +4991,7 @@ Example::
     >>> b[0, 0] = 0
     >>> torch.matrix_rank(b)
     tensor(9)
-""")
+""".format(**common_args))
 
 add_docstr(torch.matrix_power,
            r"""
