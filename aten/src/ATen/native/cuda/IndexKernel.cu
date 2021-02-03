@@ -324,14 +324,24 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
   // number of elements available in `src`
   TORCH_CHECK(totalElements <= srcSize, "source nElements must be == mask `1` elements");
 
+
+#if CUDA_VERSION >= 1120
+  // FIXME: there appears to be a bug in Thrust (CUDA 11.2) for mixed
+  // iterator prefix sums? Convert `mask` to the same datatype as what
+  // we're accumulating the prefix sum in (int64_t) to get around it
+  // Reference: https://github.com/pytorch/pytorch/issues/51544
+  auto mask_cont = mask.to(kLong).contiguous();
+  thrust::device_ptr<int64_t> maskData(mask_cont.data_ptr<int64_t>());
+#elif
   auto mask_cont = mask.contiguous();
+  thrust::device_ptr<mask_t> maskData(mask_cont.data_ptr<mask_t>());
+#endif
 
   // Use a prefix sum to determine the output locations of the masked elements
   auto maskPrefixSum = at::empty_like(mask, mask.options().dtype(kLong));
 
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
 
-  thrust::device_ptr<mask_t> maskData(mask_cont.data_ptr<mask_t>());
   thrust::device_ptr<int64_t> maskPrefixSumData(
       maskPrefixSum.data_ptr<int64_t>());
 
