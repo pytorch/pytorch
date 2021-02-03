@@ -71,6 +71,7 @@ allow_list = [
     ("aten::_foreach_div_", datetime.date(2021, 3, 2)),
     ("aten::_foreach_addcdiv", datetime.date(2021, 3, 2)),
     ("aten::_foreach_addcmul", datetime.date(2021, 3, 2)),
+    ("aten::mkl_linear", datetime.date(2021, 3, 2)),
 
 ]
 
