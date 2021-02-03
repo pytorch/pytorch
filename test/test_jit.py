@@ -2261,14 +2261,6 @@ graph(%Ra, %Rb):
         scripted = torch.jit.script(test2)
         self.assertEqual(scripted(40), test2(40))
 
-        def test2(u: Union[int, int]) -> int:
-            if u is not None:
-                return u
-            else:
-                return 0
-        scripted = torch.jit.script(test2)
-        self.assertEqual(scripted(40), test2(40))
-
         def test3(u: Union[float, int]) -> int:
             if u is not None:
                 return u
