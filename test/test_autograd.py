@@ -3799,6 +3799,45 @@ class TestAutograd(TestCase):
         self.assertIn('Anomaly Detection has been enabled', str(w[0].message))
         self.assertIn('Error detected in PowBackward0', s.captured)
 
+    def test_anomaly_pyobject_cleanup(self):
+        # Test that python objects created are properly cleaned up
+        import weakref
+
+        def get_ref():
+            with detect_anomaly():
+                # we use torch.exp here but any function that will construct a new node in its
+                # backward call in grad mode will work
+                x = torch.randn(2, 2, requires_grad=True)
+                t = x.exp()
+
+                # ExpBackward calls mul, creating the MulBackward node when create_graph=True.
+                # In anomaly mode, a PyObject referencing MulBackward's "parent" ExpBackward is added to
+                # MulBackward's anomaly metadata dict, creating the following reference chain:
+                #
+                # grad -> MulBackward -> PyObject -> ExpBackward
+                #
+                grad = torch.autograd.grad(t, x, torch.ones_like(t), create_graph=True)
+
+                # We add a weak reference to a new object foo, which we insert into ExpBackward's metadata dict
+                #
+                # (PyObject) -> ExpBackward -> dict -> *Foo*
+                #            t ----^        WeakRef ---^
+                #
+                # We want to test that when grad goes out of scope at the end of this function that PyObject is destroyed
+                # We can test this by seeing whether Foo is not kept alive once t is destroyed
+                meta_dict = t.grad_fn.metadata
+                class Foo(object):
+                    pass
+                my_obj = Foo()
+                meta_dict[0] = my_obj
+                ref = weakref.ref(my_obj)
+            return t, ref
+
+        t, ref = get_ref()
+        self.assertIsNotNone(ref())
+        del t
+        self.assertIsNone(ref())
+
     @skipIfNoLapack
     def test_eig_no_eigenvectors(self):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
