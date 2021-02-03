@@ -7797,6 +7797,7 @@ class TestMultithreadAutograd(TestCase):
             return torch.cat((x1, x2), dim=-1)
 
         torch.autograd.gradcheck(fn, [inp_r, inp_c])
+        torch.autograd.gradcheck(fn, [inp_c, inp_r])
 
 for test in method_tests():
     add_test(*test)
