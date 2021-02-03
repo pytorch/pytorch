@@ -3826,6 +3826,7 @@ class TestAutograd(TestCase):
                 # We want to test that when grad goes out of scope at the end of this function that PyObject is destroyed
                 # We can test this by seeing whether Foo is not kept alive once t is destroyed
                 meta_dict = t.grad_fn.metadata
+
                 class Foo(object):
                     pass
                 my_obj = Foo()
@@ -3856,6 +3857,7 @@ class TestAutograd(TestCase):
             # The answer is that custom function's PyObject (THPFunction) actually only hold
             # a weak reference to the c++ node!
             size = 10
+
             class MyFunc(Function):
                 @staticmethod
                 def forward(ctx, inp1):
@@ -3894,6 +3896,7 @@ class TestAutograd(TestCase):
                         gsum.backward()
 
             meta_dict = out.grad_fn.metadata
+
             class Foo(object):
                 pass
             my_obj = Foo()
