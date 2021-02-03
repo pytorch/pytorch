@@ -315,10 +315,6 @@ class TORCH_API Store : public StmtNode<Store> {
 // explicitly freed. An unfreed memory is likely considered an error.
 class TORCH_API Allocate : public StmtNode<Allocate> {
  public:
-  static Allocate* make(
-      const VarHandle& buffer_var,
-      Dtype dtype,
-      const std::vector<ExprHandle>& dims);
   static Allocate* make(const BufHandle& buf_handle) {
     return new Allocate(buf_handle.node());
   }

@@ -3522,8 +3522,7 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
 
   {
     // Simple positive case.
-    VarHandle x("x", kInt);
-    BufHandle b(x, {0}, kInt);
+    BufHandle b("x", {0}, kInt);
 
     Allocate* alloc = Allocate::make(b);
     Free* free_ = Free::make(b);
@@ -3538,8 +3537,7 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
 
   {
     // Simple negative case.
-    VarHandle x("x", kInt);
-    BufHandle b(x, {2}, kInt);
+    BufHandle b("x", {2}, kInt);
 
     Allocate* alloc = Allocate::make(b);
     Free* free_ = Free::make(b);
@@ -3554,10 +3552,8 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
 
   {
     // Finds right Alloc/Free.
-    VarHandle x("x", kInt);
-    VarHandle y("y", kInt);
-    BufHandle b1(x, {0}, kInt);
-    BufHandle b2(y, {2}, kInt);
+    BufHandle b1("x", {0}, kInt);
+    BufHandle b2("y", {2}, kInt);
 
     Allocate* alloc1 = Allocate::make(b1);
     Allocate* alloc2 = Allocate::make(b2);
@@ -3578,11 +3574,9 @@ TEST(Simplify, SimplifyEliminateZeroLengthAlloc) {
 
   {
     // Dynamic shape.
-    VarHandle x("x", kInt);
-    VarHandle y("y", kInt);
     VarHandle z("z", kInt);
-    BufHandle b1(x, {0}, kInt);
-    BufHandle b2(y, {z}, kInt);
+    BufHandle b1("x", {0}, kInt);
+    BufHandle b2("y", {z}, kInt);
 
     Allocate* alloc1 = Allocate::make(b1);
     Allocate* alloc2 = Allocate::make(b2);

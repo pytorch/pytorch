@@ -145,14 +145,6 @@ Store* Store::make(
       ExprHandle(1).node());
 }
 
-Allocate* Allocate::make(
-    const VarHandle& buffer_var,
-    Dtype dtype,
-    const std::vector<ExprHandle>& dims) {
-  return new Allocate(
-      new Buf(buffer_var.node(), ExprHandleVectorToExprVector(dims), dtype));
-}
-
 const Expr* flatten_index(
     const std::vector<const Expr*>& dims,
     const std::vector<const Expr*>& indices) {

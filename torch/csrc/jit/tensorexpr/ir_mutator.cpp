@@ -188,6 +188,8 @@ const Expr* IRMutator::mutate(const Load* v) {
 const Expr* IRMutator::mutate(const Buf* v) {
   const Var* var = v->base_handle();
   const Var* var_new = dynamic_cast<const Var*>(var->accept_mutator(this));
+  if (!var_new)
+    return nullptr;
   bool any_change = var_new != var;
 
   std::vector<const Expr*> dims_old = v->dims();
@@ -423,7 +425,8 @@ Stmt* IRMutator::mutate(const SyncThreads* v) {
 Stmt* IRMutator::mutate(const Allocate* v) {
   const Buf* buf = v->buf();
   const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
-  if (buf == buf_new) {
+  assert(buf_new);
+  if (buf_new == buf) {
     return (Stmt*)v;
   }
   return new Allocate(buf_new);
@@ -432,6 +435,7 @@ Stmt* IRMutator::mutate(const Allocate* v) {
 Stmt* IRMutator::mutate(const Free* v) {
   const Buf* buf = v->buf();
   const Buf* buf_new = dynamic_cast<const Buf*>(buf->accept_mutator(this));
+  assert(buf_new);
   if (buf_new == buf) {
     return (Stmt*)v;
   }
@@ -518,7 +522,7 @@ Stmt* StmtClone::mutate(const AtomicAdd* v) {
 }
 
 Stmt* StmtClone::mutate(const Allocate* v) {
-  return new Allocate(new Buf(v->buffer_var(), v->dims(), v->dtype()));
+  return new Allocate(v->buf());
 }
 
 Stmt* StmtClone::mutate(const Free* v) {

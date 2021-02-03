@@ -1974,28 +1974,17 @@ const Expr* buf_flattening_helper(const Buf* v) {
 }
 
 Stmt* TermExpander::mutate(const Allocate* v) {
-  const Var* buffer_var_old = v->buffer_var();
-  const Var* buffer_var_new =
-      dynamic_cast<const Var*>(buffer_var_old->accept_mutator(this));
-  bool any_change = buffer_var_new == buffer_var_old;
-
-  std::vector<const Expr*> dims_old = v->dims();
-  std::vector<const Expr*> dims_new(dims_old.size());
-  for (size_t i = 0; i < dims_old.size(); i++) {
-    dims_new[i] = dims_old[i]->accept_mutator(this);
-    any_change |= (dims_new[i] == dims_old[i]);
-  }
-
-  // Safe to do this as there can't be an Allocate inside an Allocate:
-  const Buf* buf_new = new Buf(buffer_var_new, dims_new, v->dtype());
+  const Buf* buf = v->buf();
+  const Buf* buf_new = dynamic_cast<const Buf*>(v->buf()->accept_mutator(this));
+  assert(buf_new);
   const Expr* flattened = buf_flattening_helper(buf_new);
 
   if (flattened->isConstant() && immediateEquals(flattened, 0)) {
-    eliminated_allocations_.insert(buffer_var_new);
+    eliminated_allocations_.insert(buf_new->base_handle());
     return nullptr;
   }
 
-  if (!any_change) {
+  if (buf_new == buf) {
     return (Stmt*)v;
   }
 
@@ -2003,19 +1992,20 @@ Stmt* TermExpander::mutate(const Allocate* v) {
 }
 
 Stmt* TermExpander::mutate(const Free* v) {
-  const Expr* buffer_var = v->buf()->base_handle();
-  const Var* buffer_var_new = dynamic_cast<const Var*>(buffer_var->accept_mutator(this));
+  const Buf* buf = v->buf();
+  const Buf* buf_new = dynamic_cast<const Buf*>(v->buf()->accept_mutator(this));
+  assert(buf_new);
 
-  if (eliminated_allocations_.count(buffer_var_new)) {
-    eliminated_allocations_.erase(buffer_var_new);
+  if (eliminated_allocations_.count(buf_new->base_handle())) {
+    eliminated_allocations_.erase(buf_new->base_handle());
     return nullptr;
   }
 
-  if (buffer_var_new == buffer_var) {
+  if (buf_new == buf) {
     return (Stmt*)v;
   }
 
-  return new Free(new Buf(buffer_var_new, v->buf()->dims(), v->buf()->dtype()));
+  return new Free(buf_new);
 }
 
 // Combines adjactent Cond nodes with identical conditions.

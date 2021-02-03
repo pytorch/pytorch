@@ -797,14 +797,13 @@ TEST(Registerizer, RegisterizerAllocs) {
   KernelScope kernel_scope;
 
   BufHandle a("A", {2}, kInt);
-  BufHandle b("B", {1}, kInt);
   BufHandle c("C", {1}, kInt);
   VarHandle x("x", kInt);
 
-  VarHandle b_(b.node()->base_handle());
+  BufHandle b("B", {Load::make(c, {0}, 1)}, kInt);
 
   Stmt* stmt = Block::make(
-      {Allocate::make(b_, kInt, {Load::make(c, {0}, 1)}),
+      {Allocate::make(b),
        Store::make(a, {0}, Load::make(c, {0}, 1), 1),
        Store::make(b, {0}, 0, 1),
        For::make(
