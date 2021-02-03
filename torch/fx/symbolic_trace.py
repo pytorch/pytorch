@@ -271,7 +271,7 @@ class Tracer(TracerBase):
 
         return root_fn, args
 
-    def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, any]] = None) -> Graph:
+    def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
         """
         Trace ``root`` and return the corresponding FX ``Graph`` representation. ``root``
         can either be an ``nn.Module`` instance or a Python callable.
