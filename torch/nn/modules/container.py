@@ -51,7 +51,7 @@ class Sequential(Module):
                   ('relu2', nn.ReLU())
                 ]))
 
-        # Example of using Sequential with **kwargs
+        # Example of using Sequential with kwargs
         model = nn.Sequential(
             conv1=nn.Conv2d(1, 20, 5),
             relu1=nn.ReLU(),
