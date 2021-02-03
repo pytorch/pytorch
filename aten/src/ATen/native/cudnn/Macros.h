@@ -7,7 +7,7 @@
 // once the cuDNN v8 binding is done.
 // cuDNN v8 API is not finished yet, and is not recommended to use.
 // enable this only if you know what you are doing.
-#define _ENABLE_CUDNN_V8_API true
+#define _ENABLE_CUDNN_V8_API false
 
 // Note: The version below should not actually be 8000. Instead, it should
 // be whatever version of cuDNN that v8 API work with PyTorch correctly.
