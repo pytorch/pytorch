@@ -602,8 +602,8 @@ Example::
 cond = _add_docstr(_linalg.linalg_cond, r"""
 linalg.cond(input, p=None, *, out=None) -> Tensor
 
-Computes the condition number of a matrix, or batch of matrices, :attr:`input`,
-using the matrix norm defined by :attr:`p`.
+Computes the condition number of a matrix :attr:`input`, or of each matrix in
+a batched :attr:`input`, using the matrix norm defined by :attr:`p`.
 
 For norms :math:`p \in \{'fro', 'nuc', inf, -inf, 1, -1\}` this is defined as the matrix norm of :attr:`input`
 times the matrix norm of the inverse of :attr:`input` computed using :func:`torch.linalg.norm`. While
@@ -627,6 +627,7 @@ Args:
                     where `*` is one or more batch dimensions.
     p (int, float, str, optional): the type of the matrix norm to use in the computations.
                                    The following norms are supported:
+
         =====  ============================
         p      norm for matrices
         =====  ============================
@@ -640,6 +641,7 @@ Args:
         2      ratio of the largest singular value to the smallest singular value
         -2     ratio of the smallest singular value to the largest singular value
         =====  ============================
+
         Default: ``None``
 
 Keyword args:
