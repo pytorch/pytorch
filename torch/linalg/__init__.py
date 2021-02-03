@@ -145,7 +145,8 @@ Examples::
 det = _add_docstr(_linalg.linalg_det, r"""
 linalg.det(input) -> Tensor
 
-Computes the determinant of a square matrix or batch of square matrices.
+Computes the determinant of a square matrix :attr:`input`, or of each square matrix
+in a batched :attr:`input`.
 
 This function supports float, double, cfloat and cdouble dtypes.
 
@@ -167,11 +168,11 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a
-    tensor([[-0.9052,  1.9934,  1.6803],
-            [-1.5044, -0.4700,  0.8886],
-            [-2.3036,  1.5226,  0.7618]])
+    tensor([[ 0.9478,  0.9158, -1.1295],
+            [ 0.9701,  0.7346, -1.8044],
+            [-0.2337,  0.0557,  0.6929]])
     >>> torch.linalg.det(a)
-    tensor(-5.9151)
+    tensor(0.0934)
 
     >>> a = torch.randn(3, 2, 2)
     >>> a
@@ -235,7 +236,7 @@ eigh = _add_docstr(_linalg.linalg_eigh, r"""
 linalg.eigh(input, UPLO='L', *, out=None) -> (Tensor, Tensor)
 
 Computes the eigenvalues and eigenvectors of a complex Hermitian (or real symmetric)
-matrix, or batch of such matrices, :attr:`input`.
+matrix :attr:`input`, or of each such matrix in a batched :attr:`input`.
 
 For a single matrix :attr:`input`, the tensor of eigenvalues :math:`w` and the tensor of eigenvectors
 :math:`V` decompose the :attr:`input` such that :math:`\text{input} = V \text{diag}(w) V^H`, where
@@ -304,8 +305,8 @@ Examples::
 eigvalsh = _add_docstr(_linalg.linalg_eigvalsh, r"""
 linalg.eigvalsh(input, UPLO='L', *, out=None) -> Tensor
 
-Computes the eigenvalues of a complex Hermitian (or real symmetric) matrix,
-or batch of such matrices, :attr:`input`. The eigenvalues are returned in ascending order.
+Computes the eigenvalues of a complex Hermitian (or real symmetric) matrix :attr:`input`,
+or of each such matrix in a batched :attr:`input`. The eigenvalues are returned in ascending order.
 
 Since the matrix or matrices in :attr:`input` are assumed to be Hermitian, the imaginary part of their diagonals
 is always treated as zero. When :attr:`UPLO` is "L", its default value, only the lower triangular part of
@@ -366,7 +367,7 @@ Examples::
 matrix_rank = _add_docstr(_linalg.linalg_matrix_rank, r"""
 matrix_rank(input, tol=None, hermitian=False, *, out=None) -> Tensor
 
-Computes the numerical rank of the matrix, or batch of matrices, :attr:`input`.
+Computes the numerical rank of a matrix :attr:`input`, or of each matrix in a batched :attr:`input`.
 
 The matrix rank is computed as the number of singular values (or absolute eigenvalues when :attr:`hermitian` is ``True``)
 that are greater than the specified :attr:`tol` threshold.
@@ -655,8 +656,8 @@ Example::
 cond = _add_docstr(_linalg.linalg_cond, r"""
 linalg.cond(input, p=None, *, out=None) -> Tensor
 
-Computes the condition number of a matrix, or batch of matrices, :attr:`input`,
-using the matrix norm defined by :attr:`p`.
+Computes the condition number of a matrix :attr:`input`, or of each matrix in
+a batched :attr:`input`, using the matrix norm defined by :attr:`p`.
 
 For norms :math:`p \in \{'fro', 'nuc', inf, -inf, 1, -1\}` this is defined as the matrix norm of :attr:`input`
 times the matrix norm of the inverse of :attr:`input` computed using :func:`torch.linalg.norm`. While
@@ -680,6 +681,7 @@ Args:
                     where `*` is one or more batch dimensions.
     p (int, float, str, optional): the type of the matrix norm to use in the computations.
                                    The following norms are supported:
+
         =====  ============================
         p      norm for matrices
         =====  ============================
@@ -693,6 +695,7 @@ Args:
         2      ratio of the largest singular value to the smallest singular value
         -2     ratio of the smallest singular value to the largest singular value
         =====  ============================
+
         Default: ``None``
 
 Keyword args:
