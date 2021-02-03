@@ -333,11 +333,11 @@ class {module_name}(torch.nn.Module):
             # constiuent substrings of the error message
             tb_repr = traceback.format_exc()
             custom_msg = ("Call to “exec” using an FX-traced Module, "
-                f"line {err_lineno} of the traced Module’s "
-                "generated forward function:\n")
+                          f"line {err_lineno} of the traced Module’s "
+                          "generated forward function:\n")
             up_to_and_incl_err = "".join(all_src_lines[err_lineno - 2 : err_lineno + 1])
             marker = "~" * err_line_len + "~~~ <--- HERE"
-            after_err = "".join(all_src_lines[err_lineno+1:err_lineno+2])
+            after_err = "".join(all_src_lines[err_lineno + 1 : err_lineno + 2])
 
             # joined message
             return "".join([tb_repr, custom_msg, up_to_and_incl_err, marker, after_err])
@@ -349,8 +349,9 @@ class {module_name}(torch.nn.Module):
                 return self._cls_call(self, *args, **kwargs)
             except Exception as e:
                 if "eval_with_key" in traceback.format_exc():
+                    assert e.__traceback__
                     print(generate_error_message(e.__traceback__),
-                          file = sys.stderr)
+                          file=sys.stderr)
                     # Elide the real traceback since we've already
                     # printed our message to stderr
                     raise e.with_traceback(None)

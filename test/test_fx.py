@@ -1601,7 +1601,7 @@ class TestFX(JitTestCase):
         try:
             from io import StringIO
             from unittest.mock import patch
-        except:
+        except ImportError:
             self.skipTest("Necessary modules not available")
 
         class M(torch.nn.Module):
@@ -1622,6 +1622,8 @@ class TestFX(JitTestCase):
 
         with self.assertRaises(TypeError):
             traced(5)
+
+        traced(5)
 
         with patch("sys.stderr", new=StringIO()) as fake_err:
             try:
