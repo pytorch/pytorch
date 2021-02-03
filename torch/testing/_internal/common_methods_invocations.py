@@ -1757,7 +1757,6 @@ op_db: List[OpInfo] = [
            # max can have a kwarg for a tuple of tensors, not a tensor
            supports_tensor_out=False,
            test_inplace_grad=False,
-           assert_autodiffed=True,
            safe_casts_outputs=True,
            sample_inputs_func=sample_inputs_max_min,),
     OpInfo('min',
@@ -1767,7 +1766,6 @@ op_db: List[OpInfo] = [
            # min can have a kwarg for a tuple of tensors, not a tensor
            supports_tensor_out=False,
            test_inplace_grad=False,
-           assert_autodiffed=True,
            safe_casts_outputs=True,
            sample_inputs_func=sample_inputs_max_min,),
     UnaryUfuncInfo('neg',
