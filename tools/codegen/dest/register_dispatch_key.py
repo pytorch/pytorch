@@ -7,7 +7,6 @@ from tools.codegen.context import *
 from tools.codegen.utils import *
 from tools.codegen.model import *
 from tools.codegen.api.types import *
-import tools.codegen.api.native as native
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
