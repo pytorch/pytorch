@@ -1433,7 +1433,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         if with_cuda:
             extra_ldflags.append('c10_cuda.lib')
         extra_ldflags.append('torch_cpu.lib')
-        if BUILD_SPLIT_CUDA:
+        if BUILD_SPLIT_CUDA and with_cuda:
             extra_ldflags.append('torch_cuda_cu.lib')
             # /INCLUDE is used to ensure torch_cuda_cu is linked against in a project that relies on it.
             extra_ldflags.append('-INCLUDE:?searchsorted_cuda@native@at@@YA?AVTensor@2@AEBV32@0_N1@Z')
@@ -1458,7 +1458,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         if with_cuda:
             extra_ldflags.append('-lc10_hip' if IS_HIP_EXTENSION else '-lc10_cuda')
         extra_ldflags.append('-ltorch_cpu')
-        if BUILD_SPLIT_CUDA:
+        if BUILD_SPLIT_CUDA and with_cuda:
             extra_ldflags.append('-ltorch_hip' if IS_HIP_EXTENSION else '-ltorch_cuda_cu -ltorch_cuda_cpp')
         elif with_cuda:
             extra_ldflags.append('-ltorch_hip' if IS_HIP_EXTENSION else '-ltorch_cuda')
