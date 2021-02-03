@@ -112,8 +112,18 @@ Check this module for more information.
             # Trivial
             return ctx[goal]
 
-        # If the goal is a const&, try solving for the value type first
+        # const & is satisfied with mutable &
         if isinstance(goal, ConstRefCType):
+            try:
+                # WARNING: not strictly decreasing; be careful not
+                # to add a direct conversion that goes satisfies
+                # mutable& with const&
+                return solve(MutRefCType(goal.elem), direct=direct)
+            except UnsatError:
+                pass
+
+        # mutable & is satisfied with value
+        if isinstance(goal, MutRefCType):
             try:
                 return solve(goal.elem, direct=direct)
             except UnsatError:
