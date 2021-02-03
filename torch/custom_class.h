@@ -132,12 +132,11 @@ class class_ {
   /// a constructor for a given C++ class type. For example, passing
   /// `torch::init<int, std::string>()` would register a two-argument constructor
   /// taking an `int` and a `std::string` as argument.
-  template <typename... Types>
+  template <typename... Types, typename... Args>
   class_& def(
       detail::types<void, Types...>,
       std::string doc_string = "",
-      std::initializer_list<arg> default_args =
-          {}) { // Used in combination with
+      Args&&... args) { // Used in combination with
     // torch::init<...>()
     auto func = [](c10::tagged_capsule<CurClass> self, Types... args) {
       auto classObj = c10::make_intrusive<CurClass>(args...);
@@ -145,16 +144,20 @@ class class_ {
       object->setSlot(0, c10::IValue::make_capsule(std::move(classObj)));
     };
 
-    defineMethod("__init__", std::move(func), std::move(doc_string), default_args);
+    defineMethod(
+        "__init__",
+        std::move(func),
+        std::move(doc_string),
+        std::forward<Args>(args)...);
     return *this;
   }
 
   // Used in combination with torch::init([]lambda(){......})
-  template <typename Func, typename... ParameterTypes>
+  template <typename Func, typename... ParameterTypes, typename... Args>
   class_& def(
       InitLambda<Func, c10::guts::typelist::typelist<ParameterTypes...>> init,
       std::string doc_string = "",
-      std::initializer_list<arg> default_args = {}) {
+      Args&&... args) {
     auto init_lambda_wrapper = [func = std::move(init.f)](
                                    c10::tagged_capsule<CurClass> self,
                                    ParameterTypes... arg) {
@@ -163,7 +166,12 @@ class class_ {
       auto object = self.ivalue.toObject();
       object->setSlot(0, c10::IValue::make_capsule(classObj));
     };
-    defineMethod("__init__", std::move(init_lambda_wrapper), std::move(doc_string), default_args);
+
+    defineMethod(
+        "__init__",
+        std::move(init_lambda_wrapper),
+        std::move(doc_string),
+        std::forward<Args>(args)...);
 
     return *this;
   }
@@ -186,14 +194,18 @@ class class_ {
   ///     .def("call_lambda", [](const c10::intrusive_ptr<Foo>& self) {
   ///       // do something
   ///     })
-  template <typename Func>
+  template <typename Func, typename... Args>
   class_& def(
       std::string name,
       Func f,
       std::string doc_string = "",
-      std::initializer_list<arg> default_args = {}) {
+      Args&&... args) {
     auto wrapped_f = detail::wrap_func<CurClass, Func>(std::move(f));
-    defineMethod(std::move(name), std::move(wrapped_f), std::move(doc_string), default_args);
+    defineMethod(
+        std::move(name),
+        std::move(wrapped_f),
+        std::move(doc_string),
+        std::forward<Args>(args)...);
     return *this;
   }
 
@@ -306,23 +318,55 @@ class class_ {
   }
 
  private:
-  template <typename Func>
+  // This is the "base case" for the parameter pack used by
+  // constructDefaultArgsListReverse.
+  std::vector<arg> constructDefaultArgsListReverse() {
+    return std::vector<arg>();
+  }
+
+  // Convert a variable list of arguments of the same type into a vector
+  // of those same instances in the same order.
+  template <
+      typename Arg,
+      typename... Args>
+  std::enable_if_t<std::is_same<std::remove_reference_t<Arg>, arg>::value, std::vector<arg>> constructDefaultArgsListReverse(Arg&& arg, Args&&... args) {
+    auto others = constructDefaultArgsListReverse(std::forward<Args>(args)...);
+    others.emplace_back(std::forward<Arg>(arg));
+    return others;
+  }
+
+  // constructDefaultArgsListReverse converts a variable list of arguments into
+  // a list of torch::arg, but does so in reverse due to how parameter packs
+  // work. This function reverses the return value of
+  // constructDefaultArgsListReverse so that the args passed to it are returned
+  // in a vector in the right order.
+  template <typename... Args>
+  std::vector<arg>
+  constructDefaultArgsList(Args&&... args) {
+    auto others = constructDefaultArgsListReverse(std::forward<Args>(args)...);
+    return std::vector<arg>(others.rbegin(), others.rend());
+  }
+
+  template <typename Func, typename... Args>
   void defineMethod(
       std::string name,
       Func func,
       std::string doc_string = "",
-      std::initializer_list<arg> default_args = {}) {
+      Args&&... args) {
     auto qualMethodName = qualClassName + "." + name;
     auto schema = c10::inferFunctionSchemaSingleReturn<Func>(std::move(name), "");
+    auto default_args = constructDefaultArgsList(std::forward<Args>(args)...);
 
-    // If default values are provided for function arguments, there must be none
-    // (no default values) or default values for all function arguments, except
-    // for self. This is because argument names are not extracted by
-    // inferFunctionSchemaSingleReturn, and so there must be a torch::arg instance in
-    // default_args even for arguments that do not have an actual default value provided.
-    TORCH_CHECK(
-        default_args.size() == 0 || default_args.size() == schema.arguments().size()-1,
-        "Default values must be specified for none or all arguments");
+    // If default values are provided for function arguments, there must be
+    // none (no default values) or default values for all function
+    // arguments, except for self. This is because argument names are not
+    // extracted by inferFunctionSchemaSingleReturn, and so there must be a
+    // torch::arg instance in default_args even for arguments that do not
+    // have an actual default value provided.
+        TORCH_CHECK(
+            default_args.size() == 0 ||
+                default_args.size() == schema.arguments().size() - 1,
+            "Default values must be specified for none or all arguments");
 
     // If there are default args, copy the argument names and default values to the
     // function schema.
