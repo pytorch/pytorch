@@ -527,6 +527,53 @@ def load():
         regular_src = inspect.getsourcelines(regular_class)
         self.assertEqual(packaged_src, regular_src)
 
+    def test_package_fx_simple(self):
+        class SimpleTest(torch.nn.Module):
+            def forward(self, x):
+                return torch.relu(x + 3.0)
+
+        st = SimpleTest()
+        traced = symbolic_trace(st)
+
+        f = BytesIO()
+        with PackageExporter(f, verbose=False) as pe:
+            pe.save_pickle('model', 'model.pkl', traced)
+
+        f.seek(0)
+        pi = PackageImporter(f)
+        loaded_traced = pi.load_pickle('model', 'model.pkl')
+        input = torch.rand(2, 3)
+        self.assertTrue(torch.allclose(loaded_traced(input), traced(input)))
+
+    def test_package_fx_with_imports(self):
+        import package_a.subpackage
+
+        # Manually construct a graph that invokes a leaf function
+        graph = Graph()
+        a = graph.placeholder('x')
+        b = graph.placeholder('y')
+        c = graph.call_function(package_a.subpackage.leaf_function, (a, b))
+        d = graph.call_function(torch.sin, (c,))
+        graph.output(d)
+        gm = GraphModule(torch.nn.Module(), graph)
+
+        f = BytesIO()
+        with PackageExporter(f, verbose=False) as pe:
+            pe.save_pickle('model', 'model.pkl', gm)
+        f.seek(0)
+
+        pi = PackageImporter(f)
+        loaded_gm = pi.load_pickle('model', 'model.pkl')
+        input_x = torch.rand(2, 3)
+        input_y = torch.rand(2, 3)
+
+        self.assertTrue(torch.allclose(loaded_gm(input_x, input_y), gm(input_x, input_y)))
+
+        # Check that the packaged version of the leaf_function dependency is
+        # not the same as in the outer env.
+        packaged_dependency = pi.import_module('package_a.subpackage')
+        self.assertTrue(packaged_dependency is not package_a.subpackage)
+
 
 class ManglingTest(TestCase):
     def test_unique_manglers(self):
@@ -586,53 +633,6 @@ class ManglingTest(TestCase):
         mangled = a.mangle("foo.bar")
         mangle_prefix = get_mangle_prefix(mangled)
         self.assertEqual(mangle_prefix + "." + "foo.bar", mangled)
-
-    def test_package_fx_simple(self):
-        class SimpleTest(torch.nn.Module):
-            def forward(self, x):
-                return torch.relu(x + 3.0)
-
-        st = SimpleTest()
-        traced = symbolic_trace(st)
-
-        f = BytesIO()
-        with PackageExporter(f, verbose=False) as pe:
-            pe.save_pickle('model', 'model.pkl', traced)
-
-        f.seek(0)
-        pi = PackageImporter(f)
-        loaded_traced = pi.load_pickle('model', 'model.pkl')
-        input = torch.rand(2, 3)
-        self.assertTrue(torch.allclose(loaded_traced(input), traced(input)))
-
-    def test_package_fx_with_imports(self):
-        import package_a.subpackage
-
-        # Manually construct a graph that invokes a leaf function
-        graph = Graph()
-        a = graph.placeholder('x')
-        b = graph.placeholder('y')
-        c = graph.call_function(package_a.subpackage.leaf_function, (a, b))
-        d = graph.call_function(torch.sin, (c,))
-        graph.output(d)
-        gm = GraphModule(torch.nn.Module(), graph)
-
-        f = BytesIO()
-        with PackageExporter(f, verbose=False) as pe:
-            pe.save_pickle('model', 'model.pkl', gm)
-        f.seek(0)
-
-        pi = PackageImporter(f)
-        loaded_gm = pi.load_pickle('model', 'model.pkl')
-        input_x = torch.rand(2, 3)
-        input_y = torch.rand(2, 3)
-
-        self.assertTrue(torch.allclose(loaded_gm(input_x, input_y), gm(input_x, input_y)))
-
-        # Check that the packaged version of the leaf_function dependency is
-        # not the same as in the outer env.
-        packaged_dependency = pi.import_module('package_a.subpackage')
-        self.assertTrue(packaged_dependency is not package_a.subpackage)
 
 
 if __name__ == '__main__':
