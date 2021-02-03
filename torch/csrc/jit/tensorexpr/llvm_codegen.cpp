@@ -33,6 +33,7 @@
 
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
+#include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 #include <torch/csrc/jit/tensorexpr/half_support.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
@@ -115,6 +116,7 @@ class LLVMCodeGenImpl : public IRVisitor {
 #define LLVM_TYPE_DECLARE(_1, Name) llvm::Type* Name##Ty_;
   AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, LLVM_TYPE_DECLARE);
 #undef LLVM_TYPE_DECLARE
+  llvm::Type* Int8PtrTy_;
 
   std::unordered_map<const Var*, int> varToArg_;
   std::unordered_map<const Var*, llvm::Value*> varToVal_;
@@ -187,6 +189,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   void visit(const Free* v) override;
   void visit(const Let* v) override;
   void visit(const Cond* v) override;
+  void visit(const ExternalCall* v) override;
 
   void emitIsNan(const Intrinsics* v);
 
@@ -298,6 +301,7 @@ LLVMCodeGenImpl::LLVMCodeGenImpl(
   HalfTy_ = llvm::Type::getHalfTy(getContext());
   FloatTy_ = llvm::Type::getFloatTy(getContext());
   DoubleTy_ = llvm::Type::getDoubleTy(getContext());
+  Int8PtrTy_ = llvm::Type::getInt8PtrTy(getContext());
   BoolTy_ = ByteTy_;
 
   llvm::InitializeNativeTarget();
@@ -1569,6 +1573,120 @@ void LLVMCodeGenImpl::visit(const Intrinsics* v) {
 
 void LLVMCodeGenImpl::visit(const FunctionCall* v) {
   throw unimplemented_lowering(v);
+}
+
+void LLVMCodeGenImpl::visit(const ExternalCall* v) {
+  constexpr int max_buffers = 10;
+  constexpr int max_dimensions = 40;
+
+  auto& func_registry = getNNCFunctionRegistry();
+  if (!func_registry.count(v->func_name())) {
+    throw unimplemented_lowering(v);
+  }
+
+  // Prepare a vector of bufs that we need to pass to the external function.
+  // This vector is the output buf followed by the buf_args.
+  std::vector<const Buf*> bufs(v->buf_args());
+  bufs.insert(bufs.begin(), v->buf());
+
+  int64_t bufs_num = bufs.size();
+  int64_t args_num = v->args().size();
+
+  // Count the size of dims array - it consists of dimension of all bufs
+  // concatenated together.
+  int64_t dims_num = 0;
+  for (const Buf* b : bufs) {
+    dims_num += b->dims().size();
+  }
+
+  llvm::Value* buf_ptrs = irb_.CreateAlloca(
+      Int8PtrTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_num));
+  llvm::Value* buf_ranks = irb_.CreateAlloca(
+      LongTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_num));
+  llvm::Value* buf_dims = irb_.CreateAlloca(
+      LongTy_, llvm::ConstantInt::getSigned(IntTy_, dims_num));
+  llvm::Value* buf_dtypes = irb_.CreateAlloca(
+      ByteTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_num));
+  llvm::Value* extra_args = irb_.CreateAlloca(
+      LongTy_, llvm::ConstantInt::getSigned(IntTy_, args_num));
+
+  int i = 0;
+  int dim_idx = 0;
+  for (const Buf* b : bufs) {
+    // Store value for buf pointer
+    auto gep = irb_.CreateInBoundsGEP(
+        buf_ptrs, {llvm::ConstantInt::getSigned(IntTy_, i)});
+    b->base_handle()->accept(this);
+    auto buf_ptr = this->value_;
+    auto buf_void_ptr = irb_.CreatePointerCast(buf_ptr, Int8PtrTy_);
+    irb_.CreateStore(buf_void_ptr, gep);
+
+    // Store dtype of the buf
+    gep = irb_.CreateInBoundsGEP(
+        buf_dtypes, {llvm::ConstantInt::getSigned(IntTy_, i)});
+    irb_.CreateStore(
+        llvm::ConstantInt::getSigned(ByteTy_, (int8_t)b->dtype().scalar_type()),
+        gep);
+
+    // Store rank of the buf
+    gep = irb_.CreateInBoundsGEP(
+        buf_ranks, {llvm::ConstantInt::getSigned(IntTy_, i)});
+    irb_.CreateStore(
+        llvm::ConstantInt::getSigned(LongTy_, b->dims().size()), gep);
+
+    // Store dims of the buf
+    for (int dim = 0; dim < b->dims().size(); dim++) {
+      gep = irb_.CreateInBoundsGEP(
+          buf_dims, {llvm::ConstantInt::getSigned(IntTy_, dim_idx)});
+      b->dims()[dim]->accept(this);
+      auto dim_val = this->value_;
+      irb_.CreateStore(irb_.CreateZExt(dim_val, LongTy_), gep);
+      dim_idx++;
+    }
+
+    i++;
+  }
+
+  i = 0;
+  for (const Expr* arg : v->args()) {
+    auto gep = irb_.CreateInBoundsGEP(
+        extra_args, {llvm::ConstantInt::getSigned(IntTy_, i)});
+    arg->accept(this);
+    irb_.CreateStore(irb_.CreateZExtOrBitCast(this->value_, LongTy_), gep);
+    i++;
+  }
+
+  // Generate the call itself
+  std::string fname = v->func_name();
+  FunctionCallee callee = module_->getOrInsertFunction(
+      fname,
+      llvm::FunctionType::get(
+          llvm::Type::getVoidTy(getContext()), // return type
+          {LongTy_, // int64_t bufs_num
+           Int8PtrTy_->getPointerTo(), // void** buf_data
+           LongTy_->getPointerTo(), // int64_t* buf_ranks
+           LongTy_->getPointerTo(), // int64_t* buf_dims
+           ByteTy_->getPointerTo(), // int64_t* buf_dtypes
+           LongTy_, // int64_t args_num
+           LongTy_->getPointerTo()}, // int64_t* extra_args
+          false)); // is var_arg
+
+  auto call_ty = callee.getFunctionType();
+  auto call_fn = callee.getCallee();
+  llvm::cast<llvm::Function>(call_fn)->addFnAttr(llvm::Attribute::NoUnwind);
+
+  irb_.CreateCall(
+      call_ty,
+      call_fn,
+      {llvm::ConstantInt::getSigned(LongTy_, bufs_num),
+       buf_ptrs,
+       buf_ranks,
+       buf_dims,
+       buf_dtypes,
+       llvm::ConstantInt::getSigned(LongTy_, args_num),
+       extra_args});
+
+  value_ = llvm::ConstantInt::get(IntTy_, 0);
 }
 
 void LLVMCodeGenImpl::visit(const Allocate* v) {

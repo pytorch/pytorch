@@ -1,9 +1,14 @@
 import os
+import pickle
+import random
 import tempfile
 import warnings
 import tarfile
 
+import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests)
+from torch.utils.data import IterDataPipe, RandomSampler
+from typing import List, Tuple, Dict, Any, Type
 
 import torch.utils.data.datapipes as dp
 
@@ -116,6 +121,196 @@ class TestIterableDataPipeBasic(TestCase):
         for i in range(0, count):
             self.assertEqual(os.path.basename(data_refs[i][0]), os.path.basename(self.temp_files[i]))
             self.assertEqual(data_refs[i][1].read(), open(self.temp_files[i], 'rb').read())
+
+
+class IDP_NoLen(IterDataPipe):
+    def __init__(self, input_dp):
+        super().__init__()
+        self.input_dp = input_dp
+
+    def __iter__(self):
+        for i in self.input_dp:
+            yield i
+
+
+class IDP(IterDataPipe):
+    def __init__(self, input_dp):
+        super().__init__()
+        self.input_dp = input_dp
+        self.length = len(input_dp)
+
+    def __iter__(self):
+        for i in self.input_dp:
+            yield i
+
+    def __len__(self):
+        return self.length
+
+
+def _fake_fn(self, data, *args, **kwargs):
+    return data
+
+
+class TestFunctionalIterDataPipe(TestCase):
+
+    def test_picklable(self):
+        arr = range(10)
+        picklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, List, Dict[str, Any]]] = [
+            (dp.iter.Callable, IDP(arr), [], {}),
+            (dp.iter.Callable, IDP(arr), [0], {'fn': _fake_fn, 'test': True}),
+            (dp.iter.Collate, IDP(arr), [], {}),
+            (dp.iter.Collate, IDP(arr), [0], {'collate_fn': _fake_fn, 'test': True}),
+        ]
+        for dpipe, input_dp, args, kargs in picklable_datapipes:
+            p = pickle.dumps(dpipe(input_dp, *args, **kargs))  # type: ignore
+
+        unpicklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, List, Dict[str, Any]]] = [
+            (dp.iter.Callable, IDP(arr), [], {'fn': lambda x: x}),
+            (dp.iter.Collate, IDP(arr), [], {'collate_fn': lambda x: x}),
+        ]
+        for dpipe, input_dp, args, kargs in unpicklable_datapipes:
+            with self.assertRaises(AttributeError):
+                p = pickle.dumps(dpipe(input_dp, *args, **kargs))  # type: ignore
+
+    def test_callable_datapipe(self):
+        arr = range(10)
+        input_dp = IDP(arr)
+        input_dp_nl = IDP_NoLen(arr)
+
+        def fn(item, dtype=torch.float, *, sum=False):
+            data = torch.tensor(item, dtype=dtype)
+            return data if not sum else data.sum()
+
+        callable_dp = dp.iter.Callable(input_dp, fn=fn)  # type: ignore
+        self.assertEqual(len(input_dp), len(callable_dp))
+        for x, y in zip(callable_dp, input_dp):
+            self.assertEqual(x, torch.tensor(y, dtype=torch.float))
+
+        callable_dp = dp.iter.Callable(input_dp, torch.int, fn=fn, sum=True)  # type: ignore
+        self.assertEqual(len(input_dp), len(callable_dp))
+        for x, y in zip(callable_dp, input_dp):
+            self.assertEqual(x, torch.tensor(y, dtype=torch.int).sum())
+
+        callable_dp_nl = dp.iter.Callable(input_dp_nl)  # type: ignore
+        with self.assertRaises(NotImplementedError):
+            len(callable_dp_nl)
+        for x, y in zip(callable_dp_nl, input_dp_nl):
+            self.assertEqual(x, torch.tensor(y, dtype=torch.float))
+
+    def test_collate_datapipe(self):
+        arrs = [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+        input_dp = IDP(arrs)
+        input_dp_nl = IDP_NoLen(arrs)
+
+        def _collate_fn(batch):
+            return torch.tensor(sum(batch), dtype=torch.float)
+
+        collate_dp = dp.iter.Collate(input_dp, collate_fn=_collate_fn)
+        self.assertEqual(len(input_dp), len(collate_dp))
+        for x, y in zip(collate_dp, input_dp):
+            self.assertEqual(x, torch.tensor(sum(y), dtype=torch.float))
+
+        collate_dp_nl = dp.iter.Collate(input_dp_nl)  # type: ignore
+        with self.assertRaises(NotImplementedError):
+            len(collate_dp_nl)
+        for x, y in zip(collate_dp_nl, input_dp_nl):
+            self.assertEqual(x, torch.tensor(y))
+
+    def test_batch_datapipe(self):
+        arrs = list(range(10))
+        input_dp = IDP(arrs)
+        with self.assertRaises(AssertionError):
+            batch_dp0 = dp.iter.Batch(input_dp, batch_size=0)
+
+        # Default not drop the last batch
+        bs = 3
+        batch_dp1 = dp.iter.Batch(input_dp, batch_size=bs)
+        self.assertEqual(len(batch_dp1), 4)
+        for i, batch in enumerate(batch_dp1):
+            self.assertEqual(len(batch), 1 if i == 3 else bs)
+            self.assertEqual(batch, arrs[i * bs: i * bs + len(batch)])
+
+        # Drop the last batch
+        bs = 4
+        batch_dp2 = dp.iter.Batch(input_dp, batch_size=bs, drop_last=True)
+        self.assertEqual(len(batch_dp2), 2)
+        for i, batch in enumerate(batch_dp2):
+            self.assertEqual(len(batch), bs)
+            self.assertEqual(batch, arrs[i * bs: i * bs + len(batch)])
+
+        input_dp_nl = IDP_NoLen(range(10))
+        batch_dp_nl = dp.iter.Batch(input_dp_nl, batch_size=2)
+        with self.assertRaises(NotImplementedError):
+            len(batch_dp_nl)
+
+    def test_bucket_batch_datapipe(self):
+        input_dp = IDP(range(20))
+        with self.assertRaises(AssertionError):
+            dp.iter.BucketBatch(input_dp, batch_size=0)
+
+        input_dp_nl = IDP_NoLen(range(20))
+        bucket_dp_nl = dp.iter.BucketBatch(input_dp_nl, batch_size=7)
+        with self.assertRaises(NotImplementedError):
+            len(bucket_dp_nl)
+
+        # Test Bucket Batch without sort_key
+        def _helper(**kwargs):
+            arrs = list(range(100))
+            random.shuffle(arrs)
+            input_dp = IDP(arrs)
+            bucket_dp = dp.iter.BucketBatch(input_dp, **kwargs)
+            if kwargs["sort_key"] is None:
+                # BatchDataset as reference
+                ref_dp = dp.iter.Batch(input_dp, batch_size=kwargs['batch_size'], drop_last=kwargs['drop_last'])
+                for batch, rbatch in zip(bucket_dp, ref_dp):
+                    self.assertEqual(batch, rbatch)
+            else:
+                bucket_size = bucket_dp.bucket_size
+                bucket_num = (len(input_dp) - 1) // bucket_size + 1
+                it = iter(bucket_dp)
+                for i in range(bucket_num):
+                    ref = sorted(arrs[i * bucket_size: (i + 1) * bucket_size])
+                    bucket: List = []
+                    while len(bucket) < len(ref):
+                        try:
+                            batch = next(it)
+                            bucket += batch
+                        # If drop last, stop in advance
+                        except StopIteration:
+                            break
+                    if len(bucket) != len(ref):
+                        ref = ref[:len(bucket)]
+                    # Sorted bucket
+                    self.assertEqual(bucket, ref)
+
+        _helper(batch_size=7, drop_last=False, sort_key=None)
+        _helper(batch_size=7, drop_last=True, bucket_size_mul=5, sort_key=None)
+
+        # Test Bucket Batch with sort_key
+        def _sort_fn(data):
+            return data
+
+        _helper(batch_size=7, drop_last=False, bucket_size_mul=5, sort_key=_sort_fn)
+        _helper(batch_size=7, drop_last=True, bucket_size_mul=5, sort_key=_sort_fn)
+
+    def test_sampler_datapipe(self):
+        arrs = range(10)
+        input_dp = IDP(arrs)
+        # Default SequentialSampler
+        sampled_dp = dp.iter.Sampler(input_dp)  # type: ignore
+        self.assertEqual(len(sampled_dp), 10)
+        i = 0
+        for x in sampled_dp:
+            self.assertEqual(x, i)
+            i += 1
+
+        # RandomSampler
+        random_sampled_dp = dp.iter.Sampler(input_dp, sampler=RandomSampler, replacement=True)  # type: ignore
+
+        # Requires `__len__` to build SamplerDataset
+        input_dp_nolen = IDP_NoLen(arrs)
+        with self.assertRaises(AssertionError):
+            sampled_dp = dp.iter.Sampler(input_dp_nolen)
 
 
 if __name__ == '__main__':
