@@ -71,9 +71,9 @@ std::shared_ptr<JitFuture> RpcAgent::sendWithRetries(
       retryOptions);
   // Use weak_ptr so that the value can be std::moved in rpcRetryCallback.
   jitFuture->addCallback([this,
-                   newTime,
-                   firstRetryRpc,
-                   wp = std::weak_ptr<JitFuture>(jitFuture)]() {
+                          newTime,
+                          firstRetryRpc,
+                          wp = std::weak_ptr<JitFuture>(jitFuture)]() {
     auto future = wp.lock();
     TORCH_INTERNAL_ASSERT(future);
     rpcRetryCallback(future, newTime, firstRetryRpc);
@@ -88,8 +88,7 @@ void RpcAgent::retryExpiredRpcs() {
       std::pair<std::shared_ptr<JitFuture>, std::shared_ptr<RpcRetryInfo>>>
       futures;
   // Stores futures and exception messages for non-retriable error-ed futures.
-  std::vector<std::pair<std::shared_ptr<JitFuture>, std::string>>
-      errorFutures;
+  std::vector<std::pair<std::shared_ptr<JitFuture>, std::string>> errorFutures;
 
   while (rpcAgentRunning_.load()) {
     std::unique_lock<std::mutex> lock(rpcRetryMutex_);
@@ -166,9 +165,9 @@ void RpcAgent::retryExpiredRpcs() {
 
       // Use weak_ptr so that the value can be std::moved in rpcRetryCallback.
       jitFuture->addCallback([this,
-                       newTime,
-                       earliestRpc,
-                       wp = std::weak_ptr<JitFuture>(jitFuture)]() {
+                              newTime,
+                              earliestRpc,
+                              wp = std::weak_ptr<JitFuture>(jitFuture)]() {
         auto future = wp.lock();
         TORCH_INTERNAL_ASSERT(future);
         rpcRetryCallback(future, newTime, earliestRpc);
@@ -181,7 +180,8 @@ void RpcAgent::retryExpiredRpcs() {
     for (const auto& it : errorFutures) {
       auto errorFuture = it.first;
       auto errorMsg = it.second;
-      errorFuture->setError(std::make_exception_ptr(std::runtime_error(errorMsg)));
+      errorFuture->setError(
+          std::make_exception_ptr(std::runtime_error(errorMsg)));
     }
     errorFutures.clear();
   }
@@ -284,6 +284,12 @@ void RpcAgent::enableGILProfiling(bool flag) {
 
 bool RpcAgent::isGILProfilingEnabled() {
   return profilingEnabled_.load();
+}
+
+std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> RpcAgent::getDeviceMap(
+    const WorkerInfo& dest) {
+  // Default implementation has no device map.
+  return {};
 }
 
 std::unordered_map<std::string, std::string> RpcAgent::getDebugInfo() {

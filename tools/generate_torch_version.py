@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 from distutils.util import strtobool
 
-def get_sha():
+def get_sha(pytorch_root):
     try:
         return subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=pytorch_root).decode('ascii').strip()
     except Exception:
@@ -13,8 +13,6 @@ def get_sha():
 def get_torch_version(sha=None):
     pytorch_root = Path(__file__).parent.parent
     version = open('version.txt', 'r').read().strip()
-    if sha is None:
-        sha = get_sha()
 
     if os.getenv('PYTORCH_BUILD_VERSION'):
         assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
@@ -23,6 +21,8 @@ def get_torch_version(sha=None):
         if build_number > 1:
             version += '.post' + str(build_number)
     elif sha != 'Unknown':
+        if sha is None:
+            sha = get_sha(pytorch_root)
         version += '+' + sha[:7]
     return version
 
@@ -40,7 +40,7 @@ if __name__ == "__main__":
 
     pytorch_root = Path(__file__).parent.parent
     version_path = pytorch_root / "torch" / "version.py"
-    sha = get_sha()
+    sha = get_sha(pytorch_root)
     version = get_torch_version(sha)
 
     with open(version_path, 'w') as f:

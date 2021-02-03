@@ -7,7 +7,9 @@
 
 #include <c10/core/DispatchKey.h>
 #include <c10/core/CompileTimeFunctionPointer.h>
-#include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/dispatch/CppSignature.h>
+#include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #if defined(EXPOSE_C2_OPS) || !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
@@ -20,7 +22,7 @@ namespace detail {
 template<class KernelFunctor>
 std::unique_ptr<FunctionSchema> inferFunctionSchemaFromFunctor() {
   using func_type = typename c10::guts::infer_function_traits_t<KernelFunctor>::func_type;
-  return std::make_unique<FunctionSchema>(inferFunctionSchemaFlattenedReturns<func_type>("", ""));
+  return std::make_unique<FunctionSchema>(inferFunctionSchemaFlattenedReturns<func_type>());
 }
 }
 

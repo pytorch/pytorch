@@ -43,7 +43,7 @@ Dispatcher::Dispatcher()
 
 Dispatcher::~Dispatcher() {}
 
-C10_EXPORT Dispatcher& Dispatcher::singleton() {
+C10_EXPORT Dispatcher& Dispatcher::realSingleton() {
   static Dispatcher _singleton;
   return _singleton;
 }
@@ -305,6 +305,30 @@ std::vector<OperatorHandle> Dispatcher::findDanglingImpls() const {
     }
     return opsWithDanglingImpls;
   });
+}
+
+int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey) {
+  int64_t seq_num = -1;
+  // Setting sequence number in the Autograd case to associate
+  // the forward range with the coresponding Autograd's node
+  if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
+    seq_num = at::sequence_number::peek();
+  }
+  return seq_num;
+}
+
+void Dispatcher::runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey, const torch::jit::Stack &stack) {
+  guard.before(op, stack, sequenceNumberForRunningRecordFunction(dispatchKey));
+}
+
+void Dispatcher::runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey, torch::jit::Stack &&stack) {
+  guard.before(op, std::move(stack), sequenceNumberForRunningRecordFunction(dispatchKey));
+}
+
+void Dispatcher::runRecordFunction(at::RecordFunction& guard, const OperatorHandle& op, DispatchKey dispatchKey) {
+  // Setting sequence number in the Autograd case to associate
+  // the forward range with the coresponding Autograd's node
+  guard.before(op, sequenceNumberForRunningRecordFunction(dispatchKey));
 }
 
 }

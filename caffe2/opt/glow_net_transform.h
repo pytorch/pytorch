@@ -35,7 +35,7 @@ void onnxifi(
     const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs = {});
 
 std::unordered_set<int> ParseNetPositionList(const std::string& str);
-std::unordered_set<std::string> ParseBlackListOps(const std::string& str);
+std::unordered_set<std::string> ParseBlockListOps(const std::string& str);
 
 } // namespace glow
 } // namespace caffe2

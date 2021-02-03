@@ -128,27 +128,25 @@ Descriptor::Set::Set(
       "Invalid Vulkan descriptor set!");
 }
 
-void Descriptor::Set::update(const Item& item) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_ && descriptor_set_,
-      "This descriptor set is in an invalid state! "
-      "Potential reason: This descriptor set is moved from.");
+Descriptor::Set::Set(Set&& set)
+  : device_(std::move(set.device_)),
+    descriptor_set_(std::move(set.descriptor_set_)),
+    shader_layout_signature_(std::move(set.shader_layout_signature_)),
+    bindings_(std::move(set.bindings_)) {
+  set.invalidate();
+}
 
-  const auto items_itr = std::find_if(
-      bindings_.items.begin(),
-      bindings_.items.end(),
-      [binding = item.binding](const Item& other) {
-        return other.binding == binding;
-      });
+Descriptor::Set& Descriptor::Set::operator=(Set&& set) {
+  if (&set != this) {
+    device_ = std::move(set.device_);
+    descriptor_set_ = std::move(set.descriptor_set_);
+    shader_layout_signature_ = std::move(set.shader_layout_signature_);
+    bindings_ = std::move(set.bindings_);
 
-  if (bindings_.items.end() == items_itr) {
-     bindings_.items.emplace_back(item);
-  }
-  else {
-    *items_itr = item;
-  }
+    set.invalidate();
+  };
 
-  bindings_.dirty = true;
+  return *this;
 }
 
 Descriptor::Set& Descriptor::Set::bind(
@@ -276,12 +274,39 @@ VkDescriptorSet Descriptor::Set::handle() const {
   return descriptor_set_;
 }
 
+void Descriptor::Set::invalidate() {
+  device_ = VK_NULL_HANDLE;
+  descriptor_set_ = VK_NULL_HANDLE;
+}
+
+void Descriptor::Set::update(const Item& item) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      device_ && descriptor_set_,
+      "This descriptor set is in an invalid state! "
+      "Potential reason: This descriptor set is moved from.");
+
+  const auto items_itr = std::find_if(
+      bindings_.items.begin(),
+      bindings_.items.end(),
+      [binding = item.binding](const Item& other) {
+        return other.binding == binding;
+      });
+
+  if (bindings_.items.end() == items_itr) {
+     bindings_.items.emplace_back(item);
+  }
+  else {
+    *items_itr = item;
+  }
+
+  bindings_.dirty = true;
+}
+
 Descriptor::Pool::Pool(const GPU& gpu)
   : device_(gpu.device),
     descriptor_pool_(
         create_descriptor_pool(gpu.device),
-        VK_DELETER(DescriptorPool)(device_)),
-    set_{} {
+        VK_DELETER(DescriptorPool)(device_)) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
       "Invalid Vulkan device!");
@@ -295,7 +320,7 @@ Descriptor::Pool::Pool(Pool&& pool)
   : device_(std::move(pool.device_)),
     descriptor_pool_(std::move(pool.descriptor_pool_)),
     set_(std::move(pool.set_)) {
-  pool.device_ = VK_NULL_HANDLE;
+  pool.invalidate();
 }
 
 Descriptor::Pool& Descriptor::Pool::operator=(Pool&& pool) {
@@ -304,7 +329,7 @@ Descriptor::Pool& Descriptor::Pool::operator=(Pool&& pool) {
     descriptor_pool_ = std::move(pool.descriptor_pool_);
     set_ = std::move(pool.set_);
 
-    pool.device_ = VK_NULL_HANDLE;
+    pool.invalidate();
   };
 
   return *this;
@@ -317,13 +342,14 @@ Descriptor::Pool::~Pool() {
     }
   }
   catch (const std::exception& e) {
-    LOG(WARNING)
-        << "Vulkan: Descriptor pool destructor raised an exception!  Error: "
-        << e.what();
+    TORCH_WARN(
+        "Vulkan: Descriptor pool destructor raised an exception! Error: ",
+        e.what());
   }
   catch (...) {
-    LOG(WARNING)
-        << "Vulkan: Descriptor pool destructor raised an unknown exception!";
+    TORCH_WARN(
+        "Vulkan: Descriptor pool destructor raised an exception! "
+        "Error: Unknown");
   }
 }
 
@@ -371,8 +397,13 @@ void Descriptor::Pool::purge() {
       "This descriptor pool is in an invalid state! "
       "Potential reason: This descriptor pool is moved from.");
 
-  set_.layouts.clear();
   VK_CHECK(vkResetDescriptorPool(device_, descriptor_pool_.get(), 0u));
+  set_.layouts.clear();
+}
+
+void Descriptor::Pool::invalidate() {
+  device_ = VK_NULL_HANDLE;
+  descriptor_pool_.reset();
 }
 
 } // namespace api

@@ -1,22 +1,24 @@
-import numpy as np
+from typing import Tuple
+import io
+import itertools
 import sys
 import unittest
-import itertools
 
-import torch.onnx
-import torch.onnx.operators
-from torch.onnx import ExportTypes
+import numpy as np
+
+from debug_embed_params import run_embed_params
 from torch import nn
 from torch.autograd import Variable, function
-import torch.utils.model_zoo as model_zoo
 from torch.nn.utils import rnn as rnn_utils
-from debug_embed_params import run_embed_params
-import io
+from torch.onnx import ExportTypes
+import torch.onnx
+import torch.onnx.operators
+import torch.utils.model_zoo as model_zoo
 
 # Import various models for testing
 from torchvision.models.alexnet import alexnet
-from torchvision.models.inception import inception_v3
 from torchvision.models.densenet import densenet121
+from torchvision.models.inception import inception_v3
 from torchvision.models.resnet import resnet50
 from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
 
@@ -1981,8 +1983,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     def test_tuple_input_output(self):
         class TupleModel(torch.jit.ScriptModule):
             @torch.jit.script_method
-            def forward(self, a):
-                # type: (Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tensor]
+            def forward(self, a: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
                 return a
 
         x = (torch.randn(3, 4), torch.randn(4, 3))
@@ -1992,8 +1993,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
     def test_nested_tuple_input_output(self):
         class NestedTupleModel(torch.jit.ScriptModule):
             @torch.jit.script_method
-            def forward(self, a, b):
-                # type: (Tensor, Tuple[Tensor, Tuple[Tensor, Tensor]]) -> Tensor
+            def forward(self, a: torch.Tensor, b: Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]) -> torch.Tensor:
                 return a + b[0] + b[1][0] + b[1][1]
 
         x = torch.randn(4, 5)

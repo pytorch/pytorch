@@ -1,10 +1,10 @@
-#include <torch/csrc/distributed/rpc/python_functions.h>
 #include <ATen/ThreadLocalState.h>
 #include <c10/util/C++17.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/message.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
+#include <torch/csrc/distributed/rpc/python_functions.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
 #include <torch/csrc/distributed/rpc/python_resp.h>
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
@@ -138,36 +138,29 @@ c10::intrusive_ptr<JitFuture> toPyJitFuture(
     const std::shared_ptr<JitFuture>& messageJitFuture,
     bool hasValue) {
   if (hasValue) {
-    c10::intrusive_ptr<JitFuture> pyJitFuture =
-        c10::make_intrusive<JitFuture>(PyObjectType::get());
     std::weak_ptr<JitFuture> wp = messageJitFuture;
-    messageJitFuture->addCallback(
-        at::wrapPropagateTLSState<void>([pyJitFuture, wp]() {
+    return messageJitFuture->then(
+        at::wrapPropagateTLSState<IValue>([wp]() {
           auto future = wp.lock();
           if (future->hasError()) {
-            pyJitFuture->setError(future->exception_ptr());
+            std::rethrow_exception(future->exception_ptr());
           } else {
-            pyJitFuture->markCompleted(
-                toPyIValue(*future->value().toCustomClass<Message>()));
+            return toPyIValue(*future->value().toCustomClass<Message>());
           }
-        }));
-
-    return pyJitFuture;
+        }),
+        PyObjectType::get());
   } else {
-    c10::intrusive_ptr<JitFuture> pyJitFuture =
-        c10::make_intrusive<JitFuture>(NoneType::get());
     std::weak_ptr<JitFuture> wp = messageJitFuture;
-    messageJitFuture->addCallback(
-        at::wrapPropagateTLSState<void>([wp, pyJitFuture]() {
+    return messageJitFuture->then(
+        at::wrapPropagateTLSState<IValue>([wp]() {
           auto future = wp.lock();
           if (future->hasError()) {
-            pyJitFuture->setError(future->exception_ptr());
+            std::rethrow_exception(future->exception_ptr());
           } else {
-            pyJitFuture->markCompleted(IValue());
+            return IValue();
           }
-        }));
-
-    return pyJitFuture;
+        }),
+        NoneType::get());
   }
 }
 

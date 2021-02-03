@@ -1,3 +1,5 @@
+import copy
+
 import torch
 from torch import nn
 
@@ -87,7 +89,7 @@ DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.RNNCell: nnqd.RNNCell,
 }
 
-# Whitelist for propagating the qconfig
+# Allowlist for propagating the qconfig
 _INCLUDE_QCONFIG_PROPAGATE_LIST : Set[Callable] = {
     nn.Sequential,
 }
@@ -112,7 +114,7 @@ DEFAULT_MODULE_TO_ACT_POST_PROCESS : Dict[Callable, Callable] = {
 def get_default_static_quant_module_mappings() -> Dict[Callable, Any]:
     ''' Get module mapping for post training static quantization
     '''
-    return DEFAULT_STATIC_QUANT_MODULE_MAPPINGS
+    return copy.deepcopy(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS)
 
 def get_static_quant_module_class(
         float_module_class: Callable,
@@ -127,7 +129,7 @@ def get_static_quant_module_class(
     assert static_quant_module_class is not None, \
         "Floating point module class {}".format(str(float_module_class)) + \
         " does not have a corresponding quantized module class"
-    return static_quant_module_class
+    return copy.deepcopy(static_quant_module_class)
 
 def get_dynamic_quant_module_class(
         float_module_class: Callable,
@@ -142,12 +144,12 @@ def get_dynamic_quant_module_class(
     assert dynamic_quant_module_class is not None, \
         "Floating point module class {}".format(str(float_module_class)) + \
         " does not have a corresponding quantized module class"
-    return dynamic_quant_module_class
+    return copy.deepcopy(dynamic_quant_module_class)
 
 def get_default_qat_module_mappings() -> Dict[Callable, Any]:
     ''' Get default module mapping for quantization aware training
     '''
-    return DEFAULT_QAT_MODULE_MAPPINGS
+    return copy.deepcopy(DEFAULT_QAT_MODULE_MAPPINGS)
 
 def get_default_dynamic_quant_module_mappings() -> Dict[Callable, Any]:
     ''' Get module mapping for post training dynamic quantization
@@ -164,7 +166,7 @@ def get_default_qconfig_propagation_list() -> Set[Callable]:
          set(DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS.keys()) |
          _INCLUDE_QCONFIG_PROPAGATE_LIST)
     )
-    return QCONFIG_PROPAGATE_MODULE_CLASS_LIST
+    return copy.deepcopy(QCONFIG_PROPAGATE_MODULE_CLASS_LIST)
 
 def get_default_compare_output_module_list() -> Set[Callable]:
     ''' Get list of module class types that we will record output
@@ -179,7 +181,7 @@ def get_default_compare_output_module_list() -> Set[Callable]:
         | set(DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS.keys())
         | _INCLUDE_QCONFIG_PROPAGATE_LIST
     )
-    return NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_MODULE_LIST
+    return copy.deepcopy(NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_MODULE_LIST)
 
 # TODO: merge with get_static_quant_module_class
 def get_quantized_operator(float_op: Union[Callable, str]) -> Callable:

@@ -289,6 +289,7 @@ _(aten, diag_embed) \
 _(aten, diagflat) \
 _(aten, diagonal) \
 _(aten, fill_diagonal_) \
+_(aten, diff) \
 _(aten, digamma) \
 _(aten, dim) \
 _(aten, dist) \
@@ -331,6 +332,8 @@ _(aten, flipud) \
 _(aten, floor) \
 _(aten, fmod) \
 _(aten, fmod_) \
+_(aten, fmax) \
+_(aten, fmin) \
 _(aten, frac) \
 _(aten, fractional_max_pool2d) \
 _(aten, fractional_max_pool2d_backward) \

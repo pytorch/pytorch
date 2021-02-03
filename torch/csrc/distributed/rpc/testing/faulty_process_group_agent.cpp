@@ -1,5 +1,5 @@
-#include <torch/csrc/distributed/rpc/testing/faulty_process_group_agent.h>
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
+#include <torch/csrc/distributed/rpc/testing/faulty_process_group_agent.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
@@ -59,7 +59,8 @@ std::unordered_map<MessageType, float, std::hash<int>> FaultyProcessGroupAgent::
 std::shared_ptr<JitFuture> FaultyProcessGroupAgent::send(
     const WorkerInfo& to,
     Message&& message,
-    const float rpcTimeoutSeconds) {
+    const float rpcTimeoutSeconds,
+    const std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>& deviceMap) {
   // We only fail control messages that have been specified by the test case.
   // For all other messages, we just send them without any failures.
   if (!shouldFailMessage(message.type())) {
@@ -79,10 +80,9 @@ std::shared_ptr<JitFuture> FaultyProcessGroupAgent::send(
     failMessageCountMap_[key]++;
     lock.unlock();
     auto jitFuture = std::make_shared<JitFuture>(at::AnyClassType::get());
-    jitFuture->setError(
-        std::make_exception_ptr(std::runtime_error(makeRPCError(
-            c10::str("Send attempt failed intentionally for ", key),
-            RPCErrorType::INTENTIONAL_FAILURE))));
+    jitFuture->setError(std::make_exception_ptr(std::runtime_error(makeRPCError(
+        c10::str("Send attempt failed intentionally for ", key),
+        RPCErrorType::INTENTIONAL_FAILURE))));
     return jitFuture;
   } else {
     lock.unlock();
