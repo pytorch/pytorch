@@ -11,6 +11,13 @@ if(MSVC)
   include(../cmake/public/utils.cmake)
 endif()
 
+# Debug messages - if you want to get a list of source files and examine
+# target information enable thefollowing.
+set(DEBUG TRUE)
+if(DEBUG)
+  include(../cmake/DebugHelper.cmake)
+endif()
+
 # ATen parallelism settings
 #  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
 #  NATIVE - using native thread pool for intra- and inter-op parallelism
@@ -168,9 +175,7 @@ if(CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_HIP_SRCS CAFFE2_ALLOWLISTED_FILES)
 endif()
 
-# Debug messages - if you want to get a list of source files, enable the
-# following.
-if(TRUE)
+if(DEBUG)
   message(STATUS "CPU sources: ")
   foreach(tmp ${Caffe2_CPU_SRCS})
     message(STATUS "  " ${tmp})
@@ -446,12 +451,17 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   set(TORCH_SRCS ${GENERATED_CXX_TORCH})
   list(APPEND TORCH_SRCS ${GENERATED_H_TORCH})
   # append_filelist("libtorch_cmake_sources" TORCH_SRCS)
-  append_filelist("libtorch_lite_cmake_sources" TORCH_SRCS)
+  list(APPEND LIBTORCH_CMAKE_SRCS "")
+  append_filelist("libtorch_lite_cmake_sources" LIBTORCH_CMAKE_SRCS)
+  # append_filelist("libtorch_lite_cmake_sources" TORCH_SRCS)
+  list(APPEND TORCH_SRCS ${LIBTORCH_CMAKE_SRCS})
 
-  message(STATUS "Interpreter sources: ")
-  foreach(tmp ${TORCH_SRCS})
-    message(STATUS "  " ${tmp})
-  endforeach()
+  if(DEBUG)
+    message(STATUS "Interpreter sources: ")
+    foreach(tmp ${LIBTORCH_CMAKE_SRCS})
+      message(STATUS "  " ${tmp})
+    endforeach()
+  endif()
 
   # Required workaround for LLVM 9 includes.
   if(NOT MSVC)
@@ -1321,48 +1331,13 @@ if(BUILD_MOBILE_TEST)
   endforeach()
 endif()
 
-# message(STATUS "torch_library: ")
-# foreach(tmp ${torch_library})
-#   message(STATUS "  " ${tmp})
-# endforeach()
-
-# Get all propreties that cmake supports
-execute_process(COMMAND cmake --help-property-list OUTPUT_VARIABLE CMAKE_PROPERTY_LIST)
-
-# Convert command output into a CMake list
-STRING(REGEX REPLACE ";" "\\\\;" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
-STRING(REGEX REPLACE "\n" ";" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
-
-function(print_properties)
-    message ("CMAKE_PROPERTY_LIST = ${CMAKE_PROPERTY_LIST}")
-endfunction(print_properties)
-
-function(print_target_properties tgt)
-    if(NOT TARGET ${tgt})
-      message("There is no target named '${tgt}'")
-      return()
-    endif()
-
-    foreach (prop ${CMAKE_PROPERTY_LIST})
-        string(REPLACE "<CONFIG>" "${CMAKE_BUILD_TYPE}" prop ${prop})
-    # Fix https://stackoverflow.com/questions/32197663/how-can-i-remove-the-the-location-property-may-not-be-read-from-target-error-i
-    if(prop STREQUAL "LOCATION" OR prop MATCHES "^LOCATION_" OR prop MATCHES "_LOCATION$")
-        continue()
-    endif()
-        # message ("Checking ${prop}")
-        get_property(propval TARGET ${tgt} PROPERTY ${prop} SET)
-        if (propval)
-            get_target_property(propval ${tgt} ${prop})
-            message ("${tgt} ${prop} = ${propval}")
-        endif()
-    endforeach(prop)
-endfunction(print_target_properties)
-
 add_executable(lite_interpreter_demo ${TORCH_ROOT}/test/cpp/demos/main.cpp)
 target_link_libraries(lite_interpreter_demo torch_library)
-print_target_properties(torch)
-print_target_properties(lite_interpreter_demo)
-print_target_properties(torch_cpu)
+if(DEBUG)
+  print_target_properties(torch)
+  print_target_properties(lite_interpreter_demo)
+  print_target_properties(torch_cpu)
+endif()
 
 # ---[ Test binaries.
 if(BUILD_TEST)

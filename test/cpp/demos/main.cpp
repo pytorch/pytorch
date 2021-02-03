@@ -5,15 +5,23 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 
 int main(int argc, char* argv[]) {
-    std::cout << "test start" << std::endl;
-    std::string file_path = argv[1];
-    std::vector<c10::IValue> inputs;
+    std::cout << "lite_interpreter_demo is starting..." << std::endl;
 
-    torch::jit::mobile::Module bc = torch::jit::_load_for_mobile(file_path);
-    // inputs.push_back(c10::IValue(1));
-    inputs.push_back(torch::ones({1, 1, 4, 4}));
+    if (argc == 2) {
+        std::string file_path = argv[1];
+        std::vector<c10::IValue> inputs;
 
-    at::Tensor output = bc.forward(inputs).toTensor();
-    std::cout << output.slice(/*dim=*/1, /*start=*/0, /*end=*/5) << '\n';
+        std::cout << "Loading model from: " << file_path << std::endl;
+        torch::jit::mobile::Module bc = torch::jit::_load_for_mobile(file_path);
+
+        inputs.push_back(torch::ones({1, 1, 4, 4}));
+
+        at::Tensor output = bc.forward(inputs).toTensor();
+        std::cout << "Model output is: " << std::endl;
+        std::cout << output << std::endl;;
+    } else {
+        throw std::invalid_argument( "Incorrect input. "
+            "Example usage: lite_interpreter_demo model.ptl" );
+    }
     return 0;
 }
