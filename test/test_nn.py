@@ -14306,18 +14306,32 @@ class TestLazyModules(TestCase):
         self.assertTrue(module.has_uninitialized_params())
 
     @suppress_warnings
-    def test_lazy_module_jit(self):
+    def test_lazy_module_jit_param(self):
         module = LazyModule()
         module.register_parameter('test_param', UninitializedParameter())
+        self.assertTrue(module.has_uninitialized_params())
+        with self.assertRaisesRegex(RuntimeError, 'run a forward pass'):
+            torch.jit.script(module)
+
+    @suppress_warnings
+    def test_lazy_module_jit_buffer(self):
+        module = LazyModule()
         module.register_buffer('test_buffer', UninitializedBuffer())
         self.assertTrue(module.has_uninitialized_params())
         with self.assertRaisesRegex(RuntimeError, 'run a forward pass'):
             torch.jit.script(module)
 
     @suppress_warnings
-    def test_lazy_share_memory(self):
+    def test_lazy_share_memory_param(self):
         module = LazyModule()
         module.register_parameter('test_param', UninitializedParameter())
+        self.assertTrue(module.has_uninitialized_params())
+        with self.assertRaisesRegex(RuntimeError, 'share memory on an uninitialized'):
+            module.share_memory()
+
+    @suppress_warnings
+    def test_lazy_share_memory_buffer(self):
+        module = LazyModule()
         module.register_buffer('test_buffer', UninitializedBuffer())
         self.assertTrue(module.has_uninitialized_params())
         with self.assertRaisesRegex(RuntimeError, 'share memory on an uninitialized'):
@@ -14519,14 +14533,19 @@ class TestLazyModules(TestCase):
 
                 if module.weight is not None:
                     self.assertEqual(lazy_module.weight.shape, module.weight.shape)
+                    self.assertEqual(lazy_module.weight, module.weight)
                 if module.bias is not None:
                     self.assertEqual(lazy_module.bias.shape, module.bias.shape)
+                    self.assertEqual(lazy_module.bias, module.bias)
                 if module.running_mean is not None:
                     self.assertEqual(lazy_module.running_mean.shape, module.running_mean.shape)
+                    self.assertEqual(lazy_module.running_mean, module.running_mean)
                 if module.running_var is not None:
                     self.assertEqual(lazy_module.running_var.shape, module.running_var.shape)
+                    self.assertEqual(lazy_module.running_var, module.running_var)
                 if module.num_batches_tracked is not None:
                     self.assertEqual(lazy_module.num_batches_tracked.shape, module.num_batches_tracked.shape)
+                    self.assertEqual(lazy_module.num_batches_tracked, module.num_batches_tracked)
 
     def _check_lazy_batchnorm_pickle(self, cls, lazy_cls, input_shape):
         for affine in [False, True]:
