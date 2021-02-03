@@ -76,6 +76,8 @@ void PyAnomalyMetadata::assign_parent(const std::shared_ptr<Node>& parent_node) 
   if (PyDict_SetItemString(dict(), ANOMALY_PARENT_KEY, pyobj)) {
     throw python_error();
   }
+  // Decrement extra refcount because inserting into dict already increments refcount
+  Py_DECREF(pyobj);
 }
 
 void _print_stack(PyObject* stack, const std::string& current_node_name, bool is_parent) {
