@@ -12,9 +12,9 @@ if(MSVC)
 endif()
 
 # Debug messages - if you want to get a list of source files and examine
-# target information enable thefollowing.
-set(DEBUG_INFO TRUE)
-if(DEBUG_INFO)
+# target information enable the following by `set(ADD_DEBUG_INFO TRUE)`.
+set(ADD_DEBUG_INFO FALSE)
+if(ADD_DEBUG_INFO)
   include(../cmake/DebugHelper.cmake)
 endif()
 
@@ -82,7 +82,6 @@ if(INTERN_BUILD_ATEN_OPS)
 
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
-
   list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_SRCS})
   list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
@@ -93,7 +92,6 @@ if(INTERN_BUILD_ATEN_OPS)
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CORE_TEST_SRCS})
   list(APPEND Caffe2_VULKAN_TEST_SRCS ${ATen_VULKAN_TEST_SRCS})
   list(APPEND Caffe2_CPU_INCLUDE ${ATen_CPU_INCLUDE})
-
   list(APPEND Caffe2_GPU_INCLUDE ${ATen_CUDA_INCLUDE})
   list(APPEND Caffe2_HIP_INCLUDE ${ATen_HIP_INCLUDE})
   list(APPEND Caffe2_VULKAN_INCLUDE ${ATen_VULKAN_INCLUDE})
@@ -175,7 +173,7 @@ if(CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_HIP_SRCS CAFFE2_ALLOWLISTED_FILES)
 endif()
 
-if(DEBUG_INFO)
+if(ADD_DEBUG_INFO)
   message(STATUS "CPU sources: ")
   foreach(tmp ${Caffe2_CPU_SRCS})
     message(STATUS "  " ${tmp})
@@ -366,8 +364,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
 
   set(GENERATED_H_TORCH
-    "${TORCH_SRC_DIR}/csrc/au
-    tograd/generated/Functions.h"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
     )
 
@@ -460,7 +457,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
   list(APPEND TORCH_SRCS ${LIBTORCH_CMAKE_SRCS})
 
-  if(DEBUG_INFO)
+  if(ADD_DEBUG_INFO)
     message(STATUS "Interpreter sources: ")
     foreach(tmp ${LIBTORCH_CMAKE_SRCS})
       message(STATUS "  " ${tmp})
@@ -679,7 +676,6 @@ if(HAVE_SOVERSION)
   set_target_properties(torch_cpu PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
-message(STATUS ${torch_cpu})
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
 if(USE_LLVM AND LLVM_FOUND)
@@ -704,7 +700,6 @@ file(WRITE ${DUMMY_EMPTY_FILE} ${DUMMY_FILE_CONTENT})
 # Wrapper library for people who link against torch and expect both CPU and CUDA support
 # Contains "torch_cpu" and "torch_cuda"
 add_library(torch ${DUMMY_EMPTY_FILE})
-
 if(HAVE_SOVERSION)
   set_target_properties(torch PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -1337,7 +1332,7 @@ endif()
 
 add_executable(lite_interpreter_demo ${TORCH_ROOT}/test/cpp/demos/main.cpp)
 target_link_libraries(lite_interpreter_demo torch_library)
-if(DEBUG_INFO)
+if(ADD_DEBUG_INFO)
   print_target_properties(torch)
   print_target_properties(lite_interpreter_demo)
   print_target_properties(torch_cpu)
