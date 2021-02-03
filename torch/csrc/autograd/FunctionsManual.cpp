@@ -553,23 +553,25 @@ Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntArrayRef sizes) {
   return self;
 }
 
-std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, int64_t dim) {
+std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, const std::vector<ScalarType> &dtypes, int64_t dim) {
   std::vector<Tensor> grad_inputs(sizes.size());
   if (!grad.defined()) {
     return grad_inputs;
   }
   dim = at::legacy_cat_wrap_dim(dim, sizes);
   int64_t accumulate = 0;
+
   for (size_t i = 0; i < sizes.size(); ++i) {
     auto& shape = sizes[i];
+    auto grad_ = handle_r_to_c(dtypes[i], grad);
     // If input was empty tensor, gradInput should be empty tensor.
     if (shape == std::vector<int64_t>({0})) {
-      grad_inputs[i] = at::zeros({0}, grad.options());
+      grad_inputs[i] = at::zeros({0}, grad_.options());
       continue;
     }
     auto size = shape[dim];
     accumulate += size;
-    grad_inputs[i] = grad.narrow(dim, accumulate - size, size);
+    grad_inputs[i] = grad_.narrow(dim, accumulate - size, size);
   }
   return grad_inputs;
 }

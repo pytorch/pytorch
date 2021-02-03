@@ -283,7 +283,7 @@
   mat2: at::_bmm(self.transpose(1, 2), grad, deterministic)
 
 - name: cat(Tensor[] tensors, int dim=0) -> Tensor
-  tensors: cat_tensors_backward(grad, to_args_sizes(tensors), dim)
+  tensors: cat_tensors_backward(grad, to_args_sizes(tensors), to_args_scalartypes(tensors), dim)
 
 - name: cauchy_(Tensor(a!) self, float median=0, float sigma=1, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
