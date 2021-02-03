@@ -10,6 +10,79 @@ namespace at { namespace native {
 
 namespace {
 
+/*
+Copies the lower (or upper) triangle of the square matrix to the other half and conjugates it.
+This operation is performed in-place.
+*/
+template <typename scalar_t>
+void apply_reflect_conj_tri_single(scalar_t* self, int64_t n, int64_t stride, bool upper) {
+  std::function<void(int64_t, int64_t)> loop = [](int64_t, int64_t){};
+  if (upper) {
+    loop = [&](int64_t start, int64_t end) {
+      for (int64_t i = start; i < end; i++) {
+        for (int64_t j = i + 1; j < n; j++) {
+          self[i * stride + j] = conj_impl(self[j * stride + i]);
+        }
+      }
+    };
+  } else {
+    loop = [&](int64_t start, int64_t end) {
+      for (int64_t i = start; i < end; i++) {
+        for (int64_t j = 0; j < i; j++) {
+          self[i * stride + j] = conj_impl(self[j * stride + i]);
+        }
+      }
+    };
+  }
+  // For small matrices OpenMP overhead is too large
+  if (n < 256) {
+    loop(0, n);
+  } else {
+    at::parallel_for(0, n, 0, loop);
+  }
+}
+
+/*
+Computes the inverse of a symmetric (Hermitian) positive-definite matrix n-by-n matrix 'input' using the Cholesky factorization
+This is an in-place routine, content of 'input' is overwritten.
+'infos' is an int Tensor containing error codes for each matrix in the batched input.
+For more information see LAPACK's documentation for POTRI routine.
+*/
+template <typename scalar_t>
+void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
+#ifndef USE_LAPACK
+  TORCH_CHECK(false, "cholesky_inverse: LAPACK library not found in compilation");
+#else
+  char uplo = upper ? 'U' : 'L';
+
+  auto input_data = input.data_ptr<scalar_t>();
+  auto infos_data = infos.data_ptr<int>();
+  auto input_matrix_stride = matrixStride(input);
+  auto batch_size = batchCount(input);
+  auto n = input.size(-2);
+  auto lda = std::max<int64_t>(1, n);
+
+  for (int64_t i = 0; i < batch_size; i++) {
+    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+    int* info_working_ptr = &infos_data[i];
+    lapackCholeskyInverse<scalar_t>(uplo, n, input_working_ptr, lda, info_working_ptr);
+    // LAPACK writes to only upper/lower part of the matrix leaving the other side unchanged
+    apply_reflect_conj_tri_single<scalar_t>(input_working_ptr, n, lda, upper);
+  }
+#endif
+}
+
+// This is a type dispatching helper function for 'apply_cholesky_inverse'
+Tensor& cholesky_inverse_kernel_impl(Tensor& result, Tensor& infos, bool upper) {
+  // This function calculates the inverse matrix in-place
+  // result should be in column major order and contain matrices to invert
+  // the content of result is overwritten by 'apply_cholesky_inverse'
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(result.scalar_type(), "cholesky_inverse_out_cpu", [&]{
+    apply_cholesky_inverse<scalar_t>(result, infos, upper);
+  });
+  return result;
+}
+
 template <typename scalar_t>
 void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vecs_, int64_t* info_ptr) {
 #ifndef USE_LAPACK
@@ -98,12 +171,20 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau, Tensor& infos, int6
 
 } // anonymous namespace
 
+REGISTER_ARCH_DISPATCH(cholesky_inverse_stub, DEFAULT, &cholesky_inverse_kernel_impl);
+REGISTER_AVX_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
+REGISTER_AVX2_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
+REGISTER_VSX_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
+
 REGISTER_ARCH_DISPATCH(eig_stub, DEFAULT, &eig_kernel_impl);
 REGISTER_AVX_DISPATCH(eig_stub, &eig_kernel_impl);
 REGISTER_AVX2_DISPATCH(eig_stub, &eig_kernel_impl);
+REGISTER_VSX_DISPATCH(eig_stub, &eig_kernel_impl);
 
 REGISTER_ARCH_DISPATCH(orgqr_stub, DEFAULT, &orgqr_kernel_impl);
 REGISTER_AVX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
 REGISTER_AVX2_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
+REGISTER_VSX_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
+
 
 }} // namespace at::native

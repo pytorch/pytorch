@@ -1,5 +1,6 @@
 import copy
 import itertools
+import functools
 import unittest
 
 try:
@@ -16,9 +17,11 @@ import torch.jit
 import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, \
-    run_tests, TemporaryFileName, IS_WINDOWS
+    run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS
 
-from torch.autograd.gradcheck import gradgradcheck, gradcheck
+# batched grad doesn't support mkldnn
+gradcheck = functools.partial(gradcheck, check_batched_grad=False)
+gradgradcheck = functools.partial(gradgradcheck, check_batched_grad=False)
 
 
 # For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
@@ -750,6 +753,25 @@ class TestMkldnn(TestCase):
 
             self._test_serialization(mkldnn_linear, (x.to_mkldnn(),))
             self._test_tracing(mkldnn_linear, (x.to_mkldnn(),))
+
+    def test_linear_backward(self):
+        in_features = torch.randint(3, 10, (1,)).item()
+        out_features = torch.randint(3, 100, (1,)).item()
+        x = torch.randn(3, in_features, dtype=torch.float32) * 10
+        # Only works for bias case by dispatch onednn linear to addmm.
+        for bias in [True]:
+            x1 = x.clone().requires_grad_()
+            x2 = x.clone().to_mkldnn().requires_grad_()
+            linear = torch.nn.Linear(in_features, out_features).float()
+            mkldnn_linear = copy.deepcopy(linear)
+            y1 = linear(x1).sum()
+            y2 = mkldnn_linear(x2).to_dense().sum()
+            y1.backward()
+            y2.backward()
+            self.assertEqual(x1.grad, x2.grad.to_dense())
+            self.assertEqual(linear.weight.grad, mkldnn_linear.weight.grad)
+            if bias:
+                self.assertEqual(linear.bias.grad, mkldnn_linear.bias.grad)
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_linear_bf16(self):
