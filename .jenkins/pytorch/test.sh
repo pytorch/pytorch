@@ -22,6 +22,10 @@ if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
   export PYTORCH_COLLECT_COVERAGE=1
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda11.1* ]]; then
+  export BUILD_SPLIT_CUDA=ON
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
