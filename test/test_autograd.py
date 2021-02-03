@@ -3856,44 +3856,33 @@ class TestAutograd(TestCase):
             # since if PyObject is not destroyed here, wouldn't this test would detect that also?
             # The answer is that custom function's PyObject (THPFunction) actually only hold
             # a weak reference to the c++ node!
-            size = 10
-
             class MyFunc(Function):
                 @staticmethod
-                def forward(ctx, inp1):
-                    ctx.save_for_backward(inp1)
-                    return inp1.sum(0, keepdim=True)
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return x
 
                 @staticmethod
                 def backward(ctx, gO):
-                    inp, = ctx.saved_tensors
-                    g = gO.clone().expand(size)
-                    gI = MyFunc2.apply(g * inp, g + inp)
-                    return gI, None
+                    x, = ctx.saved_tensors
+                    return MyFunc2.apply(x)
 
             class MyFunc2(Function):
                 @staticmethod
-                def forward(ctx, inp1, inp2):
-                    return inp1 * 2.0 + inp2
+                def forward(ctx, x):
+                    return x
 
                 @staticmethod
                 def backward(ctx, gO):
-                    g1 = gO.clone()
-                    g2 = gO.clone()
-                    g1[0] = 0
-                    g2[0] = 0
+                    return gO + float("NaN")
 
-                    g2[0] /= 0
-                    return g1, g2, None
-
-            inp = torch.rand(size, requires_grad=True)
+            inp = torch.rand(1, requires_grad=True)
+            out = MyFunc.apply(inp)
+            ginp, = torch.autograd.grad(out, (inp,), create_graph=True)
             with warnings.catch_warnings(record=True) as w:
-                with self.assertRaisesRegex(RuntimeError, "Function 'MyFunc2Backward' returned nan values in its 1th output."):
+                with self.assertRaisesRegex(RuntimeError, "Function 'MyFunc2Backward' returned nan values in its 0th output."):
                     with detect_anomaly():
-                        out = MyFunc.apply(inp)
-                        ginp, = torch.autograd.grad(out, (inp,), create_graph=True)
-                        gsum = ginp.sum()
-                        gsum.backward()
+                        ginp.backward()
 
             meta_dict = out.grad_fn.metadata
 
