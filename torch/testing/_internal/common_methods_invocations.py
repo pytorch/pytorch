@@ -663,69 +663,69 @@ def sample_inputs_max_min(op_info, device, dtype, requires_grad):
     samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                                           args=(1, True,),))
+                              args=(1, True,),))
     samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                                           args=(1,),))
+                              args=(1,),))
     samples.append(SampleInput(make_tensor((), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                                           args=(0,),))
+                              args=(0,),))
     samples.append(SampleInput(make_tensor((), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                                           args=(0, True,),))
+                              args=(0, True,),))
     samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                                           args=(),))
+                              args=(),))
     samples.append(SampleInput(make_tensor((), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                                           args=(),))
+                              args=(),))
     samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                                           args=(make_tensor((S, S, S), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),),))
+                              args=(make_tensor((S, S, S), device, dtype,
+                                                low=None, high=None,
+                                                requires_grad=requires_grad),),))
     samples.append(SampleInput(make_tensor((S,), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                                           args=(make_tensor((S, S, S), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),),))
+                              args=(make_tensor((S, S, S), device, dtype,
+                                                low=None, high=None,
+                                                requires_grad=requires_grad),),))
     samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                                           args=(make_tensor((S,), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),),))
+                              args=(make_tensor((S,), device, dtype,
+                                                low=None, high=None,
+                                                requires_grad=requires_grad),),))
     samples.append(SampleInput(make_tensor((S, 1, S), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                                           args=(make_tensor((S, S), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),),))
+                              args=(make_tensor((S, S), device, dtype,
+                                                low=None, high=None,
+                                                requires_grad=requires_grad),),))
     samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                                           args=(make_tensor((), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),),))
+                              args=(make_tensor((), device, dtype,
+                                                low=None, high=None,
+                                                requires_grad=requires_grad),),))
     samples.append(SampleInput(make_tensor((), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                                           args=(make_tensor((S, S, S), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),),))
+                              args=(make_tensor((S, S, S), device, dtype,
+                                                low=None, high=None,
+                                                requires_grad=requires_grad),),))
     samples.append(SampleInput(make_tensor((), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                                           args=(make_tensor((), device, dtype,
-                                           low=None, high=None,
-                                           requires_grad=requires_grad),),))
+                              args=(make_tensor((), device, dtype,
+                                                low=None, high=None,
+                                                requires_grad=requires_grad),),))
     return samples
 
 def sample_movedim_moveaxis(op_info, device, dtype, requires_grad):
@@ -1750,15 +1750,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_masked_select,
            test_inplace_grad=False,
            supports_tensor_out=True),
-    OpInfo('min',
-           dtypes=all_types_and(torch.float16, torch.bfloat16),
-           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-           test_inplace_grad=False,
-           assert_autodiffed=True,
-           safe_casts_outputs=True,
-           sample_inputs_func=sample_inputs_max_min,
-           supports_tensor_out=True),
     OpInfo('max',
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
@@ -1766,8 +1757,15 @@ op_db: List[OpInfo] = [
            test_inplace_grad=False,
            assert_autodiffed=True,
            safe_casts_outputs=True,
-           sample_inputs_func=sample_inputs_max_min,
-           supports_tensor_out=True),
+           sample_inputs_func=sample_inputs_max_min,),
+    OpInfo('min',
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
+           dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           test_inplace_grad=False,
+           assert_autodiffed=True,
+           safe_casts_outputs=True,
+           sample_inputs_func=sample_inputs_max_min,),
     UnaryUfuncInfo('neg',
                    ref=np.negative,
                    skip_bfloat16_grad=True,
