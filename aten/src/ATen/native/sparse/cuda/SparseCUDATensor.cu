@@ -106,6 +106,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
           newNnz,
           stride
         );
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
   }
 

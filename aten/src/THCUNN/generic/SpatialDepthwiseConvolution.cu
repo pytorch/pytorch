@@ -70,23 +70,24 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
   dim3 grid(blocks);
   dim3 block(CUDA_NUM_THREADS);
   if (kW == 3 && kH == 3) {
-  spatialDepthwiseConvolutionUpdateOutput<scalar_t, accreal, unsigned int, 3><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-    dInput, dOutput, dWeight, dBias, bias != NULL, n, outputChannels, depthwiseMultiplier,
-    width, height, outputWidth, outputHeight,
-    kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+    spatialDepthwiseConvolutionUpdateOutput<scalar_t, accreal, unsigned int, 3><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
+      dInput, dOutput, dWeight, dBias, bias != NULL, n, outputChannels, depthwiseMultiplier,
+      width, height, outputWidth, outputHeight,
+      kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else if (kW == 1 && kH == 1) {
-  spatialDepthwiseConvolutionUpdateOutput<scalar_t, accreal, unsigned int, 1><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-    dInput, dOutput, dWeight, dBias, bias != NULL, n, outputChannels, depthwiseMultiplier,
-    width, height, outputWidth, outputHeight,
-    kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+    spatialDepthwiseConvolutionUpdateOutput<scalar_t, accreal, unsigned int, 1><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
+      dInput, dOutput, dWeight, dBias, bias != NULL, n, outputChannels, depthwiseMultiplier,
+      width, height, outputWidth, outputHeight,
+      kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
-  spatialDepthwiseConvolutionUpdateOutput<scalar_t, accreal, unsigned int, 0><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-    dInput, dOutput, dWeight, dBias, bias != NULL, n, outputChannels, depthwiseMultiplier,
-    width, height, outputWidth, outputHeight,
-    kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+    spatialDepthwiseConvolutionUpdateOutput<scalar_t, accreal, unsigned int, 0><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
+      dInput, dOutput, dWeight, dBias, bias != NULL, n, outputChannels, depthwiseMultiplier,
+      width, height, outputWidth, outputHeight,
+      kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
-
-  THCudaCheck(cudaGetLastError());
 
   THCTensor_(free)(state, input);
   THCTensor_(free)(state, weight);
@@ -151,48 +152,54 @@ void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
   if (kW == 3 && kH == 3)
     if (dW == 1 && dH == 1){
       spatialDepthwiseConvolutionUpdateGradInput<scalar_t, accreal, unsigned int, 3, 1><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-      dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
-      height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
+        height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else if (dW == 2 && dH == 2) {
       spatialDepthwiseConvolutionUpdateGradInput<scalar_t, accreal, unsigned int, 3, 2><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-      dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
-      height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
+        height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       spatialDepthwiseConvolutionUpdateGradInput<scalar_t, accreal, unsigned int, 3, 0><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-      dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
-      height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
+        height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   else if (kW == 1 && kH == 1)
     if (dW == 1 && dH == 1){
       spatialDepthwiseConvolutionUpdateGradInput<scalar_t, accreal, unsigned int, 1, 1><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-      dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
-      height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
+        height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else if (dW == 2 && dH == 2) {
       spatialDepthwiseConvolutionUpdateGradInput<scalar_t, accreal, unsigned int, 1, 2><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-      dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
-      height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
+        height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       spatialDepthwiseConvolutionUpdateGradInput<scalar_t, accreal, unsigned int, 1, 0><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-      dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
-      height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
+        height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   else
     if (dW == 1 && dH == 1){
       spatialDepthwiseConvolutionUpdateGradInput<scalar_t, accreal, unsigned int, 0, 1><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-      dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
-      height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
+        height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else if (dW == 2 && dH == 2) {
       spatialDepthwiseConvolutionUpdateGradInput<scalar_t, accreal, unsigned int, 0, 2><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-      dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
-      height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
+        height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
       spatialDepthwiseConvolutionUpdateGradInput<scalar_t, accreal, unsigned int, 0, 0><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-      dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
-      height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+        dGradOutput, dGradInput, dWeight, n, inputChannels, depthwiseMultiplier, outputChannels, width,
+        height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
-
-
-  THCudaCheck(cudaGetLastError());
 
   THCTensor_(free)(state, weight);
   THCTensor_(free)(state, gradOutput);
@@ -256,8 +263,7 @@ void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
   spatialDepthwiseConvolutionAccGradParameters<scalar_t, accreal, unsigned int><<<grid, block, smem, c10::cuda::getCurrentCUDAStream()>>>(
       dGradOutput, dInput, dGradWeight, batchSize, inputChannels, outputChannels, depthwiseMultiplier,
       width, height, outputWidth, outputHeight, kW, kH, dW, dH, padW, padH, dilationW, dilationH);
-
-  THCudaCheck(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   THCTensor_(free)(state, gradOutput);
 }

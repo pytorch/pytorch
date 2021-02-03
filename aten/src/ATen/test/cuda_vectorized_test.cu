@@ -99,6 +99,7 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
   reset_buffers();
   cudaDeviceSynchronize();
   vectorized_copy<double, 4><<<16, 64>>>(b2, b1);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   cudaDeviceSynchronize();
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);
   for (int i = 0; i < 1024; i++) {
@@ -112,6 +113,7 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
   reset_buffers();
   cudaDeviceSynchronize();
   vectorized_copy<double, 2><<<16, 64>>>(b2, b1);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   cudaDeviceSynchronize();
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);
   for (int i = 0; i < 1024; i++) {
@@ -125,6 +127,7 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
   reset_buffers();
   cudaDeviceSynchronize();
   vectorized_copy<double, 1><<<16, 64>>>(b2, b1);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   cudaDeviceSynchronize();
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);
   for (int i = 0; i < 1024; i++) {
@@ -142,6 +145,7 @@ TEST(TestVectorizedMemoryAccess, CopyKernel) {
       cudaGetLastError();
       cudaDeviceSynchronize();
       vectorized_copy<double, 4><<<1, 64>>>(b2, b1);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
       cudaDeviceSynchronize();
       auto err = cudaGetLastError();
       if (i % 16 == 0 && j % 16 == 0) {

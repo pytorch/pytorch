@@ -113,7 +113,7 @@ __global__ void cuda_sparse_coo_softmax_kernel(
         auto i = pool_indices[p];
         auto values_row = input_values_acc[i];
         auto out_values_row = output_values_acc[i];
-        
+
         if (LogSoftMax) {
           out_values_row[j] = values_row[j] - mx_row[j] - c10::cuda::compat::log(exp_sums);
         } else {
@@ -191,7 +191,7 @@ __global__ void cuda_sparse_coo_softmax_backward_kernel(
           } else {
             values_row[k] =
                 out_values_row[k] * (grad_values_row[k] + tmp_row);
-          } 
+          }
         } else {
           if (LogSoftMax) {
             values_row[k] =
@@ -322,12 +322,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
 
   Tensor mx_buffer;
   if (requireMxRows) {
-    
+
     auto values_accessor =
         values.packed_accessor<scalar_t, 2>(); // {nnz, nvalues}
 
     mx_buffer = at::full({new_sz * nvalues}, Scalar(-std::numeric_limits<scalar_t>::infinity()), values.options());
- 
+
     auto mx_buffer_ptr = mx_buffer.data_ptr<scalar_t>();
 
     auto pool_sizes_ptr = pool_sizes.data_ptr<int64_t>();
@@ -427,7 +427,7 @@ void cuda_sparse_coo_softmax(
           mx_buffer.data_ptr<scalar_t>(),
           values_accessor,
           out_values_accessor);
-  THCudaCheck(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 template <typename scalar_t, bool LogSoftMax>
@@ -464,7 +464,7 @@ void cuda_sparse_coo_softmax_backward(
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
 
-  /* when dim >= sparse_dim the dense backward is used */ 
+  /* when dim >= sparse_dim the dense backward is used */
   if (dim >= sparse_dim) {
     if (at::native::cuda_equal(out_offsets, grad_offsets) == true) {
       Tensor unused = at::native::empty_like(grad_values);
@@ -489,10 +489,10 @@ void cuda_sparse_coo_softmax_backward(
             grad_offsets_accessor + grad_offsets.size(0),
             out_offsets_accessor[i]);
         auto j = low - grad_offsets_accessor;
-        /* 
-          Compute output using dense backward only when limits and pools are valid 
-          If this check is false then a sparse tensor with full of zeros is returned 
-        */ 
+        /*
+          Compute output using dense backward only when limits and pools are valid
+          If this check is false then a sparse tensor with full of zeros is returned
+        */
         if (j < grad_nnz && out_offsets_accessor[i] == grad_offsets_accessor[j]) {
           if (LogSoftMax) {
             auto r = log_softmax_backward_cuda(
@@ -561,7 +561,7 @@ void cuda_sparse_coo_softmax_backward(
           values_accessor,
           out_values_accessor,
           grad_values_accessor);
-  THCudaCheck(cudaGetLastError());
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 } // end anonymous namespace

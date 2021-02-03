@@ -147,7 +147,7 @@ __global__ void kernelHistogram1D(
          SHARED_MEM,                                                       \
          getCurrentCUDAStream()>>>(                    \
           aInfo, pInfo, bInfo, nbins, minvalue, maxvalue, totalElements, WEIGHTS_OP);        \
-  TORCH_INTERNAL_ASSERT(cudaGetLastError() == cudaSuccess, "kernelHistogram1D failed");
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #define HANDLE_SWITCH_CASE(mType, getOp)                                   \
   switch (mType) {                                                         \

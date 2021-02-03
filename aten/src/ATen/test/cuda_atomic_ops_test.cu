@@ -47,6 +47,7 @@ void test_atomic_add() {
   cudaMemcpy(sumd, sum, arraysize * sizeof(T), cudaMemcpyHostToDevice);
 
   addition_test_kernel<<<dimGrid, dimBlock>>>(ad, sumd);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   cudaMemcpy(sum, sumd, arraysize * sizeof(T), cudaMemcpyDeviceToHost);
 
@@ -85,6 +86,7 @@ void test_atomic_mul() {
   cudaMemcpy(sumd, sum, arraysize * sizeof(T), cudaMemcpyHostToDevice);
 
   mul_test_kernel<<<dimGrid, dimBlock>>>(ad, sumd);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   cudaMemcpy(sum, sumd, arraysize * sizeof(T), cudaMemcpyDeviceToHost);
 
