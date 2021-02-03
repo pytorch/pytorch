@@ -165,3 +165,60 @@ class TestSubgraphRewriter(JitTestCase):
         ref_outs = comparison_fn(x, y)
         test_outs = traced_module.forward(x, y)
         self.assertEqual(ref_outs, test_outs)
+
+    def test_subgraph_rewriter_pattern_output_pattern_node_can_have_users_that_are_not_matched(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = torch.relu(x)
+                return torch.neg(y) - y
+
+        def pattern(x):
+            return torch.relu(x)
+
+        def replacement(x):
+            return torch.sigmoid(x)
+
+        def comparison(x):
+            y = torch.sigmoid(x)
+            return torch.neg(y) - y
+
+        traced = symbolic_trace(M())
+        comparison_fn = symbolic_trace(comparison)
+
+        x = torch.randn(3, 4)
+
+        subgraph_rewriter.replace_pattern(traced, pattern, replacement)
+
+        traced.graph.lint(traced)
+
+        ref_outs = comparison_fn(x)
+        test_outs = traced.forward(x)
+        self.assertEqual(ref_outs, test_outs)
+
+    def test_subgraph_rewriter_internal_pattern_nodes_cannot_have_users_that_are_not_matched(self):
+        class M(torch.nn.Module):
+            def forward(self, x, w1, w2, b1, b2):
+                m0 = torch.cat([w1, w2])
+                m1 = torch.cat([w1, w2])
+                m2 = torch.cat([x, b2])
+                t0 = torch.addmm(b1, m1, m2.t())
+                t1 = torch.sum(w1, 1)
+                t2 = torch.addmm(b1, m1, m2.t())
+                return torch.sum(t1), torch.sum(t2)
+
+        def pattern(x, w1, w2, b1, b2):
+            m1 = torch.cat([w1, w2])
+            m2 = torch.cat([x, b2])
+            return torch.addmm(b1, m1, m2.t())
+
+        def replacement(x, w1, w2, b1, b2):
+            return torch.cat([x, w1, w2])
+
+        traced = symbolic_trace(M())
+
+        # Result should be None since no matches can be found
+        res = subgraph_rewriter.replace_pattern(traced, pattern, replacement)
+
+        traced.graph.lint(traced)
+
+        self.assertEqual(res, None)

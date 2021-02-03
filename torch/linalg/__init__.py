@@ -21,23 +21,24 @@ Each decomposition has the form:
 
 where :math:`L` is a lower-triangular matrix and :math:`L^H` is the conjugate transpose of :math:`L`,
 which is just a transpose for the case of real-valued input matrices.
-In code it translates to ``input = L @ L.t()` if :attr:`input` is real-valued and
+In code it translates to ``input = L @ L.t()`` if :attr:`input` is real-valued and
 ``input = L @ L.conj().t()`` if :attr:`input` is complex-valued.
 The batch of :math:`L` matrices is returned.
 
 Supports real-valued and complex-valued inputs.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: LAPACK's `potrf` is used for CPU inputs, and MAGMA's `potrf` is used for CUDA inputs.
 
 .. note:: If :attr:`input` is not a Hermitian positive-definite matrix, or if it's a batch of matrices
           and one or more of them is not a Hermitian positive-definite matrix, then a RuntimeError will be thrown.
           If :attr:`input` is a batch of matrices, then the error message will include the batch index
           of the first matrix that is not Hermitian positive-definite.
 
-.. warning:: This function always checks whether :attr:`input` is a Hermitian positive-definite matrix
-             using `info` argument to LAPACK/MAGMA call. For CUDA this causes cross-device memory synchronization.
-
 Args:
     input (Tensor): the input tensor of size :math:`(*, n, n)` consisting of Hermitian positive-definite
-                    :math:`n \times n` matrices, where `*` is zero or more batch dimensions.
+                    :math:`n \times n` matrices, where :math:`*` is zero or more batch dimensions.
 
 Keyword args:
     out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
@@ -148,23 +149,29 @@ Alias of :func:`torch.det`.
 """)
 
 slogdet = _add_docstr(_linalg.linalg_slogdet, r"""
-linalg.slogdet(input) -> (Tensor, Tensor)
+linalg.slogdet(input, *, out=None) -> (Tensor, Tensor)
 
 Calculates the sign and natural logarithm of the absolute value of a square matrix's determinant,
-or of the absolute values of the determinants of a batch of square matrices :attr`input`.
+or of the absolute values of the determinants of a batch of square matrices :attr:`input`.
 The determinant can be computed with ``sign * exp(logabsdet)``.
 
 Supports input of float, double, cfloat and cdouble datatypes.
 
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
 
+.. note:: The determinant is computed using LU factorization. LAPACK's `getrf` is used for CPU inputs,
+          and MAGMA's `getrf` is used for CUDA inputs.
+
 .. note:: For matrices that have zero determinant, this returns ``(0, -inf)``.
           If :attr:`input` is batched then the entries in the result tensors corresponding to matrices with
           the zero determinant have sign 0 and the natural logarithm of the absolute value of the determinant -inf.
 
-Arguments:
+Args:
     input (Tensor): the input matrix of size :math:`(n, n)` or the batch of matrices of size :math:`(*, n, n)`
-                    where `*` is one or more batch dimensions.
+                    where :math:`*` is one or more batch dimensions.
+
+Keyword args:
+    out (tuple, optional): tuple of two tensors to write the output to.
 
 Returns:
     A namedtuple (sign, logabsdet) containing the sign of the determinant and the natural logarithm
