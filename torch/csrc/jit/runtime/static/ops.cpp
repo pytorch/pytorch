@@ -418,6 +418,40 @@ REGISTER_OPERATOR_FUNCTOR_OPT(
             include_last_offset);
       };
     });
+REGISTER_OPERATOR_FUNCTOR_OPT(
+    quantized::embedding_bag_4bit_rowwise_offsets,
+    embedding_bag_4bit_rowwise_offsets,
+    false, // don't reuse byte inputs
+    true,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        auto& weight = p_node->Input(0).toTensor();
+        auto& indices = p_node->Input(1).toTensor();
+        auto offsets = p_node->Input(2).toOptional<at::Tensor>();
+        auto pruned_weights = p_node->Input(5).toBool();
+        auto per_sample_weights = p_node->Input(6).toOptional<at::Tensor>();
+        auto compressed_indices_mapping =
+            p_node->Input(7).toOptional<at::Tensor>();
+        auto include_last_offset = p_node->Input(8).toBool();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) =
+              at::empty({0}, weight.options().dtype(at::kFloat));
+        }
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+        return at::native::embedding_bag_byte_rowwise_offsets_out(
+            out_t,
+            weight,
+            indices,
+            offsets,
+            false, // unused scale_grad_by_freq
+            0, // unused mode
+            pruned_weights,
+            per_sample_weights,
+            compressed_indices_mapping,
+            include_last_offset);
+      };
+    });
 
 // The out variant takes precedence over native
 REGISTER_OPERATOR_FUNCTOR(aten::narrow, aten_narrow, [](Node* n) -> SROperator {

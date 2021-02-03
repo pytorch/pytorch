@@ -2304,6 +2304,8 @@ AT_ERROR("svd: MAGMA library not found in "
 
   magma_int_t m = magma_int_cast(self.size(-2), "m");
   magma_int_t n = magma_int_cast(self.size(-1), "n");
+  auto lda = std::max<magma_int_t>(1, m);
+  auto ldvt = std::max<magma_int_t>(1, n);
   auto mn = std::min(m, n);
 
   c10::Storage storage_rwork;
@@ -2324,7 +2326,7 @@ AT_ERROR("svd: MAGMA library not found in "
   // and (batch_size - 1) calls to allocate and deallocate workspace using at::empty()
   magma_int_t lwork = -1;
   scalar_t wkopt;
-  magmaSvd<scalar_t, value_t>(jobz, m, n, self_data, m, S_data, U_data, m, VT_data, n, &wkopt, lwork, rwork, iwork, &info);
+  magmaSvd<scalar_t, value_t>(jobz, m, n, self_data, lda, S_data, U_data, lda, VT_data, ldvt, &wkopt, lwork, rwork, iwork, &info);
   lwork = magma_int_cast(real_impl<scalar_t, value_t>(wkopt), "work_size");
   scalar_t* work;
   ALLOCATE_ARRAY(work, scalar_t, lwork);
@@ -2336,8 +2338,8 @@ AT_ERROR("svd: MAGMA library not found in "
     scalar_t* VT_working_ptr = &VT_data[i * VT_stride];
 
     // Compute S, U (optionally), VT (optionally)
-    magmaSvd<scalar_t, value_t>(jobz, m, n, self_working_ptr, m,
-                                S_working_ptr, U_working_ptr, m, VT_working_ptr, n, work, lwork, rwork, iwork, &info);
+    magmaSvd<scalar_t, value_t>(jobz, m, n, self_working_ptr, lda,
+                                S_working_ptr, U_working_ptr, lda, VT_working_ptr, ldvt, work, lwork, rwork, iwork, &info);
     infos[i] = info;
     if (info != 0) {
       return;
@@ -2356,47 +2358,42 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_legacy(const Tensor& self, b
   Tensor U_working_copy, S_working_copy, VT_working_copy;
   std::tie(U_working_copy, S_working_copy, VT_working_copy) = _create_U_S_VT(self, some, compute_uv);
 
-  if (self.numel() > 0) {
-    // The input matrix, U, S and VT have to reside in pinned memory.
-    // Additionally, the input and U have to be in column major format.
-    // _create_U_S_VT takes care of a part of these requirements (for U, S and VT)
-    // For the input matrix, this requirements are being taken care of below.
-    // Specify strides
-    auto self_col_major_strides = at::detail::defaultStrides(self.sizes());
-    self_col_major_strides[self.dim() - 2] = 1;
-    self_col_major_strides[self.dim() - 1] = m;
-    // Create strided tensor in pinned memory
-    auto self_working_copy = at::empty_strided(self.sizes(), self_col_major_strides,
-                                               at::TensorOptions(at::kCPU).dtype(self.dtype()).pinned_memory(true));
-    self_working_copy.copy_(self);
+  // The input matrix, U, S and VT have to reside in pinned memory.
+  // Additionally, the input and U have to be in column major format.
+  // _create_U_S_VT takes care of a part of these requirements (for U, S and VT)
+  // For the input matrix, this requirements are being taken care of below.
+  // Specify strides
+  auto self_col_major_strides = at::detail::defaultStrides(self.sizes());
+  self_col_major_strides[self.dim() - 2] = 1;
+  self_col_major_strides[self.dim() - 1] = m;
+  // Create strided tensor in pinned memory
+  auto self_working_copy = at::empty_strided(self.sizes(), self_col_major_strides,
+                                              at::TensorOptions(at::kCPU).dtype(self.dtype()).pinned_memory(true));
+  self_working_copy.copy_(self);
 
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cuda", [&] {
-      apply_svd<scalar_t>(self_working_copy, U_working_copy, S_working_copy, VT_working_copy, jobchar, infos);
-    });
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "svd_cuda", [&] {
+    apply_svd<scalar_t>(self_working_copy, U_working_copy, S_working_copy, VT_working_copy, jobchar, infos);
+  });
 
-    if (self.dim() > 2) {
-      batchCheckErrors(infos, "svd_cuda");
-    } else {
-      singleCheckErrors(infos[0], "svd_cuda");
-    }
-
-    U_working_copy = same_stride_to(U_working_copy, self.options());
-    S_working_copy = same_stride_to(S_working_copy, S_working_copy.options().device(self.device()));
-    VT_working_copy = same_stride_to(VT_working_copy, self.options());
-
-    if (compute_uv) {
-      if (some) {
-        VT_working_copy = VT_working_copy.narrow(-2, 0, k);
-      }
-    } else {
-      VT_working_copy.zero_();
-      U_working_copy.zero_();
-    }
+  if (self.dim() > 2) {
+    batchCheckErrors(infos, "svd_cuda");
   } else {
-    U_working_copy = same_stride_to(U_working_copy, self.options()).zero_();
-    S_working_copy = same_stride_to(S_working_copy, S_working_copy.options().device(self.device()));
-    VT_working_copy = same_stride_to(VT_working_copy, self.options()).zero_();
+    singleCheckErrors(infos[0], "svd_cuda");
   }
+
+  U_working_copy = same_stride_to(U_working_copy, self.options());
+  S_working_copy = same_stride_to(S_working_copy, S_working_copy.options().device(self.device()));
+  VT_working_copy = same_stride_to(VT_working_copy, self.options());
+
+  if (!compute_uv) {
+    VT_working_copy.zero_();
+    U_working_copy.zero_();
+  }
+
+  if (some) {
+    VT_working_copy = VT_working_copy.narrow(-2, 0, k);
+  }
+
   // so far we have computed VT, but torch.svd returns V instead. Adjust accordingly.
   // Note that the 'apply_svd' routine returns VT = V^T (for real inputs) or VT = V^H (for complex inputs), not V.
   VT_working_copy = VT_working_copy.conj();
