@@ -4,6 +4,7 @@ import numpy as np
 from itertools import product, combinations, permutations
 from functools import partial
 import random
+import warnings
 
 from torch._six import nan
 from torch.testing._internal.common_utils import (
@@ -490,6 +491,17 @@ class TestShapeOps(TestCase):
             torch_fn = partial(torch.rot90, k=rot_times, dims=[0, 1])
             np_fn = partial(np.rot90, k=rot_times, axes=[0, 1])
             self.compare_with_numpy(torch_fn, np_fn, data)
+
+    # TODO: update once warning flag is available to always trigger ONCE warnings
+    # Ensures nonzero does not throw a warning, even when the as_tuple argument
+    #   is not provided
+    def test_nonzero_no_warning(self, device):
+        t = torch.randn((2, 2), device=device)
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            torch.nonzero(t)
+            t.nonzero()
+            self.assertEqual(len(w), 0)
 
     @dtypes(*torch.testing.get_all_dtypes(include_complex=False))
     def test_nonzero(self, device, dtype):
