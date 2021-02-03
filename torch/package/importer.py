@@ -80,8 +80,10 @@ class PackageImporter:
 
         self.patched_builtins = builtins.__dict__.copy()
         self.patched_builtins['__import__'] = self.__import__
-        # allow pickles from archive using `import resources`
-        self.modules['resources'] = self  # type: ignore
+        # Allow packaged modules to reference their PackageImporter
+        # Special characters in there to make it very difficult to collide with
+        # user-defined modules.
+        self.modules['torch_package_importer'] = self  # type: ignore
 
         self._mangler = PackageMangler()
 
