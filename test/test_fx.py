@@ -1623,8 +1623,6 @@ class TestFX(JitTestCase):
         with self.assertRaises(TypeError):
             traced(5)
 
-        traced(5)
-
         with patch("sys.stderr", new=StringIO()) as fake_err:
             try:
                 traced(5)
