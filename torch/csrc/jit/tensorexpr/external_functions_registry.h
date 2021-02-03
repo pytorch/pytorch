@@ -29,6 +29,10 @@ namespace tensorexpr {
 // array of int64_t values. The way they are encoded is not specified and could
 // be arbitrary - whatever the most convenient for the specific bridge function
 // is.
+//
+// The bridge functions must not throw exceptions - properly propagating them
+// from the generated code is too cumbersome, and thus all calls to functions
+// that could throw must be wrapped with try-catch blocks.
 using NNCExternalFunction = void (*)(
     int64_t bufs_num,
     void** buf_data,

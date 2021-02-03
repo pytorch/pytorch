@@ -1673,6 +1673,7 @@ void LLVMCodeGenImpl::visit(const ExternalCall* v) {
 
   auto call_ty = callee.getFunctionType();
   auto call_fn = callee.getCallee();
+  llvm::cast<llvm::Function>(call_fn)->addFnAttr(llvm::Attribute::NoUnwind);
 
   irb_.CreateCall(
       call_ty,

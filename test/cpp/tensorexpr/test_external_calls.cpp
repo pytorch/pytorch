@@ -193,7 +193,6 @@ TEST(ExternalCall, Conv2d_nobias_noargs) {
 
 TEST(ExternalCall, Matmul) {
   KernelScope kernel_scope;
-  {
   Placeholder A("A", kFloat, {10, 3, 100, 200});
   Placeholder B("", kFloat, {10, 3, 200, 300});
   BufHandle ResultBuf("Result", {10, 3, 100, 300}, kFloat);
@@ -236,13 +235,6 @@ TEST(ExternalCall, Matmul) {
   ir_eval.call({a_buf, b_buf, result_buf});
   nnc_result = at::from_blob(result_buf.data(), {10, 3, 100, 300}, options);
   ASSERT_TRUE(at::allclose(nnc_result, ref));
-  }
-  {
-    try { // This now causes a segfault :(
-      throw std::logic_error("test");
-    } catch (...) {
-    }
-  }
 }
 
 } // namespace jit
