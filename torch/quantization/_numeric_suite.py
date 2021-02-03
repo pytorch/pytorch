@@ -165,6 +165,10 @@ class Logger(nn.Module):
     def __init__(self):
         super(Logger, self).__init__()
         self.stats = {}
+        # We only insert observer if the op is quantized with static quantization,
+        # which is identified by activation_observer.dtype == quint8.  This is needed
+        # when attaching Logger as observer for FX mode
+        self.dtype = torch.quint8
 
     def forward(self, x):
         pass
