@@ -21,7 +21,7 @@ std::vector<at::Tensor> constructTensors(
   int64_t buf_dims_idx = 0;
   for (int64_t i = 0; i < bufs_num; i++) {
     buf_data_vec.push_back(buf_data[i]);
-    buf_dims_vec.push_back({});
+    buf_dims_vec.emplace_back();
     for (int64_t dim = 0; dim < buf_ranks[i]; dim++) {
       buf_dims_vec[i].push_back(buf_dims[buf_dims_idx++]);
     }
