@@ -3,7 +3,6 @@ import torch
 import collections
 import textwrap
 import functools
-import pdb
 import warnings
 from typing import Dict, List, Set, Type
 from enum import Enum
@@ -300,7 +299,6 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                 pass
 
         attr_type, inferred = infer_type(name, value)
-        pdb.set_trace()
         if attr_type.success():
             concrete_type_builder.add_attribute(name, attr_type.type(), False, False)
         else:
