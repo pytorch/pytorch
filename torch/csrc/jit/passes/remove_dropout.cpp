@@ -30,7 +30,8 @@ void removeDropoutImpl(Block* block) {
     if ((node->kind() == c10::Symbol::fromQualString("aten::dropout") ||
          node->kind() == c10::Symbol::fromQualString("aten::dropout_") ||
          node->kind() == c10::Symbol::fromQualString("aten::feature_dropout") ||
-         node->kind() == c10::Symbol::fromQualString("aten::feature_dropout_")) &&
+         node->kind() ==
+             c10::Symbol::fromQualString("aten::feature_dropout_")) &&
         isDropoutRemovable(*it)) {
       // Input tensor of dropout.
       Value* input_value = node->inputs()[0];
