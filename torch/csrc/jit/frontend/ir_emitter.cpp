@@ -143,10 +143,12 @@ struct CondValue {
   CondValue(
       Value* value,
       RefinementSet refinements,
-      c10::optional<bool> static_if)
+      c10::optional<bool> static_if,
+      c10::optional<Value*> bool_value = c10::nullopt)
       : value_(value),
         refinements_(std::move(refinements)),
-        static_if_(static_if) {}
+        static_if_(static_if),
+        bool_value_(bool_value) {}
   CondValue(
       Graph& g,
       const SourceRange& loc,
@@ -156,6 +158,13 @@ struct CondValue {
         refinements_(std::move(refinements)),
         static_if_(static_value) {}
   Value* value() const {
+    return value_;
+  }
+  Value* bool_value() const {
+    if (bool_value_) {
+      return *bool_value_;
+    }
+
     return value_;
   }
   const RefinementSet& refinements() const {
@@ -176,6 +185,7 @@ struct CondValue {
                   // the expression that produced it to not trigger the
                   // static if behavior. e.g. use of a variable assigned
                   // to a constant
+  c10::optional<Value*> bool_value_;
 };
 
 enum NoneStatus { ALWAYS, MAYBE, NEVER };
@@ -1222,7 +1232,8 @@ struct to_ir {
             }
           }
         }
-        auto expr_out = emitToBool(expr.range(), emitExpr(expr));
+        auto expr_out = emitExpr(expr);
+        auto expr_out_bool = emitToBool(expr.range(), expr_out);
         c10::optional<bool> static_if = c10::nullopt;
         auto kind = expr_out->node()->kind();
         if (kind == aten::is_scripting) {
@@ -1231,10 +1242,10 @@ struct to_ir {
           static_if = false;
         }
         // MetaCompile on boolean literals and constants
-        if (auto maybe_ivalue = toIValue(expr_out)) {
+        if (auto maybe_ivalue = toIValue(expr_out_bool)) {
           static_if = maybe_ivalue->toBool();
         }
-        return CondValue(expr_out, RefinementSet({}), static_if);
+        return CondValue(expr_out, RefinementSet({}), static_if, expr_out_bool);
       } break;
     }
   }
@@ -1377,7 +1388,7 @@ struct to_ir {
 
     // if it's an OR the first expr is emitted in the true branch
     // and the second expr in the false branch, if it's an AND the opposite
-    auto get_const_expr = [&] { return graph->insertConstant(is_or, loc); };
+    auto get_const_expr = [&] { return lhs.value(); };
 
     c10::optional<CondValue> rhs;
     auto get_continue_expr = [&] {
@@ -1418,6 +1429,7 @@ struct to_ir {
       const std::function<Value*()>& true_expr,
       const std::function<Value*()>& false_expr) {
     Node* n = graph->insertNode(create(prim::If, range, 0));
+    //
     n->addInput(cond_value.value());
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();

@@ -1257,9 +1257,19 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             userObj->setSlot(inst.X, std::move(v));
             ++frame.pc;
           } break;
-          case JF:
-            frame.pc += (pop(stack).toBool()) ? 1 : inst.X;
+          case JF: {
+            bool bool_res = false;
+            auto res = pop(stack);
+            if (res.isBool()) {
+              bool_res = res.toBool();
+            } else if (res.isGenericDict()) {
+              bool_res = !res.toGenericDict().empty();
+            } else if (res.isList()) {
+              bool_res = !res.toList().empty();
+            }
+            frame.pc += (bool_res) ? 1 : inst.X;
             break;
+          }
           case JMP:
             frame.pc += inst.X;
             break;
@@ -1268,7 +1278,16 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             auto fr = stack.end() - (inst.N + 1);
             int64_t trip_count = fr[0].toInt();
             int64_t max_trip_count = fr[1].toInt();
-            bool cond = fr[2].toBool();
+
+            bool cond = false;
+            if (fr[2].isBool()) {
+              cond = fr[2].toBool();
+            } else if (fr[2].isGenericDict()) {
+              cond = !fr[2].toGenericDict().empty();
+            } else if (fr[2].isList()) {
+              cond = !fr[2].toList().empty();
+            }
+
             if (trip_count < max_trip_count && cond) {
               fr[2] = trip_count;
               fr[0] = trip_count + 1;
