@@ -27,7 +27,7 @@ elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
 fi
 
 EXTRA_CONDA_FLAGS=""
-if [[ "\$python_nodot" = *39* ]]; then
+if [[ "\$python_nodot" = *39* || "$DESIRED_CUDA" == "cu112" ]]; then
   EXTRA_CONDA_FLAGS="-c=conda-forge"
 fi
 

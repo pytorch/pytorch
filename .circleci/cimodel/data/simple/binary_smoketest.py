@@ -83,7 +83,7 @@ WORKFLOW_DATA = [
     SmoketestJob(
         "binary_linux_build",
         ["libtorch", "3.7m", "cpu", "gcc5.4_cxx11-abi"],
-        "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest",
+        "pytorch/pytorch-binary-docker-image-ubuntu16.04:test",
         "binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build",
         is_master_only=False,
         has_libtorch_variant=True,
@@ -180,7 +180,7 @@ WORKFLOW_DATA = [
     SmoketestJob(
         "binary_linux_test",
         ["libtorch", "3.7m", "cpu", "gcc5.4_cxx11-abi"],
-        "pytorch/pytorch-binary-docker-image-ubuntu16.04:latest",
+        "pytorch/pytorch-binary-docker-image-ubuntu16.04:test",
         "binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_test",
         is_master_only=False,
         requires=["binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_shared-with-deps_build"],
