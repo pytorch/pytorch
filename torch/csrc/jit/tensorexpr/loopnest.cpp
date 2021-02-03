@@ -24,6 +24,11 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 
+LoopNest::LoopNest(const LoopNest& other)
+    : root_stmt_(Stmt::clone(other.root_stmt_)),
+      output_bufs_(other.output_bufs_),
+      intermediate_bufs_(other.intermediate_bufs_) {}
+
 class FunctionCallUseCount : public IRVisitor {
  public:
   std::unordered_map<const Buf*, size_t> findUses(Stmt* s) {
@@ -145,6 +150,41 @@ class Vectorizer : public IRMutator {
     std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
     return try_vectorize(v, inputs, [&]() {
       return ExprHandle(inputs[0]) / ExprHandle(inputs[1]);
+    });
+  }
+
+  const Expr* mutate(const And* v) override {
+    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+    return try_vectorize(v, inputs, [&]() {
+      return ExprHandle(inputs[0]) & ExprHandle(inputs[1]);
+    });
+  }
+
+  const Expr* mutate(const Or* v) override {
+    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+    return try_vectorize(v, inputs, [&]() {
+      return ExprHandle(inputs[0]) | ExprHandle(inputs[1]);
+    });
+  }
+
+  const Expr* mutate(const Xor* v) override {
+    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+    return try_vectorize(v, inputs, [&]() {
+      return ExprHandle(inputs[0]) ^ ExprHandle(inputs[1]);
+    });
+  }
+
+  const Expr* mutate(const Lshift* v) override {
+    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+    return try_vectorize(v, inputs, [&]() {
+      return ExprHandle(inputs[0]) << ExprHandle(inputs[1]);
+    });
+  }
+
+  const Expr* mutate(const Rshift* v) override {
+    std::vector<const Expr*> inputs = {v->lhs(), v->rhs()};
+    return try_vectorize(v, inputs, [&]() {
+      return ExprHandle(inputs[0]) >> ExprHandle(inputs[1]);
     });
   }
 
@@ -424,11 +464,7 @@ class DepTracker : public IRVisitor {
  public:
   std::vector<Tensor*> findUsedTensors(Tensor* tensor) {
     used_tensors.clear();
-    if (tensor->body()) {
-      tensor->body()->accept(this);
-    } else {
-      tensor->ElementStmt()->accept(this);
-    }
+    tensor->stmt()->accept(this);
     return used_tensors;
   }
 
@@ -508,7 +544,12 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
 
   std::vector<Stmt*> loops;
   for (Tensor* t : tensors_to_compute) {
-    Stmt* loop = lowerToStmt(t);
+    Stmt* loop = t->stmt();
+    if (loop->get_parent()) {
+      std::cerr << "Error: creating a loopnest from already used Tensors\n";
+      loops = {};
+      break;
+    }
     // Flatten initializers.
     if (Block* block = dynamic_cast<Block*>(loop)) {
       for (auto* s : block->stmts()) {
@@ -532,49 +573,6 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors) {
   }
 }
 
-Stmt* LoopNest::lowerToStmt(Tensor* t) {
-  Stmt* body = t->ElementStmt();
-
-  // If this Tensor has no functional body, it already has its axes expanded.
-  if (nullptr == t->body()) {
-    return body;
-  }
-
-  if (t->ndim() == 0 && t->reduce_ndim() == 0) {
-    return body;
-  }
-
-  const Expr* initializer = t->initializer();
-  if (initializer) {
-    buf_initializers_[t->buf()] = initializer;
-  }
-
-  std::vector<const Expr*> indices(t->args().begin(), t->args().end());
-
-  if (t->reduce_ndim() > 0) {
-    for (size_t i = 0; i < t->reduce_ndim(); i++) {
-      // Going in reverse order: from innermost loop to the outermost
-      size_t dim_index = t->reduce_ndim() - i - 1;
-      body = new For(
-          t->reduce_arg(dim_index),
-          new IntImm(0),
-          t->reduce_dim(dim_index),
-          body);
-    }
-    if (initializer) {
-      Store* init = new Store(t->buf(), indices, initializer, new IntImm(1));
-      body = new Block({init, body});
-    }
-  }
-
-  for (size_t i = 0; i < t->ndim(); i++) {
-    // Going in reverse order: from innermost loop to the outermost
-    size_t dim_index = t->ndim() - i - 1;
-    body = new For(t->arg(dim_index), new IntImm(0), t->dim(dim_index), body);
-  }
-  return body;
-}
-
 class FunctionInliner : public IRMutator {
  public:
   FunctionInliner(Store* producer, std::unordered_set<const Buf*> outputs)
@@ -587,6 +585,7 @@ class FunctionInliner : public IRMutator {
         throw std::logic_error("cannot inline Buf with compound indices");
       }
       index_vars_.insert(index_var);
+      producer_index_vars_.push_back(index_var);
     }
   }
 
@@ -606,9 +605,9 @@ class FunctionInliner : public IRMutator {
     }
 
     std::vector<const Var*> index_vars;
-    TORCH_INTERNAL_ASSERT(buf->ndim() == t->args().size());
+    TORCH_INTERNAL_ASSERT(buf->ndim() == producer_index_vars_.size());
     for (size_t i = 0; i < buf->ndim(); i++) {
-      const Var* func_callee_arg = dynamic_cast<const Var*>(t->arg(i));
+      const Var* func_callee_arg = producer_index_vars_.at(i);
       const Expr* func_caller_param = v->param(i);
       auto iter = inline_mapping_.find(func_callee_arg);
       if (iter != inline_mapping_.end()) {
@@ -729,6 +728,7 @@ class FunctionInliner : public IRMutator {
 
   // Index Vars present in the producer.
   std::unordered_set<const Var*> index_vars_;
+  std::vector<const Var*> producer_index_vars_;
 
   std::unordered_map<const Var*, const Expr*> inline_mapping_;
 
@@ -2352,8 +2352,9 @@ void LoopNest::rfactor(
   }
 
   std::vector<const Expr*> new_dims = {};
-  Buf* tmp_buf =
-      new Buf(new Var("tmp_buf", kHandle), new_dims, reduce_op->dtype());
+  const Expr* init = reduce_op->accumulator()->initializer();
+  TORCH_INTERNAL_ASSERT(init);
+  Buf* tmp_buf = new Buf("tmp_buf", new_dims, reduce_op->dtype(), init);
 
   auto old_acc = reduce_op->accumulator();
   auto new_inner = reduce_op->reduce_args();
@@ -2425,26 +2426,17 @@ void LoopNest::rfactor(
     throw std::runtime_error("TODO: enable non-root insertion points");
   }
 
-  // From this point forward any errors cannot be handled silently.
-  auto init_it = buf_initializers_.find(reduce_op->accumulator());
-  if (init_it != buf_initializers_.end()) {
-    buf_initializers_[tmp_buf] = init_it->second;
-    Stmt* init_stmt =
-        new Store(tmp_buf, new_outer, init_it->second, new IntImm(1));
+  Stmt* init_stmt = new Store(tmp_buf, new_outer, init, new IntImm(1));
 
-    // Wrap it in any loops lower than the insertion point of the new reduction.
-    for (auto* ol : output_loops) {
-      init_stmt = ol->cloneWithNewBody(init_stmt);
-    }
+  // Wrap it in any loops lower than the insertion point of the new reduction.
+  for (auto* ol : output_loops) {
+    init_stmt = ol->cloneWithNewBody(init_stmt);
+  }
 
-    if (output_contains_target) {
-      parent_block->insert_stmt_before(init_stmt, new_root_for);
-    } else {
-      new_root_for->body()->prepend_stmt(init_stmt);
-    }
+  if (output_contains_target) {
+    parent_block->insert_stmt_before(init_stmt, new_root_for);
   } else {
-    // We may support this but not possible now.
-    throw std::runtime_error("can't rfactor reduction with no initializer\n");
+    new_root_for->body()->prepend_stmt(init_stmt);
   }
 
   auto second_buf = dynamic_cast<const Buf*>(second_reduce->accumulator());

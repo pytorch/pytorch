@@ -40,6 +40,7 @@ from jit.test_warn import TestWarn  # noqa: F401
 from jit.test_isinstance import TestIsinstance  # noqa: F401
 from jit.test_cuda import TestCUDA  # noqa: F401
 from jit.test_hash import TestHash  # noqa: F401
+from jit.test_complex import TestComplex  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -65,7 +66,7 @@ from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WIT
     freeze_rng_state, set_rng_seed, slowTest, TemporaryFileName, skipIfCompiledWithoutNumpy, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
-    _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, \
+    _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, make_global, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
     RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, nn_functional_tests, get_script_args, \
@@ -788,7 +789,7 @@ class TestJit(JitTestCase):
                 super(Mod, self).__init__()
                 self.model = nn.ModuleList([nn.Linear(10, 10) for _ in range(10)])
                 self.model += (nn.Linear(10, 20),)
-                self.model.append(nn.Linear(20, 30)) 
+                self.model.append(nn.Linear(20, 30))
                 self.model.extend([nn.Linear(30, 40), nn.Linear(40, 50)])
 
             def forward(self, v):
@@ -3118,6 +3119,16 @@ def foo(x):
     @unittest.skipIf(not RUN_CUDA, "Requires CUDA")
     def test_device_type_cuda(self):
         self._test_device_type('cuda')
+
+    def test_string_device_implicit_conversion(self):
+        @torch.jit.script
+        def fn(x: torch.device):
+            return x
+
+        self.assertEqual(fn("cpu"), torch.device("cpu"))
+
+        with self.assertRaisesRegex(RuntimeError, "Expected one of"):
+            fn("invalid_device")
 
     def test_eval_python(self):
         def _test(m):
@@ -6609,8 +6620,6 @@ a")
                    .check("in foo").check("in baz").run(str(cm.exception))
 
     def test_error_stacktrace_interface(self):
-        global IFace
-
         @torch.jit.script
         def baz(c, b):
             return c + b
@@ -6633,6 +6642,8 @@ a")
             def one(self, x, y):
                 # type: (Tensor, Tensor) -> Tensor
                 pass
+
+        make_global(IFace)
 
         @torch.jit.script
         def as_interface(x):
@@ -12669,6 +12680,15 @@ dedent """
         with self.assertRaisesRegex(RuntimeError, "operation failed in the TorchScript interpreter"):
             fn(torch.tensor(4))
 
+    def test_dict_expansion_raises_error(self):
+        def fn(self):
+            d = {"foo": 1, "bar": 2, "baz": 3}
+            return {**d}
+
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError,
+                                    "Dict expansion "):
+            torch.jit.script(fn)
+
     def test_module_parameters_and_buffers(self):
         weights = torch.randn(10, 10)
         bias = torch.randn(10)
@@ -15263,6 +15283,17 @@ dedent """
         self.checkScript(fn, ({'hi': 2, 'bye': 3},))
         self.checkScript(fn, ({'bye': 3},))
 
+    def test_for_else(self):
+        def fn():
+            c = 0
+            for i in range(4):
+                c += 10
+            else:
+                print("In else block of for...else")
+
+        with self.assertRaisesRegex(torch.jit.frontend.NotSupportedError, "else branches of for loops aren't supported"):
+            torch.jit.script(fn)
+
     def test_split(self):
         def split_two(tensor):
             a, b, c = torch.split(tensor, 2, dim=1)
@@ -15682,7 +15713,7 @@ def add_autograd_test(
                 def fn(*inputs, **kwargs):
                     attr = getattr(inputs[0], name)
                     output = attr(*inputs[1:], **kwargs)
-                    return output_process_fn(output)
+                    return output
 
                 check_types = test_name not in EXCLUDE_TYPE_CHECK
                 # XXX: this test should always run with disable_autodiff_subgraph_inlining(True),
@@ -15698,7 +15729,7 @@ def add_autograd_test(
                             traced_fn = create_traced_fn(self, fn)
 
                             check_against_reference(self, traced_fn,
-                                                    fn, (self_variable,) + args_variable, kwargs_variable,
+                                                    fn, output_process_fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
                             if IS_SANDCASTLE:
                                 autodiff_nodes = autodiff_nodes + fusible_nodes
@@ -15708,9 +15739,9 @@ def add_autograd_test(
                                 self.assertAutodiffNode(traced_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
 
                         if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
-                            script_fn = create_script_fn(self, name, 'method', output_process_fn)
+                            script_fn = create_script_fn(self, name, 'method')
                             check_against_reference(self, script_fn,
-                                                    fn, (self_variable,) + args_variable, kwargs_variable,
+                                                    fn, output_process_fn, (self_variable,) + args_variable, kwargs_variable,
                                                     check_types=check_types)
 
                             if IS_SANDCASTLE:
@@ -15725,21 +15756,20 @@ def add_autograd_test(
                     # functional interface tests
                     if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
                         def fn(*inputs, **kwargs):
-                            output = getattr(torch, name)(*inputs, **kwargs)
-                            return output_process_fn(output)
+                            return getattr(torch, name)(*inputs, **kwargs)
 
                         f_args_variable = (self_variable,) + args_variable
                         f_args_tensor = (self_tensor,) + args_tensor
 
                         if not is_inplace and test_name not in EXCLUDE_TRACED:
                             check_against_reference(self,
-                                                    create_traced_fn(self, fn),
-                                                    fn, f_args_variable, kwargs_variable, check_types=check_types)
+                                                    create_traced_fn(self, fn), fn, output_process_fn,
+                                                    f_args_variable, kwargs_variable, check_types=check_types)
 
                         if not is_inplace and test_name not in EXCLUDE_SCRIPT:
                             check_against_reference(self,
-                                                    create_script_fn(self, name, 'functional', output_process_fn),
-                                                    fn, f_args_variable, kwargs_variable,
+                                                    create_script_fn(self, name, 'functional'),
+                                                    fn, output_process_fn, f_args_variable, kwargs_variable,
                                                     check_types=check_types)
 
                 # alias annotation testing
@@ -15781,8 +15811,7 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
             output_variable = getattr(F, name)(self_variable, *args_variable, **kwargs_variable)
 
         def fn(*inputs, **kwargs):
-            output = getattr(F, name)(*inputs, **kwargs)
-            return output_process_fn(output)
+            return getattr(F, name)(*inputs, **kwargs)
 
         f_args_variable = (self_variable,) + args_variable
         f_args_tensor = (self_tensor,) + args_tensor
@@ -15793,8 +15822,9 @@ def add_nn_functional_test(name, self_size, args, variant_name='', check_ad=(), 
                 # XXX: this test should always run with disable_autodiff_subgraph_inlining(True),
                 #      so that we don't regress on autodiff support.
                 with disable_autodiff_subgraph_inlining():
-                    script_fn = create_script_fn(self, name, 'nn_functional', output_process_fn)
-                    check_against_reference(self, script_fn, fn, f_args_variable, kwargs_variable, no_grad=no_grad)
+                    script_fn = create_script_fn(self, name, 'nn_functional')
+                    check_against_reference(self, script_fn, fn, output_process_fn,
+                                            f_args_variable, kwargs_variable, no_grad=no_grad)
                     # For tests we disabled AD subgraph inlining, make sure it's not falling back to autograd
                     if (doAutodiffCheck(test_name)):
                         self.assertAutodiffNode(script_fn.last_graph, should_autodiff_node, autodiff_nodes, fusible_nodes)
@@ -15914,7 +15944,8 @@ def add_nn_module_test(*args, **kwargs):
         f_args_variable = deepcopy(unpack_variables(args_variable))
 
         # Check against Python module as reference
-        check_against_reference(self, create_script_module, create_nn_module, f_args_variable, no_grad=no_grad)
+        check_against_reference(self, create_script_module, create_nn_module,
+                                lambda x: x, f_args_variable, no_grad=no_grad)
 
     if 'slowTest' in kwargs:
         do_test = slowTest(do_test)
