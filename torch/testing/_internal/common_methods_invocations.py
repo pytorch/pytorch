@@ -663,67 +663,67 @@ def sample_inputs_max_min(op_info, device, dtype, requires_grad):
     samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                              args=(1, True,),))
+                               args=(1, True,),))
     samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                              args=(1,),))
+                               args=(1,),))
     samples.append(SampleInput(make_tensor((), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                              args=(0,),))
+                               args=(0,),))
     samples.append(SampleInput(make_tensor((), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                              args=(0, True,),))
+                               args=(0, True,),))
     samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                              args=(),))
+                               args=(),))
     samples.append(SampleInput(make_tensor((), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                              args=(),))
+                               args=(),))
     samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                              args=(make_tensor((S, S, S), device, dtype,
+                               args=(make_tensor((S, S, S), device, dtype,
                                                 low=None, high=None,
                                                 requires_grad=requires_grad),),))
     samples.append(SampleInput(make_tensor((S,), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                              args=(make_tensor((S, S, S), device, dtype,
+                               args=(make_tensor((S, S, S), device, dtype,
                                                 low=None, high=None,
                                                 requires_grad=requires_grad),),))
     samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                              args=(make_tensor((S,), device, dtype,
+                               args=(make_tensor((S,), device, dtype,
                                                 low=None, high=None,
                                                 requires_grad=requires_grad),),))
     samples.append(SampleInput(make_tensor((S, 1, S), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                              args=(make_tensor((S, S), device, dtype,
+                               args=(make_tensor((S, S), device, dtype,
                                                 low=None, high=None,
                                                 requires_grad=requires_grad),),))
     samples.append(SampleInput(make_tensor((S, S, S), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                              args=(make_tensor((), device, dtype,
+                               args=(make_tensor((), device, dtype,
                                                 low=None, high=None,
                                                 requires_grad=requires_grad),),))
     samples.append(SampleInput(make_tensor((), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                              args=(make_tensor((S, S, S), device, dtype,
+                               args=(make_tensor((S, S, S), device, dtype,
                                                 low=None, high=None,
                                                 requires_grad=requires_grad),),))
     samples.append(SampleInput(make_tensor((), device, dtype,
                                            low=None, high=None,
                                            requires_grad=requires_grad),
-                              args=(make_tensor((), device, dtype,
+                               args=(make_tensor((), device, dtype,
                                                 low=None, high=None,
                                                 requires_grad=requires_grad),),))
     return samples
