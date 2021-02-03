@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import torch.fx as fx
 from torch.fx import Proxy
+from typing import Tuple, Any, Optional
 
 import torch.fx
 from torch.fx.passes.shape_prop import ShapeProp
@@ -46,6 +47,12 @@ from torch.fx.passes.shape_prop import ShapeProp
 # the graph.
 
 def move_bdim_to_front(x, result_ndim=None):
+    """
+    Returns a tensor with a batch dimension at the front. If a batch
+    dimension already exists, move it. Otherwise, create a new batch
+    dimension at the front. If `result_ndim` is not None, ensure that the
+    resulting tensor has rank equal to `result_ndim`.
+    """
     x_dim = len(x.shape)
     x_bdim = x.bdim
     if x_bdim is None:
@@ -103,7 +110,7 @@ def gen_batching_rule_function(target, *args):
     out_node.bdim = bdim
     return out_node
 
-def vmap(model: torch.nn.Module, in_axes, example_args) -> torch.nn.Module:
+def vmap(model: torch.nn.Module, in_axes: Tuple[Optional[int], ...], example_args: Tuple[Any, ...]) -> torch.nn.Module:
     """vmap
     Given a model with inputs, vmap will return a function that works on
     batched versions of those inputs. Which inputs will be batched is
