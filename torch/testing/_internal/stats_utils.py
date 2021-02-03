@@ -1,6 +1,7 @@
 import math
 import statistics
-from typing import Dict, Iterable, List, Optional, Tuple
+from collections import defaultdict
+from typing import DefaultDict, Dict, Iterable, List, Optional, Tuple
 
 from typing_extensions import TypedDict
 
@@ -60,11 +61,6 @@ class SuiteDiff(TypedDict):
     cases: List[CaseDiff]
 
 
-class RegressionAnalysis(TypedDict):
-    diffs: List[SuiteDiff]
-    delta: Stat
-
-
 def case_status(case: Case) -> Status:
     for k in {'errored', 'failed', 'skipped'}:
         if case[k]:  # type: ignore
@@ -108,7 +104,7 @@ def list_stat(l: List[float]) -> Stat:
 
 
 def zero_stat() -> Stat:
-    return {'center': 0, 'spread': 0}
+    return {'center': 0, 'spread': None}
 
 
 def recenter(was: Stat, now: float) -> Stat:
@@ -172,7 +168,7 @@ def analyze(
     *,
     head_report: SimplerReport,
     base_reports: Dict[Commit, List[SimplerReport]],
-) -> RegressionAnalysis:
+) -> List[SuiteDiff]:
     # most recent master ancestor with at least one S3 report
     base_sha = next(sha for sha, reports in base_reports.items() if reports)
 
@@ -183,8 +179,6 @@ def analyze(
     removed_suites: List[SuiteDiff] = []
     modified_suites: List[SuiteDiff] = []
     added_suites: List[SuiteDiff] = []
-
-    all_stats: List[Stat] = []
 
     for suite_name in sorted(all_suites):
         case_diffs: List[CaseDiff] = []
@@ -206,7 +200,6 @@ def analyze(
                         case_status,
                     ))
                     if case_name not in head_suite:
-                        all_stats.append(recenter(case_stats[case_name], 0))
                         removed_cases.append({
                             'margin': '-',
                             'name': case_name,
@@ -219,7 +212,6 @@ def analyze(
                     head_case = head_suite[head_case_name]
                     if head_case_name in base_cases:
                         stat = case_stats[head_case_name]
-                        all_stats.append(recenter(stat, head_case[0]))
                         base_status = base_cases[head_case_name]
                         if head_case[1] != base_status:
                             modified_cases.append({
@@ -229,13 +221,13 @@ def analyze(
                                 'now': head_case,
                             })
                     else:
-                        all_stats.append(recenter(zero_stat(), head_case[0]))
                         added_cases.append({
                             'margin': '+',
                             'name': head_case_name,
                             'was': None,
                             'now': head_case,
                         })
+                # there might be a bug calculating this stdev, not sure
                 was = sum_normals(case_stats.values())
                 case_diffs = removed_cases + modified_cases + added_cases
                 if case_diffs:
@@ -249,7 +241,6 @@ def analyze(
             else:
                 for head_case_name in sorted(head_suite):
                     head_case = head_suite[head_case_name]
-                    all_stats.append(recenter(zero_stat(), head_case[0]))
                     case_diffs.append({
                         'margin': ' ',
                         'name': head_case_name,
@@ -271,7 +262,6 @@ def analyze(
                     case_name,
                     case_status,
                 ))
-                all_stats.append(recenter(case_stats[case_name], 0))
                 case_diffs.append({
                     'margin': ' ',
                     'name': case_name,
@@ -281,15 +271,13 @@ def analyze(
             removed_suites.append({
                 'margin': '-',
                 'name': suite_name,
+                # there might be a bug calculating this stdev, not sure
                 'was': sum_normals(case_stats.values()),
                 'now': None,
                 'cases': case_diffs,
             })
 
-    return {
-        'diffs': removed_suites + modified_suites + added_suites,
-        'delta': sum_normals(all_stats),
-    }
+    return removed_suites + modified_suites + added_suites
 
 
 def case_diff_lines(diff: CaseDiff) -> List[str]:
@@ -396,44 +384,76 @@ def graph(
     return unlines(lines)
 
 
-def summary(delta: Stat, stdev_threshold: int) -> str:
-    center = delta['center']
-    spread = delta['spread']
+def case_delta(case: CaseDiff) -> Stat:
+    was = case['was']
+    now = case['now']
+    return recenter(
+        was[0] if was else zero_stat(),
+        now[0] if now else 0,
+    )
+
+
+def display_final_stat(stat: Stat) -> str:
+    center = stat['center']
+    spread = stat['spread']
     displayed = display_stat(
         {'center': abs(center), 'spread': spread},
-        ((1, 2), (1, 2)),
-    ).rstrip()
+        ((4, 2), (3, 2)),
+    )
     if center < 0:
         sign = '-'
     elif center > 0:
         sign = '+'
     else:
         sign = ' '
-    lines = [f'Estimated total change in test time: {sign}{displayed}']
+    return f'{sign}{displayed}'.rstrip()
 
-    if spread:
-        stdevs_bigger = center / spread
-        stdevs_abs = abs(stdevs_bigger)
-        stdevs_floor = math.floor(stdevs_abs)
-        stdevs_ceil = math.ceil(stdevs_abs)
-        if stdevs_abs < stdev_threshold:
-            icon, verb, prep, amount = '🟢', 'maintains', 'within', stdevs_ceil
-        else:
-            prep, amount = 'by at least', stdevs_floor
-            if stdevs_bigger < 0:
-                icon, verb = '🟣', 'reduces'
-            else:
-                icon, verb = '🔴', 'increases'
-        plural = '' if amount == 1 else 's'
-        lines.append(f'{icon} this commit {verb} total test job time {prep} {amount} standard deviation{plural}')
-    else:
-        if center < 0:
-            icon, verb = '🟣', 'reduces'
-        else:
-            icon, verb = '🔴', 'increases'
-        lines.append(f'{icon} this commit {verb} total test job time')
 
-    return unlines(lines)
+def summary_line(message: str, d: DefaultDict[str, List[CaseDiff]]) -> str:
+    all_cases = [c for cs in d.values() for c in cs]
+    tests = len(all_cases)
+    suites = len(d)
+    sp = f'{plural(suites)})'.ljust(2)
+    tp = f'{plural(tests)},'.ljust(2)
+    # there might be a bug calculating this stdev, not sure
+    stat = sum_normals(case_delta(c) for c in all_cases)
+    return ''.join([
+        f'{message} (across across {suites:>4} suite{sp}',
+        f'{tests:>6} test{tp}',
+        f' totaling {display_final_stat(stat)}',
+    ])
+
+
+def summary(analysis: List[SuiteDiff], stdev_threshold: int) -> str:
+    removed_tests: DefaultDict[str, List[CaseDiff]] = defaultdict(list)
+    modified_tests: DefaultDict[str, List[CaseDiff]] = defaultdict(list)
+    added_tests: DefaultDict[str, List[CaseDiff]] = defaultdict(list)
+
+    for diff in analysis:
+        # the use of 'margin' here is not the most elegant
+        name = diff['name']
+        margin = diff['margin']
+        cases = diff['cases']
+        if margin == '-':
+            removed_tests[name] += cases
+        elif margin == '+':
+            added_tests[name] += cases
+        else:
+            removed = list(filter(lambda c: c['margin'] == '-', cases))
+            added = list(filter(lambda c: c['margin'] == '+', cases))
+            modified = list(filter(lambda c: c['margin'] == '!', cases))
+            if removed:
+                removed_tests[name] += removed
+            if added:
+                added_tests[name] += added
+            if modified:
+                modified_tests[name] += modified
+
+    return unlines([
+        summary_line('Removed ', removed_tests),
+        summary_line('Modified', modified_tests),
+        summary_line('Added   ', added_tests),
+    ])
 
 
 def regression_info(
@@ -472,7 +492,7 @@ def regression_info(
             f'    job: {job_name}',
             f'    commit: {head_sha}',
         ]),
-        anomalies(analysis['diffs']),
+        anomalies(analysis),
         graph(
             head_sha=head_sha,
             head_seconds=head_report['total_seconds'],
@@ -485,7 +505,7 @@ def regression_info(
             other_ancestors=other_ancestors,
         ),
         summary(
-            analysis['delta'],
+            analysis,
             stdev_threshold=stdev_threshold,
         ),
     ])

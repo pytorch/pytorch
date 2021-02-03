@@ -720,8 +720,6 @@ class TestStatsUtils(TestCase):
             base_reports=simpler_base,
         )
 
-        self.assertAlmostEqual(0.44333333, analysis['delta']['center'])
-        self.assertAlmostEqual(3.90390642, analysis['delta']['spread'])
         self.assertEqual(
             '''\
 
@@ -782,7 +780,7 @@ class TestStatsUtils(TestCase):
 +         # now   3.742s           (failed)
 
 ''',
-            stats_utils.anomalies(analysis['diffs']),
+            stats_utils.anomalies(analysis),
         )
 
     def test_graph(self):
@@ -928,39 +926,6 @@ Commit graph (base is most recent master ancestor with at least one S3 report):
             )
         )
 
-    def test_summary(self):
-        self.assertEqual(
-            '''\
-Estimated total change in test time:  0.00s ± 1.00s
-🟢 this commit maintains total test job time within 0 standard deviations
-''',
-            stats_utils.summary({'center': 0, 'spread': 1}, 2),
-        )
-
-        self.assertEqual(
-            '''\
-Estimated total change in test time: +3.00s ± 2.00s
-🟢 this commit maintains total test job time within 2 standard deviations
-''',
-            stats_utils.summary({'center': 3, 'spread': 2}, 2),
-        )
-
-        self.assertEqual(
-            '''\
-Estimated total change in test time: +10.00s ± 3.00s
-🔴 this commit increases total test job time by at least 3 standard deviations
-''',
-            stats_utils.summary({'center': 10, 'spread': 3}, 3),
-        )
-
-        self.assertEqual(
-            '''\
-Estimated total change in test time: -2.00s ± 1.50s
-🟣 this commit reduces total test job time by at least 1 standard deviation
-''',
-            stats_utils.summary({'center': -2, 'spread': 1.5}, 1),
-        )
-
     def test_regression_info(self):
         self.assertEqual(
             '''\
@@ -969,29 +934,58 @@ Following output is to check for test time regressions:
     commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
 
+  class Foo:
+      # was   42.50s ±   2.12s
+      # now    3.02s
+
+    - def test_bar: ...
+    -     # was   1.000s
+
+    ! def test_foo: ...
+    !     # was  41.500s ±  2.121s
+    !     # now   0.020s           (skipped)
+
+    + def test_baz: ...
+    +     # now   3.000s
+
+
 Commit graph (base is most recent master ancestor with at least one S3 report):
 
     : (master)
     |
-    | * aaaaaaaaaa (HEAD)            total time    42.00s
+    | * aaaaaaaaaa (HEAD)            total time     3.02s
     |/
-    * bbbbbbbbbb (base)   1 report,  total time    40.00s
+    * bbbbbbbbbb (base)   1 report,  total time    41.00s
     * cccccccccc          1 report,  total time    43.00s
     |
     :
 
-Estimated total change in test time: +0.50s ± 2.12s
-🟢 this commit maintains total test job time within 1 standard deviation
+Removed  (across across    1 suite)      1 test,  totaling -   1.00s
+Modified (across across    1 suite)      1 test,  totaling -  41.48s ±   2.12s
+Added    (across across    1 suite)      1 test,  totaling +   3.00s
 ''',
             stats_utils.regression_info(
                 head_sha=fakehash('a'),
-                head_report=makereport({'Foo': [makecase('test_foo', 42)]}),
+                head_report=makereport({
+                    'Foo': [
+                        makecase('test_foo', 0.02, skipped=True),
+                        makecase('test_baz', 3),
+                    ]}),
                 base_reports={
                     fakehash('b'): [
-                        makereport({'Foo': [makecase('test_foo', 40)]}),
+                        makereport({
+                            'Foo': [
+                                makecase('test_foo', 40),
+                                makecase('test_bar', 1),
+                            ],
+                        }),
                     ],
                     fakehash('c'): [
-                        makereport({'Foo': [makecase('test_foo', 43)]}),
+                        makereport({
+                            'Foo': [
+                                makecase('test_foo', 43),
+                            ],
+                        }),
                     ],
                 },
                 stdev_threshold=2,
