@@ -1710,7 +1710,9 @@ def _write_ninja_file_to_build_library(path,
     # sysconfig.get_path('include') gives us the location of Python.h
     # Explicitly specify 'posix_prefix' scheme on non-Windows platforms to workaround error on some MacOS
     # installations where default `get_path` points to non-existing `/Library/Python/M.m/include` folder
-    system_includes.append(sysconfig.get_path('include', scheme = 'nt' if IS_WINDOWS else 'posix_prefix'))
+    python_include_path = sysconfig.get_path('include', scheme='nt' if IS_WINDOWS else 'posix_prefix')
+    if python_include_path is not None:
+        system_includes.append(python_include_path)
 
     # Windows does not understand `-isystem`.
     if IS_WINDOWS:
