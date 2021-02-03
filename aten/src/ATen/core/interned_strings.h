@@ -31,8 +31,6 @@ namespace c10 {
   _(prim, ReductionSizes)            \
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
-  _(prim, ConvertToMKLDNN)           \
-  _(prim, ConvertFromMKLDNN)         \
   _(prim, ConstantMKLDNNTensor)      \
   _(prim, MKLDNNGroup)               \
   _(prim, Drop)                      \
@@ -272,6 +270,7 @@ namespace c10 {
   _(aten, trunc_)                    \
   _(aten, fix)                       \
   _(aten, fix_)                      \
+  _(aten, to_mkldnn)                 \
   _(aten, neg)                       \
   _(aten, neg_)                      \
   _(aten, negative)                  \

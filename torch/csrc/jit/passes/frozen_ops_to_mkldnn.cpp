@@ -34,51 +34,6 @@ using Tensor = at::Tensor;
 
 namespace {
 
-c10::AliasAnalysisKind aliasAnalysisFromSchema() {
-  return AliasAnalysisKind::FROM_SCHEMA;
-}
-
-// These operators are registered as builtins instead of
-// using control flow because it will make it easier to
-// remove unneeded adjacent mkldnn/dense conversions
-RegisterOperators mm_tree_reduction_reg(
-    {Operator(
-         "prim::ConvertToMKLDNN(Tensor input) -> (bool, Tensor)",
-         [](Stack* stack) {
-           auto input = pop(stack).toTensor();
-           bool is_mkldnn = input.is_mkldnn();
-           push(stack, is_mkldnn);
-           if (input.is_mkldnn()) {
-             push(stack, input);
-           } else {
-             push(stack, input.to_mkldnn());
-           }
-         },
-         // registered as a special case so that it can return two outputs
-         // instead of a tuple tuple unboxing wouldn't be able to be removed and
-         // gets in the way of transformation
-         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
-     Operator(
-         "prim::ConvertFromMKLDNN(bool to_mkldnn, Tensor(a) input) -> (Tensor(a))",
-         [](Stack* stack) {
-           auto input = pop(stack).toTensor();
-           bool to_mkldnn = pop(stack).toBool();
-           if (to_mkldnn) {
-             if (input.is_mkldnn()) {
-               push(stack, input);
-             } else {
-               push(stack, input.to_mkldnn());
-             }
-           } else {
-             if (input.is_mkldnn()) {
-               push(stack, input.to_dense());
-             } else {
-               push(stack, input);
-             }
-           }
-         },
-         aliasAnalysisFromSchema())});
-
 Operation ConstantMKLDNNTensorOp(const Node* node) {
   auto t = node->t(attr::value);
   return [t](Stack* stack) {
@@ -88,7 +43,8 @@ Operation ConstantMKLDNNTensorOp(const Node* node) {
 }
 
 // This is registered as its own op instead of as prim::Constant bc it does not
-// serialize which is an invariant of prim::Consstant
+// serialize which is an invariant of prim::Constant
+// TODO: make mkldnn tensor serialize...
 RegisterOperators MKLDNNConstantOp({
     torch::jit::Operator(
         prim::ConstantMKLDNNTensor,
@@ -183,19 +139,13 @@ void moveWeightsToMKLDNN(Node* n) {
 
 void computeSubgraphInMKLDNN(Node* subgraph_node) {
   auto graph = subgraph_node->owningGraph();
-  Value* was_mkldnn;
   for (size_t i = 0; i < subgraph_node->inputs().size(); ++i) {
     Value* v = subgraph_node->inputs().at(i);
     if (!v->type()->cast<TensorType>()) {
       continue;
     }
-    auto to_mkldnn =
-        graph->create(prim::ConvertToMKLDNN, 2)->insertBefore(subgraph_node);
-    to_mkldnn->addInput(v);
-    was_mkldnn = to_mkldnn->outputs().at(0)->setType(BoolType::get());
-    Value* mkldnn_tensor =
-        to_mkldnn->outputs().at(1)->setType(TensorType::get());
-    subgraph_node->replaceInput(i, mkldnn_tensor);
+    WithInsertPoint guard(subgraph_node);
+    subgraph_node->replaceInput(i, graph->insert(aten::to_mkldnn, {v}));
   }
 
   for (size_t i = 0; i < subgraph_node->outputs().size(); ++i) {
@@ -203,7 +153,8 @@ void computeSubgraphInMKLDNN(Node* subgraph_node) {
     if (!v->type()->cast<TensorType>()) {
       continue;
     }
-    auto from_mkldnn = graph->create(prim::ConvertFromMKLDNN, {was_mkldnn, v})
+    auto none_value = graph->insertConstant(IValue());
+    auto from_mkldnn = graph->create(aten::to_dense, {v, none_value})
                            ->insertAfter(subgraph_node);
     v->replaceAllUsesAfterNodeWith(from_mkldnn, from_mkldnn->output());
   }
@@ -349,13 +300,13 @@ class MKLDNNSubgraphSlicer {
       return supportedMKLDNNWeight(*const_tensor);
     }
     auto k = v->node()->kind();
-    bool supported = k == prim::MKLDNNGroup ||
-        k == prim::ConstantMKLDNNTensor || k == prim::ConvertToMKLDNN;
-    if (supported) {
+    bool supported_kind = k == prim::MKLDNNGroup || k == aten::to_mkldnn ||
+        k == prim::ConstantMKLDNNTensor;
+    if (supported_kind) {
       return true;
     }
     for (const auto& use : v->uses()) {
-      if (use.user->kind() == prim::ConvertToMKLDNN &&
+      if (use.user->kind() == aten::to_mkldnn &&
           v_use->owningBlock() == use.user->owningBlock()) {
         return true;
       }
@@ -500,9 +451,12 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
     // previously existed between input and output
     RemoveTensorMutation(graph);
     AliasDb db(graph);
+    bool prev_mkldnn_constants_enabled = getMKLDNNConstantTensorsEnabled();
+    // getMKLDNNConstantTensorsEnabled() = true;
     MKLDNNSubgraphSlicer(graph->block(), graph, db).run();
     EliminateDeadCode(graph);
     GRAPH_DUMP("After convert frozen ops to mkldnn", graph);
+    getMKLDNNConstantTensorsEnabled() = prev_mkldnn_constants_enabled;
   } else {
     GRAPH_DUMP("No mkldnn compatible frozen nodes", graph);
   }
