@@ -436,7 +436,7 @@ PyTorch provides two types of hooks for modules:
 * **Backward hooks** are called during the backward pass. They can be installed with
   :func:`~torch.nn.Module.register_full_backward_hook`. These hooks will be called when the backward for this
   Module has been computed and will allow the user to access the gradients for both the inputs and outputs.
-  Alternatively, this hooks can be installed globally for all modules with
+  Alternatively, they can be installed globally for all modules with
   :func:`~torch.nn.modules.module.register_module_full_backward_hook`.
 
 All hooks allow the user to return an updated value that will be used throughout the remaining computation.
