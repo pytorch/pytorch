@@ -36,37 +36,44 @@ def get_type_a_related_to_b() -> Set[Tuple[Callable, Callable]]:
 
         # TODO(future PR): other ops
     ])
-
     # make the mapping bidirectional
-    reverse_mapping = set()
-    for k in type_a_related_to_b:
-        type_a, type_b = k
-        reverse_mapping.add((type_b, type_a))
-    type_a_related_to_b.update(reverse_mapping)
-
+    type_a_related_to_b.update(set((b, a) for a, b in type_a_related_to_b))
     return type_a_related_to_b
 
-# Note: the other thing we will need for prepare_model_stubs
-# is a conversion function from inputs of node A to inputs of node B
-# i.e. {
-#        (F.linear, toq.linear):
-#          lambda x, scale, zp: torch.quantize_per_tensor(x, scale, zp),
-#        (toq.linear, F.linear):
-#          lambda x: x.dequantize(),
-#        ...
-#      }
-#
-# This can probably be implemented mostly with heuristics
+def get_non_matchable_functions() -> Set[Callable]:
+    """
+    `call_function` nodes pointing to these functions are non-matchable.
+    """
+    # TODO(future PR): allow customizations
+    return set([
+        torch.quantize_per_tensor,
+    ])
+
+def get_non_matchable_modules() -> Set[Callable]:
+    """
+    `call_module` nodes pointing to instances of these types are non-matchable.
+    """
+    # TODO(future PR): allow customizations
+    return set([
+        torch.quantization.ObserverBase,
+    ])
 
 class _NSGraphMatchableNodesIterator:
     """
     Iterates through the graph of gm, starting with the output nodes
     and continuing backwards.
-    1. Returns meaningful nodes, in order
-    2. Skips over non-meaningful nodes
+    1. Returns matchable nodes, in order
+    2. Skips over non-matchable nodes
     """
-    def __init__(self, gm: GraphModule):
+    def __init__(
+        self,
+        gm: GraphModule,
+        non_matchable_functions: Set[Callable],
+        non_matchable_modules: Set[Callable],
+    ):
         self.gm: GraphModule = gm
+        self.non_matchable_functions: Set[Callable] = non_matchable_functions
+        self.non_matchable_modules: Set[Callable] = non_matchable_modules
         self.seen_nodes: Set[Node] = set()
         self.stack: List[Node] = []
         for start_node in _get_output_nodes(self.gm.graph):
@@ -77,7 +84,7 @@ class _NSGraphMatchableNodesIterator:
 
     def __next__(self) -> Node:
         """
-        Returns the next meaningful node.
+        Returns the next matchable node.
         """
         while len(self.stack) > 0:
             cur_node = self.stack.pop()
@@ -92,28 +99,24 @@ class _NSGraphMatchableNodesIterator:
                 # TODO(future PR): handle other arg types such as Tuple, etc
 
             # skip observers, etc
-            if not self._is_meaningful(cur_node):
+            if not self._is_matchable(cur_node):
                 continue
 
             return cur_node
 
         raise StopIteration
 
-    def _is_meaningful(self, node: Node) -> bool:
-        is_meaningful = False
+    def _is_matchable(self, node: Node) -> bool:
         if node.op == 'call_function':
-            is_meaningful = True
-            # TODO(future PR): make sure quant/dequant calls are not useful, more generic
-            if node.target in (torch.quantize_per_tensor,):
-                is_meaningful = False
+            return not (node.target in self.non_matchable_functions)
         elif node.op == 'call_module':
-            is_meaningful = True
             assert isinstance(node.target, str)
-            target_module = getattr(self.gm, node.target)
-            # TODO(future PR): more generic, skip other nodes, etc
-            if isinstance(target_module, torch.quantization.ObserverBase):
-                is_meaningful = False
-        return is_meaningful
+            target_mod = getattr(self.gm, node.target)
+            return not \
+                any(isinstance(target_mod, t)  # type: ignore
+                    for t in self.non_matchable_modules)
+        else:
+            return False
 
 class GraphMatchingException(Exception):
     """
@@ -131,10 +134,6 @@ def _node_a_related_to_b(
     if node_a.op != node_a.op:
         # for now, comparing call_module to call_function is not supported
         # this can be added later if needed
-        return False
-
-    if node_a.op not in ('call_module', 'call_function'):
-        # only call_module and call_function make sense for this use case
         return False
 
     if node_a.op == 'call_function':
@@ -166,9 +165,9 @@ def get_matching_node_pairs(
     gm_b: GraphModule,
 ) -> Dict[str, Tuple[Node, Node]]:
     """
-    Matches meaningful nodes of graph_a to graph_b.
+    Matches matchable nodes of graph_a to graph_b.
 
-    For a node, "meaningful" is defined as a node which is not an observer,
+    For a node, "matchable" is defined as a node which is not an observer,
     fake_quants, quant or dequant.
 
     A pair of nodes is "related" if both nodes represent the same mathematical
@@ -176,14 +175,12 @@ def get_matching_node_pairs(
     `F.linear` and `torch.ops.quantized.linear` are related, and
     `F.linear` and `torch.nn.Conv` are not related.
 
-    TODO(before land): align on naming for "meaningful" and "related" and "flavors".
-
-    For each meaningful pair of nodes node_a and node_b, they will match
+    For each matchable pair of nodes node_a and node_b, they will match
     if node_a and node_b are related.
 
     For graphs A and B, they will match iff:
-    1. the number of meaningful nodes in A and B is equivalent
-    2. when iterating through the meaningful nodes of A and B in the same order, each
+    1. the number of matchable nodes in A and B is equivalent
+    2. when iterating through the matchable nodes of A and B in the same order, each
        corresponding pair of nodes is related.
 
     Practically, this enables us to find the corresponding nodes between
@@ -205,44 +202,44 @@ def get_matching_node_pairs(
     }
 
     """
-    graph_a_iterator = _NSGraphMatchableNodesIterator(gm_a)
-    graph_b_iterator = _NSGraphMatchableNodesIterator(gm_b)
+    non_matchable_functions = get_non_matchable_functions()
+    non_matchable_modules = get_non_matchable_modules()
+    graph_a_iterator = _NSGraphMatchableNodesIterator(
+        gm_a, non_matchable_functions, non_matchable_modules)
+    graph_b_iterator = _NSGraphMatchableNodesIterator(
+        gm_b, non_matchable_functions, non_matchable_modules)
     results = {}
     type_a_related_to_b = get_type_a_related_to_b()
 
     while True:
+        # fetch the next nodes from a and b
         cur_node_a, cur_node_b = None, None
-
-        # fetch the next node from a
         try:
             cur_node_a = next(graph_a_iterator)
         except StopIteration:
             pass
-
-        # fetch the next node from b
         try:
             cur_node_b = next(graph_b_iterator)
         except StopIteration:
             pass
 
-        # now that we have two candidate nodes, check if they match
-        if cur_node_a is None and cur_node_b is None:
-            # we reached the end of both graphs
-            break
-
-        elif cur_node_a is not None and cur_node_b is not None:
-            # there is a candidate match
-            if not _node_a_related_to_b(cur_node_a, cur_node_b, gm_a, gm_b, type_a_related_to_b):
-                # matching error
-                # TODO(future PR): more descriptive error message
-                raise GraphMatchingException()
+        # check for results and determine what to do next
+        if cur_node_a is not None and cur_node_b is not None:
+            # both nodes were fetched, check for relatedness
+            if not _node_a_related_to_b(cur_node_a, cur_node_b,
+                                        gm_a, gm_b, type_a_related_to_b):
+                raise GraphMatchingException(
+                    "%s and %s are not related" % (cur_node_a, cur_node_b))
             key_name = _get_name_for_node_pair(cur_node_a, cur_node_b)
             results[key_name] = (cur_node_a, cur_node_b)
             continue
-
+        elif cur_node_a is None and cur_node_b is None:
+            # we reached the end of both graphs
+            break
         else:
-            # matching error
-            # TODO(future PR): more descriptive error message
-            raise GraphMatchingException()
+            # only one node was fetched, no match possible, throw error
+            raise GraphMatchingException(
+                "Matchable nodes count mismatch: cur_node_a is %s and cur_node_b is %s" %
+                (cur_node_a, cur_node_b))
 
     return results
