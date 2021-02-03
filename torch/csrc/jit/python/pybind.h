@@ -50,12 +50,16 @@ class unwrapping_shared_ptr {
     }
     return impl->elem;
   }
+  // we need to disable the overloaded & for PyBind11 < 2.3 due.
+  // see https://github.com/pybind/pybind11/pull/1435
+#if (PYBIND11_VERSION_MAJOR > 2) || ((PYBIND11_VERSION_MAJOR == 2) && (PYBIND11_VERSION_MINOR >= 3))
   T** operator&() {
     if (!impl->elem) {
       throw std::logic_error("has been invalidated");
     }
     return &(impl->elem);
-  }
+    }
+#endif
 };
 
 } // namespace jit
