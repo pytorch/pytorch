@@ -255,6 +255,16 @@ class Conv1d(_ConvNd):
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _single(0), groups, bias, padding_mode)
 
+        # The weights are instantiated for the Conv2d. Although this case is
+        # covered when converting from the FP model, it is not right after
+        # instantiation.
+        w, b = self._weight_bias()
+        if w.ndim > 3:
+            # Remove the last dimension
+            w = w[:, :, :, 1]
+            w.squeeze_(-1)
+            self.set_weight_bias(w, b)
+
     def _get_name(self):
         return 'QuantizedConv1d'
 
