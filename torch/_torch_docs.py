@@ -8464,8 +8464,7 @@ Example::
 .. _Gauge problem in AD: https://re-ra.xyz/Gauge-Problem-in-Automatic-Differentiation/
 """)
 
-add_docstr(torch.symeig,
-           r"""
+add_docstr(torch.symeig, r"""
 symeig(input, eigenvectors=False, upper=True, *, out=None) -> (Tensor, Tensor)
 
 This function returns eigenvalues and eigenvectors
@@ -8485,6 +8484,21 @@ Since the input matrix :attr:`input` is supposed to be symmetric,
 only the upper triangular portion is used by default.
 
 If :attr:`upper` is ``False``, then lower triangular portion is used.
+
+.. note:: Prefer using :func:`torch.linalg.eigh` instead of ``torch.symeig`` with
+          ``eigenvectors=True``, or :func:`torch.linalg.eigvalsh` instead of
+          ``torch.symeig`` with ``eigenvectors=False``.
+           
+          **Differences with** :func:`torch.linalg.eigh` and :func:`torch.linalg.eigvalsh`:
+
+          * the :attr:`upper` parameter was replaced by the :attr:`UPLO` parameter.
+
+          * the default value for :attr:`upper` is True while the default value for :attr:`UPLO` is
+            'L' which is the opposite (equivalent to ``upper=False``).
+
+          * :func:`torch.symeig` uses LAPACK's `syev` and `heev` operations for CPU inputs while
+            :func:`torch.linalg.eigh` and :func:`torch.linalg.eigvalsh` use LAPACK's `syevd` and
+            `heevd` operations which implement a different, and generally faster, algorithm.
 
 .. note:: The eigenvalues are returned in ascending order. If :attr:`input` is a batch of matrices,
           then the eigenvalues of each matrix in the batch is returned in ascending order.
