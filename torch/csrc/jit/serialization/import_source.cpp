@@ -384,6 +384,8 @@ struct SourceImporterImpl : public Resolver,
     // in case any are called more than once
     std::vector<std::string> pre_hooks_order;
     std::vector<std::string> hooks_order;
+    std::vector<std::tuple<std::string, std::string, std::string>> properties;
+
     // Process statements, splitting things into attribute and method
     // definitions.
     for (const auto& statement : class_def.body()) {
@@ -417,6 +419,20 @@ struct SourceImporterImpl : public Resolver,
                     ListLiteral(assign.rhs().get()).inputs();
                 for (const auto& buffer : buffer_list) {
                   buffer_names.insert(StringLiteral(buffer).text());
+                }
+              } else if (name == "__properties__") {
+                const auto prop_list = ListLiteral(assign.rhs().get()).inputs();
+                for (const auto& property : prop_list) {
+                  const auto prop_data = TupleLiteral(property).inputs();
+                  std::string name = StringLiteral(prop_data[0]).text();
+                  std::string getter = StringLiteral(prop_data[1]).text();
+                  std::string setter;
+
+                  if (prop_data.size() == 3) {
+                    setter = StringLiteral(prop_data[2]).text();
+                  }
+
+                  properties.emplace_back(std::make_tuple(name, getter, setter));
                 }
               } else if (name == "__forward_pre_hooks__") {
                 TORCH_INTERNAL_ASSERT(
@@ -559,6 +575,14 @@ struct SourceImporterImpl : public Resolver,
         pre_hooks,
         pre_hook_resolvers,
         &self);
+
+    for (const auto& prop : properties) {
+      std::string name, getter_name, setter_name;
+      std::tie(name, getter_name, setter_name) = prop;
+      auto* getter = class_type->findMethod(getter_name);
+      auto* setter = !setter_name.empty() ? class_type->findMethod(setter_name) : nullptr;
+      class_type->addProperty(name, getter, setter);
+    }
   }
 
   void importEnum(

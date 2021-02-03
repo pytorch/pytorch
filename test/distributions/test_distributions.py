@@ -3926,6 +3926,11 @@ class TestConstraints(TestCase):
                     except KeyError:
                         continue  # ignore optional parameters
 
+                    # Check param shape is compatible with distribution shape.
+                    self.assertGreaterEqual(value.dim(), constraint.event_dim)
+                    value_batch_shape = value.shape[:value.dim() - constraint.event_dim]
+                    torch.broadcast_shapes(dist.batch_shape, value_batch_shape)
+
                     if is_dependent(constraint):
                         continue
 

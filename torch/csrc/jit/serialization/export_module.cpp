@@ -227,13 +227,48 @@ std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
   // register size
   auto register_size = static_cast<int>(code.register_size());
 
-  auto table = Table(
+  auto codeTable = Table(
       {{"instructions", Tup(instructions)},
        {"operators", Tup(operators)},
        {"constants", Tup(constants)},
        {"types", Tup(types)},
        {"register_size", register_size}});
-  auto bytecode_vals = Tup({func.qualname().qualifiedName(), table});
+
+  // schema
+  const auto& schema = func.getSchema();
+  TORCH_CHECK(
+      schema.overload_name().empty(), // @TODO: is this check correct?
+      "Overloads are not supported in mobile modules.");
+  TORCH_CHECK(
+      !schema.is_vararg(), "Python *args are not supported in mobile modules.");
+  TORCH_CHECK(
+      !schema.is_varret(),
+      "A variable number of return values is not supported in mobile modules.");
+  auto makeArgTuple = [](const std::vector<Argument>& args) {
+    std::vector<IValue> argTables;
+    for (auto&& arg : args) {
+      TORCH_CHECK(
+          !arg.N(),
+          "Arguments with known list lengths are not supported in mobile modules.");
+      TORCH_CHECK(
+          !arg.kwarg_only(),
+          "Keyword-only arguments are not supported in mobile modules.");
+      argTables.emplace_back(Table({
+          {"name", arg.name()},
+          {"type", arg.type()->annotation_str()},
+          {"default_value", arg.default_value()},
+      }));
+    }
+    return Tup(argTables);
+  };
+  auto schemaTable = Table({
+      {"arguments", makeArgTuple(schema.arguments())},
+      {"returns", makeArgTuple(schema.returns())},
+  });
+
+  // function tuple
+  auto bytecode_vals =
+      Tup({func.qualname().qualifiedName(), codeTable, schemaTable});
 
   c10::optional<IValue> debug_info_vals;
   if (save_mobile_debug_info) {
@@ -284,7 +319,7 @@ void setstateTuple(
 
 void moduleMethodsTuple(
     const Module& module,
-    std::vector<c10::IValue>& elements,
+    std::vector<c10::IValue>& elements, // note: appended to in-place
     c10::optional<std::vector<c10::IValue>>& debug_info_elements,
     bool save_mobile_debug_info) {
   auto methods = module.get_methods();

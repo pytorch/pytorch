@@ -19,8 +19,8 @@ VkFormat vk_format(const caffe2::TypeMeta dtype) {
 
     default:
       TORCH_CHECK(
-        false,
-        "Vulkan tensor format not supported!");
+          false,
+          "Vulkan tensor format not supported!");
   }
 
   return VK_FORMAT_UNDEFINED;
