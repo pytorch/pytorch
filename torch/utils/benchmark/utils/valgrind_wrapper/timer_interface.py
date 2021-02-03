@@ -244,6 +244,8 @@ class CallgrindStats(object):
         issues when diffing profiles. If a key component such as Python
         or PyTorch was built in separate locations in the two profiles, which
         can result in something resembling:
+
+        ```
             23234231 /tmp/first_build_dir/thing.c:foo(...)
              9823794 /tmp/first_build_dir/thing.c:bar(...)
               ...
@@ -251,6 +253,7 @@ class CallgrindStats(object):
               ...
              -9823794 /tmp/second_build_dir/thing.c:bar(...)
             -23234231 /tmp/second_build_dir/thing.c:foo(...)
+        ```
 
         Stripping prefixes can ameliorate this issue by regularizing the
         strings and causing better cancellation of equivilent call sites
