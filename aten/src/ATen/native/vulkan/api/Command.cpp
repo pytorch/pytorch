@@ -371,13 +371,14 @@ Command::Pool::~Pool() {
     }
   }
   catch (const std::exception& e) {
-    LOG(WARNING)
-        << "Vulkan: Command pool destructor raised an exception!  Error: "
-        << e.what();
+    TORCH_WARN(
+        "Vulkan: Command pool destructor raised an exception! Error: ",
+        e.what());
   }
   catch (...) {
-    LOG(WARNING)
-        << "Vulkan: Command pool destructor raised an unknown exception!";
+    TORCH_WARN(
+        "Vulkan: Command pool destructor raised an exception! "
+        "Error: Unknown");
   }
 }
 
