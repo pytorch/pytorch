@@ -1,5 +1,4 @@
 from typing import List, Callable, Dict, Optional, Any, Union, BinaryIO
-from types import ModuleType
 import builtins
 import importlib
 import inspect
