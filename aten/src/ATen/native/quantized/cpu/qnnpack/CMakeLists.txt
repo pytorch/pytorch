@@ -150,6 +150,7 @@ set(PYTORCH_QNNPACK_INIT_SRCS
   src/deconvolution.c
   src/fc-prepack.cc
   src/fully-connected.c
+  src/fully-connected-sparse.c
   src/global-average-pooling.c
   src/hardsigmoid.c
   src/hardswish.c
@@ -165,6 +166,7 @@ set(PYTORCH_QNNPACK_EXEC_SRCS
   src/deconv-run.cc
   src/fc-run.cc
   src/fc-dynamic-run.cc
+  src/pack_block_sparse.cc
   src/indirection.c
   src/operator-run.c)
 
@@ -453,6 +455,15 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
   target_include_directories(fully-connected-test PRIVATE src test)
   target_link_libraries(fully-connected-test PRIVATE pytorch_qnnpack clog cpuinfo fp16 gtest gtest_main)
   add_test(fully-connected-test fully-connected-test)
+
+  add_executable(fully-connected-sparse-test test/fully-connected-sparse.cc)
+  set_target_properties(fully-connected-sparse-test PROPERTIES
+    CXX_STANDARD 14
+    CXX_STANDARD_REQUIRED YES
+    CXX_EXTENSIONS NO)
+  target_include_directories(fully-connected-sparse-test PRIVATE src test)
+  target_link_libraries(fully-connected-sparse-test PRIVATE pytorch_qnnpack clog cpuinfo fp16 gtest gtest_main)
+  add_test(fully-connected-sparse-test fully-connected-sparse-test)
 
   add_executable(channel-shuffle-test test/channel-shuffle.cc)
   set_target_properties(channel-shuffle-test PROPERTIES

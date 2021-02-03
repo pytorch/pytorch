@@ -243,7 +243,6 @@ class GemmBlockSparseMicrokernelTester {
 
     for (size_t iteration = 0; iteration < 1; iteration++) {
       std::generate(a.begin(), a.end(), std::ref(u8rng));
-      std::generate(b.begin(), b.end(), std::ref(u8rng));
       std::generate(bias.begin(), bias.end(), std::ref(s32rng));
       std::fill(c.begin(), c.end(), 0.0f);
       size_t num_zero_points_padded = n() + 8;
@@ -261,8 +260,8 @@ class GemmBlockSparseMicrokernelTester {
         min_elem = *std::min_element(b.cbegin(), b.cend());
       } while (max_elem == min_elem);
 
-      BCSRMatrix bcsr_matrix =
-        generateBlockCSRMatrix(
+      std::unique_ptr<qnnpack::BCSRMatrix> bcsr_matrix =
+        qnnpack::generateBlockCSRMatrix(
             b.data(), n(), k(), blockSize(), kernel_zero_points.data());
 
       ASSERT_NE(
@@ -309,9 +308,9 @@ class GemmBlockSparseMicrokernelTester {
           n(),
           aPtr,
           aStride() * sizeof(uint8_t),
-          bcsr_matrix.values.data(),
-          bcsr_matrix.row_values.data(),
-          bcsr_matrix.col_indices.data(),
+          bcsr_matrix->values.data(),
+          bcsr_matrix->row_values.data(),
+          bcsr_matrix->col_indices.data(),
           bias.data(),
           c.data(),
           cStride(),

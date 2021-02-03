@@ -71,6 +71,50 @@ static void compute_q8gemm(
       &context->quantization_params);
 }
 
+struct q8gemm_sparse_dq_context {
+  const uint8_t* a;
+  size_t a_stride;
+  const uint32_t* kernel_col_indices;
+  const uint32_t* kernel_row_values;
+  const uint8_t* kernel_values;
+  const float* bias;
+  float* c;  // can be float or uint8)t
+  size_t c_stride;
+  struct pytorch_qnnp_conv_dynamic_quantization_params quantization_params;
+  const pytorch_q8gemm_dq_sparse_ukernel_function ukernel;
+};
+
+static void compute_q8gemm_sparse_dq(
+    const struct q8gemm_sparse_dq_context context[RESTRICT_STATIC 1],
+    size_t group_index, /* ignored */
+    size_t pixel_index, /* ignored */
+    size_t mr_block_start,
+    size_t nr_block_start,
+    size_t group_range /* always 1 */,
+    size_t pixel_range,
+    size_t mr_block_size,
+    size_t nr_block_size) {
+  const uint8_t* restrict a = context->a;
+  const size_t a_stride = context->a_stride;
+  float* restrict c = (float*)context->c;
+  const size_t c_stride = context->c_stride;
+
+  size_t output_channel_index = nr_block_start;
+  context->ukernel(
+      mr_block_size,
+      nr_block_size,
+      a + mr_block_start * a_stride,
+      a_stride,
+      context->kernel_values,
+      context->kernel_row_values + nr_block_start,
+      context->kernel_col_indices,
+      context->bias + nr_block_start,
+      c + mr_block_start * c_stride + nr_block_start,
+      c_stride,
+      output_channel_index,
+      &context->quantization_params);
+}
+
 struct q8sum_rows_context {
   const uint8_t* a;
   size_t groups;
@@ -838,6 +882,41 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
           threadpool,
           (pthreadpool_function_4d_tiled_t)compute_q8gemm,
           &q8gemm_context,
+          groups,
+          batch_size * output_size,
+          output_size,
+          group_output_channels,
+          1,
+          output_size,
+          mr,
+          nr);
+      break;
+    }
+    case pytorch_qnnp_ukernel_type_gemm_sparse_dq: {
+      const size_t batch_size = op->batch_size;
+      const size_t groups = op->groups;
+      const size_t group_output_channels = op->group_output_channels;
+      const uint32_t mr = pytorch_qnnp_params.q8conv.mr;
+      const uint32_t nr = pytorch_qnnp_params.q8conv.nr;
+
+      const size_t output_size = op->output_height * op->output_width;
+      struct q8gemm_sparse_dq_context q8gemm_sparse_dq_context = {
+          .a = op->input,
+          .a_stride = op->input_pixel_stride,
+          .kernel_col_indices = op->sparse_matrix.col_indices,
+          .kernel_row_values = op->sparse_matrix.row_values,
+          .kernel_values = op->sparse_matrix.values,
+          .bias = (const float*)op->bias,
+          .c = (float*)op->output,
+          .c_stride = op->output_pixel_stride,
+          .quantization_params = op->dynamic_conv_quantization_params,
+          .ukernel = pytorch_qnnp_params.q8gemm_sparse.gemm_dq,
+      };
+
+      pthreadpool_compute_4d_tiled(
+          threadpool,
+          (pthreadpool_function_4d_tiled_t)compute_q8gemm_sparse_dq,
+          &q8gemm_sparse_dq_context,
           groups,
           batch_size * output_size,
           output_size,
