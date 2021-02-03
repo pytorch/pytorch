@@ -217,7 +217,7 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
 
 std::string stacksToStr(const std::vector<std::string>& stacks) {
   std::ostringstream oss;
-  for (auto idx = 0; idx < stacks.size(); ++idx) {
+  for (std::vector<std::string>::size_type idx = 0; idx < stacks.size(); ++idx) {
     if (idx > 0) {
       oss << ";";
     }
