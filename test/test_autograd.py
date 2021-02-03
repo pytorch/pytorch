@@ -7792,6 +7792,7 @@ class TestMultithreadAutograd(TestCase):
     def test_cat_r_to_c(self):
         inp_c = torch.rand(3, 2, dtype=torch.cdouble, requires_grad=True)
         inp_r = torch.randn(3, 2, dtype=torch.double, requires_grad=True)
+
         def fn(x1, x2):
             return torch.cat((x1, x2), dim=-1)
 
