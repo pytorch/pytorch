@@ -34,6 +34,16 @@ FunctionCount = NamedTuple("FunctionCount", [("count", int), ("function", str)])
 
 @dataclasses.dataclass(repr=False, eq=False, frozen=True)
 class FunctionCounts(object):
+    """Container for manipulating Callgrind results.
+
+    It supports:
+        1) Addition and subtraction to combine or diff results.
+        2) Tuple-like indexing.
+        3) A `denoise` function which strips CPython calls which are known to
+           be non-deterministic and quite noisy.
+        4) Two higher order methods (`filter` and `transform`) for custom
+           manipulation.
+    """
     _data: Tuple[FunctionCount, ...]
     inclusive: bool
 
@@ -91,6 +101,12 @@ class FunctionCounts(object):
         return self._merge(other, lambda c: -c)
 
     def transform(self, map_fn: Callable[[str], str]) -> "FunctionCounts":
+        """Apply `map_fn` to all of the function names.
+
+        This can be used to regularize function names (e.g. stripping irrelevant
+        parts of the file path), coalesce entries by mapping multiple functions
+        to the same name, etc.
+        """
         counts: DefaultDict[str, int] = collections.defaultdict(int)
         for c, fn in self._data:
             counts[map_fn(fn)] += c
@@ -98,6 +114,7 @@ class FunctionCounts(object):
         return self._from_dict(counts, self.inclusive)
 
     def filter(self, filter_fn: Callable[[str], bool]) -> "FunctionCounts":
+        """Keep only the elements where `filter_fn` returns True."""
         return FunctionCounts(tuple(i for i in self if filter_fn(i.function)), self.inclusive)
 
     def sum(self) -> int:
@@ -136,6 +153,13 @@ class FunctionCounts(object):
 
 @dataclasses.dataclass(repr=False, eq=False, frozen=True)
 class CallgrindStats(object):
+    """Top level container for Callgrind results collected by Timer.
+
+    Manipulation is generally done using the FunctionCounts class, which is
+    obtained by calling `CallgrindStats.stats(...)`. Several convenience
+    methods are provided as well; the most significant is
+    `CallgrindStats.as_standardized()`.
+    """
     task_spec: common.TaskSpec
     number_per_run: int
     built_with_debug_symbols: bool
@@ -163,7 +187,10 @@ class CallgrindStats(object):
         return output
 
     def stats(self, inclusive: bool = False) -> FunctionCounts:
-        """Returns stats as a tuple of (count, function)
+        """Returns detailed function counts.
+
+        Conceptually, the FunctionCounts returned can be thought of as a tuple
+        of (count, path_and_function_name).
 
         `inclusive` matches the semantics of callgrind. If True, the counts
         include instructions executed by children. `inclusive=True` is useful
