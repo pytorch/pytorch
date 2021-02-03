@@ -401,7 +401,6 @@ class Conv2d(_ConvNd):
             raise ValueError("Input shape must be `(N, C, H, W)`!")
         if self.padding_mode != 'zeros':
             _reversed_padding_repeated_twice = _reverse_repeat_padding(self.padding)
-            print(self.padding, _reversed_padding_repeated_twice)
             input = F.pad(input, _reversed_padding_repeated_twice,
                           mode=self.padding_mode)
         return ops.quantized.conv2d(
