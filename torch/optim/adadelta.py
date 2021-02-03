@@ -78,13 +78,13 @@ class Adadelta(Optimizer):
 
                 state['step'] += 1
 
-            F.adadelta(params_with_grad,
-                       grads,
-                       square_avgs,
-                       acc_deltas,
-                       lr,
-                       rho,
-                       eps,
-                       weight_decay)
+            F._adadelta(params_with_grad,
+                        grads,
+                        square_avgs,
+                        acc_deltas,
+                        lr,
+                        rho,
+                        eps,
+                        weight_decay)
 
         return loss

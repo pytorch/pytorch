@@ -470,6 +470,7 @@ Other Operations
     diag_embed
     diagflat
     diagonal
+    diff
     einsum
     flatten
     flip

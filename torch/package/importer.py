@@ -1,6 +1,8 @@
 from typing import List, Callable, Dict, Optional, Any, Union, BinaryIO
+from types import ModuleType
 import builtins
 import importlib
+import inspect
 import linecache
 from torch.serialization import _load
 import pickle
@@ -167,6 +169,10 @@ class PackageImporter:
         ns['__file__'] = mangled_filename
         ns['__cached__'] = None
         ns['__builtins__'] = self.patched_builtins
+
+        # Add this module to our private global registry. It should be unique due to mangling.
+        assert module.__name__ not in _package_imported_modules
+        _package_imported_modules[module.__name__] = module
 
         # pre-emptively install on the parent to prevent IMPORT_FROM from trying to
         # access sys.modules
@@ -429,3 +435,16 @@ class _ModuleNode(_PathNode):
 
 class _ExternNode(_PathNode):
     pass
+
+# A private global registry of all modules that have been package-imported.
+_package_imported_modules: Dict[str, ModuleType] = {}
+
+# `inspect` by default only looks in `sys.modules` to find source files for classes.
+# Patch it to check our private registry of package-imported modules as well.
+_orig_getfile = inspect.getfile
+def patched_getfile(object):
+    if inspect.isclass(object):
+        if object.__module__ in _package_imported_modules:
+            return _package_imported_modules[object.__module__].__file__
+    return _orig_getfile(object)
+inspect.getfile = patched_getfile
