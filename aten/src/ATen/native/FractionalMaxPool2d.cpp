@@ -130,6 +130,8 @@ void fractional_max_pool2d_out_cpu_template(
   at::Tensor& indices,
   const at::Tensor& randomSamples) {
 
+  TORCH_CHECK(pool_size.size() == 2, "Pool size must either a single Int or tuple of Ints")
+  TORCH_CHECK(output_size.size() == 2, "Output size must either a single Int or tuple of Ints")
   int numBatch = 1;
   int planeDim = 0;
   int heightDim = 1;
