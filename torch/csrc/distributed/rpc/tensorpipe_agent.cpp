@@ -226,7 +226,7 @@ C10_REGISTER_CREATOR(TensorPipeTransportRegistry, ibv, makeIbvTransport);
 #endif // TENSORPIPE_HAS_IBV_TRANSPORT
 
 std::unique_ptr<CpuChannelRegistration> makeBasicChannel() {
-  auto context = std::make_shared<tensorpipe::channel::basic::Context>();
+  auto context = tensorpipe::channel::basic::create();
   return std::make_unique<CpuChannelRegistration>(
       CpuChannelRegistration{std::move(context), kBasicChannelPriority});
 }
@@ -239,7 +239,7 @@ C10_REGISTER_CREATOR(TensorPipeCpuChannelRegistry, basic, makeBasicChannel);
 #if TENSORPIPE_HAS_CMA_CHANNEL
 
 std::unique_ptr<CpuChannelRegistration> makeCmaChannel() {
-  auto context = std::make_shared<tensorpipe::channel::cma::Context>();
+  auto context = tensorpipe::channel::cma::create();
   return std::make_unique<CpuChannelRegistration>(
       CpuChannelRegistration{std::move(context), kCmaChannelPriority});
 }
@@ -265,7 +265,7 @@ std::unique_ptr<CpuChannelRegistration> makeMultiplexedUvChannel() {
     contexts.push_back(std::move(context));
     listeners.push_back(contexts.back()->listen(address));
   }
-  auto context = std::make_shared<tensorpipe::channel::mpt::Context>(
+  auto context = tensorpipe::channel::mpt::create(
       std::move(contexts), std::move(listeners));
   return std::make_unique<CpuChannelRegistration>(CpuChannelRegistration{
       std::move(context), kMultiplexedUvChannelPriority});
@@ -286,7 +286,7 @@ C10_REGISTER_CREATOR(
 #if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
 
 std::unique_ptr<CudaChannelRegistration> makeCudaIpcChannel() {
-  auto context = std::make_shared<tensorpipe::channel::cuda_ipc::Context>();
+  auto context = tensorpipe::channel::cuda_ipc::create();
   return std::make_unique<CudaChannelRegistration>(
       CudaChannelRegistration{std::move(context), kCudaIpcChannelPriority});
 }
@@ -303,7 +303,7 @@ C10_REGISTER_CREATOR(
 #if TENSORPIPE_HAS_CUDA_GDR_CHANNEL && defined(USE_CUDA_NOT_ROCM)
 
 std::unique_ptr<CudaChannelRegistration> makeCudaGdrChannel() {
-  auto context = std::make_shared<tensorpipe::channel::cuda_gdr::Context>();
+  auto context = tensorpipe::channel::cuda_gdr::create();
   return std::make_unique<CudaChannelRegistration>(
       CudaChannelRegistration{std::move(context), kCudaGdrChannelPriority});
 }
@@ -327,7 +327,7 @@ C10_REGISTER_CREATOR(
 #ifdef USE_CUDA_NOT_ROCM
 
 std::unique_ptr<CudaChannelRegistration> makeCudaXthChannel() {
-  auto context = std::make_shared<tensorpipe::channel::cuda_xth::Context>();
+  auto context = tensorpipe::channel::cuda_xth::create();
   return std::make_unique<CudaChannelRegistration>(
       CudaChannelRegistration{std::move(context), kCudaXthChannelPriority});
 }
@@ -340,8 +340,8 @@ C10_REGISTER_CREATOR(
     makeCudaXthChannel);
 
 std::unique_ptr<CudaChannelRegistration> makeCudaBasicChannel() {
-  auto context = std::make_shared<tensorpipe::channel::cuda_basic::Context>(
-      std::make_shared<tensorpipe::channel::basic::Context>());
+  auto context = tensorpipe::channel::cuda_basic::create(
+      tensorpipe::channel::basic::create());
   return std::make_unique<CudaChannelRegistration>(
       CudaChannelRegistration{std::move(context), kCudaBasicChannelPriority});
 }
