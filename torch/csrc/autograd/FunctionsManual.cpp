@@ -659,7 +659,7 @@ Tensor _sparse_addmm_sparse_backward(const Tensor& grad, const Tensor& sparse_, 
 // and they must have the same shape.
 // Note that the `output` must have the same `indices` as the `mask` so we are using just a clone.
 // However, to get `values` we have to use specific helper function for CPU/CUDA and use the `mask` data to filter `values`
-// That's why we created this `sparse_mask_helper` function.
+// That's why we created this `_sparse_mask_helper` function.
 Tensor _sparse_matrix_mask(const Tensor& input, const Tensor& mask){
   Tensor output = at::empty_like(mask);
   Tensor mask_indices = mask._indices().clone();

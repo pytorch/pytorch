@@ -205,6 +205,9 @@ Tensor sparse_mask_helper_cuda(
     Inputs:
       `t`             - coalesced sparse tensor input
       `mask_indices`  - mask indices tensor
+
+    Note: The nnz in the output tensor will be same as the `mask_indices`. So it will 
+    works independently if the mask is coalesced or not. 
   */
   TORCH_CHECK(t.is_sparse(), "t: input is not a sparse tensor");
   TORCH_CHECK(t.is_coalesced(), "t:  input is uncoalesced");
