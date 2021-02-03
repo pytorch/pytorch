@@ -103,16 +103,16 @@ class RMSprop(Optimizer):
                 state['step'] += 1
 
 
-            F.rmsprop(params_with_grad,
-                      grads,
-                      square_avgs,
-                      grad_avgs,
-                      momentum_buffer_list,
-                      group['lr'],
-                      group['alpha'],
-                      group['eps'],
-                      group['weight_decay'],
-                      group['momentum'],
-                      group['centered'])
+            F._rmsprop(params_with_grad,
+                       grads,
+                       square_avgs,
+                       grad_avgs,
+                       momentum_buffer_list,
+                       group['lr'],
+                       group['alpha'],
+                       group['eps'],
+                       group['weight_decay'],
+                       group['momentum'],
+                       group['centered'])
 
         return loss
