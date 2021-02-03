@@ -600,6 +600,10 @@ def check_module_initialized(mod):
             if isinstance(param, torch.nn.parameter.UninitializedParameter):
                 raise RuntimeError("'{}' has uninitialized parameters {}. Did you forget to run a forward pass?"
                                    .format(torch.typename(type(mod)), name))
+        for name, param in mod._buffers.items():
+            if isinstance(param, torch.nn.parameter.UninitializedBuffer):
+                raise RuntimeError("'{}' has uninitialized buffers {}. Did you forget to run a forward pass?"
+                                   .format(torch.typename(type(mod)), name))
 
 def infer_methods_to_compile(nn_module):
     """
