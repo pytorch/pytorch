@@ -361,7 +361,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
 
   set(GENERATED_H_TORCH
-    "${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.h"
+    "${TORCH_SRC_DIR}/csrc/au
+    tograd/generated/Functions.h"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
     )
 
@@ -492,26 +493,26 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
 
   if(NOT INTERN_BUILD_MOBILE)
-    # list(APPEND TORCH_SRCS
-    #   ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
-    #   ${TORCH_SRC_DIR}/csrc/jit/serialization/onnx.cpp
-    #   ${TORCH_SRC_DIR}/csrc/jit/serialization/export.cpp
-    #   ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
-    #   ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
-    #   ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
-    #   ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
-    # )
-    # # Disable legacy import of building without Caffe2 support
-    # if(BUILD_CAFFE2)
-    #   list(APPEND TORCH_SRCS
-    #     ${TORCH_SRC_DIR}/csrc/jit/serialization/import_legacy.cpp
-    #   )
-    # else()
-    #   set_source_files_properties(
-    #     ${TORCH_SRC_DIR}/csrc/jit/serialization/import.cpp
-    #     PROPERTIES COMPILE_FLAGS "-DC10_DISABLE_LEGACY_IMPORT"
-    #   )
-    # endif()
+    list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/serialization/onnx.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/serialization/export.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
+      ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
+    )
+    # Disable legacy import of building without Caffe2 support
+    if(BUILD_CAFFE2)
+      list(APPEND TORCH_SRCS
+        ${TORCH_SRC_DIR}/csrc/jit/serialization/import_legacy.cpp
+      )
+    else()
+      set_source_files_properties(
+        ${TORCH_SRC_DIR}/csrc/jit/serialization/import.cpp
+        PROPERTIES COMPILE_FLAGS "-DC10_DISABLE_LEGACY_IMPORT"
+      )
+    endif()
     if(USE_DISTRIBUTED AND NOT WIN32)
       append_filelist("libtorch_distributed_sources" TORCH_SRCS)
     endif()
@@ -1358,7 +1359,7 @@ function(print_target_properties tgt)
 endfunction(print_target_properties)
 
 add_executable(lite_interpreter_demo ${TORCH_ROOT}/test/cpp/demos/main.cpp)
-target_link_libraries(${lite_interpreter_demo} torch_cpu)
+target_link_libraries(lite_interpreter_demo torch_cpu_library)
 print_target_properties(torch)
 print_target_properties(lite_interpreter_demo)
 print_target_properties(torch_cpu)

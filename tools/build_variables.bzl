@@ -333,6 +333,7 @@ torch_mobile_core = [
     "torch/csrc/jit/mobile/import.cpp",
     "torch/csrc/jit/mobile/interpreter.cpp",
     "torch/csrc/jit/mobile/module.cpp",
+    "torch/csrc/jit/mobile/observer.cpp",
 ]
 
 libtorch_lite_cmake_sources = sorted(core_sources_common + torch_mobile_core)
