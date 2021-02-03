@@ -66,7 +66,7 @@ class profile(object):
     - ``record_shapes`` - save information about operator's input shapes;
     - ``profile_memory`` - track tensor memory allocation/deallocation;
     - ``with_stack`` - record source information (file and line number) for the ops.
-    - ``use_gpu`` - (deprecated, use ``activities``).
+    - ``use_cuda`` - (deprecated, use ``activities``).
 
     .. note::
         Use ``torch.profiler.schedule`` to generate the callable schedule.
@@ -138,7 +138,7 @@ class profile(object):
             profile_memory: bool = False,
             with_stack: bool = False,
             # deprecated:
-            use_gpu: Optional[bool] = None):
+            use_cuda: Optional[bool] = None):
         if activities:
             self.activities = set(activities)
         else:
@@ -146,9 +146,9 @@ class profile(object):
             if torch.cuda.is_available():
                 self.activities.add(ProfilerActivity.CUDA)
 
-        if use_gpu is not None:
-            warn("use_gpu is deprecated, use activities argument instead")
-            if use_gpu:
+        if use_cuda is not None:
+            warn("use_cuda is deprecated, use activities argument instead")
+            if use_cuda:
                 self.activities.add(ProfilerActivity.CUDA)
             elif ProfilerActivity.CUDA in self.activities:
                 self.activities.remove(ProfilerActivity.CUDA)
