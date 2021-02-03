@@ -458,7 +458,8 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
         with torch.cuda.device(self.device):
             torch.manual_seed(self.rank)  # make sure that the different rank get different data
 
-            # Setup two problems in parallel, we'll make sure that the second track (with save/load) follows the first one(untouched)
+            # Setup two problems in parallel, we'll make sure that the second track (with save/load)
+            # follows the first one(untouched)
             # We split the model in two to test the multiple param groups support
             batch, input_width, hidden, target_width = 3, 20, 10, 5
             target = torch.rand((batch, target_width), device=self.device)
@@ -472,7 +473,8 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             model_oss2 = copy.deepcopy(model_oss1)
             head_oss2 = copy.deepcopy(head_oss1)
 
-            # For this test the gradients are (all) reduced in the same way in between the torch reference and fairscale.
+            # For this test the gradients are (all) reduced in the same way in between
+            # the torch reference and zeroredundancyoptimizer.
             # Normally OSS would use ShardedDDP and only reduce to the proper rank, but this does not change the
             # gradient norm computation from OSS and adds a dependency.
             # to keep the comparison apples-to-apples DDP is used in both cases
