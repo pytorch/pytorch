@@ -185,7 +185,7 @@ def send_report_to_s3(obj):
     # gunzip command whereas Python's bz2 does work with bzip2
     obj.put(Body=bz2.compress(json.dumps(obj).encode()))
 
-def print_regressions(obj, *, n, stdev_threshold):
+def print_regressions(obj, *, num_prev_commits):
     sha1 = os.environ.get("CIRCLE_SHA1")
 
     base = subprocess.check_output(
@@ -206,7 +206,7 @@ def print_regressions(obj, *, n, stdev_threshold):
     # if current commit is already on master, we need to exclude it from
     # this history; otherwise we include the merge-base
     commits = subprocess.check_output(
-        ["git", "rev-list", f"--max-count={n+1}", base],
+        ["git", "rev-list", f"--max-count={num_prev_commits+1}", base],
         encoding="ascii",
     ).splitlines()
     on_master = False
@@ -238,7 +238,6 @@ def print_regressions(obj, *, n, stdev_threshold):
         head_sha=sha1,
         head_report=obj,
         base_reports=objects,
-        stdev_threshold=stdev_threshold,
         job_name=job,
         on_master=on_master,
         ancestry_path=ancestry_path - 1,
@@ -303,13 +302,6 @@ if __name__ == '__main__':
         help="how many previous commits to compare test times with",
     )
     parser.add_argument(
-        "--stdev-threshold",
-        type=positive_integer,
-        default=3,  # to be conservative and reduce false positives
-        metavar="s",
-        help="minimum standard deviations difference to count as anomaly",
-    )
-    parser.add_argument(
         "--use-json",
         metavar="FILE.json",
         help="compare S3 with JSON file, instead of the test report folder",
@@ -351,8 +343,4 @@ if __name__ == '__main__':
         head_json = obj
         if args.use_json:
             head_json = json.loads(Path(args.use_json).read_text())
-        print_regressions(
-            head_json,
-            n=args.num_prev_commits,
-            stdev_threshold=args.stdev_threshold,
-        )
+        print_regressions(head_json, num_prev_commits=args.num_prev_commits)

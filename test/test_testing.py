@@ -929,7 +929,8 @@ Commit graph (base is most recent master ancestor with at least one S3 report):
     def test_regression_info(self):
         self.assertEqual(
             '''\
-Following output is to check for test time regressions:
+----- Historic stats comparison result ------
+
     job: foo_job
     commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 
@@ -960,9 +961,9 @@ Commit graph (base is most recent master ancestor with at least one S3 report):
     |
     :
 
-Removed  (across across    1 suite)      1 test,  totaling -   1.00s
-Modified (across across    1 suite)      1 test,  totaling -  41.48s ±   2.12s
-Added    (across across    1 suite)      1 test,  totaling +   3.00s
+Removed  (across    1 suite)      1 test,  totaling -   1.00s
+Modified (across    1 suite)      1 test,  totaling -  41.48s ±   2.12s
+Added    (across    1 suite)      1 test,  totaling +   3.00s
 ''',
             stats_utils.regression_info(
                 head_sha=fakehash('a'),

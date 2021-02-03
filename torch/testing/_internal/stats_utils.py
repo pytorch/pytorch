@@ -418,13 +418,13 @@ def summary_line(message: str, d: DefaultDict[str, List[CaseDiff]]) -> str:
     # there might be a bug calculating this stdev, not sure
     stat = sum_normals(case_delta(c) for c in all_cases)
     return ''.join([
-        f'{message} (across across {suites:>4} suite{sp}',
+        f'{message} (across {suites:>4} suite{sp}',
         f'{tests:>6} test{tp}',
         f' totaling {display_final_stat(stat)}',
     ])
 
 
-def summary(analysis: List[SuiteDiff], stdev_threshold: int) -> str:
+def summary(analysis: List[SuiteDiff]) -> str:
     removed_tests: DefaultDict[str, List[CaseDiff]] = defaultdict(list)
     modified_tests: DefaultDict[str, List[CaseDiff]] = defaultdict(list)
     added_tests: DefaultDict[str, List[CaseDiff]] = defaultdict(list)
@@ -461,7 +461,6 @@ def regression_info(
     head_sha: Commit,
     head_report: Report,
     base_reports: Dict[Commit, List[Report]],
-    stdev_threshold: int,
     job_name: str,
     on_master: bool,
     ancestry_path: int,
@@ -488,7 +487,8 @@ def regression_info(
 
     return '\n'.join([
         unlines([
-            'Following output is to check for test time regressions:',
+            '----- Historic stats comparison result ------',
+            '',
             f'    job: {job_name}',
             f'    commit: {head_sha}',
         ]),
@@ -504,8 +504,5 @@ def regression_info(
             ancestry_path=ancestry_path,
             other_ancestors=other_ancestors,
         ),
-        summary(
-            analysis,
-            stdev_threshold=stdev_threshold,
-        ),
+        summary(analysis),
     ])
