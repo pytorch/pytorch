@@ -126,6 +126,10 @@ class UninitializedMixin:
             'to initialize the parameters before calling torch functions'.format(func, cls.__name__))
 
 
+def is_lazy(param):
+    return isinstance(param, UninitializedMixin)
+
+
 class UninitializedParameter(UninitializedMixin, Parameter):
     r"""A parameter that is not initialized.
 
