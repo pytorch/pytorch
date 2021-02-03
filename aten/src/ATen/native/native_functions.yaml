@@ -1365,6 +1365,16 @@
 - func: fill_diagonal_(Tensor(a!) self, Scalar fill_value, bool wrap=False) -> Tensor(a!)
   variants: method
 
+- func: diff(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Tensor? append=None) -> Tensor
+  variants: function, method
+  dispatch:
+    Math: diff
+
+- func: diff.out(Tensor self, int n=1, int dim=-1, Tensor? prepend=None, Tensor? append=None, *, Tensor(a!) out) -> Tensor(a!)
+  variants: function
+  dispatch:
+    Math: diff_out
+
 - func: div.Tensor(Tensor self, Tensor other) -> Tensor
   variants: function, method
   dispatch:
