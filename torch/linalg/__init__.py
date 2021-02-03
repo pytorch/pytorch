@@ -602,19 +602,19 @@ Example::
 cond = _add_docstr(_linalg.linalg_cond, r"""
 linalg.cond(input, p=None, *, out=None) -> Tensor
 
-Computes the condition number of a matrix :attr:`input`,
-or of each matrix in a batched :attr:`input`, using the matrix norm defined by :attr:`p`.
+Computes the condition number of a matrix :attr:`input`, or of each matrix in a batched :attr:`input`,
+using the matrix norm defined by :attr:`p`.
+
 For norms ``p = {'fro', 'nuc', inf, -inf, 1, -1}`` this is defined as the matrix norm of :attr:`input`
-times the matrix norm of the inverse of :attr:`input`. And for norms ``p = {None, 2, -2}`` this is defined as
-the ratio between the largest and smallest singular values.
+times the matrix norm of the inverse of :attr:`input` computed using :func:`torch.linalg.norm`. While
+for norms ``p = {None, 2, -2}`` this is defined as the ratio between the largest and smallest singular
+values computed using :func:`torch.linalg.svd`.
 
-This function supports ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes for :attr:`input`.
-If the input is complex and neither :attr:`dtype` nor :attr:`out` is specified, the result's data type will
-be the corresponding floating point type (e.g. float if :attr:`input` is complexfloat).
+This function supports ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes.
 
-.. note:: For ``p = {None, 2, -2}`` the condition number is computed as the ratio between the largest
-          and smallest singular values computed using :func:`torch.linalg.svd`.
-          For these norms :attr:`input` may be a non-square matrix or batch of non-square matrices.
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: For ``p = {None, 2, -2}`` :attr:`input` may be a non-square matrix or batch of non-square matrices.
           For other norms, however, :attr:`input` must be a square matrix or a batch of square matrices,
           and if this requirement is not satisfied a RuntimeError will be thrown.
 
@@ -622,14 +622,12 @@ be the corresponding floating point type (e.g. float if :attr:`input` is complex
           a tensor containing infinity will be returned. If :attr:`input` is a batch of matrices and one
           or more of them is not invertible then a RuntimeError will be thrown.
 
-.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
-
 Args:
     input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`
-                    where `*` is one or more batch dimensions.
+                    where :math:`*` is one or more batch dimensions.
 
     p (int, float, inf, -inf, 'fro', 'nuc', optional): the type of the matrix norm to use in the computations.
-        The following norms are supported:
+                                                       The following norms are supported:
 
         =====  ============================
         p      norm for matrices
@@ -649,6 +647,10 @@ Args:
 
 Keyword args:
     out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+Returns:
+    Tensor: the condition number of :attr:`input`. For ``p = {None, 2, -2}`` the output dtype is always
+            real valued (e.g. ``float`` if :attr:`input` is ``cfloat``).
 
 Examples::
 
