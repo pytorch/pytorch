@@ -832,9 +832,9 @@ class FloatType(JitType):
     @staticmethod
     def get() -> FloatType: ...
 
-class ComplexDoubleType(JitType):
+class ComplexType(JitType):
     @staticmethod
-    def get() -> ComplexDoubleType: ...
+    def get() -> ComplexType: ...
 
 class IntType(JitType):
     @staticmethod
