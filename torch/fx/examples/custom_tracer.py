@@ -1,8 +1,6 @@
 import torch
 from torch.fx import symbolic_trace, Tracer, Graph, GraphModule, Node
-from torch.fx.node import Argument
 from typing import Any, Callable, Dict, Optional, Tuple, Union
-from enum import Enum, auto
 
 """
 How to Create and Use Custom Tracers
