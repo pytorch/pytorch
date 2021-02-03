@@ -1667,6 +1667,8 @@ op_db: List[OpInfo] = [
                                 device_type='cpu', dtypes=[torch.bfloat16]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
+                                dtypes=[torch.cfloat, torch.cdouble]),
                    )),
     OpInfo('masked_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -2142,6 +2144,8 @@ if TEST_SCIPY:
                            SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                            SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
+                                    device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                            # RuntimeError: sigmoid does not support automatic differentiation for outputs with complex dtype.
                            SkipInfo('TestCommon', 'test_variant_consistency_jit',
