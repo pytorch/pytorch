@@ -116,6 +116,5 @@ class Adam(Optimizer):
                    beta2,
                    group['lr'],
                    group['weight_decay'],
-                   group['eps']
-                   )
+                   group['eps'])
         return loss
