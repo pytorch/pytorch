@@ -598,8 +598,7 @@ class ComputeFunction:
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
         # We unconditionally generate function variants of the redispatch API.
-        # This is mainly because (a) we can namespace functions separately, but not methods,
-        # and (b) we can put functions in a separate header file, only including it where required.
+        # This is mainly because we can namespace functions separately, but not methods,
         if Variant.function not in f.variants and not self.is_redispatching_fn:
             return None
 
