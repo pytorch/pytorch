@@ -314,8 +314,8 @@ KinetoEvent& KinetoEvent::activity(const libkineto::TraceActivity& activity) {
   start_us_ = activity.timestamp();
   duration_us_ = activity.duration();
   // Set the correlation id for the PyTorch CPU ops.
-  // Note: skip seeting correlation id for other activities to avoid
-  // an accidental attribution of CUDA kernels to them.
+  // Note: skip setting the correlation ids for other activities to avoid
+  // an incorrect attribution of CUDA kernels.
   if (activity.type() == libkineto::ActivityType::CPU_OP) {
     correlation_id_ = activity.correlationId();
   }

@@ -1169,7 +1169,6 @@ def parse_kineto_results(result):
             device_index=kineto_event.device_index(),
         )
         function_events.append(fe)
-        #if kineto_event.device_type() == DeviceType.CUDA:
         corr_id = kineto_event.linked_correlation_id()
         if corr_id > 0:
             if corr_id not in cuda_corr_map:
