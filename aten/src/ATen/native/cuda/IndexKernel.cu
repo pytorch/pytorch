@@ -332,7 +332,7 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
   // Reference: https://github.com/pytorch/pytorch/issues/51544
   auto mask_cont = mask.to(kLong).contiguous();
   thrust::device_ptr<int64_t> maskData(mask_cont.data_ptr<int64_t>());
-#elif
+#else
   auto mask_cont = mask.contiguous();
   thrust::device_ptr<mask_t> maskData(mask_cont.data_ptr<mask_t>());
 #endif
