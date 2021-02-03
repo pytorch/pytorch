@@ -143,15 +143,6 @@ public:
   template<class Return, class... Args>
   static Return callWithDispatchKeySlowPath(const TypedOperatorHandle<Return (Args...)>& op, bool pre_sampled, DispatchKeySet dispatchKeySet, const KernelFunction& kernel, Args... args);
 
-  // Like call, but intended for use in a redispatch: you are currently
-  // in some currentDispatchKey, you have finished processing the key and
-  // you now want to redispatch to the next dispatch key in the chain.
-  // This will mask out the current key *and all previous keys* from the
-  // eligible set, and reinvoke the dispatcher.
-  template<class Return, class... Args>
-  Return redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey currentDispatchKey, Args... args) const;
-
-
   // Like call, but intended for use in a redispatch in kernels that have explicitly performed the DispatchKey update calculatulation.
   // This will take the DispatchKeySet completely as is and dispatch to the kernel of the corresponding highest priority key in the set.
   // Note that this version of redispatch treats the inputted DispatchKeySet *as is*, and does NOT mask out the highest priority key.
@@ -468,19 +459,6 @@ C10_ALWAYS_INLINE Return Dispatcher::call(const TypedOperatorHandle<Return(Args.
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKeySet.highestPriorityTypeId()));
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKeySet.highestPriorityTypeId());
   return _callWithDispatchKeySet<Return, Args...>(op, kernel, dispatchKeySet, args...);
-}
-
-template<class Return, class... Args>
-inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey currentDispatchKey, Args... args) const {
-  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  auto currentDispatchKeySet = op.operatorIterator_->op.dispatchKeyExtractor()
-    .template getDispatchKeySetUnboxed<Args...>(
-      DispatchKeySet(DispatchKeySet::FULL_AFTER, currentDispatchKey),
-      args...
-    );
-  // do not use RecordFunction on redispatch
-  const KernelFunction& kernel = op.operatorIterator_->op.lookup(currentDispatchKeySet.highestPriorityTypeId());
-  return kernel.template call<Return, Args...>(op, currentDispatchKeySet, std::forward<Args>(args)...);
 }
 
 template<class Return, class... Args>
