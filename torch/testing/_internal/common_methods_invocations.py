@@ -1754,6 +1754,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           # optional kwarg. perhaps sample inputs can be edited to always have a kwarg
+           supports_tensor_out=False,
            test_inplace_grad=False,
            assert_autodiffed=True,
            safe_casts_outputs=True,
@@ -1762,6 +1764,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCPU=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
+           # optional kwarg. perhaps sample inputs can be edited to always have a kwarg
+           supports_tensor_out=False,
            test_inplace_grad=False,
            assert_autodiffed=True,
            safe_casts_outputs=True,
