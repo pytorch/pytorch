@@ -8,6 +8,8 @@
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
 
+#include <ATen/core/ivalue.h>
+
 namespace torch {
 namespace jit {
 namespace tensorexpr {
