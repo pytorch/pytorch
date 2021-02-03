@@ -13,8 +13,8 @@ endif()
 
 # Debug messages - if you want to get a list of source files and examine
 # target information enable thefollowing.
-set(DEBUG TRUE)
-if(DEBUG)
+set(DEBUG_INFO TRUE)
+if(DEBUG_INFO)
   include(../cmake/DebugHelper.cmake)
 endif()
 
@@ -175,7 +175,7 @@ if(CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_HIP_SRCS CAFFE2_ALLOWLISTED_FILES)
 endif()
 
-if(DEBUG)
+if(DEBUG_INFO)
   message(STATUS "CPU sources: ")
   foreach(tmp ${Caffe2_CPU_SRCS})
     message(STATUS "  " ${tmp})
@@ -450,13 +450,17 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
 
   set(TORCH_SRCS ${GENERATED_CXX_TORCH})
   list(APPEND TORCH_SRCS ${GENERATED_H_TORCH})
-  # append_filelist("libtorch_cmake_sources" TORCH_SRCS)
   list(APPEND LIBTORCH_CMAKE_SRCS "")
-  append_filelist("libtorch_lite_cmake_sources" LIBTORCH_CMAKE_SRCS)
-  # append_filelist("libtorch_lite_cmake_sources" TORCH_SRCS)
+
+  # Switch between the full jit interpreter and lite interpreter
+  if(BUILD_LITE_INTERPRETER)
+    append_filelist("libtorch_lite_cmake_sources" LIBTORCH_CMAKE_SRCS)
+  else()
+    append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
+  endif()
   list(APPEND TORCH_SRCS ${LIBTORCH_CMAKE_SRCS})
 
-  if(DEBUG)
+  if(DEBUG_INFO)
     message(STATUS "Interpreter sources: ")
     foreach(tmp ${LIBTORCH_CMAKE_SRCS})
       message(STATUS "  " ${tmp})
@@ -1333,7 +1337,7 @@ endif()
 
 add_executable(lite_interpreter_demo ${TORCH_ROOT}/test/cpp/demos/main.cpp)
 target_link_libraries(lite_interpreter_demo torch_library)
-if(DEBUG)
+if(DEBUG_INFO)
   print_target_properties(torch)
   print_target_properties(lite_interpreter_demo)
   print_target_properties(torch_cpu)
