@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
+
 #include <ATen/core/functional.h>
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
@@ -110,7 +111,7 @@ std::unordered_set<Symbol> skip_list = {
     prim::Uninitialized,
     prim::Guard,
     prim::profile,
-    prim::profile_optional,
+    prim::profile_ivalue,
     prim::unchecked_unwrap_optional, // TODO remove
     // TODO (zach): we should consider skipping tensor factories in the cases
     // where the constant tensor would be large but cheap to create.

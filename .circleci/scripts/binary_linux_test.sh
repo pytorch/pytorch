@@ -39,27 +39,27 @@ fi
 #   conda build scripts themselves. These should really be consolidated
 pkg="/final_pkgs/\$(ls /final_pkgs)"
 if [[ "$PACKAGE_TYPE" == conda ]]; then
-  conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
-  if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
-    retry conda install \${EXTRA_CONDA_FLAGS} -y cpuonly -c pytorch
-  fi
-  retry conda install \${EXTRA_CONDA_FLAGS} -yq future numpy protobuf six
-  if [[ "$DESIRED_CUDA" != 'cpu' ]]; then
-    # DESIRED_CUDA is in format cu90 or cu102
-    if [[ "${#DESIRED_CUDA}" == 4 ]]; then
-      cu_ver="${DESIRED_CUDA:2:1}.${DESIRED_CUDA:3}"
-    else
-      cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
+  (
+    # For some reason conda likes to re-activate the conda environment when attempting this install
+    # which means that a deactivate is run and some variables might not exist when that happens,
+    # namely CONDA_MKL_INTERFACE_LAYER_BACKUP from libblas so let's just ignore unbound variables when
+    # it comes to the conda installation commands
+    set +u
+    conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
+    if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
+      retry conda install \${EXTRA_CONDA_FLAGS} -y cpuonly -c pytorch
     fi
-    (
-      # For some reason conda likes to re-activate the conda environment when attempting this install
-      # which means that a deactivate is run and some variables might not exist when that happens,
-      # namely CONDA_MKL_INTERFACE_LAYER_BACKUP from libblas so let's just ignore unbound variables when
-      # it comes to the conda installation commands
-      set +u
+    retry conda install \${EXTRA_CONDA_FLAGS} -yq future numpy protobuf six
+    if [[ "$DESIRED_CUDA" != 'cpu' ]]; then
+      # DESIRED_CUDA is in format cu90 or cu102
+      if [[ "${#DESIRED_CUDA}" == 4 ]]; then
+        cu_ver="${DESIRED_CUDA:2:1}.${DESIRED_CUDA:3}"
+      else
+        cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
+      fi
       retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "cudatoolkit=\${cu_ver}"
-    )
-  fi
+    fi
+  )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   pip install "\$pkg"
   retry pip install -q future numpy protobuf six

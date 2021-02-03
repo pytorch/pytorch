@@ -1,4 +1,3 @@
-#include <torch/csrc/distributed/rpc/request_callback_no_python.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/engine/dist_engine.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
@@ -8,6 +7,7 @@
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
 #include <torch/csrc/distributed/autograd/utils.h>
 #include <torch/csrc/distributed/rpc/profiler/server_process_global_profiler.h>
+#include <torch/csrc/distributed/rpc/request_callback_no_python.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
@@ -345,11 +345,19 @@ void RequestCallbackNoPython::processForwardAutogradReq(
     const std::shared_ptr<JitFuture>& responseFuture) const {
   auto& rpcWithAutograd = static_cast<RpcWithAutograd&>(rpc);
 
+  // Need to reverse the device map for the backward pass of distributed
+  // autograd.
+  std::unordered_map<c10::DeviceIndex, c10::DeviceIndex> reverseDeviceMap;
+  for (const auto& mapEntry : rpcWithAutograd.deviceMap()) {
+    reverseDeviceMap.insert({mapEntry.second, mapEntry.first});
+  }
+
   // Attach 'recv' autograd function.
   auto autogradContext = addRecvRpcBackward(
       rpcWithAutograd.autogradMetadata(),
       rpcWithAutograd.tensors(),
-      rpcWithAutograd.fromWorkerId());
+      rpcWithAutograd.fromWorkerId(),
+      reverseDeviceMap);
   // For this recv thread on server side, before processRpc(),
   // set current_context_id_ to be context_id passed from client.
   // In this way, if there is nested rpc call in python rpc call, original

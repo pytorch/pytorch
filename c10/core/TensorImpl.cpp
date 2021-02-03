@@ -92,9 +92,11 @@ TensorImpl::TensorImpl(Storage&& storage, DispatchKeySet key_set, const caffe2::
   // Storages with default devices.
 }
 
+#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 IntArrayRef TensorImpl::sizes() const {
   return sizes_and_strides_.sizes_arrayref();
 }
+#endif
 
 IntArrayRef TensorImpl::strides() const {
   return sizes_and_strides_.strides_arrayref();
@@ -218,9 +220,11 @@ void TensorImpl::release_resources() {
   }
 }
 
+#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 int64_t TensorImpl::dim() const {
   return sizes_and_strides_.size();
 }
+#endif
 
 int64_t TensorImpl::size(int64_t d) const {
   d = at::maybe_wrap_dim(d, dim(), false);
@@ -232,9 +236,11 @@ int64_t TensorImpl::stride(int64_t d) const {
   return sizes_and_strides_.stride_at_unchecked(d);
 }
 
+#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 bool TensorImpl::has_storage() const {
   return storage_;
 }
+#endif
 
 bool TensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
 #ifdef DEBUG

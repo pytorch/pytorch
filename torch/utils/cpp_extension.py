@@ -17,12 +17,12 @@ from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from .hipify import hipify_python
 from .hipify.hipify_python import get_hip_file_path, GeneratedFileCleaner
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from setuptools.command.build_ext import build_ext
 from pkg_resources import packaging  # type: ignore
 
-
+BUILD_SPLIT_CUDA = os.getenv('BUILD_SPLIT_CUDA')
 IS_WINDOWS = sys.platform == 'win32'
 LIB_EXT = '.pyd' if IS_WINDOWS else '.so'
 EXEC_EXT = '.exe' if IS_WINDOWS else ''
@@ -31,7 +31,6 @@ SHARED_FLAG = '/DLL' if IS_WINDOWS else '-shared'
 _HERE = os.path.abspath(__file__)
 _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
 TORCH_LIB_PATH = os.path.join(_TORCH_PATH, 'lib')
-
 
 # Taken directly from python stdlib < 3.9
 # See https://github.com/pytorch/pytorch/issues/48617
@@ -876,19 +875,21 @@ def CUDAExtension(name, sources, *args, **kwargs):
     else:
         libraries.append('cudart')
         libraries.append('c10_cuda')
-        libraries.append('torch_cuda')
+        if BUILD_SPLIT_CUDA:
+            libraries.append('torch_cuda_cu')
+            libraries.append('torch_cuda_cpp')
+        else:
+            libraries.append('torch_cuda')
     kwargs['libraries'] = libraries
 
     include_dirs = kwargs.get('include_dirs', [])
 
     if IS_HIP_EXTENSION:
         build_dir = os.getcwd()
-        if not include_dirs:
-            include_dirs = ['*']
         hipify_result = hipify_python.hipify(
             project_directory=build_dir,
             output_directory=build_dir,
-            includes=[os.path.join(os.path.relpath(include_dir, build_dir), '*') for include_dir in include_dirs],
+            includes=[os.path.join(os.path.relpath(include_dir, build_dir), '*') for include_dir in include_dirs] if include_dirs else ['*'],
             extra_files=[os.path.abspath(s) for s in sources],
             show_detailed=True,
             is_pytorch_extension=True,
@@ -980,7 +981,7 @@ def library_paths(cuda: bool = False) -> List[str]:
 
 
 def load(name,
-         sources: List[str],
+         sources: Union[str, List[str]],
          extra_cflags=None,
          extra_cuda_cflags=None,
          extra_ldflags=None,
@@ -1432,7 +1433,15 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         if with_cuda:
             extra_ldflags.append('c10_cuda.lib')
         extra_ldflags.append('torch_cpu.lib')
-        if with_cuda:
+        if BUILD_SPLIT_CUDA:
+            extra_ldflags.append('torch_cuda_cu.lib')
+            # /INCLUDE is used to ensure torch_cuda_cu is linked against in a project that relies on it.
+            extra_ldflags.append('-INCLUDE:?searchsorted_cuda@native@at@@YA?AVTensor@2@AEBV32@0_N1@Z')
+            extra_ldflags.append('torch_cuda_cpp.lib')
+            # /INCLUDE is used to ensure torch_cuda_cpp is linked against in a project that relies on it.
+            # Related issue: https://github.com/pytorch/pytorch/issues/31611
+            extra_ldflags.append('-INCLUDE:?warp_size@cuda@at@@YAHXZ')
+        elif with_cuda:
             extra_ldflags.append('torch_cuda.lib')
             # /INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
             # Related issue: https://github.com/pytorch/pytorch/issues/31611
@@ -1449,7 +1458,9 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         if with_cuda:
             extra_ldflags.append('-lc10_hip' if IS_HIP_EXTENSION else '-lc10_cuda')
         extra_ldflags.append('-ltorch_cpu')
-        if with_cuda:
+        if BUILD_SPLIT_CUDA:
+            extra_ldflags.append('-ltorch_hip' if IS_HIP_EXTENSION else '-ltorch_cuda_cu -ltorch_cuda_cpp')
+        elif with_cuda:
             extra_ldflags.append('-ltorch_hip' if IS_HIP_EXTENSION else '-ltorch_cuda')
         extra_ldflags.append('-ltorch')
         if not is_standalone:

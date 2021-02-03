@@ -7,15 +7,18 @@ from warnings import warn
 
 
 class ProfilerAction(Enum):
+    """
+    Profiler actions that can be taken at the specified intervals
+    """
     NONE = 0
     WARMUP = 1
     RECORD = 2
     RECORD_AND_SAVE = 3
 
 
-def schedule(*, wait: int, warmup: int, active: int):
+def schedule(*, wait: int, warmup: int, active: int) -> Callable:
     """
-    Represents profiler behavior: wait for ``wait`` steps, then
+    Returns a callable that can be used as profiler ``schedule`` argument. The profiler will wait for ``wait`` steps, then
     do the warmup for the next ``warmup`` steps, then
     do the active recording for the next ``active`` steps and then
     repeat the cycle staring with the next step.
@@ -52,14 +55,15 @@ class profile(object):
 
     Args:
 
-    - ``activities`` - list of activity groups (CPU, CUDA) to use in profiling;
+    - ``activities`` - list of activity groups (CPU, CUDA) to use in profiling, supported values:
+      ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``
     - ``schedule`` - callable that takes step (int) as a single parameter and returns
-      ``ProfilerAction`` value that specifies the profiler action on each step;
-    - ``on_trace_ready`` (optional) - callable, called each time the trace is ready
+      ``ProfilerAction`` value that specifies the profiler action to perform at each step;
+    - ``on_trace_ready`` - callable that is called at each step when ``schedule`` returns ``ProfilerAction.RECORD_AND_SAVE``
       during the profiling;
     - ``record_shapes`` - save information about operator's input shapes;
     - ``profile_memory`` - track tensor memory allocation/deallocation;
-    - ``with_stack`` - save stack traces;
+    - ``with_stack`` - record source information (file and line number) for the ops.
     - ``use_gpu`` - (deprecated, use ``activities``).
 
     .. note::
@@ -86,7 +90,7 @@ class profile(object):
         print(p.key_averages().table(
             sort_by="self_cuda_time_total", row_limit=-1))
 
-    Usimg the profiler's ``schedule``, ``on_trace_ready`` and ``next_step`` functions:
+    Using the profiler's ``schedule``, ``on_trace_ready`` and ``step`` functions:
 
     .. code-block:: python
 
@@ -96,7 +100,7 @@ class profile(object):
         def trace_handler(prof):
             print(prof.key_averages().table(
                 sort_by="self_cuda_time_total", row_limit=-1))
-            # prof.export_chrome_trace("/tmp/test_trace_" + str(prof.step()) + ".json")
+            # prof.export_chrome_trace("/tmp/test_trace_" + str(prof.step_num) + ".json")
 
         with torch.profiler.profile(
             activities=[
@@ -120,7 +124,7 @@ class profile(object):
                 for iter in range(N):
                     code_iteration_to_profile(iter)
                     # send a signal to the profiler that the next iteration has started
-                    p.next_step()
+                    p.step()
     """
     def __init__(
             self,
@@ -172,7 +176,7 @@ class profile(object):
             self.step_rec_fn.__exit__(None, None, None)
         self._exit_actions()
 
-    def next_step(self):
+    def step(self):
         """
         Signals the profiler that the next profiling step has started.
         """
@@ -232,12 +236,6 @@ class profile(object):
             self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
             self.step_rec_fn.__enter__()
 
-    def step(self):
-        """
-        Returns the current profiling step.
-        """
-        return self.step_num
-
     def export_chrome_trace(self, path: str):
         """
         Exports the collected trace in Chrome JSON format.
@@ -273,6 +271,14 @@ class profile(object):
         """
         assert self.profiler
         return self.profiler.key_averages(group_by_input_shape, group_by_stack_n)
+
+    def events(self):
+        """
+        Returns the list of unaggregated profiler events,
+        to be used in the trace callback or after the profiling is finished
+        """
+        assert self.profiler
+        return self.profiler.function_events
 
     def _enter_actions(self):
         if self.current_action == ProfilerAction.WARMUP:

@@ -1,12 +1,14 @@
-import os
-import io
-import pathlib
-import sys
-import random
-import torch
 from itertools import product as product
-from torch.testing._internal.common_utils import TemporaryFileName
 from typing import NamedTuple, Optional
+import io
+import os
+import pathlib
+import random
+import sys
+
+from torch import Tensor
+from torch.testing._internal.common_utils import TemporaryFileName
+import torch
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))

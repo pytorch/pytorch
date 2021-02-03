@@ -251,15 +251,17 @@ class Node:
 
 def map_arg(a: Argument, fn: Callable[[Node], Argument]) -> Argument:
     """ Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys. """
+    return map_aggregate(a, lambda x: fn(x) if isinstance(x, Node) else x)
+
+def map_aggregate(a: Argument, fn: Callable[[Argument], Argument]) -> Argument:
+    """ Apply fn to each Node appearing arg. arg may be a list, tuple, slice, or dict with string keys. """
     if isinstance(a, tuple):
-        return tuple(map_arg(elem, fn) for elem in a)
+        return tuple(map_aggregate(elem, fn) for elem in a)
     elif isinstance(a, list):
-        return immutable_list(map_arg(elem, fn) for elem in a)
+        return immutable_list(map_aggregate(elem, fn) for elem in a)
     elif isinstance(a, dict):
-        return immutable_dict((k, map_arg(v, fn)) for k, v in a.items())
+        return immutable_dict((k, map_aggregate(v, fn)) for k, v in a.items())
     elif isinstance(a, slice):
-        return slice(map_arg(a.start, fn), map_arg(a.stop, fn), map_arg(a.step, fn))
-    elif isinstance(a, Node):
-        return fn(a)
+        return slice(map_aggregate(a.start, fn), map_aggregate(a.stop, fn), map_aggregate(a.step, fn))
     else:
-        return a
+        return fn(a)

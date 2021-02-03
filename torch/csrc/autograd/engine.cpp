@@ -1051,6 +1051,8 @@ auto Engine::ready_queue_by_index(std::shared_ptr<ReadyQueue> cpu_ready_queue, i
     TORCH_INTERNAL_ASSERT(cpu_ready_queue);
     return cpu_ready_queue;
   } else {
+    // Static cast is ok here as the number of device should never overflow an int.
+    TORCH_INTERNAL_ASSERT(0 <= device_index && device_index < static_cast<int>(device_ready_queues_.size()));
     // See Note [Allocating GPUs to autograd threads]
     // NB: This function would become obsolete if we truly allocated a CPU thread
     // per device, rather than colocate.

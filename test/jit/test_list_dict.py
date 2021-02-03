@@ -1,10 +1,11 @@
 import os
 import sys
 import inspect
-from typing import Dict, List, Any
+from typing import Any, Dict, List, Optional, Tuple
 from textwrap import dedent
 from collections import OrderedDict
 
+from torch import Tensor
 import torch
 from torch.testing import FileCheck
 
