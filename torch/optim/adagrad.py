@@ -80,13 +80,13 @@ class Adagrad(Optimizer):
                     # record the step after step update
                     state_steps.append(state['step'])
 
-            F.adagrad(params_with_grad,
-                      grads,
-                      state_sums,
-                      state_steps,
-                      group['lr'],
-                      group['weight_decay'],
-                      group['lr_decay'],
-                      group['eps'])
+            F._adagrad(params_with_grad,
+                       grads,
+                       state_sums,
+                       state_steps,
+                       group['lr'],
+                       group['weight_decay'],
+                       group['lr_decay'],
+                       group['eps'])
 
         return loss
