@@ -46,7 +46,7 @@ class Parameter(torch.Tensor):
     __torch_function__ = _disabled_torch_function_impl
 
 
-class UninitializedMixin:
+class UninitializedTensorMixin:
     _allowed_methods = [
         torch.Tensor.__hash__,
         torch.Tensor.size,
@@ -127,10 +127,10 @@ class UninitializedMixin:
 
 
 def is_lazy(param):
-    return isinstance(param, UninitializedMixin)
+    return isinstance(param, UninitializedTensorMixin)
 
 
-class UninitializedParameter(UninitializedMixin, Parameter):
+class UninitializedParameter(UninitializedTensorMixin, Parameter):
     r"""A parameter that is not initialized.
 
     Unitialized Parameters are a a special case of :class:`torch.nn.Parameter`
@@ -150,7 +150,7 @@ class UninitializedParameter(UninitializedMixin, Parameter):
         return torch.Tensor._make_subclass(cls, data, requires_grad)
 
 
-class UninitializedBuffer(UninitializedMixin, torch.Tensor):
+class UninitializedBuffer(UninitializedTensorMixin, torch.Tensor):
     r"""A buffer that is not initialized.
 
     Unitialized Buffer is a a special case of :class:`torch.Tensor`
