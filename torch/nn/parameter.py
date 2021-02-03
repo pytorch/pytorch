@@ -101,7 +101,7 @@ class UninitializedTensorMixin:
             '`module.share_memory()`.')
 
     def __repr__(self):
-        return '<' + self.__class__.__name__ + '>'
+        return f'<{self.__class__.__name__}>'
 
     def __reduce_ex__(self, proto):
         # See Note [Don't serialize hooks]
