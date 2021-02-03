@@ -9543,21 +9543,22 @@ Keyword args:
     {memory_format}
 """.format(**factory_like_common_args))
 
-add_docstr(torch.det,
-           r"""
+add_docstr(torch.det, r"""
 det(input) -> Tensor
 
 Calculates determinant of a square matrix or batches of square matrices.
 
+.. note:: :func:`torch.det` is deprecated. Please use :func:`torch.linalg.det` instead.
+
 .. note::
-    Backward through :meth:`det` internally uses SVD results when :attr:`input` is
-    not invertible. In this case, double backward through :meth:`det` will be
-    unstable in when :attr:`input` doesn't have distinct singular values. See
-    :meth:`~torch.svd` for details.
+    Backward through :math:`det` internally uses SVD results when :attr:`input` is
+    not invertible. In this case, double backward through :math:`det` will be
+    unstable when :attr:`input` doesn't have distinct singular values. See
+    :math:`~torch.svd` for details.
 
 Arguments:
     input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more
-                batch dimensions.
+                    batch dimensions.
 
 Example::
 
