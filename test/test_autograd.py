@@ -3799,8 +3799,8 @@ class TestAutograd(TestCase):
         self.assertIn('Anomaly Detection has been enabled', str(w[0].message))
         self.assertIn('Error detected in PowBackward0', s.captured)
 
-    def test_anomaly_pyobject_cleanup(self):
-        # Test that python objects created are properly cleaned up
+    def test_anomaly_assign_parent_cleanup(self):
+        # Test that python objects created are properly cleaned up when assign_parent is called
         import weakref
 
         def get_ref():
@@ -3832,6 +3832,74 @@ class TestAutograd(TestCase):
                 meta_dict[0] = my_obj
                 ref = weakref.ref(my_obj)
             return t, ref
+
+        t, ref = get_ref()
+        self.assertIsNotNone(ref())
+        del t
+        self.assertIsNone(ref())
+
+    def test_nested_anomaly_printstack_cleanup(self):
+        # Test if metadata dict PyObject is properly destroyed
+        import weakref
+
+        def get_ref():
+            # This is similar to the construction in test_anomaly_assign_parent_cleanup:
+            #
+            # MyFuncBackward2 -> PyObject -> MyFuncBackward -> dict -> Foo
+            #                               out ---^         WeakRef ---^
+            #
+            # We want to check that Foo is still properly destroyed even when MyFunc2Backward's
+            # AnomalyMetadata calls printstack, which does some python object manipulation.
+            #
+            # You might be wondering why we still have to test_anomaly_assign_parent_cleanup,
+            # since if PyObject is not destroyed here, wouldn't this test would detect that also?
+            # The answer is that custom function's PyObject (THPFunction) actually only hold
+            # a weak reference to the c++ node!
+            size = 10
+            class MyFunc(Function):
+                @staticmethod
+                def forward(ctx, inp1):
+                    ctx.save_for_backward(inp1)
+                    return inp1.sum(0, keepdim=True)
+
+                @staticmethod
+                def backward(ctx, gO):
+                    inp, = ctx.saved_tensors
+                    g = gO.clone().expand(size)
+                    gI = MyFunc2.apply(g * inp, g + inp)
+                    return gI, None
+
+            class MyFunc2(Function):
+                @staticmethod
+                def forward(ctx, inp1, inp2):
+                    return inp1 * 2.0 + inp2
+
+                @staticmethod
+                def backward(ctx, gO):
+                    g1 = gO.clone()
+                    g2 = gO.clone()
+                    g1[0] = 0
+                    g2[0] = 0
+
+                    g2[0] /= 0
+                    return g1, g2, None
+
+            inp = torch.rand(size, requires_grad=True)
+            with warnings.catch_warnings(record=True) as w:
+                with self.assertRaisesRegex(RuntimeError, "Function 'MyFunc2Backward' returned nan values in its 1th output."):
+                    with detect_anomaly():
+                        out = MyFunc.apply(inp)
+                        ginp, = torch.autograd.grad(out, (inp,), create_graph=True)
+                        gsum = ginp.sum()
+                        gsum.backward()
+
+            meta_dict = out.grad_fn.metadata
+            class Foo(object):
+                pass
+            my_obj = Foo()
+            meta_dict[0] = my_obj
+            ref = weakref.ref(my_obj)
+            return out, ref
 
         t, ref = get_ref()
         self.assertIsNotNone(ref())
