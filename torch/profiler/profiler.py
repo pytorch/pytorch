@@ -16,16 +16,19 @@ class ProfilerAction(Enum):
     RECORD_AND_SAVE = 3
 
 
-def schedule(*, wait: int, warmup: int, active: int) -> Callable:
+def schedule(*, wait: int, warmup: int, active: int, repeat: int = 0) -> Callable:
     """
     Returns a callable that can be used as profiler ``schedule`` argument. The profiler will wait for ``wait`` steps, then
     do the warmup for the next ``warmup`` steps, then
     do the active recording for the next ``active`` steps and then
-    repeat the cycle staring with the next step.
+    repeat the cycle starting with the next step. The number of cycles is specified by the ``repeat`` parameter.
+    When the parameter's value is zero, the cycles will continue until the profiling is finished.
     """
     def schedule_fn(step: int) -> ProfilerAction:
         assert step >= 0
         num_steps = wait + warmup + active
+        if repeat > 0 and step / num_steps >= repeat:
+            return ProfilerAction.NONE
         mod_step = step % num_steps
         if mod_step < wait:
             return ProfilerAction.NONE
