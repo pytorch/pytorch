@@ -34,6 +34,9 @@ from torch.quantization.ns.graph_matcher import (
     get_matching_node_pairs,
     GraphMatchingException,
 )
+from torch.quantization.ns.numeric_suite_core_apis_fx import (
+    compare_weights,
+)
 
 
 class TestGraphModeNumericSuite(QuantizationTestCase):
@@ -335,3 +338,45 @@ class TestFXGraphMatcher(QuantizationTestCase):
         mq = convert_fx(mp_copy)
         # assume success if no exceptions
         results = get_matching_node_pairs(mp, mq)
+
+class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
+
+    def test_compare_weights_mod(self):
+        m = nn.Sequential(nn.Conv2d(1, 1, 1), nn.Conv2d(1, 1, 1)).eval()
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+        # print(mp, mq)
+
+        results = compare_weights('fp32_prepared', mp, 'int8', mq)
+
+        # human inspection - correct
+        # TODO(before land): real checks
+        print(results)
+
+    def test_compare_weights_fun(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = nn.Parameter(torch.Tensor(1, 1))
+                self.b = nn.Parameter(torch.Tensor(1))
+
+            def forward(self, x):
+                return F.linear(x, self.w, self.b)
+
+        m = M().eval()
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        mp(torch.randn(1, 1))
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+        # print(mp, mq)
+
+        results = compare_weights('fp32_prepared', mp, 'int8', mq)
+
+        # human inspection - correct
+        # TODO(before land): real checks
+        print(results)
