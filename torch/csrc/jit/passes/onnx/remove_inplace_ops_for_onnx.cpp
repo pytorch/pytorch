@@ -443,21 +443,21 @@ void RegisterInplaceNodeInIfBlocks(
 //          %60 : Tensor = aten::index_put(%bias.1, %59, %45, %25)
 //          -> (%27, %60)
 //      -> (%27, %61)
-void RegisterInplaceNodeInLoopBlocks(
-    Value* orig_data,
-    Value* new_inplace_node,
-    Node* block_node,
-    Block* outer_block,
-    Node* next_node) {
-  if (next_node->kind() != prim::Loop)
+void RegisterInplaceNodeInLoopBlocks(Value* orig_data, Value* new_data) {
+  Node* inplace_node = new_data->node();
+  Block* outer_block = inplace_node->owningBlock();
+  Node* outer_block_node = outer_block->owningNode();
+
+  if (outer_block_node->kind() != prim::Loop)
     return;
 
-  outer_block->registerOutput(new_inplace_node);
+  outer_block->registerOutput(new_data);
   std::vector<std::pair<Block*, Node*>> node_list = {
-      std::make_pair(outer_block, next_node)};
+      std::make_pair(outer_block, outer_block_node)};
 
-  next_node->addOutput()->setType(new_inplace_node->type());
-  auto next_block = next_node->owningBlock();
+  outer_block_node->addOutput()->setType(new_data->type());
+  auto next_block = outer_block_node->owningBlock();
+  auto next_node = outer_block_node;
 
   while (nullptr != next_block->owningNode() &&
          next_block != orig_data->node()->owningBlock()) {
@@ -465,7 +465,7 @@ void RegisterInplaceNodeInLoopBlocks(
     outer_block->registerOutput(
         next_node->outputs().at(next_node->outputs().size() - 1));
     next_node = outer_block->owningNode();
-    next_node->addOutput()->setType(new_inplace_node->type());
+    next_node->addOutput()->setType(new_data->type());
     next_block = next_node->owningBlock();
     if (next_node->kind() ==
         prim::Loop) // Do not register input if nested in If block
@@ -486,11 +486,11 @@ void RegisterInplaceNodeInLoopBlocks(
   }
 
   // Update inplace node inputs inside the inner most block.
-  auto prev_data = block_node->inputs().at(0);
+  auto prev_data = inplace_node->inputs().at(0);
   while (inplace_ops.find(prev_data->node()->kind()) != inplace_ops.end()) {
     prev_data = prev_data->node()->inputs().at(0);
   }
-  for (auto node : block_node->owningBlock()->nodes()) {
+  for (auto node : inplace_node->owningBlock()->nodes()) {
     size_t idx = 0;
     for (auto inputs_ : node->inputs()) {
       if (inputs_ == prev_data) {
@@ -507,13 +507,12 @@ void RegisterInplaceNodeInLoopBlocks(
 }
 
 // Register inplace op node inputs/outputs through the blocks.
-void RegisterInplaceNodeInBlocks(
-    Value* orig_data,
-    Value* new_inplace_node,
-    Node* block_node,
-    Block* outer_block,
-    Node* next_node) {
-  if (next_node == nullptr)
+void RegisterInplaceNodeInBlocks(Value* orig_data, Value* new_data) {
+  Node* inplace_node = new_data->node();
+  Block* outer_block = inplace_node->owningBlock();
+  Node* outer_block_node = outer_block->owningNode();
+
+  if (outer_block_node == nullptr)
     return;
 
   // Check if the value is already registered in the block
@@ -523,11 +522,11 @@ void RegisterInplaceNodeInBlocks(
   }
   for (auto use : orig_data->uses()) {
     if ((use.user->owningBlock() == outer_block) &&
-        (use.user->isAfter(new_inplace_node->node()))) {
+        (use.user->isAfter(inplace_node))) {
       size_t idx = 0;
       for (auto input_ : use.user->inputs()) {
         if (input_ == orig_data) {
-          use.user->replaceInput(idx, new_inplace_node);
+          use.user->replaceInput(idx, new_data);
           registered = true;
         }
         idx++;
@@ -538,19 +537,14 @@ void RegisterInplaceNodeInBlocks(
     return;
 
   // Register inplace node outputs through the blocks.
-  RegisterInplaceNodeInLoopBlocks(
-      orig_data, new_inplace_node, block_node, outer_block, next_node);
+  RegisterInplaceNodeInLoopBlocks(orig_data, new_data);
 
   RegisterInplaceNodeInIfBlocks(
-      orig_data,
-      new_inplace_node,
-      outer_block,
-      next_node,
-      orig_data->debugName());
+      orig_data, new_data, outer_block, outer_block_node, orig_data->debugName());
 
   while (nullptr != outer_block->owningNode() &&
          outer_block != orig_data->node()->owningBlock()) {
-    MatchIfBlocksOutputForValue(orig_data, outer_block, new_inplace_node);
+    MatchIfBlocksOutputForValue(orig_data, outer_block, new_data);
     outer_block = outer_block->owningNode()->owningBlock();
   }
 }
@@ -630,8 +624,7 @@ void SquashSliceAndSelect(Node* index_put_node) {
     return;
   }
 
-  RegisterInplaceNodeInBlocks(
-      orig_data, new_index_put, block_node, outer_block, next_node);
+  RegisterInplaceNodeInBlocks(orig_data, new_index_put);
 }
 
 void PrepareIndexPutForONNX(Node* node) {
@@ -695,12 +688,7 @@ static void PrepareListPopForONNX(Node* n) {
       n->inputs().at(0)->replaceAllUsesAfterNodeWith(n, n->output());
       return;
     }
-    RegisterInplaceNodeInBlocks(
-        n->inputs().at(0),
-        n->output(),
-        n,
-        n->owningBlock(),
-        n->owningBlock()->owningNode());
+    RegisterInplaceNodeInBlocks(n->inputs().at(0), n->output());
   }
 }
 
@@ -713,12 +701,7 @@ static void PrepareListDeleteForONNX(Node* n) {
       n->inputs().at(0)->replaceAllUsesAfterNodeWith(n, n->output());
       return;
     }
-    RegisterInplaceNodeInBlocks(
-        n->inputs().at(0),
-        n->output(),
-        n,
-        n->owningBlock(),
-        n->owningBlock()->owningNode());
+    RegisterInplaceNodeInBlocks(n->inputs().at(0), n->output());
   }
 }
 
@@ -733,12 +716,7 @@ static void PrepareListAppendAndInsertForONNX(Node* n) {
       n->inputs().at(0)->replaceAllUsesAfterNodeWith(n, n->output());
       return;
     }
-    RegisterInplaceNodeInBlocks(
-        n->inputs().at(0),
-        n->output(),
-        n,
-        n->owningBlock(),
-        n->owningBlock()->owningNode());
+    RegisterInplaceNodeInBlocks(n->inputs().at(0), n->output());
   }
 }
 
