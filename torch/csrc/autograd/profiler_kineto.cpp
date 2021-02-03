@@ -217,13 +217,10 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
 
 std::string stacksToStr(const std::vector<std::string>& stacks) {
   std::ostringstream oss;
-  for (std::vector<std::string>::size_type idx = 0; idx < stacks.size(); ++idx) {
-    if (idx > 0) {
-      oss << ";";
-    }
-    oss << stacks[idx];
-  }
-  return oss.str();
+  std::copy(stacks.begin(), stacks.end(), std::ostream_iterator<std::string>(oss, ";"));
+  auto rc = oss.str();
+  rc.pop_back();
+  return rc;
 }
 
 } // namespace
