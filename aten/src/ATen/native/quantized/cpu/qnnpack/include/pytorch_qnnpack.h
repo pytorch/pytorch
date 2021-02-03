@@ -140,6 +140,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
     uint8_t output_max,
     uint32_t flags,
     const float* requantization_scales,
+    bool use_prepack_kernel,
     pytorch_qnnp_operator_t* fully_connected);
 
 enum pytorch_qnnp_status pytorch_qnnp_setup_fully_connected_nc_q8(

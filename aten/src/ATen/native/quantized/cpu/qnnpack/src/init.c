@@ -208,9 +208,12 @@ static void init(void) {
   };
   pytorch_qnnp_params.q8gemm_sparse = (struct pytorch_q8gemm_sparse_parameters){
       .gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4__sse2,
+      .packedA_gemm_dq = pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__sse2,
+      .packA = pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2,
       .mr = 8,
       .nr = 4,
       .kr = 4,
+      .log2_mr = 3,
   };
   pytorch_qnnp_params.q8conv_xzp = (struct pytorch_q8conv_xzp_parameters){
       .kthreshold = SIZE_MAX,

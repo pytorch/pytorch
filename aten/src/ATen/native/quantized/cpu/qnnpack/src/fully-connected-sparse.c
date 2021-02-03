@@ -35,6 +35,7 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
     uint8_t output_max,
     uint32_t flags,
     const float* requantization_scales,
+    bool use_prepack_kernel,
     pytorch_qnnp_operator_t* fully_connected_out) {
   pytorch_qnnp_operator_t fully_connected = NULL;
   enum pytorch_qnnp_status status = pytorch_qnnp_status_uninitialized;
@@ -85,7 +86,12 @@ enum pytorch_qnnp_status pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
   fully_connected->dynamic_conv_quantization_params.multipliers =
     requantization_scales;
 
-  fully_connected->ukernel_type = pytorch_qnnp_ukernel_type_gemm_sparse_dq;
+  if (use_prepack_kernel) {
+    fully_connected->ukernel_type =
+      pytorch_qnnp_ukernel_type_gemm_prepackA_sparse_dq;
+  } else {
+    fully_connected->ukernel_type = pytorch_qnnp_ukernel_type_gemm_sparse_dq;
+  }
   fully_connected->format = pytorch_qnnp_format_quint8;
 
   *fully_connected_out = fully_connected;
