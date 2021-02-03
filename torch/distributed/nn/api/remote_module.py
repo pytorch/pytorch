@@ -293,14 +293,14 @@ class _RemoteModule(nn.Module):
         )
 
     @property
-    def training(self: T) -> bool:
+    def training(self):
         if hasattr(self, 'on'):
             return rpc.rpc_sync(self.on, _training, args=(self.module_rref,))
         else:
-            _raise_not_supported(self.training.__name__)
+            return _raise_not_supported("training")
 
     @training.setter
-    def training(self: T, value: bool):
+    def training(self, value: bool):
         if hasattr(self, 'on'):
             rpc.rpc_sync(self.on, _set_training, args=(self.module_rref, value))
         else:
