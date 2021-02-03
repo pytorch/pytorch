@@ -8,6 +8,7 @@ functionalities in `torch.jit`.
 """
 import functools
 import collections
+import enum
 import inspect
 import copy
 import pickle
@@ -948,6 +949,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
                 " from nn.Module,"
                 " pass an instance instead".format(obj)
             )
+
+        # Enums are automatically usable in TorchScript, explicitly scripting
+        # is not necessary, but not harmful either.
+        if issubclass(obj, enum.Enum):
+            return obj
 
         if not _is_new_style_class(obj):
             raise RuntimeError(
