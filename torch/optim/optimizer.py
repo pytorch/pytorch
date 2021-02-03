@@ -191,7 +191,7 @@ class Optimizer(object):
 
         Args:
             set_to_none (bool): instead of setting to zero, set the grads to None.
-                This is will in general have lower memory footprint, and can modestly improve performance.
+                This will in general have lower memory footprint, and can modestly improve performance.
                 However, it changes certain behaviors. For example:
                 1. When the user tries to access a gradient and perform manual ops on it,
                 a None attribute or a Tensor full of 0s will behave differently.

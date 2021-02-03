@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import (
     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
-    wrapDeterministicFlagAPITest, DeterministicGuard)
+    wrapDeterministicFlagAPITest, DeterministicGuard, make_tensor)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -1565,6 +1565,18 @@ class AbstractTestCases:
 
         def test_sobolengine_draw_scrambled(self):
             self.test_sobolengine_draw(scramble=True)
+
+        def test_sobolengine_first_point(self):
+            for dtype in (torch.float, torch.double):
+                engine = torch.quasirandom.SobolEngine(2, scramble=False)
+                sample = engine.draw(1, dtype=dtype)
+                self.assertTrue(torch.all(sample == 0))
+                self.assertEqual(sample.dtype, dtype)
+            for dtype in (torch.float, torch.double):
+                engine = torch.quasirandom.SobolEngine(2, scramble=True, seed=123456)
+                sample = engine.draw(1, dtype=dtype)
+                self.assertTrue(torch.all(sample != 0))
+                self.assertEqual(sample.dtype, dtype)
 
         def test_sobolengine_continuing(self, scramble: bool = False):
             ref_sample = self._sobol_reference_samples(scramble=scramble)
@@ -3819,6 +3831,29 @@ class TestTorchDeviceType(TestCase):
                             expected = self._brute_cdist(x, y, p=p)
                             self.assertEqual(expected, actual)
 
+    @onlyCUDA
+    def test_cdist_cuda_backward(self, device):
+        for l1 in [1, 511, 513]:
+            for l2 in [1, 511, 513]:
+                for p in [0, 1, 2, 3, 1.5, 2.5, float('inf')]:
+                    x1 = torch.randn(4, l1, 32, device=device, requires_grad=True)
+                    x2 = x1.clone().detach_().requires_grad_()
+                    y1 = torch.randn(4, l2, 32, device=device, requires_grad=True)
+                    y2 = y1.clone().detach_().requires_grad_()
+                    if p == 2:
+                        for cm in ['use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
+                            z1 = torch.cdist(x1, y1, p=2, compute_mode=cm).mean()
+                            z2 = self._brute_cdist(x2, y2, p=2).mean()
+                            z1.backward()
+                            z2.backward()
+                            self.assertEqual(x1.grad, x2.grad, rtol=0, atol=0.001)
+                            self.assertEqual(y1.grad, y2.grad, rtol=0, atol=0.001)
+                    else:
+                        z1 = torch.cdist(x1, y1, p=p).mean()
+                        z2 = self._brute_cdist(x2, y2, p=p).mean()
+                        self.assertEqual(x1.grad, x2.grad, rtol=0, atol=0.001)
+                        self.assertEqual(y1.grad, y2.grad, rtol=0, atol=0.001)
+
     @tf32_on_and_off(0.005)
     def test_cdist_large(self, device):
         for cm in ['use_mm_for_euclid_dist_if_necessary', 'use_mm_for_euclid_dist', 'donot_use_mm_for_euclid_dist']:
@@ -4119,6 +4154,87 @@ class TestTorchDeviceType(TestCase):
                 'expected scalar_type Double but found Float'):
             torch.logcumsumexp(b, axis, out=inplace_out)
 
+    def _test_diff_numpy(self, t, dims=None):
+        # Helper for test_diff to compare with NumPy reference implementation
+        def to_np(t):
+            if t.dtype == torch.bfloat16:
+                return t.to(dtype=torch.float, device="cpu").numpy()
+            else:
+                return t.cpu().numpy()
+
+        for dim in dims if dims else range(t.dim()):
+            prepend = t.narrow(dim, 0, 1)
+            append = t.narrow(dim, 0, 1)
+            np_t = to_np(t)
+
+            # test when prepend and append's size along dim is 1
+            actual = torch.diff(t, dim=dim, prepend=prepend, append=append)
+            expected = torch.from_numpy(np.diff(np_t, axis=dim, prepend=to_np(prepend), append=to_np(append)))
+            self.assertEqual(actual, expected.to(t.dtype))
+
+            # test when prepend and append's size along dim != 1
+            actual = torch.diff(t, dim=dim, prepend=t, append=t)
+            expected = torch.from_numpy(np.diff(np_t, axis=dim, prepend=np_t, append=np_t))
+            self.assertEqual(actual, expected.to(t.dtype))
+
+    # All tensors appear contiguous on XLA
+    @onlyOnCPUAndCUDA
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_diff_noncontig(self, device, dtype):
+        shapes = (
+            (1,),
+            (1, 5),
+            (3, 5),
+            (1, 5, 1),
+            (2, 3, 5))
+
+        for shape in shapes:
+            contig = make_tensor(shape, device, dtype, low=-9, high=9)
+
+            non_contig = torch.empty(shape + (2, 2), device=device, dtype=dtype)[..., 0]
+            non_contig = non_contig.select(-1, -1)
+            non_contig.copy_(contig)
+            self.assertTrue(not non_contig.is_contiguous() or shape == (1,))
+
+            self._test_diff_numpy(non_contig)
+
+    # RngNormal not implemented for type f16 for XLA
+    @dtypes(*torch.testing.get_all_dtypes(include_half=False))
+    @dtypesIfCPU(*torch.testing.get_all_dtypes())
+    @dtypesIfCUDA(*torch.testing.get_all_dtypes())
+    def test_diff(self, device, dtype):
+        shapes = (
+            (1,),
+            (1, 5),
+            (3, 5),
+            (1, 5, 1),
+            (2, 3, 5))
+
+        for shape in shapes:
+            contig = make_tensor(shape, device, dtype, low=-9, high=9)
+            self._test_diff_numpy(contig)
+
+        t = torch.ones(2, 3)
+
+        with self.assertRaisesRegex(
+                RuntimeError, 'diff expects prepend or append to be the same dimension as input'):
+            invalid_prepend = torch.tensor([1, 2, 3], device=device, dtype=dtype)
+            t.diff(dim=0, prepend=invalid_prepend)
+
+        with self.assertRaisesRegex(
+                RuntimeError, 'diff expects the shape of tensor to prepend or append to match that of input'):
+            invalid_prepend = torch.tensor([[0, 1]], device=device, dtype=dtype)
+            t.diff(dim=0, prepend=invalid_prepend)
+
+        with self.assertRaisesRegex(
+                RuntimeError, 'diff only supports n = 1 currently'):
+            torch.diff(t, n=2)
+
+        with self.assertRaisesRegex(
+                RuntimeError, 'diff expects input to be at least one-dimensional'):
+            scalar = torch.tensor(2, device=device, dtype=dtype)
+            torch.diff(scalar)
+
     def _test_large_cum_fn_helper(self, x, fn):
         x_cpu = x.cpu().float()
         expected = fn(x_cpu)
@@ -4315,15 +4431,15 @@ class TestTorchDeviceType(TestCase):
         test_func(self, device, 'method')
         test_func(self, device, 'method inplace')
 
-    def test_index_fill(self, device):
-        for dt in torch.testing.get_all_dtypes():
-            if dt == torch.half or dt == torch.bfloat16 or dt.is_complex:
-                continue
-
-            x = torch.tensor([[1, 2], [4, 5]], dtype=dt, device=device)
-            index = torch.tensor([0], device=device)
-            x.index_fill_(1, index, 0)
-            self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dt, device=device))
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_index_fill(self, device, dtype):
+        x = torch.tensor([[1, 2], [4, 5]], dtype=dtype, device=device)
+        index = torch.tensor([0], device=device)
+        x.index_fill_(1, index, 0)
+        self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dtype, device=device))
+        if not x.is_complex():
+            with self.assertRaisesRegex(RuntimeError, r"Scalar"):
+                x.index_fill_(1, index, 1 + 1j)
 
     def test_index_select(self, device):
         for dtype in [torch.int, torch.long]:
@@ -6880,17 +6996,11 @@ tensor_op_tests = [
         1e-5, 1e-5, 3e-4, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma]),
     ('eig', 'with_eigvec', _new_t((10, 10)), lambda t, d: [True],
         1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False, [skipCUDAIfNoMagma, onlyOnCPUAndCUDA]),
-    ('abs', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5,
-        torch.testing.get_all_dtypes(include_complex=False, include_bool=False), [torch.bfloat16]),
     ('sign', '', _small_3d, lambda t, d: []),
-    ('logit', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('rad2deg', '', _small_3d, lambda t, d: [], 1e-1, 1e-0, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
     ('deg2rad', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes(), [torch.bfloat16]),
-    ('floor', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('frac', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('round', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('trunc', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('ceil', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
 ]
 
 # Creates and decorates a generic test and adds it to the class.

@@ -67,38 +67,49 @@ TEST(LiteInterpreterTest, CheckAttrAccess) {
   AT_ASSERT(!mobile_optimized);
 }
 
-TEST(LiteInterpreterTest, Add) {
-  Module m("m");
-  m.register_parameter("foo", torch::ones({}), false);
-  // TODO: support default param val, which was pushed in
-  // function schema's checkAndNormalizeInputs()
-  //  m.define(R"(
-  //    def add_it(self, x, b : int = 4):
-  //      return self.foo + x + b
-  //  )");
-  m.define(R"(
-    def add_it(self, x):
-      b = 4
-      return self.foo + x + b
-  )");
+TEST(LiteInterpreterTest, MethodInvocation) { // NOLINT (use =delete in gtest)
+  const std::vector<std::string> test_programs{
+      // test invoking a method with default parameter
+      R"(
+      def test_func(self, x, b : int = 4):
+        return self.foo + x + b
+      )",
+      // inner method call with default parameter (gets inlined)
+      R"(
+      def add_with_default_arg(self, x, b : int = 4):
+        return self.foo + x + b
+      def test_func(self, x):
+        return self.add_with_default_arg(x)  # invoke method w/ default arg
+      )",
+      // simple method call
+      R"(
+      def test_func(self, x):
+        b = 4
+        return self.foo + x + b
+      )",
+  };
+  for (const auto& test_program : test_programs) {
+    Module m("m");
+    m.register_parameter("foo", torch::ones({}), false);
+    m.define(test_program);
 
-  std::vector<IValue> inputs;
-  auto minput = 5 * torch::ones({});
-  inputs.emplace_back(minput);
-  auto ref = m.run_method("add_it", minput);
+    const int fortyTwo = 42; // (keep linter happy)
+    auto minput = fortyTwo * torch::ones({});
+    auto ref = m.run_method("test_func", minput);
 
-  std::stringstream ss;
-  m._save_for_mobile(ss);
-  mobile::Module bc = _load_for_mobile(ss);
-  IValue res;
-  for (int i = 0; i < 3; ++i) {
-    auto bcinputs = inputs;
-    res = bc.get_method("add_it")(bcinputs);
+    std::stringstream ss;
+    m._save_for_mobile(ss);
+    mobile::Module bc = _load_for_mobile(ss);
+    const auto& test_func = bc.get_method("test_func");
+    IValue res;
+    for (int i = 0; i < 3; ++i) {
+      res = test_func({minput});
+    }
+
+    auto resd = res.toTensor().item<float>();
+    auto refd = ref.toTensor().item<float>();
+    AT_ASSERT(resd == refd);
   }
-
-  auto resd = res.toTensor().item<float>();
-  auto refd = ref.toTensor().item<float>();
-  AT_ASSERT(resd == refd);
 }
 
 TEST(LiteInterpreterTest, Conv) {
@@ -347,7 +358,7 @@ struct ClassNamespaceValue : public SugaredValue {
       const SourceRange& loc,
       Function& m,
       const std::string& name) override {
-    auto fullName = c10::QualifiedName(basename_, name);
+    const auto fullName = c10::QualifiedName(basename_, name);
 
     // Check to see if it is a custom class.
     if (auto custom_class = getCustomClass(fullName.qualifiedName())) {
