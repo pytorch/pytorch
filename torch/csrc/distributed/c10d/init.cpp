@@ -427,11 +427,15 @@ Example::
               py::call_guard<py::gil_scoped_release>(),
               R"(
 Inserts the key-value pair into the store based on the supplied ``key`` and
-performs comparison between ``new_value`` and ``old_value`` befores inserting. ``new_value`` 
+performs comparison between ``new_value`` and ``old_value`` before inserting. ``new_value`` 
 will only be placed if ``old_value`` for the ``key`` already exists in the store.
 
+.. warning::
+    The ``compare_set`` API is only supported by the :class:`~torch.distributed.TCPStore`. Using this API
+    with the :class:`~torch.distributed.FileStore` or class:`~torch.distributed.HashStore` will result in an exception.
+
 Arguments:
-    key (str): The key to be added to the store.
+    key (str): The key to be checked in the store.
     new_value (str): The value associated with ``key`` to be added to the store.
     old_value (str): The value associated with ``key`` to be checked before insertion.
 

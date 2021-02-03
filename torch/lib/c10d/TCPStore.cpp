@@ -167,9 +167,10 @@ void TCPStoreDaemon::compareSetHandler(int socket) {
   std::vector<uint8_t> currentValue = tcputil::recvVector<uint8_t>(socket);
   std::vector<uint8_t> newValue = tcputil::recvVector<uint8_t>(socket);
 
-  // sets value to new value if the key exists and the existing value is the old value
-  if (tcpStore_.find(key) != tcpStore_.end() && tcpStore_.at(key) == currentValue) {
-    tcpStore_[key] = newValue;
+  // sets value to new value if the key exists and it's existing value is the current value
+  auto it = tcpStore_.find(key);
+  if (it != tcpStore_.end() && it->second == currentValue) {
+    it->second = newValue;
     tcputil::sendVector<uint8_t>(socket, newValue);
   } else {
     tcputil::sendVector<uint8_t>(socket, currentValue);
