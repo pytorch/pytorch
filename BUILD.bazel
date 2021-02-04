@@ -138,6 +138,7 @@ genrule(
         "aten/src/ATen/CUDAFunctions.h",
         "aten/src/ATen/Functions.h",
         "aten/src/ATen/Functions.cpp",
+        "aten/src/ATen/RedispatchFunctions.cpp",
         "aten/src/ATen/NativeFunctions.h",
         "aten/src/ATen/MetaFunctions.h",
         "aten/src/ATen/core/TensorBody.h",
