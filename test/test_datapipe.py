@@ -179,7 +179,7 @@ class TestIterableDataPipeBasic(TestCase):
                 self.assertTrue(rec[1] == open(rec[0], 'rb').read().decode('utf-8'))
 
 
-    def test_groupbyfilename_iterable_datapipe(self):
+    def test_groupbykey_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
         temp_tarfile_pathname = os.path.join(temp_dir, "test_tar.tar")
         file_list = [
@@ -196,7 +196,7 @@ class TestIterableDataPipeBasic(TestCase):
         datapipe1 = dp.iter.ListDirFiles(temp_dir, '*.tar')
         datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
         datapipe3 = dp.iter.ReadFilesFromTar(datapipe2)
-        datapipe4 = dp.iter.GroupByFilename(datapipe3, group_size=2)
+        datapipe4 = dp.iter.GroupByKey(datapipe3, group_size=2)
 
         expected_result = [("a.png", "a.json"), ("c.png", "c.json"), ("b.png", "b.json"), ("d.png", "d.json"), (
             "f.png", "f.json"), ("g.png", "g.json"), ("e.png", "e.json"), ("h.json", "h.txt")]
