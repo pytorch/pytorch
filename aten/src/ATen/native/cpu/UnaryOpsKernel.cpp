@@ -606,7 +606,7 @@ static void frexp_kernel(TensorIterator& iter) {
         [](scalar_t a) -> std::tuple<scalar_t, scalar_t> {
           int exponent;
           scalar_t mantissa = std::frexp(a, &exponent);
-          return {mantissa, static_cast<scalar_t>(exponent)};
+          return std::tuple<scalar_t, scalar_t>(mantissa, static_cast<scalar_t>(exponent));
         }
       );
   });

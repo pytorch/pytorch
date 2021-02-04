@@ -687,7 +687,7 @@ std::tuple<Tensor, Tensor> frexp(const Tensor& self) {
   auto iter = build_frexp_iter(self, mantissa, exponent);
   frexp_stub(iter.device_type(), iter);
 
-  return {iter.output(0), iter.output(1)};
+  return std::tuple<Tensor, Tensor>(iter.output(0), iter.output(1));
 }
 
 std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
@@ -697,7 +697,7 @@ std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
   auto iter = build_frexp_iter(self, mantissa, exponent);
   frexp_stub(iter.device_type(), iter);
 
-  return {mantissa, mantissa};
+  return std::tuple<Tensor&, Tensor&>(mantissa, exponent);
 }
 
 DEFINE_DISPATCH(abs_stub);
