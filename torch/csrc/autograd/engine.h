@@ -213,6 +213,15 @@ struct NodeTask {
         isShutdownTask_(isShutdownTask) {}
 };
 
+// Guard that sets and restores checkpoint_valid
+class CheckpointValidGuard {
+ public:
+  explicit CheckpointValidGuard(const std::shared_ptr<GraphTask>& graph_task);
+  ~CheckpointValidGuard();
+ private:
+  bool prev_checkpoint_valid_state;
+};
+
 
 struct ReadyQueue {
  private:
