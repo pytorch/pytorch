@@ -2244,6 +2244,32 @@ graph(%Ra, %Rb):
         t = Test()
         self.assertEqual(t(torch.ones(1)), torch.ones(1) + 4)
 
+    def test_union_to_optional(self):
+        def test1(u: Union[int, None]) -> int:
+            if u is not None:
+                return u
+            else:
+                return 0
+        scripted = torch.jit.script(test1)
+        self.assertEqual(scripted(10), test1(10))
+
+        def test2(u: Union[None, int]) -> int:
+            if u is not None:
+                return u
+            else:
+                return 0
+        scripted = torch.jit.script(test2)
+        self.assertEqual(scripted(40), test2(40))
+
+        def test3(u: Union[float, int]) -> int:
+            if u is not None:
+                return u
+            else:
+                return 0
+        expected_result = "General Union types are not currently supported"
+        with self.assertRaisesRegex(RuntimeError, expected_result):
+            torch.jit.script(test3)
+
     def test_mutable_default_values(self):
         with self.assertRaisesRegex(Exception, "Mutable default parameters"):
             @torch.jit.script
@@ -5918,6 +5944,11 @@ a")
         self.checkScript(test_not_cast, (torch.tensor(1),))
         self.checkScript(test_not_cast, (torch.tensor(0),))
 
+        with self.assertRaisesRegex(RuntimeError, r"Could not cast value of type Tuple\[Tensor, Tensor\]"):  # noqa: W605
+            @torch.jit.script
+            def test_mult(x, y):
+                return not(x, y)
+
         def test_cast_int(x):
             # type: (int) -> int
             if x:
@@ -5937,6 +5968,15 @@ a")
         self.checkScript(test_cast_float, (1.,))
         self.checkScript(test_cast_float, (0.,))
         self.checkScript(test_cast_float, (-1.,))
+
+        with self.assertRaisesRegex(RuntimeError, r"Could not cast value of type Tuple\[int, int\] to bool"):  # noqa: W605
+
+            @torch.jit.script
+            def test_bad_conditional(x):
+                if (1, 2):  # noqa F634
+                    return
+                else:
+                    return 0
 
     def test_while_nonexistent_value(self):
         with self.assertRaisesRegex(RuntimeError, "undefined value x"):
