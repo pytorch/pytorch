@@ -13,7 +13,7 @@ aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.
 all_operators_with_namedtuple_return = {
     'max', 'min', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
     'qr', 'geqrf', 'solve', 'slogdet', 'sort', 'topk', 'lstsq',
-    'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "unpack_dual", 'linalg_qr',
+    'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "_unpack_dual", 'linalg_qr',
     '_svd_helper', 'linalg_svd', 'linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask',
 }
@@ -76,7 +76,6 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['fake_quantize_per_channel_affine_cachemask'],
                input=(per_channel_scale, per_channel_zp, 1, 0, 255),
                names=('output', 'mask',), hasout=False),
-            op(operators=['unpack_dual'], input=(0,), names=('primal', 'tangent'), hasout=False),
         ]
 
         def get_func(f):
