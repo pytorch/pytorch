@@ -654,6 +654,52 @@ Tensor& lgamma_out(Tensor& result, const Tensor& self) { return unary_op_impl_fl
 Tensor lgamma(const Tensor& self) { return unary_op_impl_float(self, lgamma_stub); }
 Tensor& lgamma_(Tensor& self) { return unary_op_impl_(self, at::lgamma_out); }
 
+static inline TensorIterator build_frexp_iter(const Tensor &self,
+                                              Tensor mantissa, Tensor exponent) {
+  return TensorIteratorConfig()
+    .set_check_mem_overlap(true)
+    .add_output(mantissa)
+    .add_output(exponent)
+    .add_input(self)
+    .cast_common_dtype_to_outputs(true)
+    .promote_inputs_to_common_dtype(true)
+    .promote_integer_inputs_to_float(true)
+    .enforce_safe_casting_to_output(true)
+    .build();
+}
+
+static inline void frexp_check(const Tensor& self) {
+  // torch.frexp currently does not support integral dtypes for cuda tensors
+  // due to the casting issues of gpu_kernel_multiple_outputs
+  // https://github.com/pytorch/pytorch/pull/51097
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()) || self.device().is_cpu(),
+              "frexp is not implemented for ",
+              self.scalar_type(),
+              " on CUDA device.");
+}
+
+std::tuple<Tensor, Tensor> frexp(const Tensor& self) {
+  frexp_check(self);
+
+  Tensor mantissa;
+  Tensor exponent;
+
+  auto iter = build_frexp_iter(self, mantissa, exponent);
+  frexp_stub(iter.device_type(), iter);
+
+  return {iter.output(0), iter.output(1)};
+}
+
+std::tuple<Tensor&, Tensor&> frexp_out(const Tensor& self,
+                                       Tensor& mantissa, Tensor& exponent) {
+  frexp_check(self);
+
+  auto iter = build_frexp_iter(self, mantissa, exponent);
+  frexp_stub(iter.device_type(), iter);
+
+  return {mantissa, mantissa};
+}
+
 DEFINE_DISPATCH(abs_stub);
 DEFINE_DISPATCH(angle_stub);
 DEFINE_DISPATCH(real_stub);
@@ -681,6 +727,7 @@ DEFINE_DISPATCH(exp2_stub);
 DEFINE_DISPATCH(expm1_stub);
 DEFINE_DISPATCH(floor_stub);
 DEFINE_DISPATCH(frac_stub);
+DEFINE_DISPATCH(frexp_stub);
 DEFINE_DISPATCH(i0_stub);
 DEFINE_DISPATCH(log_stub);
 DEFINE_DISPATCH(log10_stub);

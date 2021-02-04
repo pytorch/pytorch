@@ -3177,6 +3177,32 @@ Example::
     tensor([ 0.0000,  0.5000, -0.2000])
 """)
 
+add_docstr(torch.frexp,
+           r"""
+frac(input, *, out=None) -> (Tensor mantissa, Tensor exponent)
+
+Decompose :attr:`input` into mantissa and twos exponent, elementwise.
+The range of mantissa is the open interval(-1, 1).
+
+.. note:: This function does not support integral dtypes for CUDA inputs.
+
+
+Args:
+    input (Tensor): the input tensor to be decomposed where ``input = mantissa * 2**exponent``
+
+Keyword args:
+    out (tuple, optional): the output tensors
+
+Example::
+
+    >>> x = torch.arange(9.)
+    >>> mantissa, exponent = torch.frexp(x)
+    >>> mantissa
+    >>> tensor([0.0000, 0.5000, 0.5000, 0.7500, 0.5000, 0.6250, 0.7500, 0.8750, 0.5000])
+    >>> exponent
+    >>> tensor([0., 1., 2., 2., 3., 3., 3., 3., 4.])
+""")
+
 add_docstr(torch.from_numpy,
            r"""
 from_numpy(ndarray) -> Tensor

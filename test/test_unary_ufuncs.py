@@ -1562,6 +1562,24 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(torch.isinf(torch.atanh(sample)), inf_mask)
         self.assertEqual(torch.isinf(sample.atanh()), inf_mask)
 
+    @dtypes(*torch.testing.get_all_dtypes(include_complex=False, include_bfloat16=False))
+    def test_frexp(self, device, dtype):
+        input = make_tensor((50, 50), device, dtype, low=-9, high=9)
+
+        if self.device_type == 'cuda' and dtype in torch.testing.get_all_int_dtypes() + [torch.bool]:
+            # torch.frexp currently does not support integral dtypes for cuda tensors
+            # due to the casting issues of gpu_kernel_multiple_outputs
+            # https://github.com/pytorch/pytorch/pull/51097
+            with self.assertRaisesRegex(RuntimeError, r"frexp is not implemented for \w+ on CUDA device"):
+                torch.frexp(input)
+        else:
+            np_input = input.cpu().numpy()
+
+            y1, y2 = torch.frexp(input)
+            y1_np, y2_np = np.frexp(np_input)
+
+            self.assertEqual(y1, y1_np)
+            self.assertEqual(y2, y2_np)
 
 def _generate_reference_input(dtype, device):
     input = []

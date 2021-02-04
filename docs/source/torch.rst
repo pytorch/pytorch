@@ -304,6 +304,7 @@ Pointwise Ops
     floor_divide
     fmod
     frac
+    frexp
     imag
     ldexp
     lerp

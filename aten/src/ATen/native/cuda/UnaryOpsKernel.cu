@@ -252,6 +252,19 @@ void kaiser_window_kernel_cuda(TensorIterator& iter, int64_t window_length, doub
   });
 }
 
+void frexp_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::Half,
+    iter.common_dtype(),
+    "frexp_cuda", [&]() {
+      using T_ACC = acc_type<scalar_t, true>;
+      gpu_kernel_multiple_outputs(iter, [=] GPU_LAMBDA (scalar_t a) -> thrust::tuple<scalar_t, scalar_t> {
+        int exponent;
+        scalar_t mantissa = ::frexp(a, &exponent);
+        return {mantissa, static_cast<T_ACC>(exponent)};
+      });
+  });
+}
+
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(exp_stub, &exp_kernel_cuda);
 REGISTER_DISPATCH(exp2_stub, &exp2_kernel_cuda);
@@ -270,6 +283,7 @@ REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_cuda);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_cuda);
 REGISTER_DISPATCH(nan_to_num_stub, &nan_to_num_kernel_cuda);
 REGISTER_DISPATCH(kaiser_window_stub, &kaiser_window_kernel_cuda);
+REGISTER_DISPATCH(frexp_stub, &frexp_kernel_cuda);
 
 } // namespace native
 } // namespace at
