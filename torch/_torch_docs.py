@@ -3157,8 +3157,7 @@ Example::
 add_docstr(torch.floor_divide, r"""
 floor_divide(input, other, *, out=None) -> Tensor
 
-.. deprecated::
-
+.. warning::
     :func:`torch.floor_divide` is deprecated and will be removed in a future PyTorch
     release. Its name is a misnomer because it actually rounds the quotient
     towards zero instead of taking its floor. To keep the current behavior use
