@@ -155,10 +155,9 @@ This function supports float, double, cfloat and cdouble dtypes.
 .. note:: The determinant is computed using LU factorization. LAPACK's `getrf` is used for CPU inputs,
           and MAGMA's `getrf` is used for CUDA inputs.
 
-.. note:: Backward through `det` internally uses :func:`torch.svd` when :attr:`input` is
-          not invertible. In this case, double backward through `det` will be
-          unstable when :attr:`input` doesn't have distinct singular values. See
-          :func:`torch.svd` for more details.
+.. note:: Backward through `det` internally uses :func:`torch.linalg.svd` when :attr:`input` is not
+          invertible. In this case, double backward through `det` will be unstable when :attr:`input`
+          doesn't have distinct singular values. See :func:`torch.linalg.svd` for more details.
 
 Args:
     input (Tensor): the input matrix of size `(n, n)` or the batch of matrices of size
@@ -238,9 +237,9 @@ linalg.eigh(input, UPLO='L', *, out=None) -> (Tensor, Tensor)
 Computes the eigenvalues and eigenvectors of a complex Hermitian (or real symmetric)
 matrix :attr:`input`, or of each such matrix in a batched :attr:`input`.
 
-For a single matrix :attr:`input`, the tensor of eigenvalues :math:`w` and the tensor of eigenvectors
-:math:`V` decompose the :attr:`input` such that :math:`\text{input} = V \text{diag}(w) V^H`, where
-:math:`^H` is the conjugate transpose operation.
+For a single matrix :attr:`input`, the tensor of eigenvalues `w` and the tensor of eigenvectors
+`V` decompose the :attr:`input` such that `input = V diag(w) Vᴴ`, where `Vᴴ` is the transpose of `V`
+for real-valued :attr:`input`, or the conjugate transpose of `V` for complex-valued :attr:`input`.
 
 Since the matrix or matrices in :attr:`input` are assumed to be Hermitian, the imaginary part of their diagonals
 is always treated as zero. When :attr:`UPLO` is "L", its default value, only the lower triangular part of each
