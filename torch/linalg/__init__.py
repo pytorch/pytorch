@@ -653,7 +653,8 @@ values computed using :func:`torch.linalg.svd`.
 
 This function supports float, double, cfloat and cdouble dtypes.
 
-.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+.. note:: When given inputs on a CUDA device, this function may synchronize that device with the CPU depending
+          on which norm :attr:`p` is used.
 
 .. note:: For norms `{None, 2, -2}`, :attr:`input` may be a non-square matrix or batch of non-square matrices.
           For other norms, however, :attr:`input` must be a square matrix or a batch of square matrices,

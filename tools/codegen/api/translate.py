@@ -79,6 +79,17 @@ def translate(
     for b in binding_exprs:
         ctx[b.type] = b.expr
 
+        # While we're at it, do some simple forward inference, looking through
+        # constructors.
+        # TODO: My kingdom for a pattern matcher
+        # https://www.python.org/dev/peps/pep-0634/
+        # TODO: This could get us in recomputation trouble if b.expr is nontrivial
+        t = b.type
+        if isinstance(t, ConstRefCType) and isinstance(t.elem, OptionalCType) and \
+                isinstance(t.elem.elem, BaseCType) and t.elem.elem.type == 'Tensor':
+            ctx[ConstRefCType(BaseCType("Tensor", t.elem.elem.name))] = \
+                f'({b.expr}.has_value() ? *{b.expr} : at::Tensor())'
+
     # Add implicit bindings if the generated code is inside a Tensor method
     if method:
         ctx[MutRefCType(BaseCType("Tensor", "self"))] = "const_cast<Tensor&>(*this)"
