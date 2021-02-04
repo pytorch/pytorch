@@ -7,7 +7,6 @@ from tools.codegen.context import *
 from tools.codegen.utils import *
 from tools.codegen.model import *
 from tools.codegen.api.types import *
-import tools.codegen.api.native as native
 import tools.codegen.api.meta as meta
 import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
@@ -89,17 +88,32 @@ class RegisterDispatchKey:
         if self.target is Target.REGISTRATION and not self.selector.is_native_function_selected(f):
             return None
 
-        name = native.name(f.func)
-        returns_type = native.returns_type(f.func.returns)
-        args = native.arguments(f.func)
+        sig = NativeSignature(f.func, prefix='wrapper_')
+
+        name = sig.name()
+        returns_type = sig.returns_type()
+        args = sig.arguments()
         args_str = ', '.join(a.defn() for a in args)
 
+        # See Note [Direct dispatch bindings]
+        cpp_sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=False)
+
         if self.target is Target.NAMESPACED_DECLARATION:
-            # TODO: implement at::cpu:: bindings for non-structured functions
-            return ''
+            result = f"TORCH_API {cpp_sig_group.signature.decl()};\n"
+            if cpp_sig_group.faithful_signature is not None:
+                result += f"TORCH_API {cpp_sig_group.faithful_signature.decl()};\n"
+            return result
         elif self.target is Target.NAMESPACED_DEFINITION:
-            # TODO: implement at::cpu:: bindings for non-structured functions
-            return ''
+            def generate_defn(cpp_sig: CppSignature) -> str:
+                return f"""
+{cpp_sig.defn()} {{
+return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), sig.arguments()))});
+}}
+"""
+            result = generate_defn(cpp_sig_group.signature)
+            if cpp_sig_group.faithful_signature is not None:
+                result += generate_defn(cpp_sig_group.faithful_signature)
+            return result
         elif self.target is Target.ANONYMOUS_DEFINITION:
             impl_name = f"at::native::{f.dispatch[self.dispatch_key]}"
 
@@ -322,6 +336,8 @@ struct {class_name} final : public {parent_class} {{
         if self.target is Target.REGISTRATION and not self.selector.is_native_function_selected(f):
             return None
 
+        # Note [Direct dispatch bindings]
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Signature of the non-dispatched function we'll expose in a header
         # (e.g., at::cpu::add).  We don't generate methods (TODO: do this
         # when CPUTensor class is a thing); nor do we generate fallback
