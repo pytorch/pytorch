@@ -1158,6 +1158,13 @@ floor_divide_(value) -> Tensor
 In-place version of :meth:`~Tensor.floor_divide`
 """)
 
+add_docstr_all('diff',
+               r"""
+diff(n=1, dim=-1, prepend=None, append=None) -> Tensor
+
+See :func:`torch.diff`
+""")
+
 add_docstr_all('digamma',
                r"""
 digamma() -> Tensor

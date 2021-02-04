@@ -929,7 +929,11 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         warnings.warn(
             "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
         )
+
+    # No-op for modules and functions that are already scripted
     if isinstance(obj, ScriptModule):
+        return obj
+    if isinstance(obj, ScriptFunction):
         return obj
 
     if isinstance(obj, torch.nn.Module):

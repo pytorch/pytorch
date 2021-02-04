@@ -341,6 +341,7 @@ Pointwise Ops
     rsqrt
     sigmoid
     sign
+    sgn
     signbit
     sin
     sinc
@@ -470,6 +471,7 @@ Other Operations
     diag_embed
     diagflat
     diagonal
+    diff
     einsum
     flatten
     flip
