@@ -653,26 +653,25 @@ void RRefContext::recordThreadLocalPendingRRefs() {
   recording_ = true;
 }
 
-std::shared_ptr<Future<bool>> RRefContext::waitForThreadLocalPendingRRefs() {
-  std::shared_ptr<Future<bool>> future;
+c10::intrusive_ptr<JitFuture> RRefContext::waitForThreadLocalPendingRRefs() {
+  auto jitFuturePtr = c10::make_intrusive<JitFuture>(BoolType::get());
   if (userTable_.empty()) {
-    future = std::make_shared<Future<bool>>(true);
+    jitFuturePtr->markCompleted();
   } else {
-    future = std::make_shared<Future<bool>>();
     auto remainingRRefs =
         std::make_shared<std::atomic<uint64_t>>(userTable_.size());
     for (auto& state : userTable_) {
-      state->confirmationFuture_->addCallback([future, remainingRRefs]() {
+      state->confirmationFuture_->addCallback([jitFuturePtr, remainingRRefs]() {
         auto localCount = remainingRRefs->fetch_sub(1);
         if (localCount == 1) {
-          future->markCompleted(true);
+          jitFuturePtr->markCompleted(true);
         }
       });
     }
     userTable_.clear();
   }
   recording_ = false;
-  return future;
+  return jitFuturePtr;
 }
 
 void RRefContext::clearRecordedPendingRRefsOnError() {

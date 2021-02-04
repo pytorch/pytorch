@@ -192,7 +192,7 @@ class TORCH_API RRefContext {
   // because this Future is already captured in callbacks of the
   // PendingUserState. If there is no pending UserRRefs, this method returns a
   // completed future.
-  std::shared_ptr<Future<bool>> waitForThreadLocalPendingRRefs();
+  c10::intrusive_ptr<JitFuture> waitForThreadLocalPendingRRefs();
   // Only call this function when there are errors during a recording session,
   // and it is likely that waitForThreadLocalPendingRRefs() cannot be invoked
   // properly.
