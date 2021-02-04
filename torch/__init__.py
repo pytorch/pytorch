@@ -543,6 +543,8 @@ if TYPE_CHECKING:
     # PR #43339 for details.
     from torch._C._VariableFunctions import *  # type: ignore
 
+from . import tensor
+
 for name in dir(_C._VariableFunctions):
     if name.startswith('__'):
         continue
