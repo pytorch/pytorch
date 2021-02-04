@@ -1530,12 +1530,34 @@ class TestFrozenOptimizations(JitTestCase):
         mod = torch.jit.script(Net())
         script_mod = torch.jit.script(mod)
         script_mod.eval()
- 
+
         # By default freezing runs optimize_frozen_module
         frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()))
         FileCheck().check_not("aten::dropout").run(frozen_mod.graph)
 
         input = torch.randn(2)
+        output_s = script_mod.forward(input)
+        output_f = frozen_mod.forward(input)
+        self.assertEqual(output_s, output_f)
+
+    def test_freeze_remove_feature_dropout(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.dropout = nn.Dropout2d(0.5)
+
+            def forward(self, x):
+                return self.dropout(x)
+
+        mod = torch.jit.script(Net())
+        script_mod = torch.jit.script(mod)
+        script_mod.eval()
+
+        # By default freezing runs optimize_frozen_module
+        frozen_mod = torch.jit.freeze(torch.jit.script(mod.eval()))
+        FileCheck().check_not("aten::feature_dropout").run(frozen_mod.graph)
+
+        input = torch.randn(2, 2)
         output_s = script_mod.forward(input)
         output_f = frozen_mod.forward(input)
         self.assertEqual(output_s, output_f)
