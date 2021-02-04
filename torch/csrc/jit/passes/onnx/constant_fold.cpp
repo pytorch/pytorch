@@ -313,6 +313,16 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     auto indices_corr = at::add(indices, inputTensorValues[0].sizes()[axis]);
     auto indices_masked = at::where(less_mask, indices_corr, indices);
     updated_val = at::index_select(inputTensorValues[0], axis, indices_masked);
+    auto q = indices.dim();
+    // Cases where rank of indices > 1 are not currently supported.
+    if (q > 1) {
+      return c10::nullopt;
+    }
+    // If rank of indices is 0, rank of output tensor should be
+    // rank_of_input - 1.
+    if (q < 1) {
+      updated_val = updated_val.squeeze();
+    }
     return c10::optional<at::Tensor>(updated_val);
   } else {
     return c10::nullopt;
