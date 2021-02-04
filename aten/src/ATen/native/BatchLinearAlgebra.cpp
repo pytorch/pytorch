@@ -534,7 +534,8 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
   Tensor other_broadcasted, input_broadcasted;
   std::tie(other_broadcasted, input_broadcasted) = _linalg_broadcast_batch_dims(other_, input, "linalg_solve");
 
-  auto squeezed_result_shape = other_broadcasted.squeeze(-1).sizes();
+  auto squeezed_other_broadcasted = at::squeeze(other_broadcasted, -1);
+  auto squeezed_result_shape = squeezed_other_broadcasted.sizes();
 
   // if result has no elements we can modify it
   if (result.numel() == 0) {
