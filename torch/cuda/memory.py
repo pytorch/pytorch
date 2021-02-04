@@ -138,8 +138,9 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
     - ``"num_ooms"``: number of out-of-memory errors thrown.
 
     The caching allocator can be configured via ENV to not split blocks larger than a
-    defined size. This helps avoid memory framentation but may have a performance
-    penalty. Additional statics to assist with tuning and evaluating impact:
+    defined size (see Memory Management section of the Cuda Semantics documentation).
+    This helps avoid memory framentation but may have a performance
+    penalty. Additional outputs to assist with tuning and evaluating impact:
 
     - ``"max_split_size"``: blocks above this size will not be split.
     - ``"oversize_allocations.{current,peak,allocated,freed}"``:
