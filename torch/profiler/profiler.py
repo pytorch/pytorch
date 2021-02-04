@@ -1,3 +1,4 @@
+import torch
 import torch.autograd.profiler as prof
 from torch.autograd import ProfilerActivity
 
@@ -80,7 +81,8 @@ class profile(object):
     Args:
 
     - ``activities`` - list of activity groups (CPU, CUDA) to use in profiling, supported values:
-      ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``
+      ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``;
+      default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA;
     - ``schedule`` - callable that takes step (int) as a single parameter and returns
       ``ProfilerAction`` value that specifies the profiler action to perform at each step;
     - ``on_trace_ready`` - callable that is called at each step when ``schedule`` returns ``ProfilerAction.RECORD_AND_SAVE``
@@ -88,7 +90,7 @@ class profile(object):
     - ``record_shapes`` - save information about operator's input shapes;
     - ``profile_memory`` - track tensor memory allocation/deallocation;
     - ``with_stack`` - record source information (file and line number) for the ops.
-    - ``use_gpu`` - (deprecated, use ``activities``).
+    - ``use_cuda`` - (deprecated, use ``activities``).
 
     .. note::
         Use ``torch.profiler.schedule`` to generate the callable schedule.
@@ -161,17 +163,24 @@ class profile(object):
             profile_memory: bool = False,
             with_stack: bool = False,
             # deprecated:
-            use_gpu: Optional[bool] = None):
+            use_cuda: Optional[bool] = None):
         if activities:
-            self.activities = activities
+            self.activities = set(activities)
         else:
-            if use_gpu is not None:
-                warn("use_gpu is deprecated, use activities argument instead")
-                self.activities = set([ProfilerActivity.CPU])
-                if use_gpu:
-                    self.activities.add(ProfilerActivity.CUDA)
-            else:
-                raise RuntimeError("Profiler activities are not specified")
+            self.activities = set([ProfilerActivity.CPU])
+            if torch.cuda.is_available():
+                self.activities.add(ProfilerActivity.CUDA)
+
+        if use_cuda is not None:
+            warn("use_cuda is deprecated, use activities argument instead")
+            if use_cuda:
+                self.activities.add(ProfilerActivity.CUDA)
+            elif ProfilerActivity.CUDA in self.activities:
+                self.activities.remove(ProfilerActivity.CUDA)
+
+        assert len(self.activities) > 0, "No profiler activities specified"
+        assert (ProfilerActivity.CUDA not in self.activities) or torch.cuda.is_available(), \
+            "CUDA activity specified, but CUDA is not available"
 
         if schedule:
             self.schedule = schedule

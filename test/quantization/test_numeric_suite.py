@@ -227,6 +227,7 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             q_model = quantize(model, test_only_eval_fn, [self.calib_data])
             compare_and_validate_results(model, q_model, module_swap_list, linear_data)
 
+    @override_qengines
     def test_compare_model_stub_partial(self):
         r"""Compare the output of static quantized linear layer and its float shadow module"""
 
