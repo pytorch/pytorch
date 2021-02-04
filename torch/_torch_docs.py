@@ -5151,10 +5151,10 @@ Example::
 add_docstr(torch.fmax, r"""
 fmax(input, other, *, out=None) -> Tensor
 
-Computes the element-wise maximum of :attr:`input` and :attr:`other`. 
+Computes the element-wise maximum of :attr:`input` and :attr:`other`.
 
-This is like :func:`torch.maximum` except it handles NaNs differently: 
-if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the maximum. 
+This is like :func:`torch.maximum` except it handles NaNs differently:
+if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the maximum.
 Only if both elements are NaN is NaN propagated.
 
 This function is a wrapper around C++'s ``std::fmax`` and is similar to NumPy's ``fmax`` function.
@@ -5626,10 +5626,10 @@ Example::
 add_docstr(torch.fmin, r"""
 fmin(input, other, *, out=None) -> Tensor
 
-Computes the element-wise minimum of :attr:`input` and :attr:`other`. 
+Computes the element-wise minimum of :attr:`input` and :attr:`other`.
 
-This is like :func:`torch.minimum` except it handles NaNs differently: 
-if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the minimum. 
+This is like :func:`torch.minimum` except it handles NaNs differently:
+if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the minimum.
 Only if both elements are NaN is NaN propagated.
 
 This function is a wrapper around C++'s ``std::fmin`` and is similar to NumPy's ``fmin`` function.
