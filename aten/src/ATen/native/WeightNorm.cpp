@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
+ #include <ATen/native/cpu/WeightNormKernel.h>
 
 #include <cstring>
 #include <memory>
@@ -46,17 +47,42 @@ Tensor _weight_norm
   auto v = v_in.contiguous();
   auto g = g_in.contiguous();
 
-  bool can_use_fused = v.is_cuda() && (dim == 0 || dim == v.dim() - 1);
+  bool can_use_fused = (dim == 0 || dim == v.dim() - 1);
 
   if (can_use_fused) {
     // weight_norm does not have a derivative defined for it, so this will route back through
     // VariableType.cpp, and construct a WeightNormFusedBackward object in the autograd graph.
-    return std::get<0>(at::_weight_norm_cuda_interface(v, g, dim));
+    return std::get<0>(at::_weight_norm_interface(v, g, dim));
   } else {
     // Double-differentiable primitive ops
     // at::native::norm_except_dim would probably be fine as well.
     return v*(g/at::norm_except_dim(v, 2, dim));
   }
+}
+
+// fused impl for CPU
+std::tuple<Tensor,Tensor> weight_norm_cpu
+  (const Tensor & v,
+   const Tensor & g,
+   int64_t dim)
+{
+  Tensor w = at::empty_like(v, at::MemoryFormat::Contiguous);
+  Tensor norms = at::empty_like(g, at::MemoryFormat::Contiguous);
+  weight_norm_stub(kCPU, w, norms, v, g, dim);
+  return std::tuple<Tensor, Tensor>{w, norms};
+}
+
+std::tuple<Tensor, Tensor> weight_norm_cpu_backward
+  (const Tensor & grad_w,
+   const Tensor & saved_v,
+   const Tensor & saved_g,
+   const Tensor & saved_norms,
+   int64_t dim)
+{
+  auto grad_v = at::empty_like(saved_v, at::MemoryFormat::Contiguous);
+  auto grad_g = at::empty_like(saved_g, at::MemoryFormat::Contiguous);
+  weight_norm_backward_stub(kCPU, grad_v, grad_g, grad_w, saved_v, saved_g, saved_norms, dim);
+  return std::tuple<Tensor, Tensor>{grad_v, grad_g};
 }
 
 // Differentiable backward path, an alternative to weight_norm_cuda_backward, to be used
@@ -108,6 +134,9 @@ std::tuple<Tensor, Tensor> _weight_norm_differentiable_backward
     return std::tuple<Tensor, Tensor>{grad_v, grad_g};
   }
 }
+
+DEFINE_DISPATCH(weight_norm_stub);
+DEFINE_DISPATCH(weight_norm_backward_stub);
 
 } // namespace native
 } // namespace at
