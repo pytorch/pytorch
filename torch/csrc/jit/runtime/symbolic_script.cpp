@@ -762,6 +762,31 @@ const std::vector<std::string> functions = {
                 return grad_output / other, None
             return self / other, backward
 
+        def div_2(self, other, *, rounding_mode: str):
+            result = torch.div(self, other, rounding_mode=rounding_mode)
+            self_size, other_size = AD_sizes_if_not_equal_multi_0(self, other, result)
+            def backward(grad_output):
+                if rounding_mode == "true":
+                    grad_self = (grad_output / other)._grad_sum_to_size(self_size)
+                    grad_other = (-grad_output * self / (other * other))._grad_sum_to_size(other_size)
+                else:
+                    grad_self = torch.zeros_like(self)
+                    grad_other = torch.zeros_like(other)
+
+                return grad_self, grad_other, None
+
+            return result, backward
+
+        def div_3(self, other: number, *,  rounding_mode: str):
+            result = torch.div(self, other, rounding_mode=rounding_mode)
+            def backward(grad_output):
+                if rounding_mode == "true":
+                    grad_self = (grad_output / other)
+                else:
+                    grad_self = torch.zeros_like(self, memory_format=1)
+                return grad_self, None, None
+            return result, backward
+
         def max(self, other):
             result = torch.max(self, other)
             self_size, other_size = AD_sizes_if_not_equal_multi_0(self, other, result)

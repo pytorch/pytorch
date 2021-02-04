@@ -10,7 +10,8 @@ import yaml
 from tools.codegen.api.autograd import *
 from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
-from tools.codegen.gen import parse_native_yaml, with_native_function
+from tools.codegen.gen import parse_native_yaml
+from tools.codegen.context import with_native_function
 from tools.codegen.model import *
 from tools.codegen.utils import *
 
