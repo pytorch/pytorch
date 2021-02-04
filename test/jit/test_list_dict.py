@@ -35,6 +35,12 @@ class TestList(JitTestCase):
         self.checkScript(or_assignment, ([1, 2, 3],))
         self.checkScript(or_assignment, ([],))
 
+        def optional_assignment(l: Optional[List[int]]):
+            a = l or [3]
+            return a
+
+        self.checkScript(optional_assignment, (None,))
+
     def test_list_bool_conversion(self):
         def if_predicate(l: List[int]):
             if l:
@@ -1233,6 +1239,12 @@ class TestDict(JitTestCase):
 
         self.checkScript(or_assignment, ({1:2, 3:4},))
         self.checkScript(or_assignment, ({},))
+
+        def optional_assignment(d: Optional[Dict[int, int]]):
+            a = d or {10: 11}
+            return a
+
+        self.checkScript(optional_assignment, (None,))
 
     def test_dict_bool_conversion(self):
         def if_predicate(d: Dict[int, int]):

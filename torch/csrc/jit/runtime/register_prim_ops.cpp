@@ -460,6 +460,10 @@ RegisterOperators reg(
          noop,
          aliasAnalysisFromSchema()),
      OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::Bool.optional(t(a)? optional) -> bool"),
+         [](Stack* stack) { push(stack, pop(stack).isNone()); },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("prim::device(Tensor a) -> Device"),
          [](Stack* stack) { push(stack, pop(stack).toTensor().device()); },
          aliasAnalysisFromSchema()),
