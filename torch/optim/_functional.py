@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 from typing import List, Optional
 
-# TODO: use foreach API in optim.functional to do all the computation
+# TODO: use foreach API in optim._functional to do all the computation
 
 def _make_sparse(grad, grad_indices, values):
     size = grad.size()
@@ -13,14 +13,14 @@ def _make_sparse(grad, grad_indices, values):
     return torch.sparse_coo_tensor(grad_indices, values, size)
 
 
-def _adagrad(params: List[Tensor],
-             grads: List[Tensor],
-             state_sums: List[Tensor],
-             state_steps: List[int],
-             lr: float,
-             weight_decay: float,
-             lr_decay: float,
-             eps: float):
+def adagrad(params: List[Tensor],
+            grads: List[Tensor],
+            state_sums: List[Tensor],
+            state_steps: List[int],
+            lr: float,
+            weight_decay: float,
+            lr_decay: float,
+            eps: float):
     r"""Functional API that performs Adagrad algorithm computation.
 
     See :class:`~torch.optim.Adagrad` for details.
@@ -50,18 +50,18 @@ def _adagrad(params: List[Tensor],
             param.addcdiv_(grad, std, value=-clr)
 
 
-def _adam(params: List[Tensor],
-          grads: List[Tensor],
-          exp_avgs: List[Tensor],
-          exp_avg_sqs: List[Tensor],
-          max_exp_avg_sqs: List[Tensor],
-          state_steps: List[int],
-          amsgrad: bool,
-          beta1: float,
-          beta2: float,
-          lr: float,
-          weight_decay: float,
-          eps: float):
+def adam(params: List[Tensor],
+         grads: List[Tensor],
+         exp_avgs: List[Tensor],
+         exp_avg_sqs: List[Tensor],
+         max_exp_avg_sqs: List[Tensor],
+         state_steps: List[int],
+         amsgrad: bool,
+         beta1: float,
+         beta2: float,
+         lr: float,
+         weight_decay: float,
+         eps: float):
     r"""Functional API that performs Adam algorithm computation.
 
     See :class:`~torch.optim.Adam` for details.
@@ -96,18 +96,18 @@ def _adam(params: List[Tensor],
         param.addcdiv_(exp_avg, denom, value=-step_size)
 
 
-def _adamw(params: List[Tensor],
-           grads: List[Tensor],
-           exp_avgs: List[Tensor],
-           exp_avg_sqs: List[Tensor],
-           max_exp_avg_sqs: List[Tensor],
-           state_steps: List[int],
-           amsgrad: bool,
-           beta1: float,
-           beta2: float,
-           lr: float,
-           weight_decay: float,
-           eps: float):
+def adamw(params: List[Tensor],
+          grads: List[Tensor],
+          exp_avgs: List[Tensor],
+          exp_avg_sqs: List[Tensor],
+          max_exp_avg_sqs: List[Tensor],
+          state_steps: List[int],
+          amsgrad: bool,
+          beta1: float,
+          beta2: float,
+          lr: float,
+          weight_decay: float,
+          eps: float):
     r"""Functional API that performs AdamW algorithm computation.
 
     See :class:`~torch.optim.AdamW` for details.
@@ -140,14 +140,14 @@ def _adamw(params: List[Tensor],
         param.addcdiv_(exp_avg, denom, value=-step_size)
 
 
-def _sgd(params: List[Tensor],
-         d_p_list: List[Tensor],
-         momentum_buffer_list: List[Optional[Tensor]],
-         weight_decay: float,
-         momentum: float,
-         lr: float,
-         dampening: float,
-         nesterov: bool):
+def sgd(params: List[Tensor],
+        d_p_list: List[Tensor],
+        momentum_buffer_list: List[Optional[Tensor]],
+        weight_decay: float,
+        momentum: float,
+        lr: float,
+        dampening: float,
+        nesterov: bool):
     r"""Functional API that performs SGD algorithm computation.
 
     See :class:`~torch.optim.SGD` for details.
@@ -176,14 +176,14 @@ def _sgd(params: List[Tensor],
         param.add_(d_p, alpha=-lr)
 
 
-def _adadelta(params: List[Tensor],
-              grads: List[Tensor],
-              square_avgs: List[Tensor],
-              acc_deltas: List[Tensor],
-              lr: float,
-              rho: float,
-              eps: float,
-              weight_decay: float):
+def adadelta(params: List[Tensor],
+             grads: List[Tensor],
+             square_avgs: List[Tensor],
+             acc_deltas: List[Tensor],
+             lr: float,
+             rho: float,
+             eps: float,
+             weight_decay: float):
     r"""Functional API that performs Adadelta algorithm computation.
 
     See :class:`~torch.optim.Adadelta` for details.
@@ -200,17 +200,17 @@ def _adadelta(params: List[Tensor],
         acc_delta.mul_(rho).addcmul_(delta, delta, value=1 - rho)
 
 
-def _rmsprop(params: List[Tensor],
-             grads: List[Tensor],
-             square_avgs: List[Tensor],
-             grad_avgs: List[Tensor],
-             momentum_buffer_list: List[Tensor],
-             lr: float,
-             alpha: float,
-             eps: float,
-             weight_decay: float,
-             momentum: float,
-             centered: bool):
+def rmsprop(params: List[Tensor],
+            grads: List[Tensor],
+            square_avgs: List[Tensor],
+            grad_avgs: List[Tensor],
+            momentum_buffer_list: List[Tensor],
+            lr: float,
+            alpha: float,
+            eps: float,
+            weight_decay: float,
+            momentum: float,
+            centered: bool):
     r"""Functional API that performs rmsprop algorithm computation.
 
     See :class:`~torch.optim.RMSProp` for details.
