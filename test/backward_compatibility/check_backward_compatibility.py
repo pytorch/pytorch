@@ -59,6 +59,17 @@ allow_list = [
     ("aten::fake_quantize_per_tensor_affine_backward", datetime.date(2021, 2, 20)),
     ("aten::fake_quantize_per_channel_affine_backward", datetime.date(2021, 2, 20)),
     ("aten::rowwise_prune", datetime.date(9999, 1, 1)),
+    ("aten::_foreach_mul_.ScalarList", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_sub.ScalarList", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_addcdiv_.ScalarList", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_add_.ScalarList", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_mul.ScalarList", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_addcmul.ScalarList", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_add.ScalarList", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_sub_.ScalarList", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_div.ScalarList", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_div_.ScalarList", datetime.date(2021, 2, 25)),
+    ("aten::_foreach_addcdiv.ScalarList", datetime.date(2021, 2, 25)),
 ]
 
 def allow_listed(schema, allow_list):
