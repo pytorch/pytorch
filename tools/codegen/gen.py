@@ -3,6 +3,7 @@ import contextlib
 import textwrap
 import itertools
 from typing import List, Dict, Optional, Iterator, Tuple, Set, Callable, Any, TypeVar, Union, Sequence, Iterable
+from typing_extensions import Literal
 import yaml
 from enum import Enum
 from collections import OrderedDict, defaultdict
@@ -237,7 +238,11 @@ class RegisterSchema:
 class RegisterDispatchKey:
     dispatch_key: DispatchKey
 
-    target: Target
+    target: Union[
+        Literal[Target.DEFINITION],
+        Literal[Target.DECLARATION],
+        Literal[Target.REGISTRATION]
+    ]
 
     # Selector object to determine which operators to generate
     # registration code for.
@@ -637,7 +642,10 @@ c10::impl::hacky_wrapper_for_legacy_signatures<
 # the dispatcher from these functions.  See also compute_tensor_method.
 @dataclass(frozen=True)
 class ComputeFunction:
-    target: Target
+    target: Union[
+        Literal[Target.DECLARATION],
+        Literal[Target.DEFINITION]
+    ]
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
@@ -654,7 +662,8 @@ class ComputeFunction:
                 result += f"TORCH_API {sig_group.faithful_signature.decl()};\n"
             return result
 
-        assert self.target is Target.DEFINITION
+        if self.target is not Target.DEFINITION:
+            assert_never(self.target)
 
         def generate_defn(faithful: bool) -> str:
             dispatcher_sig = DispatcherSignature.from_schema(f.func)
@@ -688,7 +697,10 @@ class ComputeFunction:
 # the dispatcher from these functions.  See also compute_function.
 @dataclass(frozen=True)
 class ComputeTensorMethod:
-    target: Target
+    target: Union[
+        Literal[Target.DECLARATION],
+        Literal[Target.DEFINITION]
+    ]
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
@@ -708,7 +720,8 @@ class ComputeTensorMethod:
                 result += f"{sig_group.faithful_signature.decl()} const;\n"
             return result
 
-        assert self.target is Target.DEFINITION
+        if self.target is not Target.DEFINITION:
+            assert_never(self.target)
 
         def generate_defn(faithful: bool) -> str:
             dispatcher_sig = DispatcherSignature.from_schema(f.func)
@@ -824,7 +837,10 @@ struct TORCH_API {name} : public {parent_class} {{
 # be easily done automatically using templating.
 @dataclass(frozen=True)
 class ComputeBackendSelect:
-    target: Target
+    target: Union[
+        Literal[Target.DEFINITION],
+        Literal[Target.REGISTRATION]
+    ]
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
@@ -875,8 +891,6 @@ C10_ALWAYS_INLINE
 """
         elif self.target is Target.REGISTRATION:
             return f"""m.impl("aten::{f.func.name}", TORCH_FN({name}));"""
-        elif self.target is Target.DECLARATION:
-            raise AssertionError()
         else:
             assert_never(self.target)
 
