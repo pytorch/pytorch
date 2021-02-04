@@ -81,10 +81,10 @@ struct TORCH_API DispatchStub<rT (*)(Args...), T> {
       }
       return (*fptr)(std::forward<ArgTypes>(args)...);
     } else if (device_type == DeviceType::CUDA) {
-      AT_ASSERTM(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
+      TORCH_INTERNAL_ASSERT(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
       return (*cuda_dispatch_ptr)(std::forward<ArgTypes>(args)...);
     } else if (device_type == DeviceType::HIP) {
-      AT_ASSERTM(hip_dispatch_ptr, "DispatchStub: missing HIP kernel");
+      TORCH_INTERNAL_ASSERT(hip_dispatch_ptr, "DispatchStub: missing HIP kernel");
       return (*hip_dispatch_ptr)(std::forward<ArgTypes>(args)...);
     } else {
       AT_ERROR("DispatchStub: unsupported device type", device_type);
@@ -96,23 +96,23 @@ struct TORCH_API DispatchStub<rT (*)(Args...), T> {
     (void)capability;
 #ifdef HAVE_AVX2_CPU_DEFINITION
     if (capability >= static_cast<int>(CPUCapability::AVX2)) {
-      AT_ASSERTM(AVX2, "DispatchStub: missing AVX2 kernel");
+      TORCH_INTERNAL_ASSERT(AVX2, "DispatchStub: missing AVX2 kernel");
       return AVX2;
     }
 #endif
 #ifdef HAVE_AVX_CPU_DEFINITION
     if (capability >= static_cast<int>(CPUCapability::AVX)) {
-      AT_ASSERTM(AVX, "DispatchStub: missing AVX kernel");
+      TORCH_INTERNAL_ASSERT(AVX, "DispatchStub: missing AVX kernel");
       return AVX;
     }
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
     if (capability >= static_cast<int>(CPUCapability::VSX)) {
-      AT_ASSERTM(VSX, "DispatchStub: missing VSX kernel");
+      TORCH_INTERNAL_ASSERT(VSX, "DispatchStub: missing VSX kernel");
       return VSX;
     }
 #endif
-    AT_ASSERTM(DEFAULT, "DispatchStub: missing default kernel");
+    TORCH_INTERNAL_ASSERT(DEFAULT, "DispatchStub: missing default kernel");
     return DEFAULT;
   }
 

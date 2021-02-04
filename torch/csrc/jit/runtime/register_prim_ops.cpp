@@ -632,10 +632,6 @@ RegisterOperators reg(
          listLen,
          aliasAnalysisFromSchema()),
      OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("aten::Bool.t(t[] a) -> bool"),
-         listBool,
-         aliasAnalysisFromSchema()),
-     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::eq.int_list(int[] a, int[] b) -> bool"),
          listEq<int64_t>,
          aliasAnalysisFromSchema()),
@@ -860,14 +856,6 @@ RegisterOperators reg(
          [](Stack& stack) {
            auto string = pop(stack).toStringRef();
            push(stack, static_cast<int64_t>(string.size()));
-           return 0;
-         },
-         aliasAnalysisFromSchema()),
-     OperatorGenerator(
-         TORCH_SELECTIVE_SCHEMA("aten::Bool.str(str s) -> bool"),
-         [](Stack& stack) {
-           auto string = pop(stack).toStringRef();
-           push(stack, !string.empty());
            return 0;
          },
          aliasAnalysisFromSchema()),
@@ -1110,11 +1098,6 @@ void dictLen(Stack* stack) {
   push(stack, int64_t(dict.size()));
 }
 
-void dictBool(Stack* stack) {
-  auto dict = pop(stack).toGenericDict();
-  push(stack, !dict.empty());
-}
-
 void dictValues(Stack* stack) {
   auto dict = pop(stack).toGenericDict();
   auto values = c10::impl::GenericList(dict.valueType());
@@ -1276,11 +1259,6 @@ void dictConstructFromList(Stack* stack) {
                              ", t) self) -> int"),                             \
       dictLen,                                                                 \
       aliasAnalysisFromSchema()),                                              \
-      OperatorGenerator(                                                       \
-          TORCH_SELECTIVE_SCHEMA("aten::Bool.Dict_" key_type "(Dict(" key_type \
-                                 ", t) self) -> bool"),                        \
-          dictBool,                                                            \
-          aliasAnalysisFromSchema()),                                          \
       OperatorGenerator(                                                       \
           TORCH_SELECTIVE_SCHEMA("aten::keys." key_type "(Dict(" key_type      \
                                  ", t) self) -> " key_type "[](*)"),           \
