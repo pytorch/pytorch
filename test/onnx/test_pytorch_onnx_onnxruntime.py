@@ -18,6 +18,9 @@ from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
 from typing import List, Tuple, Optional
 import model_defs.word_language_model as word_language_model
+
+import onnx
+
 import torchvision
 from torchvision import ops
 from torchvision.models.detection.image_list import ImageList
@@ -26,7 +29,6 @@ from torchvision.models.detection.rpn import AnchorGenerator, RPNHead, RegionPro
 from torchvision.models.detection.roi_heads import RoIHeads
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, TwoMLPHead
 from collections import OrderedDict
-import onnx
 
 def to_numpy(tensor):
     if tensor.requires_grad:
@@ -3876,7 +3878,6 @@ class TestONNXRuntime(unittest.TestCase):
         inputs = torch.zeros(1, 2, 3, dtype=torch.long)
         self.run_test(model, inputs)
 
-    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_loop_with_list(self):
         class ListLoopModel(torch.jit.ScriptModule):
@@ -6063,7 +6064,6 @@ class TestONNXRuntime(unittest.TestCase):
             convert_to_onnx(model, input=(box_regression, proposal),
                             example_outputs=outputs, use_new_jit_passes=True)
 
-    @skipIfUnsupportedOpsetVersion([13])
     def test_initializer_sequence(self):
         class MyModule(torch.nn.Module):
             def __init__(self, input_size, hidden_size, num_classes):
@@ -6680,13 +6680,6 @@ TestONNXRuntime_opset12_IRv4_old_jit_API = type(str("TestONNXRuntime_opset12_IRv
                                                 dict(TestONNXRuntime.__dict__, opset_version=12,
                                                      keep_initializers_as_inputs=False,
                                                      use_new_jit_passes=False))
-
-
-# opset 12 tests, with _onnx_shape_inference=True.
-TestONNXRuntime_opset12_onnx_shape_inference = type(str("TestONNXRuntime_opset12_onnx_shape_inference"),
-                                                    (unittest.TestCase,),
-                                                    dict(TestONNXRuntime.__dict__, opset_version=12,
-                                                         onnx_shape_inference=True))
 
 if __name__ == '__main__':
     unittest.main()
