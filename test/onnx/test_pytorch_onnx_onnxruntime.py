@@ -2986,7 +2986,7 @@ class TestONNXRuntime(unittest.TestCase):
             def __init__(self):
                 super().__init__()
                 self.rnn = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
- 
+
             def forward(self, x, h0, c0):
                 return self.rnn(x, (h0, c0))
 
@@ -3001,7 +3001,7 @@ class TestONNXRuntime(unittest.TestCase):
             def __init__(self):
                 super().__init__()
                 self.rnn = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 1, bidirectional=False)
- 
+
             def forward(self, x):
                 return self.rnn(x)
 
@@ -3057,7 +3057,7 @@ class TestONNXRuntime(unittest.TestCase):
                 super(LstmNet, self).__init__()
                 self.lstm = torch.nn.LSTM(input_size, hidden_size, num_layers, bidirectional=bidirectional)
 
-            def forward(self, input, initial_state:Tuple[torch.Tensor, torch.Tensor]):
+            def forward(self, input, initial_state: Tuple[torch.Tensor, torch.Tensor]):
                 return self.lstm(input, initial_state)
 
         def get_LstmNet_model_and_inputs(input_size, hidden_size, num_layers, batch_size,
@@ -3084,7 +3084,7 @@ class TestONNXRuntime(unittest.TestCase):
                 super(LstmNet, self).__init__()
                 self.lstm = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, num_layers, bias=False, bidirectional=bidirectional)
 
-            def forward(self, input, initial_state:Tuple[torch.Tensor, torch.Tensor]):
+            def forward(self, input, initial_state: Tuple[torch.Tensor, torch.Tensor]):
                 return self.lstm(input, initial_state)
 
         def get_LstmNet_model_and_inputs(num_layers, bidirectional):
