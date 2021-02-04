@@ -4,7 +4,9 @@ from typing import Optional, List, Sequence, Union
 from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
 from tools.codegen.code_template import CodeTemplate
-from tools.codegen.gen import with_native_function, parse_native_yaml, FileManager, mapMaybe
+from tools.codegen.context import with_native_function
+from tools.codegen.utils import mapMaybe
+from tools.codegen.gen import parse_native_yaml, FileManager
 from tools.codegen.model import *
 
 # Note [Manual Backend kernels]
