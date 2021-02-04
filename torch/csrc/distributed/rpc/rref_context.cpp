@@ -662,7 +662,7 @@ std::shared_ptr<Future<bool>> RRefContext::waitForThreadLocalPendingRRefs() {
     auto remainingRRefs =
         std::make_shared<std::atomic<uint64_t>>(userTable_.size());
     for (auto& state : userTable_) {
-      state->future_.addCallback([future, remainingRRefs]() {
+      state->confirmationFuture_->addCallback([future, remainingRRefs]() {
         auto localCount = remainingRRefs->fetch_sub(1);
         if (localCount == 1) {
           future->markCompleted(true);
