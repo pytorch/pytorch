@@ -155,10 +155,9 @@ This function supports float, double, cfloat and cdouble dtypes.
 .. note:: The determinant is computed using LU factorization. LAPACK's `getrf` is used for CPU inputs,
           and MAGMA's `getrf` is used for CUDA inputs.
 
-.. note:: Backward through `det` internally uses :func:`torch.svd` when :attr:`input` is
-          not invertible. In this case, double backward through `det` will be
-          unstable when :attr:`input` doesn't have distinct singular values. See
-          :func:`torch.svd` for more details.
+.. note:: Backward through `det` internally uses :func:`torch.linalg.svd` when :attr:`input` is not
+          invertible. In this case, double backward through `det` will be unstable when :attr:`input`
+          doesn't have distinct singular values. See :func:`torch.linalg.svd` for more details.
 
 Args:
     input (Tensor): the input matrix of size `(n, n)` or the batch of matrices of size
