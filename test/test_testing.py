@@ -989,7 +989,6 @@ Added    (across    1 suite)      1 test,  totaling +   3.00s
                         }),
                     ],
                 },
-                stdev_threshold=2,
                 job_name='foo_job',
                 on_master=False,
                 ancestry_path=0,
