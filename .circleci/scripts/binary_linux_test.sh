@@ -55,7 +55,6 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
       ninja \
       dataclasses \
       typing-extensions \
-      "blas * mkl" \
       protobuf \
       six
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
