@@ -396,7 +396,7 @@ class TestProfiler(TestCase):
         ) as kineto_profiler:
             model(inputs)
         profiler_output = kineto_profiler.key_averages().table(
-            sort_by="self_cuda_time_total", row_limit=10)
+            sort_by="self_cuda_time_total", row_limit=-1)
         self.assertIn("FLOPS", profiler_output)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
