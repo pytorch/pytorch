@@ -732,6 +732,33 @@ class TestFX(JitTestCase):
         self.assertIn('operator.add', graph_str)
         self.assertIn('torch.add', graph_str)
 
+    def test_pretty_print_node(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param: torch.nn.Parameter = torch.nn.Parameter(
+                    torch.rand(3, 4))
+                self.linear = torch.nn.Linear(4, 5)
+
+            def forward(self, x: torch.Tensor, y: int = 2):
+                return self.linear(x[y] + self.param).clamp(min=0.0, max=1.0)
+
+        traced = symbolic_trace(M())
+
+        printout: List[str] = """%x : torch.Tensor [#users=1] = placeholder[target=x]
+%y : int [#users=1] = placeholder[target=y](default=2)
+%getitem : [#users=1] = call_function[target=operator.getitem](args = (%x, %y), kwargs = {})
+%param : [#users=1] = self.param
+%add_1 : [#users=1] = call_function[target=operator.add](args = (%getitem, %param), kwargs = {})
+%linear_1 : [#users=1] = call_module[target=linear](args = (%add_1,), kwargs = {})
+%clamp_1 : [#users=1] = call_method[target=clamp](args = (%linear_1,), kwargs = {min: 0.0, max: 1.0})
+return clamp_1
+""".splitlines()
+
+        for node, expected in zip(traced.graph.nodes, printout):
+            actual = node.format_node()
+            self.assertEqual(actual, expected)
+
     def test_script_tensor_constant(self):
         # TorchScript seems to ignore attributes that start with `__`.
         # We used to call anonymous Tensor values `__tensor_constant*`, but
