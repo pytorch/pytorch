@@ -623,6 +623,7 @@ class DistributedDataParallel(Module):
         attrs = copy.copy(self.__dict__)
         del attrs['process_group']
         del attrs['reducer']
+        del attrs['logger']
         return attrs
 
     def __setstate__(self, state):
