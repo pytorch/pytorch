@@ -41,10 +41,12 @@ class PowerSGDState(object):
 
     Note [Guidance to Tune ``matrix_approximation_rank`` And ``start_powerSGD_iter``]
     ~~~~~~~~~~~~~~~~~~~~~~~~~~
+
     1) To tune ``matrix_approximation_rank``, the user can increase it from 1 by factors of 2,
     until a satisfying accuracy can be reached.
     The increase of ``matrix_approximation_rank`` can substantially increase the computation costs of the compression.
     However, the accuracy may not be futher improved beyond a certain ``matrix_approximation_rank`` value.
+
     2) To tune ``start_powerSGD_iter``, the user can typically start with 10% of total training steps,
     and increase it until a satisfying accuracy can be reached.
     Deferrring PowerSGD can effectively improve the accuracy,
@@ -167,12 +169,15 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     algorithm described in https://arxiv.org/abs/1905.13727.
     Once gradient tensors are aggregated across all workers, this hook applies
     compression as follows:
+
     1) Views the input flattened 1D gradient tensor as two groups of per-parameter tensors:
     high-rank tensors and vector-like rank-1 tensors (for biases).
+
     2) Handles rank-1 tensors by allreducing them without compression:
         2.1) Allocate contiguous memory for those rank-1 tensors,
         and allreduces all the rank-1 tensors as a batch, without compression;
         2.2) Copies the individual rank-1 tensors from the contiguous memory back to the input tensor.
+
     3) Handles high-rank tensors by PowerSGD compression:
         3.1) For each high-rank tensor M, creates two low-rank tensors P and Q for decomposing M,
         such that M = PQ^T, where Q is initialized from a standard normal distribution and orthogonalized;
@@ -417,16 +422,25 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     algorithm described in https://arxiv.org/abs/1905.13727.
     Once gradient tensors are aggregated across all workers, this hook applies
     compression to the flattened input tensor that batches per-parameter tensors as follows:
+
     1) Views the input flattened 1D gradient tensor as a square-shaped tensor M with 0 paddings;
+
     2) Creates two low-rank tensors P and Q for decomposing M,
     such that M = PQ^T, where Q is initialized from a standard normal distribution and orthogonalized;
-    2) Computes P, which is equal to MQ;
-    3) Allreduces P;
-    4) Orthogonalizes P;
-    5) Computes Q, which is approximately equal to M^TP;
-    6) Allreduces Q;
-    7) Computes M, which is approximately equal to PQ^T.
-    8) Truncates the input tensor to the original length.
+
+    3) Computes P, which is equal to MQ;
+
+    4) Allreduces P;
+
+    5) Orthogonalizes P;
+
+    6) Computes Q, which is approximately equal to M^TP;
+
+    7) Allreduces Q;
+
+    8) Computes M, which is approximately equal to PQ^T.
+
+    9) Truncates the input tensor to the original length.
 
     This variant is faster than :meth:`powerSGD_hook` that runs layer-wise gradient compression,
     but it usually results in a much lower accuracy, unless ``matrix_approximation_rank`` in the state is 1.
