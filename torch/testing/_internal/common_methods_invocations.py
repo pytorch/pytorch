@@ -2266,7 +2266,11 @@ if TEST_SCIPY:
                        domain=(-1, 1),
                        skips=(
                            # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
-                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
+                                    active_if=LooseVersion(scipy.__version__) < "1.4.0"),
+                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
+                                    active_if=LooseVersion(scipy.__version__) < "1.4.0"),
+                           SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     active_if=LooseVersion(scipy.__version__) < "1.4.0"),
                            # RuntimeError: "pow" not implemented for 'BFloat16'
                            SkipInfo('TestCommon', 'test_variant_consistency_jit',
