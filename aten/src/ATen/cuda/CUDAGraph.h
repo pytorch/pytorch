@@ -4,14 +4,13 @@
 #include <c10/core/Device.h>
 #include <c10/cuda/CUDAStream.h>
 
-// global typedef but i don't see any cops
-typedef unsigned long long CUDACaptureid_t;
-
 namespace at {
 
 class CUDAGeneratorImpl;
 
 namespace cuda {
+
+using CUDACaptureid_t = unsigned long long;
 
 struct TORCH_CUDA_CPP_API CUDAGraph {
   CUDAGraph();
@@ -63,14 +62,14 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 
 // RAII guard for "cudaStreamCaptureMode", a thread-local value
 // that controls the error-checking strictness of a capture.
-struct TORCH_CUDA_CPP_API cudaStreamCaptureModeGuard {
-  cudaStreamCaptureModeGuard(cudaStreamCaptureMode desired) {
+struct TORCH_CUDA_CPP_API CUDAStreamCaptureModeGuard {
+  CUDAStreamCaptureModeGuard(cudaStreamCaptureMode desired) {
 #if CUDA_VERSION >= 11000
     strictness_ = desired;
     C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&strictness_));
 #endif
   }
-  ~cudaStreamCaptureModeGuard() {
+  ~CUDAStreamCaptureModeGuard() {
 #if CUDA_VERSION >= 11000
     C10_CUDA_CHECK_WARN(cudaThreadExchangeStreamCaptureMode(&strictness_));
 #endif

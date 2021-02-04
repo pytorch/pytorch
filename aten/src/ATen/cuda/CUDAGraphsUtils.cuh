@@ -67,6 +67,7 @@ inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
   return os;
 }
 
+// Use this version where you're sure a CUDA context exists already.
 inline CaptureStatus currentStreamCaptureStatusMayInitCtx() {
     cudaStreamCaptureStatus is_capturing;
     AT_CUDA_CHECK(cudaStreamIsCapturing(at::cuda::getCurrentCUDAStream(),
@@ -74,6 +75,7 @@ inline CaptureStatus currentStreamCaptureStatusMayInitCtx() {
     return CaptureStatus(is_capturing);
 }
 
+// Use this version where you don't want to create a CUDA context if none exists.
 inline CaptureStatus currentStreamCaptureStatus() {
   #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   // don't create a context if we don't have to

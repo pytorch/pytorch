@@ -212,7 +212,7 @@ cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   } else {
     // It's ok to capture cudaMallocs, as long as we never cudaFree those addresses before replay.
-    at::cuda::cudaStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
+    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     return cudaMalloc(p, size);
   }
 #endif
