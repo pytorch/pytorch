@@ -206,7 +206,7 @@ void CUDAGraph::reset() {
 CUDACaptureid_t CUDAGraph::pool() {
 #if CUDA_VERSION >= 11000
   TORCH_CHECK(has_graph_exec_,
-              "Called CUDAGraph::pool without a preceding successful capture.");
+              "Called CUDAGraph::pool() without a preceding successful capture.");
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0");
 #endif

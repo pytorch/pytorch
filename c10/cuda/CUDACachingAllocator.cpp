@@ -589,13 +589,17 @@ class DeviceCachingAllocator {
     captures_underway++;
     auto it = graph_pools.find(mempool_id);
     if (it == graph_pools.end()) {
+      // mempool_id does not reference an existing pool. Make a new pool for this capture.
       graph_pools.insert({mempool_id, PrivatePool()});
     } else {
+      // mempool_id references an existing pool, which the current capture will share.
+      // Check this pool is live (at least one other capture already references it).
+      TORCH_INTERNAL_ASSERT(it->second.use_count > 0);
       it->second.use_count++;
     }
-    // Makes sure this graph_id wasn't somehow assigned a private pool already.
-    TORCH_INTERNAL_ASSERT(capture_to_pool_map.find(graph_id) == capture_to_pool_map.end());
-    capture_to_pool_map[graph_id] = mempool_id;
+    // Maps this graph_id to mempool_id and makes sure this graph_id wasn't somehow
+    // assigned a mempool_id already.
+    TORCH_INTERNAL_ASSERT(capture_to_pool_map.insert({graph_id, mempool_id}).second);
   }
 
   // Called by CUDAGraph::capture_end
@@ -704,7 +708,7 @@ class DeviceCachingAllocator {
     // captures_underway is a conservative guess that the current stream may be capturing.
     // It's only > 0 if some thread has begun and not yet ended a capture, so it's usually 0,
     // and we can short-circuit cudaStreamCaptureStatus (which does a TLS lookup).
-    if C10_UNLIKELY(captures_underway) {
+    if (C10_UNLIKELY(captures_underway)) {
       CUDACaptureid_t id;
       cudaStreamCaptureStatus status;
       C10_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &id));
