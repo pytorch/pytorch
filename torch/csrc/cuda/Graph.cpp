@@ -24,10 +24,13 @@ void THCPGraph_init(PyObject *module) {
 
   shared_ptr_class_<::at::cuda::CUDAGraph>(module, "_CudaGraphBase")
       .def(py::init<>())
+      // I'm not sure this is the correct order of all the arguments. Pybind11 docs
+      // aren't clear. But it works.
       .def("capture_begin",
            &::at::cuda::CUDAGraph::capture_begin,
            py::call_guard<py::gil_scoped_release>(),
-           R"(``capture_begin`` begins Cuda graph capture on the current stream.)")
+           R"(``capture_begin`` begins Cuda graph capture on the current stream.)",
+           py::arg("pool") = 0)
       .def("capture_end",
            &::at::cuda::CUDAGraph::capture_end,
            py::call_guard<py::gil_scoped_release>(),
