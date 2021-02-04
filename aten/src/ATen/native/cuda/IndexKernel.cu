@@ -324,32 +324,25 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
   // number of elements available in `src`
   TORCH_CHECK(totalElements <= srcSize, "source nElements must be == mask `1` elements");
 
-
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11020
-  // FIXME: there appears to be a bug in Thrust (CUDA 11.2) for mixed
-  // iterator prefix sums? Convert `mask` to the same datatype as what
-  // we're accumulating the prefix sum in (int64_t) to get around it
-  // Reference: https://github.com/pytorch/pytorch/issues/51544
-  auto mask_cont = mask.to(kLong).contiguous();
-  thrust::device_ptr<int64_t> maskData(mask_cont.data_ptr<int64_t>());
-#else
   auto mask_cont = mask.contiguous();
-  thrust::device_ptr<mask_t> maskData(mask_cont.data_ptr<mask_t>());
-#endif
 
   // Use a prefix sum to determine the output locations of the masked elements
   auto maskPrefixSum = at::empty_like(mask, mask.options().dtype(kLong));
 
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
 
+  thrust::device_ptr<mask_t> maskData(mask_cont.data_ptr<mask_t>());
   thrust::device_ptr<int64_t> maskPrefixSumData(
       maskPrefixSum.data_ptr<int64_t>());
 
+  // Reference for using static_cast on `init_value`:
+  // https://github.com/NVIDIA/thrust/issues/1379
   thrust::exclusive_scan(
       thrust::cuda::par(allocator).on(c10::cuda::getCurrentCUDAStream()),
       maskData,
       maskData + mask_cont.numel(),
-      maskPrefixSumData);
+      maskPrefixSumData,
+      static_cast<int64_t>(0));
 
   // We are getting elements from `src` based on an offset from
   // `maskPrefixSum`, so that should be made contiguous too
