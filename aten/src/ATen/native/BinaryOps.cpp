@@ -73,7 +73,7 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
 }
 
 TORCH_IMPL_FUNC(add_out) (
-  const Tensor& self, const Tensor& other, Scalar alpha, Tensor& result
+  const Tensor& self, const Tensor& other, Scalar alpha, const Tensor& result
 ) {
   add_stub(device_type(), *this, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());

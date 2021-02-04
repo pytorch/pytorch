@@ -245,7 +245,10 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
         '`torch._C._debug_only_display_vmap_fallback_warnings(True) '
         'before the call to `vmap`.',
         stacklevel=2)
+    return _vmap(func, in_dims, out_dims)
 
+# A version of vmap but without the initial "experimental prototype" warning
+def _vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Callable:
     @functools.wraps(func)
     def wrapped(*args):
         _check_out_dims_is_int_or_int_tuple(out_dims, func)
