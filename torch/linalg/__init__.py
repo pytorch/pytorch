@@ -149,23 +149,29 @@ Alias of :func:`torch.det`.
 """)
 
 slogdet = _add_docstr(_linalg.linalg_slogdet, r"""
-linalg.slogdet(input) -> (Tensor, Tensor)
+linalg.slogdet(input, *, out=None) -> (Tensor, Tensor)
 
 Calculates the sign and natural logarithm of the absolute value of a square matrix's determinant,
-or of the absolute values of the determinants of a batch of square matrices :attr`input`.
+or of the absolute values of the determinants of a batch of square matrices :attr:`input`.
 The determinant can be computed with ``sign * exp(logabsdet)``.
 
 Supports input of float, double, cfloat and cdouble datatypes.
 
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
 
+.. note:: The determinant is computed using LU factorization. LAPACK's `getrf` is used for CPU inputs,
+          and MAGMA's `getrf` is used for CUDA inputs.
+
 .. note:: For matrices that have zero determinant, this returns ``(0, -inf)``.
           If :attr:`input` is batched then the entries in the result tensors corresponding to matrices with
           the zero determinant have sign 0 and the natural logarithm of the absolute value of the determinant -inf.
 
-Arguments:
+Args:
     input (Tensor): the input matrix of size :math:`(n, n)` or the batch of matrices of size :math:`(*, n, n)`
-                    where `*` is one or more batch dimensions.
+                    where :math:`*` is one or more batch dimensions.
+
+Keyword args:
+    out (tuple, optional): tuple of two tensors to write the output to.
 
 Returns:
     A namedtuple (sign, logabsdet) containing the sign of the determinant and the natural logarithm
@@ -523,7 +529,8 @@ The dtypes of ``U`` and ``V`` are the same as :attr:`input`'s. ``S`` will
 always be real-valued, even if :attr:`input` is complex.
 
 .. note:: Unlike NumPy's ``linalg.svd``, this always returns a namedtuple of
-          three tensors, even when :attr:`compute_uv=False`.
+          three tensors, even when :attr:`compute_uv=False`. This behavior may
+          change in a future PyTorch release.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
           then the singular values of each matrix in the batch is returned in descending order.
@@ -914,7 +921,7 @@ complete QR factorization. See below for a list of valid modes.
 
            * unlike ``numpy.linalg.qr``, this function always returns a
              tuple of two tensors. When ``mode='r'``, the `Q` tensor is an
-             empty tensor.
+             empty tensor. This behavior may change in a future PyTorch release.
 
 .. note::
           Backpropagation is not supported for ``mode='r'``. Use ``mode='reduced'`` instead.
