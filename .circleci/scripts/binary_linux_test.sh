@@ -49,7 +49,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     # namely CONDA_MKL_INTERFACE_LAYER_BACKUP from libblas so let's just ignore unbound variables when
     # it comes to the conda installation commands
     set +u
-    retry conda install \${EXTRA_CONDA_FLAGS} -yq future "numpy\${NUMPY_PIN}" protobuf six
+    retry conda install \${EXTRA_CONDA_FLAGS} -yq future "numpy\${NUMPY_PIN}" typing-extensions protobuf six
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
       retry conda install -c pytorch -y cpuonly
     else
@@ -65,7 +65,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
   )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   pip install "\$pkg"
-  retry pip install -q future numpy protobuf six
+  retry pip install -q future numpy protobuf typing-extensions six
 fi
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   pkg="\$(ls /final_pkgs/*-latest.zip)"
