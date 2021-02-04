@@ -101,6 +101,18 @@ class profile(object):
         duration of the context manager.
 
     .. note::
+        Use ``torch.profiler.tensorboard_trace_handler`` to generate result files for TensorBoard:
+
+        ``on_trace_ready=torch.profiler.tensorboard_trace_handler(dir_name)``
+
+        After profiling, result files can be found in the specified directory. Use the command:
+
+        ``tensorboard --log_dir=dir_name``
+
+        to see the results in TensorBoard.
+        For more information, see `Pytorch Profiler <https://github.com/pytorch/kineto/tree/master/tb_plugin>`__
+
+    .. note::
         Enabling shape and stack tracing results in additional overhead.
 
     Examples:
@@ -146,7 +158,8 @@ class profile(object):
                 warmup=1,
                 active=2),
             on_trace_ready=trace_handler
-            # on_trace_ready=torch.profiler.tensorboard_trace_handler('./log') # used when outputting for tensorboard
+            # on_trace_ready=torch.profiler.tensorboard_trace_handler('./log')
+            # used when outputting for tensorboard
             ) as p:
                 for iter in range(N):
                     code_iteration_to_profile(iter)
