@@ -13358,29 +13358,58 @@ class TestNNDeviceType(NNTestCase):
             gradcheck(func, [x])
             gradgradcheck(func, [x])
 
-        with self.assertRaises(RuntimeError):
-            # Incorrect kernel_size
-            F.fractional_max_pool2d(x, (), output_size=(3, 3), _random_samples=samples)
+        for kernel_size in [(), (1,)]:
+            with self.assertRaisesRegex(RuntimeError, "kernel_size must either"):
+                # Incorrect kernel_size
+                F.fractional_max_pool2d(x, kernel_size=kernel_size, output_size=(3, 3), _random_samples=samples)
 
-        with self.assertRaises(RuntimeError):
-            # Incorrect kernel_size
-            F.fractional_max_pool2d(x, (1, ), output_size=(3, 3), _random_samples=samples)
+        for output_size in [(3,), ()]:
+            with self.assertRaisesRegex(RuntimeError, "output_size must either"):
+                # Incorrect output_size
+                F.fractional_max_pool2d(x, (2, 2), output_size=output_size, _random_samples=samples)
 
-        with self.assertRaises(RuntimeError):
-            # Incorrect output_size
-            F.fractional_max_pool2d(x, (2, 2), output_size=(9, 3), _random_samples=samples)
+        for output_size, msg in [((9, 3), "height"),
+                                 ((3, 9), "width")]:
+            with self.assertRaisesRegex(RuntimeError, "too large relative to input " + msg):
+                # Incorrect output_size
+                F.fractional_max_pool2d(x, (2, 2), output_size=output_size, _random_samples=samples)
 
-        with self.assertRaises(RuntimeError):
-            # Incorrect output_size
-            F.fractional_max_pool2d(x, (2, 2), output_size=(3, 9), _random_samples=samples)
+    @onlyOnCPUAndCUDA
+    def test_fractional_max_pool3d(self, device):
+        x = torch.randn(1, 2, 7, 7, 7, requires_grad=True, device=device)
+        samples = x.new(1, 2, 2).uniform_()
 
-        with self.assertRaises(RuntimeError):
-            # Incorrect output_size
-            F.fractional_max_pool2d(x, (2, 2), output_size=(3, ), _random_samples=samples)
+        def func(x):
+            return F.fractional_max_pool3d(
+                x, (2, 2, 2), output_size=(3, 3, 3), _random_samples=samples)
 
-        with self.assertRaises(RuntimeError):
-            # Incorrect output_size
-            F.fractional_max_pool2d(x, (2, 2), output_size=(), _random_samples=samples)
+        self.assertEqual(func(x).shape, (1, 2, 3, 3, 3))
+        gradcheck(func, [x])
+        gradgradcheck(func, [x])
+
+        if self.device_type != 'cuda':
+            x = torch.randn(2, 7, 7, 7, requires_grad=True, device=device)
+            samples = x.new(2, 2).uniform_()
+            self.assertEqual(func(x).shape, (2, 3, 3, 3))
+            gradcheck(func, [x])
+            gradgradcheck(func, [x])
+
+        for kernel_size in [(), (1,), (1, 1)]:
+            with self.assertRaisesRegex(RuntimeError, "kernel_size must either"):
+                # Incorrect kernel_size
+                F.fractional_max_pool3d(x, kernel_size=kernel_size, output_size=(3, 3, 3), _random_samples=samples)
+
+        for output_size in [(3, 3), (3,), ()]:
+            with self.assertRaisesRegex(RuntimeError, "output_size must either"):
+                # Incorrect output_size
+                F.fractional_max_pool3d(x, (2, 2, 2), output_size=output_size, _random_samples=samples)
+
+        for output_size, msg in [((9, 3, 3), "time"),
+                                 ((3, 9, 3), "height"),
+                                 ((3, 3, 9), "width")]:
+            with self.assertRaisesRegex(RuntimeError, "too large relative to input " + msg):
+                # Incorrect output_size
+                F.fractional_max_pool3d(x, (2, 2, 2), output_size=output_size, _random_samples=samples)
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
