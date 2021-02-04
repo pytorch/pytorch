@@ -323,7 +323,9 @@ class MKLDNNSubgraphSlicer {
         return false;
       }
     }
-    if (n->kind() == aten::relu) {
+    // unary ops we dont need to prove anything else than
+    // the input is mkldnn supported
+    if (n->kind() == aten::relu || aten::sigmoid) {
       return true;
     }
     if (n->kind() == aten::add) {
@@ -451,12 +453,9 @@ void ConvertFrozenOpsToMKLDNN(std::shared_ptr<Graph>& graph) {
     // previously existed between input and output
     RemoveTensorMutation(graph);
     AliasDb db(graph);
-    bool prev_mkldnn_constants_enabled = getMKLDNNConstantTensorsEnabled();
-    // getMKLDNNConstantTensorsEnabled() = true;
     MKLDNNSubgraphSlicer(graph->block(), graph, db).run();
     EliminateDeadCode(graph);
     GRAPH_DUMP("After convert frozen ops to mkldnn", graph);
-    getMKLDNNConstantTensorsEnabled() = prev_mkldnn_constants_enabled;
   } else {
     GRAPH_DUMP("No mkldnn compatible frozen nodes", graph);
   }
