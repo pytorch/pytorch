@@ -254,7 +254,7 @@ def typename(o):
     return module + class_name
 
 
-def is_tensor(obj):
+def is_tensor(obj) -> bool:
     r"""Returns True if `obj` is a PyTorch tensor.
 
     Note that this function is simply doing ``isinstance(obj, Tensor)``.
@@ -268,7 +268,7 @@ def is_tensor(obj):
     return isinstance(obj, torch.Tensor)
 
 
-def is_storage(obj):
+def is_storage(obj) -> bool:
     r"""Returns True if `obj` is a PyTorch storage object.
 
     Args:
