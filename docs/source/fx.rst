@@ -86,7 +86,7 @@ nodes at once. However, if you need to entirely rewrite your graph, you may
 want to look at constructing your graph with Proxies (i.e. retracing).
 
 Graph Manipulation Examples
-~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  `Replace one
    op <https://github.com/pytorch/pytorch/blob/master/torch/fx/examples/replace_op.py>`__
