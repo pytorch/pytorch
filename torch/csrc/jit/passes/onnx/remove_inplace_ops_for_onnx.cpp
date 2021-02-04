@@ -15,6 +15,14 @@ namespace jit {
 
 namespace {
 
+const std::set<c10::Symbol> inplace_ops = {
+    aten::append,
+    aten::index_put,
+    aten::index_put_,
+    aten::pop,
+    aten::insert,
+    aten::Delete};
+
 Value* CreateSizeOfDim(Value* input, int64_t dim, Node* insertBefore) {
   auto graph = input->owningGraph();
   WithInsertPoint guard(insertBefore);
@@ -401,7 +409,8 @@ void RegisterInplaceNodeInIfBlocks(
     next_node->addOutput()->copyMetadata(new_inplace_node);
 
   auto next_block = next_node->owningBlock();
-  while (nullptr != next_block->owningNode()) {
+  while (nullptr != next_block->owningNode() &&
+         next_block != value->node()->owningBlock()) {
     next_block->registerOutput(next_node->output(0));
     next_node = next_block->owningNode();
     // Block has a new output. Add the output for the prim::If node.
@@ -451,7 +460,8 @@ void RegisterInplaceNodeInLoopBlocks(
   next_node->addOutput()->setType(new_inplace_node->type());
   auto next_block = next_node->owningBlock();
 
-  while (nullptr != next_block->owningNode()) {
+  while (nullptr != next_block->owningNode() &&
+         next_block != orig_data->node()->owningBlock()) {
     outer_block = next_block;
     outer_block->registerOutput(
         next_node->outputs().at(next_node->outputs().size() - 1));
@@ -477,8 +487,8 @@ void RegisterInplaceNodeInLoopBlocks(
   }
 
   // Update inplace node inputs inside the inner most block.
-  auto prev_data = block_node->input(0);
-  while (prev_data->node()->kind() == aten::index_put) {
+  auto prev_data = block_node->inputs().at(0);
+  while (inplace_ops.find(prev_data->node()->kind()) != inplace_ops.end()) {
     prev_data = prev_data->node()->inputs().at(0);
   }
   for (auto node : block_node->owningBlock()->nodes()) {
@@ -493,7 +503,7 @@ void RegisterInplaceNodeInLoopBlocks(
   }
 
   orig_data->replaceAllUsesAfterNodeWith(
-      next_node->output(0)->node(),
+      next_node->outputs().at(0)->node(),
       next_node->outputs().at(next_node->outputs().size() - 1));
 }
 
@@ -504,9 +514,12 @@ void RegisterInplaceNodeInBlocks(
     Node* block_node,
     Block* outer_block,
     Node* next_node) {
+  if (next_node == nullptr)
+    return;
+
   // Check if the value is already registered in the block
   bool registered = false;
-  while (orig_data->node()->kind() == aten::index_put) {
+  while (inplace_ops.find(orig_data->node()->kind()) != inplace_ops.end()) {
     orig_data = orig_data->node()->inputs().at(0);
   }
   for (auto use : orig_data->uses()) {
@@ -525,13 +538,6 @@ void RegisterInplaceNodeInBlocks(
   if (registered)
     return;
 
-  auto cur_node = next_node;
-  while (nullptr != cur_node) {
-    if (cur_node->kind() != prim::Loop && cur_node->kind() != prim::If)
-      return;
-    cur_node = cur_node->owningBlock()->owningNode();
-  }
-
   // Register inplace node outputs through the blocks.
   RegisterInplaceNodeInLoopBlocks(
       orig_data, new_inplace_node, block_node, outer_block, next_node);
@@ -543,7 +549,8 @@ void RegisterInplaceNodeInBlocks(
       next_node,
       orig_data->debugName());
 
-  while (nullptr != outer_block->owningNode()) {
+  while (nullptr != outer_block->owningNode() &&
+         outer_block != orig_data->node()->owningBlock()) {
     MatchIfBlocksOutputForValue(orig_data, outer_block, new_inplace_node);
     outer_block = outer_block->owningNode()->owningBlock();
   }
@@ -682,10 +689,19 @@ static void PrepareListPopForONNX(Node* n) {
         n->owningGraph()->create(aten::__getitem__, {n->inputs()});
     getitem_node->output()->setType(n->output()->type());
     getitem_node->insertBefore(n);
-    //    n->output()->replaceAllUsesWith(getitem_node->output());
-
+    n->output()->replaceAllUsesWith(getitem_node->output());
     n->output()->setType(n->inputs().at(0)->type());
-    n->inputs().at(0)->replaceAllUsesAfterNodeWith(n, n->output());
+
+    if (nullptr == n->owningBlock()->owningNode()) {
+      n->inputs().at(0)->replaceAllUsesAfterNodeWith(n, n->output());
+      return;
+    }
+    RegisterInplaceNodeInBlocks(
+        n->inputs().at(0),
+        n->output(),
+        n,
+        n->owningBlock(),
+        n->owningBlock()->owningNode());
   }
 }
 
@@ -972,10 +988,8 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
       trackAndRegisterAttributesInBlocks(
           n, graph, module_, allAttrValues, setAttrValues, nextSetAttrValues);
     } else if (
-        (mr.inplaceOpVariant(n) || n->kind() == aten::append ||
-         n->kind() == aten::insert || n->kind() == aten::pop) &&
-        n->kind() != aten::copy_) { // TODO: create a list of all excluded ops
-
+        (inplace_ops.find(n->kind()) != inplace_ops.end()) &&
+        n->kind() != aten::pop) { // pop is handled in its own pass
       auto orig_data = n->inputs().at(0);
       auto block_ = n->owningBlock();
       if (block_->owningNode())
