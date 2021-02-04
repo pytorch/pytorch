@@ -1,6 +1,8 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/utils/tensor_numpy.h>
 #include <torch/csrc/utils/numpy_stub.h>
+#include <ATen/ATen.h>
+#include <ATen/InitialTensorOptions.h>
 
 #ifndef USE_NUMPY
 namespace torch { namespace utils {
@@ -27,11 +29,16 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/object_ptr.h>
 
+#include <ATen/Parallel.h>
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
+
+#include <vector>
+#include <string.h>
+#include <array>
 
 using namespace at;
 using namespace torch::autograd;
@@ -347,6 +354,198 @@ at::Tensor tensor_from_cuda_array_interface(PyObject* obj) {
       at::device(kCUDA).dtype(dtype)
   );
 }
+
+
+template <typename T>
+std::string get_vector_str(std::vector<T> & vec, int64_t start, int64_t end=-1){
+  std::string output = "(";
+  if (end < 0) {
+    end = vec.size();
+  }
+  for (int i=start; i<end; ++i) {
+    output += (std::to_string(vec[i]) + ", ");
+  }
+  return output + ")";
+}  
+
+template <typename T>
+std::string get_buffer_str(void* buffer, int64_t start, int64_t end){
+  T* array = static_cast<T*>(buffer); 
+  std::string output = "(";
+  for (int i=start; i<end; ++i) {
+    output += (std::to_string(array[i]) + ", ");
+  }
+  return output + ")";
+}  
+
+
+bool _extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, size_t (&numels)[], size_t shape_idx, std::vector<PyArrayObject*> & array_ptr_storage) {
+  if (PyArray_Check(obj)) {
+    if (numels[shape_idx] != PyArray_SIZE((PyArrayObject*) obj)) {
+      auto true_shape_str = get_buffer_str<npy_intp> (static_cast<void*>(PyArray_DIMS((PyArrayObject*) obj)), 0, PyArray_NDIM((PyArrayObject*) obj)) + std::string(")");
+      auto expected_shape_str = get_vector_str(shape, shape_idx);
+      auto err_str = std::string("expected numpy array of shape ") + expected_shape_str + std::string(" at dim ") + std::to_string(shape_idx) + std::string("(got ") + true_shape_str;
+      throw ValueError(err_str);  
+    }
+    array_ptr_storage.push_back((PyArrayObject*) obj);
+    return true;
+  } 
+  else if (PySequence_Check(obj)) {
+    auto seq = THPObjectPtr(PySequence_Fast(obj, "not a sequence"));
+    if (!seq) throw python_error();
+    auto seq_len = PySequence_Fast_GET_SIZE(seq.get());
+    if (seq_len != shape[shape_idx]) {
+      throw ValueError("expected sequence of length %lld at dim %lld (got %lld)",
+        (long long)shape[shape_idx], (long long)shape_idx, (long long)seq_len);
+    }
+    PyObject** items = PySequence_Fast_ITEMS(seq.get());
+    for (size_t i=0; i<seq_len; ++i) {
+      if (!_extract_ndarrays(items[i], shape, numels, shape_idx+1, array_ptr_storage)) {
+        return false;
+      }
+    }
+  } 
+  else {
+    return false;
+  }
+  return true;
+}
+
+
+bool extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<PyArrayObject*> & array_ptr_storage) {
+
+  auto ndims = shape.size();
+  size_t numels[ndims];
+  numels[ndims-1] = shape[ndims-1];
+
+  for (int i=ndims-2; i>=0; --i) {
+    numels[i] = shape[i] * numels[i+1];
+  }
+
+  return _extract_ndarrays(obj, shape, numels, 0, array_ptr_storage);
+}
+
+
+template <typename T>
+void memcpy_cpu(void* dst, const void* src, size_t num_items, bool isaligned, int itemsize=1) {
+  if (isaligned) {
+    at::parallel_for(
+      0,
+      num_items,
+      at::internal::GRAIN_SIZE,
+      [=](size_t begin, size_t end) {  
+        T* src_tmp = ((T*) src) + begin;
+        T* dst_tmp = ((T*) dst) + begin;
+        auto last = src_tmp+(end-begin);
+
+        while(src_tmp < last){
+          *dst_tmp = *src_tmp;
+          ++src_tmp;
+          ++dst_tmp;
+        }
+      });
+  } 
+  else {
+    at::parallel_for(
+      0,
+      num_items*itemsize,
+      at::internal::GRAIN_SIZE,
+      [=](size_t begin, size_t end) {  
+        char* src_tmp = ((char*) src) + begin;
+        char* dst_tmp = ((char*) dst) + begin;
+        auto last = src_tmp+(end-begin);
+
+        while(src_tmp < last){
+          *dst_tmp = *src_tmp;
+          ++src_tmp;
+          ++dst_tmp;
+        }
+      });    
+  }
+}
+
+
+inline void* store_ndarray(void* tensor_ptr, void* ndarray_ptr, at::ScalarType scalarType, size_t num_items, int itemsize, bool isaligned) {
+  switch (scalarType) {
+    case at::kByte: memcpy_cpu<uint8_t> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((uint8_t *)tensor_ptr) + num_items);
+    case at::kChar: memcpy_cpu<char> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((char *)tensor_ptr) + num_items);
+    case at::kShort: memcpy_cpu<int16_t> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((int16_t *)tensor_ptr) + num_items);
+    case at::kInt: memcpy_cpu<int32_t> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((int32_t *)tensor_ptr) + num_items);
+    case at::kLong: memcpy_cpu<int64_t> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((uint64_t *)tensor_ptr) + num_items);
+    case at::kHalf: memcpy_cpu<at::Half> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((at::Half *)tensor_ptr) + num_items);
+    case at::kFloat: memcpy_cpu<float> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((float *)tensor_ptr) + num_items);
+    case at::kDouble: memcpy_cpu<double> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((double *)tensor_ptr) + num_items);
+    case at::kComplexHalf: memcpy_cpu<c10::complex<at::Half>> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((c10::complex<at::Half> *)tensor_ptr) + num_items);
+    case at::kComplexFloat: memcpy_cpu<c10::complex<float>> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((c10::complex<float> *)tensor_ptr) + num_items);
+    case at::kComplexDouble: memcpy_cpu<c10::complex<double>> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((c10::complex<double> *)tensor_ptr) + num_items);
+    case at::kBool: memcpy_cpu<bool> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((bool *)tensor_ptr) + num_items);
+    case at::kBFloat16: memcpy_cpu<at::BFloat16> (tensor_ptr, ndarray_ptr, num_items, itemsize, isaligned); return (void*)(((at::BFloat16 *)tensor_ptr) + num_items);
+    default: throw std::runtime_error("invalid type");
+  }
+  return NULL;
+}
+
+
+Tensor reverse_strides(Tensor & tensor) {
+  auto strides = tensor.strides();
+  auto size = strides.size();
+  std::vector<long int> new_strides(size);
+  new_strides[0] = strides[0];
+  for (int i=0; i<size-1; ++i) {
+    new_strides[i+1] = strides[size-i-1];
+  }
+  return at::native::set_storage_cpu_(tensor, tensor.storage(), tensor.storage_offset(), tensor.sizes(), new_strides);
+}
+
+
+at::Tensor tensor_from_ndarray_batch(std::vector<PyArrayObject*> & array_ptr_storage, std::vector<int64_t> & sizes, ScalarType scalarType, bool pin_memory) {
+  
+  size_t C_contiguous_count = 0;
+  bool C_contiguous_majority = true;
+
+  for (auto array:array_ptr_storage) {
+    if (PyArray_IS_C_CONTIGUOUS(array))
+      C_contiguous_count += 1;
+  }
+
+  if (2*C_contiguous_count < array_ptr_storage.size())
+    C_contiguous_majority = false;
+
+  auto tensor = at::empty(sizes, at::initialTensorOptions().dtype(scalarType).pinned_memory(pin_memory));
+  int np_type = aten_to_numpy_dtype(scalarType);
+  auto tensor_ptr = tensor.data_ptr();
+
+  double time = 0;
+
+  for (auto array:array_ptr_storage) {
+    auto flags = PyArray_FLAGS(array);
+    if (C_contiguous_majority) {
+        auto array_tmp = (PyArrayObject*) PyArray_FromArray(array, PyArray_DescrFromType(np_type), NPY_ARRAY_CARRAY);        
+        if (!array_tmp) throw python_error();
+        tensor_ptr = store_ndarray(tensor_ptr, PyArray_DATA(array_tmp), scalarType, PyArray_SIZE(array_tmp), tensor.dtype().itemsize(), true);
+        if (array_tmp != array) { 
+          Py_DECREF((PyObject*) array_tmp);
+        }
+    }
+    else {
+        auto array_tmp = (PyArrayObject*) PyArray_FromArray(array, PyArray_DescrFromType(np_type), NPY_ARRAY_FARRAY);
+        if (!array_tmp) throw python_error();
+        tensor_ptr = store_ndarray(tensor_ptr, PyArray_DATA(array_tmp), scalarType, PyArray_SIZE(array_tmp), tensor.dtype().itemsize(), true);
+        if (array_tmp != array) {
+          Py_DECREF((PyObject*) array_tmp);
+        }
+    }
+  }
+
+  if (!C_contiguous_majority) 
+    tensor = reverse_strides(tensor);
+
+  return tensor;
+}
+
 }} // namespace torch::utils
+
+
+
 
 #endif  // USE_NUMPY
