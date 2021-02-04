@@ -344,53 +344,67 @@ Value* MatchIfBlocksOutputForValue(
   return outer_block->owningNode()->outputs().at(output_size - 1);
 }
 
+// clang-format off
 // Register inplace op node inputs/outputs through the blocks.
 // Eg. The IR before updating:
 //%23 : bool = aten::eq(%22, %13)
 // = prim::If(%23) # test/onnx/test_pytorch_onnx_onnxruntime.py:6243:12
 //  block0():
-//    %24 : int[] = prim::ListConstruct(%batch_size.1, %6, %spatial_size_0.1,
-//    %spatial_size_1.1) %25 : Tensor = aten::ones(%24, %12, %12, %12, %12) %26
-//    : Tensor = aten::slice(%state.1, %13, %13, %10, %11) %27 : Tensor =
-//    aten::copy_(%26, %25, %9)
+//    %24 : int[] = prim::ListConstruct(%batch_size.1, %6, %spatial_size_0.1, %spatial_size_1.1)
+//    %25 : Tensor = aten::ones(%24, %12, %12, %12, %12)
+//    %26 : Tensor = aten::slice(%state.1, %13, %13, %10, %11)
+//    %27 : Tensor = aten::copy_(%26, %25, %9)
 //    -> ()
 //  block1():
-//    %28 : int[] = prim::ListConstruct(%batch_size.1, %6, %spatial_size_0.1,
-//    %spatial_size_1.1) %29 : Tensor = aten::randn(%28, %12, %12, %12, %12) %30
-//    : Tensor = aten::slice(%state.1, %13, %13, %10, %11) %31 : Tensor =
-//    aten::copy_(%30, %29, %9)
+//    %28 : int[] = prim::ListConstruct(%batch_size.1, %6, %spatial_size_0.1, %spatial_size_1.1)
+//    %29 : Tensor = aten::randn(%28, %12, %12, %12, %12)
+//    %30 : Tensor = aten::slice(%state.1, %13, %13, %10, %11)
+//    %31 : Tensor = aten::copy_(%30, %29, %9)
 //    -> ()
 // After updating:
 //%23 : bool = aten::eq(%22, %13)
 //%51 : Tensor = prim::If(%23)
 //  block0():
-//    %24 : int[] = prim::ListConstruct(%batch_size.1, %6, %spatial_size_0.1,
-//    %spatial_size_1.1) %25 : Tensor = aten::ones(%24, %12, %12, %12, %12) %26
-//    : Tensor = aten::slice(%state.1, %13, %13, %10, %11) %32 : Tensor?[] =
-//    prim::ListConstruct() %33 : Tensor = aten::expand_as(%25, %26) %38 : int =
-//    prim::Constant[value=0]() %39 : int = aten::size(%state.1, %38) %40 : int
-//    = prim::Constant[value=4]() %41 : None = prim::Constant() %42 : None =
-//    prim::Constant() %43 : None = prim::Constant() %44 : Tensor =
-//    aten::arange(%39, %40, %41, %42, %43) %45 : int =
-//    prim::Constant[value=0]() %46 : Tensor = aten::slice(%44, %45, %13, %10,
-//    %11) %47 : int[] = prim::Constant[value=[-1]]() %48 : Tensor =
-//    aten::view(%46, %47) %49 : Tensor?[] = prim::ListConstruct(%48) %50 :
-//    Tensor = aten::index_put(%state.1, %49, %33, %9)
+//    %24 : int[] = prim::ListConstruct(%batch_size.1, %6, %spatial_size_0.1, %spatial_size_1.1)
+//    %25 : Tensor = aten::ones(%24, %12, %12, %12, %12)
+//    %26 : Tensor = aten::slice(%state.1, %13, %13, %10, %11)
+//    %32 : Tensor?[] = prim::ListConstruct()
+//    %33 : Tensor = aten::expand_as(%25, %26)
+//    %38 : int = prim::Constant[value=0]()
+//    %39 : int = aten::size(%state.1, %38)
+//    %40 : int = prim::Constant[value=4]()
+//    %41 : None = prim::Constant()
+//    %42 : None = prim::Constant()
+//    %43 : None = prim::Constant()
+//    %44 : Tensor = aten::arange(%39, %40, %41, %42, %43)
+//    %45 : int = prim::Constant[value=0]()
+//    %46 : Tensor = aten::slice(%44, %45, %13, %10, %11)
+//    %47 : int[] = prim::Constant[value=[-1]]()
+//    %48 : Tensor = aten::view(%46, %47)
+//    %49 : Tensor?[] = prim::ListConstruct(%48)
+//    %50 : Tensor = aten::index_put(%state.1, %49, %33, %9)
 //    -> (%50)
 //  block1():
-//    %28 : int[] = prim::ListConstruct(%batch_size.1, %6, %spatial_size_0.1,
-//    %spatial_size_1.1) %29 : Tensor = aten::randn(%28, %12, %12, %12, %12) %30
-//    : Tensor = aten::slice(%state.1, %13, %13, %10, %11) %35 : Tensor?[] =
-//    prim::ListConstruct() %36 : Tensor = aten::expand_as(%29, %30) %52 : int =
-//    prim::Constant[value=0]() %53 : int = aten::size(%state.1, %52) %54 : int
-//    = prim::Constant[value=4]() %55 : None = prim::Constant() %56 : None =
-//    prim::Constant() %57 : None = prim::Constant() %58 : Tensor =
-//    aten::arange(%53, %54, %55, %56, %57) %59 : int =
-//    prim::Constant[value=0]() %60 : Tensor = aten::slice(%58, %59, %13, %10,
-//    %11) %61 : int[] = prim::Constant[value=[-1]]() %62 : Tensor =
-//    aten::view(%60, %61) %63 : Tensor?[] = prim::ListConstruct(%62) %64 :
-//    Tensor = aten::index_put(%state.1, %63, %36, %9)
+//    %28 : int[] = prim::ListConstruct(%batch_size.1, %6, %spatial_size_0.1, %spatial_size_1.1)
+//    %29 : Tensor = aten::randn(%28, %12, %12, %12, %12)
+//    %30 : Tensor = aten::slice(%state.1, %13, %13, %10, %11)
+//    %35 : Tensor?[] = prim::ListConstruct()
+//    %36 : Tensor = aten::expand_as(%29, %30)
+//    %52 : int = prim::Constant[value=0]()
+//    %53 : int = aten::size(%state.1, %52)
+//    %54 : int = prim::Constant[value=4]()
+//    %55 : None = prim::Constant()
+//    %56 : None = prim::Constant()
+//    %57 : None = prim::Constant()
+//    %58 : Tensor = aten::arange(%53, %54, %55, %56, %57)
+//    %59 : int = prim::Constant[value=0]()
+//    %60 : Tensor = aten::slice(%58, %59, %13, %10, %11)
+//    %61 : int[] = prim::Constant[value=[-1]]()
+//    %62 : Tensor = aten::view(%60, %61)
+//    %63 : Tensor?[] = prim::ListConstruct(%62)
+//    %64 : Tensor = aten::index_put(%state.1, %63, %36, %9)
 //    -> (%64)
+// clang-format on
 void RegisterInplaceNodeInIfBlocks(
     Value* value,
     Value* new_inplace_node,
