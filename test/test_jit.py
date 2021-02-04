@@ -5918,11 +5918,6 @@ a")
         self.checkScript(test_not_cast, (torch.tensor(1),))
         self.checkScript(test_not_cast, (torch.tensor(0),))
 
-        with self.assertRaisesRegex(RuntimeError, r"Could not cast value of type Tuple\[Tensor, Tensor\]"):  # noqa: W605
-            @torch.jit.script
-            def test_mult(x, y):
-                return not(x, y)
-
         def test_cast_int(x):
             # type: (int) -> int
             if x:
@@ -5942,15 +5937,6 @@ a")
         self.checkScript(test_cast_float, (1.,))
         self.checkScript(test_cast_float, (0.,))
         self.checkScript(test_cast_float, (-1.,))
-
-        with self.assertRaisesRegex(RuntimeError, r"Could not cast value of type Tuple\[int, int\] to bool"):  # noqa: W605
-
-            @torch.jit.script
-            def test_bad_conditional(x):
-                if (1, 2):  # noqa F634
-                    return
-                else:
-                    return 0
 
     def test_while_nonexistent_value(self):
         with self.assertRaisesRegex(RuntimeError, "undefined value x"):
