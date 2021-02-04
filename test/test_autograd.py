@@ -3804,34 +3804,33 @@ class TestAutograd(TestCase):
         import weakref
 
         def get_ref():
-            with detect_anomaly():
-                # we use torch.exp here but any function that will construct a new node in its
-                # backward call in grad mode will work
-                x = torch.randn(2, 2, requires_grad=True)
-                t = x.exp()
+            # we use torch.exp here but any function that will construct a new node in its
+            # backward call in grad mode will work
+            x = torch.randn(2, 2, requires_grad=True)
+            t = x.exp()
 
-                # ExpBackward calls mul, creating the MulBackward node when create_graph=True.
-                # In anomaly mode, a PyObject referencing MulBackward's "parent" ExpBackward is added to
-                # MulBackward's anomaly metadata dict, creating the following reference chain:
-                #
-                # grad -> MulBackward -> PyObject -> ExpBackward
-                #
+            # ExpBackward calls mul, creating the MulBackward node when create_graph=True.
+            # In anomaly mode, a PyObject referencing MulBackward's "parent" ExpBackward is added to
+            # MulBackward's anomaly metadata dict, creating the following reference chain:
+            #
+            # grad -> MulBackward -> PyObject -> ExpBackward
+            #
+            with detect_anomaly():
                 grad = torch.autograd.grad(t, x, torch.ones_like(t), create_graph=True)
 
-                # We add a weak reference to a new object foo, which we insert into ExpBackward's metadata dict
-                #
-                # (PyObject) -> ExpBackward -> dict -> *Foo*
-                #            t ----^        WeakRef ---^
-                #
-                # We want to test that when grad goes out of scope at the end of this function that PyObject is destroyed
-                # We can test this by seeing whether Foo is not kept alive once t is destroyed
-                meta_dict = t.grad_fn.metadata
-
-                class Foo(object):
-                    pass
-                my_obj = Foo()
-                meta_dict[0] = my_obj
-                ref = weakref.ref(my_obj)
+            # We add a weak reference to a new Foo object, which we insert into ExpBackward's metadata dict
+            #
+            # (PyObject) -> ExpBackward -> dict -> *Foo*
+            #            t ----^        WeakRef ---^
+            #
+            # We want to test that when grad goes out of scope at the end of this function that PyObject is destroyed
+            # We can test this by seeing whether Foo is not kept alive once t is destroyed
+            class Foo(object):
+                pass
+            my_obj = Foo()
+            meta_dict = t.grad_fn.metadata
+            meta_dict[0] = my_obj
+            ref = weakref.ref(my_obj)
             return t, ref
 
         t, ref = get_ref()
@@ -3879,16 +3878,16 @@ class TestAutograd(TestCase):
             inp = torch.rand(1, requires_grad=True)
             out = MyFunc.apply(inp)
             ginp, = torch.autograd.grad(out, (inp,), create_graph=True)
+
             with warnings.catch_warnings(record=True) as w:
                 with self.assertRaisesRegex(RuntimeError, "Function 'MyFunc2Backward' returned nan values in its 0th output."):
                     with detect_anomaly():
                         ginp.backward()
 
-            meta_dict = out.grad_fn.metadata
-
             class Foo(object):
                 pass
             my_obj = Foo()
+            meta_dict = out.grad_fn.metadata
             meta_dict[0] = my_obj
             ref = weakref.ref(my_obj)
             return out, ref
