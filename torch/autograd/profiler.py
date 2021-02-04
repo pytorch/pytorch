@@ -1132,7 +1132,7 @@ def parse_kineto_results(result):
 
     # Create and return FunctionEvent list
     function_events = []
-    cuda_corr_map: Dict[int, List[torch.autograd.KinetoEvent]] = {}
+    cuda_corr_map: Dict[int, List[FunctionEvent]] = {}
     for kineto_event in result.events():
         if filter_name(kineto_event.name()):
             continue
@@ -1167,6 +1167,7 @@ def parse_kineto_results(result):
             sequence_nr=kineto_event.sequence_nr(),
             device_type=kineto_event.device_type(),
             device_index=kineto_event.device_index(),
+            flops=kineto_event.flops(),
         )
         function_events.append(fe)
         corr_id = kineto_event.linked_correlation_id()
