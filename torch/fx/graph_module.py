@@ -4,7 +4,6 @@ import torch.overrides
 from torch.nn.modules.module import _addindent
 import linecache
 from typing import Type, Dict, List, Any, Union, Optional
-from types import TracebackType
 from .graph import Graph
 import copy
 import sys
@@ -24,7 +23,7 @@ def exec_with_source(src: str, globals: Dict[str, Any]):
     key = f'<eval_with_key_{_next_id}>'
     _next_id += 1
     _eval_cache[key] = [line + '\n' for line in src.splitlines()]
-    exec(compile(src, key, 'exec'), globals)    # noqa: P204
+    exec(compile(src, key, 'exec'), globals)
 
 # patch linecache so that any code we exec using exec_with_source
 # works with inspect
@@ -310,9 +309,8 @@ class {module_name}(torch.nn.Module):
         # error occurred in a traced Module's generated forward
         # function, and five lines of context surrounding the faulty
         # line
-        def generate_error_message(tb: TracebackType) -> str:
+        def generate_error_message(frame_summary: traceback.FrameSummary) -> str:
             # auxiliary variables (for readability)
-            frame_summary = traceback.extract_tb(tb)[-1]
             err_lineno = frame_summary.lineno
             err_line_len = len(frame_summary.line)
             all_src_lines = _eval_cache[frame_summary.filename]
@@ -339,7 +337,7 @@ class {module_name}(torch.nn.Module):
                 topmost_framesummary: traceback.FrameSummary = \
                     traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]  # type: ignore
                 if "eval_with_key" in topmost_framesummary.filename:
-                    print(generate_error_message(e.__traceback__),
+                    print(generate_error_message(topmost_framesummary),
                           file=sys.stderr)
                     # Elide the real traceback since we've already
                     # printed our message to stderr

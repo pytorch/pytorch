@@ -27,6 +27,7 @@ inline int64_t getTimeUs() {
 }
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes);
+std::string stacksToStr(const std::vector<std::string>& stacks);
 
 struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
   using ProfilerThreadLocalState::ProfilerThreadLocalState;
@@ -72,10 +73,13 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
           .fwdThreadId(ctx->fwdThreadId)
           .scope(ctx->recFunScope);
       if (ctx->shapes && !ctx->shapes->empty()) {
-          kineto_events_.back().shapes(*ctx->shapes);
+        kineto_events_.back().shapes(*ctx->shapes);
       }
       if (ctx->stack && !ctx->stack->empty()) {
         kineto_events_.back().stack(*ctx->stack);
+      }
+      if (ctx->extraArgs && !ctx->extraArgs->empty()) {
+        kineto_events_.back().flops(computeFlops(std::string(fn.name().str()), *ctx->extraArgs));
       }
       cpu_trace->activities.emplace_back(std::move(op));
     }
@@ -119,6 +123,9 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
       } else {
         cpu_trace->activities[idx].inputDims = "[]";
       }
+      if (kineto_events_[idx].hasStack()) {
+        cpu_trace->activities[idx].callStack = stacksToStr(kineto_events_[idx].stack());
+      }
     }
   }
 
@@ -153,6 +160,10 @@ void pushProfilingCallbacks() {
 
         if (state_ptr->config().report_input_shapes) {
           ctx_ptr->shapes = inputSizes(fn);
+        }
+
+        if (state_ptr->config().with_flops) {
+          ctx_ptr->extraArgs = saveExtraArgs(fn);
         }
 
         ctx_ptr->sequenceNr = fn.seqNr();
@@ -209,6 +220,14 @@ std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
   }
   oss << "]";
   return oss.str();
+}
+
+std::string stacksToStr(const std::vector<std::string>& stacks) {
+  std::ostringstream oss;
+  std::copy(stacks.begin(), stacks.end(), std::ostream_iterator<std::string>(oss, ";"));
+  auto rc = oss.str();
+  rc.pop_back();
+  return rc;
 }
 
 } // namespace

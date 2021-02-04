@@ -9,6 +9,7 @@ import os
 import pickle
 import sys
 import torch
+import traceback
 import unittest
 from math import sqrt
 from pathlib import Path
@@ -1597,7 +1598,7 @@ class TestFX(JitTestCase):
         with self.assertRaisesRegex(NotImplementedError, "new_args"):
             x[0] = 4
 
-    def test_error_reporting_after_recompile(self):
+    def test_custom_traceback_raised_when_exception_source_is_graphmodule(self):
         class M(torch.nn.Module):
             def __init__(self):
                 super(M, self).__init__()
@@ -1610,7 +1611,7 @@ class TestFX(JitTestCase):
 
         out_nodes = [n for n in traced.graph.nodes if n.op == "output"]
         out = out_nodes[-1]
-        relu_out = traced.graph.call_method(method_name='relu', args=(out,))
+        relu_out = traced.graph.call_method(method_name='relu', args=(out.args[0],))
         out.replace_all_uses_with(relu_out)
 
         traced.recompile()
@@ -1622,6 +1623,37 @@ class TestFX(JitTestCase):
         self.assertIn("Call using an FX-traced Module, line 4 of the "
                       "traced Module’s generated forward function:",
                       captured[0])
+
+    def test_custom_traceback_not_raised_when_exception_source_is_submodule(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        traced = torch.fx.symbolic_trace(M())
+
+        # TODO: Figure out why using `capture_stderr` as a context
+        # manager doesn't work in this case even though it works on the
+        # other `test_custom_traceback` test. I'd put the "woman
+        # shrugging" emoji in here but I don't want to press my luck
+        # in terms of things unexpectedly failing
+        try:
+            traced(torch.rand(5, 5))
+        except RuntimeError:
+            captured = traceback.format_exc()
+
+        # Let's test our test--this will fail if someone changes the
+        # above to `capture_stderr`. I want this in here since the test
+        # wouldn't fail otherwise (obviously only "" is in "" so
+        # `self.AssertNotIn` will always hold)
+        self.assertNotEqual(captured, "")
+
+        self.assertNotIn("Call using an FX-traced Module, line 4 of the "
+                         "traced Module’s generated forward function:",
+                         captured)
 
 def run_getitem_target():
     from torch.fx.symbolic_trace import _wrapped_methods_to_patch
