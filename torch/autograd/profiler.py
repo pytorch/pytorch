@@ -1172,6 +1172,7 @@ def parse_kineto_results(result):
             sequence_nr=kineto_event.sequence_nr(),
             device_type=kineto_event.device_type(),
             device_index=kineto_event.device_index(),
+            flops=kineto_event.flops(),
         )
         function_events.append(fe)
         if kineto_event.device_type() == DeviceType.CUDA:
