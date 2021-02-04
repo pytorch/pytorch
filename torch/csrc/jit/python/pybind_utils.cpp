@@ -74,8 +74,11 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::StringType:
       return ConstantString::create(py::cast<std::string>(obj));
     case TypeKind::DeviceObjType: {
-      auto device = reinterpret_cast<THPDevice*>(obj.ptr());
-      return device->device;
+      if (THPDevice_Check(obj.ptr())) {
+        auto device = reinterpret_cast<THPDevice*>(obj.ptr());
+        return device->device;
+      }
+      return c10::Device(py::cast<std::string>(obj.ptr()));
     }
     case TypeKind::StreamObjType: {
       auto stream = reinterpret_cast<THPStream*>(obj.ptr());
