@@ -13,7 +13,7 @@ Overview
 Writing Transformations
 -----------------------
 
-What is a FX transform? Essentially, it's a function that looks like this.
+What is an FX transform? Essentially, it's a function that looks like this.
 
 ::
 
@@ -23,7 +23,7 @@ What is a FX transform? Essentially, it's a function that looks like this.
         return new_model
 
 Your transform will take in an :class:`torch.nn.Module`, convert it into a
-:class:`GraphModule` with :meth:``symbolic_trace``, and return a new
+:class:`GraphModule` with :meth:`symbolic_trace`, and return a new
 ``nn.Module``. You should think of the ``nn.Module`` that your FX transform
 returns as identical to a regular ``nn.Module`` -- you can pass it to another
 FX transform, you can pass it to TorchScript, or you can
@@ -37,10 +37,10 @@ graph.
 Graph Manipulation
 ^^^^^^^^^^^^^^^^^^
 
-One approach to building this new graph is to simply transform your old
-one. To aid in this, we can simply take the graph we obtain from
-symbolic tracing and modify it. For example, let’s say we desire to
-replace ``torch.add`` with ``torch.mul``.
+One approach to building this new graph is to directly manipulate your old
+one. To aid in this, we can simply take the graph we obtain from symbolic
+tracing and modify it. For example, let’s say we desire to replace
+``torch.add`` with ``torch.mul``.
 
 ::
 
@@ -51,19 +51,23 @@ replace ``torch.add`` with ``torch.mul``.
 
     def transform(m: nn.Module) -> nn.Module:
         fx_model: GraphModule = fx.symbolic_trace(m)
-        # FX represents its graph as an ordered list of nodes, so we can iterate through them.
+        # FX represents its graph as an ordered list of nodes, so we can
+        # iterate through them.
         for node in fx_model.graph.nodes:
             # Checks if we're calling a function (i.e: torch.add)
             if node.op == 'call_function':
-                # The target attribute is the function that call_function calls.
+                # The target attribute is the function that call_function
+                # calls.
                 if node.target == torch.add:
                     node.target = torch.mul
 
-        traced.lint() # Does some checks to make sure the graph is well-formed.
-        traced.recompile() # regenerates the python code that corresponds to the graph.
+        fx_model.lint() # Does some checks to make sure the graph is well-formed.
+        # Regenerates the python code that corresponds to fx_model.
+        fx_model.recompile()
+        return fx_model
 
 We can also do more involved graph rewrites, such as deleting or appending
-nodes. after a node. To aid in these transformations, FX has utility
+nodes. To aid in these transformations, FX has utility
 functions for transforming the graph that can be found in :class:`Graph`. An
 example of using these APIs to append a relu can be found below.
 
@@ -157,12 +161,13 @@ looping over the FX graph and modifying it, you can write an interpreter
 on top of the FX graph! As the FX IR is quite simple, it’s easy to
 reimplement an interpreter that also captures your desired attributes.
 
-As this pattern is quite useful, we we can also use an abstraction of this pattern
+As this pattern is quite useful, we we can also use an abstraction of this
+pattern
 -- the `Interpreter
 <https://github.com/pytorch/pytorch/blob/master/torch/fx/interpreter.py>`__.
 You can see an example using this for `shape propagation
-<https://github.com/pytorch/pytorch/blob/master/torch/fx/passes/shape_prop.py>`__
-, which reinterprets the FX graph with example inputs while annotating the
+<https://github.com/pytorch/pytorch/blob/master/torch/fx/passes/shape_prop.py>`__,
+which reinterprets the FX graph with example inputs while annotating the
 graph with the shapes.
 
 Reinterpreting the FX graph is generally most useful when you want
