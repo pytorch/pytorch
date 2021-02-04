@@ -599,12 +599,12 @@ void populateRemoteProfiledEvents(
 }
 
 c10::intrusive_ptr<OwnerRRef> fromRRefInterface(
-    c10::intrusive_ptr<c10::RRefInterface> rrefInterface) {
+    const c10::intrusive_ptr<c10::RRefInterface>& rrefInterface) {
   return c10::static_intrusive_pointer_cast<OwnerRRef>(rrefInterface);
 }
 
 c10::intrusive_ptr<c10::RRefInterface> fromOwnerRRef(
-    c10::intrusive_ptr<OwnerRRef> ownerRRef) {
+    const c10::intrusive_ptr<OwnerRRef>& ownerRRef) {
   return c10::static_intrusive_pointer_cast<c10::RRefInterface>(ownerRRef);
 }
 

@@ -90,11 +90,11 @@ TORCH_API void populateRemoteProfiledEvents(
 
 // Casts from c10::RRefInterface to OwnerRRef
 TORCH_API c10::intrusive_ptr<OwnerRRef> fromRRefInterface(
-    c10::intrusive_ptr<c10::RRefInterface> rrefInterface);
+    const c10::intrusive_ptr<c10::RRefInterface>& rrefInterface);
 
 // Casts from OwnerRRef to c10::RRefInterface
 TORCH_API c10::intrusive_ptr<c10::RRefInterface> fromOwnerRRef(
-    c10::intrusive_ptr<OwnerRRef> ownerRRef);
+    const c10::intrusive_ptr<OwnerRRef>& ownerRRef);
 
 } // namespace rpc
 } // namespace distributed
