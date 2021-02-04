@@ -654,7 +654,7 @@ class _TensorBase(object):
     output_nr: _int
     _version: _int
     _base: Optional[Tensor]
-    _cdata: _int 
+    _cdata: _int
     grad_fn: Any
     _grad_fn: Any
     _grad: Optional[Tensor]
@@ -832,9 +832,9 @@ class FloatType(JitType):
     @staticmethod
     def get() -> FloatType: ...
 
-class ComplexDoubleType(JitType):
+class ComplexType(JitType):
     @staticmethod
-    def get() -> ComplexDoubleType: ...
+    def get() -> ComplexType: ...
 
 class IntType(JitType):
     @staticmethod
