@@ -157,10 +157,12 @@ class _LazyBatchNorm(LazyModuleMixin, _BatchNorm):
         if not self.has_uninitialized_params() and self.num_features != 0:
             super().reset_parameters()
 
-    def initialize_parameters(self, input) -> None:
+    def initialize_parameters(self, input) -> None:  # type: ignore
         if self.has_uninitialized_params():
             self.num_features = input.shape[1]
             if self.affine:
+                assert isinstance(self.weight, UninitializedParameter)
+                assert isinstance(self.bias, UninitializedParameter)
                 self.weight.materialize((self.num_features,))
                 self.bias.materialize((self.num_features,))
             if self.track_running_stats:
@@ -263,7 +265,7 @@ class LazyBatchNorm1d(_LazyBatchNorm):
             in both training and eval modes. Default: ``True``
     """
 
-    cls_to_become = BatchNorm1d
+    cls_to_become = BatchNorm1d  # type: ignore[assignment]
 
     def _check_input_dim(self, input):
         if input.dim() != 2 and input.dim() != 3:
@@ -365,7 +367,7 @@ class LazyBatchNorm2d(_LazyBatchNorm):
             in both training and eval modes. Default: ``True``
     """
 
-    cls_to_become = BatchNorm2d
+    cls_to_become = BatchNorm2d  # type: ignore[assignment]
 
     def _check_input_dim(self, input):
         if input.dim() != 4:
@@ -468,7 +470,7 @@ class LazyBatchNorm3d(_LazyBatchNorm):
             in both training and eval modes. Default: ``True``
     """
 
-    cls_to_become = BatchNorm3d
+    cls_to_become = BatchNorm3d  # type: ignore[assignment]
 
     def _check_input_dim(self, input):
         if input.dim() != 5:
