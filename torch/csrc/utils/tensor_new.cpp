@@ -24,8 +24,12 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+
 #include <stdexcept>
 #include <vector>
+#include <string.h>
+#include <array>
+#include <utility>
 
 using at::Backend;
 using at::Device;
@@ -42,6 +46,10 @@ using at::Type;
 using c10::optional;
 
 namespace torch { namespace utils {
+
+at::Tensor tensor_from_ndarray_batch(std::vector<PyArrayObject*> & array_ptr_storage, std::vector<int64_t> & sizes, ScalarType scalarType, bool pin_memory);
+bool extract_ndarrays(PyObject* obj, std::vector<int64_t> & shape, std::vector<PyArrayObject*> & array_ptr_storage);
+
 namespace {
 const int MAX_DIMS = 128;
 
@@ -126,6 +134,7 @@ Tensor new_with_tensor(c10::DispatchKey dispatch_key, at::ScalarType scalar_type
   return other.slice();
 }
 
+
 std::vector<int64_t> compute_sizes(PyObject* seq) {
   std::vector<int64_t> sizes;
   THPObjectPtr handle;
@@ -146,6 +155,8 @@ std::vector<int64_t> compute_sizes(PyObject* seq) {
 
   return sizes;
 }
+
+
 
 ScalarType infer_scalar_type(PyObject *obj) {
 #ifdef USE_NUMPY
@@ -230,6 +241,7 @@ void recursive_store(char* data, IntArrayRef sizes, IntArrayRef strides, int64_t
   }
 }
 
+
 Tensor internal_new_from_data(
     c10::DispatchKey dispatch_key,
     at::ScalarType scalar_type,
@@ -259,6 +271,8 @@ Tensor internal_new_from_data(
     return var.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_variables);
   }
 
+  auto sizes = compute_sizes(data);
+
 #ifdef USE_NUMPY
   if (PyObject_HasAttrString(data, "__cuda_array_interface__")) {
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from __cuda_array_interface__");
@@ -279,10 +293,21 @@ Tensor internal_new_from_data(
     maybe_initialize_cuda(device);
     return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/copy_numpy);
   }
+
+  std::vector<PyArrayObject*> array_ptr_storage;
+  if (torch::utils::extract_ndarrays(data, sizes, array_ptr_storage)) {
+    const auto& inferred_scalar_type = infer_scalar_type(data);
+    auto tensor = torch::utils::tensor_from_ndarray_batch(array_ptr_storage, sizes, inferred_scalar_type, pin_memory);
+    auto device = device_opt.has_value() ? *device_opt : at::Device(computeDeviceType(dispatch_key));
+    pybind11::gil_scoped_release no_gil;
+    maybe_initialize_cuda(device);
+    return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
+  }
+
 #endif
 
-  auto sizes = compute_sizes(data);
   ScalarType inferred_scalar_type = type_inference ? infer_scalar_type(data) : scalar_type;
+
   // This exists to prevent us from tracing the call to empty().  The actual
   // autograd code doesn't really matter, because requires_grad is always false
   // here.
@@ -308,6 +333,8 @@ Tensor internal_new_from_data(
   // in this case.
   return tensor.to(device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
 }
+
+
 
 Tensor new_from_data_copy(
     c10::DispatchKey dispatch_key,
