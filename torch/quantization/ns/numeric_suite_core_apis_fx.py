@@ -142,19 +142,38 @@ def _remove_observers_add_loggers(
             # ensure env is populated with base node
             env[node.name] = new_graph.node_copy(node, load_arg)
 
-            prefix = node.name + '_ns_logger_'
-            get_new_logger_name_fn = get_new_attr_name_with_prefix(prefix)
-            new_logger_name = get_new_logger_name_fn(gm)
+            new_logger_name = \
+                get_new_attr_name_with_prefix(node.name + '_ns_logger_')(gm)
             logger_obj = logger_cls(node.name)
             setattr(gm, new_logger_name, logger_obj)
             env[node.name] = new_graph.create_node(
-                'call_module', new_logger_name, (load_arg(node),), {})
+                'call_module', new_logger_name, (node,), {})
 
         else:
             env[node.name] = new_graph.node_copy(node, load_arg)
 
     new_gm = GraphModule(gm, new_graph)
     return new_gm
+
+# TODO: hook this up
+def _add_logger_after_node(
+    node: Node,
+    gm: GraphModule,
+    logger_cls: Callable,
+    logger_obj_name: str,
+    logger_node_name_suffix: str,
+) -> Node:
+    # create new name
+    logger_node_name = \
+        get_new_attr_name_with_prefix(node.name + logger_node_name_suffix)(gm)
+    # create the logger object
+    logger_obj = logger_cls(logger_obj_name)
+    # attach the logger object to the parent module
+    setattr(gm, logger_node_name, logger_obj)
+    logger_node = node.graph.create_node(
+        'call_module', logger_node_name, (node,), {})
+    return logger_node
+
 
 def _create_a_shadows_b(
     gm_a: GraphModule,
@@ -211,19 +230,16 @@ def _create_a_shadows_b(
                 # TODO(before land): make this generic with a mapping
                 domain_translation_op = torch.dequantize
 
-                domain_translation_prefix = node_b.name + '_domain_translation_'
-                get_new_domain_translation_name_fn = \
-                    get_new_attr_name_with_prefix(domain_translation_prefix)
-                new_domain_translation_name = get_new_domain_translation_name_fn(gm_b)
+                new_domain_translation_name = \
+                    get_new_attr_name_with_prefix(node_b.name + '_domain_translation_')(gm_b)
                 env[new_domain_translation_name] = new_graph.create_node(
                     'call_function', domain_translation_op, (load_arg(node_b.args[0]),), {},
                     new_domain_translation_name)
 
                 # hook up the new mod_a copy to be in the graph, receiving the
                 # same inputs as mod_b does, with domain translated to match a
-                mod_copy_prefix = node_b.name + '_shadow_copy_'
-                get_new_mod_copy_name_fn = get_new_attr_name_with_prefix(mod_copy_prefix)
-                new_mod_copy_name = get_new_mod_copy_name_fn(gm_b)
+                new_mod_copy_name = \
+                    get_new_attr_name_with_prefix(node_b.name + '_shadow_copy_')(gm_b)
 
                 # fetch the corresponding module from gm_a
                 assert isinstance(node_a.target, str)
@@ -235,13 +251,12 @@ def _create_a_shadows_b(
 
                 # TODO(before land): handle args and kwargs generically
                 env[new_mod_copy_name] = new_graph.create_node(
-                    'call_module', new_mod_copy_name, (load_arg(env[new_domain_translation_name]),), {})
+                    'call_module', new_mod_copy_name, (env[new_domain_translation_name],), {})
 
                 # hook up a logger to the mod_a copy
                 # TODO(before land): reusable instead of copy-pasta
-                prefix = node_b.name + '_ns_logger_a_'
-                get_new_logger_name_fn = get_new_attr_name_with_prefix(prefix)
-                new_logger_name = get_new_logger_name_fn(gm_b)
+                new_logger_name = \
+                    get_new_attr_name_with_prefix(node_b.name + '_ns_logger_a_')(gm_b)
                 logger_obj = logger_cls(new_mod_copy_name)
                 setattr(gm_b, new_logger_name, logger_obj)
                 env[new_mod_copy_name] = new_graph.create_node(
@@ -249,9 +264,8 @@ def _create_a_shadows_b(
 
                 # hook up a logger to the mod_b copy
                 # TODO(before land): reusable instead of copy-pasta
-                prefix = node_b.name + '_ns_logger_b_'
-                get_new_logger_name_fn = get_new_attr_name_with_prefix(prefix)
-                new_logger_name = get_new_logger_name_fn(gm_b)
+                new_logger_name = \
+                    get_new_attr_name_with_prefix(node_b.name + '_ns_logger_b_')(gm_b)
                 logger_obj = logger_cls(node_b.name)
                 setattr(gm_b, new_logger_name, logger_obj)
                 env[node_b.name] = new_graph.create_node(
@@ -266,10 +280,8 @@ def _create_a_shadows_b(
                 # TODO(before land): make this generic with a mapping
                 domain_translation_op = torch.dequantize
 
-                domain_translation_prefix = node_b.name + '_domain_translation_'
-                get_new_domain_translation_name_fn = \
-                    get_new_attr_name_with_prefix(domain_translation_prefix)
-                new_domain_translation_name = get_new_domain_translation_name_fn(gm_b)
+                new_domain_translation_name = \
+                    get_new_attr_name_with_prefix(node_b.name + '_domain_translation_')(gm_b)
                 env[new_domain_translation_name] = new_graph.create_node(
                     'call_function', domain_translation_op, (load_arg(node_b.args[0]),), {},
                     new_domain_translation_name)
