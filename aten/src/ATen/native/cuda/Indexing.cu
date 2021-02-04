@@ -203,7 +203,7 @@ void index_put_accum_kernel(Tensor & self, const c10::List<c10::optional<Tensor>
       using device_ptr = thrust::device_ptr<int64_t>;
       const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-      linearIndex.floor_divide_(sliceSize);
+      linearIndex.divide_(sliceSize, "trunc");
       {
       sorted_indices.copy_(linearIndex);
       auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());

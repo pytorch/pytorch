@@ -5510,7 +5510,7 @@ a")
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''
         def test_integral_shape_inference(a):
-            return a // a
+            return a * a
         ''')
         inputs = [torch.ones(10, 10, dtype=torch.long)]
         outputs = torch.ones(10, 10)
@@ -11861,7 +11861,8 @@ dedent """
                 cu = torch.jit.CompilationUnit(funcs_str)
                 f_script = cu.fn
                 f = scope['fn']
-                self.assertEqual(f_script(), f())
+                with self.maybeWarnsRegex(UserWarning, "floor_divide"):
+                    self.assertEqual(f_script(), f())
 
     def test_call_python_fn_from_script_fn(self):
         @torch.jit.ignore

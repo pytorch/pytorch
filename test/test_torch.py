@@ -23,7 +23,7 @@ from torch.testing._internal.common_utils import (
     do_test_dtypes, IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, slowTest,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
-    wrapDeterministicFlagAPITest, DeterministicGuard, make_tensor)
+    wrapDeterministicFlagAPITest, DeterministicGuard, _wrap_maybe_warns, make_tensor)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -6652,14 +6652,6 @@ def _new_t(shape):
         return _make_tensor(shape, dtype, device)
     return tmp
 
-def _wrap_maybe_warns(regex):
-    def decorator(fn):
-        def inner(self, device, dtype):
-            with self.maybeWarnsRegex(UserWarning, regex):
-                fn(self, device, dtype)
-        return inner
-    return decorator
-
 # TODO: these tests should be refactored into other test suites using OpInfos
 # TODO: random functions, cat, gather, scatter, index*, masked*,
 #       resize, resizeAs, storage_offset, storage, stride, unfold
@@ -6700,9 +6692,6 @@ tensor_op_tests = [
     ('true_divide', 'tensor_with_inplace', _small_3d,
         lambda t, d: [_small_3d(t, d, has_zeros=False)], 1e-1,
         1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
-    ('floor_divide', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1, 1e-5, 1e-5, _types),
-    ('floor_divide', 'tensor', _small_3d,
-        lambda t, d: [_small_3d(t, d, has_zeros=False)], 1, 1e-5, 1e-5, _types),
     ('pow', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('pow', '1', _small_3d, lambda t, d: [_number(1., 1, t)], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
     ('pow', '2', _small_3d, lambda t, d: [_number(2., 2, t)], 1e-1, 1e-1, 1e-5, torch.testing.get_all_fp_dtypes()),
