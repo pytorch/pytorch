@@ -543,7 +543,6 @@ if TYPE_CHECKING:
     # PR #43339 for details.
     from torch._C._VariableFunctions import *  # type: ignore
 
-
 for name in dir(_C._VariableFunctions):
     if name.startswith('__'):
         continue
@@ -560,6 +559,7 @@ class _TensorModuleWarner:
         # TODO: make the message more expressive
         warnings.warn("You are using the import wrong!")
         return self._tensor_fun(*args, **kwargs)
+
 
 sys.modules["torch.tensor"] = _TensorModuleWarner()
 
