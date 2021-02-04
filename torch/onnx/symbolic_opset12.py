@@ -1,4 +1,3 @@
-
 import torch
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented
@@ -124,11 +123,11 @@ def le(g, input, other):
 
 @parse_args('v', 'i', 'v', 'v')
 def unfold(g, input, dimension, size, step):
-    size = sym_help._maybe_get_const(size, 'i')
-    step = sym_help._maybe_get_const(step, 'i')
-    if not sym_help._is_value(size) and not sym_help._is_value(step):
+    const_size = sym_help._maybe_get_const(size, 'i')
+    const_step = sym_help._maybe_get_const(step, 'i')
+    if not sym_help._is_value(const_size) and not sym_help._is_value(const_step):
         from torch.onnx.symbolic_opset9 import unfold as _unfold
-        return _unfold(g, input, dimension, size, step)
+        return _unfold(g, input, dimension, const_size, const_step)
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
 
