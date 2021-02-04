@@ -7,15 +7,421 @@ Overview
 --------
 .. automodule:: torch.fx
 
+.. _Writing Transformations:
+
+
 Writing Transformations
 -----------------------
 
-TODO
+What is an FX transform? Essentially, it's a function that looks like this.
 
-Debugging Transformations
--------------------------
+::
 
-TODO
+    def transform(m: nn.Module) -> nn.Module:
+        fx_model: GraphModule = fx.symbolice_trace(m)
+        new_model = ...
+        return new_model
+
+Your transform will take in an :class:`torch.nn.Module`, convert it into a
+:class:`GraphModule` with :meth:`symbolic_trace`, and return a new
+``nn.Module``. You should think of the ``nn.Module`` that your FX transform
+returns as identical to a regular ``nn.Module`` -- you can pass it to another
+FX transform, you can pass it to TorchScript, or you can
+run it. Ensuring that the inputs and outputs of your FX transform are a
+``nn.Module`` will allow for composability.
+
+Given that you’ve passed in an ``nn.Module`` that has been traced into a
+graph, there are now two primary approaches you can take to building a new
+graph.
+
+Graph Manipulation
+^^^^^^^^^^^^^^^^^^
+
+One approach to building this new graph is to directly manipulate your old
+one. To aid in this, we can simply take the graph we obtain from symbolic
+tracing and modify it. For example, let’s say we desire to replace
+``torch.add`` with ``torch.mul``.
+
+::
+
+    # Sample module
+    class M(torch.nn.Module):
+        def forward(self, x, y):
+            return torch.add(x, y)
+
+    def transform(m: nn.Module) -> nn.Module:
+        fx_model: GraphModule = fx.symbolic_trace(m)
+        # FX represents its graph as an ordered list of nodes, so we can
+        # iterate through them.
+        for node in fx_model.graph.nodes:
+            # Checks if we're calling a function (i.e: torch.add)
+            if node.op == 'call_function':
+                # The target attribute is the function that call_function
+                # calls.
+                if node.target == torch.add:
+                    node.target = torch.mul
+
+        fx_model.lint() # Does some checks to make sure the graph is well-formed.
+        # Regenerates the python code that corresponds to fx_model.
+        fx_model.recompile()
+        return fx_model
+
+We can also do more involved graph rewrites, such as deleting or appending
+nodes. To aid in these transformations, FX has utility
+functions for transforming the graph that can be found in :class:`Graph`. An
+example of using these APIs to append a relu can be found below.
+
+::
+
+    with traced.graph.inserting_after(node): # Specifies the insertion point
+        new_node = traced.graph.call_function(torch.relu, args=(node,)) # builds a new relu node
+        node.replace_all_uses_with(new_node)
+
+This approach is also a good fit for graph optimizations such as
+`conv/batch norm
+fusion! <https://github.com/pytorch/pytorch/blob/ec86cec20a8a2312a2295d7bc8be6e88256a2de4/torch/fx/experimental/fuser.py>`__
+
+For simple transformations that only consist of substitutions, you can also
+make use of the `subgraph rewriter. <https://github.com/pytorch/pytorch/blob/master/torch/fx/subgraph_rewriter.py>`__
+
+In general, writing your transformation through graph manipulation is a good
+fit if you need to make a few small changes or if you need to match multiple
+nodes at once. However, if you need to entirely rewrite your graph, you may
+want to look at constructing your graph with Proxies (i.e. retracing).
+
+Graph Manipulation Examples
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  `Replace one
+   op <https://github.com/pytorch/pytorch/blob/master/torch/fx/examples/replace_op.py>`__
+-  `Conv/Batch Norm
+   fusion <https://github.com/pytorch/pytorch/blob/master/torch/fx/experimental/fuser.py>`__
+-  `Quantization <https://github.com/pytorch/pytorch/tree/master/torch/quantization/fx>`__
+
+Proxy/Retracing
+^^^^^^^^^^^^^^^
+
+Although most transformations can be implemented as graph
+transformations, transformations that involve a lot of graph rewrites
+are often more easily represented through retracing. For example, let’s
+imagine that we wanted to write a pass that decomposed
+PyTorch functions. It would transform every ``F.relu(x)``
+into ``(x > 0)*x``. One possibility would be to perform the requisite
+graph rewriting to insert the comparison and multiplication after the
+``F.relu``, and then clean up the original ``F.relu``. However, graph
+manipulation can be awkward, and it’s often easier to implicitly
+generate the graph by retracing.
+
+To use this method, we write the graph that we want inserted as regular
+PyTorch code and pass in Proxy objects. These Proxy objects
+will capture the operations that are performed on them and append them to
+the graph.
+
+::
+
+    # Note that this decomposition rule can be read as regular Python
+    def relu_decomposition(x):
+        return (x > 0)*x
+
+    decomposition_rules = {}
+    decomposition_rules[F.relu] = relu_decomposition
+
+    def decompose(model: torch.nn.Module) -> torch.nn.Module:
+        model = fx.symbolic_trace(model)
+        new_graph = fx.Graph()
+        env = {}
+        for node in model.graph.nodes:
+            if node.op == 'call_function' and node.target in decomposition_rules:
+                # By wrapping the arguments with proxies, we can dispatch to
+                # the appropriate decomposition rule and add it to the graph by
+                # symbolically tracing it.
+                proxy_args = [fx.Proxy(env[x.name]) if isinstance(x, fx.Node) else x for x in node.args]
+                new_node = decomposition_rules[node.target](*proxy_args).node
+                env[node.name] = new_node
+            else:
+                new_node = new_graph.node_copy(node, lambda x: env[x.name])
+                env[node.name] = new_node
+        return fx.GraphModule(model, new_graph)
+
+In addition to avoiding explicit graph manipulation, using Proxies also allows you to
+specify your rewrite rules as native Python code. For transformations
+that require a large amount of rewrite rules (such as vmap or grad),
+this can often improve readability and maintainability of the rules.
+
+TODO: Example transformations (need to be included first)
+
+The Interpreter Pattern
+^^^^^^^^^^^^^^^^^^^^^^^
+
+In addition to FX passes that take in a module and return a module,
+there may be other things you wish to do with the FX graph. For example,
+let’s say that you’d like to obtain
+the shape information of tensors in your graph. In this case, instead of
+looping over the FX graph and modifying it, you can write an interpreter
+on top of the FX graph! As the FX IR is quite simple, it’s easy to
+reimplement an interpreter that also captures your desired attributes.
+
+As this pattern is quite useful, we we can also use an abstraction of this
+pattern
+-- the `Interpreter
+<https://github.com/pytorch/pytorch/blob/master/torch/fx/interpreter.py>`__.
+You can see an example using this for `shape propagation
+<https://github.com/pytorch/pytorch/blob/master/torch/fx/passes/shape_prop.py>`__,
+which reinterprets the FX graph with example inputs while annotating the
+graph with the shapes.
+
+Reinterpreting the FX graph is generally most useful when you want
+runtime information that FX typically doesn’t capture (due to being a
+symbolic trace). This can be used for capturing shape information for
+downstream passes, but it can also be used to capture other information
+about execution.
+TODO: Add roofline analysis pass once it gets merged.
+
+Examples
+~~~~~~~~
+
+-  `Shape
+   Propagation <https://github.com/pytorch/pytorch/blob/master/torch/fx/experimental/shape_prop.py>`__
+-  `Roofline
+   Analyzer <https://github.com/pytorch/pytorch/blob/a9f88511b8155ba9620730fb175dee8c54e346d5/torch/fx/experimental/cost_model.py>`__
+
+
+Debugging
+-----------
+
+Introduction
+^^^^^^^^^^^^^^^^
+
+After symbolically tracing an ``nn.Module`` and performing some number
+of transformations on the resulting GraphModule, we'll want to verify
+that the proper semantics were preserved after those transforms. If they
+weren't, we may need to do some debugging. The key is to work
+backwards: first, check the results of the generated module, then debug
+the generated code, then debug the process of transformations that lead
+to the generated code.
+
+If you’re not familiar with debuggers, please see the auxiliary section
+:ref:`Available Debuggers`.
+
+Debugging the Generated Code
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Because FX generates the ``forward()`` function on GraphModules, using
+traditional debugging techniques like ``print`` statements or ``pdb`` is
+not as straightfoward. Luckily, we have several techniques we can use
+for debugging the generated code.
+
+Use ``pdb``
+~~~~~~~~~~~~~
+Invoke ``pdb`` to step into the running program. Although the code that
+represents the FX graph is not in any source file, we can still step
+into it manually using ``pdb`` when the forward pass is invoked.
+
+::
+
+    def my_pass(in: torch.nn.Module) -> torch.nn.Module:
+        traced = torch.fx.symbolic_trace(in)
+        # Transformation logic here
+        return traced
+
+    # When this line is executed at runtime, we will be dropped into an
+    # interactive `pdb` prompt. We can use the `step` or `s` command to
+    # step into the execution of the next line
+    import pdb; pdb.set_trace()
+
+    my_pass(my_module)
+
+.. _Print the Generated Code:
+
+Print the Generated Code
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+If you’d like to run the same code multiple times, then it can be
+a bit tedious to step to the right code with ``pdb``. In that case, one
+approach is to simply copy-paste the generated ``forward`` pass into
+your code and examine it from there.
+
+::
+
+    # Assume that `traced` is a GraphModule that has undergone some
+    # number of transforms
+
+    # Print the code generated from symbolic tracing. This outputs:
+    """
+    def forward(self, y):
+        x = self.x
+        add_1 = x + y;  x = y = None
+        return add_1
+    """
+    # Copy this code for later
+    print(traced)
+
+    # Subclass the original Module
+    class SubclassM(M):
+        def __init__(self):
+            super().__init__()
+
+        # Paste the generated `forward` function (the one we printed and
+        # copied on line 22) here
+        def forward(self, y):
+            x = self.x
+            add_1 = x + y;  x = y = None
+            return add_1
+
+    # Create an instance of the original, untraced Module. Then, create an
+    # instance of the Module with the copied `forward` function. We can
+    # now compare the output of both the original and the traced version.
+    pre_trace = M()
+    post_trace = SubclassM()
+
+Use the ``to_folder`` Function From ``GraphModule``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+:meth:`GraphModule.to_folder` is a method in ``GraphModule`` that allows
+you to dump out the generated FX code to a folder. Although copying the
+forward pass into the code often suffices as in :ref:`Print the Generated Code`,
+it may be easier to examine modules and parameters using ``to_folder``.
+
+::
+
+    m = symbolic_trace(M())
+    m.to_folder("foo", "Bar")
+    from foo import Bar
+    y = Bar()
+
+After running the above example, we can then look at the code within
+``foo/module.py`` and modify it as desired (e.g. adding ``print``
+statements or using ``pdb``) to debug the generated code.
+
+Debugging the Transformation
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Now that we've identified that a transformation is creating incorrect
+code, it's time to debug the transformation itself. First, we'll check
+the :ref:`Limitations of Symbolic Tracing` section in the documentation.
+Once we verify that ``symbolic_trace`` is working as expected, the goal
+becomes figuring out what went wrong during our ``GraphModule``
+transformation. There may be a quick answer in
+:ref:`Writing Transformations`, but, if not, there are several ways to
+examine our traced module:
+
+::
+
+    # Sample Module
+    class M(torch.nn.Module):
+        def forward(self, x, y):
+            return x + y
+
+    # Create an instance of `M`
+    m = M()
+
+    # Symbolically trace an instance of `M` (returns a GraphModule). In
+    # this example, we'll only be discussing how to inspect a
+    # GraphModule, so we aren't showing any sample transforms for the
+    # sake of brevity.
+    traced = symbolic_trace(m)
+
+    # Print the code produced by tracing the module. The generated `forward`
+    # function is:
+    """
+    def forward(self, x, y):
+        add_1 = x + y;  x = y = None
+        return add_1
+    """
+    print(traced)
+
+    # Print the internal Graph. This representation returns:
+    """
+    graph(x, y):
+        %add_1 : [#users=1] = call_function[target=<built-in function add>](args = (%x, %y), kwargs = {})
+        return add_1
+    """
+    print(traced.graph)
+
+    # Print a tabular representation of the internal Graph. This gives us:
+    """
+    opcode         name    target                   args      kwargs
+    -------------  ------  -----------------------  --------  --------
+    placeholder    x       x                        ()        {}
+    placeholder    y       y                        ()        {}
+    call_function  add_1   <built-in function add>  (x, y)    {}
+    """
+    traced.graph.print_tabular()
+
+Using the utility functions above, we can compare our traced Module
+before and after we've apply our transformations. Sometimes, a
+simple visual comparison is enough to trace down a bug. If it's still
+not clear what's going wrong, a debugger like ``pdb`` can be a good
+next step.
+
+Going off of the example above, consider the following code:
+
+::
+
+    # Sample user-defined function
+    def transform_graph(gm: GraphModule) -> None:
+
+        # Get the Graph from our traced Module
+        g = gm.graph
+
+        """
+        Transformations on `g` go here
+        """
+
+        # Recompile the GraphModule. This must be called after editing
+        # the Graph `g`, otherwise the generated code will still reflect
+        # the old Graph before any transforms
+        gm.recompile()
+
+    # Transform the Graph
+    transform_graph(traced)
+
+    # Print the new code after our transforms. Check to see if it was
+    # what we expected
+    print(traced)
+
+Using the above example, let’s say that the call to ``print(traced)``
+showed us that there was an error in our transforms. We want to find
+what goes wrong using a debugger. We start a ``pdb`` session. We can see
+what’s happening during the transform by breaking on
+``transform_graph(traced)``, then pressing ``s`` to “step into” the call
+to ``transform_graph(traced)``.
+
+We may also have good luck by editing the ``print_tabular`` method to print
+different attributes of the Nodes in the Graph. (For example, we might
+want to see the Node’s ``input_nodes`` and ``users``.)
+
+.. _Available Debuggers:
+
+Available Debuggers
+^^^^^^^^^^^^^^^^^^^^^^
+
+The most common Python debugger is
+`pdb <https://docs.python.org/3/library/pdb.html>`__. You can start
+your program in “debug mode” with ``pdb`` by typing
+``python -m pdb FILENAME.py`` into the command line, where ``FILENAME``
+is the name of the file you want to debug. After that, you can use the
+``pdb`` `debugger commands
+<https://docs.python.org/3/library/pdb.html#debugger-commands>`__
+to move through your running program stepwise. It’s common to set a
+breakpoint (``b LINE-NUMBER``) when you start ``pdb``, then call ``c`` to
+run the program until that point. This prevents you from having to step
+through each line of execution (using ``s`` or ``n``) to get to the part
+of the code you want to examine. Alternatively, you can write
+``import pdb; pdb.set_trace()`` before the line you want to break at.
+If you add ``pdb.set_trace()``, your program will automatically start
+in debug mode when you run it. (In other words, you can just type
+``python FILENAME.py`` into the command line instead of
+``python -m pdb FILENAME.py``.) Once you're running your file in
+debug mode, you can step through the code and examine your program's
+internal state using certain commands. There are many excellent
+tutorials on ``pdb`` online, including RealPython’s
+`“Python Debugging With Pdb” <https://realpython.com/python-debugging-pdb/>`__.
+
+IDEs like PyCharm or VSCode usually have a debugger built in. In your
+IDE, you can choose to either a) use ``pdb`` by pulling up a terminal
+window in your IDE (e.g. View → Terminal in VSCode), or b) use the
+built-in debugger (usually a graphical wrapper around ``pdb``).
+
+.. _Limitations of Symbolic Tracing:
 
 Limitations of Symbolic Tracing
 -------------------------------
@@ -322,3 +728,12 @@ API Reference
   :members:
 
 .. autoclass:: torch.fx.Proxy
+
+.. autoclass:: torch.fx.Interpreter
+  :members:
+
+.. autoclass:: torch.fx.Transformer
+  :members:
+
+.. autofunction:: torch.fx.replace_pattern
+
