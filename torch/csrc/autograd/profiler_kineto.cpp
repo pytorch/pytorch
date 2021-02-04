@@ -72,10 +72,13 @@ struct TORCH_API KinetoThreadLocalState : public ProfilerThreadLocalState {
           .fwdThreadId(ctx->fwdThreadId)
           .scope(ctx->recFunScope);
       if (ctx->shapes && !ctx->shapes->empty()) {
-          kineto_events_.back().shapes(*ctx->shapes);
+        kineto_events_.back().shapes(*ctx->shapes);
       }
       if (ctx->stack && !ctx->stack->empty()) {
         kineto_events_.back().stack(*ctx->stack);
+      }
+      if (ctx->extraArgs && !ctx->extraArgs->empty()) {
+        kineto_events_.back().flops(computeFlops(std::string(fn.name().str()), *ctx->extraArgs));
       }
       cpu_trace->activities.emplace_back(std::move(op));
     }
@@ -153,6 +156,10 @@ void pushProfilingCallbacks() {
 
         if (state_ptr->config().report_input_shapes) {
           ctx_ptr->shapes = inputSizes(fn);
+        }
+
+        if (state_ptr->config().with_flops) {
+          ctx_ptr->extraArgs = saveExtraArgs(fn);
         }
 
         ctx_ptr->sequenceNr = fn.seqNr();
