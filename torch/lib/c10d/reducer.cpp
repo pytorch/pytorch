@@ -22,15 +22,6 @@ inline int64_t current_time_in_nanos() {
   return torch::autograd::profiler::getTime();
 }
 
-std::string parse_env(const char* env_var_name) {
-  char* stringValue = std::getenv(env_var_name);
-  std::string res = "N/A";
-  if (stringValue != nullptr) {
-    res = stringValue;
-  }
-  return res;
-}
-
 constexpr int kUnsetDivFactor = -1;
 
 } // namespace
@@ -53,13 +44,12 @@ Reducer::Reducer(
       find_unused_parameters_(find_unused_parameters),
       gradient_as_bucket_view_(gradient_as_bucket_view),
       local_used_maps_reduced_(false),
-      backward_stats_base_(0),
+      num_iterations_(0),
+      num_buckets_ready_(0),
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
       divFactor_(kUnsetDivFactor),
-      comm_hook_(nullptr),
-      ddp_logging_data_(std::move(std::make_unique<c10::DDPLoggingData>())),
-      num_iterations_(0) {
+      comm_hook_(nullptr) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");
   TORCH_CHECK(replicas_[0].size() >= 1, "Expected at least one parameter.");
@@ -195,6 +185,15 @@ Reducer::Reducer(
             at::empty({static_cast<long>(variable_count)}, options);
       }
     }
+  }
+
+  if (replicas_[0][0].is_cuda()) {
+    cudaEventCreate(&gpu_timer_.forward_start);
+    cudaEventCreate(&gpu_timer_.backward_compute_start);
+    cudaEventCreate(&gpu_timer_.backward_compute_end);
+    cudaEventCreate(&gpu_timer_.backward_comm_start);
+    cudaEventCreate(&gpu_timer_.backward_comm_end);
+    cudaEventCreate(&gpu_timer_.backward_variable_ready);
   }
 }
 
@@ -576,8 +575,20 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   TORCH_CHECK(
       variable_index < variable_locators_.size(),
       "Out of range variable index.");
-  backward_stats_[replica_index][variable_index] =
-      current_time_in_nanos() - backward_stats_base_;
+  if (replicas_[0][0].is_cuda()) {
+    cudaEventRecord(gpu_timer_.backward_variable_ready);
+    cudaEventSynchronize(gpu_timer_.backward_variable_ready);
+    float ready_time_ms = 0.0;
+    cudaEventElapsedTime(
+      &ready_time_ms,
+      gpu_timer_.backward_compute_start,
+      gpu_timer_.backward_variable_ready);
+    backward_stats_[replica_index][variable_index]
+      = int(ready_time_ms * 1000000);
+  } else {
+    backward_stats_[replica_index][variable_index] =
+      current_time_in_nanos() - cpu_timer_.backward_compute_start_time;
+  }
 
   // Any time we mark a variable ready (be it in line due to unused parameters,
   // or via an autograd hook), we require a call to the finalize function. If
@@ -704,7 +715,11 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
        next_bucket_++) {
     num_buckets_ready_++;
     if (num_buckets_ready_ == 1) {
-      comm_start_time_ = current_time_in_nanos();
+      if (replicas_[0][0].is_cuda()) {
+        cudaEventRecord(gpu_timer_.backward_comm_start);
+      } else {
+        cpu_timer_.backward_comm_start_time = current_time_in_nanos();
+      }
     }
     auto& bucket = buckets_[next_bucket_];
     std::vector<at::Tensor> tensors;
@@ -987,7 +1002,11 @@ void Reducer::populate_bucket_views_out(
 void Reducer::prepare_for_forward() {
   std::lock_guard<std::mutex> lock(mutex_);
   num_iterations_++;
-  forward_start_time_ = current_time_in_nanos();
+  if (replicas_[0][0].is_cuda()) {
+    cudaEventRecord(gpu_timer_.forward_start);
+  } else {
+    cpu_timer_.forward_start_time = current_time_in_nanos();
+  }
 }
 
 // Traverse the autograd graph starting at the specified output.
@@ -1005,16 +1024,16 @@ void Reducer::prepare_for_backward(
   // Reset accounting.
   expect_autograd_hooks_ = true;
   next_bucket_ = 0;
-  backward_stats_base_ = current_time_in_nanos();
+
+  if (replicas_[0][0].is_cuda()) {
+    cudaEventRecord(gpu_timer_.backward_compute_start);
+  } else {
+    cpu_timer_.backward_compute_start_time = current_time_in_nanos();
+  }
 
   // Reset num_buckets_ready_ at the beginning of backward computation
   // in each iteration.
   num_buckets_ready_ = 0;
-
-  // Set ith iteration when the runtime stats are set
-  ddp_logging_data_->iteration = num_iterations_;
-  set_avg_forward_compute_time();
-  set_rebuilt_bucket_stats();
 
   for (auto& bucket : buckets_) {
     for (auto& replica : bucket.replicas) {
@@ -1080,8 +1099,6 @@ void Reducer::prepare_for_backward(
       "to have unused parameters."
     );
   }
-
-  set_unused_parameter_stats();
 }
 
 void Reducer::copy_bucket_to_grad(
@@ -1210,8 +1227,11 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
 }
 
 void Reducer::finalize_backward() {
-  set_avg_backward_compute_time();
-  set_avg_compute_comm_overlap_time();
+  if (replicas_[0][0].is_cuda()) {
+    cudaEventRecord(gpu_timer_.backward_compute_end);
+  } else {
+    cpu_timer_.backward_compute_end_time = current_time_in_nanos();
+  }
 
   // No longer expect autograd hooks to fire after this function returns.
   TORCH_INTERNAL_ASSERT(expect_autograd_hooks_);
@@ -1284,7 +1304,11 @@ void Reducer::finalize_backward() {
     local_used_maps_reduced_ = false;
   }
 
-  set_avg_backward_comm_time();
+  if (replicas_[0][0].is_cuda()) {
+    cudaEventRecord(gpu_timer_.backward_comm_end);
+  } else {
+    cpu_timer_.backward_comm_end_time = current_time_in_nanos();
+  }
 }
 
 void Reducer::runGradCallbackForVariable(
@@ -1501,117 +1525,6 @@ void Reducer::ensure_prior_reduction_finished() {
         "value of `forward` of your module when reporting this issue (e.g. ",
         "list, dict, iterable).");
   }
-}
-
-void Reducer::set_env_variables() {
-  // Environment variables
-  ddp_logging_data_->master_port = parse_env("MASTER_PORT");
-  ddp_logging_data_->master_addr = parse_env("MASTER_ADDR");
-  ddp_logging_data_->cuda_visible_devices = parse_env("CUDA_VISIBLE_DEVICES");
-  ddp_logging_data_->gloo_socket_ifname = parse_env("GLOO_SOCKET_IFNAME");
-  ddp_logging_data_->gloo_device_transport = parse_env("GLOO_DEVICE_TRANSPORT");
-  ddp_logging_data_->nccl_socket_ifname = parse_env("NCCL_SOCKET_IFNAME");
-  ddp_logging_data_->nccl_blocking_wait = parse_env("NCCL_BLOCKING_WAIT");
-  ddp_logging_data_->nccl_debug = parse_env("NCCL_DEBUG");
-  ddp_logging_data_->nccl_nthreads = parse_env("NCCL_NTHREADS");
-  ddp_logging_data_->nccl_ib_timeout = parse_env("NCCL_IB_TIMEOUT");
-}
-
-void Reducer::set_parameter_stats() {
-  ddp_logging_data_->num_parameters = 0;
-  ddp_logging_data_->parameter_size = 0;
-  for (const auto& t : replicas_[0]) {
-    ddp_logging_data_->num_parameters++;
-    ddp_logging_data_->parameter_size += t.numel() * t.element_size();
-  }
-}
-
-std::vector<int> Reducer::get_bucket_sizes() {
-  std::vector<int> bucket_sizes;
-  for (const auto& bucket : buckets_) {
-    const auto& variables = bucket.replicas[0].variables;
-    int bucket_size = 0;
-    for (const auto& v : variables) {
-      bucket_size += v.numel() * v.element_size();
-    }
-    bucket_sizes.push_back(bucket_size);
-  }
-  return bucket_sizes;
-}
-
-void Reducer::set_construction_logging_data(
-  const std::string& module_name,
-  const std::vector<int>& device_ids,
-  int output_device,
-  bool broadcast_buffers
-) {
-// Data that can be got during DistributedDataParallel construction time
-  ddp_logging_data_->module_name = module_name;
-  ddp_logging_data_->world_size = process_group_->getSize();
-  ddp_logging_data_->rank = process_group_->getRank();
-  ddp_logging_data_->iteration = 0;
-  ddp_logging_data_->dtype = std::string(replicas_[0][0].dtype().name());
-
-  ddp_logging_data_->bucket_sizes = get_bucket_sizes();
-
-  set_parameter_stats();
-  set_env_variables();
-
-  // DistributedDataParallel constructor input parameters
-  ddp_logging_data_->device_ids = device_ids;
-  ddp_logging_data_->output_device = output_device;
-  ddp_logging_data_->broadcast_buffers = broadcast_buffers;
-  ddp_logging_data_->bucket_cap_mb = bucket_bytes_cap_ / (1024 * 1024);
-  ddp_logging_data_->find_unused_parameters = find_unused_parameters_;
-  ddp_logging_data_->gradient_as_bucket_view = gradient_as_bucket_view_;
-  ddp_logging_data_->backend_name = process_group_->getBackendName();
-
-  LogPyTorchDDPUsage(*ddp_logging_data_);
-}
-
-void Reducer::set_unused_parameter_stats() {
-  for (const auto& unused_index : unused_parameters_) {
-    const auto& v
-      = replicas_[unused_index.replica_index][unused_index.variable_index];
-    ddp_logging_data_->unused_parameter_size += v.numel() * v.element_size();
-  }
-}
-
-void Reducer::set_rebuilt_bucket_stats() {
-  ddp_logging_data_->has_rebuilt_buckets = has_rebuilt_bucket_;
-  ddp_logging_data_->rebuilt_bucket_sizes = get_bucket_sizes();
-}
-
-void Reducer::set_avg_forward_compute_time() {
-  ddp_logging_data_->avg_forward_compute_time = (
-    (current_time_in_nanos() - forward_start_time_)
-    + ddp_logging_data_->avg_forward_compute_time
-      * (num_iterations_ - 1)) / num_iterations_;
-}
-
-void Reducer::set_avg_backward_compute_time() {
-  ddp_logging_data_->avg_backward_compute_time = (
-    (current_time_in_nanos() - backward_stats_base_)
-    + ddp_logging_data_->avg_backward_compute_time
-      * (num_iterations_ - 1)) / num_iterations_;
-}
-
-void Reducer::set_avg_backward_comm_time() {
-  ddp_logging_data_->avg_backward_comm_time = (
-    (current_time_in_nanos() - comm_start_time_)
-    + ddp_logging_data_->avg_backward_comm_time
-      * (num_iterations_ - 1)) / num_iterations_;
-}
-
-void Reducer::set_avg_compute_comm_overlap_time() {
-  ddp_logging_data_->avg_backward_compute_comm_overlap_time = (
-    (current_time_in_nanos() - comm_start_time_)
-    + ddp_logging_data_->avg_backward_compute_comm_overlap_time
-      * (num_iterations_ - 1)) / num_iterations_;
-}
-
-c10::DDPLoggingData Reducer::get_ddp_logging_data() {
-  return *ddp_logging_data_;
 }
 
 namespace {

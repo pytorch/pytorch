@@ -318,16 +318,15 @@ struct DDPLoggingData {
   std::string backend_name = "";
   // The DDPLoggingData is logged in which iteration of the training loop,
   // 0 if the data is logged during DistributedDataParallel construction time.
-  int iteration = -1;
+  int64_t iteration = -1;
   // Parameter's data type
   std::string dtype = "";
   // Total parameters size (Bytes)
-  int parameter_size = -1;
+  int64_t total_parameter_size_bytes = -1;
   // The number of parameter tensors
-  int num_parameters = -1;
+  int num_parameter_tensors = -1;
   // A list of bucket sizes (Bytes) calculated during construction time
   std::vector<int> bucket_sizes = std::vector<int>();
-
 
   // Environment variables
   std::string master_port = "";
@@ -343,7 +342,7 @@ struct DDPLoggingData {
 
   // DistributedDataParallel constructor input parameters
   bool broadcast_buffers = false;
-  int bucket_cap_mb = -1;
+  float bucket_cap_mb = -1.0;
   bool find_unused_parameters = false;
   bool gradient_as_bucket_view = false;
 
@@ -353,15 +352,15 @@ struct DDPLoggingData {
 
   // Total unused parameter size (Bytes)
   // It is calculated after forward computation in each iteration.
-  int unused_parameter_size = 0;
+  int64_t unused_parameter_size = 0;
   // Rebuild buckets stats after 1st iteration
   bool has_rebuilt_buckets = false;
-  std::vector<int> rebuilt_bucket_sizes;
+  std::vector<int> rebuilt_bucket_sizes = std::vector<int>();
   // Average performance stats per iteration (ns)
-  int avg_forward_compute_time = 0;
-  int avg_backward_compute_time = 0;
-  int avg_backward_comm_time = 0;
-  int avg_backward_compute_comm_overlap_time = 0;
+  int64_t avg_forward_compute_time = 0;
+  int64_t avg_backward_compute_time = 0;
+  int64_t avg_backward_comm_time = 0;
+  int64_t avg_backward_compute_comm_overlap_time = 0;
 };
 
 C10_API void SetPyTorchDDPUsageLogger(std::function<void(const c10::DDPLoggingData&)> logger);

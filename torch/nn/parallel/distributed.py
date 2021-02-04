@@ -606,9 +606,10 @@ class DistributedDataParallel(Module):
             self.find_unused_parameters,
             self.gradient_as_bucket_view)
 
+        self.logger = dist.Logger(self.reducer)
+
         # Set logging data that can be got during construction time.
-        dist._set_construction_logging_data(
-            self.reducer,
+        self.logger.set_construction_logging_data(
             self.module.__class__.__name__,
             [] if self.device_ids is None else self.device_ids,
             -1 if self.output_device is None else self.output_device,
@@ -622,6 +623,7 @@ class DistributedDataParallel(Module):
         attrs = copy.copy(self.__dict__)
         del attrs['process_group']
         del attrs['reducer']
+        del attrs['logger']
         return attrs
 
     def __setstate__(self, state):
@@ -671,6 +673,7 @@ class DistributedDataParallel(Module):
             self.require_backward_grad_sync = old_require_backward_grad_sync
 
     def forward(self, *inputs, **kwargs):
+        self.logger.set_runtime_stats()
         self.reducer.prepare_for_forward()
         if self.ddp_uneven_inputs_config.ddp_join_enabled:
             ones = torch.ones(
@@ -773,9 +776,6 @@ class DistributedDataParallel(Module):
         for module in self._module_copies[1:]:
             module.train(mode)
         return self
-
-    def get_ddp_logging_data(self):
-        return dist._get_ddp_logging_data(self.reducer)
 
     # When running in join mode, schedules an allreduce to match the one in the
     # forward pass to determine the no. of currently active processes and whether

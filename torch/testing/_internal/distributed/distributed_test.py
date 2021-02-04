@@ -138,6 +138,17 @@ class Net(nn.Module):
         x = self.fc3(x)
         return F.softmax(x, dim=1)
 
+class LargeNet(nn.Module):
+    def __init__(self):
+        super(LargeNet, self).__init__()
+        self.fc1 = nn.Linear(1000, 2000, bias=False)
+        self.fc2 = nn.Linear(2000, 500, bias=False)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.fc2(x)
+        return x
+
 class Task(nn.Module):
     def __init__(self):
         super().__init__()
@@ -3227,7 +3238,7 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             model_DDP = self._test_DistributedDataParallelCPU()
 
-            ddp_logging_data = model_DDP.get_ddp_logging_data()
+            ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.world_size, dist.get_world_size())
             self.assertEqual(ddp_logging_data.rank, dist.get_rank())
             self.assertEqual(ddp_logging_data.module_name, 'Net')
@@ -3240,7 +3251,7 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.find_unused_parameters, False)
             self.assertEqual(ddp_logging_data.gradient_as_bucket_view, False)
             self.assertEqual(ddp_logging_data.backend_name, dist.get_backend(group_id))
-            self.assertEqual(ddp_logging_data.iteration, 5)
+            self.assertEqual(ddp_logging_data.iteration, 4)
             params = list(model_DDP.parameters())
             num_params = 0
             param_size = 0
@@ -3249,8 +3260,8 @@ class DistributedTest:
                 num_params += 1
                 param_size += p.numel() * p.element_size()
             self.assertEqual(ddp_logging_data.dtype, "float")
-            self.assertEqual(ddp_logging_data.parameter_size, param_size)
-            self.assertEqual(ddp_logging_data.num_parameters, num_params)
+            self.assertEqual(ddp_logging_data.total_parameter_size_bytes, param_size)
+            self.assertEqual(ddp_logging_data.num_parameter_tensors, num_params)
             self.assertEqual(ddp_logging_data.bucket_sizes, [param_size])
             self.assertEqual(ddp_logging_data.master_port, parse_env("MASTER_PORT"))
             self.assertEqual(ddp_logging_data.master_addr, parse_env("MASTER_ADDR"))
@@ -3262,6 +3273,7 @@ class DistributedTest:
             self.assertEqual(ddp_logging_data.nccl_debug, parse_env("NCCL_DEBUG"))
             self.assertEqual(ddp_logging_data.nccl_nthreads, parse_env("NCCL_NTHREADS"))
             self.assertEqual(ddp_logging_data.nccl_ib_timeout, parse_env("NCCL_IB_TIMEOUT"))
+            # test runtime logging fields
             self.assertEqual(ddp_logging_data.unused_parameter_size, 0)
             self.assertEqual(ddp_logging_data.has_rebuilt_buckets, True)
             self.assertEqual(ddp_logging_data.rebuilt_bucket_sizes, [param_size])
@@ -3275,6 +3287,15 @@ class DistributedTest:
             self.assertGreaterEqual(
                 ddp_logging_data.avg_backward_comm_time,
                 ddp_logging_data.avg_backward_compute_comm_overlap_time)
+            # test larger net and verify multiple bucket sizes
+            model = LargeNet()
+            model_DDP = nn.parallel.DistributedDataParallel(model, bucket_cap_mb=1.5)
+            ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
+            params = list(model_DDP.parameters())
+            self.assertEqual(ddp_logging_data.bucket_cap_mb, 1.5)
+            self.assertEqual(
+                ddp_logging_data.bucket_sizes,
+                [params[1].numel() * p.element_size(), params[0].numel() * p.element_size()])
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                          "Only Nccl & Gloo backend support DistributedDataParallel")
@@ -3284,7 +3305,7 @@ class DistributedTest:
             model_DDP = copy.deepcopy(DDP_NET)
             model_DDP.cuda(rank)
             model_DDP = nn.parallel.DistributedDataParallel(model_DDP, device_ids=[rank])
-            ddp_logging_data = model_DDP.get_ddp_logging_data()
+            ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.device_ids, [rank])
             self.assertEqual(ddp_logging_data.output_device, rank)
 
