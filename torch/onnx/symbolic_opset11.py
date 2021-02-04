@@ -322,6 +322,8 @@ def insert(g, self, pos, tensor):
 def pop(g, tensor_list, dim):
     return g.op("SequenceErase", tensor_list, dim)
 
+def Delete(g, tensor_list, dim):
+    return g.op("SequenceErase", tensor_list, dim)
 
 def cat(g, tensor_list, dim):
     if sym_help._is_packed_list(tensor_list):

@@ -3957,6 +3957,117 @@ class TestONNXRuntime(unittest.TestCase):
         inputs = torch.randn(16, 1)
         self.run_test(model, inputs)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_list_append(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                for i in range(x.size(0)):
+                    res += [torch.matmul(x[i], y)]
+                return res
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(16, 3, 4)
+        y = torch.randn(4, 5)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_list_append_nested(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                for i in range(x.size(0)):
+                    for j in range(x.size(1)):
+                        res += [torch.matmul(x[i][j], y)]
+                return res
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(4, 4, 3, 4)
+        y = torch.randn(4, 5)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_list_pop(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                for i in range(x.size(0)):
+                    res += [torch.matmul(x[i], y)]
+                res.pop()
+                return res
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(16, 3, 4)
+        y = torch.randn(4, 5)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_list_pop_nested(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                for i in range(x.size(0)):
+                    for j in range(x.size(1)):
+                        res += [torch.matmul(x[i][j], y)]
+                        res.pop()
+                    res += [torch.matmul(x[i][0], y)]
+                return res
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(4, 4, 3, 4)
+        y = torch.randn(4, 5)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_list_del(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                for i in range(x.size(0)):
+                    res += [torch.matmul(x[i], y)]
+                del res[2]
+                return res
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(16, 3, 4)
+        y = torch.randn(4, 5)
+        self.run_test(model, (x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_list_del_nested(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                for i in range(x.size(0)):
+                    for j in range(x.size(1)):
+                        res += [torch.matmul(x[i][j], y)]
+                        del res[i]
+                    res += [torch.matmul(x[i][0], y)]
+                return res
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(4, 4, 3, 4)
+        y = torch.randn(4, 5)
+        self.run_test(model, (x, y))
+
+    @unittest.skip("Enable this once remove is supported by pytorch")
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_list_remove(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                for i in range(x.size(0)):
+                    res += [torch.matmul(x[i], y)]
+                # The following fails with pytorch
+                # RuntimeError: Boolean value of Tensor with more than one value is ambiguous
+                res.remove(res[2])
+                return res
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(16, 3, 4)
+        y = torch.randn(4, 5)
+        self.run_test(model, (x, y))
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tensor_factories(self):
         class TensorFactory(torch.nn.Module):
