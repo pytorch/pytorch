@@ -311,6 +311,7 @@ auto ${inp}_p = toLegacyPrimal(${inp});
 
 FW_DERIVATIVE_SETTER_TENSOR = CodeTemplate("""\
 if (${out_arg}_new_fw_grad.defined()) {
+  // The hardcoded 0 here will need to be updated once we support multiple levels.
   ${out_arg}.set_fw_grad(${out_arg}_new_fw_grad, /* level */ 0, /* is_inplace_op */ ${is_inplace});
 }
 """)
@@ -319,14 +320,15 @@ FW_DERIVATIVE_SETTER_TENSOR_LIST = CodeTemplate("""\
 TORCH_INTERNAL_ASSERT(${out_arg}.size() == ${out_arg}_new_fw_grad.size());
 for (auto i=0; i<${out_arg}.size(); ++i) {
   if (${out_arg}_new_fw_grad[i].defined()) {
+  // The hardcoded 0 here will need to be updated once we support multiple levels.
     ${out_arg}[i].set_fw_grad(${out_arg}_new_fw_grad[i], /* level */ 0, /* is_inplace_op */ ${is_inplace});
   }
 }
 """)
 
 FW_DERIVATIVE_TEMPLATE = CodeTemplate("""\
-if (${if_stmt}) {
-    ${fw_grad_defined}
+if (${requires_fw_grad}) {
+    ${unpacked_arguments}
     auto ${out_arg}_new_fw_grad = ${formula};
     ${fw_grad_setter}
 }
@@ -890,23 +892,26 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         for derivative in fw_derivatives:
             res = derivative.var_name
 
-            if_stmt = " || ".join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp.name)
-                                   for inp in differentiable_inputs if inp.name in derivative.required_inputs_fw_grad])
-            if not if_stmt:
+            requires_fw_grad = " || ".join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp.name)
+                                           for inp in differentiable_inputs if inp.name in derivative.required_inputs_fw_grad])
+            if not requires_fw_grad:
                 # Handle functions like stack
                 # For these, we don't unpack anything and always call the user function
-                assert len(differentiable_inputs) == 1
-                assert is_tensor_list_type(differentiable_inputs[0].type)
-                if_stmt = "true"
-            fw_grad_defined = ""
+                if not (len(differentiable_inputs) == 1 and is_tensor_list_type(differentiable_inputs[0].type)):
+                    raise RuntimeError(f'No differentiable input to "{name}" is a differentiable Tensor even though a '
+                                       'forward gradient formula has been defined for it. This case should only happen '
+                                       'for function that take a single TensorList as input. All other cases are not '
+                                       'supported right now.')
+                requires_fw_grad = "true"
+            unpacked_arguments = ""
             for inp in differentiable_inputs:
                 if inp.name in derivative.required_inputs_fw_grad:
                     if inp.cpp_type == 'Tensor &':
                         warnings.warn(f'The formula for "{name}" might be using the original value of {inp.name} that is being '
                                       'modified inplace. This can lead to wrong forward gradients.')
-                    fw_grad_defined += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(inp=inp.name)
+                    unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(inp=inp.name)
                 if inp.name in (derivative.required_inputs_primal or []):
-                    fw_grad_defined += FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(inp=inp.name)
+                    unpacked_arguments += FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(inp=inp.name)
 
             if inplace:
                 is_inplace_str = "true"
@@ -920,8 +925,8 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
             else:
                 raise RuntimeError("Unsupported output type for forward derivative")
             # View ops create fw_grad that already is a view of the base's fw_grad so just use that
-            content.append(FW_DERIVATIVE_TEMPLATE.substitute(if_stmt=if_stmt, formula=derivative.formula, out_arg=res,
-                                                             fw_grad_defined=fw_grad_defined, fw_grad_setter=fw_grad_setter))
+            content.append(FW_DERIVATIVE_TEMPLATE.substitute(requires_fw_grad=requires_fw_grad, formula=derivative.formula, out_arg=res,
+                                                             unpacked_arguments=unpacked_arguments, fw_grad_setter=fw_grad_setter))
         return content
 
     def emit_forbid_fw_derivatives(is_inplace: bool = False) -> str:
@@ -936,9 +941,11 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         for inp in differentiable_inputs:
             if is_tensor_type(inp.type):
                 to_check.append(FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp.name))
-            if is_tensor_list_type(inp.type):
+            elif is_tensor_list_type(inp.type):
                 cond = FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp="_t")
                 res += FW_DERIVATIVE_FORBID_LIST_TEMPLATE.substitute(arg=inp.name, cond=cond, msg=get_msg())
+            else:
+                raise RuntimeError(f'Unsupported input type for "{name}" when forbidding forward AD usage.')
 
         if len(to_check) > 0:
             cond = " || ".join(to_check)

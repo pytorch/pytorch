@@ -188,12 +188,12 @@
 - name: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)
   other: handle_r_to_c(other.scalar_type(), maybe_multiply(grad, alpha.conj()))
-  result: maybe_multiply(self_t, alpha) + other_t
+  result: self_t + maybe_multiply(other_t, alpha)
 
 - name: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   self: handle_r_to_c(self.scalar_type(), grad)
   other: handle_r_to_c(other.scalar_type(), maybe_multiply(grad, alpha.conj()))
-  result: self_t.mul_(alpha).add_(other_t)
+  result: self_t.add_(maybe_multiply(other_t, alpha))
 
 - name: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)

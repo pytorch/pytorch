@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoL
                                                   TemporaryFileName)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available
 from torch.autograd.function import InplaceFunction
-from torch.autograd import forward_ad as fwAD
+import torch.autograd.forward_ad as fwAD
 from torch.testing import randn_like
 from torch.testing._internal.common_methods_invocations import (method_tests,
                                                                 create_input, unpack_variables,
