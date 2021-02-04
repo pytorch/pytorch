@@ -2459,8 +2459,8 @@ class TestQuantizedOps(TestCase):
                     Bias, Add_bias_kv, Add_zero_attn):
                 # TODO: need to investigate why resetting the bias reduces SNR
                 #       https://github.com/pytorch/pytorch/issues/51662
-                min_power = 20 if bias else 10
-                max_mse = 4 if bias else 10
+                min_power = 20 if (add_bias_kv and add_zero_attn) else 10
+                max_mse = 4 if (add_bias_kv and add_zero_attn) else 10
 
                 mha = MultiheadAttentionModel(embed_dim, num_heads, dropout,
                                               bias, add_bias_kv, add_zero_attn)
