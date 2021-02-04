@@ -4374,6 +4374,18 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={'x': [1, 2]},
                       test_with_inputs=[y])
 
+    def test_silu(self):
+        class SiLUModel(torch.nn.Module):
+            def __init__(self):
+                super(SiLUModel, self).__init__()
+                self.silu = torch.nn.SiLU()
+
+            def forward(self, x):
+                return self.silu(x)
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(SiLUModel(), (x))
+
     def test_remainder(self):
         class RemainderModel(torch.nn.Module):
             def forward(self, input, other):
