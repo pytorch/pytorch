@@ -10,10 +10,8 @@ from ._stdlib import is_stdlib_module
 import types
 import importlib
 from typing import List, Any, Callable, Dict, Tuple, Union, Iterable, BinaryIO, Optional
-from distutils.sysconfig import get_python_lib
 from pathlib import Path
 import linecache
-import sys
 from urllib.parse import quote
 import re
 
