@@ -38,8 +38,8 @@ class TestLicense(TestCase):
         site_packages = os.path.dirname(os.path.dirname(torch.__file__))
         distinfo = glob.glob(os.path.join(site_packages, 'torch-*dist-info'))
         if len(distinfo) > 1:
-            raise AssertionError(f'Found too many "torch-*dist-info" directories '
-                                 'in "{site_packages}, expected only one')
+            raise AssertionError('Found too many "torch-*dist-info" directories '
+                                 f'in "{site_packages}, expected only one')
         elif len(distinfo) > 0:
             with open(os.path.join(os.path.join(distinfo[0], 'LICENSE'))) as fid:
                 txt = fid.read()
