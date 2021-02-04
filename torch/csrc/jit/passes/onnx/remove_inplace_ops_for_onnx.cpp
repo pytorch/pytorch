@@ -406,35 +406,38 @@ Value* MatchIfBlocksOutputForValue(
 //    -> (%64)
 // clang-format on
 void RegisterInplaceNodeInIfBlocks(
-    Value* value,
-    Value* new_inplace_node,
-    Block* outer_block,
-    Node* initial_node,
+    Value* orig_data,
+    Value* new_data,
     const std::string& output_name) {
-  if (initial_node->kind() != prim::If)
+  auto outer_block = new_data->node()->owningBlock();
+  auto initial_block_node = outer_block->owningNode();
+
+  if ((nullptr == initial_block_node) ||
+      (initial_block_node->kind() != prim::If)) {
     return;
-
-  auto next_node = initial_node;
-  new_inplace_node->setDebugName("_output_" + output_name);
-  outer_block->registerOutput(new_inplace_node);
-  // Block has a new output. Add the output for the prim::If node.
-  if (next_node->outputs().size() < outer_block->outputs().size())
-    next_node->addOutput()->copyMetadata(new_inplace_node);
-
-  auto next_block = next_node->owningBlock();
-  while (nullptr != next_block->owningNode() &&
-         next_block != value->node()->owningBlock()) {
-    next_block->registerOutput(next_node->output(0));
-    next_node = next_block->owningNode();
-    // Block has a new output. Add the output for the prim::If node.
-    if (next_node->outputs().size() < next_block->outputs().size())
-      next_node->addOutput()->setType(new_inplace_node->type());
-    next_block = next_node->owningBlock();
   }
 
-  value->replaceAllUsesAfterNodeWith(
-      next_node->output(0)->node(),
-      next_node->outputs().at(next_node->outputs().size() - 1));
+  auto next_block_node = initial_block_node;
+  new_data->setDebugName("_output_" + output_name);
+  outer_block->registerOutput(new_data);
+  // Block has a new output. Add the output for the prim::If node.
+  if (next_block_node->outputs().size() < outer_block->outputs().size())
+    next_block_node->addOutput()->copyMetadata(new_data);
+
+  auto next_block = next_block_node->owningBlock();
+  while (nullptr != next_block->owningNode() &&
+         next_block != orig_data->node()->owningBlock()) {
+    next_block->registerOutput(next_block_node->output(0));
+    next_block_node = next_block->owningNode();
+    // Block has a new output. Add the output for the prim::If node.
+    if (next_block_node->outputs().size() < next_block->outputs().size())
+      next_block_node->addOutput()->setType(new_data->type());
+    next_block = next_block_node->owningBlock();
+  }
+
+  orig_data->replaceAllUsesAfterNodeWith(
+      next_block_node->output(0)->node(),
+      next_block_node->outputs().at(next_block_node->outputs().size() - 1));
 }
 
 // Register inplace op node inputs/outputs through the blocks.
@@ -557,8 +560,7 @@ void RegisterInplaceNodeInBlocks(Value* orig_data, Value* new_data) {
   // Register inplace node outputs through the blocks.
   RegisterInplaceNodeInLoopBlocks(orig_data, new_data);
 
-  RegisterInplaceNodeInIfBlocks(
-      orig_data, new_data, outer_block, outer_block_node, orig_data->debugName());
+  RegisterInplaceNodeInIfBlocks(orig_data, new_data, orig_data->debugName());
 
   while (nullptr != outer_block->owningNode() &&
          outer_block != orig_data->node()->owningBlock()) {
@@ -899,10 +901,8 @@ Value* registerSetAttrInBlocks(
     Value* origValue,
     const std::string& output_name) {
   auto cloneNode = insertCloneBeforeNode(graph, newValue, block->return_node());
-  auto next_node = block->owningNode();
 
-  RegisterInplaceNodeInIfBlocks(
-      origValue, cloneNode->output(), block, next_node, output_name);
+  RegisterInplaceNodeInIfBlocks(origValue, cloneNode->output(), output_name);
 
   return MatchIfBlocksOutputForValue(origValue, block, cloneNode->output());
 }
