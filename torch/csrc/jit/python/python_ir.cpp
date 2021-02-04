@@ -769,9 +769,8 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &IntType::get);
   py::class_<FloatType, Type, std::shared_ptr<FloatType>>(m, "FloatType")
       .def_static("get", &FloatType::get);
-  py::class_<ComplexDoubleType, Type, std::shared_ptr<ComplexDoubleType>>(
-      m, "ComplexDoubleType")
-      .def_static("get", &ComplexDoubleType::get);
+  py::class_<ComplexType, Type, std::shared_ptr<ComplexType>>(m, "ComplexType")
+      .def_static("get", &ComplexType::get);
   py::class_<TensorType, Type, std::shared_ptr<TensorType>>(m, "TensorType")
       .def_static("get", &TensorType::get)
       .def_static("getInferred", &TensorType::getInferred);
