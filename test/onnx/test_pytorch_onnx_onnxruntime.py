@@ -5736,7 +5736,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 2, 3, requires_grad=True)
         self.run_test(EmptyBranchModel(), x)
 
-    @disableScriptTest()
     def test_derive_index(self):
         class MyModule(torch.nn.Module):
             def forward(self, x: torch.Tensor):
@@ -5806,8 +5805,7 @@ class TestONNXRuntime(unittest.TestCase):
                     res = res + [x]
                 else:
                     res = res + [y]
-                # TODO: remove torch.stack once graph sequence output is supported.
-                return torch.stack(res)
+                return res
 
         x = torch.randn(2, 3)
         y = torch.randn(3, 3)
@@ -5833,7 +5831,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.assertRaises(RuntimeError, check_proto)
 
-    @disableScriptTest()  # dtype mismatch
     def test_split_tensor_scalar(self):
         class SplitModel(torch.nn.Module):
             def forward(self, x):
@@ -6791,16 +6788,17 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
-    @skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedMinOpsetVersion(13)
     def test_list_pop_in_block(self):
         class ListModel(torch.nn.Module):
             def forward(self, x, y):
                 res = []
+                elem = torch.matmul(x[0], y)
                 for i in range(x.size(0)):
                     res.append(torch.matmul(x[i], y))
-                for i in range(x.size(0)):
-                    res.pop()
-                return res
+                for i in range(x.size(0) - 1):
+                    elem = res.pop()
+                return res.append(elem)
 
         model = torch.jit.script(ListModel())
         x = torch.randn(16, 3, 4)
