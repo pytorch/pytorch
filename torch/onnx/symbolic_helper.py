@@ -1,6 +1,7 @@
 
 import torch
 import warnings
+import inspect
 from sys import maxsize as maxsize
 from typing import Set
 
@@ -50,7 +51,7 @@ from torch._C import OptionalType
 _sum = sum
 
 
-def _parse_arg(value, desc):
+def _parse_arg(value, desc, arg_name=None, node_name=None):
     if desc == 'none':
         return value
     if desc == 'v' or not _is_value(value):
@@ -86,7 +87,11 @@ def _parse_arg(value, desc):
         else:
             raise RuntimeError("ONNX symbolic doesn't know to interpret ListConstruct node")
 
-    raise RuntimeError("Unexpected node type: {}".format(value.node().kind()))
+    if arg_name is None or node_name is None:
+        raise RuntimeError("Expected node type 'onnx::Constant', got '{}'.".format(value.node().kind()))
+    else:
+        raise RuntimeError("Expected node type 'onnx::Constant' "
+                           "for argument '{}' of node '{}', got '{}'.".format(arg_name, node_name, value.node().kind()))
 
 
 def _maybe_get_const(value, desc):
@@ -127,7 +132,15 @@ def parse_args(*arg_descriptors):
         def wrapper(g, *args, **kwargs):
             # some args may be optional, so the length may be smaller
             assert len(arg_descriptors) >= len(args)
-            args = [_parse_arg(arg, arg_desc) for arg, arg_desc in zip(args, arg_descriptors)]  # type: ignore
+            try:
+                sig = inspect.signature(fn)
+                arg_names = list(sig.parameters.keys())[1:]
+                fn_name = fn.__name__
+            except Exception:
+                arg_names = [None] * len(args)  # type: ignore
+                fn_name = None  # type: ignore
+            args = [_parse_arg(arg, arg_desc, arg_name, fn_name)  # type: ignore
+                    for arg, arg_desc, arg_name in zip(args, arg_descriptors, arg_names)]  # type: ignore
             # only support _outputs in kwargs
             assert len(kwargs) <= 1
             if len(kwargs) == 1:
