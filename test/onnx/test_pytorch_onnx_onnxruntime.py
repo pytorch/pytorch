@@ -2734,6 +2734,38 @@ class TestONNXRuntime(unittest.TestCase):
         indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
         self.run_test(GatherModel(), input=(input, indices))
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_gather_constant_fold(self):
+        class GatherModule(torch.nn.Module):
+            def __init__(self):
+                super(GatherModule, self).__init__()
+                self.register_buffer("weight", torch.ones(5))
+
+            def forward(self, x):
+                # shape is of rank 0
+                shape = self.weight.shape[0]
+                m = 5 - shape
+                return x.clamp(min=m)
+
+        x = torch.randn(1)
+        self.run_test(GatherModule(), (x,))
+
+        class GatherModule(torch.nn.Module):
+            def __init__(self):
+                super(GatherModule, self).__init__()
+                self.register_buffer("weight", torch.ones(2))
+
+            def forward(self, x):
+                # shape is of rank 0
+                shape = self.weight.shape[0]
+                pad = [1, shape, shape, shape]
+                zero_pad = torch.nn.ZeroPad2d(pad)
+                return zero_pad(x)
+
+        x = torch.randn(1, 3, 2)
+        self.run_test(GatherModule(), (x,))
+
+    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_expand(self):
         class ExpandModel(torch.nn.Module):
