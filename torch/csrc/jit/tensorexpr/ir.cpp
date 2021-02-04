@@ -245,6 +245,20 @@ int Intrinsics::OpArgCount(IntrinsicsOp op_type) {
   }
 }
 
+ExternalCall* ExternalCall::make(
+    BufHandle buf,
+    const std::string& func_name,
+    const std::vector<BufHandle>& buf_args,
+    const std::vector<ExprHandle>& args) {
+  std::vector<const Buf*> buf_arg_nodes;
+  buf_arg_nodes.reserve(buf_args.size());
+  for (const BufHandle& buf_arg : buf_args) {
+    buf_arg_nodes.push_back(buf_arg.node());
+  }
+  return new ExternalCall(
+      buf.node(), func_name, buf_arg_nodes, ExprHandleVectorToExprVector(args));
+}
+
 std::vector<const Expr*> ExprHandleVectorToExprVector(
     const std::vector<ExprHandle>& v) {
   std::vector<const Expr*> result(v.size());

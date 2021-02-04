@@ -23,9 +23,9 @@ def _orthogonalize(matrix, epsilon=1e-8):
         if epsilon == 0:
             # Note that col ** 2 can underflow/overflow if we use FP16.
             # May need to consider multiplying a scaling factor and dividing it later, or using bfloat16 instead.
-            col /= torch.sqrt(torch.sum(col ** 2))
+            col /= torch.norm(col)
         else:
-            col /= torch.sqrt(torch.sum(col ** 2)) + epsilon
+            col /= torch.norm(col) + epsilon
         # Project it on the rest and remove it.
         if i + 1 < num_cols:
             rest = matrix[:, i + 1 :]
