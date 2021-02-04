@@ -286,7 +286,7 @@ class Conv1d(_ConvNd):
                 w, b, self.stride, self.padding, self.dilation, self.groups)
         else:
             self._packed_params = torch.ops.quantized.conv1d_prepack(
-                w, b, self.stride, _pair_from_first(0), self.dilation,
+                w, b, self.stride, _pair(0), self.dilation,
                 self.groups)
 
     def _weight_bias(self):
@@ -305,7 +305,8 @@ class Conv1d(_ConvNd):
         if len(input.shape) != 3:
             raise ValueError("Input shape must be `(N, C, L)`!")
         if self.padding_mode != 'zeros':
-            _reversed_padding_repeated_twice = _reverse_repeat_padding(self.padding)
+            # Padding in Conv1d is stored as (p, p), need to get (p,)
+            _reversed_padding_repeated_twice = _reverse_repeat_padding(self.padding[:1])
             input = F.pad(input, _reversed_padding_repeated_twice,
                           mode=self.padding_mode)
         return ops.quantized.conv1d(input, self._packed_params, self.scale, self.zero_point)
@@ -458,6 +459,7 @@ class Conv3d(_ConvNd):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros'):
+        assert padding_mode != 'reflect', "Conv3d does not support reflection padding"
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
         padding = _triple(padding)

@@ -230,9 +230,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
     def _test_conv_api_impl(
         self, module_name, qconv_module, conv_module, batch_size,
         in_channels_per_group, input_feature_map_size, out_channels_per_group,
-        groups, kernel_size, stride, padding, dilation, X_scale, X_zero_point,
-        W_scale, W_zero_point, Y_scale, Y_zero_point, use_bias, use_fused,
-        use_channelwise,
+        groups, kernel_size, stride, padding, padding_mode, dilation,
+        X_scale, X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
+        use_bias, use_fused, use_channelwise,
     ):
         for i in range(len(kernel_size)):
             assume(input_feature_map_size[i] + 2 * padding[i]
@@ -304,7 +304,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             self.assertEqual(model_dict[key], loaded_dict[key])
         loaded_qconv_module = type(qconv_module)(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, use_bias, padding_mode="zeros")
+            groups, use_bias, padding_mode=padding_mode)
         loaded_qconv_module.load_state_dict(loaded_dict)
 
         self.assertTrue(dir(loaded_qconv_module) == dir(qconv_module))
@@ -414,7 +414,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         self._test_conv_api_impl(
             module_name, qconv_module, conv_module, batch_size,
             in_channels_per_group, input_feature_map_size,
-            out_channels_per_group, groups, kernel_size, stride, pad,
+            out_channels_per_group, groups, kernel_size, stride, pad, pad_mode,
             dilation, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
             Y_zero_point, use_bias, use_fused, use_channelwise)
 
@@ -479,8 +479,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             module_name, qconv_module, conv_module, batch_size,
             in_channels_per_group, input_feature_map_size,
             out_channels_per_group, groups, kernel_size, stride, padding,
-            dilation, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
-            Y_zero_point, use_bias, use_fused, use_channelwise)
+            pad_mode, dilation, X_scale, X_zero_point, W_scale, W_zero_point,
+            Y_scale, Y_zero_point, use_bias, use_fused, use_channelwise)
 
     @skipIfNoFBGEMM
     @given(batch_size=st.integers(1, 3),
@@ -499,7 +499,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
            pad_d=st.integers(0, 1),
            pad_h=st.integers(0, 1),
            pad_w=st.integers(0, 1),
-           pad_mode=st.sampled_from(['zeros', 'reflect']),
+           pad_mode=st.just('zeros'),  # Conv3d doesn't support reflection
            dilation=st.integers(1, 2),
            X_scale=st.floats(1.2, 1.6),
            X_zero_point=st.integers(0, 4),
@@ -549,8 +549,9 @@ class TestStaticQuantizedModule(QuantizationTestCase):
                 module_name, qconv_module, conv_module, batch_size,
                 in_channels_per_group, input_feature_map_size,
                 out_channels_per_group, groups, kernel_size, stride, padding,
-                dilation, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
-                Y_zero_point, use_bias, use_fused, use_channelwise)
+                pad_mode, dilation, X_scale, X_zero_point, W_scale,
+                W_zero_point, Y_scale, Y_zero_point, use_bias, use_fused,
+                use_channelwise)
 
     def test_pool_api(self):
         """Tests the correctness of the pool module.
