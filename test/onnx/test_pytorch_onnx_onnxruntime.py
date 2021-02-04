@@ -439,7 +439,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         return [image], [image2]
 
-    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()  # Faster RCNN model is not scriptable
     def test_faster_rcnn(self):
@@ -490,7 +489,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         assert torch.all(out2.eq(out_trace2))
 
-    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
     def test_mask_rcnn(self):
@@ -535,7 +533,6 @@ class TestONNXRuntime(unittest.TestCase):
         assert torch.all(out2[0].eq(out_trace2[0]))
         assert torch.all(out2[1].eq(out_trace2[1]))
 
-    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
     def test_keypoint_rcnn(self):
@@ -557,7 +554,6 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={"images_tensors": [0, 1, 2]},
                       rtol=5e-3, atol=1e-5)
 
-    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
     def test_shufflenet_v2_dynamic_axes(self):
@@ -1248,8 +1244,8 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(FloatingPoint(), x)
 
-    @unittest.skip("If operator rank mismatch between outputs of two branches.")
-    @skipIfUnsupportedMinOpsetVersion(9)
+    # Operator rank mismatch between outputs of two branches for opsets below 11.
+    @skipIfUnsupportedMinOpsetVersion(11)
     @skipIfONNXShapeInference(False)
     def test_floating_point_infer_dtype(self):
         class FloatingPoint(torch.jit.ScriptModule):
@@ -1802,7 +1798,6 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={'x': {0: 'seq_length', 1: 'batch_size'}}, test_with_inputs=[y])
 
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipIfUnsupportedOpsetVersion([13])
     def test_copy_(self):
         class CopyModel(torch.nn.Module):
             def forward(self, x, data):
@@ -3612,7 +3607,6 @@ class TestONNXRuntime(unittest.TestCase):
         ind = torch.tensor(-2, dtype=torch.long)
         self.run_test(GetItemModel(), (x, y, z, ind))
 
-    @skipIfUnsupportedOpsetVersion([13])
     @disableScriptTest()  # torch.nonzero(x, as_tuple=True) is not scriptable.
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_nonzero(self):
@@ -4416,7 +4410,6 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randint(10, (2, 3))
         self.run_test(FModModel(), x)
 
-    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_glu(self):
         class GluModel(torch.nn.Module):
@@ -5510,7 +5503,6 @@ class TestONNXRuntime(unittest.TestCase):
         z = torch.ones(2, 3, 1)
         self.run_test(Model(), (x, y, z))
 
-    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(9)
     @disableScriptTest()  # scripting tests run for opsets > 11. See: test_where_condition_script
     def test_where_condition(self):
@@ -6127,7 +6119,6 @@ class TestONNXRuntime(unittest.TestCase):
             "ScriptModel - Initializers' sequence is not as same as named_parameters(). Expected: (" \
             + ', '.join(named_params_list) + "). Actual:(" + ', '.join(actual_list) + ")."
 
-    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_nms(self):
         boxes = torch.rand(5, 4)
@@ -6158,7 +6149,6 @@ class TestONNXRuntime(unittest.TestCase):
                       dynamic_axes={"size": [0, 1]},
                       test_with_inputs=[(boxes, size), (boxes, size_2)])
 
-    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_align(self):
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
@@ -6166,7 +6156,6 @@ class TestONNXRuntime(unittest.TestCase):
         model = ops.RoIAlign((5, 5), 1., 2)
         self.run_test(model, (x, single_roi))
 
-    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_roi_align_aligned(self):
         x = torch.rand(1, 1, 10, 10, dtype=torch.float32)
@@ -6242,7 +6231,6 @@ class TestONNXRuntime(unittest.TestCase):
         features = OrderedDict(features)
         return features
 
-    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
     def test_rpn(self):
@@ -6272,7 +6260,6 @@ class TestONNXRuntime(unittest.TestCase):
                       test_with_inputs=[(images, features), (images2, test_features)],
                       dict_check=False)
 
-    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
     def test_multi_scale_roi_align(self):
@@ -6300,7 +6287,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         self.run_test(TransformModule(), (i, [boxes],), test_with_inputs=[(i, [boxes],), (i1, [boxes1],)])
 
-    @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     @disableScriptTest()
     def test_roi_heads(self):
