@@ -583,7 +583,8 @@ The dtypes of ``U`` and ``V`` are the same as :attr:`input`'s. ``S`` will
 always be real-valued, even if :attr:`input` is complex.
 
 .. note:: Unlike NumPy's ``linalg.svd``, this always returns a namedtuple of
-          three tensors, even when :attr:`compute_uv=False`.
+          three tensors, even when :attr:`compute_uv=False`. This behavior may
+          change in a future PyTorch release.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
           then the singular values of each matrix in the batch is returned in descending order.
@@ -668,20 +669,21 @@ This function supports float, double, cfloat and cdouble dtypes.
 
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
 
-.. note:: For `{None, 2, -2}`, :attr:`input` may be a non-square matrix or batch of non-square matrices.
+.. note:: For norms `{None, 2, -2}`, :attr:`input` may be a non-square matrix or batch of non-square matrices.
           For other norms, however, :attr:`input` must be a square matrix or a batch of square matrices,
           and if this requirement is not satisfied a RuntimeError will be thrown.
 
-.. note:: For `{'fro', 'nuc', inf, -inf, 1, -1}` if :attr:`input` is a non-invertible matrix then
+.. note:: For norms `{'fro', 'nuc', inf, -inf, 1, -1}` if :attr:`input` is a non-invertible matrix then
           a tensor containing infinity will be returned. If :attr:`input` is a batch of matrices and one
           or more of them is not invertible then a RuntimeError will be thrown.
 
 Args:
     input (Tensor): the input matrix of size `(m, n)` or the batch of matrices of size `(*, m, n)`
-                    where `*` is one or more batch dimensions.
+        where `*` is one or more batch dimensions.
 
-    p (int, float, str, optional): the type of the matrix norm to use in the computations, which can
-                                   be one of the following:
+    p (int, float, inf, -inf, 'fro', 'nuc', optional): the type of the matrix norm to use in the computations.
+        inf refers to :attr:`float('inf')`, numpy's :attr:`inf` object, or any equivalent object.
+        The following norms can be used:
 
         =====  ============================
         p      norm for matrices
@@ -1000,7 +1002,7 @@ complete QR factorization. See below for a list of valid modes.
 
            * unlike ``numpy.linalg.qr``, this function always returns a
              tuple of two tensors. When ``mode='r'``, the `Q` tensor is an
-             empty tensor.
+             empty tensor. This behavior may change in a future PyTorch release.
 
 .. note::
           Backpropagation is not supported for ``mode='r'``. Use ``mode='reduced'`` instead.

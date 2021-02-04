@@ -5694,6 +5694,26 @@ class TestAutogradFunctional(TestCase):
         for inputs in test_cases:
             self._test_construct_standard_basis_for(inputs)
 
+    def _test_vectorize_raises_no_warnings(self, api):
+        # vmap is an experimental prototype. When someone calls torch.vmap,
+        # it raises a python warning. This test checks that
+        # autogradF.{jacobian, hessian} don't raise that experimental prototype
+        # warning; it is not nice for a public-facing API to raise a warning
+        # no matter how it is called.
+        def foo(a):
+            return (a ** 2).sum()
+
+        x = torch.randn(3)
+        with warnings.catch_warnings(record=True) as wa:
+            result = api(foo, x, vectorize=True)
+        self.assertEqual(len(wa), 0)
+
+    def test_jacobian_vectorize_raises_no_warnings(self):
+        return self._test_vectorize_raises_no_warnings(autogradF.jacobian)
+
+    def test_hessian_vectorize_raises_no_warnings(self):
+        return self._test_vectorize_raises_no_warnings(autogradF.hessian)
+
     def _test_jacobian_err_check(self, vectorize):
         def foo(a):
             return 3 * a.narrow(0, 0, 3)
