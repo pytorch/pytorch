@@ -193,7 +193,6 @@ class EventList(list):
             row_limit=row_limit,
             max_src_column_width=max_src_column_width,
             header=header,
-            use_cuda=self._use_cuda,
             profile_memory=self._profile_memory,
             with_flops=self._with_flops,
             top_level_events_only=top_level_events_only)
@@ -1133,7 +1132,7 @@ def parse_kineto_results(result):
 
     # Create and return FunctionEvent list
     function_events = []
-    cuda_corr_map: Dict[int, List[torch.autograd.KinetoEvent]] = {}
+    cuda_corr_map: Dict[int, List[FunctionEvent]] = {}
     for kineto_event in result.events():
         if filter_name(kineto_event.name()):
             continue
@@ -1171,23 +1170,29 @@ def parse_kineto_results(result):
             flops=kineto_event.flops(),
         )
         function_events.append(fe)
-        if kineto_event.device_type() == DeviceType.CUDA:
-            corr_id = kineto_event.linked_correlation_id()
-            if corr_id > 0:
-                if corr_id not in cuda_corr_map:
-                    cuda_corr_map[corr_id] = []
-                cuda_corr_map[corr_id].append(kineto_event)
+        corr_id = kineto_event.linked_correlation_id()
+        if corr_id > 0:
+            if corr_id not in cuda_corr_map:
+                cuda_corr_map[corr_id] = []
+            cuda_corr_map[corr_id].append(fe)
 
-    # associate CUDA kernels with CPU events
+    # associate CUDA kernels and CUDA runtime (CPU) with CPU events
     for fe in function_events:
         if (fe.device_type == DeviceType.CPU and not fe.is_async and
                 fe.id in cuda_corr_map):
-            for k_evt in cuda_corr_map[fe.id]:
-                fe.append_kernel(
-                    k_evt.name(),
-                    k_evt.device_index(),
-                    k_evt.start_us(),
-                    k_evt.start_us() + k_evt.duration_us())
+            for f_evt in cuda_corr_map[fe.id]:
+                if f_evt.device_type == DeviceType.CUDA:
+                    fe.append_kernel(
+                        f_evt.name,
+                        f_evt.device_index,
+                        f_evt.time_range.start,
+                        f_evt.time_range.end)
+                elif f_evt.device_type == DeviceType.CPU:
+                    # make sure that 'thread' of a CPU Kineto (e.g. CUDA Runtime) event is associated
+                    # with the 'thread' of the corresponding linked PyTorch event to properly track
+                    # parents and children
+                    f_evt.thread = fe.thread
+
 
     function_events.sort(key=lambda evt: [evt.time_range.start, -evt.time_range.end])
     return function_events
@@ -1421,7 +1426,6 @@ def build_table(
         header=None,
         row_limit=100,
         max_src_column_width=75,
-        use_cuda=True,
         with_flops=False,
         profile_memory=False,
         top_level_events_only=False):
@@ -1429,20 +1433,21 @@ def build_table(
     if len(events) == 0:
         return ""
 
+    has_cuda_time = any([event.self_cuda_time_total > 0 for event in events])
+    has_cuda_mem = any([event.self_cuda_memory_usage > 0 for event in events])
+    has_input_shapes = any(
+        [(event.input_shapes is not None and len(event.input_shapes) > 0) for event in events])
+
     if sort_by is not None:
         events = EventList(sorted(
             events, key=lambda evt: getattr(evt, sort_by), reverse=True
-        ), use_cuda=use_cuda, profile_memory=profile_memory, with_flops=with_flops)
-
-    has_input_shapes = any(
-        [(event.input_shapes is not None and len(event.input_shapes) > 0) for event in events])
+        ), use_cuda=has_cuda_time, profile_memory=profile_memory, with_flops=with_flops)
 
     MAX_NAME_COLUMN_WIDTH = 55
     name_column_width = max([len(evt.key) for evt in events]) + 4
     name_column_width = min(name_column_width, MAX_NAME_COLUMN_WIDTH)
 
     DEFAULT_COLUMN_WIDTH = 12
-
     shapes_column_width = max([len(str(evt.input_shapes)) for evt in events]) + 4
     shapes_column_width = min(shapes_column_width, 45)
 
@@ -1466,7 +1471,7 @@ def build_table(
         'CPU total',
         'CPU time avg',
     ]
-    if use_cuda:
+    if has_cuda_time:
         headers.extend([
             'Self CUDA',
             'Self CUDA %',
@@ -1478,7 +1483,7 @@ def build_table(
             'CPU Mem',
             'Self CPU Mem',
         ])
-        if torch.cuda.is_available():
+        if has_cuda_mem:
             headers.extend([
                 'CUDA Mem',
                 'Self CUDA Mem',
@@ -1559,16 +1564,16 @@ def build_table(
         result.append(s)
         result.append('\n')  # Yes, newline after the end as well
 
-    self_cpu_time_total = sum([event.self_cpu_time_total for event in events])
-    cuda_time_total = 0
+    sum_self_cpu_time_total = sum([event.self_cpu_time_total for event in events])
+    sum_self_cuda_time_total = 0
     for evt in events:
         if evt.device_type == DeviceType.CPU:
             # in legacy profiler, kernel info is stored in cpu events
             if evt.is_legacy:
-                cuda_time_total += evt.self_cuda_time_total
+                sum_self_cuda_time_total += evt.self_cuda_time_total
         elif evt.device_type == DeviceType.CUDA:
-            # in kineto mode, there're events with the correct device type (e.g. CUDA)
-            cuda_time_total += evt.self_cuda_time_total
+            # in kineto profiler, there're events with the correct device type (e.g. CUDA)
+            sum_self_cuda_time_total += evt.self_cuda_time_total
 
     # Actual printing
     if header is not None:
@@ -1603,20 +1608,20 @@ def build_table(
             name = name[:(MAX_NAME_COLUMN_WIDTH - 3)] + "..."
         row_values = [
             name,
-            # Self CPU total, 0 for async events. %
+            # Self CPU total %, 0 for async events.
             format_time_share(evt.self_cpu_time_total,
-                              self_cpu_time_total),
+                              sum_self_cpu_time_total),
             evt.self_cpu_time_total_str,  # Self CPU total
             # CPU total %, 0 for async events.
-            format_time_share(evt.cpu_time_total, self_cpu_time_total) if not evt.is_async else 0,
+            format_time_share(evt.cpu_time_total, sum_self_cpu_time_total) if not evt.is_async else 0,
             evt.cpu_time_total_str,  # CPU total
             evt.cpu_time_str,  # CPU time avg
         ]
-        if use_cuda:
+        if has_cuda_time:
             row_values.extend([
                 evt.self_cuda_time_total_str,
                 # CUDA time total %
-                format_time_share(evt.self_cuda_time_total, cuda_time_total),
+                format_time_share(evt.self_cuda_time_total, sum_self_cuda_time_total),
                 evt.cuda_time_total_str,
                 evt.cuda_time_str,  # Cuda time avg
             ])
@@ -1627,7 +1632,7 @@ def build_table(
                 # Self CPU Mem Total
                 format_memory(evt.self_cpu_memory_usage),
             ])
-            if torch.cuda.is_available():
+            if has_cuda_mem:
                 row_values.extend([
                     # CUDA Mem Total
                     format_memory(evt.cuda_memory_usage),
@@ -1643,7 +1648,7 @@ def build_table(
         if has_input_shapes:
             row_values.append(str(evt.input_shapes)[:shapes_column_width])
         if with_flops:
-            if evt.flops <= 0:
+            if evt.flops <= 0.0:
                 row_values.append("--")
             else:
                 row_values.append('{0:8.3f}'.format(evt.flops * flops_scale))
@@ -1662,7 +1667,7 @@ def build_table(
             append(row_format.format(*empty_headers))
 
     append(header_sep)
-    append("Self CPU time total: {}".format(format_time(self_cpu_time_total)))
-    if use_cuda:
-        append("CUDA time total: {}".format(format_time(cuda_time_total)))
+    append("Self CPU time total: {}".format(format_time(sum_self_cpu_time_total)))
+    if has_cuda_time:
+        append("Self CUDA time total: {}".format(format_time(sum_self_cuda_time_total)))
     return ''.join(result)
