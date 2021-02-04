@@ -413,6 +413,13 @@
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
   self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
 
+- name: div.Tensor_mode(Tensor self, Tensor other, *, str rounding_mode) -> Tensor
+  self: div_tensor_self_backward(grad, other, self.scalar_type(), rounding_mode)
+  other: div_tensor_other_backward(grad, self, other, rounding_mode)
+
+- name: div.Scalar_mode(Tensor self, Scalar other, *, str rounding_mode) -> Tensor
+  self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type(), rounding_mode)
+
 - name: dot(Tensor self, Tensor tensor) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad * tensor.conj())
   tensor: handle_r_to_c(tensor.scalar_type(), grad * self.conj())

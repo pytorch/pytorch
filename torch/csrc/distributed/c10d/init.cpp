@@ -412,6 +412,42 @@ Example::
     >>> # Should return "first_value"
     >>> store.get("first_key")
 )")
+          .def(
+              "compare_set",
+              [](::c10d::Store& store,
+                 const std::string& key,
+                 const std::string& new_value,
+                 const std::string& old_value) -> py::bytes {
+                std::vector<uint8_t> newValue_(new_value.begin(), new_value.end());
+                std::vector<uint8_t> oldValue_(old_value.begin(), old_value.end());
+                auto value = store.compareSet(key, newValue_, oldValue_);
+                return py::bytes(
+                    reinterpret_cast<char*>(value.data()), value.size());
+              },
+              py::call_guard<py::gil_scoped_release>(),
+              R"(
+Inserts the key-value pair into the store based on the supplied ``key`` and
+performs comparison between ``new_value`` and ``old_value`` before inserting. ``new_value`` 
+will only be placed if ``old_value`` for the ``key`` already exists in the store.
+
+.. warning::
+    The ``compare_set`` API is only supported by the :class:`~torch.distributed.TCPStore`. Using this API
+    with the :class:`~torch.distributed.FileStore` or class:`~torch.distributed.HashStore` will result in an exception.
+
+Arguments:
+    key (str): The key to be checked in the store.
+    new_value (str): The value associated with ``key`` to be added to the store.
+    old_value (str): The value associated with ``key`` to be checked before insertion.
+
+Example::
+    >>> import torch.distributed as dist
+    >>> from datetime import timedelta
+    >>> store = dist.TCPStore("127.0.0.1", 0, 1, True, timedelta(seconds=30))
+    >>> store.set("first_key", "first_value")
+    >>> store.compare_set("first_key", "second_value", "first_value")
+    >>> # Should return "second_value"
+    >>> store.get("first_key")
+)")
           // Convert from std::vector<uint8_t> to py::bytes.
           // The returned value is not guaranteed to be valid UTF-8.
           .def(
