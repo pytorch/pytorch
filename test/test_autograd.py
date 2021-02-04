@@ -3690,6 +3690,104 @@ class TestAutograd(TestCase):
         self.assertIn('Anomaly Detection has been enabled', str(w[0].message))
         self.assertIn('Error detected in PowBackward0', s.captured)
 
+    def test_anomaly_assign_parent_cleanup(self):
+        # Test that python objects created are properly cleaned up when assign_parent is called
+        import weakref
+
+        def get_ref():
+            # we use torch.exp here but any function that will construct a new node in its
+            # backward call in grad mode will work
+            x = torch.randn(2, 2, requires_grad=True)
+            t = x.exp()
+
+            # ExpBackward calls mul, creating the MulBackward node when create_graph=True.
+            # In anomaly mode, a PyObject referencing MulBackward's "parent" ExpBackward is added to
+            # MulBackward's anomaly metadata dict, creating the following reference chain:
+            #
+            # grad -> MulBackward -> PyObject -> ExpBackward
+            #
+            with detect_anomaly():
+                grad = torch.autograd.grad(t, x, torch.ones_like(t), create_graph=True)
+
+            # We add a weak reference to a new Foo object, which we insert into ExpBackward's metadata dict
+            #
+            # (PyObject) -> ExpBackward -> dict -> *Foo*
+            #            t ----^        WeakRef ---^
+            #
+            # We want to test that when grad goes out of scope at the end of this function that PyObject is destroyed
+            # We can test this by seeing whether Foo is not kept alive once t is destroyed
+            class Foo(object):
+                pass
+            my_obj = Foo()
+            meta_dict = t.grad_fn.metadata
+            meta_dict[0] = my_obj
+            ref = weakref.ref(my_obj)
+            return t, ref
+
+        t, ref = get_ref()
+        self.assertIsNotNone(ref())
+        del t
+        self.assertIsNone(ref())
+
+    def test_nested_anomaly_printstack_cleanup(self):
+        # Test if metadata dict PyObject is properly destroyed
+        import weakref
+
+        def get_ref():
+            # This is similar to the construction in test_anomaly_assign_parent_cleanup:
+            #
+            # MyFuncBackward2 -> PyObject -> MyFuncBackward -> dict -> Foo
+            #                               out ---^         WeakRef ---^
+            #
+            # We want to check that Foo is still properly destroyed even when MyFunc2Backward's
+            # AnomalyMetadata calls printstack, which does some python object manipulation.
+            #
+            # You might be wondering why we still have to test_anomaly_assign_parent_cleanup,
+            # since if PyObject is not destroyed here, wouldn't this test would detect that also?
+            # The answer is that custom function's PyObject (THPFunction) actually only hold
+            # a weak reference to the c++ node!
+            class MyFunc(Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return x
+
+                @staticmethod
+                def backward(ctx, gO):
+                    x, = ctx.saved_tensors
+                    return MyFunc2.apply(x)
+
+            class MyFunc2(Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x
+
+                @staticmethod
+                def backward(ctx, gO):
+                    return gO + float("NaN")
+
+            inp = torch.rand(1, requires_grad=True)
+            out = MyFunc.apply(inp)
+            ginp, = torch.autograd.grad(out, (inp,), create_graph=True)
+
+            with warnings.catch_warnings(record=True) as w:
+                with self.assertRaisesRegex(RuntimeError, "Function 'MyFunc2Backward' returned nan values in its 0th output."):
+                    with detect_anomaly():
+                        ginp.backward()
+
+            class Foo(object):
+                pass
+            my_obj = Foo()
+            meta_dict = out.grad_fn.metadata
+            meta_dict[0] = my_obj
+            ref = weakref.ref(my_obj)
+            return out, ref
+
+        t, ref = get_ref()
+        self.assertIsNotNone(ref())
+        del t
+        self.assertIsNone(ref())
+
     @skipIfNoLapack
     def test_eig_no_eigenvectors(self):
         A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
