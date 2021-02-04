@@ -86,7 +86,9 @@ VkInstance create_instance(const Runtime::Type type) {
         nullptr, &instance_extension_count, instance_extension_properties.data()));
 
     constexpr const char* const requested_instance_extensions[]{
+    #ifdef VK_EXT_debug_report
       VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
+    #endif
     };
 
     for (const auto& requested_instance_extension : requested_instance_extensions) {
@@ -265,8 +267,8 @@ void Runtime::Debug::operator()(
           instance_, "vkDestroyDebugReportCallbackEXT");
 
       TORCH_CHECK(
-        vkDestroyDebugReportCallbackEXT,
-        "Could not load vkDestroyDebugReportCallbackEXT");
+          vkDestroyDebugReportCallbackEXT,
+          "Could not load vkDestroyDebugReportCallbackEXT");
 
       vkDestroyDebugReportCallbackEXT(
           instance_, debug_report_callback, nullptr);
@@ -303,11 +305,11 @@ Adapter Runtime::select(const Selector& selector) {
       "Vulkan: no adapter was selected as part of device enumeration!");
 }
 
-Runtime* initialize() {
+Runtime* runtime() {
   static const std::unique_ptr<Runtime> runtime([]() -> Runtime* {
 #ifdef USE_VULKAN_WRAPPER
     if (!InitVulkan()) {
-      TORCH_WARN("Vulkan: Wrapper Failed to InitVulkan!");
+      TORCH_WARN("Vulkan: Failed to initialize Vulkan Wrapper!");
       return nullptr;
     }
 #endif
@@ -315,22 +317,25 @@ Runtime* initialize() {
     try {
       return new Runtime(Configuration::kRuntime);
     }
-    catch (...) {
-      return nullptr;
+    catch (const std::exception& e) {
+      TORCH_WARN(
+          "Vulkan: Failed to initialize runtime! Error: ",
+          e.what());
     }
+    catch (...) {
+      TORCH_WARN(
+          "Vulkan: Failed to initialize runtime! "
+          "Error: Unknown");
+    }
+
+    return nullptr;
   }());
 
-  return runtime.get();
-}
-
-Runtime* runtime() {
-  Runtime* const runtime = initialize();
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       runtime,
-      "Vulkan: Backend not available on this platform!"
-      "Calls to api::runtime() must have been guarded by api::available().");
+      "Invalid Vulkan runtime!");
 
-  return runtime;
+  return runtime.get();
 }
 
 } // namespace api

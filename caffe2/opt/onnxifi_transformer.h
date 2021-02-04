@@ -61,6 +61,17 @@ class TORCH_API OnnxifiTransformer final : public BackendTransformerBase {
       const ShapeInfoMap& shape_hints,
       const std::unordered_set<int>& blocklisted_ops) override;
 
+  // Query whether an operator is supported by passing C2 protobuf
+  bool supportOpC2(
+      const caffe2::OperatorDef& op,
+      const ShapeInfoMap& shape_hints,
+      const std::unordered_set<std::string>& weights,
+      const std::unordered_set<int>& blocklisted_ops,
+      onnxBackendID backend_id) const;
+
+  // Determine backend id
+  std::vector<onnxBackendID> getBackendId();
+
  private:
   // Since we create new tensors during the conversion process, we actually need
   // into inject them into the original workspace
@@ -114,14 +125,6 @@ class TORCH_API OnnxifiTransformer final : public BackendTransformerBase {
       ShapeInfoMap* shape_hints_max_bs,
       const std::unordered_map<int, ShapeInfoMap> &shape_hints_per_bs);
 
-  // Query whether an operator is supported by passing C2 protobuf
-  bool supportOpC2(
-      const caffe2::OperatorDef& op,
-      const ShapeInfoMap& shape_hints,
-      const std::unordered_set<std::string>& weights,
-      const std::unordered_set<int>& blocklisted_ops,
-      onnxBackendID backend_id) const;
-
   // Query whether an operator is supported by passing ONNX protobuf
   bool supportOpOnnx(
       const caffe2::OperatorDef& op,
@@ -151,9 +154,6 @@ class TORCH_API OnnxifiTransformer final : public BackendTransformerBase {
       const ShapeInfoMap& shape_hints,
       const std::unordered_set<std::string>& weights,
       std::unordered_set<int>* blocklisted_ops) const;
-
-  // Determine backend id
-  void getBackendId();
 
   // Extract partition info from the original net
   void extractPartitionInfo(const NetDef& net);

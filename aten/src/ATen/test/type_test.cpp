@@ -175,8 +175,8 @@ class OneForward(Interface):
 
 TEST(TypeEquality, TupleEquality) {
   // Tuples should be structurally typed
-  auto type = TupleType::create({IntType::get(), TensorType::get(), FloatType::get()});
-  auto type2 = TupleType::create({IntType::get(), TensorType::get(), FloatType::get()});
+  auto type = TupleType::create({IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
+  auto type2 = TupleType::create({IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
 
   EXPECT_EQ(*type, *type2);
 }
@@ -185,24 +185,24 @@ TEST(TypeEquality, NamedTupleEquality) {
   // Named tuples should compare equal if they share a name and field names
   auto type = TupleType::createNamed(
       "MyNamedTuple",
-      {"a", "b", "c"},
-      {IntType::get(), TensorType::get(), FloatType::get()});
+      {"a", "b", "c", "d"},
+      {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
   auto type2 = TupleType::createNamed(
       "MyNamedTuple",
-      {"a", "b", "c"},
-      {IntType::get(), TensorType::get(), FloatType::get()});
+      {"a", "b", "c", "d"},
+      {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
   EXPECT_EQ(*type, *type2);
 
   auto differentName = TupleType::createNamed(
       "WowSoDifferent",
-      {"a", "b", "c"},
-      {IntType::get(), TensorType::get(), FloatType::get()});
+      {"a", "b", "c", "d"},
+      {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
   EXPECT_NE(*type, *differentName);
 
   auto differentField = TupleType::createNamed(
       "MyNamedTuple",
-      {"wow", "so", "different"},
-      {IntType::get(), TensorType::get(), FloatType::get()});
+      {"wow", "so", "very", "different"},
+      {IntType::get(), TensorType::get(), FloatType::get(), ComplexType::get()});
   EXPECT_NE(*type, *differentField);
 }
 } // namespace c10

@@ -17,6 +17,8 @@ namespace detail {
 // Obtains the base name from a full path.
 C10_API std::string StripBasename(const std::string& full_path);
 
+C10_API std::string ExcludeFileExtension(const std::string& full_path);
+
 template <typename T>
 struct CanonicalizeStrTypes {
   using type = const T&;

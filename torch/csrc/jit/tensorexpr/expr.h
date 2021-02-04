@@ -211,11 +211,18 @@ class TORCH_API Buf : public ExprNode<Buf> {
 
   Buf(const std::string& name_hint,
       const std::vector<const Expr*>& dims,
-      Dtype dtype)
-      : Buf(new Var(name_hint, kHandle), dims, dtype) {}
+      Dtype dtype,
+      const Expr* initializer = nullptr)
+      : Buf(new Var(name_hint, kHandle), dims, dtype, initializer) {}
 
-  Buf(const Var* var, const std::vector<const Expr*>& dims, Dtype dtype)
-      : ExprNodeBase(dtype, kPrimitive), base_handle_(var), dims_(dims) {
+  Buf(const Var* var,
+      const std::vector<const Expr*>& dims,
+      Dtype dtype,
+      const Expr* initializer = nullptr)
+      : ExprNodeBase(dtype, kPrimitive),
+        base_handle_(var),
+        dims_(dims),
+        initializer_(initializer) {
     TORCH_CHECK(var);
   }
 
@@ -235,9 +242,14 @@ class TORCH_API Buf : public ExprNode<Buf> {
     dims_ = dims;
   };
 
+  const Expr* initializer() const {
+    return initializer_;
+  };
+
  private:
   const Var* base_handle_;
   std::vector<const Expr*> dims_;
+  const Expr* initializer_;
 };
 
 class TORCH_API BufHandle : public ExprHandle {
@@ -293,6 +305,8 @@ TORCH_API ExprHandle exp(const ExprHandle& v);
 TORCH_API ExprHandle expm1(const ExprHandle& v);
 TORCH_API ExprHandle abs(const ExprHandle& v);
 TORCH_API ExprHandle log(const ExprHandle& v);
+TORCH_API ExprHandle fast_tanh(const ExprHandle& v);
+TORCH_API ExprHandle fast_sigmoid(const ExprHandle& v);
 TORCH_API ExprHandle fast_log(const ExprHandle& v);
 TORCH_API ExprHandle log2(const ExprHandle& v);
 TORCH_API ExprHandle log10(const ExprHandle& v);

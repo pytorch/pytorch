@@ -1,4 +1,3 @@
-#include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <ATen/ThreadLocalState.h>
 #include <fmt/format.h>
 #include <torch/csrc/autograd/record_function_ops.h>
@@ -8,13 +7,14 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
 #include <torch/csrc/distributed/rpc/script_call.h>
+#include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
 namespace distributed {
 namespace rpc {
 
-c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
+c10::intrusive_ptr<JitFuture> rpcTorchscript(
     const std::string& dstWorkerName,
     const c10::QualifiedName& qualifiedName,
     const c10::FunctionSchema& functionSchema,
@@ -43,14 +43,14 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
   auto scriptCall = std::make_unique<ScriptCall>(
       qualifiedName, std::move(stack), isAsyncExecution);
   auto rpcAgentPtr = RpcAgent::getCurrentRpcAgent();
-  auto futMessage = autograd::sendMessageWithAutograd(
+  auto jitFuture = autograd::sendMessageWithAutograd(
       *rpcAgentPtr,
       rpcAgentPtr->getWorkerInfo(dstWorkerName),
       std::move(*scriptCall).toMessage(),
       true /*forceGradRecording*/,
       rpcTimeoutSeconds);
 
-  // Get function return type to construct c10::ivalue::Future.
+  // Get function return type to construct JitFuture.
   auto returns = functionSchema.returns();
   // Script call only allows single IValue returned.
   TORCH_INTERNAL_ASSERT(
@@ -62,15 +62,15 @@ c10::intrusive_ptr<c10::ivalue::Future> rpcTorchscript(
 
   // Create a JIT future and pass it to futMessage's callback to set state
   // of the JIT future.
-  auto futPtr = c10::make_intrusive<c10::ivalue::Future>(returnType);
-  std::weak_ptr<FutureMessage> wp = futMessage;
-  futMessage->addCallback(at::wrapPropagateTLSState<void>([futPtr, wp]() {
-    auto futMessage = wp.lock();
-    if (futMessage->hasError()) {
-      c10::ivalue::Future::FutureError jitFutErr(futMessage->error()->what());
-      futPtr->setError(std::make_exception_ptr(jitFutErr));
+  auto futPtr = c10::make_intrusive<JitFuture>(returnType);
+  std::weak_ptr<JitFuture> wp = jitFuture;
+  jitFuture->addCallback(at::wrapPropagateTLSState<void>([futPtr, wp]() {
+    auto future = wp.lock();
+    if (future->hasError()) {
+      futPtr->setError(future->exception_ptr());
     } else {
-      futPtr->markCompleted(deserializeRespToIValue(futMessage->constValue()));
+      futPtr->markCompleted(deserializeRespToIValue(
+          *future->constValue().toCustomClass<Message>()));
     }
   }));
   if (shouldProfile) {
@@ -112,21 +112,19 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         userRRefPtr->forkId(),
         isAsyncExecution);
 
-    auto fm = torch::distributed::autograd::sendMessageWithAutograd(
+    auto jitFuture = torch::distributed::autograd::sendMessageWithAutograd(
         *rpcAgentPtr,
         dstWorkerInfo,
         std::move(*scriptRemoteCall).toMessage(),
         true /*forceGradRecording*/,
         rpcTimeoutSeconds /* timeout */);
 
-    userRRefPtr->registerOwnerCreationFuture(fm);
-
+    userRRefPtr->registerOwnerCreationFuture(jitFuture);
     ctx.addPendingUser(userRRefPtr->forkId(), userRRefPtr);
-    std::weak_ptr<FutureMessage> wp = fm;
-    fm->addCallback(
+    std::weak_ptr<JitFuture> wp = jitFuture;
+    jitFuture->addCallback(
         at::wrapPropagateTLSState<void>([wp, forkId{userRRefPtr->forkId()}]() {
-          auto fm = wp.lock();
-          callback::confirmPendingUser(*fm, forkId);
+          callback::confirmPendingUser(*wp.lock(), forkId);
         }));
 
     return userRRefPtr;
@@ -142,19 +140,18 @@ c10::intrusive_ptr<RRef> remoteTorchscript(
         ownerRRefPtr->rrefId(),
         isAsyncExecution);
 
-    auto fm = torch::distributed::autograd::sendMessageWithAutograd(
+    auto jitFuture = torch::distributed::autograd::sendMessageWithAutograd(
         *rpcAgentPtr,
         dstWorkerInfo,
         std::move(*scriptRemoteCall).toMessage(),
         true /*forceGradRecording*/,
         rpcTimeoutSeconds /* timeout */);
 
-    ownerRRefPtr->registerOwnerCreationFuture(fm);
-    std::weak_ptr<FutureMessage> wp = fm;
-    fm->addCallback(at::wrapPropagateTLSState<void>(
+    ownerRRefPtr->registerOwnerCreationFuture(jitFuture);
+    std::weak_ptr<JitFuture> wp = jitFuture;
+    jitFuture->addCallback(at::wrapPropagateTLSState<void>(
         [wp, ownerRRefId = ownerRRefPtr->rrefId()]() {
-          auto fm = wp.lock();
-          callback::finishCreatingOwnerRRef(*fm, ownerRRefId);
+          callback::finishCreatingOwnerRRef(*wp.lock(), ownerRRefId);
         }));
     return ownerRRefPtr;
   }
