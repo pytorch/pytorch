@@ -543,6 +543,19 @@ if TYPE_CHECKING:
     # PR #43339 for details.
     from torch._C._VariableFunctions import *  # type: ignore
 
+
+# TODO: add explanation
+class _Modules(dict):
+    def __getitem__(self, item):
+        if item == "torch.tensor":
+            # TODO: make message more expressive
+            warnings.warn("You are importing wrong!")
+        return super().__getitem__(item)
+
+
+sys.modules = _Modules(sys.modules)
+
+
 for name in dir(_C._VariableFunctions):
     if name.startswith('__'):
         continue
