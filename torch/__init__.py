@@ -353,6 +353,10 @@ def use_deterministic_algorithms(d):
         * :class:`torch.nn.ConvTranspose2d` when called on CUDA tensor
         * :class:`torch.nn.ConvTranspose3d` when called on CUDA tensor
         * :func:`torch.bmm` when called on sparse-dense CUDA tensors
+        * :func:`torch.__getitem__` backward when `self` is a CPU tensor and
+          ``indices`` is a list of tensors
+        * :func:`torch.index_put` with ``accumulate=True`` when called on a CPU
+          tensor
 
     The following normally-nondeterministic operations will throw a
     :class:`RuntimeError` when `d=True`:

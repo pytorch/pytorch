@@ -4,6 +4,7 @@ import random
 import tempfile
 import warnings
 import tarfile
+import zipfile
 
 import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests)
@@ -112,6 +113,35 @@ class TestIterableDataPipeBasic(TestCase):
             self.assertEqual(rec[1].read(), open(temp_file, 'rb').read())
         self.assertEqual(count, len(self.temp_files))
         # read extracted files after reaching the end of the tarfile
+        count = 0
+        data_refs = []
+        for rec in datapipe3:
+            count = count + 1
+            data_refs.append(rec)
+        self.assertEqual(count, len(self.temp_files))
+        for i in range(0, count):
+            self.assertEqual(os.path.basename(data_refs[i][0]), os.path.basename(self.temp_files[i]))
+            self.assertEqual(data_refs[i][1].read(), open(self.temp_files[i], 'rb').read())
+
+
+    def test_readfilesfromzip_iterable_datapipe(self):
+        temp_dir = self.temp_dir.name
+        temp_zipfile_pathname = os.path.join(temp_dir, "test_zip.zip")
+        with zipfile.ZipFile(temp_zipfile_pathname, 'w') as myzip:
+            myzip.write(self.temp_files[0])
+            myzip.write(self.temp_files[1])
+            myzip.write(self.temp_files[2])
+        datapipe1 = dp.iter.ListDirFiles(temp_dir, '*.zip')
+        datapipe2 = dp.iter.LoadFilesFromDisk(datapipe1)
+        datapipe3 = dp.iter.ReadFilesFromZip(datapipe2)
+        # read extracted files before reaching the end of the zipfile
+        count = 0
+        for rec, temp_file in zip(datapipe3, self.temp_files):
+            count = count + 1
+            self.assertEqual(os.path.basename(rec[0]), os.path.basename(temp_file))
+            self.assertEqual(rec[1].read(), open(temp_file, 'rb').read())
+        self.assertEqual(count, len(self.temp_files))
+        # read extracted files before reaching the end of the zipile
         count = 0
         data_refs = []
         for rec in datapipe3:
