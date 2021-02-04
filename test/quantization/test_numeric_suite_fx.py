@@ -36,6 +36,9 @@ from torch.quantization.ns.graph_matcher import (
 )
 from torch.quantization.ns.numeric_suite_core_apis_fx import (
     compare_weights,
+    prepare_model_outputs,
+    OutputLogger,
+    prepare_model_with_stubs,
 )
 
 
@@ -380,3 +383,144 @@ class TestFXNumericSuiteCoreAPIs(QuantizationTestCase):
         # human inspection - correct
         # TODO(before land): real checks
         print(results)
+
+    def test_match_activations_mod(self):
+        m = nn.Sequential(
+            torch.quantization.QuantStub(),
+            nn.Conv2d(1, 1, 1),
+            nn.Conv2d(1, 1, 1),
+        ).eval()
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        mp(torch.randn(4, 1, 4, 4))
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+
+        mp_ns, mq_ns = prepare_model_outputs('fp32_prepared', mp, 'int8', mq, OutputLogger)
+
+        # calibrate
+        input_fp32 = torch.randn(4, 1, 4, 4)
+        mp_ns(input_fp32)
+        mq_ns(input_fp32)
+
+        # extract stats
+        # TODO(future PR): build an API for this
+        for model in (mp_ns, mq_ns):
+            for name, module in model.named_modules():
+                if isinstance(module, OutputLogger):
+                    # this is correct just need to wrap in an API
+                    print(module.name, module.stats)
+
+    def test_match_activations_fun(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w1 = nn.Parameter(torch.Tensor(1, 1))
+                self.b1 = nn.Parameter(torch.Tensor(1))
+                self.w2 = nn.Parameter(torch.Tensor(1, 1))
+                self.b2 = nn.Parameter(torch.Tensor(1))
+
+            def forward(self, x):
+                x = F.linear(x, self.w1, self.b1)
+                x = F.linear(x, self.w2, self.b2)
+                return x
+
+        m = M().eval()
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        mp(torch.randn(2, 1))
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+
+        mp_ns, mq_ns = prepare_model_outputs('fp32_prepared', mp, 'int8', mq, OutputLogger)
+
+        # calibrate
+        input_fp32 = torch.randn(2, 1)
+        mp_ns(input_fp32)
+        mq_ns(input_fp32)
+
+        # extract stats
+        # TODO(future PR): build an API for this
+        for model in (mp_ns, mq_ns):
+            for name, module in model.named_modules():
+                if isinstance(module, OutputLogger):
+                    # this is correct just need to wrap in an API
+                    print(module.name, module.stats)
+
+    def test_prepare_model_with_stubs_mod(self):
+        m = nn.Sequential(
+            nn.Conv2d(1, 1, 1),
+            nn.Conv2d(1, 1, 1),
+        ).eval()
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        mp(torch.randn(4, 1, 4, 4))
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+
+        mp_shadows_mq = prepare_model_with_stubs('fp32_prepared', mp, 'int8', mq, OutputLogger)
+
+        # calibrate
+        input_fp32 = torch.randn(4, 1, 4, 4)
+        mp_shadows_mq(input_fp32)
+
+        # extract stats
+        # TODO(future PR): build an API for this
+        for name, module in mp_shadows_mq.named_modules():
+            if isinstance(module, OutputLogger):
+                # this is correct just need to wrap in an API
+                print(module.name, module.stats)
+
+    def test_prepare_model_with_stubs_fun(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w1 = nn.Parameter(torch.Tensor(1, 1))
+                self.b1 = nn.Parameter(torch.Tensor(1))
+                self.w2 = nn.Parameter(torch.Tensor(1, 1))
+                self.b2 = nn.Parameter(torch.Tensor(1))
+
+            def forward(self, x):
+                x = F.linear(x, self.w1, self.b1)
+                x = F.linear(x, self.w2, self.b2)
+                return x
+
+        m = M().eval()
+        mp = prepare_fx(m, {'': torch.quantization.default_qconfig})
+        mp(torch.randn(2, 1))
+        # TODO(future PR): prevent the need for copying here, we can copy the
+        # modules but should reuse the underlying tensors
+        mp_copy = copy.deepcopy(mp)
+        mq = convert_fx(mp_copy)
+
+        mp_shadows_mq = prepare_model_with_stubs('fp32_prepared', mp, 'int8', mq, OutputLogger)
+
+        # calibrate
+        input_fp32 = torch.randn(2, 1)
+        mp_shadows_mq(input_fp32)
+
+        # extract stats
+        # TODO(future PR): build an API for this
+        for name, module in mp_shadows_mq.named_modules():
+            if isinstance(module, OutputLogger):
+                # this is correct just need to wrap in an API
+                print(module.name, module.stats)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
