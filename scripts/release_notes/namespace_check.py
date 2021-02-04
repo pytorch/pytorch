@@ -3,9 +3,14 @@ import torch
 from os import path
 import json
 
+# Import all utils so that getattr below can find them
+from torch.utils import bottleneck, checkpoint, model_zoo
+
 all_submod_list = [
     "",
     "nn",
+    "nn.functional",
+    "nn.init",
     "optim",
     "autograd",
     "cuda",
@@ -15,6 +20,13 @@ all_submod_list = [
     "linalg",
     "jit",
     "distributed",
+    "futures",
+    "onnx",
+    "random",
+    "utils.bottleneck",
+    "utils.checkpoint",
+    "utils.data",
+    "utils.model_zoo",
 ]
 
 def get_content(submod):
@@ -31,7 +43,7 @@ def namespace_filter(data):
     return out
 
 def run(args, submod):
-    print(f"Processing torch.{submod}")
+    print(f"## Processing torch.{submod}")
     prev_filename = f"prev_data_{submod}.json"
     new_filename = f"new_data_{submod}.json"
 
@@ -63,13 +75,17 @@ def run(args, submod):
             prev_content = namespace_filter(prev_content)
             new_content = namespace_filter(new_content)
 
-        print("Things that were added:")
-        print(new_content - prev_content)
-        print("")
+        if new_content == prev_content:
+            print("Nothing changed.")
+            print("")
+        else:
+            print("Things that were added:")
+            print(new_content - prev_content)
+            print("")
 
-        print("Things that were removed:")
-        print(prev_content - new_content)
-        print("")
+            print("Things that were removed:")
+            print(prev_content - new_content)
+            print("")
 
 def main():
     parser = argparse.ArgumentParser(description='Tool to check namespace content changes')
