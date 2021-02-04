@@ -24,7 +24,7 @@ def exec_with_source(src: str, globals: Dict[str, Any]):
     key = f'<eval_with_key_{_next_id}>'
     _next_id += 1
     _eval_cache[key] = [line + '\n' for line in src.splitlines()]
-    exec(compile(src, key, 'exec'), globals)
+    exec(compile(src, key, 'exec'), globals)    # noqa: P204
 
 # patch linecache so that any code we exec using exec_with_source
 # works with inspect
@@ -36,14 +36,14 @@ def patched_getline(*args, **kwargs):
     return _orig_getlines(*args, **kwargs)
 linecache.getlines = patched_getline
 
-def _forward_from_src(src : str):
+def _forward_from_src(src: str):
     # If you add more globals here, remember to add their names to fx.graph._shadows_builtin_name!
     gbls: Dict[str, Any] = {'inf': math.inf, 'nan': math.nan, 'NoneType' : type(None)}
     exec_with_source(src, gbls)
     return gbls['forward']
 
 
-def deserialize_graphmodule(body : dict) -> torch.nn.Module:
+def deserialize_graphmodule(body: Dict[Any, Any]) -> torch.nn.Module:
     """
     Deserialize a GraphModule given the dictionary of the original module,
     using the code to reconstruct the graph. We delete the actual graph before
@@ -339,7 +339,6 @@ class {module_name}(torch.nn.Module):
                 topmost_framesummary: traceback.FrameSummary = \
                     traceback.StackSummary.extract(traceback.walk_tb(e.__traceback__))[-1]  # type: ignore
                 if "eval_with_key" in topmost_framesummary.filename:
-                    assert e.__traceback__
                     print(generate_error_message(e.__traceback__),
                           file=sys.stderr)
                     # Elide the real traceback since we've already
