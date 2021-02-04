@@ -3794,19 +3794,26 @@ class TestONNXRuntime(unittest.TestCase):
     @disableScriptTest()
     def test_chunk(self):
         class ChunkModel(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, dim=1):
                 super(ChunkModel, self).__init__()
+                self.dim = dim
 
             def forward(self, x):
-                return torch.chunk(x, 3, dim=1)
+                return torch.chunk(x, 3, dim=self.dim)
 
         model = ChunkModel()
         model.eval()
+        model_neg_dim = ChunkModel(-1)
+        model_neg_dim.eval()
         x = torch.randn(1, 18)
 
         for dim_size_ in range(13, 16):
             y = torch.randn(1, dim_size_)
             self.run_test(model, x, test_with_inputs=[y],
+                          input_names=['x'],
+                          dynamic_axes={'x': {0: 'batch_size', 1: 'dims'}})
+
+            self.run_test(model_neg_dim, x, test_with_inputs=[y],
                           input_names=['x'],
                           dynamic_axes={'x': {0: 'batch_size', 1: 'dims'}})
 
@@ -5822,6 +5829,22 @@ class TestONNXRuntime(unittest.TestCase):
         # test that the model still runs with a different batch size
         other_input = make_input(RNN_BATCH_SIZE + 1)
         self.run_test(model, other_input, batch_size=RNN_BATCH_SIZE + 1)
+
+    @disableScriptTest()  # TODO: RuntimeError: Exporting the operator __is_ to ONNX is not supported
+    def test_transformer_encoder(self):
+        from torch.nn import TransformerEncoderLayer, TransformerEncoder
+
+        class MyModule(torch.nn.Module):
+            def __init__(self, ninp, nhead, nhid, dropout, nlayers):
+                super(MyModule, self).__init__()
+                encoder_layers = TransformerEncoderLayer(ninp, nhead, nhid, dropout)
+                self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)
+
+            def forward(self, input):
+                return self.transformer_encoder(input)
+
+        x = torch.rand(10, 32, 512)
+        self.run_test(MyModule(512, 8, 2048 , 0., 3), (x,), atol=1e-6)
 
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_fake_quantize_per_tensor(self):
