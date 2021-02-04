@@ -22,7 +22,7 @@ What is an FX transform? Essentially, it's a function that looks like this.
 
     def transform(m: nn.Module,
                   tracer_class : type = torch.fx.Tracer) -> torch.nn.Module:
-        # Step 1: Acquire a graph representing the code in `m`
+        # Step 1: Acquire a Graph representing the code in `m`
 
         # NOTE: torch.fx.symbolic_trace is a wrapper around a call to
         # fx.Tracer.trace and constructing a GraphModule. We'll
@@ -30,7 +30,7 @@ What is an FX transform? Essentially, it's a function that looks like this.
         # customize tracing behavior.
         graph : torch.fx.Graph = tracer_class().trace(m)
 
-        # Step 2: Modify this graph or create a new one
+        # Step 2: Modify this Graph or create a new one
         graph = ...
 
         # Step 3: Construct a Module to return
@@ -38,34 +38,139 @@ What is an FX transform? Essentially, it's a function that looks like this.
 
 Your transform will take in an :class:`torch.nn.Module`, acquire a :class:`Graph`
 from it, do some modifications, and return a new
-``nn.Module``. You should think of the ``nn.Module`` that your FX transform
-returns as identical to a regular ``nn.Module`` -- you can pass it to another
+:class:`torch.nn.Module`. You should think of the :class:`torch.nn.Module` that your FX
+transform returns as identical to a regular :class:`torch.nn.Module` -- you can pass it to another
 FX transform, you can pass it to TorchScript, or you can
 run it. Ensuring that the inputs and outputs of your FX transform are a
-``nn.Module`` will allow for composability.
+:class:`torch.nn.Module` will allow for composability.
 
-Given that you’ve passed in an ``nn.Module`` that has been traced into a
-graph, there are now two primary approaches you can take to building a new
-graph.
+.. note::
+
+    It is also possible to modify an existing :class:`GraphModule` instead of
+    creating a new one, like so::
+
+        import torch
+        import torch.fx
+
+        def transform(m : nn.Module) -> nn.Module):
+            gm : torch.fx.GraphModule = torch.fx.symbolic_trace(m)
+
+            # Modify gm.graph
+            # <...>
+
+            # Recompile the forward() method of `gm` from its Graph
+            gm.recompile()
+
+            return gm
+
+    Note that you MUST call :meth:`GraphModule.recompile` to bring the generated
+    ``forward()`` method on the ``GraphModule`` in sync with the modified :ref:`Graph`.
+
+Given that you’ve passed in a :class:`torch.nn.Module` that has been traced into a
+:class:`Graph`, there are now two primary approaches you can take to building a new
+:class:`Graph`.
+
+A Quick Primer on Graphs
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Full treatment of the semantics of graphs can be found in the :class:`Graph`
+documentation, but we are going to cover the basics here. A :class:`Graph` is
+a data structure that represents a method on a :class:`GraphModule`. The
+information that this requires is:
+
+- What are the inputs to the method?
+- What are the operations that run inside the method?
+- What is the output (i.e. return) value from the method?
+
+All three of these concepts are represented with :class:`Node` instances.
+Let's see what we mean by that with a short example:
+
+::
+
+    import torch
+    import torch.fx
+
+    class MyModule(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.param = torch.nn.Parameter(torch.rand(3, 4))
+            self.linear = torch.nn.Linear(4, 5)
+
+        def forward(self, x):
+            return torch.topk(torch.sum(
+                self.linear(x + self.linear.weight).relu(), dim=-1), 3)
+
+    m = MyModule()
+    gm = torch.fx.symbolic_trace(m)
+
+    gm.graph.print_tabular()
+
+Here we define a module ``MyModule`` for demonstration purposes, instantiate it,
+symbolically trace it, then call the :meth:`Graph.print_tabular` method to print
+out a table showing the nodes of this :class:`Graph`:
+
+    +---------------+---------------+----------------------------+--------------------+-------------+
+    | opcode        | name          | target                     | args               | kwargs      |
+    +===============+===============+============================+====================+=============+
+    | placeholder   | x             | x                          | ()                 | {}          |
+    +---------------+---------------+----------------------------+--------------------+-------------+
+    | get_attr      | linear_weight | linear.weight              | ()                 | {}          |
+    +---------------+---------------+----------------------------+--------------------+-------------+
+    | call_function | add_1         | <built-in function add>    | (x, linear_weight) | {}          |
+    +---------------+---------------+----------------------------+--------------------+-------------+
+    | call_module   | linear_1      | linear                     | (add_1,)           | {}          |
+    +---------------+---------------+----------------------------+--------------------+-------------+
+    | call_method   | relu_1        | relu                       | (linear_1,)        | {}          |
+    +---------------+---------------+----------------------------+--------------------+-------------+
+    | call_function | sum_1         | <built-in method sum ...>  | (relu_1,)          | {'dim': -1} |
+    +---------------+---------------+----------------------------+--------------------+-------------+
+    | call_function | topk_1        | <built-in method topk ...> | (sum_1, 3)         | {}          |
+    +---------------+---------------+----------------------------+--------------------+-------------+
+    | output        | output        | output                     | (topk_1,)          | {}          |
+    +---------------+---------------+----------------------------+--------------------+-------------+
+
+We can use this information to answer the questions we posed above.
+
+- What are the inputs to the method? In FX, method inputs are specified
+  via special ``placeholder`` nodes. In this case, we have a single
+  ``placeholder`` node with a ``target`` of ``x``, meaning we have
+  a single (non-self) argument named x.
+- What are the operations within the method? The ``get_attr``,
+  ``call_function``, ``call_module``, and ``call_method`` nodes
+  represent the operations in the method. A full treatment of
+  the semantics of all of these can be found in the :class:`Node`
+  documentation.
+- What is the return value of the method? The return value in a
+  :class:`Graph` is specified by a special ``output`` node.
+
+Given that we now know the basics of how code is represented in
+FX, we can now explore how we would edit a :class:`Graph`.
 
 Graph Manipulation
 ^^^^^^^^^^^^^^^^^^
 
-One approach to building this new graph is to directly manipulate your old
-one. To aid in this, we can simply take the graph we obtain from symbolic
+Direct Graph Manipulation
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+One approach to building this new :class:`Graph` is to directly manipulate your old
+one. To aid in this, we can simply take the :class:`Graph` we obtain from symbolic
 tracing and modify it. For example, let’s say we desire to replace
-``torch.add`` with ``torch.mul``.
+:func:`torch.add` calls with :func:`torch.mul` calls.
 
 ::
+
+    import torch
+    import torch.fx
 
     # Sample module
     class M(torch.nn.Module):
         def forward(self, x, y):
             return torch.add(x, y)
 
-    def transform(m: nn.Module, tracer_class : type = fx.Tracer) -> nn.Module:
+    def transform(m: torch.nn.Module,
+                  tracer_class : type = fx.Tracer) -> torch.nn.Module:
         graph : fx.Graph = tracer_class().trace(m)
-        # FX represents its graph as an ordered list of
+        # FX represents its Graph as an ordered list of
         # nodes, so we can iterate through them.
         for node in graph.nodes:
             # Checks if we're calling a function (i.e:
@@ -77,131 +182,222 @@ tracing and modify it. For example, let’s say we desire to replace
                     node.target = torch.mul
 
         graph.lint() # Does some checks to make sure the
-                      # graph is well-formed.
+                     # Graph is well-formed.
 
         return fx.GraphModule(m, graph)
 
 
-We can also do more involved graph rewrites, such as deleting or appending
-nodes. To aid in these transformations, FX has utility
-functions for transforming the graph that can be found in :class:`Graph`. An
-example of using these APIs to append a relu can be found below.
+We can also do more involved :class:`Graph` rewrites, such as
+deleting or appending nodes. To aid in these transformations,
+FX has utility functions for transforming the graph that can
+be found in the :class:`Graph` documentation. An
+example of using these APIs to append a :func:`torch.relu` call
+can be found below.
 
 ::
 
-    with traced.graph.inserting_after(node): # Specifies the
-                                             # insertion point
+    # Specifies the insertion point. Any nodes added to the
+    # Graph within this scope will be inserted after `node`
+    with traced.graph.inserting_after(node):
+        # Insert a new `call_function` node calling `torch.relu`
         new_node = traced.graph.call_function(
-            torch.relu, args=(node,)) # builds a new relu node
-        node.replace_all_uses_with(new_node)
+            torch.relu, args=(node,))
 
-This approach is also a good fit for graph optimizations such as
-`conv/batch norm
-fusion! <https://github.com/pytorch/pytorch/blob/ec86cec20a8a2312a2295d7bc8be6e88256a2de4/torch/fx/experimental/fuser.py>`__
+        # We want all places that used the value of `node` to
+        # now use that value after the `relu` call we've added.
+        # We use the `replace_all_uses_with` API to do this.
+        node.replace_all_uses_with(new_node)
 
 For simple transformations that only consist of substitutions, you can also
 make use of the `subgraph rewriter. <https://github.com/pytorch/pytorch/blob/master/torch/fx/subgraph_rewriter.py>`__
 
-In general, writing your transformation through graph manipulation is a good
-fit if you need to make a few small changes or if you need to match multiple
-nodes at once. However, if you need to entirely rewrite your graph, you may
-want to look at constructing your graph with Proxies (i.e. retracing).
+Subgraph Rewriting With replace_pattern()
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+FX also provides another level of automation on top of direct graph manipulation.
+The :func:`replace_pattern` API is essentially a "find/replace" tool for editing
+:class:`Graph`\s. It allows you to specify a ``pattern`` and ``replacement`` function
+and it will trace through those functions, find instances of the group of operations
+in the ``pattern`` graph, and replace those instances with copies of the ``replacement``
+graph. This can help to greatly automate tedious graph manipulation code, which can
+get unwieldy as the transformations get more complex.
 
 Graph Manipulation Examples
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  `Replace one
-   op <https://github.com/pytorch/pytorch/blob/master/torch/fx/examples/replace_op.py>`__
+   op <https://github.com/pytorch/examples/blob/master/fx/replace_op.py>`__
 -  `Conv/Batch Norm
    fusion <https://github.com/pytorch/pytorch/blob/master/torch/fx/experimental/fuser.py>`__
--  `Quantization <https://github.com/pytorch/pytorch/tree/master/torch/quantization/fx>`__
+-  `replace_pattern: Basic usage <https://github.com/pytorch/examples/blob/master/fx/subgraph_rewriter_basic_use.py>`__
+-  `Quantization <https://pytorch.org/docs/master/quantization.html#prototype-fx-graph-mode-quantization>`__
+-  `Invert Transformation <https://github.com/pytorch/examples/blob/master/fx/invert.py>`__
 
 Proxy/Retracing
 ^^^^^^^^^^^^^^^
 
-Although most transformations can be implemented as graph
-transformations, transformations that involve a lot of graph rewrites
-are often more easily represented through retracing. For example, let’s
-imagine that we wanted to write a pass that decomposed
-PyTorch functions. It would transform every ``F.relu(x)``
-into ``(x > 0)*x``. One possibility would be to perform the requisite
-graph rewriting to insert the comparison and multiplication after the
-``F.relu``, and then clean up the original ``F.relu``. However, graph
-manipulation can be awkward, and it’s often easier to implicitly
-generate the graph by retracing.
+Another way of manipulating :class:`Graph`\s is by reusing the :class:`Proxy`
+machinery used in symbolic tracing. For example, let’s
+imagine that we wanted to write a transformation that decomposed
+PyTorch functions into smaller operations. It would transform every
+``F.relu(x)`` call into ``(x > 0) * x``. One possibility would be to
+perform the requisite graph rewriting to insert the comparison and
+multiplication after the ``F.relu``, and then clean up the original
+``F.relu``. However, we can automate this process by using :class:`Proxy`
+objects to automatically record operations into the :class:`Graph`.
 
-To use this method, we write the graph that we want inserted as regular
-PyTorch code and pass in Proxy objects. These Proxy objects
-will capture the operations that are performed on them and append them to
-the graph.
+To use this method, we write the operations that we want inserted as regular
+PyTorch code and invoke that code with :class:`Proxy` objects as arugments.
+These :class:`Proxy` objects will capture the operations that are performed
+on them and append them to the :class:`Graph`.
 
 ::
 
     # Note that this decomposition rule can be read as regular Python
     def relu_decomposition(x):
-        return (x > 0)*x
+        return (x > 0) * x
 
     decomposition_rules = {}
     decomposition_rules[F.relu] = relu_decomposition
 
-    def decompose(model: torch.nn.Module, tracer_class : type = fx.Tracer) -> torch.nn.Module:
+    def decompose(model: torch.nn.Module,
+                  tracer_class : type = fx.Tracer) -> torch.nn.Module:
+        """
+        Decompose `model` into smaller constituent operations.
+        Currently,this only supports decomposing ReLU into its
+        mathematical definition: (x > 0) * x
+        """
         graph : fx.Graph = tracer_class().trace(model)
         new_graph = fx.Graph()
-        env = {}
         for node in graph.nodes:
             if node.op == 'call_function' and node.target in decomposition_rules:
-                # By wrapping the arguments with proxies, we can dispatch to
-                # the appropriate decomposition rule and add it to the graph by
-                # symbolically tracing it.
-                proxy_args = [fx.Proxy(env[x.name]) if isinstance(x, fx.Node) else x for x in node.args]
-                new_node = decomposition_rules[node.target](*proxy_args).node
+                # By wrapping the arguments with proxies,
+                # we can dispatch to the appropriate
+                # decomposition rule and implicitly add it
+                # to the Graph by symbolically tracing it.
+                proxy_args = [
+                    fx.Proxy(env[x.name]) if isinstance(x, fx.Node) else x for x in node.args]
+                output_proxy = decomposition_rules[node.target](*proxy_args)
+
+                # Operations on `Proxy` always yield new `Proxy`s, and the
+                # return value of our decomposition rule is no exception.
+                # We need to extract the underlying `Node` from the `Proxy`
+                # to use it in subsequent iterations of this transform.
+                new_node = output_proxy.node
                 env[node.name] = new_node
             else:
+                # Default case: we don't have a decomposition rule for this
+                # node, so just copy the node over into the new graph.
                 new_node = new_graph.node_copy(node, lambda x: env[x.name])
                 env[node.name] = new_node
         return fx.GraphModule(model, new_graph)
 
-In addition to avoiding explicit graph manipulation, using Proxies also allows you to
-specify your rewrite rules as native Python code. For transformations
-that require a large amount of rewrite rules (such as vmap or grad),
-this can often improve readability and maintainability of the rules.
+In addition to avoiding explicit graph manipulation, using :class:`Proxy`\s
+also allows you to specify your rewrite rules as native Python code.
+For transformations that require a large amount of rewrite rules
+(such as vmap or grad), this can often improve readability and
+maintainability of the rules.
 
-TODO: Example transformations (need to be included first)
+A worked example of using :class:`Proxy`\s for :class:`Graph` manipulation
+can be found
+`here <https://github.com/pytorch/examples/blob/master/fx/proxy_based_graph_creation.py>`__.
 
 The Interpreter Pattern
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-In addition to FX passes that take in a module and return a module,
-there may be other things you wish to do with the FX graph. For example,
-let’s say that you’d like to obtain
-the shape information of tensors in your graph. In this case, instead of
-looping over the FX graph and modifying it, you can write an interpreter
-on top of the FX graph! As the FX IR is quite simple, it’s easy to
-reimplement an interpreter that also captures your desired attributes.
+A useful code organizational pattern in FX is to loop over all the :class:`Node`\s
+in a :class:`Graph` and execute them. This can be used for several things including
+runtime analysis of values flowing through the graph or transformation of the code
+via retracing with :class:`Proxy`\s. For example, suppose we want to run a
+:class:`GraphModule` and record the :class:`torch.Tensor` shape and dtype
+properties on the nodes as we see them at runtime. That might look like:
 
-As this pattern is quite useful, we we can also use an abstraction of this
-pattern
--- the `Interpreter
-<https://github.com/pytorch/pytorch/blob/master/torch/fx/interpreter.py>`__.
-You can see an example using this for `shape propagation
-<https://github.com/pytorch/pytorch/blob/master/torch/fx/passes/shape_prop.py>`__,
-which reinterprets the FX graph with example inputs while annotating the
-graph with the shapes.
+::
 
-Reinterpreting the FX graph is generally most useful when you want
-runtime information that FX typically doesn’t capture (due to being a
-symbolic trace). This can be used for capturing shape information for
-downstream passes, but it can also be used to capture other information
-about execution.
-TODO: Add roofline analysis pass once it gets merged.
+    import torch
+    import torch.fx
+    from torch.fx.node import Node
+
+    from typing import Dict
+
+    class ShapeProp:
+        """
+        Shape propagation. This class takes a `GraphModule`.
+        Then, its `propagate` method executes the `GraphModule`
+        node-by-node with the given arguments. As each operation
+        executes, the ShapeProp class stores away the shape and
+        element type for the output values of each operation on
+        the `shape` and `dtype` attributes of the operation's
+        `Node`.
+        """
+        def __init__(self, mod):
+            self.mod = mod
+            self.graph = mod.graph
+            self.modules = dict(self.mod.named_modules())
+
+        def propagate(self, *args):
+            args_iter = iter(args)
+            env : Dict[str, Node] = {}
+
+            def load_arg(a):
+                return torch.fx.graph.map_arg(a, lambda n: env[n.name])
+
+            def fetch_attr(target : str):
+                target_atoms = target.split('.')
+                attr_itr = self.mod
+                for i, atom in enumerate(target_atoms):
+                    if not hasattr(attr_itr, atom):
+                        raise RuntimeError(f"Node referenced nonexistant target {'.'.join(target_atoms[:i])}")
+                    attr_itr = getattr(attr_itr, atom)
+                return attr_itr
+
+            for node in self.graph.nodes:
+                if node.op == 'placeholder':
+                    result = next(args_iter)
+                elif node.op == 'get_attr':
+                    result = fetch_attr(node.target)
+                elif node.op == 'call_function':
+                    result = node.target(*load_arg(node.args), **load_arg(node.kwargs))
+                elif node.op == 'call_method':
+                    self_obj, *args = load_arg(node.args)
+                    kwargs = load_arg(node.kwargs)
+                    result = getattr(self_obj, node.target)(*args, **kwargs)
+                elif node.op == 'call_module':
+                    result = self.modules[node.target](*load_arg(node.args), **load_arg(node.kwargs))
+
+                # This is the only code specific to shape propagation.
+                # you can delete this `if` branch and this becomes
+                # a generic GraphModule interpreter.
+                if isinstance(result, torch.Tensor):
+                    node.shape = result.shape
+                    node.dtype = result.dtype
+
+                env[node.name] = result
+
+            return load_arg(self.graph.result)
+
+As you can see, a full interpreter for FX is not that complicated
+but it can be very useful. To ease using this pattern, we provide
+the :class:`Interpreter` class, which encompasses the above logic
+in a way that certain aspects of the interpreter's execution can
+be overridden via method overrides.
+
+In addition to executing operations, we can also generate a new
+`Graph` by feeding :class:`Proxy` values through an interpreter.
+Similarly, we provide the :class:`Transformer` class to encompass
+this pattern. :class:`Transformer` behaves similarly to
+:class:`Interpreter`, but instead of calling the ``run`` method to
+get a concrete output value from the Module, you would call the
+:meth:`Transformer.transform` method to return a new
+:class:`GraphModule` which was subject to any transformation rules
+you installed as overridden methods.
 
 Examples of the Interpreter Pattern
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  `Shape
    Propagation <https://github.com/pytorch/pytorch/blob/master/torch/fx/experimental/shape_prop.py>`__
--  `Roofline
-   Analyzer <https://github.com/pytorch/pytorch/blob/a9f88511b8155ba9620730fb175dee8c54e346d5/torch/fx/experimental/cost_model.py>`__
+-  `Performance Profiler <https://github.com/pytorch/tutorials/pull/1319>`__
 
 
 Debugging
@@ -210,16 +406,67 @@ Debugging
 Introduction
 ^^^^^^^^^^^^^^^^
 
-After symbolically tracing an ``nn.Module`` and performing some number
-of transformations on the resulting :class:`GraphModule`, we'll want to verify
-that the proper semantics were preserved after those transforms. If they
-weren't, we may need to do some debugging. The key is to work
-backwards: first, check the results of the generated module, then debug
-the generated code, then debug the process of transformations that lead
-to the generated code.
+Often in the course of authoring transformations, our code will not be quite right.
+In this case, we may need to do some debugging. The key is to work
+backwards: first, check the results of invoking the generated module to prove or
+disprove correctness. Then, inspect and debug the generated code. Then, debug the
+process of transformations that led to the generated code.
 
 If you’re not familiar with debuggers, please see the auxiliary section
 :ref:`Available Debuggers`.
+
+Checking Correctness of Modules
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Because the output of most deep learning modules consists of floating
+point :class:`torch.Tensor` instances, checking for equivalence between
+the results of two :class:`torch.nn.Module` is not as straightforward
+as doing a simple equality check. To motivate this, let's use an
+example:
+
+::
+
+    import torch
+    import torch.fx
+    import torchvision.models as models
+
+    def transform(m : torch.nn.Module) -> torch.nn.Module:
+        gm = torch.fx.symbolic_trace(m)
+
+        # Imagine we're doing some transforms here
+        # <...>
+
+        gm.recompile()
+
+        return gm
+
+    resnet18 = models.resnet18()
+    transformed_resnet18 = transform(resnet18)
+
+    input_image = torch.randn(5, 3, 224, 224)
+
+    assert resnet18(input_image) == transformed_resnet18(input_image)
+    """
+    RuntimeError: Boolean value of Tensor with more than one value is ambiguous
+    """
+
+Here, we've tried to check equality of the values of two deep learning
+models with the ``==`` equality operator. However, this is not well-
+defined both due to the issue of that operator returning a tensor
+and not a bool, but also because comparison of floating point values
+should use a margin of error (or epsilon) to account for the
+non-commutativity of floating point operations (see
+`here <https://floating-point-gui.de/errors/comparison/>`__ for more
+details). We can use :func:`torch.allclose` instead, which will give
+us an approximate comparison taking into account a relative and
+absolute tolerance threshold:
+
+::
+
+    assert torch.allclose(resnet18(input_image), transformed_resnet18(input_image))
+
+This is the first tool in our toolbox to check if transformed modules are
+behaving as we expect compared to a reference implementation.
 
 Debugging the Generated Code
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -232,7 +479,7 @@ for debugging the generated code.
 Use ``pdb``
 ~~~~~~~~~~~~~
 Invoke ``pdb`` to step into the running program. Although the code that
-represents the FX graph is not in any source file, we can still step
+represents the :class:`Graph` is not in any source file, we can still step
 into it manually using ``pdb`` when the forward pass is invoked.
 
 ::
@@ -457,8 +704,8 @@ Limitations of Symbolic Tracing
 FX uses a system of **symbolic tracing** (a.k.a `symbolic
 execution <https://en.wikipedia.org/wiki/Symbolic_execution>`__)
 to capture the semantics of programs in a transformable/analyzable form.
-The system is **tracing** in that it executes the program (really an
-``nn.Module`` or function) to record operations. It is
+The system is **tracing** in that it executes the program (really a
+:class:`torch.nn.Module` or function) to record operations. It is
 **symbolic** in that the data flowing through the program during this
 execution is not real data, but rather symbols (:class:`Proxy` in FX parlance).
 
