@@ -529,7 +529,8 @@ The dtypes of ``U`` and ``V`` are the same as :attr:`input`'s. ``S`` will
 always be real-valued, even if :attr:`input` is complex.
 
 .. note:: Unlike NumPy's ``linalg.svd``, this always returns a namedtuple of
-          three tensors, even when :attr:`compute_uv=False`.
+          three tensors, even when :attr:`compute_uv=False`. This behavior may
+          change in a future PyTorch release.
 
 .. note:: The singular values are returned in descending order. If :attr:`input` is a batch of matrices,
           then the singular values of each matrix in the batch is returned in descending order.
@@ -920,7 +921,7 @@ complete QR factorization. See below for a list of valid modes.
 
            * unlike ``numpy.linalg.qr``, this function always returns a
              tuple of two tensors. When ``mode='r'``, the `Q` tensor is an
-             empty tensor.
+             empty tensor. This behavior may change in a future PyTorch release.
 
 .. note::
           Backpropagation is not supported for ``mode='r'``. Use ``mode='reduced'`` instead.
