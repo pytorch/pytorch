@@ -1696,7 +1696,7 @@ def build_table(
             if evt.flops <= 0.0:
                 row_values.append("--")
             else:
-                row_values.append('{0:8.3g}'.format(evt.flops * flops_scale))
+                row_values.append('{0:8.3f}'.format(evt.flops * flops_scale))
         if has_stack:
             src_field = ""
             if len(evt.stack) > 0:
