@@ -52,8 +52,8 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
         # Convert to multiple slice nodes iff number of splits and number of outputs are statically known.
         if sym_help._is_packed_list(split_size_or_sizes) and \
                 len(sym_help._unpack_list(split_size_or_sizes)) == _outputs:
-            split_sizes = [g.op("Unsqueeze", v, g.op("Constant", value_t=torch.tensor([0])))
-                           for v in sym_help._unpack_list(split_size_or_sizes)]
+            split_sizes = [sym_help._unsqueeze_helper(g, v, [0]) for v in sym_help._unpack_list(split_size_or_sizes)]
+
             start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
             axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
             res = []
@@ -153,3 +153,26 @@ def _reduce_with_dtype(onnx_op, name):
     return reduce
 
 sum = _reduce_with_dtype('ReduceSum', 'sum')
+
+@parse_args('v', 'i', 'i', 'i')
+def unsafe_chunk(g, self, chunks, dim, _outputs=None):
+    if _outputs is None:
+        return g.op("SplitToSequence",
+                    self,
+                    g.op("Constant", value_t=torch.tensor(1, dtype=torch.long)),
+                    axis_i=dim, keepdims_i=0)
+
+    size = sym_help._get_tensor_dim_size(self, dim)
+    if size is None:
+        return _unimplemented('unsafe_chunk', 'unknown dimension size')
+    split_size = (size + chunks - 1) // chunks
+    splits = [split_size] * (size // split_size)
+    leftover = size % split_size
+    if leftover:
+        splits.append(leftover)
+
+    # TODO: So far we don't have a module using this method. We'll keep 
+    # this as a constant unless we see a request of dynamics in any 
+    # user's modules.
+    splits = g.op("Constant", value_t=torch.tensor(splits, dtype=torch.long))
+    return g.op("Split", self, splits, axis_i=dim, outputs=_outputs)

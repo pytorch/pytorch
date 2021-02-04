@@ -6521,6 +6521,18 @@ class TestONNXRuntime(unittest.TestCase):
         empty_tensor = torch.tensor([], dtype=torch.float).view(0, 0, 0, 0, 0)
         self.run_test(model, (random_data, empty_tensor))
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    @disableScriptTest()
+    def test_unsafe_chunk(self):
+        class ChunkModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.unsafe_chunk(x, 3, dim=1)
+
+        model = ChunkModel()
+        model.eval()
+        x = torch.randn(1, 18)
+        self.run_test(model, x, input_names=['x'])
+
 
 def make_test(name, base, layer, bidirectional, initial_state,
               variable_length, dropout,
