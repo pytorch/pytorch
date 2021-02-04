@@ -3513,6 +3513,20 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(6, 4)
         self.run_test(ViewModel(), (x, y))
 
+    def test_linear(self):
+        class LinearModel(torch.nn.Module):
+            def __init__(self):
+                super(LinearModel, self).__init__()
+                self.fc = torch.nn.Linear(16, 16)
+
+            def forward(self, x):
+                out = self.fc(x)
+                out = self.fc(out)
+                return out
+
+        x = torch.randn(3, 16)
+        self.run_test(LinearModel(), (x,))
+
     @disableScriptTest()
     def test_weight_norm(self):
         # addmm for 3-d inputs converts to onnx::MatMul
