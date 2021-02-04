@@ -100,7 +100,7 @@ jobs:
 
   clang-tidy:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
         uses: actions/setup-python@v1
