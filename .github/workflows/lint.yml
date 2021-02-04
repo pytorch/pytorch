@@ -130,7 +130,7 @@ jobs:
           sudo apt-get update
           sudo apt-get --no-install-recommends -y install cuda-toolkit-10-2
           # Install dependencies
-          pip install pyyaml
+          pip install pyyaml typing_extensions
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
           sudo apt-add-repository "deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic-11 main"
           sudo apt-get update
