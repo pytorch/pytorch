@@ -124,8 +124,20 @@ void update_stat_array(StatArray& stat_array, int64_t amount, const StatTypes& s
 }
 
 struct Block;
+struct PrivatePool;
 typedef bool (*Comparison)(const Block*, const Block*);
-typedef std::set<Block*, Comparison> BlockPool;
+
+struct BlockPool {
+  BlockPool(Comparison comparator,
+            bool small,
+            PrivatePool* private_pool=nullptr) :
+    blocks(comparator),
+    is_small(small),
+    owner_PrivatePool(private_pool) {}
+  std::set<Block*, Comparison> blocks;
+  const bool is_small;
+  PrivatePool* owner_PrivatePool;
+};
 
 struct Block {
   int           device;      // gpu
@@ -204,6 +216,26 @@ struct AllocParams {
   cudaError_t err;
 };
 
+
+// CUDA graphs helper
+struct PrivatePool {
+  PrivatePool() :
+    use_count(1),
+    large_blocks(BlockComparator, false, this),
+    small_blocks(BlockComparator, true, this) {}
+  // Number of live graphs using this pool
+  int use_count;
+  // Number of unfreed cudaMallocs made for this pool. When use_count and cudaMalloc_count
+  // drop to zero, we can delete this PrivatePool from graph_pools.
+  int cudaMalloc_count;
+  // Instead of maintaining private BlockPools here, I could stuff all blocks (private or no)
+  // into the top-level large_blocks and small_blocks, and distinguish private blocks by adding
+  // a "pool id" check above the stream check in BlockComparator. BlockComparator is performance-
+  // critial though, I'd rather not add more logic to it.
+  BlockPool large_blocks;
+  BlockPool small_blocks;
+};
+
 cudaError_t cudaMallocMaybeCapturing(void** p, size_t size) {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   if (at::cuda::currentStreamCaptureStatusMayInitCtx() == at::cuda::CaptureStatus::None) {
@@ -256,25 +288,11 @@ class DeviceCachingAllocator {
 
   // Members specific to CUDA graphs
 
-  struct PrivatePool {
-    PrivatePool() : use_count(1),
-                    large_blocks(BlockComparator),
-                    small_blocks(BlockComparator) {}
-    // Number of live graphs using this pool
-    int use_count;
-    // Number of unfreed cudaMallocs made for this pool. When use_count and cudaMalloc_count
-    // drop to zero, we can delete this PrivatePool from graph_pools.
-    int cudaMalloc_count;
-    // Instead of maintaining private BlockPools here, I could stuff all blocks (private or no)
-    // into the top-level large_blocks and small_blocks, and distinguish private blocks by adding
-    // a "pool id" check above the stream check in BlockComparator. BlockComparator is performance-
-    // critial though, I'd rather not add more logic to it.
-    BlockPool large_blocks;
-    BlockPool small_blocks;
-  };
-
   // Private pools for CUDA graphs
   std::unordered_map<CUDACaptureid_t/*pool id*/, PrivatePool> graph_pools;
+  // Pools no longer referenced by any graph. Their BlockPools are eligible for free_blocks.
+  // Needs to be a map (not a vector) because (like graph_pools) we might erase entries in any order.
+  std::unordered_map<CUDACaptureid_t/*pool id*/, PrivatePool*> graph_pools_freeable;
 
   // Maps a capturing stream to its assigned private pool,
   // in case we want multiple captures to share the same pool
@@ -283,8 +301,8 @@ class DeviceCachingAllocator {
  public:
 
   DeviceCachingAllocator() :
-      large_blocks(BlockComparator),
-      small_blocks(BlockComparator) {}
+      large_blocks(BlockComparator, false),
+      small_blocks(BlockComparator, true) {}
 
   // All public methods (except the above) acquire the allocator mutex.
   // Thus, do not call a public method from another public method.
@@ -379,7 +397,7 @@ class DeviceCachingAllocator {
       remaining->prev = block;
       remaining->ptr = static_cast<char*>(remaining->ptr) + size;
       remaining->size -= size;
-      pool.insert(remaining);
+      pool.blocks.insert(remaining);
 
       if (already_split) {
         // An already-split inactive block is being shrunk by size bytes.
@@ -543,7 +561,7 @@ class DeviceCachingAllocator {
       SegmentInfo& segment_info = result.back();
       segment_info.device = head_block->device;
       segment_info.address = reinterpret_cast<int64_t>(head_block->ptr);
-      segment_info.is_large = (head_block->pool == &large_blocks);
+      segment_info.is_large = (!head_block->pool->is_small);
 
       const Block* block = head_block;
       while (block != nullptr) {
@@ -622,7 +640,13 @@ class DeviceCachingAllocator {
     // this graph's pool when it discovers they're unused (unsplit).
     auto it = graph_pools.find(mempool_id);
     TORCH_INTERNAL_ASSERT(it != graph_pools.end());
-    it->second.use_count--;
+    auto uc = it->second.use_count--;
+    TORCH_INTERNAL_ASSERT(uc >= 0);
+    if (uc == 0) {
+      // Allows free_cached_blocks to begin cudaFreeing this pool's memory,
+      // and makes sure this pool wasn't somehow made freeable already.
+      TORCH_INTERNAL_ASSERT(graph_pools_freeable.insert({mempool_id, &(it->second)}).second);
+    }
   }
 
  private:
@@ -631,8 +655,8 @@ class DeviceCachingAllocator {
 
   std::vector<const Block*> get_all_blocks() const {
     std::vector<const Block*> blocks;
-    blocks.insert(blocks.end(), small_blocks.begin(), small_blocks.end());
-    blocks.insert(blocks.end(), large_blocks.begin(), large_blocks.end());
+    blocks.insert(blocks.end(), small_blocks.blocks.begin(), small_blocks.blocks.end());
+    blocks.insert(blocks.end(), large_blocks.blocks.begin(), large_blocks.blocks.end());
     blocks.insert(blocks.end(), active_blocks.begin(), active_blocks.end());
     return blocks;
   }
@@ -658,7 +682,7 @@ class DeviceCachingAllocator {
     }
 
     active_blocks.erase(block);
-    pool.insert(block);
+    pool.blocks.insert(block);
 
     if (block->is_split()) {
       net_change_inactive_split_blocks += 1;
@@ -667,7 +691,7 @@ class DeviceCachingAllocator {
 
     StatTypes stat_types;
     stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
-    stat_types[static_cast<size_t>(get_stat_type_for_pool(*(block->pool)))] = true;
+    stat_types[static_cast<size_t>(get_stat_type_for_pool(pool))] = true;
     update_stat_array(stats.inactive_split, net_change_inactive_split_blocks, stat_types);
     update_stat_array(stats.inactive_split_bytes, net_change_inactive_split_size, stat_types);
     update_stat_array(stats.active, -1, stat_types);
@@ -698,7 +722,7 @@ class DeviceCachingAllocator {
 
     const size_t subsumed_size = src->size;
     dst->size += subsumed_size;
-    pool.erase(src);
+    pool.blocks.erase(src);
     delete src;
 
     return subsumed_size;
@@ -734,38 +758,14 @@ class DeviceCachingAllocator {
   }
 
   StatType get_stat_type_for_pool(const BlockPool& pool) {
-    if (&pool == &small_blocks) {
-      return StatType::SMALL_POOL;
-    } else if (&pool == &large_blocks) {
-      return StatType::LARGE_POOL;
-    } else {
-      for (auto& gp : graph_pools) {
-        if (&pool == &gp.second.small_blocks) {
-          return StatType::SMALL_POOL;
-        } else if (&pool == &gp.second.large_blocks) {
-          return StatType::LARGE_POOL;
-        }
-      }
-      AT_ERROR("get_stat_type_for_pool: invalid pool");
-    }
+    return pool.is_small ? StatType::SMALL_POOL : StatType::LARGE_POOL;
   }
 
   bool should_split(const Block* block, size_t size) {
     size_t remaining = block->size - size;
-    if (block->pool == &small_blocks) {
-      return remaining >= kMinBlockSize;
-    } else if (block->pool == &large_blocks) {
-      return remaining > kSmallSize;
-    } else {
-      for (auto& gp : graph_pools) {
-        if (block->pool == &gp.second.small_blocks) {
-          return remaining >= kMinBlockSize;
-        } else if (block->pool == &gp.second.large_blocks) {
-          return remaining > kSmallSize;
-        }
-      }
-      AT_ERROR("should_split: invalid pool");
-    }
+    return (block->pool->is_small) ?
+           (remaining >= kMinBlockSize) :
+           (remaining > kSmallSize);
   }
 
   static size_t get_allocation_size(size_t size) {
@@ -780,11 +780,11 @@ class DeviceCachingAllocator {
 
   bool get_free_block(AllocParams& p) {
     BlockPool& pool = *p.pool;
-    auto it = pool.lower_bound(&p.search_key);
-    if (it == pool.end() || (*it)->stream != p.stream())
+    auto it = pool.blocks.lower_bound(&p.search_key);
+    if (it == pool.blocks.end() || (*it)->stream != p.stream())
       return false;
     p.block = *it;
-    pool.erase(it);
+    pool.blocks.erase(it);
     return true;
   }
 
@@ -831,12 +831,8 @@ class DeviceCachingAllocator {
     }
 
     // Dirty but simple check if the new cudaMalloc is for a CUDA graph's PrivatePool
-    for (auto& gp : graph_pools) {
-      if (p.pool == &gp.second.large_blocks ||
-          p.pool == &gp.second.small_blocks) {
-        gp.second.cudaMalloc_count++;
-        break;
-      }
+    if (p.pool->owner_PrivatePool) {
+      p.pool->owner_PrivatePool->cudaMalloc_count++;
     }
 
     total_allocated_memory += size;
@@ -859,50 +855,45 @@ class DeviceCachingAllocator {
     free_blocks(large_blocks);
     free_blocks(small_blocks);
 
-    for (auto it = graph_pools.begin(); it != graph_pools.end(); ) {
+    for (const auto& id_and_PrivatePool : graph_pools_freeable) {
       // See notifyCaptureDestroy for the strategy here.
-      TORCH_INTERNAL_ASSERT(it->second.use_count >= 0);
-      if (it->second.use_count > 0) {
-        ++it;
-        continue;
-      }
-      free_blocks(it->second.small_blocks, &it->second);
-      free_blocks(it->second.large_blocks, &it->second);
-      if (it->second.cudaMalloc_count == 0) {
-        it = graph_pools.erase(it);
-      } else {
-        ++it;
+      TORCH_INTERNAL_ASSERT(id_and_PrivatePool.second->use_count == 0);
+      free_blocks(id_and_PrivatePool.second->small_blocks);
+      free_blocks(id_and_PrivatePool.second->large_blocks);
+      if (id_and_PrivatePool.second->cudaMalloc_count == 0) {
+        TORCH_INTERNAL_ASSERT(graph_pools.erase(id_and_PrivatePool.first) == 1);
+        TORCH_INTERNAL_ASSERT(graph_pools_freeable.erase(id_and_PrivatePool.first) == 1);
       }
     }
 
     return true;
   }
 
-  void free_blocks(BlockPool& blocks, PrivatePool* owner_PrivatePool=nullptr)
+  void free_blocks(BlockPool& pool)
   {
     // Frees all non-split blocks
-    auto it = blocks.begin();
-    while (it != blocks.end()) {
+    auto it = pool.blocks.begin();
+    while (it != pool.blocks.end()) {
       Block* block = *it;
       if (!block->prev && !block->next) {
         C10_CUDA_CHECK(cudaFree((void*)block->ptr));
         total_allocated_memory -= block->size;
 
-        if (owner_PrivatePool) {
+        if (pool.owner_PrivatePool) {
           // The cudaFreed block belonged to a CUDA graph's PrivatePool.
-          TORCH_INTERNAL_ASSERT(owner_PrivatePool->cudaMalloc_count > 0);
-          owner_PrivatePool->cudaMalloc_count--;
+          TORCH_INTERNAL_ASSERT(pool.owner_PrivatePool->cudaMalloc_count > 0);
+          pool.owner_PrivatePool->cudaMalloc_count--;
         }
 
         StatTypes stat_types;
         stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
-        stat_types[static_cast<size_t>(get_stat_type_for_pool(*(block->pool)))] = true;
+        stat_types[static_cast<size_t>(get_stat_type_for_pool(pool))] = true;
         update_stat_array(stats.segment, -1, stat_types);
         update_stat_array(stats.reserved_bytes, -block->size, stat_types);
 
         auto cur = it;
         ++it;
-        blocks.erase(cur);
+        pool.blocks.erase(cur);
         delete block;
       } else {
         ++it;
@@ -991,9 +982,9 @@ class DeviceCachingAllocator {
   }
 
   // Accumulates sizes of all memory blocks for given device in given pool
-  void cache_info_aux(BlockPool& blocks, size_t* total, size_t* largest)
+  void cache_info_aux(BlockPool& pool, size_t* total, size_t* largest)
   {
-    for (const auto& block : blocks) {
+    for (const auto& block : pool.blocks) {
       size_t blocksize = block->size;
       *total += blocksize;
       if (blocksize > *largest) {
