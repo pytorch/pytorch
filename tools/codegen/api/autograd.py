@@ -95,9 +95,11 @@ class DifferentiabilityInfo:
     op: Optional[str]
 
     # The derivatives formulae for this function.
+    # Note that the length of this sequence is the number of differentiable inputs
     derivatives: Sequence[Derivative]
 
     # The forward derivatives formulae for this function.
+    # Note that the length of this sequence is the number of differentiable outputs
     forward_derivatives: Sequence[ForwardDerivative]
 
     # The union of 'saved_inputs' of all 'derivatives'.

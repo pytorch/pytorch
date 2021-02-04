@@ -164,14 +164,25 @@ def postprocess_forward_derivatives(
                 raise RuntimeError(f"Derivative definition of {defn_name} in derivatives.yaml defines the "
                                    "forward definition of gradient as element_wise but it does not "
                                    "defines the gradient formula for its argument which is required.")
+            # This transformation is based on the observation that for element-wise functions, the Jacobian
+            # matrix is diagonal and thus doing J * v or v * J gives the same result.
+            # So here we are going to re-use the backward formula and replace two things:
+            # 1) all occurrences of "grad" with "foo_t", where foo is the name of the unique differentiable input.
+            # 2) all usage of an original input "foo" with its primal value "foo_p".
+            # For example, for abs, the backward formula is:
+            #   grad * self.sgn()
+            # And this function generates a forward formula that is:
+            #   self_t * self_p.sgn()
 
             backward_formula = derivatives[0].original_formula
             input_name = args_with_derivatives[0].name
 
+            # Do replacement 1) of the grad
             def repl(m: Any) -> str:
                 return f"{m.group(1)}{input_name}_t{m.group(2)}"
             fw_formula = re.sub(IDENT_REGEX.format("grad"), repl, backward_formula)
 
+            # Do replacement 2) of the input variables
             for arg in args_with_derivatives:
                 arg_name = arg.name
 
@@ -179,6 +190,8 @@ def postprocess_forward_derivatives(
                     return f"{m.group(1)}{arg_name}_p{m.group(2)}"
                 fw_formula = re.sub(IDENT_REGEX.format(arg_name), repl, fw_formula)
 
+            # Since there is a single differentiable inputs and we necessarily need its tangent we can
+            # simply require all differentiable input's tangent.
             required_inputs_tangent = tuple(all_arg_names)
             formula = fw_formula
         elif formula == "auto_linear":
@@ -186,16 +199,27 @@ def postprocess_forward_derivatives(
                 raise RuntimeError(f"Derivative definition of {defn_name} in derivatives.yaml defines the "
                                    "forward definition of gradient as linear but this only works "
                                    "for functions with a single differentiable output.")
+            # This transformation is based on the observation that linear functions can be written as:
+            #   y = f(x) = A * x
+            # For some matrix A and the Jacobian of the function f is also A.
+            # So doing J * v = A * v = f(v).
+            # Hence to do the jvp, we simply need to evaluate the function at the point v instead of x.
+            # We do this by calling the forward again by replacing any occurrence of the differentiable
+            # input "foo" by it's tangent "foo_t".
+            # Note that multiple inputs are not a problem as long as the function is truly linear wrt to
+            # the vector where all the differentiable inputs are stacked.
 
             diff_arg_names = [arg.name for arg in args_with_derivatives]
             assert len(diff_arg_names) > 0
 
+            # Do replacement of input variables
             new_args = []
             for arg_name in all_arg_names:
                 if arg_name in diff_arg_names:
                     arg_name = arg_name + "_t"
                 new_args.append(arg_name)
 
+            # Call into the forward again. We need two cases here to handle both Tensor methods and at:: functions.
             if Variant.function in f.variants:
                 fw_formula = "at::{}({})".format(defn_name, ", ".join(new_args))
             else:
@@ -203,10 +227,14 @@ def postprocess_forward_derivatives(
                 assert Variant.method in f.variants
                 fw_formula = "{}.{}({})".format(new_args[0], defn_name, ", ".join(new_args[1:]))
 
+            # All of the input tangents are always used so all of them are required here.
             required_inputs_tangent = tuple(diff_arg_names)
             formula = fw_formula
 
-        # During forward formula, we use the primal instead of the input Tensors
+        # At this point, the formula is final and is not modified anymore.
+
+        # During forward formula, we use the primal instead of the input Tensors.
+        # This call inspects the formula to find for which input's primal are used.
         required_inputs_primal = find_required_inputs(formula, "_p")
 
         updated_derivatives.append(ForwardDerivative(

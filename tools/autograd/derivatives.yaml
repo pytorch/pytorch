@@ -102,7 +102,8 @@
 # formula works the same way as the backward one and advanced implementations
 # should also be placed in the FunctionsManual file.
 # This formula should compute a single Jacobian vector product using the (primal)
-# value of the argument "foo_p" and its forward grad "foo_t".
+# value of the argument "foo_p", its forward grad "foo_t" and the result of the
+# function as "result".
 # Note that the forward derivative can be automatically generated in two cases:
 #     - if your function is linear (NOT affine or multi-linear), then you can
 #       specify so by just using the string "auto_linear" for the formula.
@@ -185,12 +186,12 @@
 - name: add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)
   other: handle_r_to_c(other.scalar_type(), maybe_multiply(grad, alpha.conj()))
-  result: maybe_multiply(self_t, alpha) + other_t
+  result: self_t + maybe_multiply(other_t, alpha)
 
 - name: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   self: handle_r_to_c(self.scalar_type(), grad)
   other: handle_r_to_c(other.scalar_type(), maybe_multiply(grad, alpha.conj()))
-  result: self_t.mul_(alpha).add_(other_t)
+  result: self_t.add_(maybe_multiply(other_t, alpha))
 
 - name: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)
