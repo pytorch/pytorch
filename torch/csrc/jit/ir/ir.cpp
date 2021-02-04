@@ -892,6 +892,7 @@ bool Node::matches(const FunctionSchema& schema) const {
   if (kind().toQualString() != schema.name()) {
     return false;
   }
+
   at::ArrayRef<const Value*> actuals = inputs();
   const auto& formals = schema.arguments();
 
@@ -922,7 +923,6 @@ bool Node::matches(const FunctionSchema& schema) const {
       return false;
     }
   }
-
   // too many inputs
   if (!schema.is_vararg() && actuals.size() != formals.size()) {
     return false;

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/core/stack.h>
-#include <ATen/core/builtin_function.h>
+#include <ATen/core/overloaded_function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
@@ -157,7 +157,7 @@ class class_ {
   /// C++ classes. It is not for general purpose use.
   class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema, std::string doc_string = "") {
     auto qualMethodName = qualClassName + "." + name;
-    auto method = std::make_unique<jit::BuiltinOpFunction>(
+    auto method = std::make_unique<jit::OverloadedFunction>(
         qualMethodName, std::move(schema), std::move(func), std::move(doc_string));
     classTypePtr->addMethod(method.get());
     registerCustomClassMethod(std::move(method));
@@ -275,14 +275,14 @@ class class_ {
           typename c10::guts::infer_function_traits_t<Func>::return_type;
       detail::BoxedProxy<RetType, Func>()(stack, func);
     };
-    auto method = std::make_unique<jit::BuiltinOpFunction>(
+    auto method = std::make_unique<jit::OverloadedFunction>(
         qualMethodName, std::move(schema), std::move(wrapped_func), std::move(doc_string));
 
     // Register the method here to keep the Method alive.
     // ClassTypes do not hold ownership of their methods (normally it
     // those are held by the CompilationUnit), so we need a proxy for
     // that behavior here.
-    classTypePtr->addMethod(method.get());
+    classTypePtr->addOverloadedMethod(method.get());
     registerCustomClassMethod(std::move(method));
   }
 

@@ -23,6 +23,7 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <ATen/core/overloaded_function.h>
 
 #ifdef USE_RPC
 #include <torch/csrc/distributed/autograd/context/container.h>
@@ -940,7 +941,17 @@ struct CodeImpl {
         break;
       case prim::CallMethod:
         if (auto class_type = node->inputs().at(0)->type()->cast<ClassType>()) {
-          emitCall(&class_type->getMethod(node->s(attr::name)), node->inputs());
+          if (class_type->findOverloadedMethod(node->s(attr::name)).size() > 1) {
+            for (auto & method : class_type->findOverloadedMethod(node->s(attr::name))) {
+              // shitty schema macher
+              if (node->inputs().size() == method->getSchema().arguments().size()) {
+                emitCall(method, node->inputs());
+                break;
+              }
+            }
+          } else {
+            emitCall(&class_type->getMethod(node->s(attr::name)), node->inputs());
+          }
         } else {
           emitInterfaceCall(node->s(attr::name), node->inputs());
         }
