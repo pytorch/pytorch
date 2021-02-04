@@ -88,7 +88,7 @@ class profile(object):
     - ``on_trace_ready`` - callable that is called at each step when ``schedule`` returns ``ProfilerAction.RECORD_AND_SAVE``
       during the profiling;
     - ``record_shapes`` - save information about operator's input shapes;
-    - ``with_flops`` - use formula to estimate the FLOPS of specific operators;
+    - ``with_flops`` - use formula to estimate the FLOPS of specific operators (matrix multiplication and 2D convolution);
     - ``profile_memory`` - track tensor memory allocation/deallocation;
     - ``with_stack`` - record source information (file and line number) for the ops.
     - ``use_cuda`` - (deprecated, use ``activities``).
