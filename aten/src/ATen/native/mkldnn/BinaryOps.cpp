@@ -79,8 +79,13 @@ Tensor& mkldnn_add_out(
   ideep::tensor& y = itensor_from_mkldnn(other);
 
   ideep::tensor& z = itensor_from_mkldnn(result);
-  const std::vector<float> scales{1.0, alpha.to<float>()};
-  ideep::sum::compute(scales, {x, y}, z);
+  if (result.is_same(other)) {
+    const std::vector<float> scales{alpha.to<float>(), 1.0};
+    ideep::sum::compute(scales, {y, x}, z);
+  } else {
+    const std::vector<float> scales{1.0, alpha.to<float>()};
+    ideep::sum::compute(scales, {x, y}, z);
+  }
 
   return result;
 }

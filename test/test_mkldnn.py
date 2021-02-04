@@ -649,6 +649,16 @@ class TestMkldnn(TestCase):
         torch.add(mx, my, alpha=alpha, out=mkldnn_out)
         self.assertEqual(out, mkldnn_out.to_dense())
 
+        # add_out inplace case: first input
+        torch.add(x, y, alpha=alpha, out=x)
+        torch.add(mx, my, alpha=alpha, out=mx)
+        self.assertEqual(x, mx.to_dense())
+
+        # add_out inplace case: second input
+        torch.add(x, y, alpha=alpha, out=y)
+        torch.add(mx, my, alpha=alpha, out=my)
+        self.assertEqual(y, my.to_dense())
+
     def test_mul(self):
         N = torch.randint(3, 10, (1,)).item()
         C = torch.randint(3, 100, (1,)).item()
