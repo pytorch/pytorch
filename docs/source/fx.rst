@@ -83,7 +83,7 @@ tracing and modify it. For example, let’s say we desire to replace
 
 
 We can also do more involved graph rewrites, such as deleting or appending
-nodes after a node. To aid in these transformations, FX has utility
+nodes. To aid in these transformations, FX has utility
 functions for transforming the graph that can be found in :class:`Graph`. An
 example of using these APIs to append a relu can be found below.
 
