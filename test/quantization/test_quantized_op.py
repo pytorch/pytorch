@@ -2408,10 +2408,13 @@ class TestQuantizedOps(TestCase):
                 super(MultiheadAttentionModel, self).__init__()
                 self.layer = torch.nn.MultiheadAttention(*args, **kwargs)
 
-            def forward(self, *args, **kwargs):
-                return self.layer(*args, **kwargs)
+            def forward(self, query, key, value, key_padding_mask=None, need_weights=True, attn_mask=None):
+                return self.layer(query, key, value, key_padding_mask, need_weights, attn_mask)
 
         qengine = torch.backends.quantized.engine
+        # DEBUG: Add 'qnnpack' or 'fbgemm' to skip some of them
+        if qengine in ['qnnpack']:
+            return
 
         num_heads = 16
         batch_size = 4
@@ -2455,8 +2458,12 @@ class TestQuantizedOps(TestCase):
             fp_data[idx] = qx.dequantize()
 
         with torch.no_grad():
+            # DEBUG: Flag to show the quantized model once
+            already_shown = False
             for bias, add_bias_kv, add_zero_attn in itertools.product(
                     Bias, Add_bias_kv, Add_zero_attn):
+                # DEBUG: Show qengine + run parameters
+                print(f'{qengine} {bias:>5} {add_bias_kv:>5} {add_zero_attn:>5}', end=' ')
                 # TODO: need to investigate why resetting the bias reduces SNR
                 #       https://github.com/pytorch/pytorch/issues/51662
                 min_power = 20 if (add_bias_kv and add_zero_attn) else 10
@@ -2483,6 +2490,10 @@ class TestQuantizedOps(TestCase):
                     mha_prepared,
                     convert_custom_config_dict=custom_module_config)
                 qy = mha_quantized(*q_data)
+                # DEBUG: Show the quantized model per qengine
+                if not already_shown:
+                    print(mha_quantized)
+                    already_shown = True
 
                 # Reference result
                 mha.layer = mha_quantized.layer.dequantize()
@@ -2490,6 +2501,8 @@ class TestQuantizedOps(TestCase):
 
                 snr = _snr(y, qy)
                 for signal, mse, power in snr:
+                    # DEBUG: + SNR
+                    print(f'{power:.2f}', end=' ')
                     self.assertTrue(
                         power > min_power or mse < max_mse,
                         msg=(f"Error is too high: SNR(dB): {power}, "
@@ -2497,6 +2510,8 @@ class TestQuantizedOps(TestCase):
                              f"Run with bias={bias}, "
                              f"add_bias_kv={add_bias_kv}, "
                              f"add_zero_attn={add_zero_attn}"))
+                # DEBUG:
+                print()
 
 
 class TestDynamicQuantizedLinear(TestCase):
