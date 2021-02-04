@@ -553,10 +553,12 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 f.write(new_contents)
 
 class concat_license_files():
-    """Merge LICENSE.txt and LICENSES_BUNDLED.txt as a context manager
+    """Merge LICENSE and LICENSES_BUNDLED.txt as a context manager
 
-    Done this way to keep LICENSE.txt in repo as exact BSD 3-clause.
-    This makes GitHub web gui state correctly how the repo is licensed.
+    LICENSE is the main PyTorch license, LICENSES_BUNDLED.txt is auto-generated
+    from all the licenses found in ./third_party/. We concatenate them so there
+    is a single license file in the sdist and wheels with all of the necessary
+    licensing info.
     """
     def __init__(self):
         self.f1 = 'LICENSE'
@@ -582,7 +584,7 @@ class concat_license_files():
 try:
     from wheel.bdist_wheel import bdist_wheel
 except ImportError:
-    # This is useful when wheel is not isntalled and bdist_wheel is not
+    # This is useful when wheel is not installed and bdist_wheel is not
     # specified on the command line. If it _is_ specified, parsing the command
     # line will fail before wheel_concatenate is needed
     wheel_concatenate = None
