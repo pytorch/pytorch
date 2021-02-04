@@ -398,7 +398,9 @@ class TestProfiler(TestCase):
                 record_shapes=True,
                 with_flops=True,
         ) as kineto_profiler:
-            model(inputs)
+            for idx in range(8):
+                model(inputs)
+                p.step()
         profiler_output = kineto_profiler.key_averages().table(
             sort_by="self_cuda_time_total", row_limit=10)
         self.assertIn("FLOPS", profiler_output)

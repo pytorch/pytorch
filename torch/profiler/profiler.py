@@ -89,7 +89,7 @@ class profile(object):
       during the profiling;
     - ``record_shapes`` - save information about operator's input shapes;
     - ``profile_memory`` - track tensor memory allocation/deallocation;
-    - ``with_stack`` - record source information (file and line number) for the ops.
+    - ``with_stack`` - record source information (file and line number) for the ops;
     - ``with_flops`` - use formula to estimate the FLOPS of specific operators (matrix multiplication and 2D convolution);
     - ``use_cuda`` - (deprecated, use ``activities``).
 
