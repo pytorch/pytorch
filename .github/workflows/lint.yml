@@ -100,7 +100,7 @@ jobs:
 
   clang-tidy:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
         uses: actions/setup-python@v1
@@ -130,7 +130,7 @@ jobs:
           sudo apt-get update
           sudo apt-get --no-install-recommends -y install cuda-toolkit-10-2
           # Install dependencies
-          pip install pyyaml
+          pip install pyyaml typing_extensions
           wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
           sudo apt-add-repository "deb http://apt.llvm.org/bionic/ llvm-toolchain-bionic-11 main"
           sudo apt-get update
