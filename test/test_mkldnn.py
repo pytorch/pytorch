@@ -578,27 +578,27 @@ class TestMkldnn(TestCase):
                     x.to_mkldnn().transpose(dim1, dim2).to_dense(),
                 )
 
-    def test_linear_functional(self):
+    def test_linear_non_contiguous_weight(self):
         in_features = torch.randint(3, 10, (1,)).item()
         out_features = torch.randint(3, 100, (1,)).item()
         x = torch.randn(3, in_features, dtype=torch.float32) * 10
         w = torch.randn(in_features, out_features, dtype=torch.float32)
-        b = torch.randn(out_features, dtype=torch.float32)
-        grad = torch.randn(3, out_features, dtype=torch.float32)
-        x1 = x.clone().requires_grad_()
-        x2 = x.clone().to_mkldnn().requires_grad_()
-        w1 = w.clone().requires_grad_()
-        w2 = w.clone().requires_grad_()
-        b1 = b.clone().requires_grad_()
-        b2 = b.clone().requires_grad_()
-        y1 = torch.nn.functional.linear(x1, w1.t(), b1)
-        y2 = torch.nn.functional.linear(x2, w2.t(), b2)
-        y1.backward(grad)
-        y2.backward(grad.to_mkldnn())
-        self.assertEqual(y1, y2.to_dense())
-        self.assertEqual(x1.grad, x2.grad.to_dense())
-        self.assertEqual(w1.grad, w2.grad)
-        self.assertEqual(b1.grad, b2.grad)
+        # Only works for bias case by dispatch onednn linear to addmm.
+        for bias in [True]:
+            x1 = x.clone().requires_grad_()
+            x2 = x.clone().to_mkldnn().requires_grad_()
+            linear = torch.nn.Linear(in_features, out_features).float()
+            mkldnn_linear = copy.deepcopy(linear)
+            linear.weight = torch.nn.Parameter(w.t())
+            mkldnn_linear.weight = torch.nn.Parameter(w.t())
+            y1 = linear(x1).sum()
+            y2 = mkldnn_linear(x2).to_dense().sum()
+            y1.backward()
+            y2.backward()
+            self.assertEqual(x1.grad, x2.grad.to_dense())
+            self.assertEqual(linear.weight.grad, mkldnn_linear.weight.grad)
+            if bias:
+                self.assertEqual(linear.bias.grad, mkldnn_linear.bias.grad)
 
     def test_linear(self):
         in_features = torch.randint(3, 10, (1,)).item()

@@ -87,7 +87,7 @@ Tensor mkldnn_linear_backward_input(
 
   ideep::tensor& grady = itensor_from_mkldnn(grad_output_reshaped);
   // weight_t always dense tensor for training.
-  const Tensor weight = (weight_t.is_mkldnn() || weight_t.is_contiguous()) ? weight_t : weight_t.contiguous();
+  const Tensor weight = weight_t.is_contiguous() ? weight_t : weight_t.contiguous();
   const ideep::tensor w = itensor_view_from_dense(weight);
 
   std::vector<int64_t> input_reshaped_size;
