@@ -106,8 +106,8 @@ fit if you need to make a few small changes or if you need to match multiple
 nodes at once. However, if you need to entirely rewrite your graph, you may
 want to look at constructing your graph with Proxies (i.e. retracing).
 
-Examples
-~~~~~~~~
+Examples of Graph Manipulation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  `Replace one
    op <https://github.com/pytorch/pytorch/blob/master/torch/fx/examples/replace_op.py>`__
@@ -193,8 +193,8 @@ downstream passes, but it can also be used to capture other information
 about execution.
 TODO: Add roofline analysis pass once it gets merged.
 
-Examples
-~~~~~~~~
+Examples of the Interpreter Pattern
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 -  `Shape
    Propagation <https://github.com/pytorch/pytorch/blob/master/torch/fx/experimental/shape_prop.py>`__
