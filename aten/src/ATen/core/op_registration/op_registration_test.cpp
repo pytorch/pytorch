@@ -1869,12 +1869,13 @@ TEST(NewOperatorRegistrationTest, BackendSelectRedispatchesToCPU) {
   bool cpu_called = false;
   bool backend_generic_called = false;
   auto m = MAKE_TORCH_LIBRARY(test);
+  auto after_backend_select = c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, c10::DispatchKey::BackendSelect);
   m.def("fn(Tensor self) -> Tensor");
   m.impl("fn", c10::kCPU, [&](const Tensor& x) { cpu_called = true; return x; });
   m.impl("fn", c10::DispatchKey::BackendSelect, [&](const Tensor& x) {
      backend_generic_called = true;
      auto op = c10::Dispatcher::singleton().findSchema({"test::fn", ""}).value().typed<Tensor (const Tensor&)>();
-     return c10::Dispatcher::singleton().redispatch<Tensor, const Tensor&>(op, c10::DispatchKeySet(c10::DispatchKey::BackendSelect), x);
+     return c10::Dispatcher::singleton().redispatch<Tensor, const Tensor&>(op, after_backend_select, x);
    });
 
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
