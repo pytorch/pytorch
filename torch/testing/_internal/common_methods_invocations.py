@@ -623,6 +623,33 @@ def sample_inputs_gather(op_info, device, dtype, requires_grad):
                         0, torch.tensor(0, dtype=torch.int64, device=device))),
             )
 
+def sample_inputs_diff(op_info, device, dtype, requires_grad):
+    test_cases = (
+        ((1,), 0, None, None),
+        ((S,), 0, None, None),
+        ((S, 1), 0, None, None),
+        ((S, 1), 1, None, None),
+        ((S, S), 0, None, None),
+        ((S, S), 1, None, None),
+        ((S, S), 0, (1, S), (2, S)),
+        ((S, S), 0, None, (2, S)),
+        ((S, S, S), 1, None, None),
+        ((S, S, S), 1, (S, 1, S), (S, 1, S)),)
+
+    sample_inputs = []
+    for size, dim, size_prepend, size_append in test_cases:
+        args = (make_tensor(size, device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad), 1, dim,
+                make_tensor(size_prepend, device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad) if size_prepend else None,
+                make_tensor(size_append, device, dtype,
+                            low=None, high=None,
+                            requires_grad=requires_grad) if size_append else None)
+        sample_inputs += [SampleInput(args)]
+
+    return tuple(sample_inputs)
 
 def sample_inputs_index_select(op_info, device, dtype, requires_grad):
     return (SampleInput((make_tensor((S, S, S), device, dtype,
@@ -1114,6 +1141,23 @@ def sample_inputs_fliplr_flipud(op_info, device, dtype, requires_grad):
     )
     return [SampleInput(tensor) for tensor in tensors]
 
+def sample_inputs_diag(op_info, device, dtype, requires_grad):
+    vec_sample = SampleInput(make_tensor((M, ), device, dtype, low=None, high=None, requires_grad=requires_grad))
+
+    tensors = (
+        make_tensor((M, M), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((3, 5), device, dtype, low=None, high=None, requires_grad=requires_grad),
+        make_tensor((5, 3), device, dtype, low=None, high=None, requires_grad=requires_grad),
+    )
+
+    args = ((), (2,), (-2,), (1,), (2,))
+
+    samples = []
+    for tensor, arg in product(tensors, args):
+        samples.append(SampleInput(tensor, args=arg))
+
+    return samples + [vec_sample]
+
 def sample_inputs_logit(op_info, device, dtype, requires_grad):
     low, high = op_info.domain
 
@@ -1418,6 +1462,11 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestCommon', 'test_variant_consistency_jit',
                                 device_type='cuda', dtypes=[torch.float16]),
                    )),
+    OpInfo('diff',
+           op=torch.diff,
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_diff,
+           test_inplace_grad=False),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half),
@@ -1432,6 +1481,12 @@ op_db: List[OpInfo] = [
                    ),
                    assert_autodiffed=True,
                    safe_casts_outputs=True),
+    OpInfo('diag',
+           dtypes=all_types_and_complex_and(torch.bool),
+           dtypesIfCPU=all_types_and_complex_and(torch.bool),
+           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+           sample_inputs_func=sample_inputs_diag,
+           test_inplace_grad=False),
     SpectralFuncInfo('fft.fft',
                      aten_name='fft_fft',
                      ref=np.fft.fft,
@@ -2206,14 +2261,7 @@ if TEST_SCIPY:
                dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
                test_inplace_grad=False,
                supports_tensor_out=False,
-               # Reference: https://github.com/pytorch/pytorch/issues/50381
-               test_complex_grad=False,
-               sample_inputs_func=sample_inputs_trace,
-               skips=(
-                   SkipInfo('TestCommon', 'test_variant_consistency_jit',
-                            dtypes=[torch.complex64, torch.complex128]),
-                   SkipInfo('TestCommon', 'test_variant_consistency_eager',
-                            dtypes=[torch.complex64, torch.complex128]))),
+               sample_inputs_func=sample_inputs_trace)
     ]
     op_db = op_db + op_db_scipy_reference
 
@@ -2307,6 +2355,9 @@ NO_ARGS = NoArgsClass()
 def ident(x):
     return x
 
+# Do NOT add to this list. Method tests are being DEPRECATED and replaced by OpInfos.
+# See https://github.com/pytorch/pytorch/wiki/Writing-tests-in-PyTorch-1.8
+#
 # (
 #   method name,
 #   input size/constructing fn,
@@ -2865,16 +2916,6 @@ def method_tests():
         ('dist', (), ((), 4), 'scalar_4'),
         ('dist', (S, S, S), ((), 4), 'scalar_4_broadcast_rhs'),
         ('dist', (), ((S, S, S), 4), 'scalar_4_broadcast_lhs'),
-        ('diag', (M, M), NO_ARGS, '2d'),
-        ('diag', (3, 5), NO_ARGS, '2d_wide'),
-        ('diag', (3, 5), (2,), '2d_wide_pos'),
-        ('diag', (3, 5), (-2,), '2d_wide_neg'),
-        ('diag', (5, 3), NO_ARGS, '2d_tall'),
-        ('diag', (5, 3), (2,), '2d_tall_pos'),
-        ('diag', (5, 3), (-2,), '2d_tall_neg'),
-        ('diag', (M,), NO_ARGS, '1d'),
-        ('diag', (M, M), (1,), '2d_1'),
-        ('diag', (M, M), (2,), '2d_2'),
         ('diag_embed', (S, S), NO_ARGS),
         ('diagonal', (M, M), NO_ARGS, '2d'),
         ('diagonal', (3, 5), NO_ARGS, '2d_wide'),
