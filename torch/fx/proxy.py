@@ -71,7 +71,7 @@ class TracerBase:
         if isinstance(a, Proxy):
             # base case: we unwrap the Proxy object
             return a.node
-        elif isinstance(a, base_types) or a is None:
+        elif isinstance(a, base_types) or a is None or a is ...:
             return a
 
         raise NotImplementedError(f"argument of type: {type(a)}")
