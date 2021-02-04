@@ -105,18 +105,6 @@ class Reducer {
   // index has been used.
   std::vector<at::Tensor> get_local_used_maps_on_device() const;
 
-  // Set logging data that can be got during DistributedDataParallel
-  // construction time.
-  void set_construction_logging_data(
-      const std::string& module_name,
-      const std::vector<int>& device_ids,
-      int output_device,
-      bool broadcast_buffers);
-
-  // An Interface for users to get DDPLoggingData and log them
-  // in the applications.
-  c10::DDPLoggingData get_ddp_logging_data();
-
  protected:
   // Forward declaration.
   struct Bucket;
@@ -204,10 +192,6 @@ class Reducer {
   void runGradCallbackForVariable(
       torch::autograd::Variable& variable,
       GradCallback&& cb);
-
-  void set_env_variables();
-  void set_parameter_stats();
-  void set_bucket_stats();
 
   // A bucket replica represents [1..N] gradients to be reduced,
   // with the same dtype, on the same device.
@@ -375,9 +359,7 @@ class Reducer {
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
 
-  // ddp_logging_data_ is used to hold all the ddp related logging
-  // data fields.
-  std::unique_ptr<c10::DDPLoggingData> ddp_logging_data_;
+  friend class Logger;
 };
 
 // This is equivalent to take_tensors but returns indices into the

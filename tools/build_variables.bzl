@@ -241,6 +241,7 @@ core_sources_full_mobile = [
     "torch/csrc/jit/tensorexpr/bounds_overlap.cpp",
     "torch/csrc/jit/tensorexpr/mem_dependency_checker.cpp",
     "torch/csrc/jit/tensorexpr/codegen.cpp",
+    "torch/csrc/jit/tensorexpr/cpp_codegen.cpp",
     "torch/csrc/jit/tensorexpr/eval.cpp",
     "torch/csrc/jit/tensorexpr/expr.cpp",
     "torch/csrc/jit/tensorexpr/hash_provider.cpp",
@@ -582,6 +583,7 @@ libtorch_python_distributed_core_sources = [
     "torch/lib/c10d/default_comm_hooks.cpp",
     "torch/lib/c10d/frontend.cpp",
     "torch/lib/c10d/reducer.cpp",
+    "torch/lib/c10d/logger.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
     "torch/csrc/distributed/c10d/init.cpp",
 ]

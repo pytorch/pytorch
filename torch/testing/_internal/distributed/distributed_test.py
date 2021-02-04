@@ -3236,7 +3236,7 @@ class DistributedTest:
             group, group_id, rank = self._init_global_test()
             model_DDP = copy.deepcopy(DDP_NET)
             model_DDP = nn.parallel.DistributedDataParallel(model_DDP, bucket_cap_mb=0.001)
-            ddp_logging_data = model_DDP.get_ddp_logging_data()
+            ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.world_size, dist.get_world_size())
             self.assertEqual(ddp_logging_data.rank, dist.get_rank())
             self.assertEqual(ddp_logging_data.module_name, 'Net')
@@ -3274,7 +3274,7 @@ class DistributedTest:
             # test larger net and verify multiple bucket sizes
             model = LargeNet()
             model_DDP = nn.parallel.DistributedDataParallel(model, bucket_cap_mb=1)
-            ddp_logging_data = model_DDP.get_ddp_logging_data()
+            ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
             params = list(model_DDP.parameters())
             self.assertEqual(
                 ddp_logging_data.bucket_sizes,
@@ -3288,7 +3288,7 @@ class DistributedTest:
             model_DDP = copy.deepcopy(DDP_NET)
             model_DDP.cuda(rank)
             model_DDP = nn.parallel.DistributedDataParallel(model_DDP, device_ids=[rank])
-            ddp_logging_data = model_DDP.get_ddp_logging_data()
+            ddp_logging_data = model_DDP.logger.get_ddp_logging_data()
             self.assertEqual(ddp_logging_data.device_ids, [rank])
             self.assertEqual(ddp_logging_data.output_device, rank)
 
