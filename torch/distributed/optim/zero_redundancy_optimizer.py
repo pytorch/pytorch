@@ -13,6 +13,7 @@ import torch.distributed as dist
 from torch.nn import Parameter
 from torch._six import container_abcs
 from torch.optim import Optimizer
+import contextlib
 
 __all__ = ["ZeroRedundancyOptimizer"]
 
@@ -318,7 +319,9 @@ class ZeroRedundancyOptimizer(Optimizer):
 
         self._all_states = []
 
-        with torch.cuda.device(self._device):
+        with torch.cuda.device(self._device) if self._device.type == torch.device(
+            "cuda"
+        ).type else contextlib.suppress():
             empty_messenger = torch.tensor([0], dtype=torch.uint8, device=self._device)
 
             for rank in range(self.world_size):
