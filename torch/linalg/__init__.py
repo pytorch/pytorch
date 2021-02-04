@@ -97,7 +97,7 @@ Supports input of float, double, cfloat and cdouble data types.
 
 .. note:: The inverse matrix is computed using LAPACK's `getrf` and `getri` routines for CPU inputs. For CUDA
           inputs, cuSOLVER's `getrf` and `getrs` routines as well as cuBLAS' `getrf` and `getri` routines are
-          used if cuda version >= 10.1.243, otherwise MAGMA's `getrf` and `getri` routines are used instead.
+          used if CUDA version >= 10.1.243, otherwise MAGMA's `getrf` and `getri` routines are used instead.
 
 .. note:: If :attr:`input` is a non-invertible matrix or non-square matrix, or batch with at least one such matrix,
           then a RuntimeError will be thrown.
@@ -667,7 +667,8 @@ values computed using :func:`torch.linalg.svd`.
 
 This function supports float, double, cfloat and cdouble dtypes.
 
-.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+.. note:: When given inputs on a CUDA device, this function may synchronize that device with the CPU depending
+          on which norm :attr:`p` is used.
 
 .. note:: For norms `{None, 2, -2}`, :attr:`input` may be a non-square matrix or batch of non-square matrices.
           For other norms, however, :attr:`input` must be a square matrix or a batch of square matrices,
