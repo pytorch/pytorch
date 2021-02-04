@@ -51,6 +51,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     set +u
     retry conda install \${EXTRA_CONDA_FLAGS} -yq \
       "numpy\${NUMPY_PIN}" \
+      future \
       mkl>=2018 \
       ninja \
       dataclasses \
