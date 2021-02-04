@@ -544,23 +544,24 @@ if TYPE_CHECKING:
     from torch._C._VariableFunctions import *  # type: ignore
 
 
-# TODO: add explanation
-class _Modules(dict):
-    def __getitem__(self, item):
-        if item == "torch.tensor":
-            # TODO: make message more expressive
-            warnings.warn("You are importing wrong!")
-        return super().__getitem__(item)
-
-
-sys.modules = _Modules(sys.modules)
-
-
 for name in dir(_C._VariableFunctions):
     if name.startswith('__'):
         continue
     globals()[name] = getattr(_C._VariableFunctions, name)
     __all__.append(name)
+
+
+# TODO: add explanation
+class _TensorModuleWarner:
+    def __init__(self):
+        self._tensor_fun = globals()["tensor"]
+
+    def __call__(self, *args, **kwargs):
+        # TODO: make the message more expressive
+        warnings.warn("You are using the import wrong!")
+        return self._tensor_fun(*args, **kwargs)
+
+sys.modules["torch.tensor"] = _TensorModuleWarner()
 
 ################################################################################
 # Import interface functions defined in Python
