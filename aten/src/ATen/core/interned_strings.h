@@ -32,6 +32,7 @@ namespace c10 {
   _(prim, Constant)                  \
   _(prim, ChunkSizes)                \
   _(prim, ConstantMKLDNNTensor)      \
+  _(prim, BroadcastMKLDNNTensors)    \
   _(prim, MKLDNNGroup)               \
   _(prim, Drop)                      \
   _(prim, Eval)                      \

@@ -34,6 +34,41 @@ using Tensor = at::Tensor;
 
 namespace {
 
+c10::AliasAnalysisKind aliasAnalysisFromSchema() {
+  return AliasAnalysisKind::FROM_SCHEMA;
+}
+
+Operation BroadOp(const Node* node) {
+  return [](Stack* stack) {
+    auto b = pop(stack).toTensor();
+    auto a = pop(stack).toTensor();
+    auto b_size = b.sizes();
+    auto a_size = a.sizes();
+    if (a_size.equals(b_size)) {
+      push(stack, a, b);
+    } else {
+      auto out_size = at::infer_size(a_size, b_size);
+      if (a_size.equals(out_size)) {
+        push(stack, a);
+      } else {
+        push(stack, a.to_dense().expand(out_size).to_mkldnn());
+      }
+      if (b_size.equals(out_size)) {
+        push(stack, b);
+      } else {
+        push(stack, b.to_dense().expand(out_size).to_mkldnn());
+      }
+    }
+  };
+}
+
+RegisterOperators BroadOpReg({
+    torch::jit::Operator(
+        prim::BroadcastMKLDNNTensors,
+        BroadOp,
+        AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
+});
+
 Operation ConstantMKLDNNTensorOp(const Node* node) {
   auto t = node->t(attr::value);
   return [t](Stack* stack) {
@@ -43,8 +78,7 @@ Operation ConstantMKLDNNTensorOp(const Node* node) {
 }
 
 // This is registered as its own op instead of as prim::Constant bc it does not
-// serialize which is an invariant of prim::Constant
-// TODO: make mkldnn tensor serialize...
+// serialize which is an invariant of prim::Consstant
 RegisterOperators MKLDNNConstantOp({
     torch::jit::Operator(
         prim::ConstantMKLDNNTensor,
@@ -139,13 +173,22 @@ void moveWeightsToMKLDNN(Node* n) {
 
 void computeSubgraphInMKLDNN(Node* subgraph_node) {
   auto graph = subgraph_node->owningGraph();
+  Value* none_value;
+  {
+    WithInsertPoint guard(subgraph_node);
+    none_value = graph->insertConstant(IValue());
+  }
   for (size_t i = 0; i < subgraph_node->inputs().size(); ++i) {
     Value* v = subgraph_node->inputs().at(i);
     if (!v->type()->cast<TensorType>()) {
       continue;
     }
-    WithInsertPoint guard(subgraph_node);
-    subgraph_node->replaceInput(i, graph->insert(aten::to_mkldnn, {v}));
+    auto to_mkldnn =
+        graph->create(c10::Symbol::fromQualString("aten::to_mkldnn"), 1)
+            ->insertBefore(subgraph_node);
+    to_mkldnn->addInput(v);
+    to_mkldnn->addInput(none_value);
+    subgraph_node->replaceInput(i, to_mkldnn->output());
   }
 
   for (size_t i = 0; i < subgraph_node->outputs().size(); ++i) {
@@ -153,9 +196,11 @@ void computeSubgraphInMKLDNN(Node* subgraph_node) {
     if (!v->type()->cast<TensorType>()) {
       continue;
     }
-    auto none_value = graph->insertConstant(IValue());
-    auto from_mkldnn = graph->create(aten::to_dense, {v, none_value})
-                           ->insertAfter(subgraph_node);
+    auto from_mkldnn =
+        graph
+            ->create(
+                c10::Symbol::fromQualString("aten::to_dense"), {v, none_value})
+            ->insertAfter(subgraph_node);
     v->replaceAllUsesAfterNodeWith(from_mkldnn, from_mkldnn->output());
   }
 
@@ -166,6 +211,16 @@ void computeSubgraphInMKLDNN(Node* subgraph_node) {
     it++;
 
     moveWeightsToMKLDNN(body_node);
+
+    if (body_node->kind() == aten::add || body_node->kind() == aten::mul) {
+      auto node = body_node->owningGraph()->create(
+          Symbol::prim("BroadcastMKLDNNTensors"),
+          {body_node->inputs().at(0), body_node->inputs().at(1)},
+          2);
+      node->insertBefore(body_node);
+      body_node->replaceInput(0, node->outputs().at(0));
+      body_node->replaceInput(1, node->outputs().at(1));
+    }
   }
 }
 
@@ -300,9 +355,9 @@ class MKLDNNSubgraphSlicer {
       return supportedMKLDNNWeight(*const_tensor);
     }
     auto k = v->node()->kind();
-    bool supported_kind = k == prim::MKLDNNGroup || k == aten::to_mkldnn ||
-        k == prim::ConstantMKLDNNTensor;
-    if (supported_kind) {
+    bool supported = k == prim::MKLDNNGroup ||
+        k == prim::ConstantMKLDNNTensor || k == aten::to_mkldnn;
+    if (supported) {
       return true;
     }
     for (const auto& use : v->uses()) {
@@ -325,7 +380,7 @@ class MKLDNNSubgraphSlicer {
     }
     // unary ops we dont need to prove anything else than
     // the input is mkldnn supported
-    if (n->kind() == aten::relu || aten::sigmoid) {
+    if (n->kind() == aten::relu || n->kind() == aten::sigmoid) {
       return true;
     }
     if (n->kind() == aten::add) {
