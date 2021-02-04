@@ -21,9 +21,9 @@ def _get_stdlib_modules():
             return stdlib3_6
         if sys.version_info.minor == 7:
             return stdlib3_7
-        elif sys.version_info.minor == 8:
+        if sys.version_info.minor == 8:
             return stdlib3_8
-        elif sys.version_info.minor == 9:
+        if sys.version_info.minor == 9:
             return stdlib3_9
 
     raise RuntimeError(f"Unsupported Python version: {sys.version_info}")
