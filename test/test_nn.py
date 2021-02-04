@@ -13363,14 +13363,13 @@ class TestNNDeviceType(NNTestCase):
                 # Incorrect kernel_size
                 F.fractional_max_pool2d(x, kernel_size=kernel_size, output_size=(3, 3), _random_samples=samples)
 
-        for output_size in [(3,), ()]:
-            with self.assertRaisesRegex(RuntimeError, "output_size must either"):
-                # Incorrect output_size
-                F.fractional_max_pool2d(x, (2, 2), output_size=output_size, _random_samples=samples)
-
-        for output_size, msg in [((9, 3), "height"),
-                                 ((3, 9), "width")]:
-            with self.assertRaisesRegex(RuntimeError, "too large relative to input " + msg):
+        err_large_msg = "too large relative to input "
+        err_out_size_msg = "output_size must either"
+        for output_size, msg in [((9, 3), err_large_msg + "height"),
+                                 ((3, 9), err_large_msg + "width"),
+                                 ((3,), err_out_size_msg),
+                                 ((), err_out_size_msg)]:
+            with self.assertRaisesRegex(RuntimeError, msg):
                 # Incorrect output_size
                 F.fractional_max_pool2d(x, (2, 2), output_size=output_size, _random_samples=samples)
 
@@ -13399,15 +13398,15 @@ class TestNNDeviceType(NNTestCase):
                 # Incorrect kernel_size
                 F.fractional_max_pool3d(x, kernel_size=kernel_size, output_size=(3, 3, 3), _random_samples=samples)
 
-        for output_size in [(3, 3), (3,), ()]:
-            with self.assertRaisesRegex(RuntimeError, "output_size must either"):
-                # Incorrect output_size
-                F.fractional_max_pool3d(x, (2, 2, 2), output_size=output_size, _random_samples=samples)
-
-        for output_size, msg in [((9, 3, 3), "time"),
-                                 ((3, 9, 3), "height"),
-                                 ((3, 3, 9), "width")]:
-            with self.assertRaisesRegex(RuntimeError, "too large relative to input " + msg):
+        err_large_msg = "too large relative to input "
+        err_out_size_msg = "output_size must either"
+        for output_size, msg in [((9, 3, 3), err_large_msg + "time"),
+                                 ((3, 9, 3), err_large_msg + "height"),
+                                 ((3, 3, 9), err_large_msg + "width"),
+                                 ((3, 3), err_out_size_msg),
+                                 ((3,), err_out_size_msg),
+                                 ((), err_out_size_msg)]:
+            with self.assertRaisesRegex(RuntimeError, msg):
                 # Incorrect output_size
                 F.fractional_max_pool3d(x, (2, 2, 2), output_size=output_size, _random_samples=samples)
 
