@@ -67,7 +67,7 @@ class AST_Rewriter(ast.NodeTransformer):
 
 class RewritingTracer(Tracer):
     def trace(self, root: Union[torch.nn.Module, Callable], concrete_args: Optional[Dict[str, Any]] = None) -> Graph:
-        return super().trace(_rewrite(root))
+        return super().trace(_rewrite(root), concrete_args)
 
 
 def _rewrite(fn : Union[torch.nn.Module, Callable]) -> Union[torch.nn.Module, Callable]:
