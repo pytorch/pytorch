@@ -76,13 +76,18 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['fake_quantize_per_channel_affine_cachemask'],
                input=(per_channel_scale, per_channel_zp, 1, 0, 255),
                names=('output', 'mask',), hasout=False),
+            op(operators=['_unpack_dual'], input=(0,), names=('primal', 'tangent'), hasout=False),
         ]
 
         def get_func(f):
             "Return either torch.f or torch.linalg.f, where 'f' is a string"
+            mod = torch
             if f.startswith('linalg_'):
-                return getattr(torch.linalg, f[7:])
-            return getattr(torch, f, None)
+                mod = torch.linalg
+                f = f[7:]
+            if f.startswith('_'):
+                mod = torch._VF
+            return getattr(mod, f, None)
 
         def check_namedtuple(tup, names):
             "Check that the namedtuple 'tup' has the given names"
