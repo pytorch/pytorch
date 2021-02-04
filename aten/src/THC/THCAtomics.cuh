@@ -310,7 +310,7 @@ static inline __device__ void atomicAddNoReturn(double *address, double val) { g
 #ifdef __gfx908__
 static inline __device__ bool __hip_is_shared(const __attribute__((address_space(0))) void*) asm("llvm.amdgcn.is.shared");
 /* return type of intrinsic was void in earlier ROCm versions */
-#ifdef HIP_ATOMIC_RETURN_FLOAT
+#if defined(HIP_ATOMIC_RETURN_FLOAT) || HIP_VERSION >= 401
 static inline __device__ float atomicAddNoRet_impl(__attribute__((address_space(1))) float*, float) asm("llvm.amdgcn.global.atomic.fadd.f32.p1f32.f32");
 #else
 static inline __device__ void atomicAddNoRet_impl(__attribute__((address_space(1))) float*, float) asm("llvm.amdgcn.global.atomic.fadd.p1f32.f32");
