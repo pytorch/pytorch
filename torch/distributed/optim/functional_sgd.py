@@ -1,6 +1,6 @@
 from typing import List, Optional, Dict
 import torch
-import torch.optim.functional as F
+import torch.optim._functional as F
 
 from torch import Tensor
 
