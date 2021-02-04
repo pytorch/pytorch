@@ -448,6 +448,10 @@ void RegisterInplaceNodeInLoopBlocks(Value* orig_data, Value* new_data) {
   Block* outer_block = inplace_node->owningBlock();
   Node* outer_block_node = outer_block->owningNode();
 
+  if (nullptr == outer_block_node) {
+    return;
+  }
+
   if (outer_block_node->kind() != prim::Loop)
     return;
 
