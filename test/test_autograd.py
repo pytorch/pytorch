@@ -22,7 +22,6 @@ torch.set_default_dtype(torch.double)
 
 from torch import nn
 from torch._six import inf, nan, istuple
-from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import (profile, format_time, EventList,
                                      FunctionEvent, FunctionEventAvg,
@@ -34,7 +33,8 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoL
                                                   suppress_warnings, slowTest,
                                                   load_tests, random_symmetric_matrix,
                                                   IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck,
-                                                  TemporaryFileName, TEST_WITH_ROCM)
+                                                  TemporaryFileName, TEST_WITH_ROCM,
+                                                  gradcheck, gradgradcheck)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
@@ -73,10 +73,6 @@ load_tests = load_tests
 import pickle
 
 PRECISION = 1e-4
-
-# See #49409, we should remove these if we end up with a global gradcheck setting
-gradcheck = partial(gradcheck, check_batched_grad=True)
-gradgradcheck = partial(gradgradcheck, check_batched_grad=True)
 
 
 @contextlib.contextmanager
@@ -2217,10 +2213,10 @@ class TestAutograd(TestCase):
 
         x = torch.tensor(2).double().requires_grad_()
 
-        self.assertTrue(torch.autograd.gradcheck(double, x))
-        self.assertTrue(torch.autograd.gradgradcheck(double, x))
-        self.assertTrue(torch.autograd.gradcheck(double2, x))
-        self.assertTrue(torch.autograd.gradgradcheck(double2, x))
+        self.assertTrue(gradcheck(double, x))
+        self.assertTrue(gradgradcheck(double, x))
+        self.assertTrue(gradcheck(double2, x))
+        self.assertTrue(gradgradcheck(double2, x))
 
         y = double(x)
         torch.autograd.grad(y, x, create_graph=True)
@@ -5011,7 +5007,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'mul',
                 '__rmul__', 'sgn', 'abs', 'dot', 'vdot', 'tensor_split', 'matmul',
                 'bmm', 'mv', 'ger', 'diagonal', 'fill_', 'sub',
-                'mean', 'inverse', 'triangular_solve', 'solve', 'addcmul',
+                'mean', 'inverse', 'solve', 'addcmul',
                 'addcdiv', 'linalg.tensorinv', 'matrix_exp', 'qr',
                 'narrow', 'swapaxes', 'swapdims', 'tensor_split', 'tile',
                 'baddbmm', 'addbmm', 'addmv'] + separate_complex_tests
@@ -5697,6 +5693,26 @@ class TestAutogradFunctional(TestCase):
 
         for inputs in test_cases:
             self._test_construct_standard_basis_for(inputs)
+
+    def _test_vectorize_raises_no_warnings(self, api):
+        # vmap is an experimental prototype. When someone calls torch.vmap,
+        # it raises a python warning. This test checks that
+        # autogradF.{jacobian, hessian} don't raise that experimental prototype
+        # warning; it is not nice for a public-facing API to raise a warning
+        # no matter how it is called.
+        def foo(a):
+            return (a ** 2).sum()
+
+        x = torch.randn(3)
+        with warnings.catch_warnings(record=True) as wa:
+            result = api(foo, x, vectorize=True)
+        self.assertEqual(len(wa), 0)
+
+    def test_jacobian_vectorize_raises_no_warnings(self):
+        return self._test_vectorize_raises_no_warnings(autogradF.jacobian)
+
+    def test_hessian_vectorize_raises_no_warnings(self):
+        return self._test_vectorize_raises_no_warnings(autogradF.hessian)
 
     def _test_jacobian_err_check(self, vectorize):
         def foo(a):
@@ -7065,15 +7081,13 @@ class TestAutogradDeviceType(TestCase):
             self.assertFalse(s.grad is None or s.grad.abs().sum().item() == 0)
 
     def _test_rnn_mod(self, mod, inp):
-        from functools import partial
-
         def flatten_out(mod, inp):
             out = mod(inp)
             return tuple([t if isinstance(t, torch.Tensor) else tt for t in out for tt in t])
         gradcheckfunc = partial(flatten_out, mod)
         with torch.backends.cudnn.flags(enabled=False):
-            torch.autograd.gradcheck(gradcheckfunc, inp)
-            torch.autograd.gradgradcheck(gradcheckfunc, inp)
+            gradcheck(gradcheckfunc, inp, check_batched_grad=False)
+            gradgradcheck(gradcheckfunc, inp, check_batched_grad=False)
 
         if inp.is_cuda and not TEST_WITH_ROCM:
             # Assert that we have good error message around unsupported CuDNN double backward
@@ -7331,6 +7345,19 @@ class TestAutogradDeviceType(TestCase):
         v2.mul_(2)
         x.sum().backward()
         self.assertEqual(root.grad.tolist(), [[1, 2], [1, 1]])
+
+    def test_inplace_view_then_no_grad(self, device):
+        # Perform an in-place operation on a view of a non-leaf variable.
+        a = torch.ones(3, 1, device=device, requires_grad=True)
+        b = a * 2
+        c = b.view_as(b)
+        c[0][0] = 3
+
+        # Force a graph update with grad disabled.
+        with torch.no_grad():
+            c.grad_fn
+
+        c.sum().backward()
 
     def test_inplace_view_gradcheck(self, device):
         # gradcheck modifications to views
@@ -7779,6 +7806,18 @@ class TestMultithreadAutograd(TestCase):
             tb = sys.exc_info()[2]
             tb_str = "\n".join(traceback.format_tb(tb))
             self.assertTrue('raise ValueError("something")' in tb_str)
+
+    # TODO(@anjali411): add an OpInfo based test for torch.cat
+    # Issue: https://github.com/pytorch/pytorch/issues/51627
+    def test_cat_r_to_c(self):
+        inp_c = torch.rand(3, 2, dtype=torch.cdouble, requires_grad=True)
+        inp_r = torch.randn(3, 2, dtype=torch.double, requires_grad=True)
+
+        def fn(x1, x2):
+            return torch.cat((x1, x2), dim=-1)
+
+        torch.autograd.gradcheck(fn, [inp_r, inp_c])
+        torch.autograd.gradcheck(fn, [inp_c, inp_r])
 
 for test in method_tests():
     add_test(*test)

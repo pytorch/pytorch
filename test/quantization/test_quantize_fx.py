@@ -1525,7 +1525,6 @@ class TestQuantizeFx(QuantizationTestCase):
         qconfig_dict = {"": default_qconfig}
         m = prepare_fx(model, qconfig_dict)
         m(torch.rand(5, 5))
-
         m = convert_fx(m)
         keys = m.state_dict().keys()
         quant_scale_count = quant_zero_point = scale_count = zero_point_count = 0
@@ -1557,6 +1556,41 @@ class TestQuantizeFx(QuantizationTestCase):
         assert hasattr(m, "mods2_scale_0")
         assert hasattr(m, "mods2_zero_point_0")
 
+    @skipIfNoFBGEMM
+    def test_packed_weight_fused_op(self):
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w = torch.ones(5, 5)
+                self.b = torch.zeros(5)
+
+            def forward(self, x):
+                return F.linear(x, self.w, self.b)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mods1 = torch.nn.Sequential(
+                    Linear(),
+                    Linear()
+                )
+                self.mods2 = Linear()
+                self.relu = F.relu
+
+            def forward(self, x):
+                x = self.mods1(x)
+                x = self.mods2(x)
+                x = self.relu(x)
+                return x
+
+        model = M().eval()
+        qconfig_dict = {"": default_qconfig}
+        m = prepare_fx(model, qconfig_dict)
+        m(torch.rand(5, 5))
+        m = convert_fx(m)
+        assert hasattr(m, "mods1_0_packed_weight_0")
+        assert hasattr(m, "mods1_1_packed_weight_0")
+        assert hasattr(m, "mods2_packed_weight_0")
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -2824,7 +2858,6 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
         qconfig = default_qconfig if mode == 'static' else default_qat_qconfig
         qconfig_dict = {'': qconfig}
-        # print('graph module:', graph_module.src)
         script = torch.jit.script(model)
 
         # make sure graph module and script module are both runanble
@@ -2975,6 +3008,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
     def test_torchvision(self):
         from torchvision import models
         from torchvision.models import quantization as quantized_models
+        from torchvision.models.quantization.utils import _replace_relu
 
         def get_available_classification_models(models):
             return [k for k, v in models.__dict__.items() if callable(v) and k[0].lower() == k[0] and k[0] != "_"]
@@ -2986,15 +3020,15 @@ class TestQuantizeFxModels(QuantizationTestCase):
         quantized_model_list = set(quantized_model_list) - no_pretrained_model
         # test eager and graph consistency
         model_list = quantized_model_list
-        # inception_v3 is not symbolically traceable: https://github.com/pytorch/pytorch/issues/48813
-        model_list = set(model_list) - {'inception_v3'}
-        # mobilenet: dropout error RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'QUInt8'
-        # incpetion_v3: looks like there is some problem with AuxLogits
-        quantized_not_working = [('qat', 'inception_v3'),
-                                 ('static', 'inception_v3')]
-
-        fx_eager_not_matching = ['googlenet',  # because _transform_input is not quantized in eager
-                                 'mobilenet_v2']  # because relu6 is replaced as relu in mobilenetv2
+        model_list = set(model_list)
+        # mobilenet/inception_v3/googlenet qat is not working due to AdaptiveAveragePool qat
+        # we might observe the output of AdaptiveAveragePool in the future
+        # and re-enable the test
+        fx_eager_not_matching = [
+            ("mobilenet_v2", "qat"),
+            ("inception_v3", "qat"),
+            ("googlenet", "qat")
+        ]  # because relu6 is replaced as relu in mobilenetv2
 
         diff_of_quant = {}
         diff_from_eager = {}
@@ -3002,15 +3036,30 @@ class TestQuantizeFxModels(QuantizationTestCase):
         options = itertools.product(modes, model_list)
         for mode, name in options:
             pretrained = name in quantized_model_list  # load pretrained model to compare with quantized model
+            kwargs = {}
+            # turn off transform input for inception_v3 since
+            # it's not quantized in eager mode and in fx graph
+            # mode we can't skip quantizing a method right now
+            # (might be supported in the future)
+            if name in ["inception_v3", "googlenet"]:
+                kwargs["transform_input"] = False
+            eager_quantizable_model = None
             if name in quantized_model_list:
-                if (mode, name) in quantized_not_working:
-                    eager_quantizable_model = None
-                else:
-                    eager_quantizable_model = quantized_models.__dict__[name](pretrained=True, quantize=False).eval().float()
+                eager_quantizable_model = quantized_models.__dict__[name](pretrained=True, quantize=False, **kwargs).eval().float()
             # compare with eager mode quantized model when it is available
             pretrained = eager_quantizable_model is not None
-            model = models.__dict__[name](pretrained=pretrained).eval().float()
-            check_with_eager = name not in fx_eager_not_matching
+            model = models.__dict__[name](pretrained=pretrained, **kwargs).eval().float()
+            if name == "mobilenet_v2":
+                _replace_relu(model)
+            # disable aux logits
+            if hasattr(model, "aux_logits"):
+                model.aux_logits = False
+                model.AuxLogits = None
+                if eager_quantizable_model:
+                    eager_quantizable_model.aux_logits = False
+                    eager_quantizable_model.AuxLogits = None
+
+            check_with_eager = (name, mode) not in fx_eager_not_matching
             self._test_model_impl(
                 mode, name, model, eager_quantizable_model,
                 check_with_eager,

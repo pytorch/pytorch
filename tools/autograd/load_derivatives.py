@@ -279,6 +279,11 @@ def saved_variables(
             'suffix': '_args_sizes',
             'type': 'std::vector<std::vector<int64_t>>',
         }),
+        # replace to_args_scalartypes(self) with self_args_scalartypes
+        (r'to_args_scalartypes\({}\)', {
+            'suffix': '_args_scalartypes',
+            'type': 'std::vector<ScalarType>',
+        }),
         # replace TensorGeometry(self) with self_geometry
         (r'TensorGeometry\({}\)', {
             'suffix': '_geometry',
