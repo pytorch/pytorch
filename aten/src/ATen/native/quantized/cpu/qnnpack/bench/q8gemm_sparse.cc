@@ -562,6 +562,51 @@ BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMM_Op, 8x8__aarch64_neon, 8, 8, 8, 1)
 
 BENCHMARK_REGISTER_F(Q8GEMM_Op, 8x8__aarch64_neon)
     ->Apply(SparseGEMMBenchGemmArguments);
+
+BENCHMARK_TEMPLATE_DEFINE_F(Q8GEMMSparse_Op, 8x8c1x4_prepacked__aarch64_neon, 8, 8, 4)
+(benchmark::State& state) {
+  for (auto _ : state) {
+    auto m_blocks = (mc() + mr()  - 1) / mr();
+    auto k_blocks = (kc() + 4  - 1) / 4;
+    std::vector<uint8_t> a_packed(m_blocks * k_blocks * mr() * 4 + 8);
+    for (uint32_t m = 0; m < mc(); m += mr()) {
+      const uint32_t mrr = min(mc() - m, mr());
+      for (uint32_t n = 0, channel_offset = 0; n < nc();
+          n += nr(), channel_offset += nr()) {
+        const uint32_t nrr = min(nc() - n, nr());
+        pytorch_q8gemm_sparse_packA_ukernel_8x4__aarch64_neon(
+            mrr,
+            kc(),
+            a() + m * kc(),
+            kc() * sizeof(uint8_t),
+            a_packed.data() + (m >> 3) * (k_blocks << 2) * mr()
+            );
+      }
+    }
+    for (uint32_t m = 0; m < mc(); m += mr()) {
+      const uint32_t mrr = min(mc() - m, mr());
+      for (uint32_t n = 0, channel_offset = 0; n < nc();
+          n += nr(), channel_offset += nr()) {
+        const uint32_t nrr = min(nc() - n, nr());
+        pytorch_q8gemm_dq_sparse_1x4_ukernel_8x8_packedA__aarch64_neon(
+            mrr,
+            nrr,
+            a_packed.data() + (m >> 3) * (k_blocks << 2) * mr(),
+            bcsr_matrix_->values.data(),
+            bcsr_matrix_->row_values.data(),
+            bcsr_matrix_->col_indices.data(),
+            b() + n,
+            c() + m * nc() + n,
+            nc(),
+            channel_offset,
+            quantizationParams());
+      }
+    }
+  }
+}
+BENCHMARK_REGISTER_F(Q8GEMMSparse_Op, 8x8c1x4_prepacked__aarch64_neon)
+    ->Apply(SparseGEMMBenchGemmArguments);
+
 #endif
 
 #ifndef PYTORCH_QNNPACK_BENCHMARK_NO_MAIN
