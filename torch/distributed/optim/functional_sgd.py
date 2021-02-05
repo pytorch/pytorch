@@ -1,6 +1,6 @@
 from typing import List, Optional, Dict
 import torch
-import torch.optim.functional as F
+import torch.optim._functional as F
 
 from torch import Tensor
 
@@ -70,14 +70,14 @@ class _FunctionalSGD(object):
                     momentum_buffer_list.append(state['momentum_buffer'])
 
         with torch.no_grad():
-            F._sgd(params,
-                   grads,
-                   momentum_buffer_list,
-                   weight_decay,
-                   momentum,
-                   lr,
-                   dampening,
-                   self.nesterov)
+            F.sgd(params,
+                  grads,
+                  momentum_buffer_list,
+                  weight_decay,
+                  momentum,
+                  lr,
+                  dampening,
+                  self.nesterov)
 
         # update momentum_buffers in state
         for i, p in enumerate(params):
