@@ -197,9 +197,9 @@ void initJitBackendBindings(PyObject* module) {
     // This is a helper function for creating a new instance of the
     // backend class.
     static const auto create_backend_ct = CodeTemplate(R"(
-              def __create_backend(self):
-                  self.__backend = $name()
-              )");
+            def __create_backend(self):
+                self.__backend = $name()
+            )");
     TemplateEnv create_backend_te;
     create_backend_te.s("name", qual_backend_name.qualifiedName());
     loweredModule.define(
@@ -209,19 +209,19 @@ void initJitBackendBindings(PyObject* module) {
     // the LoweredModule.
     loweredModule.define(
         R"(
-              def __getstate__(self):
-                  return self.__method_compile_spec, self.__processed_module
-              )",
+            def __getstate__(self):
+                return self.__method_compile_spec, self.__processed_module
+            )",
         loweredModuleResolver());
 
     loweredModule.define(
         R"(
-              def __setstate__(self, state):
-                  self.__method_compile_spec = state[0]
-                  self.__processed_module = state[1]
-                  self.__create_backend()
-                  self.__handles = self.__backend.compile(self.__processed_module, self.__method_compile_spec)
-              )",
+            def __setstate__(self, state):
+                self.__method_compile_spec = state[0]
+                self.__processed_module = state[1]
+                self.__create_backend()
+                self.__handles = self.__backend.compile(self.__processed_module, self.__method_compile_spec)
+            )",
         loweredModuleResolver());
 
     // Only add preprocess method to the LoweredModule if there is no
@@ -254,12 +254,12 @@ void initJitBackendBindings(PyObject* module) {
     for (auto& e : method_compile_spec) {
       std::string method_name = py::cast<std::string>(e.first);
       static const auto method_ct = CodeTemplate(R"(
-              def $method(self${,def_inputs}):
-                  typed_inputs: List[Any] = [${fwd_inputs,}]
-                  $unpack, = self.__backend.execute(self.__handles["$method"], typed_inputs)
-                  ${refine,}
-                  return $ret
-              )");
+            def $method(self${,def_inputs}):
+                typed_inputs: List[Any] = [${fwd_inputs,}]
+                $unpack, = self.__backend.execute(self.__handles["$method"], typed_inputs)
+                ${refine,}
+                return $ret
+            )");
 
       TemplateEnv method_te;
       method_te.s("method", method_name);

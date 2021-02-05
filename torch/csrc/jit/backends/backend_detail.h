@@ -51,9 +51,8 @@ std::function<void(Stack&)> getExecuteFunc() {
   };
 }
 
-typedef std::function<
-    c10::IValue(const Module&, const c10::Dict<IValue, IValue>&)>
-    BackendPreprocessFunction;
+using BackendPreprocessFunction =
+    std::function<c10::IValue(const Module&, const c10::Dict<IValue, IValue>&)>;
 
 TORCH_API void registerBackendPreprocessFunction(
     const std::string& name,
