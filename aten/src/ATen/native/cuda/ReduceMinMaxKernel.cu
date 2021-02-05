@@ -121,7 +121,7 @@ static void _aminmax_kernel_impl(
     bool keepdim) {
   at::TensorIterator iter = make_reduction("_aminmax", min_result, 
     max_result, self, dim, keepdim, self.scalar_type());
-  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, self.scalar_type(), "_aminmax_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, self.scalar_type(), "_aminmax_cuda", [&]() {
     gpu_reduce_kernel<scalar_t, scalar_t>(
       iter,
       MinMaxOps<scalar_t, scalar_t, int32_t>{},
