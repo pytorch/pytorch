@@ -70,6 +70,7 @@ allow_list = [
     ("aten::_foreach_div", datetime.date(2021, 2, 25)),
     ("aten::_foreach_div_", datetime.date(2021, 2, 25)),
     ("aten::_foreach_addcdiv", datetime.date(2021, 2, 25)),
+    ("aten::mkldnn_linear", datetime.date(2021, 3, 2)),
 ]
 
 def allow_listed(schema, allow_list):
