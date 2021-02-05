@@ -708,7 +708,17 @@ static void PrepareListDeleteForONNX(Node* n) {
   if (n->kind() == aten::Delete) {
     n->addOutput();
     n->output()->setType(n->inputs().at(0)->type());
-    n->inputs().at(0)->replaceAllUsesAfterNodeWith(n, n->output());
+
+    if (nullptr == n->owningBlock()->owningNode()) {
+      n->inputs().at(0)->replaceAllUsesAfterNodeWith(n, n->output());
+      return;
+    }
+    RegisterInplaceNodeInBlocks(
+        n->inputs().at(0),
+        n->output(),
+        n,
+        n->owningBlock(),
+        n->owningBlock()->owningNode());
   }
 }
 
@@ -718,7 +728,17 @@ static void PrepareListAppendAndInsertForONNX(Node* n) {
       n->addOutput();
       n->output()->setType(n->inputs().at(0)->type());
     }
-    n->inputs().at(0)->replaceAllUsesAfterNodeWith(n, n->output());
+
+    if (nullptr == n->owningBlock()->owningNode()) {
+      n->inputs().at(0)->replaceAllUsesAfterNodeWith(n, n->output());
+      return;
+    }
+    RegisterInplaceNodeInBlocks(
+        n->inputs().at(0),
+        n->output(),
+        n,
+        n->owningBlock(),
+        n->owningBlock()->owningNode());
   }
 }
 
@@ -986,15 +1006,6 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
     if (n->kind() == prim::GetAttr || n->kind() == prim::SetAttr) {
       trackAndRegisterAttributesInBlocks(
           n, graph, module_, allAttrValues, setAttrValues, nextSetAttrValues);
-    } else if (
-        (inplace_ops.find(n->kind()) != inplace_ops.end()) &&
-        n->kind() != aten::pop) { // pop is handled in its own pass
-      auto orig_data = n->inputs().at(0);
-      auto block_ = n->owningBlock();
-      if (block_->owningNode())
-        RegisterInplaceNodeInBlocks(
-            orig_data, n->output(), n, block_, block_->owningNode());
-
     } else { // for prim::If and prim::Loop nodes with blocks.
       for (Block* sub_block : n->blocks()) {
         std::unordered_map<std::string, Value*> map_ =

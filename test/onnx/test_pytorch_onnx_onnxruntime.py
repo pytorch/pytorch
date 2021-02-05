@@ -6798,8 +6798,32 @@ class TestONNXRuntime(unittest.TestCase):
                 elem = torch.matmul(x[0], y)
                 for i in range(x.size(0)):
                     res.append(torch.matmul(x[i], y))
-                for i in range(x.size(0) - 1):
+                for i in range(x.size(0)):
                     elem = res.pop()
+                for i in range(x.size(0)):
+                    res.append(torch.matmul(x[i], y))
+                    elem = res.pop()
+                return res.append(elem)
+
+        model = torch.jit.script(ListModel())
+        x = torch.randn(16, 3, 4)
+        y = torch.randn(4, 5)
+        self.run_test(model, (x, y))
+
+
+    @skipIfUnsupportedMinOpsetVersion(13)
+    def test_list_del_in_block(self):
+        class ListModel(torch.nn.Module):
+            def forward(self, x, y):
+                res = []
+                elem = torch.matmul(x[0], y)
+                for i in range(x.size(0)):
+                    res.append(torch.matmul(x[i], y))
+                for i in range(x.size(0)):
+                    del res[0]
+                for i in range(x.size(0)):
+                    res.append(torch.matmul(x[i], y))
+                    del res[0]
                 return res.append(elem)
 
         model = torch.jit.script(ListModel())
