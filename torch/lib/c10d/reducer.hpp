@@ -1,7 +1,9 @@
 #pragma once
 
 #include <atomic>
+#ifdef USE_CUDA
 #include <cuda_runtime.h>
+#endif
 #include <memory>
 #include <mutex>
 #include <tuple>
@@ -340,6 +342,9 @@ class Reducer {
     int64_t backward_comm_end_time;
   };
 
+  CPUTimer cpu_timer_{};
+
+  #ifdef USE_CUDA
   // GPU events to record event start and end time.
   struct GPUTimer {
     cudaEvent_t forward_start;
@@ -347,13 +352,10 @@ class Reducer {
     cudaEvent_t backward_compute_end;
     cudaEvent_t backward_comm_start;
     cudaEvent_t backward_comm_end;
-    // It is used to calculate backward_stats_
-    // when training runs on GPUs.
-    cudaEvent_t backward_variable_ready;
   };
-
-  CPUTimer cpu_timer_{};
   GPUTimer gpu_timer_{};
+  #endif
+
   // We collect the relative timestamp of every gradient being ready
   // when executing autograd. This can be used to derive a timeline of
   // the point in time buckets were ready, or ideal bucket assignment/ordering.

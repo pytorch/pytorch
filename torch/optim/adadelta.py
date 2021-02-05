@@ -1,6 +1,6 @@
 import torch
 
-from . import functional as F
+from . import _functional as F
 from .optimizer import Optimizer
 
 
@@ -78,13 +78,13 @@ class Adadelta(Optimizer):
 
                 state['step'] += 1
 
-            F._adadelta(params_with_grad,
-                        grads,
-                        square_avgs,
-                        acc_deltas,
-                        lr,
-                        rho,
-                        eps,
-                        weight_decay)
+            F.adadelta(params_with_grad,
+                       grads,
+                       square_avgs,
+                       acc_deltas,
+                       lr,
+                       rho,
+                       eps,
+                       weight_decay)
 
         return loss

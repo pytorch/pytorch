@@ -26,12 +26,16 @@ class Logger {
 
   // Calculate avg stats using cpu timer and gpu timer
   // that has been recorded in reducer.
-  void calculate_avg_time(
+  void calculate_avg_cpu_time(
       int64_t& avg_time,
       int64_t cpu_start_time,
-      int64_t cpu_end_time,
+      int64_t cpu_end_time);
+#ifdef USE_CUDA
+  void calculate_avg_gpu_time(
+      int64_t& avg_time,
       cudaEvent_t gpu_start,
       cudaEvent_t gpu_end);
+#endif
   // Set stats that can be collected only during
   // training loop. It is called at beginning of forward call.
   void set_runtime_stats();

@@ -87,23 +87,27 @@ void Logger::set_construction_logging_data(
   LogPyTorchDDPUsage(*ddp_logging_data_);
 }
 
-void Logger::calculate_avg_time(
+void Logger::calculate_avg_cpu_time(
     int64_t& avg_time,
     int64_t cpu_start_time,
-    int64_t cpu_end_time,
+    int64_t cpu_end_time) {
+  long num_iters = reducer_->num_iterations_;
+  avg_time = ((cpu_end_time - cpu_start_time) + avg_time * (num_iters - 1)) /
+      num_iters;
+}
+
+#ifdef USE_CUDA
+void Logger::calculate_avg_gpu_time(
+    int64_t& avg_time,
     cudaEvent_t gpu_start,
     cudaEvent_t gpu_end) {
   long num_iters = reducer_->num_iterations_;
-  if (reducer_->replicas_[0][0].is_cuda()) {
-    float milliseconds = 0.0;
-    cudaEventElapsedTime(&milliseconds, gpu_start, gpu_end);
-    avg_time =
-        (int(milliseconds * 1000000) + avg_time * (num_iters - 1)) / num_iters;
-  } else {
-    avg_time = ((cpu_end_time - cpu_start_time) + avg_time * (num_iters - 1)) /
-        num_iters;
-  }
+  float milliseconds = 0.0;
+  cudaEventElapsedTime(&milliseconds, gpu_start, gpu_end);
+  avg_time =
+      (int(milliseconds * 1000000) + avg_time * (num_iters - 1)) / num_iters;
 }
+#endif
 
 void Logger::set_runtime_stats() {
   // set runtime stats after 1st iteration is complete.
@@ -131,39 +135,51 @@ void Logger::set_runtime_stats() {
   // when it is cheap to synchronize the cuda events of previous iteration,
   // as it is guaranteed that all cuda operations are done in previous
   // iteration.
-  cudaEventSynchronize(reducer_->gpu_timer_.forward_start);
-  cudaEventSynchronize(reducer_->gpu_timer_.backward_compute_start);
-  cudaEventSynchronize(reducer_->gpu_timer_.backward_compute_end);
-  cudaEventSynchronize(reducer_->gpu_timer_.backward_comm_start);
-  cudaEventSynchronize(reducer_->gpu_timer_.backward_comm_end);
+  if (reducer_->replicas_[0][0].is_cuda()) {
+#ifdef USE_CUDA
+    cudaEventSynchronize(reducer_->gpu_timer_.forward_start);
+    cudaEventSynchronize(reducer_->gpu_timer_.backward_compute_start);
+    cudaEventSynchronize(reducer_->gpu_timer_.backward_compute_end);
+    cudaEventSynchronize(reducer_->gpu_timer_.backward_comm_start);
+    cudaEventSynchronize(reducer_->gpu_timer_.backward_comm_end);
+    calculate_avg_gpu_time(
+        ddp_logging_data_->avg_forward_compute_time,
+        reducer_->gpu_timer_.forward_start,
+        reducer_->gpu_timer_.backward_compute_start);
+    calculate_avg_gpu_time(
+        ddp_logging_data_->avg_backward_compute_time,
+        reducer_->gpu_timer_.backward_compute_start,
+        reducer_->gpu_timer_.backward_compute_end);
+    calculate_avg_gpu_time(
+        ddp_logging_data_->avg_backward_comm_time,
+        reducer_->gpu_timer_.backward_comm_start,
+        reducer_->gpu_timer_.backward_comm_end);
+    calculate_avg_gpu_time(
+        ddp_logging_data_->avg_backward_compute_comm_overlap_time,
+        reducer_->gpu_timer_.backward_comm_start,
+        reducer_->gpu_timer_.backward_compute_end);
+#endif
+  } else {
+    calculate_avg_cpu_time(
+        ddp_logging_data_->avg_forward_compute_time,
+        reducer_->cpu_timer_.forward_start_time,
+        reducer_->cpu_timer_.backward_compute_start_time);
 
-  calculate_avg_time(
-      ddp_logging_data_->avg_forward_compute_time,
-      reducer_->cpu_timer_.forward_start_time,
-      reducer_->cpu_timer_.backward_compute_start_time,
-      reducer_->gpu_timer_.forward_start,
-      reducer_->gpu_timer_.backward_compute_start);
+    calculate_avg_cpu_time(
+        ddp_logging_data_->avg_backward_compute_time,
+        reducer_->cpu_timer_.backward_compute_start_time,
+        reducer_->cpu_timer_.backward_compute_end_time);
 
-  calculate_avg_time(
-      ddp_logging_data_->avg_backward_compute_time,
-      reducer_->cpu_timer_.backward_compute_start_time,
-      reducer_->cpu_timer_.backward_compute_end_time,
-      reducer_->gpu_timer_.backward_compute_start,
-      reducer_->gpu_timer_.backward_compute_end);
+    calculate_avg_cpu_time(
+        ddp_logging_data_->avg_backward_comm_time,
+        reducer_->cpu_timer_.backward_comm_start_time,
+        reducer_->cpu_timer_.backward_comm_end_time);
 
-  calculate_avg_time(
-      ddp_logging_data_->avg_backward_comm_time,
-      reducer_->cpu_timer_.backward_comm_start_time,
-      reducer_->cpu_timer_.backward_comm_end_time,
-      reducer_->gpu_timer_.backward_comm_start,
-      reducer_->gpu_timer_.backward_comm_end);
-
-  calculate_avg_time(
-      ddp_logging_data_->avg_backward_compute_comm_overlap_time,
-      reducer_->cpu_timer_.backward_comm_start_time,
-      reducer_->cpu_timer_.backward_compute_end_time,
-      reducer_->gpu_timer_.backward_comm_start,
-      reducer_->gpu_timer_.backward_compute_end);
+    calculate_avg_cpu_time(
+        ddp_logging_data_->avg_backward_compute_comm_overlap_time,
+        reducer_->cpu_timer_.backward_comm_start_time,
+        reducer_->cpu_timer_.backward_compute_end_time);
+  }
 }
 
 c10::DDPLoggingData Logger::get_ddp_logging_data() {

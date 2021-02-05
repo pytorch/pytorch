@@ -188,12 +188,13 @@ Reducer::Reducer(
   }
 
   if (replicas_[0][0].is_cuda()) {
+    #ifdef USE_CUDA
     cudaEventCreate(&gpu_timer_.forward_start);
     cudaEventCreate(&gpu_timer_.backward_compute_start);
     cudaEventCreate(&gpu_timer_.backward_compute_end);
     cudaEventCreate(&gpu_timer_.backward_comm_start);
     cudaEventCreate(&gpu_timer_.backward_comm_end);
-    cudaEventCreate(&gpu_timer_.backward_variable_ready);
+    #endif
   }
 }
 
@@ -575,20 +576,8 @@ void Reducer::mark_variable_ready(VariableIndex index) {
   TORCH_CHECK(
       variable_index < variable_locators_.size(),
       "Out of range variable index.");
-  if (replicas_[0][0].is_cuda()) {
-    cudaEventRecord(gpu_timer_.backward_variable_ready);
-    cudaEventSynchronize(gpu_timer_.backward_variable_ready);
-    float ready_time_ms = 0.0;
-    cudaEventElapsedTime(
-      &ready_time_ms,
-      gpu_timer_.backward_compute_start,
-      gpu_timer_.backward_variable_ready);
-    backward_stats_[replica_index][variable_index]
-      = int(ready_time_ms * 1000000);
-  } else {
-    backward_stats_[replica_index][variable_index] =
+  backward_stats_[replica_index][variable_index] =
       current_time_in_nanos() - cpu_timer_.backward_compute_start_time;
-  }
 
   // Any time we mark a variable ready (be it in line due to unused parameters,
   // or via an autograd hook), we require a call to the finalize function. If
@@ -716,7 +705,9 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
     num_buckets_ready_++;
     if (num_buckets_ready_ == 1) {
       if (replicas_[0][0].is_cuda()) {
+        #ifdef USE_CUDA
         cudaEventRecord(gpu_timer_.backward_comm_start);
+        #endif
       } else {
         cpu_timer_.backward_comm_start_time = current_time_in_nanos();
       }
@@ -1003,7 +994,9 @@ void Reducer::prepare_for_forward() {
   std::lock_guard<std::mutex> lock(mutex_);
   num_iterations_++;
   if (replicas_[0][0].is_cuda()) {
+    #ifdef USE_CUDA
     cudaEventRecord(gpu_timer_.forward_start);
+    #endif
   } else {
     cpu_timer_.forward_start_time = current_time_in_nanos();
   }
@@ -1025,10 +1018,12 @@ void Reducer::prepare_for_backward(
   expect_autograd_hooks_ = true;
   next_bucket_ = 0;
 
+  cpu_timer_.backward_compute_start_time = current_time_in_nanos();
+
   if (replicas_[0][0].is_cuda()) {
+    #ifdef USE_CUDA
     cudaEventRecord(gpu_timer_.backward_compute_start);
-  } else {
-    cpu_timer_.backward_compute_start_time = current_time_in_nanos();
+    #endif
   }
 
   // Reset num_buckets_ready_ at the beginning of backward computation
@@ -1228,7 +1223,9 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
 
 void Reducer::finalize_backward() {
   if (replicas_[0][0].is_cuda()) {
+    #ifdef USE_CUDA
     cudaEventRecord(gpu_timer_.backward_compute_end);
+    #endif
   } else {
     cpu_timer_.backward_compute_end_time = current_time_in_nanos();
   }
@@ -1305,7 +1302,9 @@ void Reducer::finalize_backward() {
   }
 
   if (replicas_[0][0].is_cuda()) {
+    #ifdef USE_CUDA
     cudaEventRecord(gpu_timer_.backward_comm_end);
+    #endif
   } else {
     cpu_timer_.backward_comm_end_time = current_time_in_nanos();
   }
