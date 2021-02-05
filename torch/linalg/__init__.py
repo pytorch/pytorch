@@ -758,31 +758,36 @@ Examples::
 """)
 
 pinv = _add_docstr(_linalg.linalg_pinv, r"""
-linalg.pinv(input, rcond=1e-15, hermitian=False) -> Tensor
+linalg.pinv(input, rcond=1e-15, hermitian=False, *, out=None) -> Tensor
 
 Computes the pseudo-inverse (also known as the Moore-Penrose inverse) of a matrix :attr:`input`,
 or of each matrix in a batched :attr:`input`.
-The pseudo-inverse is computed using singular value decomposition (see :func:`torch.svd`) by default.
-If :attr:`hermitian` is ``True``, then :attr:`input` is assumed to be Hermitian (symmetric if real-valued),
-and the computation of the pseudo-inverse is done by obtaining the eigenvalues and eigenvectors
-(see :func:`torch.linalg.eigh`).
-The singular values (or the absolute values of the eigenvalues when :attr:`hermitian` is ``True``) that are below
-the specified :attr:`rcond` threshold are treated as zero and discarded in the computation.
 
-Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` datatypes.
+The singular values (or the absolute values of the eigenvalues when :attr:`hermitian` is ``True``)
+that are below the specified :attr:`rcond` threshold are treated as zero and discarded in the computation.
+
+Supports input of float, double, cfloat and cdouble datatypes.
 
 .. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: The pseudo-inverse is computed using singular value decomposition (see :func:`torch.linalg.svd`) by default.
+          If :attr:`hermitian` is ``True``, then :attr:`input` is assumed to be Hermitian (symmetric if real-valued),
+          and the computation of the pseudo-inverse is done by obtaining the eigenvalues and eigenvectors
+          (see :func:`torch.linalg.eigh`).
 
 .. note:: If singular value decomposition or eigenvalue decomposition algorithms do not converge
           then a RuntimeError will be thrown.
 
 Args:
-    input (Tensor): the input matrix of size :math:`(m, n)` or the batch of matrices of size :math:`(*, m, n)`
+    input (Tensor): the input matrix of size `(m, n)` or the batch of matrices of size `(*, m, n)`
                     where `*` is one or more batch dimensions.
-    rcond (float, Tensor, optional): the tolerance value to determine the cutoff for small singular values. Default: 1e-15
-                                     :attr:`rcond` must be broadcastable to the singular values of :attr:`input`
-                                     as returned by :func:`torch.svd`.
-    hermitian(bool, optional): indicates whether :attr:`input` is Hermitian. Default: ``False``
+    rcond (float, Tensor, optional): the tolerance value to determine the cutoff for small singular values.
+                                     Must be broadcastable to the singular values of :attr:`input` as returned
+                                     by :func:`torch.svd`. Default is ``1e-15``.
+    hermitian(bool, optional): indicates whether :attr:`input` is Hermitian. Default is ``False``.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default is ``None``.
 
 Examples::
 
