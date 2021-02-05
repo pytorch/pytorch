@@ -666,10 +666,10 @@ Example::
               std::chrono::milliseconds>(),
           py::arg("host_name"),
           py::arg("port"),
-          py::arg("world_size"),
+          py::arg("world_size") = -1,
           // using noconvert() requires this argument to be True or False
           // prevents accidental implicit conversion to bool
-          py::arg("is_master").noconvert(),
+          py::arg("is_master").noconvert() = false,
           py::arg("timeout") =
               std::chrono::milliseconds(::c10d::Store::kDefaultTimeout));
 
