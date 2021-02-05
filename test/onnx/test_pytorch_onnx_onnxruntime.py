@@ -218,6 +218,7 @@ class TestONNXRuntime(unittest.TestCase):
     keep_initializers_as_inputs = True  # For IR version 3 type export.
     use_new_jit_passes = True  # For testing main code-path
     onnx_shape_inference = True
+    disable_rnn_script_test = False
 
     def setUp(self):
         torch.manual_seed(0)
@@ -5857,9 +5858,18 @@ class TestONNXRuntime(unittest.TestCase):
 
     def _elman_rnn_test(self, layers, nonlinearity, bidirectional,
                         initial_state, packed_sequence, dropout):
+        class RNNWrappedModel(torch.nn.Module):
+            def __init__(self, layers, nonlinear, bidirect, dropout, batch_first):
+                super(RNNWrappedModel, self).__init__()
+
+                self.inner_model = torch.nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, num_layers=layers, nonlinearity=nonlinear, bidirectional=bidirect, dropout=dropout,
+                                    batch_first=batch_first)
+
+            def forward(self, input, hx:torch.Tensor):
+                return self.inner_model(input, hx)
+
         batch_first = True if packed_sequence == 2 else False
-        model = torch.nn.RNN(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers, nonlinearity=nonlinearity,
-                             bidirectional=bidirectional, dropout=dropout, batch_first=batch_first)
+        model = RNNWrappedModel(layers, nonlinear=nonlinearity, bidirect=bidirectional, dropout=dropout, batch_first=batch_first)
 
         if packed_sequence == 1:
             model = RnnModelWithPackedSequence(model, False)
@@ -5934,9 +5944,34 @@ class TestONNXRuntime(unittest.TestCase):
 
     def _gru_test(self, layers, bidirectional, initial_state,
                   packed_sequence, dropout):
+
+        class GRUWithStateModel(torch.nn.Module):
+            def __init__(self, layers, bidirect, dropout, batch_first):
+                super(GRUWithStateModel, self).__init__()
+
+                self.batch_first = batch_first
+                self.inner_model = torch.nn.GRU(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, num_layers=layers, bidirectional=bidirectional, dropout=dropout,
+                                    batch_first=batch_first)
+
+            def forward(self, input, hx):
+                return self.inner_model(input, hx)
+
+        class GRUWithoutStateModel(torch.nn.Module):
+            def __init__(self, layers, bidirect, dropout, batch_first):
+                super(GRUWithoutStateModel, self).__init__()
+                self.batch_first = batch_first
+                self.inner_model = torch.nn.GRU(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, num_layers=layers, bidirectional=bidirectional, dropout=dropout,
+                                    batch_first=batch_first)
+
+            def forward(self, input):
+                return self.inner_model(input, None)
+
         batch_first = True if packed_sequence == 2 else False
-        model = torch.nn.GRU(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, layers, bidirectional=bidirectional, dropout=dropout,
-                             batch_first=batch_first)
+        if initial_state:
+            model = GRUWithStateModel(layers=layers, bidirect=bidirectional, dropout=dropout, batch_first=batch_first)
+        else:
+            model = GRUWithoutStateModel(layers=layers, bidirect=bidirectional, dropout=dropout, batch_first=batch_first)
+
         if packed_sequence == 1:
             model = RnnModelWithPackedSequence(model, False)
         if packed_sequence == 2:
@@ -6707,9 +6742,11 @@ def make_test(name, base, layer, bidirectional, initial_state,
 
     # Cannot export with older opsets because of 'ConstantFill' op
     # ConstantFill was a temp op removed at opset 8. This is no longer supported by onnxruntime
-    @disableScriptTest()  # Test code not scriptable
     @skipIfUnsupportedMinOpsetVersion(9)
     def f(self):
+        if self.disable_rnn_script_test:
+            self.is_script_test_enabled = False
+
         self._dispatch_rnn_test(
             base,
             layers=layer[0],
@@ -6759,9 +6796,14 @@ def setup_rnn_tests():
                 ('lstm', 'lstm', {}),
                 ('gru', 'gru', {})
         ):
+            if not variable_length == 'without_sequence_lengths':
+                TestONNXRuntime.disable_rnn_script_test = True
+            else:
+                TestONNXRuntime.disable_rnn_script_test = False
+
             make_test(name, base, layer, bidirectional, initial_state,
-                      variable_length, dropout,
-                      **extra_kwargs)
+                                    variable_length, dropout,
+                                    **extra_kwargs)
             test_count += 1
 
     # sanity check that a representative example does exist
@@ -6856,4 +6898,4 @@ TestONNXRuntime_opset12_IRv4_old_jit_API = type(str("TestONNXRuntime_opset12_IRv
                                                      use_new_jit_passes=False))
 
 if __name__ == '__main__':
-    unittest.main()
+     unittest.main()
