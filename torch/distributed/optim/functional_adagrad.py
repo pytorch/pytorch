@@ -80,11 +80,11 @@ class _FunctionalAdagrad(object):
                 state_steps.append(state['step'].item())
 
         with torch.no_grad():
-            F.adagrad(params,
-                      grads,
-                      state_sums,
-                      state_steps,
-                      self.defaults['lr'],
-                      self.defaults['weight_decay'],
-                      self.defaults['lr_decay'],
-                      self.defaults['eps'])
+            F._adagrad(params,
+                       grads,
+                       state_sums,
+                       state_steps,
+                       self.defaults['lr'],
+                       self.defaults['weight_decay'],
+                       self.defaults['lr_decay'],
+                       self.defaults['eps'])
