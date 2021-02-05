@@ -1721,6 +1721,10 @@ of each of the individual matrices. Similarly, when :attr:`upper` is ``False``, 
 tensor will be composed of lower-triangular Cholesky factors of each of the individual
 matrices.
 
+.. note:: :func:`torch.linalg.cholesky` should be used over ``torch.cholesky`` when possible.
+          Note however that :func:`torch.linalg.cholesky` does not yet support the :attr:`upper`
+          parameter and instead always returns the lower triangular matrix.
+
 Args:
     input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)` where `*` is zero or more
                 batch dimensions consisting of symmetric positive-definite matrices.
@@ -2638,6 +2642,45 @@ Examples::
              [ 1.0500,  0.7336, -0.3836, -1.1015]]])
 """.format(**common_args))
 
+add_docstr(torch.diff, r"""
+diff(input, n=1, dim=-1, prepend=None, append=None) -> Tensor
+
+Computes the n-th forward difference along the given dimension.
+
+The first-order differences are given by `out[i] = input[i + 1] - input[i]`. Higher-order
+differences are calculated by using :func:`torch.diff` recursively.
+
+.. note::  Only `n = 1` is currently supported
+
+Args:
+    input (Tensor): the tensor to compute the differences on
+    n (int, optional): the number of times to recursively compute the difference
+    dim (int, optional): the dimension to compute the difference along.
+        Default is the last dimension.
+    prepend, append (Tensor, optional): values to prepend or append to
+        :attr:`input` along :attr:`dim` before computing the difference.
+        Their dimensions must be equivalent to that of input, and their shapes
+        must match input's shape except on :attr:`dim`.
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([1, 3, 2])
+    >>> torch.diff(a)
+    tensor([ 2, -1])
+    >>> b = torch.tensor([4, 5])
+    >>> torch.diff(a, append=b)
+    tensor([ 2, -1,  2,  1])
+    >>> c = torch.tensor([[1, 2, 3], [3, 4, 5]])
+    >>> torch.diff(c, dim=0)
+    tensor([[2, 2, 2]])
+    >>> torch.diff(c, dim=1)
+    tensor([[1, 1],
+            [1, 1]])
+""".format(**common_args))
+
 add_docstr(torch.digamma, r"""
 digamma(input, *, out=None) -> Tensor
 
@@ -2698,7 +2741,7 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.div, r"""
-div(input, other, *, out=None) -> Tensor
+div(input, other, *, rounding_mode='true' out=None) -> Tensor
 
 Divides each element of the input ``input`` by the corresponding element of
 :attr:`other`.
@@ -2707,8 +2750,8 @@ Divides each element of the input ``input`` by the corresponding element of
     \text{{out}}_i = \frac{{\text{{input}}_i}}{{\text{{other}}_i}}
 
 .. note::
-    Performs a "true" division like Python 3. See :func:`torch.floor_divide`
-    for floor division.
+    By default, this performs a "true" division like Python 3.
+    See the :attr:`rounding_mode` argument for floor division.
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer, float, and complex inputs.
@@ -2719,33 +2762,51 @@ Args:
     other (Tensor or Number): the divisor
 
 Keyword args:
+    rounding_mode (str, optional): Type of rounding applied to the result:
+
+        * ``"true"`` - default behavior. Performs no rounding and, if both :attr:`input` and
+          :attr:`other` are integer types, promotes the inputs to the default scalar type.
+          Equivalent to true division in Python (the ``/`` operator) and NumPy's ``np.true_divide``.
+        * ``"trunc"`` - rounds the results of the division towards zero.
+          Equivalent to C-style integer division.
+        * ``"floor"`` - rounds the results of the division down.
+          Equivalent to floor division in Python (the ``//`` operator) and NumPy's ``np.floor_divide``.
+
     {out}
 
 Examples::
 
-    >>> a = torch.randn(5)
-    >>> a
-    tensor([ 0.3810,  1.2774, -0.2972, -0.3719,  0.4637])
-    >>> torch.div(a, 0.5)
-    tensor([ 0.7620,  2.5548, -0.5944, -0.7439,  0.9275])
-    >>> a = torch.randn(4, 4)
-    >>> a
-    tensor([[-0.3711, -1.9353, -0.4605, -0.2917],
-            [ 0.1815, -1.0111,  0.9805, -1.5923],
-            [ 0.1062,  1.4581,  0.7759, -1.2344],
-            [-0.1830, -0.0313,  1.1908, -1.4757]])
-    >>> b = torch.randn(4)
-    >>> b
-    tensor([ 0.8032,  0.2930, -0.8113, -0.2308])
+    >>> x = torch.tensor([ 0.3810,  1.2774, -0.2972, -0.3719,  0.4637])
+    >>> torch.div(x, 0.5)
+    tensor([ 0.7620,  2.5548, -0.5944, -0.7438,  0.9274])
+
+    >>> a = torch.tensor([[-0.3711, -1.9353, -0.4605, -0.2917],
+    ...                   [ 0.1815, -1.0111,  0.9805, -1.5923],
+    ...                   [ 0.1062,  1.4581,  0.7759, -1.2344],
+    ...                   [-0.1830, -0.0313,  1.1908, -1.4757]])
+    >>> b = torch.tensor([ 0.8032,  0.2930, -0.8113, -0.2308])
     >>> torch.div(a, b)
-    tensor([[-0.4620, -6.6051,  0.5676,  1.2637],
-            [ 0.2260, -3.4507, -1.2086,  6.8988],
-            [ 0.1322,  4.9764, -0.9564,  5.3480],
-            [-0.2278, -0.1068, -1.4678,  6.3936]])
+    tensor([[-0.4620, -6.6051,  0.5676,  1.2639],
+            [ 0.2260, -3.4509, -1.2086,  6.8990],
+            [ 0.1322,  4.9764, -0.9564,  5.3484],
+            [-0.2278, -0.1068, -1.4678,  6.3938]])
+
+    >>> torch.div(a, b, rounding_mode='trunc')
+    tensor([[-0., -6.,  0.,  1.],
+            [ 0., -3., -1.,  6.],
+            [ 0.,  4., -0.,  5.],
+            [-0., -0., -1.,  6.]])
+
+    >>> torch.div(a, b, rounding_mode='floor')
+    tensor([[-1., -7.,  0.,  1.],
+            [ 0., -4., -2.,  6.],
+            [ 0.,  4., -1.,  5.],
+            [-1., -1., -2.,  6.]])
+
 """.format(**common_args))
 
 add_docstr(torch.divide, r"""
-divide(input, other, *, out=None) -> Tensor
+divide(input, other, *, rounding_mode='true', out=None) -> Tensor
 
 Alias for :func:`torch.div`.
 """)
@@ -5108,10 +5169,10 @@ Example::
 add_docstr(torch.fmax, r"""
 fmax(input, other, *, out=None) -> Tensor
 
-Computes the element-wise maximum of :attr:`input` and :attr:`other`. 
+Computes the element-wise maximum of :attr:`input` and :attr:`other`.
 
-This is like :func:`torch.maximum` except it handles NaNs differently: 
-if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the maximum. 
+This is like :func:`torch.maximum` except it handles NaNs differently:
+if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the maximum.
 Only if both elements are NaN is NaN propagated.
 
 This function is a wrapper around C++'s ``std::fmax`` and is similar to NumPy's ``fmax`` function.
@@ -5583,10 +5644,10 @@ Example::
 add_docstr(torch.fmin, r"""
 fmin(input, other, *, out=None) -> Tensor
 
-Computes the element-wise minimum of :attr:`input` and :attr:`other`. 
+Computes the element-wise minimum of :attr:`input` and :attr:`other`.
 
-This is like :func:`torch.minimum` except it handles NaNs differently: 
-if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the minimum. 
+This is like :func:`torch.minimum` except it handles NaNs differently:
+if exactly one of the two elements being compared is a NaN then the non-NaN element is taken as the minimum.
 Only if both elements are NaN is NaN propagated.
 
 This function is a wrapper around C++'s ``std::fmin`` and is similar to NumPy's ``fmin`` function.
@@ -9141,7 +9202,7 @@ Example::
 add_docstr(torch.true_divide, r"""
 true_divide(dividend, divisor, *, out) -> Tensor
 
-Alias for :func:`torch.div`.
+Alias for :func:`torch.div` with ``rounding_mode='true'``.
 """.format(**common_args))
 
 add_docstr(torch.trunc,
@@ -9640,11 +9701,12 @@ Example::
     tensor([ 0.1815, -0.8917, -0.3031])
 """)
 
-add_docstr(torch.slogdet,
-           r"""
+add_docstr(torch.slogdet, r"""
 slogdet(input) -> (Tensor, Tensor)
 
 Calculates the sign and log absolute value of the determinant(s) of a square matrix or batches of square matrices.
+
+.. note:: :func:`torch.slogdet` is deprecated. Please use :func:`torch.linalg.slogdet` instead.
 
 .. note::
     If ``input`` has zero determinant, this returns ``(0, -inf)``.

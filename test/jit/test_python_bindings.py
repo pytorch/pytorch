@@ -35,3 +35,19 @@ class TestPythonBindings(JitTestCase):
         self.assertEqual(inp * 2, cu.test_fn(inp))
         with self.assertRaises(AttributeError):
             cu.doesnt_exist(inp)
+
+    def test_invalidation(self):
+        @torch.jit.script
+        def test_invalidation_fn(x: torch.Tensor):
+            return 2 * x
+
+        gr = test_invalidation_fn.graph.copy()
+        n = gr.insertNode(gr.create("prim::profile"))
+        v = n.output()
+        # check that they work
+        s = str((n, v))
+        torch._C._jit_pass_dce(gr)
+        with self.assertRaisesRegex(RuntimeError, "invalidated"):
+            str(n)
+        with self.assertRaisesRegex(RuntimeError, "invalidated"):
+            str(v)
