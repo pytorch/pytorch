@@ -360,18 +360,34 @@ struct DifferentiableGraphBackward : public autograd::Node {
   UnpackInstructions input_instructions_;
 };
 
+Gradient getGradient(const Node* n) {
+  AT_ASSERT(n->kind() == prim::DifferentiableGraph);
+  Gradient grad;
+  grad.f = n->g(attr::Subgraph);
+  grad.df = n->g(attr::ReverseSubgraph);
+  grad.f_real_outputs = n->i(attr::f_real_outputs);
+  grad.df_input_vjps = fmap<size_t>(n->is(attr::df_input_vjps));
+  grad.df_input_captured_inputs =
+      fmap<size_t>(n->is(attr::df_input_captured_inputs));
+  grad.df_input_captured_outputs =
+      fmap<size_t>(n->is(attr::df_input_captured_outputs));
+  grad.df_output_vjps = fmap<size_t>(n->is(attr::df_output_vjps));
+  return grad;
+}
+
 // an optimized way of executing the subgraph computed directly on
 // tensors rather than Variables.
 // This will unwrap Variables, run the plan, and re-wrap them.
 // It can optionally also have a gradient which is hooked up
 // to the output Variables if present.
 struct DifferentiableGraphOp {
-  DifferentiableGraphOp(Gradient grad)
+  DifferentiableGraphOp(Gradient grad, const Node* n)
       : f(grad.f, "<foward op>"),
         grad(std::move(grad)),
         grad_executor(this->grad.df, "<backward op>"),
         num_inputs(this->grad.f->inputs().size()),
-        num_outputs(this->grad.f->outputs().size()) {}
+        num_outputs(this->grad.f->outputs().size()),
+        node(n) {}
 
   // XXX: keep in mind that stack can be larger than the inputs we need!
   void operator()(Stack* stack) {
@@ -394,6 +410,12 @@ struct DifferentiableGraphOp {
     detachVariables(*stack);
     ExecutionPlan plan =
         f.getPlanFor(*stack, GraphExecutor::getDefaultNumBailOuts());
+
+    if (plan.optimized) {
+      GRAPH_DUMP("dump updated graph here:", plan.graph);
+      const_cast<Node*>(node)->g_(attr::Subgraph, plan.graph);
+    }
+
     InterpreterState(plan.code).run(*stack);
 
     {
@@ -470,28 +492,14 @@ struct DifferentiableGraphOp {
 
   const size_t num_inputs;
   const size_t num_outputs;
+  const Node* node;
 };
-
-Gradient getGradient(const Node* n) {
-  AT_ASSERT(n->kind() == prim::DifferentiableGraph);
-  Gradient grad;
-  grad.f = n->g(attr::Subgraph);
-  grad.df = n->g(attr::ReverseSubgraph);
-  grad.f_real_outputs = n->i(attr::f_real_outputs);
-  grad.df_input_vjps = fmap<size_t>(n->is(attr::df_input_vjps));
-  grad.df_input_captured_inputs =
-      fmap<size_t>(n->is(attr::df_input_captured_inputs));
-  grad.df_input_captured_outputs =
-      fmap<size_t>(n->is(attr::df_input_captured_outputs));
-  grad.df_output_vjps = fmap<size_t>(n->is(attr::df_output_vjps));
-  return grad;
-}
 } // anonymous namespace
 
 RegisterOperators reg_graph_executor_ops({Operator(
     prim::DifferentiableGraph,
     [](const Node* n) -> Operation {
-      return DifferentiableGraphOp(getGradient(n));
+      return DifferentiableGraphOp(getGradient(n), n);
     },
     aliasAnalysisInternalSpecialCase())});
 
@@ -520,7 +528,8 @@ void GraphExecutorImplBase::run(Stack& stack) {
   const ExecutionPlan& plan =
       getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts());
   InterpreterState(plan.code).run(stack);
-  last_executed_optimized_graph = plan.graph;
+  GRAPH_DUMP("last executed graph in run: ", plan.code.optimized_graph());
+  last_executed_optimized_graph = plan.code.optimized_graph();
 }
 
 c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(
@@ -710,7 +719,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     // Make sure there are no leftovers from any passes.
     EliminateDeadCode(opt_graph);
     GRAPH_DUMP("After compileSpec optimizations:", opt_graph);
-    return ExecutionPlan(opt_graph, function_name_);
+    return ExecutionPlan(opt_graph, function_name_, 0, true);
   }
 
   ~GraphExecutorImpl() override = default;
