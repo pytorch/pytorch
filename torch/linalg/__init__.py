@@ -86,24 +86,28 @@ Examples::
 inv = _add_docstr(_linalg.linalg_inv, r"""
 linalg.inv(input, *, out=None) -> Tensor
 
-This function computes the "multiplicative inverse" matrix of a square matrix, or batch of such matrices, :attr:`input`.
-The result satisfies the relation
+Computes the multiplicative inverse matrix of a square matrix :attr:`input`, or of each square matrix in a 
+batched :attr:`input`. The result satisfies the relation:
 
-``matmul(inv(input), input) = matmul(input, inv(input)) = eye(input.shape[0]).expand_as(input)``.
+``matmul(inv(input),input)`` = ``matmul(input,inv(input))`` = ``eye(input.shape[0]).expand_as(input)``.
 
 Supports input of float, double, cfloat and cdouble data types.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: The inverse matrix is computed using LAPACK's `getrf` and `getri` routines for CPU inputs. For CUDA
+          inputs, cuSOLVER's `getrf` and `getrs` routines as well as cuBLAS' `getrf` and `getri` routines are
+          used if CUDA version >= 10.1.243, otherwise MAGMA's `getrf` and `getri` routines are used instead.
 
 .. note:: If :attr:`input` is a non-invertible matrix or non-square matrix, or batch with at least one such matrix,
           then a RuntimeError will be thrown.
 
-.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
-
 Args:
-    input (Tensor): the square :math:`n \times n` matrix or the batch
-                    of such matrices of size :math:`(*, n, n)` where `*` is one or more batch dimensions.
+    input (Tensor): the square `(n, n)` matrix or the batch of such matrices of size
+                    `(*, n, n)` where `*` is one or more batch dimensions.
 
 Keyword args:
-    out (Tensor, optional): The output tensor. Ignored if None. Default: None
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default is ``None``.
 
 Examples::
 
