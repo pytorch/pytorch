@@ -3043,6 +3043,61 @@ class TestLinalg(TestCase):
             self.assertEqual(torch.matrix_rank(aaT, True), np.linalg.matrix_rank(aaT.cpu().numpy(), True))
             self.assertEqual(torch.matrix_rank(aaT, 0.01, True), np.linalg.matrix_rank(aaT.cpu().numpy(), 0.01, True))
 
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @precisionOverride({torch.float: 1e-03, torch.cfloat: 1e-03})
+    def test_multi_dot(self, device, dtype):
+        def check(*shapes):
+            tensors = [torch.randn(shape, device=device, dtype=dtype) for shape in shapes]
+            np_arrays = [tensor.cpu().numpy() for tensor in tensors]
+            res = torch.linalg.multi_dot(tensors).cpu()
+            ref = torch.from_numpy(np.array(np.linalg.multi_dot(np_arrays)))
+            self.assertEqual(res, ref)
+
+        # test for inputs with empty dimensions
+        check([0], [0])
+        check([2], [2, 0])
+        check([1, 0], [0])
+        check([0, 2], [2, 1])
+        check([2, 2], [2, 0])
+        check([2, 0], [0, 3])
+        check([0, 0], [0, 1])
+        check([4, 2], [2, 0], [0, 3], [3, 2])
+
+        # test variable output shapes
+        check([2], [2])
+        check([1, 2], [2])
+        check([2], [2, 1])
+        check([1, 2], [2, 1])
+        check([3, 2], [2, 4])
+
+        # test multiple input tensors
+        check([3], [3, 4], [4, 2], [2, 5], [5])
+        check([1, 2], [2, 2], [2, 3], [3, 1])
+
+        # test large tensors
+        check([10, 100], [100, 5], [5, 50])
+
+        # test discontiguous input
+        shapes = [[3, 2], [2, 2], [2, 3], [3, 4]]
+        tensors = [torch.randn(shape, device=device, dtype=dtype) for shape in shapes]
+        tensors[1] = tensors[1].t()
+        np_arrays = [tensor.cpu().numpy() for tensor in tensors]
+        res = torch.linalg.multi_dot(tensors).cpu()
+        ref = torch.from_numpy(np.array(np.linalg.multi_dot(np_arrays)))
+        self.assertEqual(res, ref)
+
+        # test out variant
+        out = torch.empty(0, device=device, dtype=dtype)
+        torch.linalg.multi_dot(tensors, out=out)
+        self.assertEqual(res, out)
+        out = torch.zeros_like(res.t(), memory_format=torch.contiguous_format).t()
+        self.assertFalse(out.is_contiguous())
+        out_strides = out.stride()
+        torch.linalg.multi_dot(tensors, out=out)
+        self.assertEqual(res, out)
+        self.assertEqual(out_strides, out.stride())
+
     @precisionOverride({torch.float32: 5e-6, torch.complex64: 5e-6})
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack

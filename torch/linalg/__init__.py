@@ -431,6 +431,45 @@ Examples::
             [1, 2, 2, 2]])
 """)
 
+multi_dot = _add_docstr(_linalg.linalg_multi_dot, r"""
+linalg.multi_dot(tensors, *, out=None)
+
+Efficiently multiplies two or more matrices given by :attr:`tensors` by
+selecting the optimal matrix chain multiplication order.
+
+Every matrix in :attr:`tensors` must be 2D except for the first and last ones
+which can also be 1D. If the first tensor is 1D it is treated as a row vector and
+if the last tensor is 1D it is treated as a column vector.
+
+If the first tensor has shape `(a, b)` and the last tensor has shape `(c, d)` the
+output will have shape `(a, d)`. However, if either tensor is 1D then its dimension
+in the output (`a` or `d`) will be ommited.
+
+.. warning:: This function does not broadcast.
+
+.. note:: This function is implemented by chaining :func:`torch.mm` calls after
+          computing the optimal matrix multiplication order.
+
+Args:
+    input (list of Tensors): two or more tensors to multiply. The first and last
+        tensors may be 1D or 2D. Every other tensor must be 2D.
+
+Keyword args:
+    out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
+
+Examples::
+
+    >>> from torch.linalg import multi_dot
+    >>> multi_dot((torch.randn(2), torch.randn(2)))
+    tensor(1.5561)
+    >>> multi_dot((torch.randn(1, 2), torch.randn(2)))
+    tensor([-0.7541])
+    >>> multi_dot((torch.randn(1, 2), torch.randn(2, 3)))
+    tensor([[2.4084, 0.6651, 1.2207]])
+    >>> multi_dot((torch.randn(1, 2), torch.randn(2, 3), torch.randn(3, 2)))
+    tensor([[-1.5182, -0.9078]])
+""")
+
 norm = _add_docstr(_linalg.linalg_norm, r"""
 linalg.norm(input, ord=None, dim=None, keepdim=False, *, out=None, dtype=None) -> Tensor
 

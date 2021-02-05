@@ -254,6 +254,157 @@ Tensor matrix_rank(const Tensor& self, bool symmetric) {
   return at::linalg_matrix_rank(self, c10::nullopt, symmetric);
 }
 
+// multi_dot helper functions
+namespace {
+
+/**
+ * @brief Computes the optimal order to multiply the input tensors
+ *
+ * Follows the dynamic programming algorithm from Cormen et al,
+ * "Introduction to Algorithms, Third Edition", Chapter 15.2,
+ * p. 370-378. Note that the book uses 1-based indexing.
+ *
+ * @param tensors list of 2D tensors
+ * @return 2D vector used by #matrix_chain_multiplication
+ */
+std::vector<std::vector<int64_t>> matrix_chain_order(
+    const std::vector<Tensor>& tensors) {
+  const auto n = tensors.size();
+
+  // Tensor i has dimensions p[i] by p[i + 1]
+  std::vector<int64_t> p(n + 1);
+  for (auto i = decltype(n){0}; i < n; ++i) {
+    p[i] = tensors[i].size(0);
+  }
+  p[n] = tensors[n - 1].size(1);
+
+  // Memoization matrices for the cost and order
+  std::vector<std::vector<int64_t>> m(n, std::vector<int64_t>(n, 0));
+  std::vector<std::vector<int64_t>> s(n, std::vector<int64_t>(n));
+
+  // For each sublist [i, j] consider the cost of splitting the multiplication
+  // into tensors [0...i] and [j...n] and then multiplying the result of those.
+  for (auto l = decltype(n){1}; l < n; ++l) {
+    for (auto i = decltype(n){0}; i < n - l; ++i) {
+      const auto j = i + l;
+      m[i][j] = std::numeric_limits<int64_t>::max();
+      for (auto k = decltype(n){i}; k < j; ++k) {
+        const auto q = m[i][k] + m[k + 1][j] + p[i] * p[k + 1] * p[j + 1];
+        if (q < m[i][j]) {
+          m[i][j] = q;
+          s[i][j] = k;
+        }
+      }
+    }
+  }
+
+  return s;
+}
+
+// Multiplies the tensors following the order from #matrix_chain_order
+Tensor matrix_chain_multiplication(
+    const std::vector<Tensor>& tensors,
+    const std::vector<std::vector<int64_t>>& order,
+    int64_t i,
+    int64_t j) {
+  if (i == j) {
+    return tensors[i];
+  }
+  return at::mm(
+      matrix_chain_multiplication(tensors, order, i, order[i][j]),
+      matrix_chain_multiplication(tensors, order, order[i][j] + 1, j));
+}
+
+} // namespace
+
+Tensor linalg_multi_dot(TensorList _tensors) {
+  const auto n = _tensors.size();
+  TORCH_CHECK(n >= 2, "multi_dot() expected at least 2 tensors but got ", n);
+
+  std::vector<int64_t> out_shape;
+  std::vector<Tensor> tensors(n);
+
+  // If the first tensor is 1D view it as a row vector
+  if (_tensors[0].dim() == 1) {
+    tensors[0] = _tensors[0].view({1, -1});
+  } else if (_tensors[0].dim() == 2) {
+    tensors[0] = _tensors[0];
+    out_shape.push_back(tensors[0].size(0));
+  } else {
+    TORCH_CHECK(
+        false,
+        "multi_dot() the first tensor must be 1D or 2D but got ",
+        _tensors[0].dim());
+  }
+
+  // If the last tensor is 1D view it as a column vector
+  if (_tensors[n - 1].dim() == 1) {
+    tensors[n - 1] = _tensors[n - 1].view({-1, 1});
+  } else if (_tensors[n - 1].dim() == 2) {
+    tensors[n - 1] = _tensors[n - 1];
+    out_shape.push_back(tensors[n - 1].size(1));
+  } else {
+    TORCH_CHECK(
+        false,
+        "multi_dot() the last tensor must be 1D or 2D but got ",
+        _tensors[0].dim());
+  }
+
+  // Ensure middle tensors are 2D
+  for (auto i = decltype(n){1}; i < n - 1; ++i) {
+    TORCH_CHECK(
+        _tensors[i].dim() == 2,
+        "multi_dot() tensor ",
+        i,
+        " must be 2D but got ",
+        _tensors[0].dim());
+    tensors[i] = _tensors[i];
+  }
+
+  // Ensure all tensors are on the same device and have the same dtype
+  const auto dtype = tensors[0].dtype();
+  const auto device = tensors[0].device();
+  bool has_empty_tensor = tensors[0].numel() == 0;
+  for (auto i = decltype(n){1}; i < n; ++i) {
+    TORCH_CHECK(
+        tensors[i].dtype() == dtype,
+        "multi_dot() all tensors have be the same dtype but tensor 0 is ",
+        dtype,
+        " and tensor ",
+        i,
+        " ",
+        tensors[i].dtype());
+    TORCH_CHECK(
+        tensors[i].device() == device,
+        "multi_dot() all tensors must be on the same device but tensor 0 is on ",
+        device,
+        " and tensor ",
+        i,
+        " on ",
+        tensors[i].device());
+     has_empty_tensor |= tensors[i].numel() == 0;
+  }
+
+  if (has_empty_tensor) {
+    return at::zeros(out_shape, tensors[0].options());
+  }
+
+  if (tensors.size() == 2) {
+    return at::mm(tensors[0], tensors[1]).view(out_shape);
+  }
+
+  const auto order = matrix_chain_order(tensors);
+  Tensor result = matrix_chain_multiplication(tensors, order, 0, n - 1);
+  return result.view(out_shape);
+}
+
+Tensor& linalg_multi_dot_out(TensorList tensors, Tensor& result) {
+  Tensor res = at::linalg_multi_dot(tensors);
+  at::native::resize_output(result, res.sizes());
+  result.copy_(res);
+  return result;
+}
+
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
  TORCH_CHECK(t.dim() == 1, fn, ": Expected 1-D argument ", arg, ", but got ", t.dim(), "-D");
 }
