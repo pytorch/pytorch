@@ -1,5 +1,4 @@
-from .node import Node, Argument, Target, map_arg
-from ._print_utils import _type_repr, _get_qualified_name
+from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 
 from typing import Callable, Any, List, Dict, Optional, Tuple, Set
 import torch
