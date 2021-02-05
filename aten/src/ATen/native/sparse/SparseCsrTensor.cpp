@@ -41,9 +41,9 @@ Tensor sparse_csr_tensor(const Tensor& crow_indices, const Tensor& col_indices,
 
   AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "csr_construct_check", [&] {
       auto crow_indices_accessor = crow_indices.accessor<index_t, 1>();
-      TORCH_CHECK(crow_indices_accessor[crow_indices.numel() - 1] >= col_indices.numel(),
+      TORCH_CHECK(crow_indices_accessor[crow_indices.numel() - 1] <= col_indices.numel(),
               "last value of crow_indices should be less than length of col_indices.");
-      TORCH_CHECK(crow_indices_accessor[0] != 0,
+      TORCH_CHECK(crow_indices_accessor[0] == 0,
                   "0th value of crow_indices must be 0.");
   });
 

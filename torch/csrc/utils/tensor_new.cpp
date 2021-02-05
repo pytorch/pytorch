@@ -653,8 +653,6 @@ Tensor sparse_csr_tensor_ctor(c10::DispatchKey dispatch_key, at::ScalarType scal
     Tensor values = internal_new_from_data(inferred_dispatch_key, inferred_scalar_type, r.deviceOptional(7), r.pyobject(2),
                                             /*copy_variables=*/false, /*copy_numpy=*/true,
                                             /*type_inference=*/type_inference);
-
-                                            std::cout << "construction complete.\n";
     return at::sparse_csr_tensor(crow_indices, col_indices, values, r.intlist(3),
                                  options(inferred_dispatch_key, inferred_scalar_type).layout(at::kSparseCsr))
                                  .set_requires_grad(r.toBool(8));
