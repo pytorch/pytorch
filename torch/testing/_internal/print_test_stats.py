@@ -14,9 +14,14 @@ from pathlib import Path
 from typing import DefaultDict, Dict, Iterable, List, Optional, Tuple
 from xml.dom import minidom
 
-import boto3
 import requests
 from typing_extensions import TypedDict
+
+try:
+    import boto3
+    HAVE_BOTO3 = True
+except ImportError:
+    HAVE_BOTO3 = False
 
 Commit = str  # 40-digit SHA-1 hex string
 Status = Optional[str]  # errored, failed, skipped, or None
@@ -796,16 +801,17 @@ if __name__ == '__main__':
         metavar="N",
         help="how many longest tests to show from the entire run",
     )
-    parser.add_argument(
-        "--upload-to-s3",
-        action="store_true",
-        help="upload test time to S3 bucket",
-    )
-    parser.add_argument(
-        "--compare-with-s3",
-        action="store_true",
-        help="download test times for base commits and compare",
-    )
+    if HAVE_BOTO3:
+        parser.add_argument(
+            "--upload-to-s3",
+            action="store_true",
+            help="upload test time to S3 bucket",
+        )
+        parser.add_argument(
+            "--compare-with-s3",
+            action="store_true",
+            help="download test times for base commits and compare",
+        )
     parser.add_argument(
         "--num-prev-commits",
         type=positive_integer,
