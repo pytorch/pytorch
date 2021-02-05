@@ -1021,13 +1021,12 @@ class DistributedDataParallel(Module):
         parameter syncs while running Distributed DataParallel training.
 
         Args:
-            state (object): Passed to the hook to maintain any state information during the training process.
-                            Examples include error feedback in gradient compression,
-                            peers to communicate with next in GossipGrad, etc.
-
-                            It is locally stored by each worker
-                            and shared by all the gradient tensors on the worker.
-            hook (callable): Averages gradient tensors across workers and defined as:
+            state (object): state is passed to the hook and can be used to maintain
+                            and update any state information that users would like to
+                            maintain as part of the training process. Examples: error
+                            feedback in gradient compression, peers to communicate with
+                            next in GossipGrad etc.
+            hook (callable): is defined as:
                              hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
 
                              This function is called once the bucket is ready. The
