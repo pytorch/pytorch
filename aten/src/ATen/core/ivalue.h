@@ -548,6 +548,12 @@ struct TORCH_API IValue final {
   c10::List<double> toDoubleList() const&;
   std::vector<double> toDoubleVector() const;
 
+  // ComplexDoubleList
+  bool isComplexDoubleList() const;
+  c10::List<c10::complex<double>> toComplexDoubleList() &&;
+  c10::List<c10::complex<double>> toComplexDoubleList() const&;
+  std::vector<c10::complex<double>> toComplexDoubleVector() const;
+
   // BoolList
   bool isBoolList() const;
   c10::List<bool> toBoolList() &&;
