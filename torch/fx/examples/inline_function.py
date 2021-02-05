@@ -4,7 +4,7 @@ from torch.fx.node import map_arg
 
 
 '''
-How to inline a function into an existing Graph
+How to Inline a Function Into an Existing Graph
 
 One reason you might want to inline a function is to get around FX's
 default tracing behavior. For example, unless you've defined a custom

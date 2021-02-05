@@ -126,6 +126,7 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 }
 
 Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
+  NoTF32Guard disable_tf32;
   ScalarType t = input.scalar_type();
   TORCH_CHECK((t == ScalarType::Double || t == ScalarType::Float || t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble)
               && input.dim() >= 2,
@@ -147,16 +148,14 @@ Tensor linalg_pinv(const Tensor& input, const Tensor& rcond, bool hermitian) {
 
   // If not Hermitian use singular value decomposition, else use eigenvalue decomposition
   if (!hermitian) {
-    // until https://github.com/pytorch/pytorch/issues/45821 is resolved
-    // svd() returns conjugated V for complex-valued input
-    Tensor U, S, V_conj;
+    Tensor U, S, V;
     // TODO: replace input.svd with linalg_svd
-    std::tie(U, S, V_conj) = input.svd();
+    // using linalg_svd breaks pytorch/xla, see https://github.com/pytorch/xla/issues/2755
+    std::tie(U, S, V) = input.svd();
     Tensor max_val = at::narrow(S, /*dim=*/-1, /*start=*/0, /*length=*/1);  // singular values are sorted in descending order
     Tensor S_pseudoinv = at::where(S > (rcond.unsqueeze(-1) * max_val), S.reciprocal(), at::zeros({}, S.options())).to(input.dtype());
-    // computes V @ diag(S_pseudoinv) @ U.T.conj()
-    // TODO: replace V_conj.conj() -> V once https://github.com/pytorch/pytorch/issues/45821 is resolved
-    return at::matmul(V_conj.conj() * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
+    // computes V @ diag(S_pseudoinv) @ U.conj().T
+    return at::matmul(V * S_pseudoinv.unsqueeze(-2), U.conj().transpose(-2, -1));
   } else {
     Tensor S, U;
     std::tie(S, U) = at::linalg_eigh(input);
@@ -2224,17 +2223,17 @@ Tensor chain_matmul(TensorList matrices) {
 Calculates the Kronecker product between two Tensors.
 */
 Tensor& kron_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto maxdim = std::max(self.dim(), other.dim());
-  auto pad_self = maxdim - self.dim();
-  auto pad_other = maxdim - other.dim();
+  int64_t maxdim = std::max(self.dim(), other.dim());
+  int64_t pad_self = maxdim - self.dim();
+  int64_t pad_other = maxdim - other.dim();
   c10::SmallVector<int64_t, 10> a_reshape(2 * maxdim);
   c10::SmallVector<int64_t, 10> b_reshape(2 * maxdim);
   c10::SmallVector<int64_t, 10> result_reshape(maxdim);
-  for (int i = 0; i < maxdim; i++) {
-    a_reshape[2 * i] = i >= pad_self ? self.sizes()[i - pad_self] : 1;
+  for (int64_t i = 0; i < maxdim; i++) {
+    a_reshape[2 * i] = (i >= pad_self ? self.sizes()[i - pad_self] : 1);
     a_reshape[2 * i + 1] = 1;
     b_reshape[2 * i] = 1;
-    b_reshape[2 * i + 1] = i >= pad_other ? other.sizes()[i - pad_other] : 1;
+    b_reshape[2 * i + 1] = (i >= pad_other ? other.sizes()[i - pad_other] : 1);
     result_reshape[i] = a_reshape[2 * i] * b_reshape[2 * i + 1];
   }
   auto self_view = at::_unsafe_view(self, a_reshape);
@@ -2242,8 +2241,14 @@ Tensor& kron_out(Tensor& result, const Tensor& self, const Tensor& other) {
   if (!result.defined()) {
     result = at::_unsafe_view(at::mul(self_view, other_view), result_reshape);
   } else {
-    at::mul_out(result, self_view, other_view);
-    result.resize_(result_reshape);
+    c10::SmallVector<int64_t, 10> mul_shape(2 * maxdim);
+    for (int64_t i = 0; i < maxdim; i++) {
+      mul_shape[2 * i] = a_reshape[2 * i];
+      mul_shape[2 * i + 1] = b_reshape[2 * i + 1];
+    }
+    resize_output(result, result_reshape);
+    auto result_mul = at::_unsafe_view(result, mul_shape);
+    at::mul_out(result_mul, self_view, other_view);
   }
   return result;
 }
