@@ -310,42 +310,41 @@ C10_API void LogAPIUsage(const std::string& context);
 // internal states and env variables and etc.
 struct DDPLoggingData {
 // Data that can be got during DistributedDataParallel construction time
-  int world_size;
-  int rank;
-  std::string module_name;
-  std::string backend_name;
+  int world_size = -1;
+  int rank = -1;
+  std::string module_name = "";
+  std::vector<int> device_ids = std::vector<int>();
+  int output_device = -1;
+  std::string backend_name = "";
   // The DDPLoggingData is logged in which iteration of the training loop,
   // 0 if the data is logged during DistributedDataParallel construction time.
-  int iteration;
+  int64_t iteration = -1;
   // Parameter's data type
-  std::string dtype;
+  std::string dtype = "";
   // Total parameters size (Bytes)
-  int parameter_size;
+  int64_t total_parameter_size_bytes = -1;
   // The number of parameter tensors
-  int num_parameters;
+  int num_parameter_tensors = -1;
   // A list of bucket sizes (Bytes) calculated during construction time
-  std::string bucket_sizes;
-
+  std::vector<int> bucket_sizes = std::vector<int>();
 
   // Environment variables
-  std::string master_port;
-  std::string master_addr;
-  std::string cuda_visible_devices;
-  std::string gloo_socket_ifname;
-  std::string gloo_device_transport;
-  std::string nccl_socket_ifname;
-  std::string nccl_blocking_wait;
-  std::string nccl_debug;
-  std::string nccl_nthreads;
-  std::string nccl_ib_timeout;
+  std::string master_port = "";
+  std::string master_addr = "";
+  std::string cuda_visible_devices = "";
+  std::string gloo_socket_ifname = "";
+  std::string gloo_device_transport = "";
+  std::string nccl_socket_ifname = "";
+  std::string nccl_blocking_wait = "";
+  std::string nccl_debug = "";
+  std::string nccl_nthreads = "";
+  std::string nccl_ib_timeout = "";
 
   // DistributedDataParallel constructor input parameters
-  std::string device_ids;
-  std::string output_device;
-  bool broadcast_buffers;
-  int bucket_cap_mb;
-  bool find_unused_parameters;
-  bool gradient_as_bucket_view;
+  bool broadcast_buffers = false;
+  float bucket_cap_mb = -1.0;
+  bool find_unused_parameters = false;
+  bool gradient_as_bucket_view = false;
 
   // Runtime stats are collected during training loop.
   // Users can get these stats at any iteration of training
@@ -353,15 +352,15 @@ struct DDPLoggingData {
 
   // Total unused parameter size (Bytes)
   // It is calculated after forward computation in each iteration.
-  int unused_parameter_size;
+  int64_t unused_parameter_size = 0;
   // Rebuild buckets stats after 1st iteration
-  bool has_rebuilt_buckets;
-  std::string rebuilt_bucket_sizes;
+  bool has_rebuilt_buckets = false;
+  std::vector<int> rebuilt_bucket_sizes = std::vector<int>();
   // Average performance stats per iteration (ns)
-  int avg_forward_compute_time = 0;
-  int avg_backward_compute_time = 0;
-  int avg_backward_comm_time = 0;
-  int avg_backward_compute_comm_overlap_time = 0;
+  int64_t avg_forward_compute_time = 0;
+  int64_t avg_backward_compute_time = 0;
+  int64_t avg_backward_comm_time = 0;
+  int64_t avg_backward_compute_comm_overlap_time = 0;
 };
 
 C10_API void SetPyTorchDDPUsageLogger(std::function<void(const c10::DDPLoggingData&)> logger);

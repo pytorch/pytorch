@@ -5,6 +5,8 @@ import numpy as np
 import torch
 import torch.distributed as dist
 
+from . import default_hooks as default
+
 
 def _orthogonalize(matrix, epsilon=1e-8):
     """
@@ -21,9 +23,9 @@ def _orthogonalize(matrix, epsilon=1e-8):
         if epsilon == 0:
             # Note that col ** 2 can underflow/overflow if we use FP16.
             # May need to consider multiplying a scaling factor and dividing it later, or using bfloat16 instead.
-            col /= torch.sqrt(torch.sum(col ** 2))
+            col /= torch.norm(col)
         else:
-            col /= torch.sqrt(torch.sum(col ** 2)) + epsilon
+            col /= torch.norm(col) + epsilon
         # Project it on the rest and remove it.
         if i + 1 < num_cols:
             rest = matrix[:, i + 1 :]
@@ -31,6 +33,30 @@ def _orthogonalize(matrix, epsilon=1e-8):
 
 
 class PowerSGDState(object):
+    """
+    Stores both the gradient compression configs and the internal states for all the gradients during the training.
+    Particularly, `matrix_approximation_rank` and `start_powerSGD_iter` are the main configs that need to be tuned by the user.
+    Although `use_error_feedback` and `warm_start` can also be tuned by the user,
+    they are typically turned on for performance.
+
+    Note [Guidance to Tune `matrix_approximation_rank` And `start_powerSGD_iter`]
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    1) To tune `matrix_approximation_rank`, the user can increase it from 1 by factors of 2,
+    until a satisfying accuracy can be reached.
+    The increase of `matrix_approximation_rank` can substantially increase the computation costs of the compression.
+    However, the accuracy may not be futher improved beyond a certain `matrix_approximation_rank` value.
+    2) To tune `start_powerSGD_iter`, the user can typically start with 10% of total training steps,
+    and increase it until a satisfying accuracy can be reached.
+    Deferrring PowerSGD can effectively improve the accuracy,
+    even a relatively small `matrix_approximation_rank` is used.
+    This is because that, the beginning of training phase is usually very sensitive to inaccurate gradients,
+    and compressing gradients too early may make the training quickly take a suboptimal trajectory,
+    which can result in an irrecoverable impact on the accuracy.
+    The minimum value allowed in DDP is 2, if error feedback or warm-up is enabled.
+    This is because there is another internal optimization that rebuilds buckets at iteration 1 in DDP,
+    and this can conflict with any tensor memorized before the rebuild process.
+    """
+
     __slots__ = [
         "process_group",
         # The two fields below are the configs that usually need to be tuned by the user.
@@ -56,6 +82,16 @@ class PowerSGDState(object):
         warm_start=True,
         random_seed=0,
     ):
+        logging.info(
+            "PowerSGD config: matrix_approximation_rank = {}; "
+            "start_powerSGD_iter = {}; use_error_feedback = {}; warm_start = {}.".format(
+                matrix_approximation_rank,
+                start_powerSGD_iter,
+                use_error_feedback,
+                warm_start,
+            )
+        )
+
         self.process_group = process_group
         # The low rank for matrix approximation controls the size of compressed low-rank tensors,
         # which determines the computation ratio.
@@ -78,6 +114,11 @@ class PowerSGDState(object):
         # However, this means that the shape of input bucketized tensors is subject to change,
         # which will complicate the implementations of error feedback and warm-up.
         # Running vanilla allreduce in the first few iterations can avoid this complexity.
+        if (use_error_feedback or warm_start) and start_powerSGD_iter <= 1:
+            raise ValueError(
+                "Expect `start_powerSGD_iter` > 1 if `use_error_feedback` or `warm_start` is enabled, "
+                "because PowerSGD can only be applied after the first two iterations in DDP."
+            )
         self.start_powerSGD_iter = start_powerSGD_iter
         # Error feedback is usually crucial for both for convergence and generalization,
         # because PowerSGD is a biased compressor,
@@ -108,16 +149,6 @@ class PowerSGDState(object):
         # Iteration/step in the training loop.
         self.iter = 0
 
-        logging.info(
-            "PowerSGD config: matrix_approximation_rank = {}; "
-            "start_powerSGD_iter = {}; use_error_feedback = {}; warm_start = {}.".format(
-                self.matrix_approximation_rank,
-                self.start_powerSGD_iter,
-                self.use_error_feedback,
-                self.warm_start,
-            )
-        )
-
     def maybe_increase_iter(self, bucket):
         # Since bucket 0 is the last bucket to allreduce in an iteration.
         # Only increase `iter` when bucket 0 is processed.
@@ -126,7 +157,7 @@ class PowerSGDState(object):
 
         if self.iter == self.start_powerSGD_iter:
             logging.info(
-                "Starting to apply PowerSGD after {} iterations.".format(self.iter)
+                "Start to apply PowerSGD after {} iterations.".format(self.iter)
             )
 
 
@@ -152,12 +183,17 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         3.6) Allreduces Qs as a batch;
         3.7) Computes each M among all the high-rank tensors, which is approximately equal to PQ^T.
 
+    Note that this communication hook enforces vanilla allreduce for the first `state.start_powerSGD_iter` iterations.
+    This can not only allow the user to have a finer tuning over the tradeoff between speedup and accuracy,
+    but also help abstract away some complexity of the internal optimization of DDP for future communication hook developers.
+
     TODO(wayi@): The above procedure does two matmul+allreduce steps per iteration --
     one left multiplication and one right multiplication.
     For warm-start, can take one such step at a time, and alternate between them.
 
     Args:
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
+            To tune the compression configs, see Note [Guidance to Tune `matrix_approximation_rank` And `start_powerSGD_iter`].
         bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode at this time,
             only exactly one tensor is stored in this bucket.
@@ -178,15 +214,8 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
 
     # Run vanilla allreduce in the first `start_powerSGD_iter` iterations.
     if state.iter < state.start_powerSGD_iter:
-        fut = dist.all_reduce(
-            input_tensor, group=group_to_use, async_op=True
-        ).get_future()
-
-        def div_callback(fut):
-            return [fut.value()[0].div_(world_size)]
-
         state.maybe_increase_iter(bucket)
-        return fut.then(div_callback)
+        return default._allreduce_fut(group_to_use, input_tensor)
 
     # Apply PowerSGD after `start_powerSGD_iter` iterations.
     device = input_tensor.device
@@ -197,13 +226,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     input_tensor_cp = None
     total_length = input_tensor.shape[0]
     if state.use_error_feedback:
-        # The buckets can be rebuilt during training.
-        # In this case, the error tensor shape will not be aligned with the input tensor,
-        # and the error will be re-initialized as zeros.
-        if (
-            bucket_index in state.error_dict
-            and state.error_dict[bucket_index].shape[0] == total_length
-        ):
+        if bucket_index in state.error_dict:
             input_tensor.add_(state.error_dict[bucket_index])
         else:
             logging.info(
@@ -211,7 +234,9 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
                     total_length
                 )
             )
-            state.error_dict[bucket_index] = torch.zeros(total_length, device=device)
+            state.error_dict[bucket_index] = torch.zeros(
+                total_length, device=device, dtype=dtype
+            )
 
         # Keep a copy of the input tensor,
         # so that we can compute the local error caused by compression later,
@@ -232,7 +257,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     rank1_tensors_memory = (
         torch.cat([tensor.view(-1) for tensor in rank1_tensors])
         if rank1_tensors
-        else torch.tensor([], device=device)
+        else torch.tensor([], device=device, dtype=dtype)
     )
 
     # Step II: Handle high-rank tensors.
@@ -250,15 +275,9 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         total_Ps_size += n * matrix_approximation_rank
         total_Qs_size += m * matrix_approximation_rank
     # If warm-start is enabled, reuse Ps and Qs from the previous iteration if possible.
-    # The memory spaces of Ps and Qs need to be (re)allocated at the beginning,
-    # as well as later whenever the buckets are rebuilt during training.
+    # The memory spaces of Ps and Qs need to be allocated in the first iteration when PowerSGD is applied.
     need_randomize_qs = False
-    if (
-        not state.warm_start
-        or bucket_index not in state.p_memory_dict
-        or state.p_memory_dict[bucket_index].shape[0] != total_Ps_size
-        or state.q_memory_dict[bucket_index].shape[0] != total_Qs_size
-    ):
+    if not state.warm_start or bucket_index not in state.p_memory_dict:
         need_randomize_qs = True
         # If warm-start is disabled, low-rank tensors will be initialized at every step.
         # Only log this if warm-start to avoid spamming.
@@ -297,7 +316,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         q_idx += m * matrix_approximation_rank
 
     # If warm-start is enabled, reuse Qs from the previous iteration if possible and skip filling random values.
-    # The exceptions are the first time and when the buckets are rebuilt.
+    # The exception is the first iteration when PowerSGD is applied.
     if not need_randomize_qs:
         for q in qs:
             _orthogonalize(q)
@@ -373,7 +392,7 @@ def powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
             torch.cuda.synchronize(device)
 
         if state.use_error_feedback:
-            # memoize the local errors.
+            # Memorize the local errors.
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         if not state.warm_start:
             state.p_memory_dict.clear()
@@ -409,12 +428,24 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     7) Computes M, which is approximately equal to PQ^T.
     8) Truncates the input tensor to the original length.
 
+    This variant is faster than `powerSGD_hook` that runs layer-wise gradient compression,
+    but it usually results in a much lower accuracy, unless `matrix_approximation_rank` in the state is 1.
+    Increasing `matrix_approximation_rank` may not necessarily increase the accuracy,
+    because batching per-parameter tensors without column/row alignment can destroy low-rank structure.
+    Therefore, the user shoud always consider `powerSGD_hook` first,
+    and only consider this variant when a satisfying accuracy can be achieved when `matrix_approximation_rank` is 1.
+
+    Note that this communication hook enforces vanilla allreduce for the first `state.start_powerSGD_iter` iterations.
+    This can not only allow the user to have a finer tuning over the tradeoff between speedup and accuracy,
+    but also help abstract away some complexity of the internal optimization of DDP for future communication hook developers.
+
     TODO(wayi@): The above procedure does two matmul+allreduce steps per iteration --
     one left multiplication and one right multiplication.
     For warm-start, can take one such step at a time, and alternate between them.
 
     Args:
         state (PowerSGDState): State information to configure the compression rate and support error feedback, warm start, etc.
+            To tune the compression configs, see Note [Guidance to Tune `matrix_approximation_rank` And `start_powerSGD_iter`].
         bucket (dist._GradBucket): Bucket that stores a 1D flattened gradient tensor that batches multiple per-variable tensors.
             Note that since DDP comm hook only supports single process single device mode at this time,
             only exactly one tensor is stored in this bucket.
@@ -432,6 +463,13 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
 
     # The input tensor is a flattened 1D tensor.
     input_tensor = bucket.get_tensors()[0]
+
+    # Run vanilla allreduce in the first `start_powerSGD_iter` iterations.
+    if state.iter < state.start_powerSGD_iter:
+        state.maybe_increase_iter(bucket)
+        return default._allreduce_fut(group_to_use, input_tensor)
+
+    # Apply PowerSGD after `start_powerSGD_iter` iterations.
     device = input_tensor.device
     total_length = input_tensor.shape[0]
 
@@ -445,13 +483,7 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     bucket_index = bucket.get_index()
     input_tensor_cp = None
     if state.use_error_feedback:
-        # The buckets can be rebuilt during training.
-        # In this case, the error tensor shape will not be aligned with the input tensor,
-        # and the error will be re-initialized as zeros.
-        if (
-            bucket_index in state.error_dict
-            and state.error_dict[bucket_index].shape[0] == padded_total_length
-        ):
+        if bucket_index in state.error_dict:
             input_tensor.add_(state.error_dict[bucket_index])
         else:
             logging.info(
@@ -460,7 +492,7 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
                 )
             )
             state.error_dict[bucket_index] = torch.zeros(
-                padded_total_length, device=device
+                padded_total_length, device=device, dtype=input_tensor.dtype
             )
 
         # Keep a copy of the input tensor,
@@ -470,14 +502,8 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
     matrix = input_tensor.view(square_side_length, square_side_length)
 
     # Reuse P and Q from the previous iteration if possible.
-    # The memory spaces of P and Q need to be (re)allocated at the beginning,
-    # as well as later whenever the buckets are rebuilt during training.
-    if (
-        not state.warm_start
-        or bucket_index not in state.p_memory_dict
-        or state.p_memory_dict[bucket_index].shape
-        != (square_side_length, state.matrix_approximation_rank)
-    ):
+    # The memory spaces of P and Q need to be allocated in the first iteration when PowerSGD is applied.
+    if not state.warm_start or bucket_index not in state.p_memory_dict:
         # If warm-start is disabled, low-rank tensors will be initialized at every step.
         # Only log this if warm-start to avoid spamming.
         if state.warm_start:
@@ -554,7 +580,7 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
         )
 
         if state.use_error_feedback:
-            # memoize the local errors.
+            # Memorize the local errors.
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         if torch.cuda.is_available():
             torch.cuda.synchronize(device)
@@ -562,6 +588,9 @@ def batched_powerSGD_hook(state: PowerSGDState, bucket) -> torch.futures.Future:
             state.p_memory_dict.clear()
             state.q_memory_dict.clear()
         ret = input_tensor.resize_(total_length)
+
+        state.maybe_increase_iter(bucket)
+
         return [ret]
 
     return allreduce_p_fut.then(compute_q).then(decompress)

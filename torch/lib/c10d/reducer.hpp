@@ -1,6 +1,9 @@
 #pragma once
 
 #include <atomic>
+#ifdef USE_CUDA
+#include <cuda_runtime.h>
+#endif
 #include <memory>
 #include <mutex>
 #include <tuple>
@@ -109,24 +112,6 @@ class Reducer {
   // index has been used.
   std::vector<at::Tensor> get_local_used_maps_on_device() const;
 
-  // Set logging data that can be got during DistributedDataParallel
-  // construction time.
-  void set_construction_logging_data(
-      const std::string& module_name,
-      const std::string& device_ids,
-      const std::string&  output_device,
-      bool broadcast_buffers);
-  void set_rebuilt_bucket_stats();
-  void set_unused_parameter_stats();
-  void set_avg_forward_compute_time();
-  void set_avg_backward_compute_time();
-  void set_avg_backward_comm_time();
-  void set_avg_compute_comm_overlap_time();
-
-  // An Interface for users to get DDPLoggingData and log them
-  // in the applications.
-  c10::DDPLoggingData get_ddp_logging_data();
-
  protected:
   // Forward declaration.
   struct Bucket;
@@ -214,10 +199,6 @@ class Reducer {
   void runGradCallbackForVariable(
       torch::autograd::Variable& variable,
       GradCallback&& cb);
-
-  void set_env_variables();
-  void set_parameter_stats();
-  std::string get_bucket_stats();
 
   // A bucket replica represents [1..N] gradients to be reduced,
   // with the same dtype, on the same device.
@@ -342,16 +323,43 @@ class Reducer {
   // Map the index of a variable to its location in the bucket structure.
   std::vector<VariableLocator> variable_locators_;
 
+  // track the number of iterations trained by users
+  long num_iterations_;
+  // track the number of buckets that have been ready for
+  // communication calls like allReduce or communication hooks.
+  int num_buckets_ready_;
+
+  // CPU timestamp to record event start and end time.
+  struct CPUTimer {
+    // The timestamp of forward call start time in each iteration.
+    int64_t forward_start_time;
+    // The timestamp of backward computation start and end time in each iteration.
+    int64_t backward_compute_start_time;
+    int64_t backward_compute_end_time;
+    // The timestamp of first communication call start time in each iteration.
+    int64_t backward_comm_start_time;
+    // The timestamp of last communication call end time in each iteration.
+    int64_t backward_comm_end_time;
+  };
+
+  CPUTimer cpu_timer_{};
+
+  #ifdef USE_CUDA
+  // GPU events to record event start and end time.
+  struct GPUTimer {
+    cudaEvent_t forward_start;
+    cudaEvent_t backward_compute_start;
+    cudaEvent_t backward_compute_end;
+    cudaEvent_t backward_comm_start;
+    cudaEvent_t backward_comm_end;
+  };
+  GPUTimer gpu_timer_{};
+  #endif
+
   // We collect the relative timestamp of every gradient being ready
   // when executing autograd. This can be used to derive a timeline of
   // the point in time buckets were ready, or ideal bucket assignment/ordering.
-  int64_t backward_stats_base_;
   std::vector<std::vector<int64_t>> backward_stats_;
-
-  // The timestamp of forward call starting time in each iteration.
-  int64_t forward_start_time_;
-  // The timestamp of first communication call starting time in each iteration.
-  int64_t comm_start_time_;
 
   // Following variables are to help build dynamic bucket order
   bool has_rebuilt_bucket_;
@@ -390,16 +398,7 @@ class Reducer {
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
 
-  // ddp_logging_data_ is used to hold all the ddp related logging
-  // data fields.
-  std::unique_ptr<c10::DDPLoggingData> ddp_logging_data_;
-
-  // track the number of iterations trained by users
-  long num_iterations_;
-
-  // track the number of buckets that have been ready for
-  // communication calls like allReduce or communication hooks.
-  int num_buckets_ready_;
+  friend class Logger;
 };
 
 // This is equivalent to take_tensors but returns indices into the
