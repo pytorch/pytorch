@@ -100,20 +100,23 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         their callbacks will be maintained even if their calls are interleaved.
 
         Args:
-            callback(``None``): a ``Callable`` that takes in no arguments
+            callback(``Future``): a ``Callable`` that takes in one argument,
+            which is the reference to this ``Future``.
 
         Example::
             >>> import torch
             >>>
-            >>> def callback():
+            >>> def callback(fut):
             >>>     print(f"This will run after the future has finished.")
+            >>>     print(fut.wait())
             >>>
             >>> fut = torch.futures.Future()
             >>> fut.add_done_callback(callback)
             >>> fut.set_result(5)
             >>>
             >>> # Outputs are:
-            >>> # This will run after the future has finished.
+            >>> This will run after the future has finished.
+            >>> 5
         """
         super().add_done_callback(callback)
 
