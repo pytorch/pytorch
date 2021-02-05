@@ -1720,8 +1720,6 @@ op_db: List[OpInfo] = [
                    skips=(
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
                                 device_type='cpu', dtypes=[torch.bfloat16]),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=IS_WINDOWS),
@@ -1737,8 +1735,6 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    safe_casts_outputs=True,
                    skips=(
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=IS_WINDOWS),
@@ -1886,8 +1882,6 @@ op_db: List[OpInfo] = [
                    skip_bfloat16_grad=True,
                    safe_casts_outputs=True,
                    skips=(
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.bfloat16]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
@@ -1917,8 +1911,6 @@ op_db: List[OpInfo] = [
                    skip_bfloat16_grad=True,
                    safe_casts_outputs=True,
                    skips=(
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
-                                device_type='cuda', dtypes=[torch.cfloat, torch.cdouble]),
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=(IS_MACOS or IS_WINDOWS)),
