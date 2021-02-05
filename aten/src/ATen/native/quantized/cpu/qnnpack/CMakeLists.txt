@@ -217,7 +217,9 @@ set(PYTORCH_QNNPACK_AARCH32_ASM_UKERNELS
   src/q8gemm/4x8-dq-aarch32-neon.S
   src/q8gemm/4x8c2-xzp-aarch32-neon.S
   src/q8gemm_sparse/8x4-packA-aarch32-neon.S
+  src/q8gemm_sparse/4x4-packA-aarch32-neon.S
   src/q8gemm_sparse/8x4c1x4-dq-packedA-aarch32-neon.S
+  src/q8gemm_sparse/4x8c1x4-dq-packedA-aarch32-neon.S
   src/q8gemm_sparse/8x4c1x4-dq-aarch32-neon.S)
 
 set(PYTORCH_QNNPACK_AARCH64_ASM_UKERNELS

@@ -76,7 +76,7 @@ DECLARE_PYTORCH_Q8GEMM_DYNAMIC_QUANTIZATION_SPARSE_UKERNEL_FUNCTION(pytorch_q8ge
       const struct pytorch_qnnp_conv_dynamic_quantization_params* quantization_params);
 
 DECLARE_PYTORCH_Q8GEMM_DYNAMIC_QUANTIZATION_SPARSE_PACKEDA_UKERNEL_FUNCTION(
-    pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__neon)
+    pytorch_q8gemm_dq_sparse_1x4_ukernel_4x8_packedA__aarch32_neon)
 DECLARE_PYTORCH_Q8GEMM_DYNAMIC_QUANTIZATION_SPARSE_PACKEDA_UKERNEL_FUNCTION(
     pytorch_q8gemm_dq_sparse_1x4_ukernel_8x4_packedA__aarch32_neon)
 DECLARE_PYTORCH_Q8GEMM_DYNAMIC_QUANTIZATION_SPARSE_PACKEDA_UKERNEL_FUNCTION(
@@ -93,7 +93,7 @@ DECLARE_PYTORCH_Q8GEMM_DYNAMIC_QUANTIZATION_SPARSE_PACKEDA_UKERNEL_FUNCTION(
       uint8_t* a_packed);
 
 DECLARE_PYTORCH_Q8GEMM_PARSE_PACKA_UKERNEL_FUNCTION(
-    pytorch_q8gemm_sparse_packA_ukernel_8x4__neon)
+    pytorch_q8gemm_sparse_packA_ukernel_4x4__aarch32_neon)
 DECLARE_PYTORCH_Q8GEMM_PARSE_PACKA_UKERNEL_FUNCTION(
     pytorch_q8gemm_sparse_packA_ukernel_8x4__aarch32_neon)
 DECLARE_PYTORCH_Q8GEMM_PARSE_PACKA_UKERNEL_FUNCTION(
