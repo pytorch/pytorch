@@ -75,7 +75,7 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
 }
 
 TORCH_IMPL_FUNC(add_out) (
-  const Tensor& self, const Tensor& other, Scalar alpha, Tensor& result
+  const Tensor& self, const Tensor& other, Scalar alpha, const Tensor& result
 ) {
   add_stub(device_type(), *this, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == output().dtype());
@@ -185,8 +185,9 @@ Tensor& div_out(const Tensor& self, const Tensor& other, Tensor& result) {
 
 Tensor div(const Tensor& self, const Tensor& other) {
   Tensor result;
-  div_true_out(self, other, result);
-  return result;
+  auto iter = TensorIterator::binary_float_op(result, self, other);
+  div_true_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor& div_(Tensor& self, const Tensor& other) {
@@ -332,8 +333,9 @@ Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other
 
 Tensor floor_divide(const Tensor& self, const Tensor& other) {
   Tensor result;
-  native::floor_divide_out(result, self, other);
-  return result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  div_trunc_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
 Tensor& floor_divide_(Tensor& self, const Tensor& other) {

@@ -89,7 +89,7 @@ DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.RNNCell: nnqd.RNNCell,
 }
 
-# Whitelist for propagating the qconfig
+# Allowlist for propagating the qconfig
 _INCLUDE_QCONFIG_PROPAGATE_LIST : Set[Callable] = {
     nn.Sequential,
 }
