@@ -466,7 +466,7 @@ inline void compute_linear(scalar_t* dst, scalar_t * src1, scalar_t* src2, scala
 // - use buffers (buf) to prefetch source data.
 // - recursively compute interpolated output for each dimension
 //
-// for example for 2d:
+// for example for 2D:
 // 
 // source[0, 0] -> buffer[0]
 // source[0, 1] -> buffer[1]
@@ -478,6 +478,10 @@ inline void compute_linear(scalar_t* dst, scalar_t * src1, scalar_t* src2, scala
 // 
 // interpolate(buffer[2], weight10, buffer[3], weight11) -> output
 //
+// We have 2^out_ndims of buffers, each buffer has size of step.
+// e.g. for 1D case: out_ndims=1 -> 2 buffers
+// e.g. for 2D case: out_ndims=2 -> 4 buffers
+// e.g. for 3D case: out_ndims=3 -> 8 buffers
 template <int n, typename scalar_t, typename index_t, int step>
 struct Interp {
     static inline void eval(scalar_t* out, scalar_t* buf, scalar_t* src[], index_t* idx[], scalar_t* w[]) {
@@ -543,7 +547,8 @@ inline void assert_strides_linear(const int64_t* strides) {
 // Linear upsampling computation method using TensorIterator for Nd case.
 // 
 // Assumptions:
-// - input and output are of shape (B, C, D1, D2, D3, ..., DN) and
+// - input and output are of shape (B, C, D1, D2, D3, ..., DN)
+// - channel first is the only supported memory format
 // - upsampling is computed on D_i axes.
 // - zero strides for construced indices and weights on dims D1, D2, ..., DN-1
 // - zero stride for input source (as it is restrided)
@@ -579,7 +584,7 @@ void ti_cpu_upsample_linear(TensorIterator& iter) {
     constexpr int p2_size = 1 << (out_ndims - 1);
 
     // temporary buffer for src values
-    scalar_t buffer[p2_size * step];
+    scalar_t buffer[2 * p2_size * step];
 
     // placeholder for pointers on indices for iterated dimension (e.g. -1)
     index_t * idx_ptrs[2];
@@ -588,7 +593,11 @@ void ti_cpu_upsample_linear(TensorIterator& iter) {
     // placeholder src pointer with all possible constant offsets added
     scalar_t * src_offset[p2_size];
     {
-      index_t * constval_idx_ptrs[2 * (out_ndims - 1)];
+      // if out_ndims == 1, we do not need to allocate constval_idx_ptrs
+      // however, it is reasonably impossible to allocate an array of constant size 0 on Windows
+      // let's add 1 additional unused entries.
+      constexpr int n = (out_ndims > 1) ? 2 * (out_ndims - 1) : 1;
+      index_t * constval_idx_ptrs[n];
       int i = 0;
       for (; i<out_ndims - 1; i++) {
         constval_idx_ptrs[2 * i + 0] = (index_t *) data[4 * i + 0 + 2];
