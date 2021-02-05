@@ -10,6 +10,7 @@
 
 #include "fully-connected-sparse-operator-tester.h"
 
+#if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
 TEST(FULLY_CONNECTED_SPARSE_OP, integration_test_dynamic) {
   FullyConnectedSparseOperatorTester()
       .batchSize(4)
@@ -201,3 +202,4 @@ TEST(FULLY_CONNECTED_OP, small_batch_with_qmax_dynamic_prepacked) {
       .iterations(3)
       .testQ8_prepacked(FullyConnectedSparseOperatorTester::Mode::Dynamic);
 }
+#endif
