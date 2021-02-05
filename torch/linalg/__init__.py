@@ -232,22 +232,25 @@ Example::
 """)
 
 eigh = _add_docstr(_linalg.linalg_eigh, r"""
-linalg.eigh(input, UPLO='L') -> tuple(Tensor, Tensor)
+linalg.eigh(input, UPLO='L', *, out=None) -> (Tensor, Tensor)
 
-This function computes the eigenvalues and eigenvectors
-of a complex Hermitian (or real symmetric) matrix, or batch of such matrices, :attr:`input`.
-For a single matrix :attr:`input`, the tensor of eigenvalues :math:`w` and the tensor of eigenvectors :math:`V`
-decompose the :attr:`input` such that :math:`\text{input} = V \text{diag}(w) V^H`,
-where :math:`^H` is the conjugate transpose operation.
+Computes the eigenvalues and eigenvectors of a complex Hermitian (or real symmetric)
+matrix :attr:`input`, or of each such matrix in a batched :attr:`input`.
+
+For a single matrix :attr:`input`, the tensor of eigenvalues `w` and the tensor of eigenvectors
+`V` decompose the :attr:`input` such that `input = V diag(w) Vᴴ`, where `Vᴴ` is the transpose of `V`
+for real-valued :attr:`input`, or the conjugate transpose of `V` for complex-valued :attr:`input`.
 
 Since the matrix or matrices in :attr:`input` are assumed to be Hermitian, the imaginary part of their diagonals
-is always treated as zero. When :attr:`UPLO` is "L", its default value, only the lower triangular part of
-each matrix is used in the computation. When :attr:`UPLO` is "U" only the upper triangular part of each matrix is used.
+is always treated as zero. When :attr:`UPLO` is "L", its default value, only the lower triangular part of each
+matrix is used in the computation. When :attr:`UPLO` is "U" only the upper triangular part of each matrix is used.
 
-Supports input of ``float``, ``double``, ``cfloat`` and ``cdouble`` data types.
+Supports input of float, double, cfloat and cdouble dtypes.
 
-See :func:`torch.linalg.eigvalsh` for a related function that computes only eigenvalues,
-however that function is not differentiable.
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: The eigenvalues/eigenvectors are computed using LAPACK's `syevd` and `heevd` for CPU inputs, 
+          and MAGMA's `syevd` and `heevd` for CUDA inputs.
 
 .. note:: The eigenvalues of real symmetric or complex Hermitian matrices are always real.
 
@@ -255,24 +258,25 @@ however that function is not differentiable.
           a valid eigenvector. This function may compute different eigenvector representations on
           different device types. Usually the difference is only in the sign of the eigenvector.
 
-.. note:: The eigenvalues/eigenvectors are computed using LAPACK/MAGMA routines ``_syevd`` and ``_heevd``.
-          This function always checks whether the call to LAPACK/MAGMA is successful
-          using ``info`` argument of ``_syevd``, ``_heevd`` and throws a RuntimeError if it isn't.
-          On CUDA this causes a cross-device memory synchronization.
+.. note:: See :func:`torch.linalg.eigvalsh` for a related function that computes only eigenvalues.
+          However, that function is not differentiable.
 
 Args:
-    input (Tensor): the Hermitian :math:`n \times n` matrix or the batch
-                    of such matrices of size :math:`(*, n, n)` where `*` is one or more batch dimensions.
+    input (Tensor): the Hermitian `n \times n` matrix or the batch of such matrices of size
+                    `(*, n, n)` where `*` is one or more batch dimensions.
     UPLO ('L', 'U', optional): controls whether to use the upper-triangular or the lower-triangular part
-                               of :attr:`input` in the computations. Default: ``'L'``
+                               of :attr:`input` in the computations. Default is ``'L'``.
+
+Keyword args:
+    out (tuple, optional): tuple of two tensors to write the output to. Default is ``None``.
 
 Returns:
     (Tensor, Tensor): A namedtuple (eigenvalues, eigenvectors) containing
 
-        - **eigenvalues** (*Tensor*): Shape :math:`(*, m)`.
+        - **eigenvalues** (*Tensor*): Shape `(*, m)`.
             The eigenvalues in ascending order.
-        - **eigenvectors** (*Tensor*): Shape :math:`(*, m, m)`.
-            The orthonormal eigenvectors of the ``input``.
+        - **eigenvectors** (*Tensor*): Shape `(*, m, m)`.
+            The orthonormal eigenvectors of the :attr:`input`.
 
 Examples::
 
