@@ -304,7 +304,9 @@ class Node:
                 return f'operator.{target.__name__}'
         return _get_qualified_name(target)
 
-    def format_node(self, placeholder_names: List[str]=None, maybe_return_typename: List[str]=None) -> Optional[str]:
+    def format_node(self,
+                    placeholder_names: List[str] = None,
+                    maybe_return_typename: List[str] = None) -> Optional[str]:
         """
         Return a descriptive string representation of ``self``.
 
@@ -338,14 +340,16 @@ class Node:
             return f'%{self.name} : {maybe_typename}[#users={len(self.users)}] = {self.op}[target={self.target}]{default_val}'
         elif self.op == 'get_attr':
             maybe_typename = f'{_type_repr(self.type)} ' if self.type is not None else ''
-            return f'%{self.name} : {maybe_typename}[#users={len(self.users)}] = {self.op}[target={self._pretty_print_target(self.target)}]'
+            return f'%{self.name} : {maybe_typename}[#users={len(self.users)}] = ' \
+                   f'{self.op}[target={self._pretty_print_target(self.target)}]'
         elif self.op == 'output':
             if self.type and maybe_return_typename:
                 maybe_return_typename[0] = f' -> {_type_repr(self.type)}'
             return f'return {self.args[0]}'
         else:
             maybe_typename = f'{_type_repr(self.type)} ' if self.type is not None else ''
-            return f'%{self.name} : {maybe_typename}[#users={len(self.users)}] = {self.op}[target={self._pretty_print_target(self.target)}](' \
+            return f'%{self.name} : {maybe_typename}[#users={len(self.users)}] = ' \
+                   f'{self.op}[target={self._pretty_print_target(self.target)}](' \
                    f'args = {_format_arg(self.args)}, kwargs = {_format_arg(self.kwargs)})'
 
     def replace_all_uses_with(self, replace_with : 'Node') -> List['Node']:
