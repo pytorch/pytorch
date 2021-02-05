@@ -4141,8 +4141,6 @@ std::unique_ptr<Function> CompilationUnit::define(
       // There should be at least a ClassName.method_name
       TORCH_INTERNAL_ASSERT(atoms.size() >= 2);
       call_name = atoms.at(atoms.size() - 2) + "." + atoms.at(atoms.size() - 1);
-      std::cout << "HI" << call_name << std::endl;
-      std::cout << "HI" << method.num_inputs() << std::endl;
     }
     ErrorReport::CallStack call(call_name, def.range());
     to_ir(def, _resolver, self, method);

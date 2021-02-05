@@ -4,7 +4,7 @@
 #include <string>
 #include <utility>
 #include "ATen/core/overloaded_function.h"
-
+#include "ATen/core/builtin_function.h"
 #include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
@@ -477,7 +477,6 @@ struct MethodValue : public SugaredValue {
 
           }
           auto match = matchSchemas(schemas, loc, *f.graph(), argsWithSelf, kwargs);
-          std::cout << "MATCHED: " << match.first << match.second.inputs.size() << std::endl;
           Value* output =
               f.graph()->insertMethodCall(method_name, match.second);
           output->node()->setSourceRange(loc);

@@ -54,6 +54,8 @@
 namespace torch {
 namespace jit {
 
+void clear_registered_instances(void* ptr);
+
 IValue toIValue(
     py::handle obj,
     const TypePtr& type,
@@ -294,7 +296,7 @@ inline InferredType tryToInferType(py::handle input) {
   } else if (py::isinstance<py::float_>(input)) {
     return InferredType(FloatType::get());
   } else if (PyComplex_CheckExact(input.ptr())) {
-    return InferredType(ComplexDoubleType::get());
+    return InferredType(ComplexType::get());
   } else if (py::isinstance<py::str>(input)) {
     return InferredType(StringType::get());
   } else if (THPLayout_Check(input.ptr())) {

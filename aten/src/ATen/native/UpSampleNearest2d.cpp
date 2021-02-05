@@ -88,7 +88,7 @@ TORCH_IMPL_FUNC(upsample_nearest2d_out_cpu) (
     IntArrayRef output_size,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w,
-    Tensor& output
+    const Tensor& output
 ) {
   upsample_nearest2d_kernel(kCPU, output, input, scales_h, scales_w);
 }
@@ -99,7 +99,7 @@ TORCH_IMPL_FUNC(upsample_nearest2d_backward_out_cpu) (
     IntArrayRef input_size,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w,
-    Tensor& grad_input) {
+    const Tensor& grad_input) {
   grad_input.zero_();
   upsample_nearest2d_backward_kernel(kCPU, grad_input, grad_output, scales_h, scales_w);
 }

@@ -2,13 +2,22 @@
 
 #include <ATen/core/function.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 #include <functional>
 #include <utility>
+#include "c10/util/ArrayRef.h"
 
 namespace torch {
 namespace jit {
+
+struct Value;
+
+bool matchesUtility(const c10::FunctionSchema& schema, at::ArrayRef<Value*> inputs);
+
+template<typename T>
+using ArrayRef = at::ArrayRef<T>;
 
 struct OverloadedFunction : public Function {
   OverloadedFunction(
@@ -39,51 +48,9 @@ struct OverloadedFunction : public Function {
     callable_(stack);
   }
 
-//   bool matches(at::ArrayRef<torch::jit::Value*> inputs) {
-//     const auto& formals = getSchema().arguments();
-
-//     // not enough inputs
-//     if (inputs.size() < formals.size()) {
-//         return false;
-//     }
-
-//     if (inputs.size() == formals.size()) {
-//         return true;
-//     }
-
-//     return false;
-
-//     // TypeEnv type_env;
-//     // for (size_t i = 0; i < formals.size(); ++i) {
-//     //     auto formal = formals[i].type();
-//     //     const MatchTypeReturn matched_type =
-//     //         matchTypeVariables(formal, inputs[i]->type(), type_env);
-//     //     if (!matched_type.success()) {
-//     //         return false;
-//     //     }
-
-//     //     TypePtr resolved = tryEvalTypeVariables(formal, type_env);
-//     //     if (resolved) {
-//     //     formal = resolved;
-//     //     }
-//     //     // note: it is possible at this point that type variable matching has
-//     //     // not resolved all type variables, e.g. if None was matched to Optional[T]
-//     //     // we will not succeed at matching T. However None <: Optional[T] so this
-//     //     // check can still succeed.
-
-//     //     if (!inputs[i]->type()->isSubtypeOf(formal)) {
-//     //     return false;
-//     //     }
-//     // }
-//     // // too many inputs
-//     // if (!getSchema().is_vararg() && inputs.size() != formals.size()) {
-//     //     return false;
-//     // }
-
-//     // return true;
-
-
-//   }
+  bool matches(ArrayRef<Value*> inputs) {
+    return matchesUtility(getSchema(), inputs);
+  }
 
   c10::intrusive_ptr<c10::ivalue::Future> runAsync(
       Stack& stack,

@@ -24,6 +24,7 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <ATen/core/overloaded_function.h>
+#include "NativeFunctions.h"
 
 #ifdef USE_RPC
 #include <torch/csrc/distributed/autograd/context/container.h>
@@ -943,10 +944,11 @@ struct CodeImpl {
         if (auto class_type = node->inputs().at(0)->type()->cast<ClassType>()) {
           if (class_type->findOverloadedMethod(node->s(attr::name)).size() > 1) {
             for (auto & method : class_type->findOverloadedMethod(node->s(attr::name))) {
-              // shitty schema macher
-              if (node->inputs().size() == method->getSchema().arguments().size()) {
-                emitCall(method, node->inputs());
-                break;
+              if (auto overloaded_method = dynamic_cast<OverloadedFunction*>(method)) {
+                if (overloaded_method->matches(node->inputs())) {
+                   emitCall(method, node->inputs());
+                    break;
+                }
               }
             }
           } else {

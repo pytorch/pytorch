@@ -2,6 +2,7 @@
 
 #include <ATen/core/stack.h>
 #include <ATen/core/overloaded_function.h>
+#include <ATen/core/builtin_function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
