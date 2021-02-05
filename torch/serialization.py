@@ -13,10 +13,13 @@ from ._utils import _import_dotted_name
 from ._six import string_classes as _string_classes
 from torch._utils_internal import get_source_lines_and_file
 from torch.types import Storage
-from typing import Any, BinaryIO, cast, Dict, Optional, Type, Tuple, Union, IO
+from typing import Any, BinaryIO, cast, Dict, Optional, Type, Tuple, Union, IO, Callable
+from types import ModuleType
 import copyreg
 import pickle
 import pathlib
+from torch.package._custom_import_pickler import create_custom_import_pickler
+import importlib
 
 DEFAULT_PROTOCOL = 2
 
@@ -859,27 +862,6 @@ def _is_torchscript_zip(zip_file):
     return 'constants.pkl' in zip_file.get_all_records()
 
 
-def _create_pickler(self, data_buf, importers):
-    def _import_module(self, module_name):
-        last_err = None
-        for import_module in importers:
-            try:
-                return import_module(module_name)
-            except ModuleNotFoundError as err:
-                last_err = err
-
-        if last_err is not None:
-            raise last_err
-        else:
-            raise ModuleNotFoundError(module_name)
-
-    if importers == [importlib.import_module]:
-        # if we are using the normal import library system, then
-        # we can use the C implementation of pickle which is faster
-        return pickle.Pickler(data_buf, protocol=3)
-    else:
-        return CustomImportPickler(self._import_module, data_buf, protocol=3)
-
 def _save_storages(importer, obj):
     serialized_storages = []
     serialized_dtypes = []
@@ -898,8 +880,6 @@ def _save_storages(importer, obj):
 
     # Write the pickle data for `obj`
     data_buf = io.BytesIO()
-    from torch.package._custom_import_pickler import create_custom_import_pickler
-    import importlib
     importer = importer if isinstance(importer, torch.package.PackageImporter) else None
     if importer is not None:
         importers = [importer.import_module, importlib.import_module]
@@ -925,7 +905,7 @@ def _load_storages(id, zip_reader, obj_bytes, serialized_storages):
     from torch.package.importer import _UnpicklerWrapper
     import importlib
 
-    import_module = importlib.import_module
+    import_module : Callable[[str], ModuleType] = importlib.import_module
     if zip_reader is not None:
         importer = _get_package(zip_reader)
 
@@ -947,5 +927,5 @@ def _get_package(zip_reader):
     return _raw_packages[zip_reader]
 
 
-_raw_packages = {}
-_deploy_objects = {}
+_raw_packages: dict = {}
+_deploy_objects: dict = {}

@@ -1,4 +1,4 @@
-#include "torch/csrc/deploy/deploy.h"
+#include <torch/csrc/deploy/deploy.h>
 
 #ifndef _WIN32
 #include <dlfcn.h>
@@ -74,7 +74,7 @@ Interpreter::Interpreter(InterpreterManager* manager)
     std::ifstream src(interp_path, std::ios::binary);
     TORCH_CHECK(
         src.good(),
-        "Could not load libtorch_deployinterpreter.so, was PyTorch build with USE_DEPLOY=ON?");
+        "Could not load libtorch_deployinterpreter.so, was PyTorch built with USE_DEPLOY=ON?");
     std::ofstream dst(library_name, std::ios::binary);
     dst << src.rdbuf();
   }

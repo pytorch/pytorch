@@ -1,12 +1,11 @@
 #pragma once
 #include <assert.h>
-#include <experimental/filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <thread>
 #include <vector>
-#include "interpreter/interpreter_impl.h"
+#include <torch/csrc/deploy/interpreter/interpreter_impl.h>
 
 namespace torch {
 
