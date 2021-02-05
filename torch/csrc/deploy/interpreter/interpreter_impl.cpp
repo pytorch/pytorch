@@ -295,10 +295,10 @@ struct ConcreteInterpreterImpl : public torch::InterpreterImpl {
 
     // we cache these so we don't have to repeat the conversion of strings into
     // Python and hash table lookups to get to these object
-    save_storage = global_impl("torch.serialization", "_save_storages");
-    load_storage = global_impl("torch.serialization", "_load_storages");
-    get_package = global_impl("torch.serialization", "_get_package");
-    objects = global_impl("torch.serialization", "_deploy_objects");
+    save_storage = global_impl("torch._deploy", "_save_storages");
+    load_storage = global_impl("torch._deploy", "_load_storages");
+    get_package = global_impl("torch._deploy", "_get_package");
+    objects = global_impl("torch._deploy", "_deploy_objects");
     // Release the GIL that PyInitialize acquires
     PyEval_SaveThread();
   }
