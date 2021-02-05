@@ -1822,7 +1822,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_max_min,
            assert_autodiffed=True,
            skips=(
-               # Skip these tests as they're currently failing
+               # Skip these tests as they're currently failing.
                # Reference: https://github.com/pytorch/pytorch/pull/51244#issuecomment-772640326
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         device_type='cpu', dtypes=[torch.float32, torch.bfloat16],),
@@ -1839,7 +1839,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_max_min,
            assert_autodiffed=True,
            skips=(
-               # Skip these tests as they're currently failing
+               # Skip these tests as they're currently failing.
                # Reference: https://github.com/pytorch/pytorch/pull/51244#issuecomment-772640326
                SkipInfo('TestCommon', 'test_variant_consistency_jit',
                         device_type='cpu', dtypes=[torch.float32, torch.bfloat16],),
