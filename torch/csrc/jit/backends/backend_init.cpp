@@ -153,11 +153,18 @@ void initJitBackendBindings(PyObject* module) {
         /*shouldMangle=*/true);
 
     // Generate attributes.
-    // This is the original cloned and preprocessed module.
+    // This is the preprocessed module.
+    // For backwards compatibility, for backends that implement preprocessing in
+    // the backend interface rather than as a separate function, we just pass
+    // the cloned original Module.
     loweredModule.register_attribute(
         "__processed_module",
         AnyType::get(),
-        cloned_module._ivalue(),
+        detail::hasBackendPreprocessFunction(backend_name)
+            ? detail::getBackendPreprocessFunction(backend_name)(
+                  cloned_module,
+                  toIValue(method_compile_spec, any_dict_ty).toGenericDict())
+            : cloned_module._ivalue(),
         /*is_param=*/false);
 
     // This is for the method_compile_spec passed in to to_<backend> or
@@ -190,9 +197,9 @@ void initJitBackendBindings(PyObject* module) {
     // This is a helper function for creating a new instance of the
     // backend class.
     static const auto create_backend_ct = CodeTemplate(R"(
-            def __create_backend(self):
-                self.__backend = $name()
-            )");
+              def __create_backend(self):
+                  self.__backend = $name()
+              )");
     TemplateEnv create_backend_te;
     create_backend_te.s("name", qual_backend_name.qualifiedName());
     loweredModule.define(
@@ -202,44 +209,57 @@ void initJitBackendBindings(PyObject* module) {
     // the LoweredModule.
     loweredModule.define(
         R"(
-            def __getstate__(self):
-                return self.__method_compile_spec, self.__processed_module
-            )",
+              def __getstate__(self):
+                  return self.__method_compile_spec, self.__processed_module
+              )",
         loweredModuleResolver());
 
     loweredModule.define(
         R"(
-            def __setstate__(self, state):
-                self.__method_compile_spec = state[0]
-                self.__processed_module = state[1]
-                self.__create_backend()
-                self.__handles = self.__backend.compile(self.__processed_module, self.__method_compile_spec)
-            )",
+              def __setstate__(self, state):
+                  self.__method_compile_spec = state[0]
+                  self.__processed_module = state[1]
+                  self.__create_backend()
+                  self.__handles = self.__backend.compile(self.__processed_module, self.__method_compile_spec)
+              )",
         loweredModuleResolver());
 
-    // This is never called during compilation or execution, but is
-    // needed to generate the LoweredModule because we don't have access
-    // to an instance of the backend as a C++ object with which to call
-    // preprocess.
-    loweredModule.define(
-        R"(
-            def __preprocess(self, mod: Any, method_compile_spec: Dict[str, Any]):
-                self.__create_backend()
-                self.__processed_module = self.__backend.preprocess(mod, method_compile_spec)
-          )",
-        loweredModuleResolver());
+    // Only add preprocess method to the LoweredModule if there is no
+    // standalone BackendPreprocessFunction for this backend.
+    // Kept for backwards compatibility for backends that implement
+    // preprocessing in the backend interface rather than as a separate
+    // function.
+    if (!detail::hasBackendPreprocessFunction(backend_name)) {
+      // This is never called during compilation or execution, but is
+      // needed to generate the LoweredModule because we don't have access
+      // to an instance of the backend as a C++ object with which to call
+      // preprocess.
+      loweredModule.define(
+          R"(
+                def __preprocess(self, mod: Any, method_compile_spec: Dict[str, Any]):
+                    self.__create_backend()
+                    self.__processed_module = self.__backend.preprocess(mod, method_compile_spec)
+              )",
+          loweredModuleResolver());
+      // Run preprocess so that __processed_module is set correctly before
+      // compilation.
+      loweredModule.run_method(
+          "__preprocess",
+          cloned_module._ivalue(),
+          toIValue(method_compile_spec, any_dict_ty).toGenericDict());
+    }
 
     // This loop generates one method on the LoweredModule for every key
     // in method_compile_spec.
     for (auto& e : method_compile_spec) {
       std::string method_name = py::cast<std::string>(e.first);
       static const auto method_ct = CodeTemplate(R"(
-            def $method(self${,def_inputs}):
-                typed_inputs: List[Any] = [${fwd_inputs,}]
-                $unpack, = self.__backend.execute(self.__handles["$method"], typed_inputs)
-                ${refine,}
-                return $ret
-            )");
+              def $method(self${,def_inputs}):
+                  typed_inputs: List[Any] = [${fwd_inputs,}]
+                  $unpack, = self.__backend.execute(self.__handles["$method"], typed_inputs)
+                  ${refine,}
+                  return $ret
+              )");
 
       TemplateEnv method_te;
       method_te.s("method", method_name);
@@ -328,13 +348,6 @@ void initJitBackendBindings(PyObject* module) {
       loweredModule.define(
           method_ct.format(method_te), loweredModuleResolver());
     }
-
-    // Run preprocess so that __processed_module is set correctly before
-    // compilation.
-    loweredModule.run_method(
-        "__preprocess",
-        cloned_module._ivalue(),
-        toIValue(method_compile_spec, any_dict_ty).toGenericDict());
 
     // Call __setstate__ to ensure that the returned Module is ready to
     // run.

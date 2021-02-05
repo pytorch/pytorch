@@ -1,7 +1,11 @@
 #pragma once
 
+#include <torch/csrc/jit/api/module.h>
+
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+
+#include <functional>
 
 namespace torch {
 namespace jit {
@@ -46,6 +50,20 @@ std::function<void(Stack&)> getExecuteFunc() {
     push(stack, res);
   };
 }
+
+typedef std::function<
+    c10::IValue(const Module&, const c10::Dict<IValue, IValue>&)>
+    BackendPreprocessFunction;
+
+TORCH_API void registerBackendPreprocessFunction(
+    const std::string& name,
+    const BackendPreprocessFunction& preprocess);
+
+TORCH_API bool hasBackendPreprocessFunction(const std::string& name);
+
+TORCH_API BackendPreprocessFunction getBackendPreprocessFunction(
+    const std::string& name);
+
 } // namespace detail
 } // namespace jit
 } // namespace torch
