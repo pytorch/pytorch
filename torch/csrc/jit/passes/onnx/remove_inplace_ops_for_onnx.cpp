@@ -402,7 +402,6 @@ void RegisterInplaceNodeInIfBlocks(
 
   auto next_node = initial_node;
   new_inplace_node->setDebugName("_output_" + output_name);
-
   outer_block->registerOutput(new_inplace_node);
   // Block has a new output. Add the output for the prim::If node.
   if (next_node->outputs().size() < outer_block->outputs().size())
@@ -995,6 +994,7 @@ std::unordered_map<std::string, Value*> registerInplaceOpAsBlockOutputs(
       if (block_->owningNode())
         RegisterInplaceNodeInBlocks(
             orig_data, n->output(), n, block_, block_->owningNode());
+
     } else { // for prim::If and prim::Loop nodes with blocks.
       for (Block* sub_block : n->blocks()) {
         std::unordered_map<std::string, Value*> map_ =
@@ -1041,6 +1041,8 @@ void RemoveInplaceOpsForONNX(
     RegisterInplaceOpAsBlockOutputs(mr, model, graph);
   RemoveTensorMutation(graph);
   RemoveListMutation(graph);
+  if (model)
+    RegisterInplaceOpAsBlockOutputs(mr, model, graph);
 }
 
 } // namespace jit
