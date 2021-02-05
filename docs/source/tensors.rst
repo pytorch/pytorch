@@ -26,6 +26,10 @@ Data type                  dtype                                         CPU ten
 32-bit integer (signed)    ``torch.int32`` or ``torch.int``              :class:`torch.IntTensor`      :class:`torch.cuda.IntTensor`
 64-bit integer (signed)    ``torch.int64`` or ``torch.long``             :class:`torch.LongTensor`     :class:`torch.cuda.LongTensor`
 Boolean                    ``torch.bool``                                :class:`torch.BoolTensor`     :class:`torch.cuda.BoolTensor`
+quantized 8-bit integer (unsigned)   ``torch.quint8``                    :class:`torch.ByteTensor`     /
+quantized 8-bit integer (signed)     ``torch.qint8``                     :class:`torch.CharTensor`     /
+quantized 32-bit integer (signed)   ``torch.qfint32``                    :class:`torch.IntTensor`      /
+quantized 4-bit integer (unsigned) [3]_    ``torch.quint4x2``            :class:`torch.ByteTensor`     /
 ========================== ===========================================   ============================= ================================
 
 .. [1]
@@ -35,6 +39,8 @@ Boolean                    ``torch.bool``                                :class:
   Sometimes referred to as Brain Floating Point: uses 1 sign, 8 exponent, and 7
   significand bits. Useful when range is important, since it has the same
   number of exponent bits as ``float32``
+.. [3]
+  quantized 4-bit integer is stored as a 8-bit signed integer.
 
 :class:`torch.Tensor` is an alias for the default tensor type (:class:`torch.FloatTensor`).
 
