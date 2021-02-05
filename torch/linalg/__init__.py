@@ -145,7 +145,46 @@ Examples::
 det = _add_docstr(_linalg.linalg_det, r"""
 linalg.det(input) -> Tensor
 
-Alias of :func:`torch.det`.
+Computes the determinant of a square matrix :attr:`input`, or of each square matrix
+in a batched :attr:`input`.
+
+This function supports float, double, cfloat and cdouble dtypes.
+
+.. note:: When given inputs on a CUDA device, this function synchronizes that device with the CPU.
+
+.. note:: The determinant is computed using LU factorization. LAPACK's `getrf` is used for CPU inputs,
+          and MAGMA's `getrf` is used for CUDA inputs.
+
+.. note:: Backward through `det` internally uses :func:`torch.linalg.svd` when :attr:`input` is not
+          invertible. In this case, double backward through `det` will be unstable when :attr:`input`
+          doesn't have distinct singular values. See :func:`torch.linalg.svd` for more details.
+
+Args:
+    input (Tensor): the input matrix of size `(n, n)` or the batch of matrices of size
+                    `(*, n, n)` where `*` is one or more batch dimensions.
+
+Example::
+
+    >>> a = torch.randn(3, 3)
+    >>> a
+    tensor([[ 0.9478,  0.9158, -1.1295],
+            [ 0.9701,  0.7346, -1.8044],
+            [-0.2337,  0.0557,  0.6929]])
+    >>> torch.linalg.det(a)
+    tensor(0.0934)
+
+    >>> a = torch.randn(3, 2, 2)
+    >>> a
+    tensor([[[ 0.9254, -0.6213],
+             [-0.5787,  1.6843]],
+
+            [[ 0.3242, -0.9665],
+             [ 0.4539, -0.0887]],
+
+            [[ 1.1336, -0.4025],
+             [-0.7089,  0.9032]]])
+    >>> torch.linalg.det(a)
+    tensor([1.1990, 0.4099, 0.7386])
 """)
 
 slogdet = _add_docstr(_linalg.linalg_slogdet, r"""
