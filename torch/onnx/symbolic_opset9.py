@@ -660,6 +660,10 @@ def prelu(g, self, weight):
     return g.op("PRelu", self, weight)
 
 
+def silu(g, input):
+    return g.op('Mul', input, g.op('Sigmoid', input))
+
+
 def relu(g, input):
     return g.op("Relu", input)
 
@@ -2321,7 +2325,8 @@ def scatter_add(g, self, dim, index, src):
     if sizes:
         to_add = g.op("Constant", value_t=torch.zeros(sizes, dtype=dtype))
     else:
-        to_add = zeros_like(self, dtype)
+        dtype = sym_help.scalar_type_to_pytorch_type.index(dtype)
+        to_add = zeros_like(g, self, dtype)
     to_add = sym_help._scatter_helper(g, to_add, dim, index, src)
     return add(g, self, to_add)
 
@@ -2821,8 +2826,7 @@ def kl_div(g, input, target, reduction, log_target):
     elif reduction == 2:
         return sym_help._reducesum_helper(g, output, keepdims_i=0)
     else:
-        return sym_help._onnx_unsupported("kl_div with reduction other than none, mean, or sum. Please open a bug to "
-                                          "request ONNX export support for the missing reduction type.")
+        return sym_help._onnx_unsupported("kl_div with reduction other than none, mean, or sum.")
 
 
 @parse_args('v', 'v', 'is', 'i')
