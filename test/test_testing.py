@@ -8,7 +8,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA, dtypes)
 from torch.testing._internal import mypy_wrapper
-from torch.testing._internal import stats_utils
+from torch.testing._internal import print_test_stats
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -574,7 +574,7 @@ def makereport(tests):
     }
 
 
-class TestStatsUtils(TestCase):
+class TestPrintTestStats(TestCase):
     maxDiff = None
 
     def test_analysis(self):
@@ -711,11 +711,11 @@ class TestStatsUtils(TestCase):
             ],
         }
 
-        simpler_head = stats_utils.simplify(head_report)
+        simpler_head = print_test_stats.simplify(head_report)
         simpler_base = {}
         for commit, reports in base_reports.items():
-            simpler_base[commit] = [stats_utils.simplify(r) for r in reports]
-        analysis = stats_utils.analyze(
+            simpler_base[commit] = [print_test_stats.simplify(r) for r in reports]
+        analysis = print_test_stats.analyze(
             head_report=simpler_head,
             base_reports=simpler_base,
         )
@@ -780,7 +780,7 @@ class TestStatsUtils(TestCase):
 +         # now   3.742s           (failed)
 
 ''',
-            stats_utils.anomalies(analysis),
+            print_test_stats.anomalies(analysis),
         )
 
     def test_graph(self):
@@ -798,7 +798,7 @@ Commit graph (base is most recent master ancestor with at least one S3 report):
     |
     :
 ''',
-            stats_utils.graph(
+            print_test_stats.graph(
                 head_sha=fakehash('a'),
                 head_seconds=502.99,
                 base_seconds={
@@ -824,7 +824,7 @@ Commit graph (base is most recent master ancestor with at least one S3 report):
     |
     :
 ''',
-            stats_utils.graph(
+            print_test_stats.graph(
                 head_sha=fakehash('a'),
                 head_seconds=9988.77,
                 base_seconds={
@@ -852,7 +852,7 @@ Commit graph (base is most recent master ancestor with at least one S3 report):
     |
     :
 ''',
-            stats_utils.graph(
+            print_test_stats.graph(
                 head_sha=fakehash('a'),
                 head_seconds=25.52,
                 base_seconds={
@@ -881,7 +881,7 @@ Commit graph (base is most recent master ancestor with at least one S3 report):
     |
     :
 ''',
-            stats_utils.graph(
+            print_test_stats.graph(
                 head_sha=fakehash('a'),
                 head_seconds=0.08,
                 base_seconds={
@@ -912,7 +912,7 @@ Commit graph (base is most recent master ancestor with at least one S3 report):
     |
     :
 ''',
-            stats_utils.graph(
+            print_test_stats.graph(
                 head_sha=fakehash('a'),
                 head_seconds=5.98,
                 base_seconds={
@@ -965,7 +965,7 @@ Removed  (across    1 suite)      1 test,  totaling -   1.00s
 Modified (across    1 suite)      1 test,  totaling -  41.48s ±   2.12s
 Added    (across    1 suite)      1 test,  totaling +   3.00s
 ''',
-            stats_utils.regression_info(
+            print_test_stats.regression_info(
                 head_sha=fakehash('a'),
                 head_report=makereport({
                     'Foo': [
