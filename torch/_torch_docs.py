@@ -8482,8 +8482,7 @@ Example::
 .. _Gauge problem in AD: https://re-ra.xyz/Gauge-Problem-in-Automatic-Differentiation/
 """)
 
-add_docstr(torch.symeig,
-           r"""
+add_docstr(torch.symeig, r"""
 symeig(input, eigenvectors=False, upper=True, *, out=None) -> (Tensor, Tensor)
 
 This function returns eigenvalues and eigenvectors
