@@ -1903,7 +1903,7 @@ op_db: List[OpInfo] = [
                        SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_normal',
                                 device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                 active_if=(IS_MACOS or IS_WINDOWS)),
-                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics_hard',
                                 device_type='cuda', dtypes=[torch.float64],
                                 active_if=TEST_WITH_ROCM),
                    )),
