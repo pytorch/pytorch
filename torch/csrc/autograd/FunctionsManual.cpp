@@ -306,14 +306,30 @@ Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st) {
   return handle_r_to_c(self_st, out);
 }
 
-Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
+Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st, c10::string_view rounding_mode) {
+  if (rounding_mode != "true") {
+    return at::zeros_like(grad, grad.options().dtype(self_st));
+  }
+
   auto result = grad / other.conj();
   return handle_r_to_c(self_st, result);
 }
 
-Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other) {
+Tensor div_tensor_self_backward(Tensor grad, Tensor other, ScalarType self_st) {
+  return div_tensor_self_backward(grad, other, self_st, "true");
+}
+
+Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other, c10::string_view rounding_mode) {
+  if (rounding_mode != "true") {
+    return at::zeros_like(grad, grad.options().dtype(other.scalar_type()));
+  }
+
   auto result = -grad * ((self / other) / other).conj();
   return handle_r_to_c(other, result);
+}
+
+Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other) {
+  return div_tensor_other_backward(grad, self, other, "true");
 }
 
 Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {

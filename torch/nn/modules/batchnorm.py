@@ -1,8 +1,9 @@
 import torch
 from torch import Tensor
 from ._functions import SyncBatchNorm as sync_batch_norm
+from .lazy import LazyModuleMixin
 from .module import Module
-from torch.nn.parameter import Parameter
+from torch.nn.parameter import Parameter, UninitializedParameter, UninitializedBuffer
 from .. import functional as F
 from .. import init
 
@@ -140,6 +141,36 @@ class _BatchNorm(_NormBase):
             self.weight, self.bias, bn_training, exponential_average_factor, self.eps)
 
 
+class _LazyBatchNorm(LazyModuleMixin, _BatchNorm):
+
+    def __init__(self, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True):
+        super(_LazyBatchNorm, self).__init__(
+            0, eps, momentum, affine, track_running_stats)
+        if self.affine:
+            self.weight = UninitializedParameter()
+            self.bias = UninitializedParameter()
+        if self.track_running_stats:
+            self.running_mean = UninitializedBuffer()
+            self.running_var = UninitializedBuffer()
+
+    def reset_parameters(self) -> None:
+        if not self.has_uninitialized_params() and self.num_features != 0:
+            super().reset_parameters()
+
+    def initialize_parameters(self, input) -> None:  # type: ignore
+        if self.has_uninitialized_params():
+            self.num_features = input.shape[1]
+            if self.affine:
+                assert isinstance(self.weight, UninitializedParameter)
+                assert isinstance(self.bias, UninitializedParameter)
+                self.weight.materialize((self.num_features,))
+                self.bias.materialize((self.num_features,))
+            if self.track_running_stats:
+                self.running_mean.materialize((self.num_features,))
+                self.running_var.materialize((self.num_features,))
+            self.reset_parameters()
+
+
 class BatchNorm1d(_BatchNorm):
     r"""Applies Batch Normalization over a 2D or 3D input (a mini-batch of 1D
     inputs with optional additional channel dimension) as described in the paper
@@ -206,6 +237,35 @@ class BatchNorm1d(_BatchNorm):
         >>> input = torch.randn(20, 100)
         >>> output = m(input)
     """
+
+    def _check_input_dim(self, input):
+        if input.dim() != 2 and input.dim() != 3:
+            raise ValueError('expected 2D or 3D input (got {}D input)'
+                             .format(input.dim()))
+
+
+class LazyBatchNorm1d(_LazyBatchNorm):
+    r"""A :class:`torch.nn.BatchNorm1d` module with lazy initialization of
+    the ``num_features`` argument of the :class:`BatchNorm1d` that is inferred
+    from the ``input.size(1)``.
+
+    Args:
+        eps: a value added to the denominator for numerical stability.
+            Default: 1e-5
+        momentum: the value used for the running_mean and running_var
+            computation. Can be set to ``None`` for cumulative moving average
+            (i.e. simple average). Default: 0.1
+        affine: a boolean value that when set to ``True``, this module has
+            learnable affine parameters. Default: ``True``
+        track_running_stats: a boolean value that when set to ``True``, this
+            module tracks the running mean and variance, and when set to ``False``,
+            this module does not track such statistics, and initializes statistics
+            buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
+            When these buffers are ``None``, this module always uses batch statistics.
+            in both training and eval modes. Default: ``True``
+    """
+
+    cls_to_become = BatchNorm1d  # type: ignore[assignment]
 
     def _check_input_dim(self, input):
         if input.dim() != 2 and input.dim() != 3:
@@ -286,6 +346,35 @@ class BatchNorm2d(_BatchNorm):
                              .format(input.dim()))
 
 
+class LazyBatchNorm2d(_LazyBatchNorm):
+    r"""A :class:`torch.nn.BatchNorm2d` module with lazy initialization of
+    the ``num_features`` argument of the :class:`BatchNorm2d` that is inferred
+    from the ``input.size(1)``.
+
+    Args:
+        eps: a value added to the denominator for numerical stability.
+            Default: 1e-5
+        momentum: the value used for the running_mean and running_var
+            computation. Can be set to ``None`` for cumulative moving average
+            (i.e. simple average). Default: 0.1
+        affine: a boolean value that when set to ``True``, this module has
+            learnable affine parameters. Default: ``True``
+        track_running_stats: a boolean value that when set to ``True``, this
+            module tracks the running mean and variance, and when set to ``False``,
+            this module does not track such statistics, and initializes statistics
+            buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
+            When these buffers are ``None``, this module always uses batch statistics.
+            in both training and eval modes. Default: ``True``
+    """
+
+    cls_to_become = BatchNorm2d  # type: ignore[assignment]
+
+    def _check_input_dim(self, input):
+        if input.dim() != 4:
+            raise ValueError('expected 4D input (got {}D input)'
+                             .format(input.dim()))
+
+
 class BatchNorm3d(_BatchNorm):
     r"""Applies Batch Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper
@@ -353,6 +442,35 @@ class BatchNorm3d(_BatchNorm):
         >>> input = torch.randn(20, 100, 35, 45, 10)
         >>> output = m(input)
     """
+
+    def _check_input_dim(self, input):
+        if input.dim() != 5:
+            raise ValueError('expected 5D input (got {}D input)'
+                             .format(input.dim()))
+
+
+class LazyBatchNorm3d(_LazyBatchNorm):
+    r"""A :class:`torch.nn.BatchNorm3d` module with lazy initialization of
+    the ``num_features`` argument of the :class:`BatchNorm3d` that is inferred
+    from the ``input.size(1)``.
+
+    Args:
+        eps: a value added to the denominator for numerical stability.
+            Default: 1e-5
+        momentum: the value used for the running_mean and running_var
+            computation. Can be set to ``None`` for cumulative moving average
+            (i.e. simple average). Default: 0.1
+        affine: a boolean value that when set to ``True``, this module has
+            learnable affine parameters. Default: ``True``
+        track_running_stats: a boolean value that when set to ``True``, this
+            module tracks the running mean and variance, and when set to ``False``,
+            this module does not track such statistics, and initializes statistics
+            buffers :attr:`running_mean` and :attr:`running_var` as ``None``.
+            When these buffers are ``None``, this module always uses batch statistics.
+            in both training and eval modes. Default: ``True``
+    """
+
+    cls_to_become = BatchNorm3d  # type: ignore[assignment]
 
     def _check_input_dim(self, input):
         if input.dim() != 5:

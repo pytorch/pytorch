@@ -64,7 +64,7 @@ run it. Ensuring that the inputs and outputs of your FX transform are a
             return gm
 
     Note that you MUST call :meth:`GraphModule.recompile` to bring the generated
-    ``forward()`` method on the ``GraphModule`` in sync with the modified :ref:`Graph`.
+    ``forward()`` method on the ``GraphModule`` in sync with the modified :class:`Graph`.
 
 Given that you’ve passed in a :class:`torch.nn.Module` that has been traced into a
 :class:`Graph`, there are now two primary approaches you can take to building a new
