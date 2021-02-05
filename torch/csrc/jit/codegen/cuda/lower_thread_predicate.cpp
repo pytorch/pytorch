@@ -102,10 +102,11 @@ void maskSouceMap(
 ParallelTypeBitmap avoidRedundantWritesToSmem(
     const TensorView* out_tv,
     const ParallelTypeBitmap& pred) {
+  const auto& ca_map = GpuLower::current()->caParallelMap();
   auto new_pred = pred;
   if (out_tv->getMemoryType() == MemoryType::Shared) {
     for (size_t i = 0; i < out_tv->nDims(); i++) {
-      auto id = out_tv->getComputeAtAxis(i).first;
+      auto id = ca_map.getConcreteMappedID(out_tv->axis(i));
       if (out_tv->axis(i)->isBroadcast() && id->isThreadDim()) {
         new_pred.set(id->getParallelType(), true);
       }

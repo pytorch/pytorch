@@ -106,9 +106,6 @@ void GpuLower::lower() {
   validateIr(fusion_);
   replaceSymbolicSizes();
 
-  // Compute thread predicates
-  ThreadPredicateMap preds(fusion_);
-
   // In the future we may directly use this map, but for now it will propagate
   // and validate (to some extent) the parallelization strategy.
   // This is the first time nodes will be lowered to kir nodes. Since for now we
@@ -124,6 +121,9 @@ void GpuLower::lower() {
   // Generate mappings to generate and map to loop nests
   ca_loop_map_ = ComputeAtMap(ComputeAtMap::MappingMode::LOOP);
   ca_loop_map_.build();
+
+  // Compute thread predicates
+  ThreadPredicateMap preds(fusion_);
 
   // Set the kernel inputs & outputs
   for (auto input : fusion_->inputs()) {

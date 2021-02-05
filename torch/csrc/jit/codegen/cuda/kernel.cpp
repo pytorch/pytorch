@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
+#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 #include <iostream>
 #include <unordered_set>
@@ -91,13 +92,15 @@ class KernelIrScanner : private kir::IrVisitor {
   void visit(const kir::GridReduction* grid_reduction) final {
     ++summary_.number_of_grid_reductions;
 
-    const auto fuser_tv = grid_reduction->reduction_op()
-                              ->out()
-                              ->as<kir::TensorIndex>()
-                              ->view()
-                              ->fuserTv();
-    for (size_t i = 0; i < fuser_tv->nDims(); ++i) {
-      const auto id = fuser_tv->getComputeAtAxis(i).first;
+    const auto dom = grid_reduction->reduction_op()
+                         ->out()
+                         ->as<kir::TensorIndex>()
+                         ->view()
+                         ->domain();
+    const auto gpu_lower = GpuLower::current();
+    for (size_t i = 0; i < dom->nDims(); ++i) {
+      const auto id =
+          gpu_lower->caParallelMap().getConcreteMappedID(dom->domain()[i]);
       summary_.has_grid_reduction_in_loop =
           summary_.has_grid_reduction_in_loop || !id->isThread();
     }
