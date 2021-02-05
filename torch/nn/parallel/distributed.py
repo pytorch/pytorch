@@ -609,7 +609,7 @@ class DistributedDataParallel(Module):
         self.logger = dist.Logger(self.reducer)
 
         # Set logging data that can be got during construction time.
-        self.logger.set_construction_logging_data(
+        self.logger.set_construction_data_and_log(
             self.module.__class__.__name__,
             [] if self.device_ids is None else self.device_ids,
             -1 if self.output_device is None else self.output_device,

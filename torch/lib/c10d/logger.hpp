@@ -7,7 +7,7 @@ class Logger {
  explicit Logger(std::shared_ptr<c10d::Reducer> reducer);
   // Set logging data that can be got during DistributedDataParallel
   // construction time.
-  void set_construction_logging_data(
+  void set_construction_data_and_log(
       const std::string& module_name,
       const std::vector<int>& device_ids,
       int output_device,

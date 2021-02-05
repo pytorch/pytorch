@@ -38,7 +38,7 @@ class Logger:
         self,
         reducer: Reducer
     ): ...
-    def set_construction_logging_data(
+    def set_construction_data_and_log(
         self,
         module_name: str,
         device_ids: List[int],

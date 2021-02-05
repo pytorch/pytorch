@@ -54,7 +54,7 @@ void Logger::set_bucket_stats() {
   }
 }
 
-void Logger::set_construction_logging_data(
+void Logger::set_construction_data_and_log(
     const std::string& module_name,
     const std::vector<int>& device_ids,
     int output_device,
