@@ -86,13 +86,13 @@ C10_DEFINE_REGISTRY(TensorPipeCpuChannelRegistry, CpuChannelRegistration);
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_REGISTRY(TensorPipeCudaChannelRegistry, CudaChannelRegistration);
 
-std::string TensorPipeAgent::guessUvAddress(
-    tensorpipe::transport::uv::Context& uvContext) {
+std::string TensorPipeAgent::guessUvAddress() {
   tensorpipe::Error error;
   std::string uvAddress;
   char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
   if (ifnameEnv != nullptr) {
-    std::tie(error, uvAddress) = uvContext.lookupAddrForIface(ifnameEnv);
+    std::tie(error, uvAddress) =
+        tensorpipe::transport::uv::lookupAddrForIface(ifnameEnv);
     if (error) {
       LOG(WARNING) << "Failed to look up the IP address for interface "
                    << ifnameEnv << " (" << error.what() << "), defaulting to "
@@ -100,7 +100,8 @@ std::string TensorPipeAgent::guessUvAddress(
       uvAddress = kDefaultUvAddress;
     }
   } else {
-    std::tie(error, uvAddress) = uvContext.lookupAddrForHostname();
+    std::tie(error, uvAddress) =
+        tensorpipe::transport::uv::lookupAddrForHostname();
     if (error) {
       LOG(WARNING) << "Failed to look up the IP address for the hostname ("
                    << error.what() << "), defaulting to " << kDefaultUvAddress;
@@ -140,8 +141,8 @@ constexpr int64_t kCudaBasicChannelPriority = 100;
 #endif
 
 std::unique_ptr<TransportRegistration> makeUvTransport() {
-  auto context = std::make_shared<tensorpipe::transport::uv::Context>();
-  std::string address = TensorPipeAgent::guessUvAddress(*context);
+  auto context = tensorpipe::transport::uv::create();
+  std::string address = TensorPipeAgent::guessUvAddress();
   return std::make_unique<TransportRegistration>(TransportRegistration{
       std::move(context), kUvTransportPriority, std::move(address)});
 }
@@ -165,7 +166,7 @@ std::string createUniqueShmAddr() {
 }
 
 std::unique_ptr<TransportRegistration> makeShmTransport() {
-  auto context = std::make_shared<tensorpipe::transport::shm::Context>();
+  auto context = tensorpipe::transport::shm::create();
   std::string address = createUniqueShmAddr();
   return std::make_unique<TransportRegistration>(TransportRegistration{
       std::move(context), kShmTransportPriority, std::move(address)});
@@ -182,12 +183,13 @@ C10_REGISTER_CREATOR(TensorPipeTransportRegistry, shm, makeShmTransport);
 
 #if TENSORPIPE_HAS_IBV_TRANSPORT
 
-std::string guessIbvAddress(tensorpipe::transport::ibv::Context& ibvContext) {
+std::string guessIbvAddress() {
   tensorpipe::Error error;
   std::string ibvAddress;
   char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
   if (ifnameEnv != nullptr) {
-    std::tie(error, ibvAddress) = ibvContext.lookupAddrForIface(ifnameEnv);
+    std::tie(error, ibvAddress) =
+        tensorpipe::transport::ibv::lookupAddrForIface(ifnameEnv);
     if (error) {
       LOG(WARNING) << "Failed to look up the IP address for interface "
                    << ifnameEnv << " (" << error.what() << "), defaulting to "
@@ -195,7 +197,8 @@ std::string guessIbvAddress(tensorpipe::transport::ibv::Context& ibvContext) {
       ibvAddress = kDefaultUvAddress;
     }
   } else {
-    std::tie(error, ibvAddress) = ibvContext.lookupAddrForHostname();
+    std::tie(error, ibvAddress) =
+        tensorpipe::transport::ibv::lookupAddrForHostname();
     if (error) {
       LOG(WARNING) << "Failed to look up the IP address for the hostname ("
                    << error.what() << "), defaulting to " << kDefaultUvAddress;
@@ -206,8 +209,8 @@ std::string guessIbvAddress(tensorpipe::transport::ibv::Context& ibvContext) {
 }
 
 std::unique_ptr<TransportRegistration> makeIbvTransport() {
-  auto context = std::make_shared<tensorpipe::transport::ibv::Context>();
-  std::string address = guessIbvAddress(*context);
+  auto context = tensorpipe::transport::ibv::create();
+  std::string address = guessIbvAddress();
   return std::make_unique<TransportRegistration>(TransportRegistration{
       std::move(context), kIbvTransportPriority, std::move(address)});
 }
@@ -223,7 +226,7 @@ C10_REGISTER_CREATOR(TensorPipeTransportRegistry, ibv, makeIbvTransport);
 #endif // TENSORPIPE_HAS_IBV_TRANSPORT
 
 std::unique_ptr<CpuChannelRegistration> makeBasicChannel() {
-  auto context = std::make_shared<tensorpipe::channel::basic::Context>();
+  auto context = tensorpipe::channel::basic::create();
   return std::make_unique<CpuChannelRegistration>(
       CpuChannelRegistration{std::move(context), kBasicChannelPriority});
 }
@@ -236,7 +239,7 @@ C10_REGISTER_CREATOR(TensorPipeCpuChannelRegistry, basic, makeBasicChannel);
 #if TENSORPIPE_HAS_CMA_CHANNEL
 
 std::unique_ptr<CpuChannelRegistration> makeCmaChannel() {
-  auto context = std::make_shared<tensorpipe::channel::cma::Context>();
+  auto context = tensorpipe::channel::cma::create();
   return std::make_unique<CpuChannelRegistration>(
       CpuChannelRegistration{std::move(context), kCmaChannelPriority});
 }
@@ -257,12 +260,12 @@ std::unique_ptr<CpuChannelRegistration> makeMultiplexedUvChannel() {
   std::vector<std::shared_ptr<tensorpipe::transport::Context>> contexts;
   std::vector<std::shared_ptr<tensorpipe::transport::Listener>> listeners;
   for (int laneIdx = 0; laneIdx < kNumUvThreads; ++laneIdx) {
-    auto context = std::make_shared<tensorpipe::transport::uv::Context>();
-    std::string address = TensorPipeAgent::guessUvAddress(*context);
+    auto context = tensorpipe::transport::uv::create();
+    std::string address = TensorPipeAgent::guessUvAddress();
     contexts.push_back(std::move(context));
     listeners.push_back(contexts.back()->listen(address));
   }
-  auto context = std::make_shared<tensorpipe::channel::mpt::Context>(
+  auto context = tensorpipe::channel::mpt::create(
       std::move(contexts), std::move(listeners));
   return std::make_unique<CpuChannelRegistration>(CpuChannelRegistration{
       std::move(context), kMultiplexedUvChannelPriority});
@@ -283,7 +286,7 @@ C10_REGISTER_CREATOR(
 #if TENSORPIPE_HAS_CUDA_IPC_CHANNEL && defined(USE_CUDA_NOT_ROCM)
 
 std::unique_ptr<CudaChannelRegistration> makeCudaIpcChannel() {
-  auto context = std::make_shared<tensorpipe::channel::cuda_ipc::Context>();
+  auto context = tensorpipe::channel::cuda_ipc::create();
   return std::make_unique<CudaChannelRegistration>(
       CudaChannelRegistration{std::move(context), kCudaIpcChannelPriority});
 }
@@ -300,7 +303,7 @@ C10_REGISTER_CREATOR(
 #if TENSORPIPE_HAS_CUDA_GDR_CHANNEL && defined(USE_CUDA_NOT_ROCM)
 
 std::unique_ptr<CudaChannelRegistration> makeCudaGdrChannel() {
-  auto context = std::make_shared<tensorpipe::channel::cuda_gdr::Context>();
+  auto context = tensorpipe::channel::cuda_gdr::create();
   return std::make_unique<CudaChannelRegistration>(
       CudaChannelRegistration{std::move(context), kCudaGdrChannelPriority});
 }
@@ -324,7 +327,7 @@ C10_REGISTER_CREATOR(
 #ifdef USE_CUDA_NOT_ROCM
 
 std::unique_ptr<CudaChannelRegistration> makeCudaXthChannel() {
-  auto context = std::make_shared<tensorpipe::channel::cuda_xth::Context>();
+  auto context = tensorpipe::channel::cuda_xth::create();
   return std::make_unique<CudaChannelRegistration>(
       CudaChannelRegistration{std::move(context), kCudaXthChannelPriority});
 }
@@ -337,8 +340,8 @@ C10_REGISTER_CREATOR(
     makeCudaXthChannel);
 
 std::unique_ptr<CudaChannelRegistration> makeCudaBasicChannel() {
-  auto context = std::make_shared<tensorpipe::channel::cuda_basic::Context>(
-      std::make_shared<tensorpipe::channel::basic::Context>());
+  auto context = tensorpipe::channel::cuda_basic::create(
+      tensorpipe::channel::basic::create());
   return std::make_unique<CudaChannelRegistration>(
       CudaChannelRegistration{std::move(context), kCudaBasicChannelPriority});
 }

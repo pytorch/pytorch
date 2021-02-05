@@ -21,7 +21,7 @@ std::vector<at::Tensor> constructTensors(
   int64_t buf_dims_idx = 0;
   for (int64_t i = 0; i < bufs_num; i++) {
     buf_data_vec.push_back(buf_data[i]);
-    buf_dims_vec.push_back({});
+    buf_dims_vec.emplace_back();
     for (int64_t dim = 0; dim < buf_ranks[i]; dim++) {
       buf_dims_vec[i].push_back(buf_dims[buf_dims_idx++]);
     }
@@ -55,34 +55,36 @@ void nnc_aten_conv2d(
   at::Tensor& r = tensors[0];
   const at::Tensor& x = tensors[1];
   const at::Tensor& w = tensors[2];
-  int64_t strideH = 1, strideW = 1;
-  int64_t paddingH = 0, paddingW = 0;
-  int64_t dilationH = 1, dilationW = 1;
-  int64_t groups = 1;
   if (args_num > 0) {
     // Check that if the extra arguments are provided, then the bias tensor is
     // also present
     TORCH_INTERNAL_ASSERT(args_num == 7 && bufs_num == 4);
-    strideH = extra_args[0];
-    strideW = extra_args[1];
-    paddingH = extra_args[2];
-    paddingW = extra_args[3];
-    dilationH = extra_args[4];
-    dilationW = extra_args[5];
-    groups = extra_args[6];
-  }
-  if (bufs_num > 3) {
     const at::Tensor& b = tensors[3];
-    r = at::native::conv2d(
-        x,
-        w,
-        b,
-        {strideH, strideW},
-        {paddingH, paddingW},
-        {dilationH, dilationW},
-        groups);
+
+    int64_t strideH = extra_args[0];
+    int64_t strideW = extra_args[1];
+    int64_t paddingH = extra_args[2];
+    int64_t paddingW = extra_args[3];
+    int64_t dilationH = extra_args[4];
+    int64_t dilationW = extra_args[5];
+    int64_t groups = extra_args[6];
+
+    try {
+      r = at::native::conv2d(
+          x,
+          w,
+          b,
+          {strideH, strideW},
+          {paddingH, paddingW},
+          {dilationH, dilationW},
+          groups);
+    } catch (...) {
+    }
   } else {
-    r = at::native::conv2d(x, w);
+    try {
+      r = at::native::conv2d(x, w);
+    } catch (...) {
+    }
   }
 
   // TODO: can i haz an out version of the conv2d?
@@ -103,7 +105,10 @@ void nnc_aten_matmul(
   at::Tensor& r = tensors[0];
   const at::Tensor& x = tensors[1];
   const at::Tensor& w = tensors[2];
-  at::matmul_out(r, x, w);
+  try {
+    at::matmul_out(r, x, w);
+  } catch (...) {
+  }
 }
 
 static RegisterNNCExternalFunction nnc_conv2d(

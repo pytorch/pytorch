@@ -193,7 +193,6 @@ TEST(ExternalCall, Conv2d_nobias_noargs) {
 
 TEST(ExternalCall, Matmul) {
   KernelScope kernel_scope;
-
   Placeholder A("A", kFloat, {10, 3, 100, 200});
   Placeholder B("", kFloat, {10, 3, 200, 300});
   BufHandle ResultBuf("Result", {10, 3, 100, 300}, kFloat);
