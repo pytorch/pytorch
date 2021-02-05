@@ -150,6 +150,35 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         """
         super().set_result(result)
 
+    def set_exception(self, result: T) -> None:
+        r"""
+        Set an exception for this ``Future``, which will mark this ``Future`` as
+        completed with an error and trigger all attached callbacks. Note that
+        when calling wait()/value() on this ``Future``, the exception set here
+        will be raised inline.
+
+        Args:
+            result (BaseException): the exception for this ``Future``.
+
+        Example::
+            >>> import torch
+            >>>
+            >>> fut = torch.futures.Future()
+            >>> fut.set_exception(ValueError("foo"))
+            >>> fut.wait()
+            >>>
+            >>> # Output:
+            >>> # This will run after the future has finished.
+            >>> ValueError: foo
+        """
+        assert isinstance(result, Exception), f"{result} is of type {type(result)}, not an Exception."
+
+        def raise_error(fut_result):
+            raise fut_result
+
+        super()._set_unwrap_func(raise_error)
+        self.set_result(result)  # type: ignore
+
 
 def collect_all(futures: List[Future]) -> Future[List[Future]]:
     r"""
